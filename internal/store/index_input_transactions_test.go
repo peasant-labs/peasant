@@ -78,6 +78,7 @@ func TestIndexInputStateBatchAndConversionTransactions(t *testing.T) {
 				}
 				return result, err
 			}
+			// ast-grep-ignore: no-migrating-store-open-in-tests -- tests conditional conversion transactions with a fault-scoped handler and edge registered at open; requires migrations to run to create the schema they operate on.
 			db, err := store.Open(filepath.Join(t.TempDir(), "conditional.db"), store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{fault: row.Fault}), store.WithIndexFormatConversions(conversion))
 			if err != nil {
 				t.Fatal(err)

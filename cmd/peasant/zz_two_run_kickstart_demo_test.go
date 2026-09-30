@@ -14,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	kit "github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -83,7 +82,7 @@ func TestTwoRunKickstartDemonstration(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(dataDir, "peasant.db")
-	database, err := store.Open(dbPath)
+	database, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open the isolated store: %v", err)
 	}

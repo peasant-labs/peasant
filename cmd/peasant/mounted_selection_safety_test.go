@@ -344,7 +344,7 @@ func seedMountedSelectionWorld(t *testing.T, fixture mountedSelectionSafetyCase)
 	if err := os.MkdirAll(filepath.Dir(world.DBPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create mounted selection data directory: %v", err)
 	}
-	db, err := store.Open(world.DBPath)
+	db, err := openPreparedStore(t, world.DBPath)
 	if err != nil {
 		t.Fatalf("open mounted selection store: %v", err)
 	}
@@ -414,7 +414,7 @@ func mountedViewerIDs(t *testing.T, world mountedSelectionWorld) map[string]bool
 	if err != nil {
 		t.Fatalf("build mounted viewer policy: %v", err)
 	}
-	db, err := store.Open(world.DBPath)
+	db, err := openPreparedStore(t, world.DBPath)
 	if err != nil {
 		t.Fatalf("open mounted viewer store: %v", err)
 	}
@@ -511,7 +511,7 @@ func mountedChooserIDs(t *testing.T, fixture mountedSelectionSafetyCase, world m
 	if err != nil {
 		t.Fatalf("load mounted chooser config: %v", err)
 	}
-	db, err := store.Open(world.DBPath)
+	db, err := openPreparedStore(t, world.DBPath)
 	if err != nil {
 		t.Fatalf("open mounted chooser store: %v", err)
 	}
@@ -606,7 +606,7 @@ func TestMountedSelectionPushChooserPipelineAndPruneKeepTheCloneBoundary(t *test
 			pipelineIDs := mountedPipelineIDs(t, fixture, world)
 			assertMountedIDSet(t, "mounted push pipeline", pipelineIDs, wantPushed)
 
-			beforePrune, err := store.Open(world.DBPath)
+			beforePrune, err := openPreparedStore(t, world.DBPath)
 			if err != nil {
 				t.Fatalf("open mounted selection store before manual prune: %v", err)
 			}
@@ -640,7 +640,7 @@ func TestMountedSelectionPushChooserPipelineAndPruneKeepTheCloneBoundary(t *test
 				t.Fatalf("mounted prune result = deleted %d errors %v, want deleted %d and no errors", pruneResult.Deleted, pruneResult.Errors, len(wantDeleted))
 			}
 
-			verify, err := store.Open(world.DBPath)
+			verify, err := openPreparedStore(t, world.DBPath)
 			if err != nil {
 				t.Fatalf("reopen mounted selection store after prune: %v", err)
 			}

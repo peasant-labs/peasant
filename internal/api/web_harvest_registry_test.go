@@ -77,7 +77,7 @@ func TestWebHarvestCanonicalRegistry(t *testing.T) {
 	if handler.ingestResult == nil || handler.ingestResult.Summary.Indexed != 1 || !maps.Equal(handler.ingestResult.Summary.HarvesterVersions, ingest.HarvesterVersionRegistry) {
 		t.Fatalf("populated web ingest result = %+v", handler.ingestResult)
 	}
-	db, err := store.Open(hs.dbPath())
+	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

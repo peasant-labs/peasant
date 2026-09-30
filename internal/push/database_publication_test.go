@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -50,8 +50,8 @@ func TestDatabasePublicationWithoutSourcesOrSidecars(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			ctx := context.Background()
-			path := filepath.Join(t.TempDir(), "peasant.db")
-			db, err := store.Open(path)
+			path := storetest.CopyGoldenDB(t)
+			db, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,7 +93,7 @@ func TestDatabasePublicationWithoutSourcesOrSidecars(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(path)
+			db, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

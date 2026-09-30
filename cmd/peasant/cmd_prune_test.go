@@ -12,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -64,7 +63,7 @@ func seedPruneTestSessions(t *testing.T, dir string) {
 		t.Fatalf("seed: create data directory: %v", err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seed: open store: %v", err)
 	}
@@ -186,7 +185,7 @@ func TestPruneCmd_DryRun(t *testing.T) {
 	}
 
 	// Verify sessions still exist (dry run didn't delete).
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -295,7 +294,7 @@ func TestPruneCmd_Confirm_Delete(t *testing.T) {
 	}
 
 	// Verify sessions are gone.
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -344,7 +343,7 @@ func TestPruneCmd_SessionFilter(t *testing.T) {
 	}
 
 	// Session B should still exist.
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -438,7 +437,7 @@ func TestPruneCmd_NonTTY_NoConfirm_Error(t *testing.T) {
 	if !strings.Contains(err.Error(), "nothing was deleted") {
 		t.Errorf("the refusal must say what state the store is in; got: %v", err)
 	}
-	db, openErr := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, openErr := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if openErr != nil {
 		t.Fatalf("open store after refused prompt: %v", openErr)
 	}
@@ -613,7 +612,7 @@ func seedPruneTestSessionsWithGitRemote(t *testing.T, dir string) {
 		t.Fatalf("seed: create data directory: %v", err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seed: open store: %v", err)
 	}
@@ -762,7 +761,7 @@ func TestPruneCmd_Unselected_DryRun(t *testing.T) {
 	}
 
 	// Verify DB is unchanged after dry run.
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -796,7 +795,7 @@ func TestPruneCmd_Unselected_Confirm_DeletesOnlyUnselected(t *testing.T) {
 	}
 
 	// Verify DB state: session A (selected) must remain, session B (unselected) must be gone.
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

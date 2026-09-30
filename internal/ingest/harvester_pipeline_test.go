@@ -3,7 +3,6 @@ package ingest_test
 import (
 	_ "embed"
 	"maps"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
@@ -54,7 +53,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
 			fs := testutil.NewMemFS()
-			db, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

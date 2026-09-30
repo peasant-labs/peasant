@@ -22,6 +22,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -299,7 +300,8 @@ func seedSyncDoorSession(t *testing.T, dbPath, sessionID, basePath string) *stor
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	storetest.CopyGoldenTo(t, dbPath)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +331,7 @@ func seedSyncDoorSession(t *testing.T, dbPath, sessionID, basePath string) *stor
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = store.Open(dbPath)
+	db, err = store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -123,7 +123,7 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			}
 			capture := func() ingest.PublicationInputBundle {
 				t.Helper()
-				db, err := store.Open(storePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+				db, err := openPreparedStore(t, storePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 				if err != nil {
 					t.Fatal(err)
 				}

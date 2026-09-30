@@ -29,10 +29,7 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 		covered[fixture.Harness] = true
 		t.Run(fixture.Name, func(t *testing.T) {
 			filesystem := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithPoolSize(1))
-			if err != nil {
-				t.Fatal(err)
-			}
+			database := storetest.OpenWith(t, store.WithPoolSize(1))
 			t.Cleanup(func() { _ = database.Close() })
 			badID, goodID := schema.SessionID(testutil.TestSessionUUID), schema.SessionID(testutil.TestSessionUUID2)
 			beforeInputs := make(map[string][]byte)

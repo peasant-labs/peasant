@@ -22,6 +22,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -89,7 +90,8 @@ func ingestConsumerSession(t *testing.T, dbPath string, fixture fullConsumerFixt
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	storetest.CopyGoldenTo(t, dbPath)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

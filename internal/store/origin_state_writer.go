@@ -41,7 +41,7 @@ func (s *Store) ListStaleOriginSessions(ctx context.Context, currentVersion int)
 	defer s.pool.Put(conn)
 
 	var rows []ingest.StoredOriginRow
-	if err := sqlitex.ExecuteTransient(conn, sqlListStaleOriginSessions, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, sqlListStaleOriginSessions, &sqlitex.ExecOptions{
 		Args: []any{currentVersion},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sid, err := ingest.NewSessionID(stmt.ColumnText(0))
@@ -104,7 +104,7 @@ func (s *Store) UpdateOriginState(ctx context.Context, sessionID ingest.SessionI
 		return fmt.Errorf("store: read publication proof before origin update for %s: %w; no origin verdict was written; repair database access and retry ingest", sessionID, err)
 	}
 
-	if err := sqlitex.ExecuteTransient(conn, sqlUpdateOriginState, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, sqlUpdateOriginState, &sqlitex.ExecOptions{
 		Args: []any{origin, version, string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: update origin state for %s to %q at version %d: %w", sessionID, origin, version, err)

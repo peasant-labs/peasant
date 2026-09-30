@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/store"
 )
 
 // TestScopedPushResolvesTheRepositoryOnce pins the reuse the push's cost fix
@@ -26,7 +25,7 @@ func TestScopedPushResolvesTheRepositoryOnce(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

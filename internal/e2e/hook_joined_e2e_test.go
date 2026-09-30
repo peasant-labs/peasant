@@ -128,7 +128,7 @@ func TestPostCommitHookPublishesConfiguredRepositoryToRealVillage(t *testing.T) 
 func assertLocalPublicationReceiptsMatchVillage(t *testing.T, sandbox disposableSandbox, origin, ownerID string, rows []villageTranscript) {
 	t.Helper()
 	dbPath := filepath.Join(sandbox.dataHome, string(defaults.AppName), "peasant.db")
-	local, err := store.Open(dbPath)
+	local, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("open V43 receipt store %s: %v", dbPath, err)
 	}

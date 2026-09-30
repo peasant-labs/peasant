@@ -12,7 +12,9 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -164,8 +166,15 @@ func openCodexCommittedPayloadStore(t *testing.T, dir string) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The test closes and reopens the same dir to prove the committed payload
+	// survives a reopen; seed the golden only on first creation.
+	destPath := filepath.Join(dir, "generations.db")
+	if _, err := os.Stat(destPath); errors.Is(err, os.ErrNotExist) {
+		storetest.CopyGoldenTo(t, destPath)
+	}
 	s, err := store.Open(
-		filepath.Join(dir, "generations.db"),
+		destPath,
+		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),

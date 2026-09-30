@@ -266,7 +266,7 @@ func readInstallFile(t *testing.T, path string) []byte {
 
 func installDB(t *testing.T, w installWorld) *store.Store {
 	t.Helper()
-	db, err := store.Open(defaults.ResolveDBFilePathWith(w.dir).String(), store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(w.dir).String(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -178,6 +178,9 @@ func TestHelperGroupListingThroughRegisteredRoutes(t *testing.T) {
 	for _, tc := range fixture.Cases {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
+			// Each case owns its golden-copy store and a port-0 server and
+			// touches no process-global sink, so the cases pack in parallel.
+			t.Parallel()
 			runHelperGroupListingCase(t, tc)
 		})
 	}

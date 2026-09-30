@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -136,7 +137,7 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 			defer cancel()
 			output := t.TempDir()
 			filesystem := &ingest.OSFileSystem{}
-			database, err := store.Open(filepath.Join(t.TempDir(), "index.db"), store.WithPoolSize(1))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +228,7 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			defer cancel()
 			output := t.TempDir()
 			filesystem := &ingest.OSFileSystem{}
-			database, err := store.Open(filepath.Join(t.TempDir(), "index.db"), store.WithPoolSize(1))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

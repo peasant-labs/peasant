@@ -15,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
@@ -153,7 +152,7 @@ func seedCrossBranchSessions(t *testing.T, dir string) (selectedID, otherID, rem
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
-	s, err := store.Open(dbPath)
+	s, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -230,7 +229,7 @@ func seedMultiProjectConflict(t *testing.T, dir string) (selectedID, excludedID,
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
-	s, err := store.Open(dbPath)
+	s, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -341,7 +340,7 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceHarnes
 		Sources:        cfg.Push.Sources,
 	}
 
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -491,7 +490,7 @@ func TestBuildPushWizardSessions_SelectionAware(t *testing.T) {
 	cfg.Output.BasePath = string(resolved)
 	matcher := cfg.SelectionMatcher()
 
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -855,7 +854,7 @@ push:
 output:
   basePath: %s
 `, syncBase))
-	db, openErr := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, openErr := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if openErr != nil {
 		t.Fatal(openErr)
 	}

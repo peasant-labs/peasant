@@ -214,7 +214,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			db, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithPoolSize(1))
+			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

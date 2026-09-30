@@ -194,7 +194,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 					}
 					options = append(options, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locks))
 				}
-				db, err := store.Open(dbPath, options...)
+				db, err := store.Open(dbPath, append([]store.OpenOption{store.WithSkipMigrations()}, options...)...)
 				if err != nil {
 					t.Fatal(err)
 				}

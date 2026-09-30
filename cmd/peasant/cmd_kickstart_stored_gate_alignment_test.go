@@ -28,6 +28,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
@@ -437,7 +438,11 @@ func seedKickstartStoredGateWorld(t *testing.T, testCase kickstartStoredGateCase
 	if err := os.MkdirAll(filepath.Dir(world.DBPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create stored gate data directory: %v", err)
 	}
-	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
+	// Start from the pre-migrated golden copy: the seeded rows land in an
+	// at-head database, so neither this setup open nor the command under test
+	// replays the migration chain.
+	storetest.CopyGoldenTo(t, world.DBPath)
+	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database: %v", err)
 	}
@@ -704,7 +709,7 @@ func assertKickstartStoredGateCandidates(
 	listings []ftue.SessionListing,
 ) {
 	t.Helper()
-	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database for candidate assertion: %v", err)
 	}
@@ -788,7 +793,7 @@ func assertKickstartStoredGateCrossSurfaces(t *testing.T, testCase kickstartStor
 	if err != nil {
 		t.Fatalf("build stored gate visibility policy: %v", err)
 	}
-	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database for cross-surface assertions: %v", err)
 	}

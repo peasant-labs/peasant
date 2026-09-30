@@ -7,10 +7,10 @@
 // the default, hermetic test run never depends on the ast-grep binary being
 // on PATH. It is invoked explicitly via `go test -tags=astgrep
 // ./internal/tui/gates/...`, added as its own step in `make check` right
-// after the pre-existing (and already ast-grep-dependent) `ast-grep scan
-// --config sgconfig.yml .` line.
+// after the pre-existing (and already ast-grep-dependent) repo-wide
+// `ast-grep scan` step.
 //
-// Validated against ast-grep 0.40.5 (this repo's flake.nix-pinned
+// Validated against ast-grep 0.45.0 (this repo's flake.nix-pinned
 // devShell/CI version) and 0.43.0 (a newer ambient version): both produce
 // byte-identical match sets and --json shapes for the rules in
 // internal/tui/gates/astrules against this repository as of this writing.
@@ -37,7 +37,7 @@ const astGrepBin = "ast-grep"
 
 // astRulesConfigRelPath is the module-root-relative path to the key-string
 // rules' own sgconfig.yml - kept separate from the repo-root sgconfig.yml
-// so the plain `ast-grep scan --config sgconfig.yml .` step in `make check`
+// so the repo-wide `ast-grep scan` step in `make check`
 // never sees these rules (see astrules/sgconfig.yml's own doc comment).
 const astRulesConfigRelPath = "internal/tui/gates/astrules/sgconfig.yml"
 
@@ -53,9 +53,21 @@ type astGrepMatch struct {
 	RuleID string `json:"ruleId"`
 }
 
-// runAstGrep runs `ast-grep scan --config <configAbsPath> --json=compact .`
-// with dir as the subprocess's working directory, and decodes the result
-// into []gates.KeyMatch.
+// runAstGrep runs `ast-grep scan --config <configAbsPath> --json=compact
+// --off=unused-suppression .` with dir as the subprocess's working
+// directory, and decodes the result into []gates.KeyMatch.
+//
+// The scan turns ast-grep's built-in unused-suppression report off: this gate
+// deliberately loads only the key rules, so a suppression comment naming a
+// rule outside this config (for example the repo-wide test-file migration-open
+// ban in ast-grep/) is reported by ast-grep as an unused suppression - a
+// diagnostic that is not a key-string hit and would otherwise be counted
+// against the key allowlist. Stale suppressions for the ast-grep/ rules are
+// policed by the repo-wide `ast-grep scan --error=unused-suppression --config
+// sgconfig.yml .` step in make check, which loads those rules. That step does
+// not load the key rules, so a per-call suppression for a key rule is not a
+// supported mechanism: the key gate pins hit counts in its allowlist instead,
+// and a key-rule suppression fails the repo-wide step as unused.
 //
 // dir MUST be the root the rule configs' `files`/`ignores` globs (and the
 // paths ast-grep reports back) are relative to - verified empirically that
@@ -71,7 +83,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 		t.Fatalf(
 			"keys_astgrep_test: ast-grep binary not found on PATH.\n"+
 				"what: exec.LookPath(%q) failed: %v.\n"+
-				"why: this test invokes the ast-grep CLI (validated against 0.40.5/0.43.0) to detect raw key-string "+
+				"why: this test invokes the ast-grep CLI (validated against 0.45.0/0.43.0) to detect raw key-string "+
 				"comparisons structurally; it cannot run without the binary.\n"+
 				"where: internal/tui/gates/keys_astgrep_test.go, runAstGrep.\n"+
 				"when: go test -tags=astgrep ./internal/tui/gates/...\n"+
@@ -82,7 +94,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 			astGrepBin, err)
 	}
 
-	cmd := exec.Command(astGrepBin, "scan", "--config", configAbsPath, "--json=compact", ".")
+	cmd := exec.Command(astGrepBin, "scan", "--config", configAbsPath, "--json=compact", "--off=unused-suppression", ".")
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -100,7 +112,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 				"when: invoking `ast-grep scan --config %s --json=compact .` in %s.\n"+
 				"means: no real matches could be read, so the count-pinned comparison cannot run.\n"+
 				"fix: run `ast-grep --version` and compare against the versions this test is validated for "+
-				"(0.40.5, 0.43.0); if ast-grep itself errored, see stderr:\n%s",
+				"(0.45.0, 0.43.0); if ast-grep itself errored, see stderr:\n%s",
 			err, configAbsPath, dir, stderr.String())
 	}
 	// ast-grep exits non-zero when it finds matches at error severity (all 3
@@ -134,7 +146,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 					"failing closed here instead of letting that through.\n"+
 					"where: internal/tui/gates/keys_astgrep_test.go, runAstGrep.\n"+
 					"means: a version drift likely changed ast-grep's --json field names.\n"+
-					"fix: compare `ast-grep --version` against 0.40.5/0.43.0 and update astGrepMatch's json tags.",
+					"fix: compare `ast-grep --version` against 0.45.0/0.43.0 and update astGrepMatch's json tags.",
 				i, m.File, m.RuleID, m.Range.Start.Line)
 		}
 		matches = append(matches, gates.KeyMatch{

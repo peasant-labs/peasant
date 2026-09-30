@@ -14,7 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
-	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -114,10 +114,7 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 			output := filepath.Join(root, "managed")
 			native := filepath.Join(root, "native.jsonl")
 			filesystem := &adapterMaintenanceFS{OSFileSystem: &ingest.OSFileSystem{}, nativePath: native}
-			database, err := store.Open(filepath.Join(root, "peasant.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			database := storetest.OpenWith(t)
 			t.Cleanup(func() { _ = database.Close() })
 			var metadata ingest.UnifiedMetadata
 			if err := json.Unmarshal([]byte(fixture.Metadata), &metadata); err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
@@ -164,8 +164,8 @@ func execContentSQL(t *testing.T, s *store.Store, query string) {
 func TestFullContentDurabilityAndPaging(t *testing.T) {
 	for _, f := range loadContentFixtures(t).Cases {
 		t.Run(f.Name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "content.db")
-			s, err := store.Open(path)
+			path := storetest.CopyGoldenDB(t)
+			s, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,7 +176,7 @@ func TestFullContentDurabilityAndPaging(t *testing.T) {
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
-			s, err = store.Open(path)
+			s, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

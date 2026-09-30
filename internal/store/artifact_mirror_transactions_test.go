@@ -2,7 +2,6 @@ package store_test
 
 import (
 	_ "embed"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
@@ -10,6 +9,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -48,12 +48,7 @@ func TestArtifactMirrorStopsOnOuterTransactionLoss(t *testing.T) {
 			t.Parallel()
 			var db *store.Store
 			if row.Panic != "" {
-				var err error
-				db, err = store.Open(filepath.Join(t.TempDir(), "panic.db"), store.WithPoolSize(1))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer db.Close()
+				db = storetest.OpenWith(t, store.WithPoolSize(1))
 			} else {
 				db = openTestStore(t)
 			}

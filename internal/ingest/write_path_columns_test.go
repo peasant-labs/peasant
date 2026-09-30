@@ -95,7 +95,7 @@ func TestWritePathColumns(t *testing.T) {
 
 			switch c.Scenario {
 			case "new":
-				db, err := store.Open(filepath.Join(t.TempDir(), "columns.db"))
+				db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -424,7 +424,7 @@ func TestWritePathReplacedSessionSubagentsSurvive(t *testing.T) {
 	// A store-backed harvest: classification is database-first, so the only read
 	// of a saved pair is the replacement-header read that the install itself
 	// makes, which is what this fixture counts.
-	db, err := store.Open(filepath.Join(t.TempDir(), "replaced.db"))
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -94,10 +95,7 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 			}
 			ctx := t.Context()
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
-			database, err := store.Open(filepath.Join(t.TempDir(), "settle.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			database := storetest.OpenWith(t)
 			defer database.Close()
 
 			id, err := ingest.NewSessionID(testutil.TestSessionUUID)

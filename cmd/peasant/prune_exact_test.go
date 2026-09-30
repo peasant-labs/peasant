@@ -20,7 +20,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"golang.org/x/term"
@@ -204,7 +203,7 @@ func TestPruneCmd_ConsentCountEqualsDeletedCount(t *testing.T) {
 	dir := t.TempDir()
 	seedPruneTestSessions(t, dir)
 
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store to count prunable sessions: %v", err)
 	}
@@ -244,7 +243,7 @@ func TestPruneCmd_ConsentCountEqualsDeletedCount(t *testing.T) {
 		t.Fatalf("the command did not report deleting the %d session(s) it asked about (looked for %q):\n%s", len(seeded), deleted, output)
 	}
 
-	verify, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	verify, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("reopen store after prune: %v", err)
 	}
@@ -358,7 +357,7 @@ func TestPruneCmd_PlanIsFrozenAcrossTheConsentWindow(t *testing.T) {
 	// The database half. Re-deriving the delete set from the store at execute
 	// time is a plausible refactor and the exact time-of-check/time-of-use bug
 	// the frozen plan exists to prevent.
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store after prune: %v", err)
 	}
@@ -408,7 +407,7 @@ func TestPruneCmd_PlanIsFrozenAcrossTheConsentWindow(t *testing.T) {
 // against, so a test can make a session appear mid-run.
 func insertPruneSession(t *testing.T, dir string, entry pruneExactEntry) {
 	t.Helper()
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store to insert a mid-run session: %v", err)
 	}
@@ -461,7 +460,7 @@ func TestPruneCmd_DeclinedConsentDeletesNothing(t *testing.T) {
 	if !strings.Contains(out.String(), "aborted") {
 		t.Fatalf("refusing consent must abort visibly:\n%s", out.String())
 	}
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store after refused consent: %v", err)
 	}

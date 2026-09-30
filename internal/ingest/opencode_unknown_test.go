@@ -1,6 +1,8 @@
 package ingest_test
 
 import (
+	"github.com/peasant-labs/peasant/internal/store/storetest"
+
 	"bytes"
 	_ "embed"
 	"path/filepath"
@@ -141,7 +143,7 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			t.Log("check retained parse")
 			check(retained.Entries)
 			dir := t.TempDir()
-			dbPath := filepath.Join(dir, "unknown.db")
+			dbPath := storetest.CopyGoldenDB(t)
 			root := filepath.Join(dir, "artifacts")
 			db := nativeRepairStore(t, dbPath, root)
 			seedOpenCodeRepairSession(t, db, string(sid), sid)

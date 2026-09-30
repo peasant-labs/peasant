@@ -14,6 +14,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"gopkg.in/yaml.v3"
@@ -268,6 +270,15 @@ func TestMountedLegacySelectedConversion_ConsentCancellationAndRerun(t *testing.
 			t.Run(scenario.Name+"/"+journey.Name, func(t *testing.T) {
 				paths := materializeMountedLegacySelectedPaths(t, scenario.Paths)
 				dataHome := t.TempDir()
+				// Prepare the database path the journey opens with the
+				// pre-migrated golden copy before the scenario seeds its rows,
+				// so the seeding open finds no pending migrations. The helper
+				// keeps its own open options and row assertions.
+				legacyDBPath := string(defaults.ResolveDBFilePathWith(dataHome))
+				if err := os.MkdirAll(filepath.Dir(legacyDBPath), 0o755); err != nil {
+					t.Fatalf("create mounted selected data directory: %v", err)
+				}
+				storetest.CopyGoldenTo(t, legacyDBPath)
 				seedMountedLegacyStore(t, dataHome, scenario.Stored, paths)
 				configPath := filepath.Join(t.TempDir(), "config.yaml")
 				baseline := config.BaseConfig()
