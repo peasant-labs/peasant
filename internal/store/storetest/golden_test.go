@@ -219,7 +219,6 @@ func TestGoldenCacheFailureFallsBackPrivately(t *testing.T) {
 	}
 }
 
-// TestCopyRootPrecedence pins the managed-root precedence without touching
 // TestCopyRootOverridePrecedence pins the managed-root precedence: unset
 // means the t.TempDir default (no managed root); a set override resolves to
 // the per-user scheme subdirectory, validated loudly. There is no other

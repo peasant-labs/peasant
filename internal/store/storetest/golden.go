@@ -1,10 +1,12 @@
 // Package storetest provides test helpers that use a pre-migrated "golden"
 // SQLite database so a parallel test pays only a file copy and a connection
-// open instead of re-running the migration-state check. The golden DB is shared
-// by active tests and removed when the last user of that shared template
-// finishes. This package is the only sanctioned way for tests to open a store:
-// the no-migrating-store-open-in-tests ast-grep rule forbids a skip-less
-// store.Open in _test.go outside this package and the migration suite.
+// open instead of re-running the migration-state check. A private fallback
+// build is removed when its last user finishes; an adopted cached stamp stays
+// in `.testcache/` until it is swept or the cache directory is deleted. This
+// package is the sanctioned source of migrated templates: the
+// no-migrating-store-open-in-tests ast-grep rule forbids a skip-less
+// store.Open in _test.go outside this package and the migration suite, and
+// sanctions an inline CopyGolden* followed by a store.WithSkipMigrations open.
 //
 // The template is cached per checkout under `.testcache/golden/` (gitignored,
 // keyed by schema fingerprint) so focused runs reuse it across processes; the
