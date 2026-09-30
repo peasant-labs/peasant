@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -31,11 +32,26 @@ func TestHandleSyncPush_PublishesOnlyTheAnnotationsOfThePublishedSessions(t *tes
 	)
 	hs := newTestXDGHomes(t)
 	base := filepath.Join(hs.Data, "peasant-sync")
-	if err := seedSyncDoorSession(t, hs.dbPath(), otherID, base).Close(); err != nil {
-		t.Fatal(err)
-	}
 	db := seedSyncDoorSession(t, hs.dbPath(), publishedID, base)
 	t.Cleanup(func() { _ = db.Close() })
+	// The other stored session: the same project, recorded separately, and
+	// not part of this push.
+	input, err := db.LoadPublicationInput(t.Context(), publishedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherMeta := input.Metadata
+	otherMeta.SessionID = schema.SessionID(otherID)
+	otherMeta.Source.FilePath = "/test/path/" + otherID + ".jsonl"
+	otherPreview := "a session the user did not choose"
+	testutil.SeedReadyPublication(t, db, &otherMeta, []schema.SessionEntry{{
+		SessionID:      schema.SessionID(otherID),
+		EntryIndex:     1,
+		Role:           schema.RoleUser,
+		Harness:        schema.Harness(defaults.HarnessClaudeCode),
+		EntryType:      schema.EntryTypeText,
+		ContentPreview: &otherPreview,
+	}})
 
 	annotator, err := db.GetAnnotatorIDByName(t.Context(), "outcome-classifier")
 	if err != nil {
