@@ -53,6 +53,11 @@ export interface GroupedLocalSessionsProps {
   selection?: GroupedSelection;
   /** Shown when the payload carries no items. */
   emptyState?: ReactNode;
+  /**
+   * Optional host content for one session row (such as its publish state or
+   * its search match), drawn inside the row under its facts.
+   */
+  rowDetail?: (row: LocalSessionRow) => ReactNode;
 }
 
 /** Short, stable handle for a session id when no title or preview exists. */
@@ -108,12 +113,14 @@ function SessionRow({
   titles,
   selection,
   onRefreshList,
+  rowDetail,
 }: {
   row: LocalSessionRow;
   groups: NonNullable<LocalSessionListItem['helperGroups']>;
   titles?: ReadonlyMap<string, string>;
   selection?: GroupedSelection;
   onRefreshList: () => void;
+  rowDetail?: (row: LocalSessionRow) => ReactNode;
 }) {
   const presentation = rowPresentation(row.session, titles);
   const selected = selection?.selectedIds.has(row.session.id) ?? false;
@@ -122,7 +129,9 @@ function SessionRow({
       {...presentation}
       selected={selection ? selected : undefined}
       onSelect={selection ? (id, next) => selection.onSelect(id, next) : undefined}
-    />
+    >
+      {rowDetail?.(row)}
+    </HelperThreadRow>
   );
   if (groups.length === 0) return ownerRow;
   return (
@@ -136,6 +145,7 @@ function SessionRow({
           titles={titles}
           selection={selection}
           onRefreshList={onRefreshList}
+          rowDetail={rowDetail}
         />
       ))}
     </HelperGroupListItem>
@@ -157,6 +167,7 @@ function MountedHelperGroup({
   titles,
   selection,
   onRefreshList,
+  rowDetail,
 }: {
   groupId: string;
   memberScope: string;
@@ -164,6 +175,7 @@ function MountedHelperGroup({
   titles?: ReadonlyMap<string, string>;
   selection?: GroupedSelection;
   onRefreshList: () => void;
+  rowDetail?: (row: LocalSessionRow) => ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [paging, setPaging] = useState<HelperMemberPaging>(() => firstHelperMemberPage());
@@ -272,6 +284,7 @@ function MountedHelperGroup({
               titles={titles}
               selection={selection}
               onRefreshList={onRefreshList}
+              rowDetail={rowDetail}
             />
           );
         }}
@@ -307,6 +320,7 @@ export function GroupedLocalSessions({
   titles,
   selection,
   emptyState,
+  rowDetail,
 }: GroupedLocalSessionsProps) {
   if (payload.items.length === 0) {
     return <>{emptyState ?? null}</>;
@@ -323,6 +337,7 @@ export function GroupedLocalSessions({
                 titles={titles}
                 selection={selection}
                 onRefreshList={onRefreshList}
+                rowDetail={rowDetail}
               />
             </div>
           );
@@ -339,6 +354,7 @@ export function GroupedLocalSessions({
                   titles={titles}
                   selection={selection}
                   onRefreshList={onRefreshList}
+                  rowDetail={rowDetail}
                 />
               ))}
             </HelperGroupListItem>
