@@ -40,6 +40,18 @@ func SaveAtomic(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("config save: marshal configuration for %q before atomic replacement: %w; no file was changed; correct the unsupported configuration value and retry", path, err)
 	}
+	return SaveAtomicYAML(path, data)
+}
+
+// SaveAtomicYAML validates a configuration document with Parse and atomically
+// replaces the file at path with it, byte for byte. It is SaveAtomic for a
+// caller that edits the document rather than the Config, so the keys the file
+// does not name stay unnamed and its comments survive. A document Parse
+// refuses changes nothing.
+func SaveAtomicYAML(path string, data []byte) error {
+	if path == "" {
+		return fmt.Errorf("config save: destination path is empty while preparing an atomic configuration replacement; no file was changed; pass the resolved --config or --config-dir path and retry")
+	}
 	if _, err := Parse(data); err != nil {
 		return fmt.Errorf("config save: validate serialized configuration for %q before atomic replacement: %w; no file was changed; correct the reported field and retry", path, err)
 	}
