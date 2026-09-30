@@ -502,7 +502,7 @@ func (w *openWorld) harvest(t *testing.T) {
 
 func (w *openWorld) store(t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(w.dataDir())))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(w.dataDir())))
 	if err != nil {
 		t.Fatal(err)
 	}
