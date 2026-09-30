@@ -63,8 +63,15 @@ const (
 	RouteSyncRedactions    Route = "/api/v1/sync/redactions"
 	RouteSyncPush          Route = "/api/v1/sync/push"
 	RouteSyncLogin         Route = "/api/v1/sync/login"
-	RouteSyncIngest        Route = "/api/v1/sync/ingest"
-	RouteSyncIngestStatus  Route = "/api/v1/sync/ingest/status"
+	RouteSyncLogout        Route = "/api/v1/sync/logout"
+	// RoutePublications reads the publication state of named sessions for the
+	// signed-in Village account, whatever the saved selection lists.
+	RoutePublications Route = "/api/v1/publications"
+	// RouteVillageCollectives lists the Village collectives the signed-in user
+	// belongs to, read with this computer's stored credential.
+	RouteVillageCollectives Route = "/api/v1/village/collectives"
+	RouteSyncIngest         Route = "/api/v1/sync/ingest"
+	RouteSyncIngestStatus   Route = "/api/v1/sync/ingest/status"
 
 	// Map / Review surfaces. Path params use Go 1.22 ServeMux
 	// {wildcard} syntax; commit/path/file/branch arrive as query params.

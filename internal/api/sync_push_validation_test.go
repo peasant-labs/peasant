@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/redact"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,7 +25,6 @@ type syncPushValidationFixture struct {
 	Name           string                `yaml:"name"`
 	SessionIDs     []string              `yaml:"sessionIds"`
 	RedactionLevel redact.RedactionLevel `yaml:"redactionLevel"`
-	Visibility     string                `yaml:"visibility"`
 	ExpectedStatus int                   `yaml:"expectedStatus"`
 	ExpectedError  string                `yaml:"expectedError"`
 }
@@ -97,10 +97,9 @@ func TestHandleSyncPush_RejectsInvalidRedactionLevelAsJSON(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
 			hs := newTestXDGHomes(t)
-			body, err := json.Marshal(pushRequest{
+			body, err := json.Marshal(schema.SyncPushRequest{
 				SessionIDs:     fixture.SessionIDs,
 				RedactionLevel: fixture.RedactionLevel.String(),
-				Visibility:     fixture.Visibility,
 			})
 			if err != nil {
 				t.Fatalf("marshal %s request: %v", fixture.Name, err)

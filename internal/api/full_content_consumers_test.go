@@ -238,7 +238,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			}))
 			defer remote.Close()
 			writeSyncDoorCredentials(t, hs.Config, remote.URL)
-			body, _ := json.Marshal(pushRequest{SessionIDs: []string{id}, Visibility: "private"})
+			body, _ := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{id}})
 			response := httptest.NewRecorder()
 			handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body)))
 			parts := captured.snapshot()

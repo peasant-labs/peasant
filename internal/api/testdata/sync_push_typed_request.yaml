@@ -1,0 +1,44 @@
+# Request bodies POST /api/v1/sync/push refuses before anything runs. The push
+# request is typed and closed: it names sessions, a redaction level, and the
+# collectives to add and remove, and nothing else. Each case is refused with
+# 400 and the code sync_push_invalid_request, and the reason must contain
+# errorContains. No case reaches the credential, so none can publish.
+requiredNames:
+  - visibility-is-refused
+  - license-is-refused
+  - misspelled-collectives-list-is-refused
+  - collective-in-both-lists-is-refused
+  - collective-named-by-name-is-refused
+  - uppercase-collective-id-is-refused
+  - duplicate-session-is-refused
+  - empty-session-list-is-refused
+  - second-json-value-is-refused
+
+cases:
+  - name: visibility-is-refused
+    body: '{"sessionIds":["s-1"],"redactionLevel":"standard","visibility":"public"}'
+    errorContains: 'unknown field "visibility"'
+  - name: license-is-refused
+    body: '{"sessionIds":["s-1"],"license":"CC0-1.0"}'
+    errorContains: 'unknown field "license"'
+  - name: misspelled-collectives-list-is-refused
+    body: '{"sessionIds":["s-1"],"collectives":{"ad":["11111111-1111-4111-8111-111111111111"]}}'
+    errorContains: 'unknown field "ad"'
+  - name: collective-in-both-lists-is-refused
+    body: '{"sessionIds":["s-1"],"collectives":{"add":["11111111-1111-4111-8111-111111111111"],"remove":["11111111-1111-4111-8111-111111111111"]}}'
+    errorContains: both added and removed
+  - name: collective-named-by-name-is-refused
+    body: '{"sessionIds":["s-1"],"collectives":{"add":["Acme Platform"]}}'
+    errorContains: 'collectives.add names "Acme Platform", which is not a Village collective identifier'
+  - name: uppercase-collective-id-is-refused
+    body: '{"sessionIds":["s-1"],"collectives":{"remove":["11111111-1111-4111-8111-11111111111A"]}}'
+    errorContains: 'collectives.remove names "11111111-1111-4111-8111-11111111111A"'
+  - name: duplicate-session-is-refused
+    body: '{"sessionIds":["s-1","s-1"]}'
+    errorContains: named twice
+  - name: empty-session-list-is-refused
+    body: '{"sessionIds":[]}'
+    errorContains: sessionIds is empty
+  - name: second-json-value-is-refused
+    body: '{"sessionIds":["s-1"]} {"sessionIds":["s-2"]}'
+    errorContains: more than one JSON value

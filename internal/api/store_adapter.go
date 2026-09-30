@@ -269,6 +269,28 @@ func (p *StoreDataProvider) sessionCandidate(row *store.SessionRow) sessionvisib
 	}
 }
 
+// SelectionScopeByID reports, for each named session stored on this computer,
+// whether the saved selection admits it into the local lists. It applies
+// selection scope only, through the same projection the lists use, and reads
+// exactly the named rows. An identifier that names no stored session is absent
+// from the map. The publication read uses it to say that a session it returns
+// is one the lists leave out; it is never a reason to withhold the session.
+func (p *StoreDataProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
+	rows, err := p.store.SessionsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: selection scope by id: %w", err)
+	}
+	selected := make(map[string]bool, len(rows))
+	for i := range rows {
+		visible, err := p.visibleSessionRow(&rows[i])
+		if err != nil {
+			return nil, fmt.Errorf("store adapter: selection scope of session %q: %w", rows[i].SessionID, err)
+		}
+		selected[rows[i].SessionID] = visible
+	}
+	return selected, nil
+}
+
 // visibleSessionRow applies SELECTION scope only. It backs the aggregate
 // surfaces (dashboard totals, trends), which count the work a store holds for
 // the selected projects rather than listing sessions to choose from. Origin

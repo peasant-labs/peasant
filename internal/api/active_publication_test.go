@@ -148,14 +148,14 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatal("ingest published without explicit action")
 	}
-	publish := func() pushResponse {
+	publish := func() schema.SyncPushResponse {
 		t.Helper()
 		restoreSource := prepareSourceFreePublication(t, db, cfg.Output.BasePath, filepath.Join(source, selectedID+".jsonl"), selectedID, repo)
 		defer restoreSource()
-		body, _ := json.Marshal(pushRequest{SessionIDs: []string{selectedID}, Visibility: "private"})
+		body, _ := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{selectedID}})
 		response := httptest.NewRecorder()
 		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body)))
-		var result pushResponse
+		var result schema.SyncPushResponse
 		if response.Code != http.StatusOK {
 			t.Fatalf("share status=%d body=%s", response.Code, response.Body.String())
 		}
