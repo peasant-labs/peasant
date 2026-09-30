@@ -272,23 +272,48 @@ export function headerGeometryFailures(manifest, context) {
   return failures
 }
 
+export const APP_SHELL_GEOMETRY_FIXTURE = join(WEB_ROOT, 'src', 'components', 'testdata', 'app-shell-geometry.yaml')
+
+/**
+ * The media query of "a screen with room to pin the offline notice", read from the one place the
+ * app declares it: globals.css's `@custom-variant notice-pinned (…)`, which
+ * src/components/testdata/app-shell-geometry.yaml records (and AppShellGeometry.test.ts holds
+ * globals.css to). Node-side; the gates pass the result into chromeClearance.
+ * @returns {string} e.g. `(min-height: 40rem) and (min-width: 48rem)`
+ */
+export function loadNoticePinnedQuery(fixturePath = APP_SHELL_GEOMETRY_FIXTURE) {
+  const document = YAML.parseDocument(readFileSync(fixturePath, 'utf8'), { strict: true, uniqueKeys: true })
+  if (document.errors.length) throw new Error(`${fixturePath}: invalid YAML: ${document.errors.map((error) => error.message).join('; ')}`)
+  const variant = document.toJS()?.noticePinnedVariant
+  const match = typeof variant === 'string' ? variant.match(/^@custom-variant notice-pinned \(@media (.+)\);$/) : null
+  if (!match) throw new Error(`${fixturePath}: noticePinnedVariant must read "@custom-variant notice-pinned (@media <query>);", got ${JSON.stringify(variant)}`)
+  return match[1]
+}
+
 /**
  * Checks that the page body clears the chrome above it. Only the one-row header is fixed. The
  * offline notice, while it shows, sits directly under the header: pinned there (position:fixed)
- * where the screen has room — (min-height: 40rem) and (min-width: 48rem), the query
- * LocalOfflineNotice and globals.css use — and at the top of the page, scrolling with it, anywhere
- * else (so on a small or zoomed screen it is never fixed). <main>'s top padding must equal the
- * header height plus the notice height (--app-header-height), or the header height alone when no
- * notice shows. Returns every failure and the measured fields.
- * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainPaddingTop: number,
+ * where the screen has room — `pinnedQuery`, the notice-pinned variant (loadNoticePinnedQuery) —
+ * and at the top of the page, scrolling with it, anywhere else (so on a small or zoomed screen it
+ * is never fixed). <main>'s top padding must equal the header height plus the notice height
+ * (--app-header-height), or the header height alone when no notice shows. The root's
+ * scroll-padding-top keeps focused elements clear of what is fixed: the header plus the notice
+ * where it is pinned, the header alone elsewhere. <main> is not focusable at rest (no tabindex): a
+ * click in the page must never make it the focus. Returns every failure and the measured fields.
+ * Self-contained for page.evaluate.
+ * @param {string} pinnedQuery
+ * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainPaddingTop: number, scrollPaddingTop: number,
  *   noticeShown: boolean, pinnedViewport: boolean, noticeFixed: boolean, noticeTop: number | null, documentTop: number | null }}
  */
-export function chromeClearance() {
+export function chromeClearance(pinnedQuery) {
   const failures = []
   const header = document.querySelector('header')
   const main = document.querySelector('main')
-  const pinnedViewport = window.matchMedia('(min-height: 40rem) and (min-width: 48rem)').matches
-  const empty = { chrome: 0, header: 0, notice: 0, mainPaddingTop: 0, noticeShown: false, pinnedViewport, noticeFixed: false, noticeTop: null, documentTop: null }
+  if (typeof pinnedQuery !== 'string' || !pinnedQuery.startsWith('(')) {
+    return { failures: [`chromeClearance needs the notice-pinned media query, got ${JSON.stringify(pinnedQuery)}`], chrome: 0, header: 0, notice: 0, mainPaddingTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport: false, noticeFixed: false, noticeTop: null, documentTop: null }
+  }
+  const pinnedViewport = window.matchMedia(pinnedQuery).matches
+  const empty = { chrome: 0, header: 0, notice: 0, mainPaddingTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport, noticeFixed: false, noticeTop: null, documentTop: null }
   if (!header || !main) return { failures: ['the header or <main> is not mounted'], ...empty }
   const headerHeight = header.getBoundingClientRect().height
   if (getComputedStyle(header).position !== 'fixed') failures.push(`the header is position:${getComputedStyle(header).position}, not fixed`)
@@ -323,5 +348,15 @@ export function chromeClearance() {
   if (Math.abs(mainPaddingTop - expected) > 1) {
     failures.push(`<main> clears ${mainPaddingTop}px but the header${notice ? ' plus the notice' : ''} is ${expected}px`)
   }
-  return { failures, chrome: expected, header: headerHeight, notice: noticeHeight, mainPaddingTop, noticeShown: !!notice, pinnedViewport, noticeFixed, noticeTop, documentTop }
+  // What stays on screen while the page scrolls: the header, plus the notice only where pinned.
+  const fixedHeight = headerHeight + (pinnedViewport ? noticeHeight : 0)
+  const scrollPaddingTop = Number.parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)
+  if (!Number.isFinite(scrollPaddingTop) || Math.abs(scrollPaddingTop - fixedHeight) > 1) {
+    failures.push(`the root's scroll-padding-top is ${getComputedStyle(document.documentElement).scrollPaddingTop}, but ${Math.round(fixedHeight)}px stays fixed at the top (the header${pinnedViewport && notice ? ' plus the pinned notice' : ''}), so focused elements can scroll under it`)
+  }
+  // The notice's focus move is the one moment <main> may carry a tabindex (it drops it on blur).
+  if (main.hasAttribute('tabindex') && document.activeElement !== main) {
+    failures.push(`<main> carries tabindex="${main.getAttribute('tabindex')}" at rest, so a click in the page would focus it`)
+  }
+  return { failures, chrome: expected, header: headerHeight, notice: noticeHeight, mainPaddingTop, scrollPaddingTop, noticeShown: !!notice, pinnedViewport, noticeFixed, noticeTop, documentTop }
 }

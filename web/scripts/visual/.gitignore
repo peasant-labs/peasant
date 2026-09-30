@@ -38,6 +38,7 @@
 !testdata/transcript-input.yaml
 !testdata/search-share.yaml
 !testdata/shell-header.yaml
+!testdata/shell-offline-cases.yaml
 # baseline/ holds the committed golden references (not ephemeral captures) so the
 # gates are self-contained — no /tmp dependency.
 !baseline/

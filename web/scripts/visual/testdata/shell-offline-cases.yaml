@@ -1,0 +1,73 @@
+# The pages the offline gate (shell-nav-default-gate.mjs) stops the server on, one
+# at a time, in both themes. The gate loads this strictly: unknown fields fail,
+# and it requires every name below, so deleting a row fails loudly instead of
+# dropping that coverage.
+#
+# Fields:
+#   name            the case and its capture file name
+#   path            the page; $TRANSCRIPT is the gate's mock transcript route
+#   body            the selector the page's body mounts
+#   width, height   the viewport, in CSS pixels
+#   check           the case-specific check after the notice shows:
+#                     plain        capture at the top of the page
+#                     retry-reach  the notice is taller than the screen, and the
+#                                  document must scroll `try again` into reach
+#                                  below the header
+#                     floor        scrolled to the bottom, `floor` keeps
+#                                  min(24rem, screen height − header) fully in
+#                                  view below the header
+#                     scrolled     the page is scrolled down before the stop, and
+#                                  the pinned notice must appear on screen under
+#                                  the header
+#   floor           the full-height element a `floor` case measures
+#   singleScroller  the page's own content scrolls; the document must not
+cases:
+  - name: home
+    path: /
+    body: main
+    width: 1440
+    height: 900
+    check: plain
+  - name: transcript
+    path: $TRANSCRIPT
+    body: .txn-app
+    width: 1440
+    height: 900
+    check: plain
+    singleScroller: true
+  - name: home-mobile
+    path: /
+    body: main
+    width: 390
+    height: 844
+    check: plain
+  # 400% zoom on a 1280×1024 screen: the notice alone is taller than the viewport.
+  - name: home-short
+    path: /
+    body: main
+    width: 320
+    height: 256
+    check: retry-reach
+  # The same zoom on the transcript: the page scrolls the notice away and keeps its floor.
+  - name: transcript-short
+    path: $TRANSCRIPT
+    body: .txn-app
+    width: 320
+    height: 256
+    check: floor
+    floor: '[data-tour="transcript-view"]'
+  # A small phone on /share: the share page keeps its floor below the notice.
+  - name: share-mobile
+    path: /share/
+    body: .share-page
+    width: 320
+    height: 568
+    check: floor
+    floor: .share-page
+  # A roomy screen scrolled down before the app stops: the pinned notice must be on screen.
+  - name: home-scrolled
+    path: /
+    body: main
+    width: 1440
+    height: 700
+    check: scrolled
