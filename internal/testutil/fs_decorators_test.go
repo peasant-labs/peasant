@@ -4,58 +4,64 @@ import (
 	"errors"
 	"io/fs"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 )
 
 func TestGatedFS_HoldsAndReleasesOneOperation(t *testing.T) {
 	t.Parallel()
-	mem := NewMemFS()
-	const path = "/out/session--transcript.jsonl"
-	if err := mem.WriteFile(path, []byte("first"), 0o600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	gated := NewGatedFS(mem)
-	if gated.Reached() != nil {
-		t.Fatal("Reached must be nil before a gate is armed")
-	}
-	gated.Arm(fsdecorator.Gate{Op: fsdecorator.OpWriteFile, Path: path})
-
-	done := make(chan error, 1)
-	go func() {
-		done <- gated.WriteFile(path, []byte("second"), 0o600)
-	}()
-
-	select {
-	case <-gated.Reached():
-	case <-time.After(5 * time.Second):
-		t.Fatal("the armed write never reached the gate")
-	}
-	// The hold is before the inner filesystem, so the old content is still there.
-	if got, err := mem.ReadFile(path); err != nil || string(got) != "first" {
-		t.Fatalf("held write touched the inner filesystem: %q, %v", got, err)
-	}
-	gated.Release()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("released write: %v", err)
+	synctest.Test(t, func(t *testing.T) {
+		mem := NewMemFS()
+		const path = "/out/session--transcript.jsonl"
+		if err := mem.WriteFile(path, []byte("first"), 0o600); err != nil {
+			t.Fatalf("seed: %v", err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Release did not unblock the held write")
-	}
-	if got, err := mem.ReadFile(path); err != nil || string(got) != "second" {
-		t.Fatalf("released write did not land: %q, %v", got, err)
-	}
-	// Release is idempotent, and a consumed gate lets the next call through.
-	gated.Release()
-	if err := gated.WriteFile(path, []byte("third"), 0o600); err != nil {
-		t.Fatalf("post-release write: %v", err)
-	}
-	if got, _ := mem.ReadFile(path); string(got) != "third" {
-		t.Fatalf("post-release content = %q, want third", got)
-	}
+		gated := NewGatedFS(mem)
+		if gated.Reached() != nil {
+			t.Fatal("Reached must be nil before a gate is armed")
+		}
+		gated.Arm(fsdecorator.Gate{Op: fsdecorator.OpWriteFile, Path: path})
+
+		done := make(chan error, 1)
+		go func() {
+			done <- gated.WriteFile(path, []byte("second"), 0o600)
+		}()
+
+		// Wait returns once every bubble goroutine is durably blocked, so the
+		// armed write has reached the gate without a wall-clock timeout.
+		synctest.Wait()
+		select {
+		case <-gated.Reached():
+		default:
+			t.Fatal("the armed write never reached the gate")
+		}
+		// The hold is before the inner filesystem, so the old content is still there.
+		if got, err := mem.ReadFile(path); err != nil || string(got) != "first" {
+			t.Fatalf("held write touched the inner filesystem: %q, %v", got, err)
+		}
+		gated.Release()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("released write: %v", err)
+			}
+		default:
+			t.Fatal("Release did not unblock the held write")
+		}
+		if got, err := mem.ReadFile(path); err != nil || string(got) != "second" {
+			t.Fatalf("released write did not land: %q, %v", got, err)
+		}
+		// Release is idempotent, and a consumed gate lets the next call through.
+		gated.Release()
+		if err := gated.WriteFile(path, []byte("third"), 0o600); err != nil {
+			t.Fatalf("post-release write: %v", err)
+		}
+		if got, _ := mem.ReadFile(path); string(got) != "third" {
+			t.Fatalf("post-release content = %q, want third", got)
+		}
+	})
 }
 
 func TestGatedFS_NonMatchingOperationPassesThrough(t *testing.T) {
