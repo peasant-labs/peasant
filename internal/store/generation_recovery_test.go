@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
@@ -796,9 +797,5 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 // rather than goroutine scheduling.
 func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label string) {
 	t.Helper()
-	select {
-	case <-attempts:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s never attempted the exclusive session lock", label)
-	}
+	testwait.Receive(t, attempts, label+" attempted the exclusive session lock")
 }
