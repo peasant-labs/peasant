@@ -328,6 +328,9 @@ func (v *CollectiveVillage) publish(w http.ResponseWriter, r *http.Request) {
 	receipt.TranscriptID = transcript
 	receipt.TranscriptURL = "https://village.example/transcripts/" + transcript.String()
 	receipt.Created = !exists
+	// Each publish is later than the one before, as Village's clock is, so
+	// "the transcript published last" is observable.
+	receipt.UpdatedAt += int64(len(v.publishes))
 	// Content lands private; a transcript shared with a collective keeps that
 	// audience when it is updated.
 	if hasLiveShare(shares) {

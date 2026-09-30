@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -268,7 +269,7 @@ func TestCollectiveIDPatternIsTheContractPattern(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if declared.Pattern == nil || *declared.Pattern != villageUUIDPattern.String() {
-		t.Fatalf("the typed push checks collectives against %q, but the contract declares %v", villageUUIDPattern.String(), declared.Pattern)
+	if declared.Pattern == nil || *declared.Pattern != village.CollectiveIDPattern {
+		t.Fatalf("the typed push checks collectives against %q, but the contract declares %v", village.CollectiveIDPattern, declared.Pattern)
 	}
 }

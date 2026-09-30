@@ -264,13 +264,9 @@ ORDER BY session_id, remote_updated_at DESC, project_hash`
 			if _, seen := out[sessionID]; seen {
 				return nil
 			}
-			projectHash, hashErr := schema.NewProjectHash(stmt.ColumnText(1))
-			if hashErr != nil {
-				return fmt.Errorf("session %q: stored project hash: %w", sessionID, hashErr)
-			}
-			record := PublicationRecord{VillageOrigin: origin, OwnerUserID: owner, SessionID: sessionID, ProjectHash: projectHash}
-			if decodeErr := json.Unmarshal([]byte(stmt.ColumnText(2)), &record.Receipt); decodeErr != nil {
-				return fmt.Errorf("session %q: %w", sessionID, decodeErr)
+			record, scanErr := scanPublicationRecord(stmt, origin, owner)
+			if scanErr != nil {
+				return scanErr
 			}
 			out[sessionID] = record
 			return nil

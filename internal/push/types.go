@@ -57,6 +57,10 @@ type PipelineConfig struct {
 	// FilterSessionIDs, when non-nil, restricts the push to only these session IDs.
 	// Set by the push wizard after user confirmation.
 	FilterSessionIDs []string
+	// HeldSessionIDs are sessions this run leaves out, whatever else selects
+	// them: an auto-publish rule holds a session it must not publish another
+	// way. Nil holds none.
+	HeldSessionIDs map[string]bool
 	// Selection, when non-nil, restricts the push to command-prepared decisions
 	// computed from the complete stored-session cohort. nil means no selection
 	// filter (push everything otherwise eligible).

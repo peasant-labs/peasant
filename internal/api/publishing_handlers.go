@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
@@ -128,17 +129,27 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 	}
 	// A hook push applies the saved selection, so a session the selection
 	// leaves out is never published by a hook, whatever is installed.
+	// Many sessions share a repository, so each directory is resolved to its
+	// repository once, and each repository's hooks are read once.
 	lifecycle := githooks.New(githooks.NewExecGit())
+	git := &ingest.ExecGitResolver{}
+	roots := map[string]string{}
 	publishing := map[string]bool{}
 	autoPublishes := func(dir string) bool {
-		if dir == "" {
+		root, known := roots[dir]
+		if !known {
+			if repo, err := autopublish.Resolve(r.Context(), git, dir); err == nil {
+				root = repo.Root
+			}
+			roots[dir] = root
+		}
+		if root == "" {
 			return false
 		}
-		if known, ok := publishing[dir]; ok {
-			return known
+		if _, known := publishing[root]; !known {
+			publishing[root] = autopublish.Publishing(r.Context(), lifecycle, root)
 		}
-		publishing[dir] = autopublish.Publishing(r.Context(), lifecycle, dir)
-		return publishing[dir]
+		return publishing[root]
 	}
 
 	var client *village.VillageClient

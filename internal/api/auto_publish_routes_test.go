@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"os"
@@ -20,49 +21,63 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
-// The auto-publish world: two git repositories side by side, one Peasant has
-// recorded sessions in and one it has not, served by the mounted local API.
-// The recorded repository holds a session the saved selection lists and one
-// it leaves out.
+// The auto-publish world: three git repositories side by side, two Peasant
+// has recorded sessions in and one it has not, served by the mounted local
+// API. The first recorded repository holds a session the saved selection
+// lists and one it leaves out.
 const (
 	recordedInsideSessionID  = "44445555-6666-4777-8888-9999aaaabbbb"
 	recordedOutsideSessionID = "55556666-7777-4888-8999-aaaabbbbcccc"
+	secondRecordedSessionID  = "66667777-8888-4999-8aaa-bbbbccccdddd"
 )
 
 type autoPublishWorld struct {
 	*publishingWorld
 	dir        string
 	recorded   string
+	second     string
 	unrecorded string
 }
 
-func (w *autoPublishWorld) repository(name string) string {
-	switch name {
-	case "recorded":
-		return w.recorded
-	case "unrecorded":
-		return w.unrecorded
-	}
-	return ""
+// autoPublishWorldOptions shape a world.
+type autoPublishWorldOptions struct {
+	// remote gives the first recorded repository an origin remote.
+	remote bool
+	// level is the configured redaction level; empty keeps the default.
+	level redact.RedactionLevel
 }
 
-func newAutoPublishWorld(t *testing.T) *autoPublishWorld {
+func (w *autoPublishWorld) repository(name string) string {
+	return map[string]string{"recorded": w.recorded, "second": w.second, "unrecorded": w.unrecorded}[name]
+}
+
+func (w *autoPublishWorld) rulesPath() string {
+	return autopublish.Path(defaults.ResolveConfigDirPathWith(w.hs.Config))
+}
+
+func newAutoPublishWorld(t *testing.T, options autoPublishWorldOptions) *autoPublishWorld {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	world := &autoPublishWorld{dir: dir, recorded: filepath.Join(dir, "recorded"), unrecorded: filepath.Join(dir, "unrecorded")}
-	for _, repo := range []string{world.recorded, world.unrecorded} {
+	world := &autoPublishWorld{dir: dir, recorded: filepath.Join(dir, "recorded"), second: filepath.Join(dir, "second"), unrecorded: filepath.Join(dir, "unrecorded")}
+	for _, repo := range []string{world.recorded, world.second, world.unrecorded} {
 		if err := os.MkdirAll(repo, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if out, err := exec.Command("git", "-C", repo, "init", "--quiet").CombinedOutput(); err != nil {
-			t.Fatalf("git init %s: %v\n%s", repo, err, out)
-		}
+		runGit(t, repo, "init", "--quiet")
+	}
+	if options.remote {
+		runGit(t, world.recorded, "remote", "add", "origin", "https://github.com/acme/tools.git")
+	}
+	services := filepath.Join(world.recorded, "services")
+	if err := os.MkdirAll(services, 0o700); err != nil {
+		t.Fatal(err)
 	}
 
 	hs := newTestXDGHomes(t)
@@ -74,11 +89,15 @@ func newAutoPublishWorld(t *testing.T) *autoPublishWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedRecordedSession(t, db, recordedInsideSessionID, insideProject, "https://github.com/acme/tools.git", filepath.Join(world.recorded, "services"))
+	seedRecordedSession(t, db, recordedInsideSessionID, insideProject, "https://github.com/acme/tools.git", services)
 	seedRecordedSession(t, db, recordedOutsideSessionID, outsideProject, "git@github.com:user/repo.git", world.recorded)
+	seedRecordedSession(t, db, secondRecordedSessionID, schema.ProjectHash(strings.Repeat("6", 64)), "git@github.com:user/other.git", world.second)
 	t.Cleanup(func() { _ = db.Close() })
 
 	cfg := config.BaseConfig()
+	if options.level != "" {
+		cfg.Redaction.Level = options.level
+	}
 	cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
 		defaults.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{{GitRemote: "git@github.com:acme/tools.git"}}},
 	}}
@@ -104,6 +123,13 @@ func newAutoPublishWorld(t *testing.T) *autoPublishWorld {
 	return world
 }
 
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+}
+
 // seedRecordedSession stores a session recorded in worktree.
 func seedRecordedSession(t *testing.T, db *store.Store, sessionID string, project schema.ProjectHash, remote, worktree string) {
 	t.Helper()
@@ -124,8 +150,7 @@ func seedRecordedSession(t *testing.T, db *store.Store, sessionID string, projec
 	testutil.SeedReadyPublication(t, db, &meta, []schema.SessionEntry{{SessionID: meta.SessionID, EntryIndex: 1, Role: schema.RoleUser, Harness: schema.Harness(defaults.HarnessClaudeCode), EntryType: schema.EntryTypeText, ContentPreview: &text}})
 }
 
-// prePushHook reads the recorded pre-push hook of repo, or nil when there is
-// none.
+// prePushHook reads the pre-push hook of repo, or nil when there is none.
 func prePushHook(t *testing.T, repo string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(repo, ".git", "hooks", "pre-push"))
@@ -136,6 +161,23 @@ func prePushHook(t *testing.T, repo string) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func ruleRoute(id string) string {
+	return strings.Replace(defaults.RouteAutoPublishRule.String(), "{id}", id, 1)
+}
+
+func installRoute(id string) string {
+	return strings.Replace(defaults.RouteAutoPublishInstall.String(), "{id}", id, 1)
+}
+
+// save PUTs one rule and decodes the answer with the contract type.
+func (w *autoPublishWorld) save(t *testing.T, id string, request schema.AutoPublishRuleRequest) schema.AutoPublishRule {
+	t.Helper()
+	status, body := w.request(t, http.MethodPut, ruleRoute(id), request)
+	var saved schema.AutoPublishRule
+	decodeContract(t, status, body, &saved)
+	return saved
 }
 
 // TestAutoPublishInstallRoutes runs the install cases of
@@ -149,7 +191,7 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 	for _, c := range fixture.For(t, autopublishtest.DriverInstall) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
-			world := newAutoPublishWorld(t)
+			world := newAutoPublishWorld(t, autoPublishWorldOptions{remote: c.RemoteRecorded})
 			if c.ForeignHook != "" {
 				if err := os.WriteFile(filepath.Join(world.recorded, ".git", "hooks", "pre-push"), []byte(c.ForeignHook), 0o755); err != nil {
 					t.Fatal(err)
@@ -157,11 +199,9 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 			}
 			rules := c.RulesFor(world.dir, "")
 			for _, rule := range rules {
-				status, body := world.request(t, http.MethodPut, strings.Replace(defaults.RouteAutoPublishRule.String(), "{id}", rule.ID, 1), rule.Request())
-				var saved schema.AutoPublishRule
-				decodeContract(t, status, body, &saved)
+				saved := world.save(t, rule.ID, rule.Request())
 				for _, repository := range saved.Repositories {
-					if repository.Path != world.recorded {
+					if repository.Path == world.unrecorded {
 						t.Errorf("rule %s lists %s; a rule lists only repositories Peasant recorded", rule.ID, repository.Path)
 					}
 				}
@@ -170,10 +210,13 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 				t.Fatal("saving a rule installed a hook")
 			}
 
-			status, body := world.request(t, http.MethodPost, strings.Replace(defaults.RouteAutoPublishInstall.String(), "{id}", rules[0].ID, 1), schema.AutoPublishInstallRequest{Path: world.repository(c.Install)})
+			status, body := world.request(t, http.MethodPost, installRoute(rules[0].ID), schema.AutoPublishInstallRequest{Path: world.repository(c.Install)})
 			if c.Expect.Status == http.StatusOK {
 				var installed schema.AutoPublishRepository
 				decodeContract(t, status, body, &installed)
+				if installed.Label != c.Expect.Label {
+					t.Errorf("label = %q, want %q", installed.Label, c.Expect.Label)
+				}
 				got := map[schema.AutoPublishEvent]schema.AutoPublishHookStatus{}
 				for _, hook := range installed.Hooks {
 					got[hook.Event] = hook.Status
@@ -203,7 +246,7 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 				decodeRefusal(t, status, body, c.Expect.Status, c.Expect.Code)
 			}
 
-			for _, name := range []string{"recorded", "unrecorded"} {
+			for _, name := range []string{"recorded", "second", "unrecorded"} {
 				hook := prePushHook(t, world.repository(name))
 				if managed := githooks.IsManaged(hook); managed != slices.Contains(c.Expect.Installed, name) {
 					t.Errorf("%s repository holds a managed pre-push hook = %v, want %v", name, managed, !managed)
@@ -216,16 +259,50 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 	}
 }
 
-// TestAutoPublishRoutesChangeNoHookOnTheirOwn walks one rule through the
-// routes: saving it installs nothing, installing is the one act that writes a
-// hook, publications then report autoPublish for the session the saved
-// selection lists, and removing the rule leaves the hook as it is.
+// TestAutoPublishRoutesRefuseBodies runs the rule-body cases: a body outside
+// the contract is refused and hooks.yaml is not written.
+func TestAutoPublishRoutesRefuseBodies(t *testing.T) {
+	t.Parallel()
+	fixture := autopublishtest.Load(t)
+	world := newAutoPublishWorld(t, autoPublishWorldOptions{})
+	for _, c := range fixture.For(t, autopublishtest.DriverRuleBody) {
+		t.Run(c.Name, func(t *testing.T) {
+			route := ruleRoute("work")
+			if c.Method == http.MethodPost {
+				route = installRoute("work")
+			}
+			req, err := http.NewRequestWithContext(t.Context(), c.Method, world.baseURL+route, bytes.NewReader([]byte(c.Body)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var raw bytes.Buffer
+			if _, err := raw.ReadFrom(resp.Body); err != nil {
+				t.Fatal(err)
+			}
+			decodeRefusal(t, resp.StatusCode, raw.Bytes(), c.Expect.Status, c.Expect.Code)
+			if _, err := os.Stat(world.rulesPath()); !os.IsNotExist(err) {
+				t.Fatalf("a refused body wrote hooks.yaml: %v", err)
+			}
+		})
+	}
+}
+
+// TestAutoPublishRoutesChangeNoHookOnTheirOwn walks rules through the routes:
+// saving installs nothing and lists every covered recorded repository,
+// replacing and removing a rule touches only that rule, installing is the one
+// act that writes a hook, publications then report autoPublish for the
+// session the saved selection lists, a hook git would not run reports absent,
+// and removing the rule leaves the hook as it is.
 func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 	t.Parallel()
-	world := newAutoPublishWorld(t)
-	route := strings.Replace(defaults.RouteAutoPublishRule.String(), "{id}", "work", 1)
-	install := strings.Replace(defaults.RouteAutoPublishInstall.String(), "{id}", "work", 1)
-	rule := schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.dir + "/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}}
+	world := newAutoPublishWorld(t, autoPublishWorldOptions{})
+	platform, research := publishingCollectives["platform"].ID, publishingCollectives["research"].ID
+	rule := schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.dir + "/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{platform}}
 	autoPublish := func() map[string]bool {
 		t.Helper()
 		var publications schema.LocalPublicationsResponse
@@ -237,55 +314,86 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 		return got
 	}
 
-	var saved schema.AutoPublishRule
-	status, body := world.request(t, http.MethodPut, route, rule)
-	decodeContract(t, status, body, &saved)
-	if len(saved.Repositories) != 1 || saved.Repositories[0].Hooks[0].Status != schema.AutoPublishHookAbsent {
-		t.Fatalf("saved rule = %+v; it lists the recorded repository with no hook", saved)
+	saved := world.save(t, "work", rule)
+	var paths []string
+	for _, repository := range saved.Repositories {
+		paths = append(paths, repository.Path)
+		if repository.Hooks[0].Status != schema.AutoPublishHookAbsent {
+			t.Errorf("%s hook = %q before any install", repository.Path, repository.Hooks[0].Status)
+		}
+	}
+	if !slices.Equal(paths, []string{world.recorded, world.second}) {
+		t.Fatalf("the rule lists %v; it covers both recorded repositories and not the unrecorded one", paths)
 	}
 	if got := autoPublish(); got[recordedInsideSessionID] || got[recordedOutsideSessionID] {
 		t.Fatalf("autoPublish before any install = %v", got)
 	}
-	rules, err := autopublish.Load(autopublish.Path(defaults.ResolveConfigDirPathWith(world.hs.Config)))
-	if err != nil || len(rules) != 1 || rules[0].ID != "work" {
-		t.Fatalf("hooks.yaml after the save = %+v, %v", rules, err)
+
+	// Replacing a rule keeps one rule; removing another leaves it as it was.
+	rule.Collectives = []schema.VillageUUID{research}
+	world.save(t, "work", rule)
+	other := schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleRemote, Match: "github.com/acme/*", Events: []schema.AutoPublishEvent{}, Collectives: []schema.VillageUUID{platform}}
+	world.save(t, "other", other)
+	var removedOther schema.AutoPublishRemovalResponse
+	status, body := world.request(t, http.MethodDelete, ruleRoute("other"), nil)
+	decodeContract(t, status, body, &removedOther)
+	rules, err := autopublish.Load(world.rulesPath())
+	if err != nil || len(rules) != 1 || rules[0].ID != "work" || !slices.Equal(rules[0].Collectives, []schema.VillageUUID{research}) || rules[0].Match != rule.Match {
+		t.Fatalf("hooks.yaml = %+v, %v; want the replaced rule alone", rules, err)
 	}
 
 	var installed schema.AutoPublishRepository
-	status, body = world.request(t, http.MethodPost, install, schema.AutoPublishInstallRequest{Path: world.recorded})
+	status, body = world.request(t, http.MethodPost, installRoute("work"), schema.AutoPublishInstallRequest{Path: world.recorded})
 	decodeContract(t, status, body, &installed)
 	if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
 		t.Fatalf("install = %+v", installed)
 	}
-	if hook := string(prePushHook(t, world.recorded)); !strings.Contains(hook, "--config-dir "+githooks.ShellQuote(world.hs.Config)) {
-		t.Errorf("the installed hook does not read this server's config directory, so it would not read its rules:\n%s", hook)
+	if hook := string(prePushHook(t, world.recorded)); !strings.Contains(hook, "--config-dir "+githooks.ShellQuote(world.hs.Config)) || !strings.Contains(hook, "--data-dir "+githooks.ShellQuote(world.hs.Data)) {
+		t.Errorf("the installed hook does not bind this server's config and data directories, so it would not read its rules and store:\n%s", hook)
 	}
 	if got := autoPublish(); !got[recordedInsideSessionID] || got[recordedOutsideSessionID] {
 		t.Fatalf("autoPublish after the install = %v; the listed session publishes and the one the selection leaves out does not", got)
 	}
 
+	// A hook git does not run publishes nothing, and installing is offered.
+	hookPath := filepath.Join(world.recorded, ".git", "hooks", "pre-push")
+	if err := os.Chmod(hookPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := autoPublish(); got[recordedInsideSessionID] {
+		t.Fatalf("autoPublish with a hook git does not run = %v", got)
+	}
+	if again := world.save(t, "work", rule); again.Repositories[0].Hooks[0].Status != schema.AutoPublishHookAbsent {
+		t.Fatalf("a hook git does not run is reported %q; installing repairs it, so it is absent", again.Repositories[0].Hooks[0].Status)
+	}
+	if err := os.Chmod(hookPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	var removed schema.AutoPublishRemovalResponse
-	status, body = world.request(t, http.MethodDelete, route, nil)
+	status, body = world.request(t, http.MethodDelete, ruleRoute("work"), nil)
 	decodeContract(t, status, body, &removed)
-	if len(removed.Repositories) != 1 || removed.Repositories[0].Hooks[0].Status != schema.AutoPublishHookInstalled {
-		t.Fatalf("removal = %+v; it reports the hook as it is", removed)
+	if len(removed.Repositories) != 2 || removed.Repositories[0].Hooks[0].Status != schema.AutoPublishHookInstalled {
+		t.Fatalf("removal = %+v; it reports the hooks as they are", removed)
 	}
 	if !githooks.IsManaged(prePushHook(t, world.recorded)) {
 		t.Fatal("removing the rule removed its hook")
 	}
+	status, body = world.request(t, http.MethodDelete, ruleRoute("work"), nil)
+	decodeRefusal(t, status, body, http.StatusNotFound, autoPublishNotFoundCode)
+	status, body = world.request(t, http.MethodPost, installRoute("work"), schema.AutoPublishInstallRequest{Path: world.recorded})
+	decodeRefusal(t, status, body, http.StatusNotFound, autoPublishNotFoundCode)
+}
 
-	status, body = world.request(t, http.MethodDelete, route, nil)
-	decodeRefusal(t, status, body, http.StatusNotFound, autoPublishNotFoundCode)
-	status, body = world.request(t, http.MethodPost, install, schema.AutoPublishInstallRequest{Path: world.recorded})
-	decodeRefusal(t, status, body, http.StatusNotFound, autoPublishNotFoundCode)
-	status, body = world.request(t, http.MethodPut, route, map[string]any{"kind": "folder", "match": world.dir, "events": []string{}, "collectives": []string{}, "visibility": "public"})
-	decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
-	status, body = world.request(t, http.MethodPut, route, map[string]any{"kind": "folder", "match": world.dir, "events": nil, "collectives": []string{}})
-	decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
-	rule.Match = "relative/*"
-	status, body = world.request(t, http.MethodPut, route, rule)
-	decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
-	if rules, err := autopublish.Load(autopublish.Path(defaults.ResolveConfigDirPathWith(world.hs.Config))); err != nil || len(rules) != 0 {
-		t.Fatalf("hooks.yaml after refused saves = %+v, %v; a refused save changes nothing", rules, err)
+// TestAutoPublishInstallRefusesAnUnsupportedRedactionLevel pins that no hook
+// is installed when every upload it ran would be refused.
+func TestAutoPublishInstallRefusesAnUnsupportedRedactionLevel(t *testing.T) {
+	t.Parallel()
+	world := newAutoPublishWorld(t, autoPublishWorldOptions{level: redact.Maximum})
+	world.save(t, "work", schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.dir + "/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{}})
+	status, body := world.request(t, http.MethodPost, installRoute("work"), schema.AutoPublishInstallRequest{Path: world.recorded})
+	refusal := decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
+	if !strings.Contains(refusal.Error, "redaction.level") || prePushHook(t, world.recorded) != nil {
+		t.Fatalf("refusal %q; it names the level and installs nothing", refusal.Error)
 	}
 }

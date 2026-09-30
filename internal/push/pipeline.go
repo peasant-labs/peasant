@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -493,6 +494,7 @@ func (p *Pipeline) getTargetSessions(ctx context.Context, parentSpanID string) (
 
 	selectionSpan := rec.StartChildSpan(perf.StagePushSelection, parentSpanID, nil)
 	base = p.filterByWizardSelection(base)
+	base = slices.DeleteFunc(base, func(s ingest.PushSessionRow) bool { return p.runCfg.HeldSessionIDs[s.SessionID] })
 	kept, withheld := ApplySelection(base, p.runCfg.Selection)
 	kept = ApplyRepositoryScope(kept, p.runCfg.Repository)
 	// The withheld notice runs AFTER the repository narrowing, not before it: a

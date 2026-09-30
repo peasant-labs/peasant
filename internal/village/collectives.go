@@ -8,10 +8,21 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/peasant-labs/schema"
 )
+
+// CollectiveIDPattern is the lowercase form Village emits for a collective,
+// and the pattern the contract declares for schema.VillageUUID.
+const CollectiveIDPattern = `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+
+var canonicalUUID = regexp.MustCompile(CollectiveIDPattern)
+
+// IsCollectiveID reports whether id is a collective identifier in the form
+// Village emits.
+func IsCollectiveID(id schema.VillageUUID) bool { return canonicalUUID.MatchString(string(id)) }
 
 // collectivesEndpoint lists the collectives the signed-in user belongs to.
 const collectivesEndpoint = "/api/v1/groups"

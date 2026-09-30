@@ -60,12 +60,20 @@ func parse(path string, raw []byte) ([]Rule, error) {
 	if err := decoder.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("read the auto-publish rules in %s: %w; correct the file or remove it, and retry", path, err)
 	}
-	if doc.Version != fileVersion && (doc.Version != 0 || len(doc.AutoPublish) > 0) {
+	// A file written by hand may leave the version out; it is the only one.
+	if doc.Version != fileVersion && doc.Version != 0 {
 		return nil, fmt.Errorf("read the auto-publish rules in %s: version %d is not the version %d this Peasant reads; nothing was applied; upgrade Peasant, or rewrite the file", path, doc.Version, fileVersion)
 	}
 	rules := doc.AutoPublish
 	if rules == nil {
 		rules = []Rule{}
+	}
+	for _, rule := range rules {
+		// A missing list is not an empty one: "events: []" pauses a rule on
+		// purpose, and a forgotten key must not.
+		if rule.Events == nil || rule.Collectives == nil {
+			return nil, fmt.Errorf("read the auto-publish rules in %s: rule %q has no events or no collectives list; write events: [pre-push] (or [] to pause the rule) and collectives: [<collective id>], and retry", path, rule.ID)
+		}
 	}
 	if err := validateRules(rules); err != nil {
 		return nil, fmt.Errorf("read the auto-publish rules in %s: %w", path, err)
