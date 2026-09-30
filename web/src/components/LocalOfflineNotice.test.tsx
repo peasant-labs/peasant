@@ -31,15 +31,16 @@ type Step =
   | { socket: 'open' | 'close' }
   | { wait: number }
   | { retry: true }
-  | { focus: 'retry' }
+  | { focus: 'retry' | 'away' }
   | { expect: 'shown' | 'hidden' }
   | { checkedAt: number }
   | { sockets: number }
   | { healthChecks: number }
   | { announce: 'stopped' | 'still' | 'back' | 'none' }
-  | { focused: 'main' | 'elsewhere' };
+  | { focused: 'main' | 'elsewhere' }
+  | { mainFocusable: boolean };
 
-const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'focus', 'expect', 'checkedAt', 'sockets', 'healthChecks', 'announce', 'focused'] as const;
+const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'focus', 'expect', 'checkedAt', 'sockets', 'healthChecks', 'announce', 'focused', 'mainFocusable'] as const;
 const REQUIRED_CASES = [
   'reachable-app-shows-nothing',
   'first-connect-within-grace-shows-nothing',
@@ -56,6 +57,8 @@ const REQUIRED_CASES = [
   'second-outage-keeps-grace',
   'unanswered-retry-does-not-reconnect',
   'stale-check-loses-to-newer-answer',
+  'try-again-within-grace-trusts-the-answer',
+  'superseded-try-again-stays-quiet',
 ];
 /** The ports the start-command rows must cover: none, the default, and at least one other. */
 const REQUIRED_PORTS = ['', '8690'];
@@ -186,16 +189,16 @@ const liveRegion = () => {
 function expectShown() {
   const region = notice();
   expect(region, 'the offline notice must show').not.toBeNull();
-  // Under the fixed header, at the top of the page and scrolling with it: never fixed itself.
+  // Under the fixed header: absolute at the top of the page by default, pinned (fixed) only
+  // through the notice-pinned variant on a screen with room for it.
   const header = document.querySelector('header');
   expect(header?.className).toContain('fixed');
   expect(header?.contains(region)).toBe(false);
-  // Absolute under the header by default; pinned only where the screen has room (a media variant).
   const wrapper = region!.parentElement!;
   expect(wrapper.classList.contains('absolute')).toBe(true);
   expect(wrapper.classList.contains('top-[var(--nav-h)]')).toBe(true);
   expect(wrapper.classList.contains('fixed')).toBe(false);
-  expect(wrapper.classList.contains('[@media(min-height:40rem)_and_(min-width:48rem)]:fixed')).toBe(true);
+  expect(wrapper.classList.contains('notice-pinned:fixed')).toBe(true);
   // It names this computer, never the internet, and offers the way back.
   expect(within(region!).getByRole('status')).toHaveTextContent(
     "peasant isn't running on this computer. your internet is fine: this page talks to the peasant app on your machine.",
@@ -221,8 +224,8 @@ describe('LocalOfflineNotice', () => {
     const mountedAt = Date.now();
     render(
       <LayoutShell>
-        {/* As app/layout.tsx mounts it: a programmatic focus target. */}
-        <main tabIndex={-1}>body</main>
+        {/* As app/layout.tsx mounts it: not focusable at rest. */}
+        <main>body</main>
       </LayoutShell>,
     );
     await advance(0);
@@ -241,7 +244,10 @@ describe('LocalOfflineNotice', () => {
         });
       } else if ('wait' in step) await advance(step.wait);
       else if ('retry' in step) fireEvent.click(screen.getByRole('button', { name: 'try again' }));
-      else if ('focus' in step) act(() => screen.getByRole('button', { name: 'try again' }).focus());
+      else if ('focus' in step) {
+        if (step.focus === 'retry') act(() => screen.getByRole('button', { name: 'try again' }).focus());
+        else act(() => (document.activeElement as HTMLElement | null)?.blur());
+      } else if ('mainFocusable' in step) expect(document.querySelector('main')?.hasAttribute('tabindex')).toBe(step.mainFocusable);
       else if ('checkedAt' in step) {
         expect(notice()?.querySelector('time')?.getAttribute('datetime')).toBe(new Date(mountedAt + step.checkedAt).toISOString());
       }

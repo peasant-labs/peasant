@@ -1,8 +1,9 @@
 /* The local shell manifest: loader and checks shared by the component tests and the mounted gates.
 
    testdata/shell-header.yaml names what the local app header must carry, what must not come
-   back, which route-only sections must still resolve, and which palette commands are forbidden
-   or required. This module is the one reader of that file. The DOM checks are self-contained
+   back, which route-only sections must still resolve, which palette commands are forbidden or
+   required, and what the offline notice's live region announces. This module is the one reader
+   of that file. The DOM checks are self-contained
    functions (no imports, no closures) so the same code runs under jsdom in Vitest and in a real
    browser through puppeteer's page.evaluate.
  */

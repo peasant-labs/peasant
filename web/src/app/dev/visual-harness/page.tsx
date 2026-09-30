@@ -37,7 +37,7 @@ type Theme = 'dark' | 'light';
  * capabilities on and host callbacks stubbed, so every action affordance renders
  * for capture. The composite owns a single bounded inner scroller
  * (`.txn-stream`) rather than scrolling the page, so the host below gives it a
- * fixed-height flex column matching the production shell's `--app-header-height`
+ * fixed-height flex column matching the production shell's `--app-body-height`
  * contract; the capture script scrolls that inner container, not the window.
  * It 404s in a production build, so it never ships as a public route.
  */
