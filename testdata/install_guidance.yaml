@@ -1,4 +1,4 @@
-declared_rows: 5
+declared_rows: 6
 guides:
   - name: macos
     path: docs/install/macos.md
@@ -51,3 +51,13 @@ guides:
       - underlying distro
       - apt install
       - tarball
+  - name: windows
+    path: docs/install/windows.md
+    channel: windows-zip
+    version_command: peasant version
+    kickstart_command: peasant kickstart
+    kickstart_link: ../KICKSTART.md#reset-and-standalone-boundaries
+    reinstall_section: Reinstalling or upgrading
+    reinstall_markers:
+      - .zip
+      - Expand-Archive
