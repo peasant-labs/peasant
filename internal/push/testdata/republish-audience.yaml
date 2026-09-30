@@ -209,3 +209,14 @@ cases:
     change: none
     update: {door: cli}
     expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public, villageLicense: none}
+
+  # The explicit change to an unchanged transcript is an owner update alone.
+  # When the Village refuses it, the door says no content was sent.
+  - name: cli-visibility-flag-failure-on-an-unchanged-transcript-sends-no-content
+    configured: {visibility: private, license: none}
+    first: {door: cli}
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: private, villageLicense: none}
+    ownerShares: true
+    change: none
+    update: {door: cli, flags: [--visibility, public], failVisibilityUpdates: true}
+    expectUpdate: {failed: true, says: "no content was sent", published: false, license: none, visibilityUpdates: [public], visibility: group, villageLicense: none}

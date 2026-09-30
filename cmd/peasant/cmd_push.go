@@ -795,7 +795,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
 	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
 	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes every already-published session the run selects, including ones shared with collectives on the village, which otherwise keep the visibility they have there", config.ImplementedVisibilityMenu()))
-	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also changes sessions already published. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt on this machine is sent the configured license", schema.LicenseMenu()))
+	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also relicenses every already-published session the run selects; a Creative Commons grant cannot be withdrawn. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt for this village account on this machine is sent the configured license", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")

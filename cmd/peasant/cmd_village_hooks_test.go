@@ -261,7 +261,7 @@ func TestVillageHooks_HelpDescribesRepositoryScopedCommand(t *testing.T) {
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("hooks help must describe the repository-scoped command %q; got:\n%s", want, output.String())
 	}
-	for _, disclosure := range []string{"--quiet", "public-visibility confirmation on your behalf", "Hooks honor the configured", "owner visibility update", "keeps the visibility and license it has on the village", "no terminal local", "project identity, not a path"} {
+	for _, disclosure := range []string{"--quiet", "public-visibility confirmation on your behalf", "Hooks honor the configured", "owner visibility update", "keeps the visibility and license", "no terminal local", "project identity, not a path"} {
 		if !strings.Contains(output.String(), disclosure) {
 			t.Errorf("hooks help must disclose %q; got:\n%s", disclosure, output.String())
 		}

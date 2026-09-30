@@ -304,13 +304,13 @@ func (d *audienceDoors) run(t *testing.T, run audienceRun) (failed bool, said st
 	}
 }
 
-// audienceSessionErrors reads the failed-session count from the transcript
-// result line the command prints: the quiet form a hook uses, or the summary.
-// A failed session does not fail the command, so its exit alone cannot say.
 // audienceNothingToPublish is how a run that uploads nothing says so instead
 // of printing a result line.
 const audienceNothingToPublish = "already pushed with unchanged content"
 
+// audienceSessionErrors reads the failed-session count from the transcript
+// result line the command prints: the quiet form a hook uses, or the summary.
+// A failed session does not fail the command, so its exit alone cannot say.
 var audienceSessionErrors = regexp.MustCompile(`(?m)^(?:pushed \d+ session\(s\), |Summary: \d+ new, \d+ updated, )(\d+) error\(s\)`)
 
 func (d *audienceDoors) execute(t *testing.T, args []string) (failed bool, said string) {

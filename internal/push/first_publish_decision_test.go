@@ -25,20 +25,23 @@ var firstPublishDecisionManifest []byte
 // earlierProjectHash is a project identity a harvest has since replaced.
 const earlierProjectHash = "3333333333333333333333333333333333333333333333333333333333333333"
 
-var (
-	allReceiptStates   = []string{"none", "current", "earlier-project"}
-	allAttemptStages   = []string{"none", "publish", "visibility", "persist"}
-	attemptStageByName = map[string]store.PublicationAttemptStage{
-		"publish":    store.PublicationAttemptStagePublish,
-		"visibility": store.PublicationAttemptStageVisibility,
-		"persist":    store.PublicationAttemptStagePersistence,
+var allReceiptStates = []string{"none", "current", "earlier-project", "other-account"}
+
+// allAttemptStages is "none" and every stage the store records, taken from
+// the store so a new stage fails the coverage check until a case places it.
+func allAttemptStages() []string {
+	stages := []string{"none"}
+	for _, stage := range store.AllPublicationAttemptStages {
+		stages = append(stages, string(stage))
 	}
-)
+	return stages
+}
 
 type firstPublishDecisionCase struct {
 	Name              string            `yaml:"name"`
 	Receipt           string            `yaml:"receipt"`
 	LatestAttempt     string            `yaml:"latestAttempt"`
+	AttemptProject    string            `yaml:"attemptProject"`
 	VillageAnswer     string            `yaml:"villageAnswer"`
 	VillageVisibility schema.Visibility `yaml:"villageVisibility"`
 	ExpectLicense     string            `yaml:"expectLicense"`
@@ -62,7 +65,8 @@ func loadFirstPublishDecisionFixture(t *testing.T) []firstPublishDecisionCase {
 		names = append(names, c.Name)
 		receipts = append(receipts, c.Receipt)
 		attempts = append(attempts, c.LatestAttempt)
-		if !slices.Contains(allReceiptStates, c.Receipt) || !slices.Contains(allAttemptStages, c.LatestAttempt) ||
+		if !slices.Contains(allReceiptStates, c.Receipt) || !slices.Contains(allAttemptStages(), c.LatestAttempt) ||
+			(c.AttemptProject != "current" && c.AttemptProject != "earlier-project") ||
 			(c.VillageAnswer != "created" && c.VillageAnswer != "update") || !c.VillageVisibility.IsValid() ||
 			(c.ExpectLicense != "none" && !schema.License(c.ExpectLicense).IsValid()) ||
 			(c.ExpectOwnerUpdate != "none" && !schema.TranscriptUpdateVisibility(c.ExpectOwnerUpdate).IsValid()) {
@@ -73,7 +77,7 @@ func loadFirstPublishDecisionFixture(t *testing.T) []firstPublishDecisionCase {
 		t.Fatal(err)
 	}
 	testutil.RequireClosedSetCoverage(t, "first publish decision", "receipt", allReceiptStates, receipts)
-	testutil.RequireClosedSetCoverage(t, "first publish decision", "latestAttempt", allAttemptStages, attempts)
+	testutil.RequireClosedSetCoverage(t, "first publish decision", "latestAttempt", allAttemptStages(), attempts)
 	return document.Cases
 }
 
@@ -91,17 +95,24 @@ func TestPipeline_FirstPublishDecision(t *testing.T) {
 			storeDouble := &testutil.StubPushStore{Sessions: []ingest.PushSessionRow{makeSession(testutil.TestSessionUUID, testutil.TestHostSlug, defaults.HarnessClaudeCode.String(), nil)}}
 			creds := baseCreds()
 			if c.Receipt != "none" {
-				hash := testutil.TestProjectHash
-				if c.Receipt == "earlier-project" {
-					hash = schema.ProjectHash(earlierProjectHash)
+				record := store.PublicationRecord{VillageOrigin: creds.VillageURL, OwnerUserID: creds.UserID, SessionID: testutil.TestSessionUUID, ProjectHash: testutil.TestProjectHash}
+				switch c.Receipt {
+				case "earlier-project":
+					record.ProjectHash = schema.ProjectHash(earlierProjectHash)
+				case "other-account":
+					record.OwnerUserID = "another-account"
 				}
-				if err := storeDouble.SavePublication(context.Background(), store.PublicationRecord{VillageOrigin: creds.VillageURL, OwnerUserID: creds.UserID, SessionID: testutil.TestSessionUUID, ProjectHash: hash}); err != nil {
+				if err := storeDouble.SavePublication(context.Background(), record); err != nil {
 					t.Fatal(err)
 				}
 				storeDouble.SavedPublicationIDs = nil
 			}
 			if c.LatestAttempt != "none" {
-				if err := storeDouble.RecordPublicationAttempt(context.Background(), store.PublicationAttemptDiagnostic{VillageOrigin: creds.VillageURL, OwnerUserID: creds.UserID, SessionID: testutil.TestSessionUUID, ProjectHash: testutil.TestProjectHash, Stage: attemptStageByName[c.LatestAttempt], Message: "an earlier attempt failed"}); err != nil {
+				attemptHash := testutil.TestProjectHash
+				if c.AttemptProject == "earlier-project" {
+					attemptHash = schema.ProjectHash(earlierProjectHash)
+				}
+				if err := storeDouble.RecordPublicationAttempt(context.Background(), store.PublicationAttemptDiagnostic{VillageOrigin: creds.VillageURL, OwnerUserID: creds.UserID, SessionID: testutil.TestSessionUUID, ProjectHash: attemptHash, Stage: store.PublicationAttemptStage(c.LatestAttempt), Message: "an earlier attempt failed"}); err != nil {
 					t.Fatal(err)
 				}
 			}

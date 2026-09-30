@@ -1195,11 +1195,13 @@ type StubPushStore struct {
 
 	UnpushedErr        error
 	SavePublicationErr error
-	// LatestPublicationAttemptErr is returned by LatestPublicationAttempt when
-	// non-nil.
+	// LatestPublicationAttemptErr is returned by
+	// LatestSessionPublicationAttempt when non-nil.
 	LatestPublicationAttemptErr error
-	InsertLogErr                error
-	HeldErr                     error
+	// PublishedToVillageErr is returned by PublishedToVillage when non-nil.
+	PublishedToVillageErr error
+	InsertLogErr          error
+	HeldErr               error
 	// GetQualityMetricsErr is returned by GetQualityMetrics when non-nil.
 	GetQualityMetricsErr error
 	// ListEntriesErr is returned by ListEntries when non-nil.
@@ -1247,22 +1249,26 @@ func (s *StubPushStore) RecordPublicationAttempt(_ context.Context, diagnostic s
 	return nil
 }
 
-// HasPublication reports whether any stored receipt belongs to the session,
-// under any village account or project identity.
-func (s *StubPushStore) HasPublication(_ context.Context, sessionID string) (bool, error) {
+// PublishedToVillage reports whether a stored receipt belongs to the session
+// on this Village account, under any project identity.
+func (s *StubPushStore) PublishedToVillage(_ context.Context, origin, owner, sessionID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.PublishedToVillageErr != nil {
+		return false, s.PublishedToVillageErr
+	}
 	for _, record := range s.Publications {
-		if record.SessionID == sessionID {
+		if record.VillageOrigin == origin && record.OwnerUserID == owner && record.SessionID == sessionID {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// LatestPublicationAttempt returns the most recently recorded attempt for one
-// publication identity, or nil when none was recorded.
-func (s *StubPushStore) LatestPublicationAttempt(_ context.Context, origin, owner string, projectHash schema.ProjectHash, sessionID string) (*store.PublicationAttemptDiagnostic, error) {
+// LatestSessionPublicationAttempt returns the most recently recorded attempt
+// for the session on this Village account, under any project identity, or nil
+// when none was recorded.
+func (s *StubPushStore) LatestSessionPublicationAttempt(_ context.Context, origin, owner, sessionID string) (*store.PublicationAttemptDiagnostic, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.LatestPublicationAttemptErr != nil {
@@ -1270,7 +1276,7 @@ func (s *StubPushStore) LatestPublicationAttempt(_ context.Context, origin, owne
 	}
 	for i := len(s.PublicationAttempts) - 1; i >= 0; i-- {
 		attempt := s.PublicationAttempts[i]
-		if attempt.VillageOrigin == origin && attempt.OwnerUserID == owner && attempt.ProjectHash == projectHash && attempt.SessionID == sessionID {
+		if attempt.VillageOrigin == origin && attempt.OwnerUserID == owner && attempt.SessionID == sessionID {
 			return &attempt, nil
 		}
 	}

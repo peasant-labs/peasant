@@ -125,8 +125,8 @@ type PipelineStore interface {
 	Publication(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationRecord, error)
 	SavePublication(context.Context, store.PublicationRecord) error
 	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
-	LatestPublicationAttempt(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationAttemptDiagnostic, error)
-	HasPublication(context.Context, string) (bool, error)
+	PublishedToVillage(context.Context, string, string, string) (bool, error)
+	LatestSessionPublicationAttempt(context.Context, string, string, string) (*store.PublicationAttemptDiagnostic, error)
 }
 
 // NewPipeline creates a push Pipeline with the given dependencies.
@@ -1004,13 +1004,12 @@ func (p *Pipeline) pushSession(
 	// choice for new publications, not an instruction to relicense published
 	// ones. Before the upload, a local receipt is the only evidence that the
 	// session was published. The exact receipt (this village account, the
-	// session's current project identity) is what the skip rule compares; the
-	// question "published before?" also counts a receipt under an earlier
-	// project identity or another account, because a harvest can re-attribute
-	// a session to a new project while the village keeps the same transcript.
-	// Counting too much only withholds a license or a visibility update, which
-	// an explicit flag can still send; counting too little would relicense or
-	// widen a published transcript.
+	// session's current project identity) is what the skip rule compares. The
+	// question "published before?" follows the village's own key instead, the
+	// account and the session under any project identity, because a harvest
+	// can re-attribute a session to a new project while the village keeps the
+	// same transcript. A receipt from another village or account does not
+	// count: there this upload is a first publication.
 	projectHash, hashErr := schema.NewProjectHash(string(input.ReceiptProjectHash))
 	if hashErr != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
@@ -1021,7 +1020,7 @@ func (p *Pipeline) pushSession(
 	}
 	publishedBefore := previous != nil
 	if !publishedBefore {
-		if publishedBefore, err = p.store.HasPublication(ctx, sess.SessionID); err != nil {
+		if publishedBefore, err = p.store.PublishedToVillage(ctx, p.creds.VillageURL, p.creds.UserID, sess.SessionID); err != nil {
 			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
 		}
 	}
@@ -1243,7 +1242,7 @@ func (p *Pipeline) pushSession(
 	// publish an earlier attempt started (unfinishedFirstPublish).
 	firstPublish := receipt.Created
 	if !firstPublish && !publishedBefore && !p.changesVisibility() && schema.Visibility(receipt.Visibility) == schema.VisibilityPrivate {
-		firstPublish, err = p.unfinishedFirstPublish(ctx, projectHash, sess.SessionID)
+		firstPublish, err = p.unfinishedFirstPublish(ctx, sess.SessionID)
 		if err != nil {
 			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publication content succeeded but its earlier attempts could not be read, so its visibility was not converged and no local terminal receipt was advanced; retry this session: %w", err)}
 		}
@@ -1256,7 +1255,7 @@ func (p *Pipeline) pushSession(
 			if updateErr != nil {
 				primary := fmt.Errorf("publication content succeeded but visibility convergence failed; the remote resource remains at its authoritative access state and no local terminal receipt was advanced; retry this session to apply the requested visibility: %w", updateErr)
 				if held {
-					primary = fmt.Errorf("the village did not apply the requested visibility to a transcript this account already published; no content was sent and the local receipt is unchanged; if the transcript no longer exists on the village, rerun with --force to publish it again: %w", updateErr)
+					primary = fmt.Errorf("the village did not apply the requested visibility to a transcript this account already published; no content was sent and the local receipt is unchanged; if the transcript no longer exists on the village, rerun with --force choosing only this session, and with --license to license it again: %w", updateErr)
 				}
 				diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
 				defer cancelDiagnostic()
@@ -1265,6 +1264,9 @@ func (p *Pipeline) pushSession(
 			}
 			if schema.Visibility(updated.Visibility) != visibility || updated.TranscriptID != receipt.TranscriptID || updated.TranscriptURL != receipt.TranscriptURL {
 				primary := fmt.Errorf("owner update returned inconsistent authoritative identity or access state; local applied state was not changed; retry this session after verifying Village health")
+				if held {
+					primary = fmt.Errorf("owner update returned inconsistent authoritative identity or access state for a transcript this account already published; no content was sent and the local receipt is unchanged; after verifying Village health, rerun with --force choosing only this session to publish it again")
+				}
 				diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
 				defer cancelDiagnostic()
 				_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStageVisibility, Message: primary.Error()})
@@ -1338,22 +1340,24 @@ func alreadyHeld(receipt schema.AuthoritativePublishResponse, operation schema.C
 // unfinishedFirstPublish reports whether an upload the village answered as an
 // update finishes a first publish an earlier attempt started. The village
 // created the transcript on that attempt, so it no longer says created. What
-// says so here is that no receipt for the session was ever written, while an
-// attempt to publish it was recorded: the upload failed or its answer was
-// lost, or the owner visibility update failed. A failed receipt save does not
-// count: by then the village had already applied every change the attempt
-// owed, so the visibility it holds now is the owner's. The caller asks only
-// while the village still holds the transcript at the private visibility new
-// content lands at, so an owner who shared or widened it since keeps that
-// choice.
+// says so here is that this village account holds no receipt for the session,
+// while its latest attempt to publish it failed before the receipt: the upload
+// failed or its answer was lost, the answer did not match the request, or the
+// owner visibility update failed. A latest attempt that failed at the receipt
+// save does not count: by then the village had applied every change the
+// attempt owed, so the visibility it holds now is the owner's. The caller asks
+// only while the village still holds the transcript at the private visibility
+// new content lands at, so an owner who shared or widened it since keeps that
+// choice. Like the receipt read, the attempt is found by the village's key,
+// under any project identity.
 //
 // The read runs on a context of its own, like the receipt write: the upload
 // already happened, and losing this read to the upload budget would send the
 // same content again on the next run.
-func (p *Pipeline) unfinishedFirstPublish(ctx context.Context, projectHash schema.ProjectHash, sessionID string) (bool, error) {
+func (p *Pipeline) unfinishedFirstPublish(ctx context.Context, sessionID string) (bool, error) {
 	readCtx, cancel := persistenceContext(ctx)
 	defer cancel()
-	attempt, err := p.store.LatestPublicationAttempt(readCtx, p.creds.VillageURL, p.creds.UserID, projectHash, sessionID)
+	attempt, err := p.store.LatestSessionPublicationAttempt(readCtx, p.creds.VillageURL, p.creds.UserID, sessionID)
 	if err != nil {
 		return false, err
 	}

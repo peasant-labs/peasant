@@ -60,3 +60,27 @@ func TestPipeline_UnreadableAttemptLedgerSavesNoReceipt(t *testing.T) {
 		t.Fatalf("the failure must say why; got %v", result.Sessions[0].Error)
 	}
 }
+
+// TestPipeline_UnreadableReceiptHistorySendsNothing covers the read that tells
+// an update from a first publication before the upload. When it cannot be
+// read, the session fails before anything is sent: carrying on as "never
+// published" would send the configured license to a transcript that may
+// already carry another one.
+func TestPipeline_UnreadableReceiptHistorySendsNothing(t *testing.T) {
+	t.Parallel()
+	fs := testutil.NewMemFS()
+	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
+	storeDouble := &testutil.StubPushStore{
+		Sessions:              []ingest.PushSessionRow{makeSession(testutil.TestSessionUUID, testutil.TestHostSlug, defaults.HarnessClaudeCode.String(), nil)},
+		PublishedToVillageErr: errors.New("receipt history unavailable"),
+	}
+	publisher := &testutil.StubPublisher{}
+	var stderr bytes.Buffer
+	result, err := newTestPipeline(storeDouble, publisher, fs, baseTestConfig(), push.PipelineConfig{}, &stderr).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Errors != 1 || len(publisher.AuthoritativeCalls) != 0 {
+		t.Fatalf("an unreadable receipt history must fail the session before any upload; result=%+v uploads=%d", result, len(publisher.AuthoritativeCalls))
+	}
+}

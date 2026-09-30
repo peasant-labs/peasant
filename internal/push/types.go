@@ -24,11 +24,12 @@ type PipelineConfig struct {
 	// ChangeVisibility says the caller asked for a visibility change, so an
 	// update also moves a transcript the village already holds to Visibility.
 	// An unchanged session gets the change as an owner update alone, sent
-	// whatever the local receipt says, because the receipt may be stale. Only an explicit request sets it (the --visibility
-	// flag), and it takes effect only with a Visibility to change to. A
-	// configured default, or the visibility the Share wizard opens a
-	// publication at, is not one: the owner may have shared the transcript with
-	// collectives on the village since, and nothing on this machine knows that.
+	// whatever the local receipt says, because the receipt may be stale. Only
+	// an explicit request sets it (the --visibility flag), and it takes effect
+	// only with a Visibility to change to. A configured default, or the
+	// visibility the Share wizard opens a publication at, is not one: the
+	// owner may have shared the transcript with collectives on the village
+	// since, and nothing on this machine knows that.
 	ChangeVisibility bool
 	// License overrides config push.license for this run (--license flag).
 	// Empty string means "use whatever is in config". A first publish sends it;

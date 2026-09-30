@@ -26,8 +26,8 @@ public-visibility confirmation on your behalf. Hooks honor the configured
 push.visibility on a session's first publication: Peasant publishes content and,
 when needed, follows it with an owner visibility update to converge the
 configured private or public state. An update of a session this machine has
-already published keeps the visibility and license it has on the village,
-including a share with collectives. If visibility convergence or local receipt
+already published to the village account keeps the visibility and license
+it has there, including a share with collectives. If visibility convergence or local receipt
 persistence fails, no terminal local receipt is recorded, so the next
 repository-scoped run retries that session.
 --timeout caps the WHOLE upload, so a village that accepts a connection and then

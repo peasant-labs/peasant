@@ -18,3 +18,4 @@ requiredNames:
   - web-retry-keeps-an-owner-share-made-meanwhile
   - cli-visibility-flag-updates-the-receipt-of-an-unchanged-transcript
   - cli-retry-finishes-a-first-publish-whose-visibility-update-failed
+  - cli-visibility-flag-failure-on-an-unchanged-transcript-sends-no-content

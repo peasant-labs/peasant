@@ -1,19 +1,25 @@
 # Whether one upload is a first publish, decided from what this machine holds
 # and what the Village answers. A first publish sends the configured license
-# and converges the requested visibility with an owner update; an update sends
-# neither.
+# (unless a receipt says the session was published before, as when the Village
+# re-creates a transcript it no longer holds) and converges the requested
+# visibility with an owner update; an update sends neither.
 #
 # Every case runs one push of one session with push.visibility: public and
 # push.license: CC-BY-4.0, and no flag. Its inputs:
 #
 #   receipt            the local receipt for the session: none, current (this
-#                      Village account, its current project identity), or
-#                      earlier-project (a project identity a harvest has since
-#                      replaced);
+#                      Village account, its current project identity),
+#                      earlier-project (this account, a project identity a
+#                      harvest has since replaced), or other-account (another
+#                      Village account);
 #   latestAttempt      the latest recorded publication attempt for the session
-#                      under its current identity: none, publish (the upload
-#                      failed or its answer was lost), visibility (the owner
-#                      update failed), or persist (the receipt save failed);
+#                      on this Village account: none, or the stage it failed
+#                      at (publish: the upload failed or its answer was lost;
+#                      validate: the answer did not match the request;
+#                      visibility: the owner update failed; persist: the
+#                      receipt save failed);
+#   attemptProject     the project identity that attempt was recorded under:
+#                      current, or earlier-project;
 #   villageAnswer      created, or update;
 #   villageVisibility  who can read the transcript when the Village answers.
 #
@@ -21,11 +27,14 @@
 # and the owner visibility update, if any.
 #
 # Deleting a case fails first_publish_decision.manifest.yaml, and every value
-# of receipt and latestAttempt must appear in some case.
+# of receipt and latestAttempt (every stage the store records) must appear in
+# some case.
+
 cases:
   - name: a-created-transcript-opens-at-the-requested-visibility
     receipt: none
     latestAttempt: none
+    attemptProject: current
     villageAnswer: created
     villageVisibility: private
     expectLicense: CC-BY-4.0
@@ -34,6 +43,7 @@ cases:
   - name: a-retry-after-a-lost-answer-finishes-the-first-publish
     receipt: none
     latestAttempt: publish
+    attemptProject: current
     villageAnswer: update
     villageVisibility: private
     expectLicense: CC-BY-4.0
@@ -42,6 +52,7 @@ cases:
   - name: a-retry-after-a-failed-owner-update-finishes-the-first-publish
     receipt: none
     latestAttempt: visibility
+    attemptProject: current
     villageAnswer: update
     villageVisibility: private
     expectLicense: CC-BY-4.0
@@ -52,6 +63,7 @@ cases:
   - name: a-retry-after-a-failed-receipt-save-keeps-the-owner-choice
     receipt: none
     latestAttempt: persist
+    attemptProject: current
     villageAnswer: update
     villageVisibility: private
     expectLicense: CC-BY-4.0
@@ -60,6 +72,7 @@ cases:
   - name: a-retry-keeps-an-owner-share-made-meanwhile
     receipt: none
     latestAttempt: publish
+    attemptProject: current
     villageAnswer: update
     villageVisibility: group
     expectLicense: CC-BY-4.0
@@ -70,6 +83,7 @@ cases:
   - name: an-update-of-a-published-session-keeps-its-audience-and-license
     receipt: current
     latestAttempt: publish
+    attemptProject: current
     villageAnswer: update
     villageVisibility: private
     expectLicense: none
@@ -78,7 +92,50 @@ cases:
   - name: an-update-after-a-project-re-attribution-keeps-its-audience-and-license
     receipt: earlier-project
     latestAttempt: publish
+    attemptProject: current
     villageAnswer: update
     villageVisibility: private
     expectLicense: none
     expectOwnerUpdate: none
+
+  # No receipt and no failed attempt: a reset database or another machine
+  # updating a transcript the owner made private. Nothing says this upload
+  # finishes a first publish, so the audience stays.
+  - name: an-update-with-no-receipt-and-no-failed-attempt-keeps-its-audience
+    receipt: none
+    latestAttempt: none
+    attemptProject: current
+    villageAnswer: update
+    villageVisibility: private
+    expectLicense: CC-BY-4.0
+    expectOwnerUpdate: none
+
+  - name: a-retry-after-a-mismatched-answer-finishes-the-first-publish
+    receipt: none
+    latestAttempt: validate
+    attemptProject: current
+    villageAnswer: update
+    villageVisibility: private
+    expectLicense: CC-BY-4.0
+    expectOwnerUpdate: public
+
+  # The attempt was recorded before a harvest re-attributed the session.
+  - name: a-retry-after-a-re-attribution-finishes-the-first-publish
+    receipt: none
+    latestAttempt: publish
+    attemptProject: earlier-project
+    villageAnswer: update
+    villageVisibility: private
+    expectLicense: CC-BY-4.0
+    expectOwnerUpdate: public
+
+  # A receipt from another Village account says nothing about this one: the
+  # upload is a first publish here and is finished like one.
+  - name: a-receipt-from-another-account-leaves-a-first-publish-a-first-publish
+    receipt: other-account
+    latestAttempt: publish
+    attemptProject: current
+    villageAnswer: update
+    villageVisibility: private
+    expectLicense: CC-BY-4.0
+    expectOwnerUpdate: public
