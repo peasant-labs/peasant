@@ -126,6 +126,7 @@ peasantConfig:
   - redaction.level
   - push.visibility
   - push.sharePreference
+  - push.autoPublishIntent
   - push.license
   - selection.mode
   - selection.autoIngestNewBranches

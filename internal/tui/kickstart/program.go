@@ -616,6 +616,16 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 			values = append(values, "publication preference: keep local; nothing is published now or when kickstart finishes")
 		}
 	}
+	// The auto-publish answer is an intent only, so its effect row says what
+	// kickstart does not do with it.
+	autoPublish := ctx.HasVisibleField(SectionAutoPublish, FieldAutoPublish) && cfg.Push.AutoPublishIntended()
+	if ctx.HasVisibleField(SectionAutoPublish, FieldAutoPublish) {
+		if autoPublish {
+			values = append(values, "publish automatically: yes; you choose which folders go to which collectives in settings later")
+		} else {
+			values = append(values, "publish automatically: not now")
+		}
+	}
 	if ctx.HasVisibleField(SectionPrivacy, FieldPrivacy) {
 		values = append(values, "publication privacy: "+strings.ToLower(cfg.Redaction.Level.String())+
 			" redaction; local imports remain original unless you run `peasant redact`")
@@ -640,6 +650,9 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 	}
 	if ctx.HasVisibleField(SectionSelection, FieldSelection) {
 		effects = append(effects, "import the selected transcripts into the local peasant store")
+	}
+	if autoPublish {
+		effects = append(effects, "install no git hook and save no auto-publish rule")
 	}
 	effects = append(effects, "publish nothing; sharing requires a later explicit push")
 	return settings.ConsentSummary{Values: values, Effects: effects}, nil
