@@ -1072,9 +1072,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// concurrently. StagingBuffer is MPMC: Add (workers) and Drain/Commit (main
 	// goroutine) must overlap so the ring buffer can recycle arena space.
 	// Running runParallel synchronously and draining after it returns would
-	// deadlock once the 2 GiB arena fills — workers spin in copyToArena waiting
-	// for arenaTail to advance, but drain only starts after runParallel returns.
-	var workersDone atomic.Bool
+	// deadlock once the 2 GiB arena fills — producers wait in copyToArena for
+	// arenaTail to advance, but drain only starts after runParallel returns.
+	//
+	// workersDone is closed once runParallel returns, so the drain loop wakes
+	// on the producers finishing instead of polling for them.
+	workersDone := make(chan struct{})
 	// Every session can independently fail reconciliation. The controller reads
 	// errors after workers finish, so reserve the complete bounded run's capacity
 	// rather than assuming full drain batches while producers run concurrently.
@@ -1112,7 +1115,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			wr.schedulingResolved = true
 			extractDoneAtomic.Add(1)
 			emitAdvance(prog, StageExtract, 1, toProcess)
-			staging.Add(wr)
+			staging.Add(ctx, wr)
 			// The root's heap payload must not outlive transfer to the arena,
 			// including while this worker walks a large descendant subtree.
 			wr.transcriptData = nil
@@ -1128,7 +1131,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				cwr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, toProcess)
-				staging.Add(cwr)
+				staging.Add(ctx, cwr)
 				// Enqueue grandchildren (if any).
 				queue = append(queue, childrenOf[childID]...)
 			}
@@ -1142,7 +1145,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		extractDone := int(extractDoneAtomic.Load())
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageExtract, Done: extractDone, Total: toProcess})
 		p.recordIndexProfileStage(StageExtract, extractProfileStart, extractDone, toProcess)
-		workersDone.Store(true)
+		close(workersDone)
 	}()
 
 	// Stage 4b: Consumer goroutine — DB INSERT + INDEX coordination.
@@ -1153,7 +1156,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		dbInsertProfileStart := time.Now()
 		defer close(indexCh) // signal INDEX goroutine to stop when consumer exits
 		emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDBInsert, Total: len(toProcessEntries)})
-		drainResults = p.drainLoop(ctx, staging, &workersDone, indexCh, indexDoneCh, errCh, prog, len(toProcessEntries), writeLane)
+		drainResults = p.drainLoop(ctx, staging, workersDone, indexCh, indexDoneCh, errCh, prog, len(toProcessEntries), writeLane)
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: len(drainResults), Total: len(toProcessEntries)})
 		p.recordIndexProfileStage(StageDBInsert, dbInsertProfileStart, len(drainResults), len(toProcessEntries))
 	}()
@@ -1319,11 +1322,17 @@ func (p *Pipeline) contentRecoveryLogEntries() []IndexLogEntry {
 //     every streamed session that belongs to the batch.
 //
 // Store errors are sent to errCh (buffered); the controller collects them after wg.Wait.
-// Bounded backoff (1ms sleep) is used when the buffer is empty but workers are still running.
+//
+// The loop blocks on events instead of polling: the ready signal wakes it when
+// a slot is published, workersDone when the producers finish, indexDoneCh when
+// the INDEX stage releases a drain batch, and ctx on cancellation. Option B:
+// on ctx.Done only the ctx arm is disabled; the loop keeps draining published
+// results and returns once the producers return, so a cancelled run keeps the
+// same per-session results and Summary.Errors it has today.
 func (p *Pipeline) drainLoop(
 	ctx context.Context,
 	staging *StagingBuffer,
-	workersDone *atomic.Bool,
+	workersDone <-chan struct{},
 	indexCh chan<- streamedIndexWork,
 	indexDoneCh <-chan DrainBatch,
 	errCh chan<- error,
@@ -1365,9 +1374,13 @@ func (p *Pipeline) drainLoop(
 		}
 	}
 
+	// ctxArm is set to nil once ctx ends, so the loop stops selecting on it
+	// without busy-looping on an already-closed channel (Option B).
+	ctxArm := ctx.Done()
+
 	for {
 		drainReadyAcks()
-		done := workersDone.Load()
+		done := isClosed(workersDone) // observed before Drain, as today
 		batch := staging.Drain()
 
 		if len(batch.Results) > 0 {
@@ -1425,10 +1438,36 @@ func (p *Pipeline) drainLoop(
 			waitForPendingAcks()
 			break
 		}
-		// Bounded backoff: avoid spinning when buffer is empty but workers still running.
-		time.Sleep(1 * time.Millisecond)
+		select {
+		case <-staging.ready:
+			// A slot was published; re-drain.
+		case <-workersDone:
+			// Producers finished; re-drain, then exit.
+		case batch := <-indexDoneCh:
+			// INDEX finished a batch. Blocked producers wait on this ack to
+			// free arena space, so the drainer must keep receiving it here.
+			ackBatch(batch)
+		case <-ctxArm:
+			// Cancelled. Keep today's accounting: stop selecting on ctx only
+			// (a closed ctx.Done would busy-loop), keep draining published
+			// results, and return once the producers return.
+			ctxArm = nil
+			continue
+		}
 	}
 	return sessionResults
+}
+
+// isClosed reports whether ch has been closed without consuming a value from a
+// still-open channel. It is the non-blocking observation the drain loop uses
+// for the producers-done broadcast.
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 type streamedIndexWork struct {
@@ -5004,7 +5043,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			staging.Commit(parentID)
 		}
 
-		var reindexWorkersDone atomic.Bool
+		// workersDone is closed once runParallel returns, so the drain loop
+		// wakes on the producers finishing instead of polling for them.
+		reindexWorkersDone := make(chan struct{})
 		// Reserve every possible per-session reconciliation failure, as in Run.
 		reindexErrChSize := extractTotal + 1
 		if reindexErrChSize < 16 {
@@ -5034,7 +5075,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 				wr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
-				staging.Add(wr)
+				staging.Add(ctx, wr)
 				// BFS over subtree: process children inline (same goroutine → no directory races).
 				queue := childrenOf[entry.Session.SessionID]
 				for len(queue) > 0 {
@@ -5046,14 +5087,14 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 					cwr.schedulingResolved = true
 					extractDoneAtomic.Add(1)
 					emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
-					staging.Add(cwr)
+					staging.Add(ctx, cwr)
 					queue = append(queue, childrenOf[childID]...)
 				}
 				// Release heap transcript bytes — arena already has the copy.
 				wr.transcriptData = nil
 				return wr
 			})
-			reindexWorkersDone.Store(true)
+			close(reindexWorkersDone)
 			p.recordIndexProfileStage(StageExtract, extractProfileStart, int(extractDoneAtomic.Load()), extractTotal+len(fallbackTargets))
 		}()
 
@@ -5066,7 +5107,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			dbInsertProfileStart := time.Now()
 			defer close(reindexIndexCh)
-			reindexDrainResults := p.drainLoop(ctx, staging, &reindexWorkersDone, reindexIndexCh, reindexIndexDoneCh, reindexErrCh, prog, extractTotal, reindexWriteLane)
+			reindexDrainResults := p.drainLoop(ctx, staging, reindexWorkersDone, reindexIndexCh, reindexIndexDoneCh, reindexErrCh, prog, extractTotal, reindexWriteLane)
 			sessionResults = append(sessionResults, reindexDrainResults...)
 			emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: len(reindexDrainResults), Total: extractTotal})
 			p.recordIndexProfileStage(StageDBInsert, dbInsertProfileStart, len(reindexDrainResults), extractTotal)

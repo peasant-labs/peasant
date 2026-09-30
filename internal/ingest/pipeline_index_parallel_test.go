@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -52,15 +53,15 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
 	staging := NewStagingBuffer(len(metas)+1, 1024*1024)
 	for _, im := range metas {
-		staging.Add(indexWorkerResult(im))
+		staging.Add(t.Context(), indexWorkerResult(im))
 	}
-	workersDone := atomic.Bool{}
-	workersDone.Store(true)
+	workersDone := make(chan struct{})
+	close(workersDone)
 	indexCh := make(chan streamedIndexWork, len(metas))
 	indexDoneCh := make(chan DrainBatch, 1)
 	drainDone := make(chan []SessionResult, 1)
 	go func() {
-		drainDone <- pipeline.drainLoop(context.Background(), staging, &workersDone, indexCh, indexDoneCh, make(chan error, 1), progress, len(metas), nil)
+		drainDone <- pipeline.drainLoop(context.Background(), staging, workersDone, indexCh, indexDoneCh, make(chan error, 1), progress, len(metas), nil)
 		close(indexCh)
 	}()
 	indexDone := make(chan struct{})
@@ -108,6 +109,113 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	if len(store.entries) != len(metas) {
 		t.Fatalf("indexed session count = %d, want %d", len(store.entries), len(metas))
 	}
+}
+
+// TestDrainLoop_WakesOnPublishedSlot proves the drain loop wakes on the ready
+// signal: a published slot must reach INDEX without polling or a timer. The
+// synctest bubble makes a missing wake visible as elapsed fake-clock time.
+func TestDrainLoop_WakesOnPublishedSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sessionID := SessionID("11111111-1111-4111-8111-111111111111")
+		staging := NewStagingBuffer(4, 1024)
+		workersDone := make(chan struct{})
+		indexCh := make(chan streamedIndexWork, 1)
+		indexDoneCh := make(chan DrainBatch, 1)
+		pipeline := &Pipeline{}
+		drained := make(chan []SessionResult, 1)
+		go func() {
+			drained <- pipeline.drainLoop(t.Context(), staging, workersDone, indexCh, indexDoneCh, make(chan error, 1), nil, 1, nil)
+		}()
+		synctest.Wait() // the loop is idle, parked on its wake arms
+
+		im := indexedMeta{
+			session: DiscoveredSession{
+				SessionID:    sessionID,
+				Harness:      HarnessClaudeCode,
+				SourcePath:   ResolvedPath("/source/" + string(sessionID) + ".jsonl"),
+				SourceFormat: SourceFormatJSONL,
+			},
+			outputTranscriptPath: "/stored/" + string(sessionID) + ".jsonl",
+			transcriptData:       []byte("published-slot"),
+		}
+
+		start := time.Now()
+		staging.Add(t.Context(), indexWorkerResult(im))
+		synctest.Wait()
+
+		var work streamedIndexWork
+		select {
+		case work = <-indexCh:
+		default:
+			t.Fatal("the drain loop did not wake on the published slot")
+		}
+		if work.meta.session.SessionID != sessionID {
+			t.Fatalf("streamed session = %s, want %s", work.meta.session.SessionID, sessionID)
+		}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("the ready wake took %v of fake-clock time; it must not wait out a poll", elapsed)
+		}
+
+		// Cleanup: release the drain batch through the INDEX ack, then finish
+		// the producers so the loop exits.
+		indexDoneCh <- work.batch.batch
+		synctest.Wait()
+		close(workersDone)
+		synctest.Wait()
+		select {
+		case results := <-drained:
+			if len(results) != 1 || results[0].SessionID != sessionID {
+				t.Fatalf("drain results = %+v, want the published session", results)
+			}
+		default:
+			t.Fatal("the drain loop did not return after the producers finished")
+		}
+	})
+}
+
+// TestDrainLoop_StopsOnContext proves the decided stop outcome: cancellation
+// disables only the ctx arm, so the loop keeps draining published results and
+// returns once the producers return instead of exiting early. Ignoring ctx
+// entirely also passes the not-returned-early check; the ctx arm's observable
+// effect is exactly that the loop does not run ahead of the producers.
+func TestDrainLoop_StopsOnContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		staging := NewStagingBuffer(4, 1024)
+		workersDone := make(chan struct{})
+		indexCh := make(chan streamedIndexWork, 1)
+		indexDoneCh := make(chan DrainBatch, 1)
+		pipeline := &Pipeline{}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		drained := make(chan []SessionResult, 1)
+		go func() {
+			drained <- pipeline.drainLoop(ctx, staging, workersDone, indexCh, indexDoneCh, make(chan error, 1), nil, 0, nil)
+		}()
+		synctest.Wait() // the loop is idle
+
+		start := time.Now()
+		cancel()
+		synctest.Wait()
+		select {
+		case <-drained:
+			t.Fatal("drainLoop returned on cancellation; the stop must not drop published results")
+		default:
+		}
+
+		close(workersDone)
+		synctest.Wait()
+		select {
+		case results := <-drained:
+			if len(results) != 0 {
+				t.Fatalf("drain results = %d, want 0", len(results))
+			}
+		default:
+			t.Fatal("drainLoop did not return after the producers finished")
+		}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("drainLoop consumed %v of fake-clock time instead of waking on its signals", elapsed)
+		}
+	})
 }
 
 func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T) {
