@@ -41,13 +41,18 @@ type shareStepsCase struct {
 	Name    string   `yaml:"name"`
 	Session string   `yaml:"session"`
 	Before  []string `yaml:"before"`
-	Request struct {
+	// ChangeContent changes the session's content after the earlier publish,
+	// so the case sends it again.
+	ChangeContent bool `yaml:"changeContent"`
+	Request       struct {
 		Add    []string `yaml:"add"`
 		Remove []string `yaml:"remove"`
 	} `yaml:"request"`
 	Village struct {
 		Unreachable          bool     `yaml:"unreachable"`
 		RequiresNewerPeasant bool     `yaml:"requiresNewerPeasant"`
+		FailPublish          bool     `yaml:"failPublish"`
+		ConflictShare        []string `yaml:"conflictShare"`
 		FailShare            []string `yaml:"failShare"`
 		FailShareRead        bool     `yaml:"failShareRead"`
 		WaitingPullRequest   bool     `yaml:"waitingPullRequest"`
@@ -97,7 +102,7 @@ func loadShareStepsFixture(t *testing.T) shareStepsFixture {
 			t.Fatalf("case %q must name what its error says exactly when its status is error", c.Name)
 		}
 		aliases := append(append(append([]string{}, c.Before...), c.Request.Add...), c.Request.Remove...)
-		aliases = append(aliases, c.Village.FailShare...)
+		aliases = append(append(aliases, c.Village.FailShare...), c.Village.ConflictShare...)
 		for _, step := range c.Expect.Steps {
 			if step.Collective != "" {
 				aliases = append(aliases, step.Collective)
@@ -142,6 +147,9 @@ func runShareStepsCase(t *testing.T, fixture shareStepsFixture, c shareStepsCase
 	for _, alias := range c.Village.FailShare {
 		remote.FailShare(fixture.Collectives[alias].ID)
 	}
+	for _, alias := range c.Village.ConflictShare {
+		remote.ConflictShare(fixture.Collectives[alias].ID)
+	}
 	remote.FailShareRead(c.Village.FailShareRead)
 	if c.Village.WaitingPullRequest {
 		remote.SetPromptRequests(
@@ -184,7 +192,11 @@ func runShareStepsCase(t *testing.T, fixture shareStepsFixture, c shareStepsCase
 	if c.Village.Unreachable {
 		remote.Close()
 	}
+	if c.ChangeContent {
+		seedShareContent(t, db, false, "the second draft of this session")
+	}
 	remote.RequireNewerPeasant(c.Village.RequiresNewerPeasant)
+	remote.FailPublish(c.Village.FailPublish)
 	publishesBefore := len(remote.Publishes())
 	published, err := publish(push.CollectiveChanges{Add: ids(c.Request.Add), Remove: ids(c.Request.Remove)})
 	if err != nil {
@@ -302,6 +314,22 @@ func seedShareSession(t *testing.T, missingModel bool) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedShareContent(t, db, missingModel, "a synthetic turn to publish")
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.Open(path, store.WithSkipMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// seedShareContent stores the session's capture with one user turn carrying
+// the text. Storing it again with other text changes the session.
+func seedShareContent(t *testing.T, db *store.Store, missingModel bool, text string) {
+	t.Helper()
 	meta := ingest.NewUnifiedMetadata()
 	meta.SessionID = testutil.TestSessionUUID
 	meta.HostSlug = testutil.TestHostSlug
@@ -317,15 +345,5 @@ func seedShareSession(t *testing.T, missingModel bool) *store.Store {
 	ingested := int64(1700000120000)
 	meta.Timestamp = ingest.TimestampInfo{Start: 1700000000000, End: 1700000060000, Ingested: &ingested}
 	meta.Stats = ingest.StatsInfo{TurnCount: 1, DurationMs: 60000}
-	content := "a synthetic turn to publish"
-	testutil.SeedReadyPublication(t, db, &meta, []schema.SessionEntry{{SessionID: meta.SessionID, EntryIndex: 1, Harness: meta.ModelHarness, Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &content}})
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	db, err = store.Open(path, store.WithSkipMigrations())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	testutil.SeedReadyPublication(t, db, &meta, []schema.SessionEntry{{SessionID: meta.SessionID, EntryIndex: 1, Harness: meta.ModelHarness, Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &text}})
 }

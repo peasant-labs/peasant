@@ -79,15 +79,48 @@ func TestUnshareTranscriptTakesTheTranscriptBack(t *testing.T) {
 	}
 }
 
-// TestTranscriptSharesRefusesAnUnknownStatus checks that a share status outside
-// the closed set fails the read instead of being reported as access.
-func TestTranscriptSharesRefusesAnUnknownStatus(t *testing.T) {
+// TestTranscriptSharesReadsEachRowStatus checks that an approved row takes its
+// status from the transcript read, which reports only approved rows, and any
+// other current row from the latest event of its share history.
+func TestTranscriptSharesReadsEachRowStatus(t *testing.T) {
+	t.Parallel()
+	const (
+		approved = schema.VillageUUID("22222222-2222-4222-8222-222222222222")
+		curated  = schema.VillageUUID("33333333-3333-4333-8333-333333333333")
+	)
+	client, requests := collectiveVillage(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/transcripts/" + testTranscript.String():
+			_, _ = w.Write([]byte(`{"shares":[{"group_id":"` + approved.String() + `","group_name":"platform","shared_at":"2026-01-01T00:00:00Z"},{"group_id":"` + curated.String() + `","group_name":"review","shared_at":"2026-01-01T00:00:00Z"}],` +
+				`"enriched_shares":[{"transcript_id":"` + testTranscript.String() + `","group_id":"` + approved.String() + `","group_name":"platform","acceptance_mode":"open","status":"approved","shared_at":"2026-01-01T00:00:00Z"}]}`))
+		case "/api/v1/users/me/collectives/" + curated.String() + "/transcripts/" + testTranscript.String() + "/events":
+			_, _ = w.Write([]byte(`[{"event_num":1,"status":"rejected","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":"moderator"},{"event_num":2,"status":"pending","recorded_at":"2026-01-02T00:00:00Z","decided_at":null,"decided_by_actor":""}]`))
+		default:
+			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+		}
+	})
+	shares, err := client.TranscriptShares(t.Context(), testTranscript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []village.TranscriptShare{{CollectiveID: approved, Name: "platform", Status: schema.VillageShareStatusApproved}, {CollectiveID: curated, Name: "review", Status: schema.VillageShareStatusPending}}
+	if len(shares) != len(want) || shares[0] != want[0] || shares[1] != want[1] {
+		t.Fatalf("shares = %+v, want %+v", shares, want)
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("requests = %+v; an approved row needs no history read", *requests)
+	}
+}
+
+// TestLatestShareStatusRefusesAnUnknownStatus checks that a share status
+// outside the closed set fails the read instead of being reported as access.
+func TestLatestShareStatusRefusesAnUnknownStatus(t *testing.T) {
 	t.Parallel()
 	client, _ := collectiveVillage(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"enriched_shares":[{"transcript_id":"` + testTranscript.String() + `","group_id":"` + testCollective.String() + `","group_name":"platform","acceptance_mode":"open","status":"visible","shared_at":"2026-01-01T00:00:00Z"}]}`))
+		_, _ = w.Write([]byte(`[{"event_num":1,"status":"visible","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":""}]`))
 	})
-	if shares, err := client.TranscriptShares(t.Context(), testTranscript); err == nil || !strings.Contains(err.Error(), "outside the closed set") {
-		t.Fatalf("shares = %+v, err = %v; want the unknown status refused", shares, err)
+	if status, err := client.LatestShareStatus(t.Context(), testTranscript, testCollective); err == nil || !strings.Contains(err.Error(), "outside the closed set") {
+		t.Fatalf("status = %q, err = %v; want the unknown status refused", status, err)
 	}
 }
 

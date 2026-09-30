@@ -31,24 +31,39 @@ type VillageCollective struct {
 }
 
 // CollectiveVillage is a Village double that keeps each published transcript
-// and its collectives the way Village does: content lands private, a curated
-// collective holds a share for its owner's approval, a live share answers 409,
-// and taking a transcript back removes the collective's access. It answers the
-// publish, the schema version, the collective reads and share changes, the
-// transcript read, the waiting pull requests, and the annotation push. A
-// transcript's identifier is its session's, so every session publishes to its
-// own transcript.
+// and its collectives the way Village does:
+//   - content lands private, and an update keeps the transcript's audience;
+//   - every share, approval, rejection, and withdrawal is an event in the
+//     share history of one (transcript, collective) pair, and the pair's
+//     current row follows its latest event (pending, approved, or rejected);
+//   - a curated collective holds a share for its owner's approval, and a
+//     share with a collective the caller is not a member of is skipped
+//     without an error;
+//   - a share that finds a live (pending or approved) row answers 409;
+//   - the transcript read lists every current row in "shares" and only the
+//     approved rows, with their status, in "enriched_shares";
+//   - taking a transcript back records a withdrawal and removes the row.
+//
+// It answers the publish, the schema version, the collective reads and share
+// changes, the transcript read, the share history, the waiting pull
+// requests, and the annotation push. A transcript's identifier is its
+// session's, so every session publishes to its own transcript.
 type CollectiveVillage struct {
 	server      *httptest.Server
 	t           testing.TB
 	collectives map[schema.VillageUUID]VillageCollective
 	order       []schema.VillageUUID
 
-	mu                   sync.Mutex
-	transcripts          map[schema.TranscriptID]map[schema.VillageUUID]schema.VillageShareStatus
+	mu sync.Mutex
+	// transcripts holds each transcript's current share rows by collective.
+	transcripts map[schema.TranscriptID]map[schema.VillageUUID]schema.VillageShareStatus
+	// events holds each (transcript, collective) pair's share history.
+	events               map[schema.TranscriptID]map[schema.VillageUUID][]schema.VillageShareEvent
 	publishes            []schema.AuthoritativePublishRequest
 	ownerUpdates         int
+	failPublish          bool
 	failShare            map[schema.VillageUUID]bool
+	conflictShare        map[schema.VillageUUID]bool
 	failShareRead        bool
 	requiresNewerPeasant bool
 	collectivesStatus    int
@@ -60,10 +75,12 @@ type CollectiveVillage struct {
 func NewCollectiveVillage(t testing.TB, collectives ...VillageCollective) *CollectiveVillage {
 	t.Helper()
 	v := &CollectiveVillage{
-		t:           t,
-		collectives: map[schema.VillageUUID]VillageCollective{},
-		transcripts: map[schema.TranscriptID]map[schema.VillageUUID]schema.VillageShareStatus{},
-		failShare:   map[schema.VillageUUID]bool{},
+		t:             t,
+		collectives:   map[schema.VillageUUID]VillageCollective{},
+		transcripts:   map[schema.TranscriptID]map[schema.VillageUUID]schema.VillageShareStatus{},
+		events:        map[schema.TranscriptID]map[schema.VillageUUID][]schema.VillageShareEvent{},
+		failShare:     map[schema.VillageUUID]bool{},
+		conflictShare: map[schema.VillageUUID]bool{},
 	}
 	for _, collective := range collectives {
 		v.collectives[collective.ID] = collective
@@ -87,7 +104,24 @@ func (v *CollectiveVillage) FailShare(id schema.VillageUUID) {
 	v.failShare[id] = true
 }
 
-// FailShareRead makes the transcript read answer 500.
+// FailPublish makes every publish answer 500, so Village keeps the content
+// and readers it had.
+func (v *CollectiveVillage) FailPublish(fail bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.failPublish = fail
+}
+
+// ConflictShare makes sharing any transcript with the collective answer 409
+// without recording anything, as Village does when another request shared it
+// at the same moment.
+func (v *CollectiveVillage) ConflictShare(id schema.VillageUUID) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.conflictShare[id] = true
+}
+
+// FailShareRead makes the share history read answer 500.
 func (v *CollectiveVillage) FailShareRead(fail bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -117,15 +151,32 @@ func (v *CollectiveVillage) SetPromptRequests(requests ...schema.VillagePromptRe
 	v.promptRequests = requests
 }
 
-// Share records a live share of the transcript with the collective, as its
-// owner could have made on Village.
+// Share records a share event of the transcript in the collective, as its
+// owner or the collective could have made on Village: pending, approved, or
+// rejected.
 func (v *CollectiveVillage) Share(transcript schema.TranscriptID, id schema.VillageUUID, status schema.VillageShareStatus) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.recordLocked(transcript, id, status)
+}
+
+// recordLocked appends one share event and moves the pair's current row to
+// it, the way Village derives transcript_shares from its latest attempt.
+func (v *CollectiveVillage) recordLocked(transcript schema.TranscriptID, id schema.VillageUUID, status schema.VillageShareStatus) {
+	if v.events[transcript] == nil {
+		v.events[transcript] = map[schema.VillageUUID][]schema.VillageShareEvent{}
+	}
+	history := v.events[transcript][id]
+	v.events[transcript][id] = append(history, schema.VillageShareEvent{EventNum: int32(len(history) + 1), Status: status, RecordedAt: villageDoubleTime})
 	if v.transcripts[transcript] == nil {
 		v.transcripts[transcript] = map[schema.VillageUUID]schema.VillageShareStatus{}
 	}
-	v.transcripts[transcript][id] = status
+	switch status {
+	case schema.VillageShareStatusPending, schema.VillageShareStatusApproved, schema.VillageShareStatusRejected:
+		v.transcripts[transcript][id] = status
+	default:
+		delete(v.transcripts[transcript], id)
+	}
 }
 
 // Publishes returns every publish request received, in order.
@@ -142,13 +193,16 @@ func (v *CollectiveVillage) OwnerUpdates() int {
 	return v.ownerUpdates
 }
 
-// Audience returns the transcript's current shares with their status.
+// Audience returns the collectives that can read the transcript or will once
+// their owner approves it: its approved and pending share rows.
 func (v *CollectiveVillage) Audience(transcript schema.TranscriptID) map[schema.VillageUUID]schema.VillageShareStatus {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	out := map[schema.VillageUUID]schema.VillageShareStatus{}
 	for id, status := range v.transcripts[transcript] {
-		out[id] = status
+		if status == schema.VillageShareStatusApproved || status == schema.VillageShareStatusPending {
+			out[id] = status
+		}
 	}
 	return out
 }
@@ -174,6 +228,8 @@ func (v *CollectiveVillage) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(schema.VillagePromptRequestsResponse{Requests: requests})
 	case r.Method == http.MethodGet && path == "/api/v1/groups":
 		v.listCollectives(w)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/me/collectives/") && strings.HasSuffix(path, "/events"):
+		v.readEvents(w, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/me/collectives/"), "/events"))
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/groups/") && strings.HasSuffix(path, "/repositories"):
 		v.listRepositories(w, schema.VillageUUID(strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/groups/"), "/repositories")))
 	case r.Method == http.MethodGet && path == "/api/v1/annotations/manifest":
@@ -202,8 +258,13 @@ func (v *CollectiveVillage) transcript(w http.ResponseWriter, r *http.Request, r
 	case r.Method == http.MethodPost && share == "share":
 		v.share(w, r, transcript)
 	case r.Method == http.MethodDelete && strings.HasPrefix(share, "share/"):
+		// Village withdraws a live share and answers the same whether or not
+		// one was live.
+		id := schema.VillageUUID(strings.TrimPrefix(share, "share/"))
 		v.mu.Lock()
-		delete(v.transcripts[transcript], schema.VillageUUID(strings.TrimPrefix(share, "share/")))
+		if status, live := v.transcripts[transcript][id]; live && (status == schema.VillageShareStatusPending || status == schema.VillageShareStatusApproved) {
+			v.recordLocked(transcript, id, schema.VillageShareStatusRetracted)
+		}
 		v.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(schema.VillageStatusResponse{Status: "unshared"})
 	default:
@@ -233,6 +294,10 @@ func (v *CollectiveVillage) publish(w http.ResponseWriter, r *http.Request) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.publishes = append(v.publishes, request)
+	if v.failPublish {
+		http.Error(w, `{"error":"Failed to store the transcript"}`, http.StatusInternalServerError)
+		return
+	}
 	shares, exists := v.transcripts[transcript]
 	if !exists {
 		v.transcripts[transcript] = map[schema.VillageUUID]schema.VillageShareStatus{}
@@ -242,7 +307,7 @@ func (v *CollectiveVillage) publish(w http.ResponseWriter, r *http.Request) {
 	receipt.Created = !exists
 	// Content lands private; a transcript shared with a collective keeps that
 	// audience when it is updated.
-	if len(shares) > 0 {
+	if hasLiveShare(shares) {
 		receipt.Visibility = schema.VisibilityGroup
 		receipt.Applied.NormalizedValues.Visibility = schema.VisibilityGroup
 	}
@@ -271,6 +336,11 @@ func (v *CollectiveVillage) share(w http.ResponseWriter, r *http.Request, transc
 		http.Error(w, `{"error":"Could not record the submission of this transcript"}`, http.StatusInternalServerError)
 		return
 	}
+	if v.conflictShare[id] {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(schema.VillageErrorResponse{Error: "Transcript was submitted to this collective by another request at the same moment as this one. Nothing was submitted to that collective. Share it again."})
+		return
+	}
 	if status, live := shares[id]; live && (status == schema.VillageShareStatusPending || status == schema.VillageShareStatusApproved) {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(schema.VillageErrorResponse{Error: "This transcript is already submitted to 1 collective"})
@@ -281,7 +351,7 @@ func (v *CollectiveVillage) share(w http.ResponseWriter, r *http.Request, transc
 		if collective.Acceptance == schema.VillageGroupAcceptanceCurated {
 			status = schema.VillageShareStatusPending
 		}
-		shares[id] = status
+		v.recordLocked(transcript, id, status)
 	}
 	rows := make([]schema.VillageTranscriptShare, 0, len(shares))
 	for shared := range shares {
@@ -293,20 +363,47 @@ func (v *CollectiveVillage) share(w http.ResponseWriter, r *http.Request, transc
 func (v *CollectiveVillage) readShares(w http.ResponseWriter, transcript schema.TranscriptID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if v.failShareRead {
-		http.Error(w, `{"error":"Failed to read the transcript"}`, http.StatusInternalServerError)
-		return
-	}
 	shares, exists := v.transcripts[transcript]
 	if !exists {
 		http.Error(w, `{"error":"Transcript not found"}`, http.StatusNotFound)
 		return
 	}
-	rows := make([]schema.VillageEnrichedTranscriptShare, 0, len(shares))
+	rows := make([]schema.VillageTranscriptShare, 0, len(shares))
+	approved := make([]schema.VillageEnrichedTranscriptShare, 0, len(shares))
 	for id, status := range shares {
-		rows = append(rows, schema.VillageEnrichedTranscriptShare{TranscriptID: transcript, GroupID: id, GroupName: v.collectives[id].Name, AcceptanceMode: v.collectives[id].Acceptance, Status: status, SharedAt: villageDoubleTime})
+		rows = append(rows, schema.VillageTranscriptShare{GroupID: id, GroupName: v.collectives[id].Name, SharedAt: villageDoubleTime})
+		if status == schema.VillageShareStatusApproved {
+			approved = append(approved, schema.VillageEnrichedTranscriptShare{TranscriptID: transcript, GroupID: id, GroupName: v.collectives[id].Name, AcceptanceMode: v.collectives[id].Acceptance, Status: status, SharedAt: villageDoubleTime})
+		}
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"enriched_shares": rows})
+	_ = json.NewEncoder(w).Encode(map[string]any{"shares": rows, "enriched_shares": approved})
+}
+
+// readEvents answers the share history of one pair, named by the path
+// "{groupId}/transcripts/{transcriptId}", oldest event first.
+func (v *CollectiveVillage) readEvents(w http.ResponseWriter, pair string) {
+	group, transcript, _ := strings.Cut(pair, "/transcripts/")
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.failShareRead {
+		http.Error(w, `{"error":"Failed to load the share-event history"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, exists := v.transcripts[schema.TranscriptID(transcript)]; !exists {
+		http.Error(w, `{"error":"Transcript not found"}`, http.StatusNotFound)
+		return
+	}
+	history := append([]schema.VillageShareEvent{}, v.events[schema.TranscriptID(transcript)][schema.VillageUUID(group)]...)
+	_ = json.NewEncoder(w).Encode(history)
+}
+
+func hasLiveShare(shares map[schema.VillageUUID]schema.VillageShareStatus) bool {
+	for _, status := range shares {
+		if status == schema.VillageShareStatusApproved || status == schema.VillageShareStatusPending {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *CollectiveVillage) listCollectives(w http.ResponseWriter) {

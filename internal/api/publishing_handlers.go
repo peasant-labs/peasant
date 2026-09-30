@@ -173,7 +173,7 @@ func publicationAudience(ctx context.Context, client *village.VillageClient, tra
 		if share.Status != schema.VillageShareStatusApproved && share.Status != schema.VillageShareStatusPending {
 			continue
 		}
-		audience = append(audience, schema.LocalPublicationAudienceMember{CollectiveID: share.GroupID, Name: share.GroupName, Status: share.Status})
+		audience = append(audience, schema.LocalPublicationAudienceMember{CollectiveID: share.CollectiveID, Name: share.Name, Status: share.Status})
 	}
 	return audience, nil
 }

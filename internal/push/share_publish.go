@@ -29,9 +29,9 @@ func (c CollectiveChanges) empty() bool { return len(c.Add) == 0 && len(c.Remove
 
 // CollectiveSharer is the Village surface the collective steps use.
 type CollectiveSharer interface {
-	TranscriptShares(context.Context, schema.TranscriptID) ([]schema.VillageEnrichedTranscriptShare, error)
 	ShareTranscript(context.Context, schema.TranscriptID, schema.VillageUUID) error
 	UnshareTranscript(context.Context, schema.TranscriptID, schema.VillageUUID) error
+	LatestShareStatus(context.Context, schema.TranscriptID, schema.VillageUUID) (schema.VillageShareStatus, error)
 }
 
 // SharePublishVillage is everything a publish from the local web asks Village
@@ -315,7 +315,6 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 		}
 	}
 
-	var sent []int
 	for _, id := range changes.Add {
 		collective := id
 		step := schema.SyncPushStepResult{Step: schema.SyncPushStepAddCollective, CollectiveID: &collective}
@@ -329,30 +328,11 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 			step.Outcome = schema.SyncPushStepSkipped
 			step.Reason = "Village holds no transcript of this session, so there is nothing to share"
 		default:
-			err := sharer.ShareTranscript(ctx, outcome.transcript.Receipt.TranscriptID, collective)
-			var refusal *village.StatusError
-			switch {
-			case err == nil:
-				sent = append(sent, len(steps))
-			case errors.As(err, &refusal) && refusal.StatusCode == http.StatusConflict:
-				step.Outcome = schema.SyncPushStepSkipped
-				step.Reason = "the collective already holds this transcript or its share waits for approval: " + refusal.Message
-			default:
-				step.Outcome = schema.SyncPushStepFailed
-				step.Reason = "sharing with this collective failed, so it cannot read the transcript: " + err.Error()
-			}
+			step = shareWithCollective(ctx, sharer, outcome.transcript.Receipt.TranscriptID, step)
 		}
 		steps = append(steps, step)
 		if step.Outcome == schema.SyncPushStepFailed && stopped < 0 {
 			stopped = len(steps) - 1
-		}
-	}
-	if len(sent) > 0 {
-		classifySentShares(ctx, sharer, outcome.transcript.Receipt.TranscriptID, steps, sent)
-		for _, index := range sent {
-			if steps[index].Outcome == schema.SyncPushStepFailed && (stopped < 0 || index < stopped) {
-				stopped = index
-			}
 		}
 	}
 
@@ -364,34 +344,48 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 	return result
 }
 
-// classifySentShares reads back what each collective did with a share Village
-// took: holds it for its owner's approval, accepts it, or skips it because the
-// caller is not a member it accepts contributions from. Village's share answer
-// does not say which, so the transcript's share list does.
-func classifySentShares(ctx context.Context, sharer CollectiveSharer, transcript schema.TranscriptID, steps []schema.SyncPushStepResult, sent []int) {
-	shares, err := sharer.TranscriptShares(ctx, transcript)
+// shareWithCollective offers the transcript to the step's collective and
+// reports what the collective did with it. Village's answer to a share does not
+// say whether the collective accepted it, holds it for its owner's approval, or
+// skipped it because the caller is not a member it takes contributions from,
+// and a 409 does not say whether a live share already exists or another request
+// won a race. The latest event of the share history says which, so every
+// outcome is read back from it.
+func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcript schema.TranscriptID, step schema.SyncPushStepResult) schema.SyncPushStepResult {
+	collective := *step.CollectiveID
+	err := sharer.ShareTranscript(ctx, transcript, collective)
+	var refusal *village.StatusError
+	duplicate := errors.As(err, &refusal) && refusal.StatusCode == http.StatusConflict
+	if err != nil && !duplicate {
+		step.Outcome = schema.SyncPushStepFailed
+		step.Reason = "sharing with this collective failed, so it cannot read the transcript: " + err.Error()
+		return step
+	}
+	status, err := sharer.LatestShareStatus(ctx, transcript, collective)
 	if err != nil {
-		for _, index := range sent {
-			steps[index].Outcome = schema.SyncPushStepFailed
-			steps[index].Reason = "Village took the share, but reading back whether the collective accepted it failed: " + err.Error() + "; open the transcript on Village to see who can read it, and publish again to retry"
-		}
-		return
+		step.Outcome = schema.SyncPushStepFailed
+		step.Reason = "Village answered the share, but reading back whether the collective accepted it failed: " + err.Error() + "; open the transcript on Village to see who can read it, and publish again to retry"
+		return step
 	}
-	status := make(map[schema.VillageUUID]schema.VillageShareStatus, len(shares))
-	for _, share := range shares {
-		status[share.GroupID] = share.Status
+	switch {
+	case duplicate && status == schema.VillageShareStatusApproved:
+		step.Outcome = schema.SyncPushStepSkipped
+		step.Reason = "the collective already shares this transcript"
+	case duplicate && status == schema.VillageShareStatusPending:
+		step.Outcome = schema.SyncPushStepSkipped
+		step.Reason = "the collective already holds this transcript for its owner's approval"
+	case duplicate:
+		step.Outcome = schema.SyncPushStepFailed
+		step.Reason = "Village refused the share, so this collective cannot read the transcript: " + refusal.Message
+	case status == schema.VillageShareStatusApproved:
+		step.Outcome = schema.SyncPushStepSucceeded
+	case status == schema.VillageShareStatusPending:
+		step.Outcome = schema.SyncPushStepPendingApproval
+	default:
+		step.Outcome = schema.SyncPushStepSkipped
+		step.Reason = "Village did not share the transcript with this collective: it shares only with a collective you are a member of that accepts your contributions"
 	}
-	for _, index := range sent {
-		switch status[*steps[index].CollectiveID] {
-		case schema.VillageShareStatusApproved:
-			steps[index].Outcome = schema.SyncPushStepSucceeded
-		case schema.VillageShareStatusPending:
-			steps[index].Outcome = schema.SyncPushStepPendingApproval
-		default:
-			steps[index].Outcome = schema.SyncPushStepSkipped
-			steps[index].Reason = "Village did not share the transcript with this collective: it shares only with a collective you are a member of that accepts your contributions"
-		}
-	}
+	return step
 }
 
 // stoppedMessage says where a session's steps stopped and what Village kept.
