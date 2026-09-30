@@ -231,6 +231,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       # `make check` shells out to `ast-grep scan`. The devShell supplied it;
       # the pool image does not, and it ships no unzip or python3 for the GitHub
@@ -486,6 +490,10 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       # The guard's probes compile and run under -race, so it keeps its own race
       # lane rather than sharing the plain `make check` artifacts. The key and its
@@ -544,6 +552,10 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       # Already namespaced `-go-cgo0-` on both the key and the restore-key, so
       # this release-only lane never collided with the shared prefix; kept as the
@@ -621,6 +633,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       - name: Notices are fresh + no copyleft dependency
         run: make third-party-notices-check
