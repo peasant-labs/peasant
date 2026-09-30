@@ -331,9 +331,12 @@ jobs:
     # testable); the cap is wedging protection only. It is NOT gated on the
     # 5-minute aggregate, which is assessed on the amd64 pool gate.
     timeout-minutes: 20
-    # No -race here: the lane invokes `go test` directly (bypassing make's
-    # GORACE_FLAG), matching the amd64 gate's RACE=0 posture — the detector's
-    # amplification does not fit this lane's 20-minute cap.
+    # RACE=0 is the lane's no-race posture, enforced at the job boundary: make
+    # honors it via GORACE_FLAG, and cmd/testgate reads $RACE directly for its
+    # -race default, so the env keeps the race pass off regardless of whether
+    # the step below invokes make, plain go test, or testgate.
+    env:
+      RACE: '0'
     steps:
       # Job-start clock for the phase report (covers checkout, the Nix install,
       # cache restore, and the web stub).
