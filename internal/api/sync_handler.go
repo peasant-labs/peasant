@@ -28,11 +28,10 @@ import (
 
 // syncHandler serves the web sync/push API endpoints.
 type syncHandler struct {
-	store  *store.Store
-	config *config.Config
-	// live, when set, replaces config: it is the configuration the server
-	// started with plus every setting saved through the settings routes.
-	live *liveConfig
+	store *store.Store
+	// config is the configuration the server applies, including every setting
+	// saved through the settings routes since it started.
+	config *liveConfig
 	// configHome, dataHome, and stateHome override the XDG roots this handler
 	// resolves config, data, and state paths under. Empty keeps the process
 	// environment as the default, so only tests inject explicit roots and the
@@ -76,13 +75,11 @@ func (h *syncHandler) dbPath() defaults.DBFilePath {
 	return defaults.ResolveDBFilePathWith(h.dataHome)
 }
 
-// currentConfig returns the configuration a request applies. A request reads
-// it once, so a setting saved while it runs does not change it halfway.
+// currentConfig returns the configuration the server applies now, or nil
+// when it runs without one. Each call returns one whole snapshot; a decision
+// that reads several settings reads them from one call.
 func (h *syncHandler) currentConfig() *config.Config {
-	if h.live != nil {
-		return h.live.load()
-	}
-	return h.config
+	return h.config.load()
 }
 
 // credentials loads the stored village credentials from configDir.

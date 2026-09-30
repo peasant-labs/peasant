@@ -1,0 +1,73 @@
+# GET /api/v1/settings reads and what each must answer.
+#
+# setup is what stands at the configuration path, as in settings-updates.yaml:
+# file (the text in file, the default) or missing (nothing). The default user
+# email a missing file reads is settings-default@example.test.
+#
+# A 200 case names one key with the value the file names and the value that
+# applies, as JSON. A refusal names its status, its error code, and text its
+# reason must hold.
+requiredNames:
+  - a missing file reads every key unset with the defaults applied
+  - a raised level reads the level it applies
+  - an unset field that defaults to on reads as on
+  - an empty choice reads its default
+  - a refused level fails the read with its remedy
+  - a push method no push applies fails the read with its remedy
+  - an invalid file fails the read
+cases:
+  - name: a missing file reads every key unset with the defaults applied
+    setup: missing
+    status: 200
+    key: user.email
+    value: 'null'
+    effective: '"settings-default@example.test"'
+  - name: a raised level reads the level it applies
+    file: |
+      version: 1
+      redaction:
+        level: minimal
+    status: 200
+    key: redaction.level
+    value: '"minimal"'
+    effective: '"standard"'
+  - name: an unset field that defaults to on reads as on
+    file: |
+      version: 1
+    status: 200
+    key: push.fields.gitRemote
+    value: 'null'
+    effective: 'true'
+  - name: an empty choice reads its default
+    file: |
+      version: 1
+      display:
+        theme: ""
+    status: 200
+    key: display.theme
+    value: '""'
+    effective: '"dark"'
+  - name: a refused level fails the read with its remedy
+    file: |
+      version: 1
+      redaction:
+        level: maximum
+    status: 500
+    code: settings_value_not_applied
+    errorContains: 'set redaction.level to one of \"standard\"'
+  - name: a push method no push applies fails the read with its remedy
+    file: |
+      version: 1
+      push:
+        method: individual
+    status: 500
+    code: settings_value_not_applied
+    errorContains: 'set push.method to one of \"all\", \"by-source\"'
+  - name: an invalid file fails the read
+    file: |
+      version: 1
+      push:
+        method: sideways
+    status: 500
+    code: settings_unreadable
+    errorContains: 'unknown push.method \"sideways\"'

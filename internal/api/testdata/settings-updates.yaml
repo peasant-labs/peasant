@@ -29,6 +29,7 @@ requiredNames:
   - a write while the file is unreadable changes nothing
   - a write while the configuration path is a directory changes nothing
   - a write while the file is invalid changes nothing
+  - a write to a file of several YAML documents changes nothing
 cases:
   - name: a valid write names the new value in config.yaml
     file: |
@@ -188,3 +189,14 @@ cases:
     status: 500
     key: push.license
     errorContains: 'unknown push.method "sideways"'
+  - name: a write to a file of several YAML documents changes nothing
+    file: |
+      version: 1
+      ---
+      version: 1
+      push:
+        license: CC0-1.0
+    body: '{"key": "push.license", "value": "CC-BY-4.0"}'
+    status: 500
+    key: push.license
+    errorContains: "more than one YAML document"

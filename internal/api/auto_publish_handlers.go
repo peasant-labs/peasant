@@ -21,8 +21,10 @@ import (
 // Saving or removing a rule changes no hook; installing is one explicit call
 // per repository, and only in a repository Peasant has recorded sessions in.
 type autoPublishHandler struct {
-	store  *store.Store
-	config *config.Config
+	store *store.Store
+	// config is the configuration the server applies, including every
+	// setting saved through the settings routes since it started.
+	config *liveConfig
 	// configHome is the XDG config root this server runs under; the rules
 	// file lives in its config directory.
 	configHome string
@@ -44,6 +46,10 @@ const (
 // errNoRule reports that no rule has the identifier.
 var errNoRule = errors.New("no auto-publish rule has this identifier")
 
+// errAutoPublishStoreUnavailable reports that the server runs without the
+// session store that names the recorded repositories.
+var errAutoPublishStoreUnavailable = errors.New("this server runs without its session store, which names the repositories Peasant recorded")
+
 func (h *autoPublishHandler) rulesPath() string {
 	return autopublish.Path(defaults.ResolveConfigDirPathWith(h.configHome))
 }
@@ -55,6 +61,37 @@ func (h *autoPublishHandler) hooks() autopublish.Hooks {
 // recorded lists the repositories Peasant has recorded sessions in.
 func (h *autoPublishHandler) recorded(r *http.Request) ([]autopublish.Repository, error) {
 	return autopublish.Recorded(r.Context(), h.store, &ingest.ExecGitResolver{})
+}
+
+// listRules reads every saved rule as the save route answers it: the recorded
+// repositories it covers, with their hooks as they are. A rule that cannot be
+// read fails the list rather than drop out of it, because a rule decides who
+// can read a transcript.
+func (h *autoPublishHandler) listRules(r *http.Request) ([]schema.AutoPublishRule, error) {
+	rules, err := autopublish.Load(h.rulesPath())
+	if err != nil {
+		return nil, err
+	}
+	views := make([]schema.AutoPublishRule, 0, len(rules))
+	if len(rules) == 0 {
+		return views, nil
+	}
+	if h.store == nil {
+		return nil, errAutoPublishStoreUnavailable
+	}
+	recorded, err := h.recorded(r)
+	if err != nil {
+		return nil, fmt.Errorf("list the recorded repositories: %w", err)
+	}
+	hooks := h.hooks()
+	for _, rule := range rules {
+		view, err := hooks.View(r.Context(), rule, recorded)
+		if err != nil {
+			return nil, fmt.Errorf("read the hooks of auto-publish rule %s: %w", rule.ID, err)
+		}
+		views = append(views, view)
+	}
+	return views, nil
 }
 
 // ready answers 503 when the server runs without its session store, which
@@ -188,8 +225,8 @@ func (h *autoPublishHandler) handleInstall(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, http.StatusBadRequest, "No hook was installed for rule "+id+": "+err.Error()+".", autoPublishInvalidCode)
 		return
 	}
-	if h.config != nil && !config.RedactionLevelSupported(h.config.Redaction.Level) {
-		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("No hook was installed for rule %s because redaction.level is %q, which this version cannot apply, so every upload the hook runs would be refused. Set redaction.level to %s, then retry.", id, h.config.Redaction.Level, config.RecommendedRedactionLevel), autoPublishInvalidCode)
+	if cfg := h.config.load(); cfg != nil && !config.RedactionLevelSupported(cfg.Redaction.Level) {
+		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("No hook was installed for rule %s because redaction.level is %q, which this version cannot apply, so every upload the hook runs would be refused. Set redaction.level to %s, then retry.", id, cfg.Redaction.Level, config.RecommendedRedactionLevel), autoPublishInvalidCode)
 		return
 	}
 	h.mu.Lock()
