@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -622,17 +623,13 @@ func TestCurrentMessageDecoderRejectsNonTextProjectedSession(t *testing.T) {
 
 func waitForActiveCatalog(t *testing.T, source *zombiezenOpenCodeSQLiteSource) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	// The catalog becoming active has no push signal, so poll the same locked
+	// read the previous spin checked; testwait.Until paces the 1 ms tick.
+	testwait.Until(t, "the catalog operation became active", func() bool {
 		source.stateMu.Lock()
-		active := source.activeCancel != nil
-		source.stateMu.Unlock()
-		if active {
-			return
-		}
-		runtime.Gosched()
-	}
-	t.Fatal("catalog operation did not become active within the test bound")
+		defer source.stateMu.Unlock()
+		return source.activeCancel != nil
+	})
 }
 
 func openConcreteSyntheticSource(t *testing.T, materialized testfixture.MaterializedSource) *zombiezenOpenCodeSQLiteSource {

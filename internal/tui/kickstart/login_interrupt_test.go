@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
 
@@ -47,13 +48,7 @@ func acceptConnectPrompt(t *testing.T, p kickstart.Program) (kickstart.Program, 
 
 func awaitContext(t *testing.T, ch <-chan context.Context) context.Context {
 	t.Helper()
-	select {
-	case ctx := <-ch:
-		return ctx
-	case <-time.After(2 * time.Second):
-		t.Fatal("login runner never started")
-		return nil
-	}
+	return testwait.Receive(t, ch, "login runner started")
 }
 
 func requireCanceled(t *testing.T, ctx context.Context, what string) {
