@@ -245,8 +245,9 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
 	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)
 
-	// Settings routes: every configuration key, and one key changed at a time.
-	settingsRoutes := &settingsHandler{path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}}
+	// Settings routes: every configuration key and auto-publish rule, and one
+	// key changed at a time.
+	settingsRoutes := &settingsHandler{path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}, rules: aph}
 	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
 	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 

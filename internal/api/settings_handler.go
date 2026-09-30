@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -80,6 +81,8 @@ type settingsHandler struct {
 	// git detects the default user email when no configuration file exists,
 	// the way every command's config.Load does.
 	git ingest.GitResolver
+	// rules lists the saved auto-publish rules the GET answer carries.
+	rules autoPublishRules
 	// mu serializes updates, so two updates cannot both start from the same
 	// file and lose one of the changes.
 	mu sync.Mutex
@@ -104,11 +107,19 @@ func (h *settingsHandler) handleGetSettings(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be read from %s in internal/api.handleGetSettings: %v. Nothing was changed. Fix or restore the configuration file, then retry.", h.path, err), "settings_unreadable")
 		return
 	}
+	if h.rules == nil {
+		writeAPIError(w, http.StatusInternalServerError, "The settings could not be listed because this server was built without the auto-publish rules in internal/api.handleGetSettings. Nothing was read. Report this defect.", "settings_unavailable")
+		return
+	}
+	rules, err := h.rules.listRules(r.Context())
+	if err != nil {
+		slog.Warn("settings: read the auto-publish rules", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be listed because the auto-publish rules could not be read in internal/api.handleGetSettings: %v. Nothing was changed. Fix or remove the rules file, then retry.", err), "settings_auto_publish_unreadable")
+		return
+	}
 	response := schema.LocalSettingsResponse{
-		Settings: make([]schema.LocalSetting, 0, len(catalog)),
-		// The auto-publish rules have their own routes and store; until those
-		// serve them, this computer has none.
-		AutoPublish: []schema.AutoPublishRule{},
+		Settings:    make([]schema.LocalSetting, 0, len(catalog)),
+		AutoPublish: rules,
 	}
 	for _, spec := range catalog {
 		row, err := spec.row(document, cfg)
@@ -220,6 +231,45 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 	h.live.apply(spec, saved)
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	_ = json.NewEncoder(w).Encode(row)
+}
+
+// autoPublishRules lists every saved auto-publish rule with the recorded
+// repositories it covers and each one's hooks.
+type autoPublishRules interface {
+	listRules(ctx context.Context) ([]schema.AutoPublishRule, error)
+}
+
+var _ autoPublishRules = (*autoPublishHandler)(nil)
+
+// listRules reads the rules the auto-publish routes save, each as the save
+// route answers it: the recorded repositories it covers, with their hooks as
+// they are. A rule that cannot be read fails the list rather than drop out of
+// it, because a rule decides who can read a transcript.
+func (h *autoPublishHandler) listRules(ctx context.Context) ([]schema.AutoPublishRule, error) {
+	rules, err := autopublish.Load(h.rulesPath())
+	if err != nil {
+		return nil, err
+	}
+	views := make([]schema.AutoPublishRule, 0, len(rules))
+	if len(rules) == 0 {
+		return views, nil
+	}
+	if h.store == nil {
+		return nil, errors.New("this server runs without its session store, which names the repositories Peasant recorded")
+	}
+	recorded, err := autopublish.Recorded(ctx, h.store, &ingest.ExecGitResolver{})
+	if err != nil {
+		return nil, fmt.Errorf("list the recorded repositories: %w", err)
+	}
+	hooks := h.hooks()
+	for _, rule := range rules {
+		view, err := hooks.View(ctx, rule, recorded)
+		if err != nil {
+			return nil, fmt.Errorf("read the hooks of auto-publish rule %s: %w", rule.ID, err)
+		}
+		views = append(views, view)
+	}
+	return views, nil
 }
 
 // readConfig reads the configuration file: its bytes, its YAML document, and

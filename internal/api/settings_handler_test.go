@@ -91,7 +91,7 @@ func TestSettingsServeEveryConfigKey(t *testing.T) {
 	if err := config.SaveAtomic(path, config.BaseConfig()); err != nil {
 		t.Fatal(err)
 	}
-	response := getSettings(t, &settingsHandler{path: path})
+	response := getSettings(t, &settingsHandler{path: path, rules: noAutoPublishRules(t)})
 	served := map[string]bool{}
 	readOnly := map[string]bool{}
 	inPeasantConfig := map[string]bool{}
@@ -136,7 +136,7 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "config.yaml")
 			before := arrangeSettingUpdate(t, c, path)
-			handler := &settingsHandler{path: path, git: &testutil.StubGitResolver{Email: settingsDefaultEmail}}
+			handler := &settingsHandler{path: path, git: &testutil.StubGitResolver{Email: settingsDefaultEmail}, rules: noAutoPublishRules(t)}
 
 			recorder := httptest.NewRecorder()
 			handler.handleUpdateSetting(recorder, httptest.NewRequest(http.MethodPatch, defaults.RouteSettings.String(), strings.NewReader(c.Body)))
@@ -207,7 +207,7 @@ func TestSettingsReturnNoCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder := httptest.NewRecorder()
-	(&settingsHandler{path: path}).handleGetSettings(recorder, httptest.NewRequest(http.MethodGet, defaults.RouteSettings.String(), nil))
+	(&settingsHandler{path: path, rules: noAutoPublishRules(t)}).handleGetSettings(recorder, httptest.NewRequest(http.MethodGet, defaults.RouteSettings.String(), nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d; body: %s", recorder.Code, recorder.Body)
 	}
@@ -217,6 +217,13 @@ func TestSettingsReturnNoCredential(t *testing.T) {
 	if bytes.Contains(recorder.Body.Bytes(), []byte("test-key")) {
 		t.Errorf("the settings response carries the stored Village API key: %s", recorder.Body)
 	}
+}
+
+// noAutoPublishRules is the rule store of a config directory that holds no
+// rules file.
+func noAutoPublishRules(t *testing.T) *autoPublishHandler {
+	t.Helper()
+	return &autoPublishHandler{configHome: t.TempDir()}
 }
 
 // getSettings reads GET /api/v1/settings through handler and checks the
