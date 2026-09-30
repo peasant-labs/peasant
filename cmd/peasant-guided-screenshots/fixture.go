@@ -66,6 +66,7 @@ type guidedSection string
 const (
 	guidedSectionAutoIngest  guidedSection = kickstart.SectionAutoIngest
 	guidedSectionPublication guidedSection = kickstart.SectionPublication
+	guidedSectionAutoPublish guidedSection = kickstart.SectionAutoPublish
 	guidedSectionPrivacy     guidedSection = kickstart.SectionPrivacy
 	guidedSectionLicense     guidedSection = kickstart.SectionLicense
 	guidedSectionDestination guidedSection = kickstart.SectionDestination
@@ -74,7 +75,7 @@ const (
 
 func (s guidedSection) valid() bool {
 	switch s {
-	case guidedSectionAutoIngest, guidedSectionPublication, guidedSectionPrivacy,
+	case guidedSectionAutoIngest, guidedSectionPublication, guidedSectionAutoPublish, guidedSectionPrivacy,
 		guidedSectionLicense, guidedSectionDestination, guidedSectionRetention:
 		return true
 	default:
@@ -549,8 +550,8 @@ func validateSheets(sheets []sheetFixture) error {
 		theme         captureTheme
 		width, height int
 	}{
-		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
-		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
+		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3980},
+		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
 		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
@@ -583,8 +584,8 @@ func validateGuidedMatrix(sections []guidedSectionFixture, captures []guidedCapt
 		sectionRows[section.Key] = section
 	}
 	for _, key := range []guidedSection{
-		guidedSectionAutoIngest, guidedSectionPublication, guidedSectionPrivacy, guidedSectionLicense,
-		guidedSectionDestination, guidedSectionRetention,
+		guidedSectionAutoIngest, guidedSectionPublication, guidedSectionAutoPublish, guidedSectionPrivacy,
+		guidedSectionLicense, guidedSectionDestination, guidedSectionRetention,
 	} {
 		if sectionRows[key].Key == "" {
 			return fmt.Errorf("screenshot fixture omits guided section %q", key)

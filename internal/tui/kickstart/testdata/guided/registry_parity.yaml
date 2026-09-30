@@ -1,7 +1,7 @@
 # One canonical registry is mounted by both production presentations for every
 # row. The section contract and scenario counts prevent silent loss of a field,
 # conditional section, or parity behavior.
-expectedSectionCount: 7
+expectedSectionCount: 8
 sections:
   - key: selection
     title: choose sessions to import
@@ -27,6 +27,15 @@ sections:
     hasGuide: true
     fieldTextBeforeGuide: true
     guideIntro: choose whether to keep transcripts local or plan to publish later.
+    conditional: false
+  - key: auto-publish
+    title: auto-publish
+    fieldKey: publish-automatically
+    fieldKind: radio
+    fieldText: publish automatically?
+    hasGuide: true
+    fieldTextBeforeGuide: true
+    guideIntro: you choose which folders go to which collectives in settings later.
     conditional: false
   - key: privacy
     title: privacy
@@ -77,7 +86,7 @@ rows:
     villageConnected: false
     claudeSessionsPresent: false
     initialRetention: 30
-    expectedVisibleSections: [selection, publication, privacy, license]
+    expectedVisibleSections: [selection, publication, auto-publish, privacy, license]
 
   - name: connected selected-mode visibility and framing
     operation: visibility
@@ -85,7 +94,7 @@ rows:
     villageConnected: true
     claudeSessionsPresent: true
     initialRetention: 30
-    expectedVisibleSections: [selection, auto-ingest, publication, privacy, license, destination, retention]
+    expectedVisibleSections: [selection, auto-ingest, publication, auto-publish, privacy, license, destination, retention]
 
   - name: transient retention accessor and dirty parity
     operation: transient-dirty
@@ -94,7 +103,7 @@ rows:
     claudeSessionsPresent: true
     initialRetention: 30
     selectedRetention: 90
-    expectedVisibleSections: [selection, publication, privacy, license, retention]
+    expectedVisibleSections: [selection, publication, auto-publish, privacy, license, retention]
 
   - name: yaml-backed accessor and persistence parity
     operation: persisted-edit
@@ -103,7 +112,7 @@ rows:
     claudeSessionsPresent: false
     initialRetention: 30
     selectedLicense: CC0-1.0
-    expectedVisibleSections: [selection, publication, privacy, license]
+    expectedVisibleSections: [selection, publication, auto-publish, privacy, license]
 
   - name: hidden section edit drop and persistence parity
     operation: hidden-drop
@@ -112,7 +121,7 @@ rows:
     claudeSessionsPresent: false
     initialRetention: 30
     expectedAutoIngest: true
-    expectedVisibleSections: [selection, auto-ingest, publication, privacy, license]
+    expectedVisibleSections: [selection, auto-ingest, publication, auto-publish, privacy, license]
 
   - name: external drift fails closed in both presentations
     operation: drift-failure
@@ -121,4 +130,4 @@ rows:
     claudeSessionsPresent: false
     initialRetention: 30
     selectedLicense: CC0-1.0
-    expectedVisibleSections: [selection, publication, privacy, license]
+    expectedVisibleSections: [selection, publication, auto-publish, privacy, license]
