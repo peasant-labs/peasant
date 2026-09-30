@@ -1,0 +1,29 @@
+# Publication answers the root-page capture serves for the mock store's
+# sessions. The mock store holds sessions, titles, trends and project
+# summaries, but no sync list and no publication receipts, so the capture
+# fulfils GET /api/v1/sync/sessions and GET /api/v1/publications itself: each
+# mock session, in list order, takes the next entry of `pattern` (cycling).
+#
+# state:            the publication state (unpublished | published)
+# syncStatus:       the sync row status (new | updated | synced)
+# autoPublish:      a managed hook publishes the session on push
+# audience:         how many collectives can read it (include=audience)
+# outsideSelection: the saved selection leaves it out, so the list hides it
+pattern:
+  - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: false }
+  - { state: published, syncStatus: synced, autoPublish: false, audience: 2, outsideSelection: false }
+  - { state: published, syncStatus: updated, autoPublish: false, audience: 1, outsideSelection: false }
+  - { state: unpublished, syncStatus: new, autoPublish: true, audience: 0, outsideSelection: false }
+  - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: false }
+  - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: true }
+  - { state: published, syncStatus: synced, autoPublish: true, audience: 1, outsideSelection: false }
+  - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: false }
+
+# The selection the "selection notice" state reports on the project summary.
+selectionNotice: { active: true, hiddenProjects: 2, hiddenSessions: 5 }
+
+# The selection the "selection recovery" state reports: every project hidden.
+selectionRecovery: { active: true, hiddenProjects: 3, hiddenSessions: 12 }
+
+# The query typed into the search box for the search state.
+searchQuery: auth

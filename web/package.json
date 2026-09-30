@@ -23,6 +23,7 @@
     "visual:search-share:self-test": "node scripts/visual/search-share-visual.mjs --self-test",
     "visual:search-share": "node scripts/visual/search-share-visual.mjs",
     "visual:grouped-local": "node scripts/visual/grouped-list-visual.mjs",
+    "visual:root-page": "node scripts/visual/root-page-visual.mjs",
     "visual:share-geometry": "node scripts/visual/share-geometry.mjs",
     "visual:context-navigation": "node scripts/visual/context-navigation-shoot.mjs",
     "shoot:peasant": "node scripts/visual/peasant-shoot.mjs",
