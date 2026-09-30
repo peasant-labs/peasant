@@ -71,11 +71,22 @@ func NewSharePipeline(pipelineStore PipelineStore, transport Transport, creds *a
 	if cfg == nil {
 		return nil, fmt.Errorf("build the publish pipeline for the local web: no configuration was loaded; nothing was published; start Peasant with its configuration and retry")
 	}
-	shareCfg := *cfg
-	shareCfg.Push.License = ""
-	return NewPipeline(pipelineStore, transport, creds, &shareCfg, &ingest.OSFileSystem{},
-		PipelineConfig{FilterSessionIDs: sessionIDs, Visibility: schema.VisibilityPrivate},
-		redactor, io.Discard)
+	shareCfg, runCfg := CollectiveAudience(cfg, PipelineConfig{FilterSessionIDs: sessionIDs})
+	return NewPipeline(pipelineStore, transport, creds, shareCfg, &ingest.OSFileSystem{},
+		runCfg, redactor, io.Discard)
+}
+
+// CollectiveAudience narrows a publish to one whose audience is collectives:
+// a first publication opens private and no license is sent, whatever the
+// configuration says, so neither a configured visibility nor a configured
+// default license reaches Village. The collective steps that follow decide who
+// can read the transcript. A publish from the local web and a hook push under
+// an auto-publish rule both publish this way.
+func CollectiveAudience(cfg *config.Config, runCfg PipelineConfig) (*config.Config, PipelineConfig) {
+	narrowed := *cfg
+	narrowed.Push.License = ""
+	runCfg.Visibility = schema.VisibilityPrivate
+	return &narrowed, runCfg
 }
 
 // SharePublish is one publish from the local web: the content of every named
@@ -141,6 +152,36 @@ func (s SharePublish) Run(ctx context.Context, sessionIDs []string, changes Coll
 		return SharePublishResult{Pushed: pushed}, fmt.Errorf("the publish ran, but its result breaks the Local API contract, so it is not reported as success: %w; open the transcripts on Village to see what they hold", err)
 	}
 	return SharePublishResult{Response: response, Pushed: pushed}, nil
+}
+
+// ShareSent shares each transcript a finished run sent with the collectives: the
+// sessions whose content the run published or updated, which is what a hook
+// push under an auto-publish rule does after its upload. A session the run
+// skipped as unchanged, held, or failed is not shared: sharing never follows a
+// failure, and an unchanged transcript keeps the readers it has. Each result
+// lists the session's steps in the order they ran, the content step first.
+func (s SharePublish) ShareSent(ctx context.Context, pushed *PushResult, collectives []schema.VillageUUID) ([]schema.SyncPushSessionResult, error) {
+	if pushed == nil || len(collectives) == 0 {
+		return nil, nil
+	}
+	var sent []string
+	for _, result := range pushed.Sessions {
+		if result.Status == PushStatusNew || result.Status == PushStatusUpdated {
+			sent = append(sent, result.SessionID)
+		}
+	}
+	if len(sent) == 0 {
+		return nil, nil
+	}
+	contents, _, err := s.contentOutcomes(ctx, sent, pushed, nil)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]schema.SyncPushSessionResult, 0, len(sent))
+	for _, id := range sent {
+		results = append(results, runSessionSteps(ctx, s.Village, contents[id], CollectiveChanges{Add: collectives}))
+	}
+	return results, nil
 }
 
 // contentOutcome is what happened to one session's content, and the transcript
