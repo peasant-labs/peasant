@@ -22,6 +22,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
@@ -465,11 +466,7 @@ func activateBarrierGeneration(t *testing.T, s *store.Store, v2 indexformat.V2, 
 
 func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label string) {
 	t.Helper()
-	select {
-	case <-attempts:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s never attempted the exclusive session lock", label)
-	}
+	testwait.Receive(t, attempts, label+" attempted the exclusive session lock")
 }
 
 // runBarrierLockLifetime drives the actual durable export boundary through the

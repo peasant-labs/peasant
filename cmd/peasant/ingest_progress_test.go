@@ -24,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -700,14 +701,7 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 
 func awaitHarvestEvent[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
-	select {
-	case value := <-ch:
-		return value
-	case <-time.After(5 * time.Second):
-		t.Fatal("harvest lifecycle did not reach expected dependency boundary")
-		var zero T
-		return zero
-	}
+	return testwait.Receive(t, ch, "harvest lifecycle reached the expected dependency boundary")
 }
 
 func TestHarvestCommandCanceledBeforeSetup(t *testing.T) {
