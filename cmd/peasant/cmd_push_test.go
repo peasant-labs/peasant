@@ -1864,7 +1864,8 @@ func TestPushCmd_VisibilityPrecedence(t *testing.T) {
 }
 
 // TestPushCmd_RejectsAnUnknownVisibility proves the flag is validated against the
-// contract's closed set, the way --license already was. It used to accept any
+// visibilities this version can apply, the way --license is against its closed
+// set. It used to accept any
 // string: a typo was taken as a visibility, quietly resolved to the default, and
 // then reported as applied.
 func TestPushCmd_RejectsAnUnknownVisibility(t *testing.T) {
@@ -1876,7 +1877,7 @@ func TestPushCmd_RejectsAnUnknownVisibility(t *testing.T) {
 	if err == nil {
 		t.Fatalf("an unknown visibility must be refused, not silently resolved; output: %s", output)
 	}
-	for _, want := range []string{"bogus", string(config.VisibilityPrivate), string(config.VisibilityGroup), string(config.VisibilityPublic)} {
+	for _, want := range []string{"bogus", config.ImplementedVisibilityMenu()} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal must name %q so the user can see what is accepted; got: %v", want, err)
 		}

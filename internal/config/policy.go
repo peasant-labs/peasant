@@ -751,13 +751,38 @@ func EffectiveVisibility(requested Visibility, cfg *Config) VisibilityPolicy {
 	return VisibilityPolicy{Configured: configured, Effective: effective}
 }
 
-// VisibilityMenu returns the accepted visibility values as a comma-separated
-// string, derived from the contract's closed set so a flag's validation message
-// can never drift from what the contract actually accepts. It mirrors
-// schema.LicenseMenu, which the --license flag validates against.
+// ImplementedVisibilityMenu returns the visibilities this version can apply,
+// as a comma-separated string, for a request that must name one of them.
+func ImplementedVisibilityMenu() string {
+	return visibilityMenu(ImplementedVisibilities)
+}
+
+// VisibilityChangeRefusal returns nil when this version can apply the
+// requested visibility, and otherwise the reason an explicit change to it is
+// refused rather than downgraded. A change also moves transcripts that are
+// already published, and the fallback would take access away from the
+// collectives a transcript is shared with. The CLI and the pipeline both ask
+// it, so the two doors refuse by one rule.
+func VisibilityChangeRefusal(requested Visibility) error {
+	if requested == "" || slices.Contains(ImplementedVisibilities, requested) {
+		return nil
+	}
+	return fmt.Errorf("%s visibility cannot be applied by this version: it would publish and change transcripts as %s instead, taking access away from the collectives a transcript is shared with; an update already keeps the visibility and collective shares a transcript has on the village, so leave the visibility unchanged to keep them, or ask for one of %s",
+		requested, FallbackVisibility, ImplementedVisibilityMenu())
+}
+
+// VisibilityMenu returns every visibility the contract defines, as a
+// comma-separated string, derived from its closed set so a message naming the
+// values a configuration accepts can never drift from the contract. It mirrors
+// schema.LicenseMenu. A request that must be applied names
+// ImplementedVisibilityMenu instead.
 func VisibilityMenu() string {
-	values := make([]string, 0, len(schema.AllVisibilities))
-	for _, visibility := range schema.AllVisibilities {
+	return visibilityMenu(schema.AllVisibilities)
+}
+
+func visibilityMenu(visibilities []Visibility) string {
+	values := make([]string, 0, len(visibilities))
+	for _, visibility := range visibilities {
 		values = append(values, visibility.String())
 	}
 	return strings.Join(values, ", ")

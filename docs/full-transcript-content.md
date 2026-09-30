@@ -86,22 +86,30 @@ to replace a publication that its owner has already approved:
    Confirm the account, Village origin, project/session identity, transcript ID and URL, current
    visibility, license, and collective shares. A local receipt alone can be stale.
 2. Rebuild and review the full capture locally. Verify that the share scan can read it.
-3. Run `peasant village push --force --visibility <current-visibility> --license <current-license>`.
-   In the chooser, select **only** the confirmed session. Do not use an unscoped non-interactive
-   force push. Keep the same account, Village, project identity, and session identity.
+3. Run `peasant village push --force`, with no `--visibility` or `--license`. An update keeps
+   the visibility, license, and collective shares the transcript has on the Village. In the
+   chooser, select **only** the confirmed session. Do not use an unscoped non-interactive force
+   push. Keep the same account, Village, project identity, and session identity.
 4. Verify the returned receipt and current owner metadata. Content must change while the
    transcript ID, URL, license, visibility, and shares stay the same. If current remote metadata
    changed during the operation, resolve that change before retrying.
 
 For internal callers of the existing pipeline, the same scoped invocation is
-`PipelineConfig{Force: true, FilterSessionIDs: []string{sessionID}, Visibility: currentVisibility,
-License: currentLicense}`. Supply the verified current values explicitly. The authoritative
-publish operation uses the unchanged project/session identity; it does not mutate collective
-shares. Visibility convergence is a separate owner update only when the requested value differs
-from the returned authoritative visibility.
+`PipelineConfig{Force: true, FilterSessionIDs: []string{sessionID}}`, with neither
+`ChangeVisibility` nor `ChangeLicense`. The authoritative publish operation uses the unchanged
+project/session identity and sends no license; it does not mutate collective shares, and no
+owner update follows.
 
-This is not a new repair API, CLI command, or automatic republish policy. Ordinary pushes still
-honor a user's configured or explicitly supplied license and visibility changes. If the current
-remote license is absent, keep the configuration's license absent too; an empty runtime override
-means “use configuration,” not “remove the remote license.” Do not use this procedure to remove
-an irrevocable license.
+This is not a new repair API, CLI command, or automatic republish policy. An ordinary update
+keeps the visibility and license the transcript has on the Village: the configured
+`push.visibility` and `push.license` apply to a first publication only, and only the
+`--visibility` and `--license` flags change a transcript that is already published. Peasant
+tells an update from a first publication by a local receipt for the session from the same
+Village account, under any project identity, so a session a later harvest re-attributed to a
+new project is still an update. A receipt from another Village account does not count: there
+the upload is a first publication. One exception remains: with no receipt for the session from
+this account on this machine, as after a reset database or on another machine, Peasant cannot
+tell an update from a first publication before the upload, so it sends the configured license;
+and if the latest attempt to publish it from this machine failed before its receipt was saved,
+it also converges a private transcript to the requested visibility. Do not use this procedure
+to remove an irrevocable license.
