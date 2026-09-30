@@ -1,11 +1,8 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 )
@@ -20,20 +17,13 @@ import (
 // reopened as is. Either way the file is already at head, so the open skips
 // migrations; the caller's options (index formats, pool size, generation
 // artifacts) are passed through unchanged, and the process-wide pool override
-// from TestMain stays in force.
+// from TestMain stays in force. See storetest.OpenPrepared for the shared
+// implementation.
 //
 // Fresh-install coverage is unaffected: a test that runs a command against an
 // empty root before calling this still exercises the production migrating
 // open inside the command.
 func openPreparedStore(t *testing.T, path string, options ...store.OpenOption) (*store.Store, error) {
 	t.Helper()
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(path), defaults.PrivateDirPerm); err != nil {
-			t.Fatalf("prepare the data directory for %s: %v", path, err)
-		}
-		storetest.CopyGoldenTo(t, path)
-	} else if err != nil {
-		t.Fatalf("stat the test database %s: %v", path, err)
-	}
-	return store.Open(path, append([]store.OpenOption{store.WithSkipMigrations()}, options...)...)
+	return storetest.OpenPrepared(t, path, options...)
 }

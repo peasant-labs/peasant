@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -75,11 +74,9 @@ func openCommittedPublicationStore(t *testing.T, path, root string, supported bo
 		t.Fatal(err)
 	}
 	// The helper reopens the same path with different options (committed vs
-	// legacy reads); seed the golden only when the file does not exist yet so a
-	// reopen keeps the seeded rows.
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		storetest.CopyGoldenTo(t, path)
-	}
+	// legacy reads); prepare a missing path from the golden so a reopen keeps
+	// the seeded rows.
+	storetest.CopyGoldenToIfAbsent(t, path)
 	var db *store.Store
 	if supported {
 		artifacts, err := store.NewOSGenerationArtifactStore(root)
