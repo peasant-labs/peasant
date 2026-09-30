@@ -333,6 +333,28 @@ describe('root page list reads', () => {
     expect(within(row).getByRole('link', { name: 'changes in beta-project' })).toHaveAttribute('href', `/review/${BETA_HASH}`);
   });
 
+  it('reads the list again when the session set changes, not when a live session grows', async () => {
+    const requests = serve(SPECS);
+    const view = render(<HomePage />);
+    await screen.findByRole('region', { name: 'sessions' });
+    const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length;
+    const before = syncReads();
+
+    topics.sessions = { sessions: [makeSession({ id: 'channel-row', project: 'alpha-project', turnCount: 99 })] };
+    view.rerender(<HomePage />);
+    await new Promise((settle) => setTimeout(settle, 50));
+    expect(syncReads()).toBe(before);
+
+    topics.sessions = {
+      sessions: [
+        makeSession({ id: 'channel-row', project: 'alpha-project', turnCount: 99 }),
+        makeSession({ id: 'channel-new', project: 'alpha-project' }),
+      ],
+    };
+    view.rerender(<HomePage />);
+    await waitFor(() => expect(syncReads()).toBe(before + 1));
+  });
+
   it('states no collective count when Village cannot name the audience', async () => {
     const requests = serve(SPECS, { audienceStatus: 502 });
     render(<HomePage />);
