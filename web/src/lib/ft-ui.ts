@@ -27,6 +27,7 @@ import type {
   ReactElement,
   ReactNode,
   RefObject,
+  SelectHTMLAttributes,
 } from 'react';
 import type { Harness } from '@peasant-labs/schema';
 import {
@@ -41,6 +42,13 @@ import {
   HelperGroupListItem as FtHelperGroupListItem,
   HelperThreadRow as FtHelperThreadRow,
   Input as FtInput,
+  // the root page: stats strip, publish-state filters, session table
+  DataTable as FtDataTable,
+  PublishStateLabel as FtPublishStateLabel,
+  Segmented as FtSegmented,
+  Select as FtSelect,
+  Sparkline as FtSparkline,
+  StatsStrip as FtStatsStrip,
   Popover as FtPopover,
   ProviderIcon as FtProviderIcon,
   ProviderName as FtProviderName,
@@ -706,3 +714,103 @@ export function useHelperSelection(config?: {
 }): HelperSelection {
   return ftUseHelperSelection(config) as HelperSelection;
 }
+
+// -- The root page: stats strip, publish-state filters, session table ---------
+
+/** One pair of the stats strip: a host-formatted value and its lowercase label. */
+export interface StatsStripItem {
+  label: string;
+  value: string | number;
+  /** `label-first` reads as a phrase ("longest streak 3 wk"). */
+  order?: 'value-first' | 'label-first';
+}
+
+/** One inline row of stat pairs above a list; tabular values, no tiles. */
+export interface StatsStripProps extends HTMLAttributes<HTMLUListElement> {
+  items: StatsStripItem[];
+  /** The list's accessible name. */
+  label?: string;
+}
+export const StatsStrip = FtStatsStrip as unknown as ComponentType<StatsStripProps>;
+
+/** A bare inline trend. It conveys shape only, so `label` must carry the values. */
+export interface SparklineProps {
+  data: number[];
+  type?: 'line' | 'bar';
+  color?: 'teal' | 'olive' | 'clay' | 'mauve' | 'amber' | 1 | 2 | 3 | 4;
+  width?: number;
+  height?: number;
+  label: string;
+  className?: string;
+}
+export const Sparkline = FtSparkline as unknown as ComponentType<SparklineProps>;
+
+/** One option of a segmented control; the label may carry a tabular count. */
+export interface SegmentedOption {
+  value: string;
+  label: ReactNode;
+  icon?: ElementType;
+}
+
+/** Mutually exclusive options; the pressed one carries aria-pressed. */
+export interface SegmentedProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange' | 'defaultValue'> {
+  options: SegmentedOption[];
+  value?: string;
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+  /** The group's accessible name. */
+  label?: string;
+}
+export const Segmented = FtSegmented as unknown as ComponentType<SegmentedProps>;
+
+/** The native select in fairtrade's field chrome. */
+export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'children'> {
+  label?: ReactNode;
+  hint?: string;
+  error?: string;
+  invalid?: boolean;
+  options?: { value: string; label: string }[];
+  children?: ReactNode;
+}
+export const Select = FtSelect as unknown as ComponentType<SelectProps>;
+
+/** One column of a DataTable; `render` draws the cell from the whole row. */
+export interface DataTableColumn<Row> {
+  key: string;
+  label: ReactNode;
+  sortable?: boolean;
+  align?: 'left' | 'right' | 'center';
+  width?: string;
+  render?: (value: unknown, row: Row) => ReactNode;
+}
+
+/** A square, hairline table with mono headers. */
+export interface DataTableProps<Row> {
+  columns: DataTableColumn<Row>[];
+  rows: Row[];
+  rowKey?: (row: Row, index: number) => string | number;
+  caption?: string;
+  className?: string;
+}
+export const DataTable = FtDataTable as unknown as <Row>(props: DataTableProps<Row>) => ReactElement;
+
+/** The fairtrade publish states a label can show. */
+export type PublishState =
+  | 'not-published'
+  | 'publishing'
+  | 'published'
+  | 'new-turns'
+  | 'auto-publish'
+  | 'outside-lists';
+
+/** A transcript's publish state: an icon and its words. */
+export interface PublishStateLabelProps extends HTMLAttributes<HTMLSpanElement> {
+  state: PublishState;
+  /** How many collectives can read it; left out of the words when omitted. */
+  collectives?: number;
+  /** Turns recorded since the last publish. */
+  newTurns?: number;
+  /** The collective an auto-publish rule targets. */
+  collective?: string;
+}
+export const PublishStateLabel = FtPublishStateLabel as unknown as ComponentType<PublishStateLabelProps>;

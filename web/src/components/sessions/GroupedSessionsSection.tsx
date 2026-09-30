@@ -9,6 +9,7 @@ import {
   fetchGroupedLocalSessions,
   isGroupedProjectScopeError,
   type LocalSessionListPayload,
+  type LocalSessionRow,
 } from '@/lib/api/grouped';
 import { GroupedLocalSessions, type GroupedSelection } from './GroupedLocalSessions';
 
@@ -46,6 +47,8 @@ export interface GroupedSessionsSectionProps {
    * the refusal is shown as an error instead.
    */
   onScopeUnavailable?: () => void;
+  /** Optional host content for one session row, such as its publish state or search match. */
+  rowDetail?: (row: LocalSessionRow) => ReactNode;
 }
 
 /**
@@ -66,6 +69,7 @@ export function GroupedSessionsSection({
   heading,
   emptyState,
   onScopeUnavailable,
+  rowDetail,
 }: GroupedSessionsSectionProps) {
   const [payload, setPayload] = useState<LocalSessionListPayload | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -149,6 +153,7 @@ export function GroupedSessionsSection({
         titles={titles}
         selection={selection}
         emptyState={emptyState}
+        rowDetail={rowDetail}
       />
     </section>
   );
