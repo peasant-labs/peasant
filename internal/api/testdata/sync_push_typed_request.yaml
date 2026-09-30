@@ -13,6 +13,9 @@ requiredNames:
   - duplicate-session-is-refused
   - empty-session-list-is-refused
   - second-json-value-is-refused
+  - null-collectives-is-refused
+  - null-add-list-is-refused
+  - null-remove-list-is-refused
 
 cases:
   - name: visibility-is-refused
@@ -42,3 +45,12 @@ cases:
   - name: second-json-value-is-refused
     body: '{"sessionIds":["s-1"]} {"sessionIds":["s-2"]}'
     errorContains: more than one JSON value
+  - name: null-collectives-is-refused
+    body: '{"sessionIds":["s-1"],"collectives":null}'
+    errorContains: collectives is null
+  - name: null-add-list-is-refused
+    body: '{"sessionIds":["s-1"],"collectives":{"add":null}}'
+    errorContains: collectives.add is null
+  - name: null-remove-list-is-refused
+    body: '{"sessionIds":["s-1"],"collectives":{"add":["11111111-1111-4111-8111-111111111111"],"remove":null}}'
+    errorContains: collectives.remove is null
