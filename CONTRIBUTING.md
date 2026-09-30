@@ -17,11 +17,10 @@ Do not post transcripts, tokens, credentials, personal paths, or other sensitive
 2. Enter the development environment with `nix develop` when available.
 3. Make a focused change with tests and documentation for user-visible behavior.
 4. Run `make check`. It runs the race detector only when you opt in:
-   `make race` (equivalent to `make check RACE=1`, i.e. `go test -race`). The
-   default gate is a single
+   `make check RACE=1` (i.e. `go test -race`). The default gate is a single
    no-race pass, on CI and locally — the detector amplifies the suite too
    much for the gate budget — so **catching data races is a local developer
-   responsibility**: run `make race` (or at least
+   responsibility**: run `make check RACE=1` (or at least
    `go test -race ./...`) locally before you push. Use `make e2e` when changing
    the Village integration; see [`TESTING.md`](TESTING.md) for its additional
    prerequisites.
