@@ -97,7 +97,10 @@ func newPublishingWorld(t *testing.T) *publishingWorld {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	server := NewServer(hs.config(ServerConfig{Port: 0, Store: db, Config: cfg, Provider: NewStoreDataProvider(db, policy)}))
+	// The provider is composed the way `peasant web start` composes it: the
+	// store-backed provider behind the progressive one.
+	provider := NewProgressiveProvider(cfg, defaults.MockComponents.Web, nil, NewStoreDataProvider(db, policy))
+	server := NewServer(hs.config(ServerConfig{Port: 0, Store: db, Config: cfg, Provider: provider}))
 	if err := server.Listen(ctx); err != nil {
 		cancel()
 		t.Fatal(err)
@@ -212,12 +215,18 @@ func decodeContract(t *testing.T, status int, body []byte, into contractValidato
 	}
 }
 
-// decodeRefusal checks a refusal's status and error code.
+// decodeRefusal checks a refusal's status and error code. It decodes the body
+// strictly, refusing unknown fields, into the envelope the server writes, whose
+// fields are exactly the declared openapi.LocalErrorResponse ({error, code}).
+// That type lives in the schema's openapi package, whose import would add the
+// OpenAPI generator's dependencies to this module for a two-field shape.
 func decodeRefusal(t *testing.T, status int, body []byte, wantStatus int, wantCode string) errorEnvelope {
 	t.Helper()
 	var refusal errorEnvelope
-	if err := json.Unmarshal(body, &refusal); err != nil {
-		t.Fatalf("the refusal is not a JSON error envelope: %v; body %s", err, body)
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&refusal); err != nil {
+		t.Fatalf("the refusal is not the declared {error, code} envelope: %v; body %s", err, body)
 	}
 	if status != wantStatus || refusal.Code != wantCode || refusal.Error == "" {
 		t.Fatalf("refusal = %d %+v, want %d with code %q and a reason", status, refusal, wantStatus, wantCode)
