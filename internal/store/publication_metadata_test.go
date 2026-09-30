@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -454,27 +455,6 @@ func TestPublicationBundleRetainsCurrentDurableAssociations(t *testing.T) {
 // test observes, not how long it may take.
 const publicationRaceRounds = 30
 
-// publicationRaceBudget bounds the interleaving loop so a genuine hang fails
-// this test instead of the whole binary. It is taken from the test's OWN
-// deadline rather than fixed: a fixed budget expires under ordinary
-// whole-package contention and interrupts a read that is still making
-// progress, which reads as a failure of the code under test and never
-// reproduces when the test runs alone. A margin is kept so this test reports
-// the hang itself rather than being killed with the binary.
-func publicationRaceBudget(t *testing.T) time.Duration {
-	t.Helper()
-	deadline, ok := t.Deadline()
-	if !ok {
-		// `go test -timeout 0` sets no deadline. Guard against a hang anyway.
-		return 10 * time.Minute
-	}
-	budget := time.Until(deadline) - 30*time.Second
-	if budget < time.Second {
-		budget = time.Second
-	}
-	return budget
-}
-
 func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
@@ -487,8 +467,7 @@ func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	if result := indexPublication(t, s, e, revision, entries); result.Err != nil {
 		t.Fatal(result.Err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), publicationRaceBudget(t))
-	defer cancel()
+	ctx := testwait.Context(t)
 	done := make(chan error, 1)
 	go func() {
 		for i := 1; i <= publicationRaceRounds; i++ {
