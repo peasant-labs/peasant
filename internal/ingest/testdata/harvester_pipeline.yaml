@@ -11,7 +11,7 @@ sessions:
 cases:
   - {name: automatic_single_bump, reindex: false, claudeTarget: 19, codexTarget: 17, claudeStored: 18, expectedHarnesses: [claude-code]}
   - {name: index_single_bump, reindex: true, claudeTarget: 19, codexTarget: 17, claudeStored: 18, expectedHarnesses: [claude-code]}
-  - {name: force_future_parser, reindex: true, force: true, claudeTarget: 17, codexTarget: 17, claudeStored: 19, expectedHarnesses: [codex]}
+  - {name: force_future_parser, reindex: true, force: true, claudeTarget: 17, codexTarget: 18, claudeStored: 19, expectedHarnesses: [codex]}
   - {name: force_harness_scope, reindex: true, force: true, scope: claude-code, claudeTarget: 18, codexTarget: 17, claudeStored: 18, expectedHarnesses: [claude-code]}
-  - {name: stale_harness_scope, reindex: true, scope: codex, claudeTarget: 18, codexTarget: 18, claudeStored: 18, expectedHarnesses: [codex]}
+  - {name: stale_harness_scope, reindex: true, scope: codex, claudeTarget: 18, codexTarget: 19, claudeStored: 18, expectedHarnesses: [codex]}
   - {name: index_dry_run, reindex: true, dryRun: true, claudeTarget: 19, codexTarget: 17, claudeStored: 18, expectedHarnesses: []}
