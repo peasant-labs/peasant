@@ -6,7 +6,7 @@
    functions (no imports, no closures) so the same code runs under jsdom in Vitest and in a real
    browser through puppeteer's page.evaluate.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
@@ -263,24 +263,77 @@ export function headerGeometryFailures(manifest, context) {
 }
 
 /**
- * Checks that the page body clears the fixed top chrome (the header plus the offline notice while
- * it shows): <main>'s top padding equals the chrome's height, and --app-header-height resolves to
- * it. Returns every failure, and the measured heights for the log.
+ * Checks that the page body clears the chrome above it. Only the one-row header is fixed; the
+ * offline notice, while it shows, sits under it at the top of the page and scrolls with it (so it is
+ * never position:fixed, and at scroll 0 its top is the header's bottom). <main>'s top padding must
+ * equal the header height plus the notice height (--app-header-height), or the header height alone
+ * when no notice shows. Returns every failure, and the measured heights for the log.
  * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainPaddingTop: number }}
  */
 export function chromeClearance() {
   const failures = []
   const header = document.querySelector('header')
-  const chrome = header?.parentElement
   const main = document.querySelector('main')
-  if (!header || !chrome || !main) return { failures: ['the header, its chrome or <main> is not mounted'], chrome: 0, header: 0, notice: 0, mainPaddingTop: 0 }
-  const chromeHeight = chrome.getBoundingClientRect().height
-  const headerHeight = header.getBoundingClientRect().height
-  const notice = chrome.querySelector('section[aria-label="peasant is not running"]')
-  const noticeHeight = notice ? chromeHeight - headerHeight : 0
+  if (!header || !main) return { failures: ['the header or <main> is not mounted'], chrome: 0, header: 0, notice: 0, mainPaddingTop: 0 }
+  const headerBox = header.getBoundingClientRect()
+  const headerHeight = headerBox.height
+  if (getComputedStyle(header).position !== 'fixed') failures.push(`the header is position:${getComputedStyle(header).position}, not fixed`)
+  const section = document.querySelector('section[aria-label="peasant is not running"]')
+  // The host wrapper around fairtrade's banner is what the page positions and measures.
+  const notice = section ? section.parentElement : null
+  let noticeHeight = 0
+  if (notice) {
+    const box = notice.getBoundingClientRect()
+    noticeHeight = box.height
+    for (let el = notice; el && el !== document.documentElement; el = el.parentElement) {
+      if (getComputedStyle(el).position === 'fixed') {
+        failures.push(`the offline notice rides in a fixed element (${el.tagName.toLowerCase()}); it must scroll with the page`)
+        break
+      }
+    }
+    if (header.contains(notice)) failures.push('the offline notice is inside the header')
+    const documentTop = box.top + window.scrollY
+    if (Math.abs(documentTop - headerHeight) > 1) failures.push(`the notice starts ${documentTop}px down the page, not at the ${headerHeight}px header bottom`)
+  }
   const mainPaddingTop = Number.parseFloat(getComputedStyle(main).paddingTop)
-  if (getComputedStyle(chrome).position !== 'fixed') failures.push(`the top chrome is position:${getComputedStyle(chrome).position}, not fixed`)
-  if (Math.abs(mainPaddingTop - chromeHeight) > 1) failures.push(`<main> clears ${mainPaddingTop}px but the top chrome is ${chromeHeight}px tall`)
-  if (!notice && Math.abs(chromeHeight - headerHeight) > 0.5) failures.push(`the chrome is ${chromeHeight}px with no notice, taller than the ${headerHeight}px header`)
-  return { failures, chrome: chromeHeight, header: headerHeight, notice: noticeHeight, mainPaddingTop }
+  const expected = headerHeight + noticeHeight
+  if (Math.abs(mainPaddingTop - expected) > 1) {
+    failures.push(`<main> clears ${mainPaddingTop}px but the header${notice ? ' plus the notice' : ''} is ${expected}px`)
+  }
+  return { failures, chrome: expected, header: headerHeight, notice: noticeHeight, mainPaddingTop }
+}
+
+/* ── Node-side: build provenance ────────────────────────────────────────────────────────────────── */
+
+/** Markers only this shell brings into the served bundle: the notice's height variable, the
+ * fairtrade banner's accessible name, and the host live region's recovery announcement. */
+export const SHELL_PROVENANCE_MARKERS = Object.freeze(['--app-notice-height', 'peasant is not running', 'peasant is running again'])
+
+const chunksOf = (html) => [...new Set(html.match(/\/_next\/static\/chunks\/[^"']+\.js/g) || [])].sort()
+
+/**
+ * Proves the server at `origin` serves this checkout's web/out before a gate trusts a capture:
+ * the served page references exactly the chunks web/out/index.html does, the served chunks carry
+ * every marker, and (when `bin` is given) the binary is not older than web/out. Throws with the
+ * mismatch; returns the evidence for the log.
+ * @param {{ origin: string, markers?: readonly string[], bin?: string, webRoot?: string }} options
+ * @returns {Promise<{ chunks: string[], markerChunks: Record<string, string[]> }>}
+ */
+export async function assertServedBuild({ origin, markers = SHELL_PROVENANCE_MARKERS, bin, webRoot = WEB_ROOT }) {
+  const outIndex = join(webRoot, 'out', 'index.html')
+  if (!existsSync(outIndex)) throw new Error(`${outIndex} is missing; run make build`)
+  if (bin) {
+    const binTime = statSync(bin).mtimeMs
+    if (binTime < statSync(outIndex).mtimeMs) throw new Error(`${bin} is older than ${outIndex}: the binary embeds an earlier web build; run make build`)
+  }
+  const localChunks = chunksOf(readFileSync(outIndex, 'utf8'))
+  const servedChunks = chunksOf(await (await fetch(`${origin}/`)).text())
+  if (JSON.stringify(servedChunks) !== JSON.stringify(localChunks)) {
+    throw new Error(`the server at ${origin} serves chunks ${JSON.stringify(servedChunks)}, not this checkout's web/out ${JSON.stringify(localChunks)}; it is a stale server or another checkout`)
+  }
+  const bodies = await Promise.all(servedChunks.map(async (chunk) => [chunk, await (await fetch(`${origin}${chunk}`)).text()]))
+  const markerChunks = Object.fromEntries(markers.map((marker) => [marker, bodies.filter(([, body]) => body.includes(marker)).map(([chunk]) => chunk)]))
+  const missing = markers.filter((marker) => markerChunks[marker].length === 0)
+  if (missing.length) throw new Error(`the bundle served at ${origin} lacks ${JSON.stringify(missing)}: it predates this shell`)
+  return { chunks: servedChunks, markerChunks }
 }
