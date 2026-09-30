@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -295,13 +295,16 @@ describe('mounted canonical schema contract', () => {
       if (fixture.expectedScorecardState === 'nullable-member') expect(analyticsScorecard?.m2TokenOutcomeRatio).toBeNull();
       else expect(analyticsScorecard).toBeUndefined();
 
+      // Touched files are plain text relative to the payload's own working
+      // directory; the code map is route-only, so nothing links into it.
       if (fixture.expectedFileNode) {
-        const link = screen.getByRole('link', { name: `Open ${fixture.expectedFileNode} on the Map` });
-        expect(link).toHaveAttribute('href', `/map/${PROJECT_HASH}?node=${encodeURIComponent(fixture.expectedFileNode)}`);
+        const files = screen.getByLabelText(/^Files touched in turn /);
+        expect(within(files).getByText(fixture.expectedFileNode).tagName).toBe('LI');
         expect(screen.queryByText(fixture.legacyWorkingDirectory)).not.toBeInTheDocument();
       } else {
-        expect(screen.queryByRole('link', { name: / on the Map$/ })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(/^Files touched in turn /)).not.toBeInTheDocument();
       }
+      expect(document.querySelector('a[href^="/map"]')).toBeNull();
     });
   }
 });

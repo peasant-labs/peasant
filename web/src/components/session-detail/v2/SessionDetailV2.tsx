@@ -560,7 +560,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             return (
               <TurnTouchedFiles
                 touches={touches}
-                projectHash={projectHash}
                 activeFile={scope.scope === TranscriptScope.File ? scope.scopeVal : undefined}
               />
             );

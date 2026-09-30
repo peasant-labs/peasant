@@ -6,11 +6,11 @@ requiredFamilies:
   - nullable-scorecard-members
   - legacy-git-context-isolation
 requiredNames:
-  - flat git context drives file navigation
+  - flat git context relativizes touched files
   - null turns normalize at the mounted boundary
   - refusal survives canonical transcript adaptation
   - nullable scorecard members reach analytics unchanged
-  - legacy working directory cannot authorize map navigation
+  - legacy working directory cannot relativize touched files
 expectedLoaderMutationCount: 2
 loaderMutations:
   - name: missing required turn depth is rejected
@@ -37,16 +37,16 @@ mutations:
     replace: "adaptQualitySessions(quality?.sessions ?? []).concat([{ id: 'mutated-quality-fallback' }]).map((session) => {"
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx
     expectedFailedTestNames:
-      - flat git context drives file navigation
+      - flat git context relativizes touched files
       - null turns normalize at the mounted boundary
       - refusal survives canonical transcript adaptation
       - nullable scorecard members reach analytics unchanged
-      - legacy working directory cannot authorize map navigation
+      - legacy working directory cannot relativize touched files
     expectedFailurePattern: 'expected \[ \{.*\} \] to deeply equal \[\]'
   - name: nested git fallback is executable
     find: 'const workingDirectory = detail.workingDirectory;'
     replace: "const workingDirectory = detail.workingDirectory ?? (detail as SessionDetailPayload & { gitContext?: { workingDirectory?: string } }).gitContext?.workingDirectory;"
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx
     expectedFailedTestNames:
-      - legacy working directory cannot authorize map navigation
-    expectedFailurePattern: 'Open src/legacy\.ts on the Map'
+      - legacy working directory cannot relativize touched files
+    expectedFailurePattern: 'Files touched in turn'
