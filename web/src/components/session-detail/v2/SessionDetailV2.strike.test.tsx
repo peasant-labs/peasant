@@ -9,6 +9,13 @@ import { SessionDetailV2 } from './SessionDetailV2';
 
 const routerReplace = vi.hoisted(() => vi.fn());
 
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => `/projects/${strikeMountedWebFixture.projectHash}/${strikeMountedWebFixture.sessionDetail.id}`,
