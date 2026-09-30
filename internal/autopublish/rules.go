@@ -1,0 +1,311 @@
+// Package autopublish holds the auto-publish rules a developer sets up in
+// hooks.yaml, and the one matcher that decides which rules cover a repository.
+//
+// A rule binds one folder glob or one git remote pattern to Village
+// collectives. It is the developer's consent, given once: when a managed hook
+// pushes a repository a rule covers, the push publishes that repository's
+// sessions redacted, private, and shares each transcript it sent with the
+// rule's collectives. A rule never installs a hook by itself. Hooks are
+// installed one repository at a time, by an explicit act, and only in a
+// repository Peasant has recorded sessions in.
+//
+// The matcher lives here and nowhere else. The local web shows what it
+// decides and never decides it again. Its type is Rule, not Binding:
+// githooks.Binding is the path context bound into a generated hook.
+package autopublish
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+
+	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/schema"
+)
+
+// Rule is one auto-publish rule: the repositories it covers, the hooks that
+// publish them, and the collectives each published transcript is shared with.
+type Rule struct {
+	// ID addresses the rule. It is unique within the file.
+	ID string `yaml:"id"`
+	// Kind says whether Match is a folder glob or a git remote pattern.
+	Kind schema.AutoPublishRuleKind `yaml:"kind"`
+	// Match is the pattern, as the developer wrote it.
+	Match string `yaml:"match"`
+	// Events are the hooks installing the rule writes. A rule with no event
+	// is kept but publishes nothing.
+	Events []schema.AutoPublishEvent `yaml:"events"`
+	// Collectives are the Village collectives each transcript is shared with.
+	Collectives []schema.VillageUUID `yaml:"collectives"`
+}
+
+// villageUUID is the canonical lowercase form Village uses for a collective.
+var villageUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// Validate checks the rule the way the contract does, and that its pattern can
+// be read for its kind and its collectives are Village identifiers.
+func (r Rule) Validate() error {
+	if strings.TrimSpace(r.ID) == "" || strings.TrimSpace(r.ID) != r.ID || strings.ContainsAny(r.ID, "/?#") {
+		return fmt.Errorf("auto-publish rule %q: the identifier is empty, has surrounding spaces, or holds '/', '?', or '#'; a rule is addressed by its identifier in a URL path; use letters, digits, '-', '_', or '.'", r.ID)
+	}
+	if err := r.Request().Validate(); err != nil {
+		return fmt.Errorf("auto-publish rule %q: %w", r.ID, err)
+	}
+	if err := validateMatch(r.Kind, r.Match); err != nil {
+		return fmt.Errorf("auto-publish rule %q: %w", r.ID, err)
+	}
+	for _, collective := range r.Collectives {
+		if !villageUUID.MatchString(string(collective)) {
+			return fmt.Errorf("auto-publish rule %q: collective %q is not a Village collective identifier; use the lowercase UUID Village shows for the collective", r.ID, collective)
+		}
+	}
+	return nil
+}
+
+// Request is the rule as the contract's request body names it.
+func (r Rule) Request() schema.AutoPublishRuleRequest {
+	return schema.AutoPublishRuleRequest{Kind: r.Kind, Match: r.Match, Events: nonNil(r.Events), Collectives: nonNil(r.Collectives)}
+}
+
+// RuleFromRequest builds the rule id names from a request body.
+func RuleFromRequest(id string, request schema.AutoPublishRuleRequest) Rule {
+	return Rule{ID: id, Kind: request.Kind, Match: request.Match, Events: request.Events, Collectives: request.Collectives}
+}
+
+// Covers reports whether the rule's pattern names the repository. It says
+// nothing about whether the rule publishes: see Applies.
+func (r Rule) Covers(repo Repository) bool {
+	switch r.Kind {
+	case schema.AutoPublishRuleFolder:
+		return folderMatches(r.Match, repo.Root)
+	case schema.AutoPublishRuleRemote:
+		return remoteMatches(r.Match, repo.Remote)
+	default:
+		return false
+	}
+}
+
+// Applies reports whether a push of the repository publishes under the rule:
+// the rule covers it and names at least one hook event. A rule without an
+// event is kept, and publishes nothing.
+func (r Rule) Applies(repo Repository) bool {
+	return len(r.Events) > 0 && r.Covers(repo)
+}
+
+// HookEvents returns the rule's events as the hook events githooks manages.
+// The two closed sets name the same hooks; an event githooks does not know
+// fails, so a rule never installs a hook it did not name.
+func (r Rule) HookEvents() ([]githooks.Event, error) {
+	events := make([]githooks.Event, 0, len(r.Events))
+	for _, event := range r.Events {
+		parsed, err := githooks.ParseEvent(string(event))
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, parsed)
+	}
+	return events, nil
+}
+
+// Applying returns the rules that publish a push of the repository, in file
+// order.
+func Applying(rules []Rule, repo Repository) []Rule {
+	var applying []Rule
+	for _, rule := range rules {
+		if rule.Applies(repo) {
+			applying = append(applying, rule)
+		}
+	}
+	return applying
+}
+
+// Collectives returns every collective the rules share with, each once, in
+// the order the rules name them. Overlapping rules add their collectives
+// together: each is a binding the developer set up.
+func Collectives(rules []Rule) []schema.VillageUUID {
+	var collectives []schema.VillageUUID
+	for _, rule := range rules {
+		for _, collective := range rule.Collectives {
+			if !slices.Contains(collectives, collective) {
+				collectives = append(collectives, collective)
+			}
+		}
+	}
+	return collectives
+}
+
+// IDs returns the rules' identifiers, in order.
+func IDs(rules []Rule) []string {
+	ids := make([]string, len(rules))
+	for i, rule := range rules {
+		ids[i] = rule.ID
+	}
+	return ids
+}
+
+// --- folder globs ---
+
+// folderSegments reads a folder glob into its path segments: a leading "~"
+// names the home directory, and the result must be absolute.
+func folderSegments(pattern string) ([]string, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "~" || strings.HasPrefix(pattern, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("the folder glob %q starts with '~', but the home directory is unknown: %w; write the absolute path", pattern, err)
+		}
+		pattern = filepath.Join(home, strings.TrimPrefix(pattern, "~"))
+	}
+	if !filepath.IsAbs(pattern) {
+		return nil, fmt.Errorf("the folder glob %q is not an absolute path; write it from the root, or from '~' for your home directory", pattern)
+	}
+	return splitPath(filepath.ToSlash(filepath.Clean(pattern))), nil
+}
+
+func splitPath(p string) []string {
+	var segments []string
+	for _, segment := range strings.Split(p, "/") {
+		if segment != "" {
+			segments = append(segments, segment)
+		}
+	}
+	return segments
+}
+
+// folderMatches reports whether the glob names the repository root. Each
+// segment matches one path segment with filepath.Match; "**" matches any
+// number of segments, none included. The glob names the root itself: a
+// repository nested in a matched one is a separate repository and is not
+// covered unless the glob names it too.
+func folderMatches(pattern, root string) bool {
+	if strings.TrimSpace(root) == "" {
+		return false
+	}
+	segments, err := folderSegments(pattern)
+	if err != nil {
+		return false
+	}
+	return matchSegments(segments, splitPath(filepath.ToSlash(filepath.Clean(root))))
+}
+
+func matchSegments(pattern, path []string) bool {
+	if len(pattern) == 0 {
+		return len(path) == 0
+	}
+	if pattern[0] == "**" {
+		for skip := 0; skip <= len(path); skip++ {
+			if matchSegments(pattern[1:], path[skip:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(path) == 0 {
+		return false
+	}
+	ok, err := filepath.Match(pattern[0], path[0])
+	return err == nil && ok && matchSegments(pattern[1:], path[1:])
+}
+
+// --- git remote patterns ---
+
+// remotePatternLabel reads a remote pattern into the schema.RemoteLabel form
+// "host:path", lowercased. The pattern is any remote git accepts, or its bare
+// "host/owner/repo" form, and its path may hold glob characters.
+func remotePatternLabel(pattern string) (string, error) {
+	pattern = strings.TrimSpace(pattern)
+	// "host:owner/repo" is git's SCP form without a user. RemoteLabel reads
+	// the SCP form only with one, so name the user git would use. A colon
+	// followed by digits and a slash is a port of the bare form instead.
+	if !strings.Contains(pattern, "://") && !strings.Contains(pattern, "@") {
+		if host, rest, found := strings.Cut(pattern, ":"); found && host != "" && !strings.Contains(host, "/") && !isPort(rest) {
+			pattern = "git@" + pattern
+		}
+	}
+	label, ok := schema.RemoteLabel(pattern)
+	if !ok {
+		return "", fmt.Errorf("the remote pattern %q names no host and repository path; write it like github.com/owner/repo, github.com/owner/*, or a remote URL", pattern)
+	}
+	return strings.ToLower(label), nil
+}
+
+// isPort reports whether rest starts with a port number and a slash.
+func isPort(rest string) bool {
+	port, _, found := strings.Cut(rest, "/")
+	if !found || port == "" {
+		return false
+	}
+	for _, r := range port {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// remoteMatches reports whether the pattern names the repository's remote.
+// Both sides are compared as schema.RemoteLabel, without case, as GitHub
+// resolves names; "*" in the pattern matches within one path segment.
+func remoteMatches(pattern, remote string) bool {
+	label, ok := schema.RemoteLabel(remote)
+	if !ok {
+		return false
+	}
+	want, err := remotePatternLabel(pattern)
+	if err != nil {
+		return false
+	}
+	matched, err := path.Match(want, strings.ToLower(label))
+	return err == nil && matched
+}
+
+// validateMatch checks that the pattern can be read for its kind.
+func validateMatch(kind schema.AutoPublishRuleKind, match string) error {
+	switch kind {
+	case schema.AutoPublishRuleFolder:
+		segments, err := folderSegments(match)
+		if err != nil {
+			return err
+		}
+		for _, segment := range segments {
+			if _, err := filepath.Match(segment, ""); errors.Is(err, filepath.ErrBadPattern) {
+				return fmt.Errorf("the folder glob %q has a malformed segment %q; close every '[' and escape a literal '\\'", match, segment)
+			}
+		}
+		return nil
+	case schema.AutoPublishRuleRemote:
+		label, err := remotePatternLabel(match)
+		if err != nil {
+			return err
+		}
+		if _, err := path.Match(label, ""); errors.Is(err, path.ErrBadPattern) {
+			return fmt.Errorf("the remote pattern %q is malformed; close every '[' and escape a literal '\\'", match)
+		}
+		return nil
+	default:
+		return fmt.Errorf("kind %q is not folder or remote", kind)
+	}
+}
+
+// RemoteMatch is the remote pattern a rule for exactly this remote uses: its
+// bare "host/owner/repo" form, or "" when the remote has none.
+func RemoteMatch(remote string) string {
+	label, ok := schema.RemoteLabel(remote)
+	if !ok {
+		return ""
+	}
+	host, repoPath, _ := strings.Cut(label, ":")
+	return host + "/" + repoPath
+}
+
+func nonNil[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
+}
