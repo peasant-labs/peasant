@@ -11,7 +11,8 @@
 #                         then 4 s …)
 #   wait: <ms>            advance the clock; also settles pending checks
 #   retry: true           press `try again` on the notice
-#   focus: retry          put keyboard focus on `try again`
+#   focus: retry | away   put keyboard focus on `try again`, or take it off
+#                         whatever holds it (to <body>)
 #   expect: shown | hidden
 #   checkedAt: <ms>       the notice's `last checked` time is this many ms after
 #                         the page mounted
@@ -23,6 +24,9 @@
 #                         by the time of the failed check)
 #   focused: main | elsewhere
 #                         keyboard focus is on the page body, or is not
+#   mainFocusable: true | false
+#                         <main> carries a tabindex (only while the notice's
+#                         focus move holds it)
 #
 # startCommands: the command the notice offers for the port the page came
 # from. `peasant web start` listens on 8690 unless told otherwise.
@@ -126,6 +130,10 @@ cases:
       - wait: 2000
       - healthChecks: 3
       - sockets: 4
+      # Past the grace, an answer alone does not clear the notice: the socket
+      # is not back yet.
+      - expect: shown
+      - announce: stopped
       - socket: open
       - wait: 0
       - expect: hidden
@@ -171,16 +179,27 @@ cases:
       - socket: close
       - wait: 0
       - expect: shown
+      - wait: 1000
+      - socket: close
+      - wait: 1000
       - health: up
       - focus: retry
       - retry: true
       - wait: 0
-      - sockets: 2
+      # The retry reconnected now, ahead of the backoff (due at 3 s); the
+      # notice stays until that socket is back.
+      - sockets: 3
+      - expect: shown
+      - announce: stopped
       - socket: open
       - wait: 0
       - expect: hidden
       - announce: back
       - focused: main
+      - mainFocusable: true
+      # <main> is focusable only while the move holds focus.
+      - focus: away
+      - mainFocusable: false
 
   - name: failed-try-again-stays-usable
     steps:
@@ -192,12 +211,16 @@ cases:
       - expect: shown
       - healthChecks: 2
       - retry: true
-      - wait: 0
+      - wait: 100
       - announce: still
       # A failed check does not reconnect: still the one closed socket.
       - sockets: 1
       - retry: true
+      # The repeat is cleared first, so it is read out again.
       - wait: 0
+      - announce: none
+      - wait: 100
+      - announce: still
       - healthChecks: 4
       - sockets: 1
       - expect: shown
@@ -257,3 +280,40 @@ cases:
       # must not raise the notice.
       - wait: 200
       - expect: hidden
+
+  - name: try-again-within-grace-trusts-the-answer
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - health: up
+      - retry: true
+      - wait: 0
+      # Inside the grace an answer clears the notice: the app is running and
+      # the socket is reconnecting.
+      - sockets: 2
+      - expect: hidden
+      - announce: back
+
+  - name: superseded-try-again-stays-quiet
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - health: hang
+      - retry: true
+      - wait: 1000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+      # The hung retry times out at 3 s, after the app came back: it must say
+      # nothing.
+      - wait: 2500
+      - announce: back

@@ -24,8 +24,11 @@ export interface LocalAppHealth {
   checkedAt: Date | null;
   /** A `try again` check is in flight. */
   retrying: boolean;
-  /** Check now; when the app answers, the socket reconnects at once. Resolves to whether it answered. */
-  retry: () => Promise<boolean>;
+  /**
+   * Check now; when the app answers, the socket reconnects at once. Resolves to
+   * whether it answered, or null when a newer check made the answer moot.
+   */
+  retry: () => Promise<boolean | null>;
 }
 
 async function healthAnswers(): Promise<boolean> {
@@ -52,7 +55,9 @@ async function healthAnswers(): Promise<boolean> {
  *   through the provider's own backoff, so it shows nothing.
  * - While offline the page checks again every OFFLINE_RECHECK_MS (and on
  *   `try again`). When the route answers, the socket reconnects at once instead
- *   of waiting out its backoff; the notice clears when the socket is back.
+ *   of waiting out its backoff. Past the grace the notice stays until the
+ *   socket is back; inside it, an answer alone clears the notice (the app is
+ *   running, and the socket is reconnecting).
  * - A connected socket always wins: the app is evidently running.
  */
 export function useLocalAppHealth(): LocalAppHealth {
@@ -72,7 +77,7 @@ export function useLocalAppHealth(): LocalAppHealth {
     async (reconnectIfAnswered: boolean) => {
       const id = ++latestCheck.current;
       const answered = await healthAnswers();
-      if (id !== latestCheck.current) return answered;
+      if (id !== latestCheck.current) return null;
       setCheckedAt(new Date());
       setHealthFailed(!answered);
       if (answered && reconnectIfAnswered) reconnect();

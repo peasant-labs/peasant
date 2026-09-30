@@ -29,12 +29,25 @@ export const OFFLINE_ANNOUNCEMENTS = {
 } as const;
 
 /**
- * Where the notice is pinned under the header: a screen with room for it. On a
- * smaller or zoomed screen it scrolls with the page instead, so it can never
- * cover the page or its own `try again`. globals.css uses the same query for
- * the scroll padding.
+ * Pinned under the header on a screen with room for it (the `notice-pinned`
+ * variant, declared once in globals.css). On a smaller or zoomed screen it
+ * scrolls with the page instead, so it can never cover the page or its own
+ * `try again`.
  */
-const PINNED = '[@media(min-height:40rem)_and_(min-width:48rem)]:fixed';
+const PINNED = 'notice-pinned:fixed';
+
+/**
+ * Moves focus to the page body. <main> is focusable only for this move: it
+ * takes tabindex -1 now and drops it on blur, so a click in the page never
+ * makes <main> the focus (which would steer Tab and keyboard scrolling).
+ */
+function focusPageBody(): void {
+  const main = document.querySelector('main');
+  if (!main) return;
+  main.setAttribute('tabindex', '-1');
+  main.addEventListener('blur', () => main.removeAttribute('tabindex'), { once: true });
+  main.focus({ preventScroll: true });
+}
 
 /** hh:mm:ss in 24-hour time, as the banner's `last checked` shows it. */
 function clockTime(date: Date): string {
@@ -62,6 +75,8 @@ export function LocalOfflineNotice() {
   const ref = useRef<HTMLDivElement>(null);
   const focusInside = useRef(false);
   const wasOffline = useRef(false);
+  const offlineNow = useRef(offline);
+  offlineNow.current = offline;
   const [announcement, setAnnouncement] = useState('');
 
   useLayoutEffect(() => {
@@ -97,15 +112,21 @@ export function LocalOfflineNotice() {
     wasOffline.current = false;
     setAnnouncement(OFFLINE_ANNOUNCEMENTS.back);
     const active = document.activeElement;
-    if (focusInside.current && (!active || active === document.body)) {
-      document.querySelector<HTMLElement>('main')?.focus({ preventScroll: true });
-    }
+    if (focusInside.current && (!active || active === document.body)) focusPageBody();
     focusInside.current = false;
   }, [offline]);
 
+  // A failed `try again` is read out each time: the text is cleared first, so
+  // two failures in the same second still change the region. An answer made
+  // moot (null) or a page back online says nothing.
   const tryAgain = () => {
     void retry().then((answered) => {
-      if (!answered) setAnnouncement(`${OFFLINE_ANNOUNCEMENTS.stillStopped} ${clockTime(new Date())}.`);
+      if (answered !== false || !offlineNow.current) return;
+      const text = `${OFFLINE_ANNOUNCEMENTS.stillStopped} ${clockTime(new Date())}.`;
+      setAnnouncement('');
+      setTimeout(() => {
+        if (offlineNow.current) setAnnouncement(text);
+      }, 50);
     });
   };
 

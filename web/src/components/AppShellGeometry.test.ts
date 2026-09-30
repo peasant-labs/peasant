@@ -12,6 +12,8 @@ interface GeometryFixture {
   variable: string;
   value: string;
   bodyVariable: string;
+  noticePinnedVariant: string;
+  noticePinnedClass: string;
   headerRow: SourceToken;
   noticeHeight: SourceToken;
   consumers: SourceToken[];
@@ -35,6 +37,16 @@ describe('app shell geometry', () => {
     // The full-height body is derived from it, once, and the share page fills it.
     expect(globals.split(`${fixture.bodyVariable}:`)).toHaveLength(2);
     expect(globals).toContain(`height: var(${fixture.bodyVariable});`);
+  });
+
+  it('declares the pinned-notice query once and uses it for the pin and the scroll padding', () => {
+    const globals = source('src/app/globals.css');
+    expect(globals.split(fixture.noticePinnedVariant)).toHaveLength(2);
+    expect(globals).toMatch(/@variant notice-pinned \{\s*scroll-padding-top: var\(--app-header-height\);/);
+    // No second, hand-written copy of the query.
+    expect(globals.split('(min-height: 40rem) and (min-width: 48rem)')).toHaveLength(2);
+    const notice = source(fixture.noticeHeight.path);
+    expect(notice).toContain(`'${fixture.noticePinnedClass}'`);
   });
 
   it('keeps the header row at --nav-h, and lets only the notice move where content starts', () => {
