@@ -50,6 +50,9 @@ func BuildWebCommand() *cobra.Command {
 		Use:   "start",
 		Short: "Start the web dashboard server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Flags are parsed; an error from here on is a runtime error, and
+			// its message is the actionable output, not the usage text.
+			cmd.SilenceUsage = true
 			if webVerbose {
 				configureVerboseLogging()
 			}
@@ -339,6 +342,13 @@ func waitForWebServer(client *http.Client, baseURL string, wait, interval time.D
 
 // runWebBackground forks the server as a background process.
 func runWebBackground(spawn webServerSpawn, noBrowser bool) error {
+	// The readiness probe below accepts any answer on the port, so check the
+	// port first. Otherwise an earlier server that still holds it would answer
+	// the probe and be reported as the new one.
+	if addr, served := api.ServedLoopbackAddr(spawn.port); served {
+		return fmt.Errorf("web start: port %d already answers at %s, so no server was started. %s", spawn.port, addr, api.PortServedHint(spawn.port))
+	}
+
 	pid, pidFile, err := spawnWebServer(spawn)
 	if err != nil {
 		return err
