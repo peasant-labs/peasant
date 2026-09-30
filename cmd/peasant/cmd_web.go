@@ -61,7 +61,16 @@ func BuildWebCommand() *cobra.Command {
 			spawn.verbose = webVerbose
 			spawn.mockDataStore = mockDataStore
 			spawn.experimental = webExperimental
-			return runWebBackground(spawn, webNoBrowser)
+			// A cancelled start is not a usage error: the readiness probe stops
+			// on the signal context, prints what it already knows, and exits
+			// non-zero with the cancellation.
+			ctx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer stopSignals()
+			cmd.SilenceUsage = true
+			return runWebBackground(ctx, webStartDependencies{
+				startServer: spawnWebServer,
+				openBrowser: browser.Open,
+			}, spawn, webNoBrowser)
 		},
 	}
 	webStartCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port to listen on")
@@ -300,6 +309,18 @@ func spawnWebServer(spawn webServerSpawn) (pid int, pidFile string, err error) {
 	return pid, pidFile, nil
 }
 
+// webStartDependencies are the process side effects of the background
+// `web start` path. Production wires the real spawn and browser; tests
+// substitute both.
+type webStartDependencies struct {
+	// startServer forks the server the spawn describes and returns its PID and
+	// PID file. It does not wait for the server to answer.
+	startServer func(spawn webServerSpawn) (pid int, pidFile string, err error)
+	// openBrowser opens the dashboard address. A failure is not fatal to the
+	// start; it is reported and the address stays printed.
+	openBrowser func(url string) error
+}
+
 // webServerReadyWait is how long a freshly forked server has to answer the
 // health route.
 const webServerReadyWait = time.Duration(defaults.HealthCheckAttempts) * defaults.HealthCheckInterval
@@ -320,26 +341,28 @@ func webServerHealthy(ctx context.Context, client *http.Client, baseURL string) 
 }
 
 // waitForWebServer polls the health route every interval until the server
-// answers or wait has passed. No probe outlives the wait, so a listener that
-// accepts connections and never answers cannot stretch it.
-func waitForWebServer(client *http.Client, baseURL string, wait, interval time.Duration) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
+// answers, wait has passed, or ctx ends. No probe outlives either bound, so a
+// listener that accepts connections and never answers cannot stretch it, and a
+// cancelled start does not wait out its budget; the derived context also
+// cancels a health request that is already in flight.
+func waitForWebServer(ctx context.Context, client *http.Client, baseURL string, wait, interval time.Duration) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-probeCtx.Done():
 			return false
 		case <-time.After(interval):
 		}
-		if webServerHealthy(ctx, client, baseURL) {
+		if webServerHealthy(probeCtx, client, baseURL) {
 			return true
 		}
 	}
 }
 
 // runWebBackground forks the server as a background process.
-func runWebBackground(spawn webServerSpawn, noBrowser bool) error {
-	pid, pidFile, err := spawnWebServer(spawn)
+func runWebBackground(ctx context.Context, deps webStartDependencies, spawn webServerSpawn, noBrowser bool) error {
+	pid, pidFile, err := deps.startServer(spawn)
 	if err != nil {
 		return err
 	}
@@ -347,7 +370,7 @@ func runWebBackground(spawn webServerSpawn, noBrowser bool) error {
 	// Readiness probe: poll health endpoint
 	serverURL := dashboardBaseURL(spawn.port)
 	client := &http.Client{Timeout: defaults.ServerClientTimeout}
-	if !waitForWebServer(client, serverURL, webServerReadyWait, defaults.HealthCheckInterval) {
+	if !waitForWebServer(ctx, client, serverURL, webServerReadyWait, defaults.HealthCheckInterval) {
 		fmt.Fprintf(os.Stderr, "Warning: server may not be ready (health check timed out)\n")
 	}
 
@@ -357,15 +380,27 @@ func runWebBackground(spawn webServerSpawn, noBrowser bool) error {
 	fmt.Printf("\nIf the server becomes unresponsive, the process ID (%d)\n", pid)
 	fmt.Printf("is saved at %s\n", pidFile)
 
+	// A cancelled start stops the probe and leaves the server it forked
+	// running: report where it is, skip the browser, and fail non-zero.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return webStartCancellationError(serverURL, ctxErr)
+	}
+
 	// Auto-open browser. Failure is non-fatal (the server is already running),
 	// but it MUST be surfaced so the user knows to open the URL themselves.
 	if !noBrowser {
-		if err := browser.Open(serverURL); err != nil {
+		if err := deps.openBrowser(serverURL); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not open browser automatically: %v\n", err)
 			fmt.Fprintf(os.Stderr, "Open this URL manually: %s\n", serverURL)
 		}
 	}
 	return nil
+}
+
+// webStartCancellationError reports a cancelled start. It wraps the command
+// context error, so exitCodeFor maps it to a non-zero exit.
+func webStartCancellationError(url string, err error) error {
+	return fmt.Errorf("web start canceled while waiting for the server at %s to answer its health check: %w; the server keeps running in the background - stop it with 'peasant web stop' or open %s when it is ready", url, err, url)
 }
 
 // stopWeb sends a shutdown request to the running server.
