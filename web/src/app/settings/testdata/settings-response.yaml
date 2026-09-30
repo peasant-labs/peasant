@@ -1,0 +1,324 @@
+# GET /api/v1/settings as a peasant server with no config.yaml answers it: every
+# key with its default. Captured from the built binary (peasant web start) and
+# kept as the server answered it, except two machine values: the import folder and the
+# CPU-derived upload count. The page tests mount the page on this answer.
+#
+# Its keys must equal requiredNames in internal/api/testdata/settings-keys.yaml;
+# a test fails when they drift, so recapture it when the server gains a key.
+settings:
+  - key: version
+    kind: integer
+    value: null
+    effective: 1
+    editable: false
+    inPeasantConfig: false
+    description: the configuration format version; peasant sets it
+  - key: user.email
+    kind: string
+    value: null
+    effective: ""
+    editable: true
+    inPeasantConfig: false
+  - key: redaction.level
+    kind: choice
+    value: null
+    effective: standard
+    options:
+      - standard
+    editable: true
+    inPeasantConfig: true
+  - key: redaction.custom_patterns
+    kind: structured
+    value: null
+    effective: []
+    editable: true
+    inPeasantConfig: false
+  - key: sources.claude-code.enabled
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: sources.claude-code.paths
+    kind: string_list
+    value: null
+    effective:
+      - ~/.claude/projects
+    editable: true
+    inPeasantConfig: false
+  - key: sources.opencode.enabled
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: sources.opencode.paths
+    kind: string_list
+    value: null
+    effective:
+      - ~/.local/share/opencode
+    editable: true
+    inPeasantConfig: false
+  - key: sources.codex.enabled
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: sources.codex.paths
+    kind: string_list
+    value: null
+    effective:
+      - ~/.codex/sessions
+    editable: true
+    inPeasantConfig: false
+  - key: sources.cursor.enabled
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: sources.cursor.paths
+    kind: string_list
+    value: null
+    effective:
+      - ~/.cursor/projects
+    editable: true
+    inPeasantConfig: false
+  - key: sources.strike.enabled
+    kind: boolean
+    value: null
+    effective: false
+    editable: true
+    inPeasantConfig: false
+  - key: sources.strike.paths
+    kind: string_list
+    value: null
+    effective:
+      - ~/.strike/sessions
+    editable: true
+    inPeasantConfig: false
+  - key: sources.pi.enabled
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: sources.pi.paths
+    kind: string_list
+    value: null
+    effective:
+      - ~/.pi/agent/sessions
+    editable: true
+    inPeasantConfig: false
+  - key: sources.claude.enabled
+    kind: boolean
+    value: null
+    effective: false
+    editable: false
+    inPeasantConfig: false
+    description: "retired: renamed to sources.claude-code; a configuration that turns it on is refused"
+  - key: sources.claude.paths
+    kind: string_list
+    value: null
+    effective: []
+    editable: false
+    inPeasantConfig: false
+    description: "retired: renamed to sources.claude-code; a configuration that turns it on is refused"
+  - key: sources.mock.enabled
+    kind: boolean
+    value: null
+    effective: false
+    editable: false
+    inPeasantConfig: false
+    description: a development setting the dashboard reads when it starts; edit config.yaml and restart the dashboard
+  - key: sources.mock.web
+    kind: string_list
+    value: null
+    effective:
+      - dashboard
+      - sessions
+      - trends
+      - qualitySessions
+    editable: false
+    inPeasantConfig: false
+    description: a development setting the dashboard reads when it starts; edit config.yaml and restart the dashboard
+  - key: sources.mock.tui
+    kind: string_list
+    value: null
+    effective:
+      - dashboard
+      - sessions
+    editable: false
+    inPeasantConfig: false
+    description: a development setting the dashboard reads when it starts; edit config.yaml and restart the dashboard
+  - key: sources.mock.api
+    kind: string_list
+    value: null
+    effective:
+      - dashboard
+      - sessions
+    editable: false
+    inPeasantConfig: false
+    description: a development setting the dashboard reads when it starts; edit config.yaml and restart the dashboard
+  - key: output.basePath
+    kind: string
+    value: null
+    effective: /home/alice/.local/share/peasant/peasant-sync
+    editable: false
+    inPeasantConfig: false
+    description: the dashboard reads it when it starts; edit config.yaml and restart the dashboard
+  - key: output.stalenessThresholdSec
+    kind: integer
+    value: null
+    effective: 60
+    editable: true
+    inPeasantConfig: false
+  - key: village.url
+    kind: string
+    value: null
+    effective: https://api.village.peasantlabs.org
+    editable: true
+    inPeasantConfig: false
+  - key: village.connected
+    kind: boolean
+    value: null
+    effective: false
+    editable: false
+    inPeasantConfig: false
+    description: changes when you sign in to village or sign out
+  - key: daemon.projectMode
+    kind: string
+    value: null
+    effective: opt-in
+    editable: true
+    inPeasantConfig: false
+  - key: push.method
+    kind: choice
+    value: null
+    effective: all
+    options:
+      - all
+      - by-source
+    editable: true
+    inPeasantConfig: false
+  - key: push.sources
+    kind: string_list
+    value: null
+    effective: []
+    editable: true
+    inPeasantConfig: false
+  - key: push.visibility
+    kind: choice
+    value: null
+    effective: private
+    options:
+      - private
+      - group
+      - public
+    editable: true
+    inPeasantConfig: true
+  - key: push.sharePreference
+    kind: choice
+    value: null
+    effective: ""
+    options:
+      - ""
+      - share-later
+    editable: true
+    inPeasantConfig: true
+  - key: push.license
+    kind: choice
+    value: null
+    effective: ""
+    options:
+      - ""
+      - CC0-1.0
+      - CC-BY-4.0
+      - CC-BY-SA-4.0
+    editable: true
+    inPeasantConfig: true
+  - key: push.fields.gitRemote
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: push.fields.gitBranch
+    kind: boolean
+    value: null
+    effective: false
+    editable: true
+    inPeasantConfig: false
+  - key: push.fields.projectPath
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: push.fields.hostSlug
+    kind: boolean
+    value: null
+    effective: false
+    editable: true
+    inPeasantConfig: false
+  - key: push.fields.projectName
+    kind: boolean
+    value: null
+    effective: true
+    editable: true
+    inPeasantConfig: false
+  - key: push.fields.projectHash
+    kind: boolean
+    value: null
+    effective: null
+    editable: false
+    inPeasantConfig: false
+    description: "retired: the project hash is always sent, so this key changes nothing"
+  - key: push.concurrency
+    kind: integer
+    value: null
+    effective: 4
+    editable: true
+    inPeasantConfig: false
+  - key: selection.mode
+    kind: choice
+    value: null
+    effective: all
+    options:
+      - all
+      - selected
+    editable: false
+    inPeasantConfig: true
+    description: the saved selection; change it with peasant kickstart or peasant config
+  - key: selection.autoIngestNewBranches
+    kind: boolean
+    value: null
+    effective: true
+    editable: false
+    inPeasantConfig: true
+    description: the saved selection; change it with peasant kickstart or peasant config
+  - key: selection.harnesses
+    kind: structured
+    value: null
+    effective: {}
+    editable: false
+    inPeasantConfig: true
+    description: the saved selection; change it with peasant kickstart or peasant config
+  - key: selection.providers
+    kind: structured
+    value: null
+    effective: {}
+    editable: false
+    inPeasantConfig: false
+    description: "retired: renamed to selection.harnesses; a configuration that sets it is refused"
+  - key: display.theme
+    kind: choice
+    value: null
+    effective: dark
+    options:
+      - dark
+      - light
+    editable: true
+    inPeasantConfig: false
+autoPublish: []

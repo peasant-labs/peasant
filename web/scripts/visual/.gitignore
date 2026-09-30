@@ -35,6 +35,7 @@
 !shell-header-manifest.mjs
 !served-build.mjs
 !root-page-visual.mjs
+!settings-shoot.mjs
 !testdata/
 !testdata/transcript-input.yaml
 !testdata/search-share.yaml

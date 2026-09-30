@@ -524,6 +524,13 @@ If no config file exists, Peasant uses built-in defaults and prints a notice dir
 `peasant kickstart`. CLI flags (`--source-harness`, `--source-path`, `--output`) override the
 config file for a single run.
 
+The web dashboard's settings page (`http://localhost:8690/settings`) shows every key. A change
+saves to `config.yaml` at once, one key per change. Keys that the dashboard reads only at startup,
+the saved selection (`peasant kickstart` edits it), and the Village sign-in are shown read-only.
+The page also lists the auto-publish rules in `hooks.yaml`. It installs their hooks in the
+repositories Peasant has recorded, only when you choose to. `peasant config` edits a subset of
+the keys. On the page, a key that `peasant config` cannot change is tagged "not in peasant config".
+
 ### Selection index
 
 The kickstart wizard saves the selection index in `config.yaml`. This example shows its persisted

@@ -1,0 +1,128 @@
+# The one "install in N repositories" action of the auto-publish group. Each
+# case mounts the page with the listed rules (as GET /api/v1/settings answers
+# them), checks what the page offers before any click, clicks the action when
+# one is offered, answers each POST .../{id}/install by repository path, and
+# checks the calls and what each repository shows. No install call may be made
+# before the click.
+#
+# offer: the action's label, or null when no action may be offered.
+# calls: every install call after the click, in order, as "rule id -> path".
+# shows: text each repository's result must show, by path (a remedy included).
+requiredNames:
+  - installs once per repository and shows a foreign hook's remedy
+  - a repository two rules cover is counted once and installed per rule
+  - a paused rule offers no install
+  - nothing is offered when every hook is there
+  - a refused call shows the server's reason
+cases:
+  - name: installs once per repository and shows a foreign hook's remedy
+    rules:
+      - id: acme-work
+        kind: folder
+        match: ~/work/acme/**
+        events: [pre-push]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: absent}]}
+          - {path: /home/alice/work/acme/web, label: "github.com:acme/web", hooks: [{event: pre-push, status: absent}]}
+          - {path: /home/alice/work/acme/worker, label: "github.com:acme/worker", hooks: [{event: pre-push, status: absent}]}
+    answers:
+      /home/alice/work/acme/api: {status: 200, body: {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: installed}]}}
+      /home/alice/work/acme/web: {status: 200, body: {path: /home/alice/work/acme/web, label: "github.com:acme/web", hooks: [{event: pre-push, status: installed}]}}
+      /home/alice/work/acme/worker:
+        status: 200
+        body:
+          path: /home/alice/work/acme/worker
+          label: "github.com:acme/worker"
+          hooks:
+            - event: pre-push
+              status: blocked
+              remedy:
+                message: "a pre-push hook that Peasant did not write is already at /home/alice/work/acme/worker/.git/hooks/pre-push. add the section below to it by hand."
+                snippet: "# BEGIN peasant village upload (pre-push)\npeasant village push --non-interactive --quiet --timeout 5s --repository /home/alice/work/acme/worker\n# END peasant village upload (pre-push)"
+    offer: install in 3 repositories
+    calls:
+      - acme-work -> /home/alice/work/acme/api
+      - acme-work -> /home/alice/work/acme/web
+      - acme-work -> /home/alice/work/acme/worker
+    shows:
+      /home/alice/work/acme/api: [hook installed]
+      /home/alice/work/acme/web: [hook installed]
+      /home/alice/work/acme/worker:
+        - blocked
+        - "a pre-push hook that Peasant did not write is already at /home/alice/work/acme/worker/.git/hooks/pre-push. add the section below to it by hand."
+        - "peasant village push --non-interactive --quiet --timeout 5s --repository /home/alice/work/acme/worker"
+  - name: a repository two rules cover is counted once and installed per rule
+    rules:
+      - id: acme-work
+        kind: folder
+        match: ~/work/acme/**
+        events: [pre-push]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: absent}]}
+          - {path: /home/alice/work/acme/web, label: "github.com:acme/web", hooks: [{event: pre-push, status: absent}]}
+      - id: acme-remote
+        kind: remote
+        match: "github.com:acme/api"
+        events: [post-commit]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000002]
+        repositories:
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: post-commit, status: absent}]}
+    answers:
+      /home/alice/work/acme/api: {status: 200, body: {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: installed}]}}
+      /home/alice/work/acme/web: {status: 200, body: {path: /home/alice/work/acme/web, label: "github.com:acme/web", hooks: [{event: pre-push, status: installed}]}}
+    offer: install in 2 repositories
+    calls:
+      - acme-work -> /home/alice/work/acme/api
+      - acme-work -> /home/alice/work/acme/web
+      - acme-remote -> /home/alice/work/acme/api
+    shows:
+      /home/alice/work/acme/web: [hook installed]
+  - name: a paused rule offers no install
+    rules:
+      - id: personal
+        kind: folder
+        match: ~/personal/**
+        events: []
+        collectives: []
+        repositories:
+          - {path: /home/alice/personal/notes, hooks: []}
+    answers: {}
+    offer: null
+    calls: []
+    shows: {}
+  - name: nothing is offered when every hook is there
+    rules:
+      - id: acme-work
+        kind: folder
+        match: ~/work/acme/**
+        events: [pre-push]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: installed}]}
+          - {path: /home/alice/work/acme/web, label: "github.com:acme/web", hooks: [{event: pre-push, status: blocked, remedy: {message: "the hooks path is shared outside this repository."}}]}
+    answers: {}
+    offer: null
+    calls: []
+    shows: {}
+  - name: a refused call shows the server's reason
+    rules:
+      - id: acme-work
+        kind: folder
+        match: ~/work/acme/**
+        events: [pre-push]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: absent}]}
+    answers:
+      /home/alice/work/acme/api:
+        status: 400
+        body: {error: "No hook was installed because redaction.level is \"maximum\", which this version cannot apply. Set redaction.level to standard, then retry.", code: auto_publish_rule_invalid}
+    offer: install in 1 repository
+    calls:
+      - acme-work -> /home/alice/work/acme/api
+    shows:
+      /home/alice/work/acme/api:
+        - not installed
+        - "No hook was installed because redaction.level is \"maximum\", which this version cannot apply. Set redaction.level to standard, then retry."
