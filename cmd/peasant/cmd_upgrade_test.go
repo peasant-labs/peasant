@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -47,6 +48,7 @@ func TestUpgradeManagedInstallAdviceFixtures(t *testing.T) {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
+			requireManagedInstallPathStyle(t, tc)
 			deps := upgradeDeps{
 				Executable:     func() (string, error) { return tc.Executable, nil },
 				GOOS:           tc.GOOS,
@@ -80,6 +82,26 @@ func TestUpgradeManagedInstallAdviceFixtures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// requireManagedInstallPathStyle honours a case's declared filesystem flavour.
+// An unknown value fails rather than running the case, so a typo cannot quietly
+// turn the declaration off.
+func requireManagedInstallPathStyle(t *testing.T, tc upgradeManagedInstallCase) {
+	t.Helper()
+	switch tc.PathStyle {
+	case "":
+		return
+	case "unix":
+		if filepath.Separator != '/' {
+			t.Skipf(
+				"case describes a unix package-manager install at %s, which cannot exist on a host whose path separator is %q",
+				tc.Executable, string(filepath.Separator),
+			)
+		}
+	default:
+		t.Fatalf("case declares unknown path_style %q; use \"unix\" or omit the field", tc.PathStyle)
 	}
 }
 
@@ -547,12 +569,97 @@ func TestUpgradeRawInstallDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	if !bytes.Equal(got, newBinary) {
 		t.Fatalf("binary content = %q, want %q", got, newBinary)
 	}
-	info, err := os.Stat(currentPath)
-	if err != nil {
-		t.Fatalf("stat replaced binary: %v", err)
+	// Permission bits are a POSIX property. Windows reports 0666 for any
+	// writable file and Peasant deliberately does not try to restrict modes
+	// there, so the mode is only asserted where modes exist.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(currentPath)
+		if err != nil {
+			t.Fatalf("stat replaced binary: %v", err)
+		}
+		if info.Mode().Perm() != 0o755 {
+			t.Fatalf("binary mode = %v, want 0755", info.Mode().Perm())
+		}
 	}
-	if info.Mode().Perm() != 0o755 {
-		t.Fatalf("binary mode = %v, want 0755", info.Mode().Perm())
+	if !strings.Contains(output, "installed v9.9.9") {
+		t.Fatalf("upgrade output did not report success:\n%s", output)
+	}
+}
+
+func TestUpgradeAssetNameFixtures(t *testing.T) {
+	t.Parallel()
+	fixture := loadUpgradeFixture(t)
+	requireUpgradeCaseNames(t, fixture.AssetNameCases, map[string]struct{}{
+		"linux-amd64-archive":       {},
+		"darwin-arm64-archive":      {},
+		"windows-amd64-executable":  {},
+		"windows-tag-without-v":     {},
+		"windows-arm64-unpublished": {},
+		"unsupported-goos":          {},
+		"unsupported-goarch":        {},
+	})
+	for _, tc := range fixture.AssetNameCases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			got, err := upgradeArchiveName(tc.Tag, tc.GOOS, tc.GOARCH)
+			if len(tc.ErrorContains) > 0 {
+				if err == nil {
+					t.Fatalf("upgradeArchiveName(%q, %q, %q) = %q, want an error", tc.Tag, tc.GOOS, tc.GOARCH, got)
+				}
+				for _, want := range tc.ErrorContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("error %q does not contain %q", err.Error(), want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("upgradeArchiveName(%q, %q, %q) returned error: %v", tc.Tag, tc.GOOS, tc.GOARCH, err)
+			}
+			if got != tc.WantAsset {
+				t.Fatalf("asset = %q, want %q", got, tc.WantAsset)
+			}
+		})
+	}
+}
+
+// The Windows asset IS the executable, so the verified download has to be
+// installed byte-for-byte with nothing unpacked from it.
+func TestUpgradeRawInstallInstallsWindowsExecutableWithoutUnpacking(t *testing.T) {
+	t.Parallel()
+	currentPath := filepath.Join(t.TempDir(), "peasant.exe")
+	if err := os.WriteFile(currentPath, []byte("old binary"), 0o755); err != nil {
+		t.Fatalf("seed current binary: %v", err)
+	}
+	newBinary := []byte("new windows binary")
+	assetName := "peasant_9.9.9_windows_amd64.exe"
+	server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
+		Tagged: map[string]upgradeRelease{
+			"v9.9.9": newUpgradeTestRelease("v9.9.9", assetName, "checksums.txt"),
+		},
+		Assets: map[string][]byte{
+			assetName:       newBinary,
+			"checksums.txt": []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(newBinary), assetName)),
+		},
+	})
+	defer server.Close()
+	deps := upgradeTestDeps(t, server.URL, currentPath)
+	deps.GOOS = "windows"
+
+	output, err := executeUpgradeCommandForTest(t, deps, "--version", "9.9.9", "--yes")
+	if err != nil {
+		t.Fatalf("upgrade install returned error: %v\noutput:\n%s", err, output)
+	}
+	got, err := os.ReadFile(currentPath)
+	if err != nil {
+		t.Fatalf("read replaced binary: %v", err)
+	}
+	if !bytes.Equal(got, newBinary) {
+		t.Fatalf("binary content = %q, want %q", got, newBinary)
+	}
+	if !strings.Contains(output, assetName) {
+		t.Fatalf("upgrade output did not name the published windows executable:\n%s", output)
 	}
 	if !strings.Contains(output, "installed v9.9.9") {
 		t.Fatalf("upgrade output did not report success:\n%s", output)
@@ -612,6 +719,18 @@ type upgradeFixture struct {
 	DowngradeRefusalCases  []upgradeDowngradeRefusalCase  `yaml:"downgrade_refusal_cases"`
 	DowngradeOverrideCases []upgradeDowngradeOverrideCase `yaml:"downgrade_override_cases"`
 	RawConfirmationCases   []upgradeRawConfirmationCase   `yaml:"raw_confirmation_cases"`
+	AssetNameCases         []upgradeAssetNameCase         `yaml:"asset_name_cases"`
+}
+
+// upgradeAssetNameCase pins which published release asset a host resolves to,
+// including the platforms Peasant publishes nothing for.
+type upgradeAssetNameCase struct {
+	Name          string   `yaml:"name"`
+	Tag           string   `yaml:"tag"`
+	GOOS          string   `yaml:"goos"`
+	GOARCH        string   `yaml:"goarch"`
+	WantAsset     string   `yaml:"want_asset"`
+	ErrorContains []string `yaml:"error_contains"`
 }
 
 type upgradeManagedInstallCase struct {
@@ -622,6 +741,13 @@ type upgradeManagedInstallCase struct {
 	Args           []string                `yaml:"args"`
 	Commands       []upgradeCommandFixture `yaml:"commands"`
 	OutputContains []string                `yaml:"output_contains"`
+	// PathStyle declares the filesystem flavour the case's install paths
+	// belong to. "unix" marks a scenario whose executable path is a unix
+	// absolute path, which a host whose filepath separator is not "/" cannot
+	// represent: detection runs the path through filepath.Clean, so on such a
+	// host "/usr/bin/peasant" becomes "\usr\bin\peasant" and no unix package
+	// manager could have owned it anyway. Empty means the case is portable.
+	PathStyle string `yaml:"path_style"`
 }
 
 type upgradeReleaseSelectionCase struct {
@@ -719,6 +845,7 @@ func (c upgradeVersionOrderCase) upgradeCaseName() string      { return c.Name }
 func (c upgradeDowngradeRefusalCase) upgradeCaseName() string  { return c.Name }
 func (c upgradeDowngradeOverrideCase) upgradeCaseName() string { return c.Name }
 func (c upgradeRawConfirmationCase) upgradeCaseName() string   { return c.Name }
+func (c upgradeAssetNameCase) upgradeCaseName() string         { return c.Name }
 
 func requireUpgradeCaseNames[T namedUpgradeCase](t *testing.T, cases []T, required map[string]struct{}) {
 	t.Helper()

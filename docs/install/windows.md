@@ -66,6 +66,15 @@ data, or your state, and it does not run setup again. Installing from the `.zip`
 installing the bare executable are interchangeable — either replaces the other.
 
 `peasant upgrade` can do this for you, replacing the running executable in place.
+It downloads the published `peasant_<version>_windows_amd64.exe`, verifies it against
+`checksums.txt`, and installs it over the executable you are running.
+
+Windows will not let a running program be overwritten, so the upgrade renames the
+current executable to `peasant.exe.old` and puts the new build in the path it
+vacated. That leaves `peasant.exe.old` beside `peasant.exe` afterwards, because
+Windows also refuses to delete it while the process that upgraded is still
+running. It is the previous version and nothing needs it: delete it whenever you
+like, and the next `peasant upgrade` removes it for you.
 
 When you run setup again, read
 [kickstart rerun and reset behavior](../KICKSTART.md#reset-and-standalone-boundaries).

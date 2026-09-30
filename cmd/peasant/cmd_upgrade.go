@@ -362,7 +362,7 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, in io.Reader, opts up
 		)
 	}
 
-	binaryBytes, mode, err := extractPeasantBinary(archiveBytes)
+	binaryBytes, mode, err := peasantBinaryFromAsset(archiveName, archiveBytes)
 	if err != nil {
 		return err
 	}
@@ -708,13 +708,13 @@ func (r upgradeRelease) asset(name string) (upgradeAsset, bool) {
 }
 
 func upgradeArchiveName(tag, goos, goarch string) (string, error) {
-	if goos != "linux" && goos != "darwin" {
+	if goos != "linux" && goos != "darwin" && goos != "windows" {
 		return "", upgradeActionableError(
-			"this platform is not supported by Peasant release archives",
-			fmt.Sprintf("GOOS %q is not one of linux or darwin", goos),
+			"this platform is not supported by Peasant release assets",
+			fmt.Sprintf("GOOS %q is not one of linux, darwin or windows", goos),
 			"peasant upgrade",
 			"while choosing the release asset",
-			"Peasant cannot select a published archive for this host",
+			"Peasant cannot select a published asset for this host",
 			fmt.Sprintf("open %s and follow the install guide for this platform", upgradeReleasePageURL),
 		)
 	}
@@ -729,6 +729,23 @@ func upgradeArchiveName(tag, goos, goarch string) (string, error) {
 		)
 	}
 	version := strings.TrimPrefix(tag, "v")
+	if goos == "windows" {
+		// Windows publishes amd64 only (.goreleaser.yml ignores windows/arm64),
+		// and publishes the executable itself beside the zip. Upgrade takes the
+		// bare .exe: it needs the binary alone, not the archive's licence and
+		// notice files, so nothing has to be unpacked to install it.
+		if goarch != "amd64" {
+			return "", upgradeActionableError(
+				"Peasant does not publish a Windows build for this CPU architecture",
+				fmt.Sprintf("GOARCH %q is not amd64", goarch),
+				"peasant upgrade",
+				"while choosing the release asset",
+				"Peasant cannot select a published asset for this host",
+				fmt.Sprintf("open %s and follow the install guide for this platform", upgradeReleasePageURL),
+			)
+		}
+		return fmt.Sprintf("peasant_%s_windows_amd64.exe", version), nil
+	}
 	return fmt.Sprintf("peasant_%s_%s_%s.tar.gz", version, goos, goarch), nil
 }
 
@@ -759,6 +776,33 @@ func checksumForUpgradeAsset(checksums []byte, assetName string) (string, error)
 		"Peasant will not install an archive it cannot verify",
 		"check the release checksums.txt and retry after the release is repaired",
 	)
+}
+
+// peasantBinaryFromAsset returns the peasant executable carried by a verified
+// release asset.
+//
+// Linux and macOS publish a .tar.gz the binary is unpacked from. Windows
+// publishes the executable itself, and upgradeArchiveName selects that bare
+// .exe, so those bytes already ARE the binary and there is nothing to unpack.
+// Dispatch is on the asset NAME rather than on the host GOOS so that the same
+// selection runs under every platform's tests.
+func peasantBinaryFromAsset(assetName string, assetBytes []byte) ([]byte, fs.FileMode, error) {
+	if !strings.HasSuffix(assetName, ".exe") {
+		return extractPeasantBinary(assetBytes)
+	}
+	if int64(len(assetBytes)) > upgradeBinaryLimit {
+		return nil, 0, upgradeActionableError(
+			"the published Peasant executable is too large",
+			fmt.Sprintf("%s exceeded %d bytes", assetName, upgradeBinaryLimit),
+			"peasant upgrade",
+			"after checksum verification",
+			"the existing binary was left untouched",
+			"check the release asset and retry after the release is repaired",
+		)
+	}
+	// Windows carries no POSIX permission bits, so the asset supplies no mode
+	// and upgradeInstallMode picks the fallback.
+	return assetBytes, 0, nil
 }
 
 func extractPeasantBinary(archiveBytes []byte) ([]byte, fs.FileMode, error) {
@@ -859,8 +903,8 @@ func installPeasantBinary(path string, binary []byte, mode fs.FileMode) error {
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close temporary binary %s: %w", tempPath, err)
 	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("rename verified binary over %s: %w", path, err)
+	if err := replaceExecutable(tempPath, path); err != nil {
+		return err
 	}
 	keepTemp = true
 	return nil
