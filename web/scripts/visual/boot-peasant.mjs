@@ -12,8 +12,9 @@
      make build
      ./bin/peasant web start --port 8690 --foreground --no-browser \
          --mock-data-store=web,sessions,qualitySessions,annotations,review
-   then point this at it (PEASANT_REAL_ORIGIN). Or run `next dev` with NEXT_PUBLIC_WS_URL aimed at the
-   backend and PEASANT_REAL_ORIGIN=http://localhost:3000.
+   then point this at it (PEASANT_REAL_ORIGIN). Or run `make dev`, where the backend proxies `next dev` on
+   its own origin, and keep PEASANT_REAL_ORIGIN at the backend. The backend refuses a WebSocket from
+   another origin, so `next dev` on :3000 with NEXT_PUBLIC_WS_URL aimed at the backend does not connect.
 
    Exit codes (held PER SURFACE; first failure exits immediately): 0 = EVERY boot-arm surface rendered a
    non-empty composite; 2 = a surface's real route never mounted (its mount selector never appeared — the

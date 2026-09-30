@@ -21,7 +21,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/full_content_republication.yaml
@@ -36,10 +35,13 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 			CurrentLicense       string `yaml:"currentLicense"`
 			RequestedVisibility  string `yaml:"requestedVisibility"`
 			RequestedLicense     string `yaml:"requestedLicense"`
+			Explicit             *bool  `yaml:"explicit"`
 			ExpectedOwnerUpdates int    `yaml:"expectedOwnerUpdates"`
+			ExpectedVisibility   string `yaml:"expectedVisibility"`
+			ExpectedLicense      string `yaml:"expectedLicense"`
 		}
 	}
-	if err := yaml.Unmarshal(fullRepublicationYAML, &fixtures); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(fullRepublicationYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
@@ -61,8 +63,10 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 			currentLicense := schema.License(f.CurrentLicense)
 			requestedVisibility := schema.Visibility(f.RequestedVisibility)
 			requestedLicense := schema.License(f.RequestedLicense)
-			if !currentVisibility.IsValid() || !requestedVisibility.IsValid() || !currentLicense.IsValid() || !requestedLicense.IsValid() {
-				t.Fatal("invalid access fixture")
+			expectedVisibility := schema.Visibility(f.ExpectedVisibility)
+			expectedLicense := schema.License(f.ExpectedLicense)
+			if f.Explicit == nil || !currentVisibility.IsValid() || !requestedVisibility.IsValid() || !expectedVisibility.IsValid() || !currentLicense.IsValid() || !requestedLicense.IsValid() || !expectedLicense.IsValid() {
+				t.Fatal("invalid access fixture: every case states explicit and valid visibilities and licenses")
 			}
 			var mu sync.Mutex
 			var previousIdentity json.RawMessage
@@ -103,14 +107,24 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 					}
 					receipt.Visibility = currentVisibility
 					receipt.Applied.NormalizedValues.Visibility = currentVisibility
+					if receipt.Applied.License == nil {
+						// A publish that sends no license keeps the one the
+						// transcript already has.
+						kept := currentLicense
+						receipt.Applied.License = &kept
+					}
 					if publishes > 0 {
 						for name, part := range parts {
 							if !strings.Contains(part, "REPAIRED-SAFE-TAIL") || strings.Contains(part, syncDoorSecret) {
 								t.Errorf("replacement multipart %s lost full redacted tail", name)
 							}
 						}
-						if receipt.Applied.License == nil || *receipt.Applied.License != requestedLicense {
-							t.Error("ordinary configured license ignored")
+						_, sent := request["license"]
+						if *f.Explicit && (!sent || *receipt.Applied.License != requestedLicense) {
+							t.Error("explicitly requested license ignored")
+						}
+						if !*f.Explicit && sent {
+							t.Error("an update sent the configured default license")
 						}
 					}
 					status := http.StatusOK
@@ -144,10 +158,18 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			run := func(visibility schema.Visibility, license schema.License) {
+			// An explicit run passes the values the way --visibility and
+			// --license do; otherwise they are the configured defaults.
+			run := func(visibility schema.Visibility, license schema.License, explicit bool) {
 				t.Helper()
-				cfg.Push.License = license
-				pipeline, err := push.NewPipeline(db, village.NewVillageClient(remote.URL, creds.APIKey, nil), creds, cfg, &ingest.OSFileSystem{}, push.PipelineConfig{Force: true, FilterSessionIDs: []string{id}, Visibility: visibility}, redactor, io.Discard)
+				runCfg := push.PipelineConfig{Force: true, FilterSessionIDs: []string{id}}
+				if explicit {
+					runCfg.Visibility, runCfg.ChangeVisibility = visibility, true
+					runCfg.License, runCfg.ChangeLicense = license, true
+				} else {
+					cfg.Push.Visibility, cfg.Push.License = visibility, license
+				}
+				pipeline, err := push.NewPipeline(db, village.NewVillageClient(remote.URL, creds.APIKey, nil), creds, cfg, &ingest.OSFileSystem{}, runCfg, redactor, io.Discard)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -156,7 +178,7 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 					t.Fatalf("publication failed: %+v %v", result, err)
 				}
 			}
-			run(currentVisibility, currentLicense)
+			run(currentVisibility, currentLicense, false)
 			before, err := db.Publication(t.Context(), remote.URL, creds.UserID, testutil.TestProjectHash, id)
 			if err != nil || before == nil {
 				t.Fatalf("missing initial receipt: %v", err)
@@ -167,14 +189,15 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 				t.Fatal(err)
 			}
 			testutil.SeedReadyPublication(t, db, &input.Metadata, []schema.SessionEntry{{SessionID: ingest.SessionID(id), EntryIndex: 1, Harness: defaults.HarnessClaudeCode, Role: schema.RoleAssistant, EntryType: schema.EntryTypeText, ContentPreview: &full}})
-			// Repair passes verified current owner metadata explicitly; a normal
-			// push is free to pass a different user-configured license/visibility.
-			run(requestedVisibility, requestedLicense)
+			// Repair passes no flags, so the update keeps the current access and
+			// license whatever the configuration now says. Only an explicit
+			// request changes a published transcript.
+			run(requestedVisibility, requestedLicense, *f.Explicit)
 			after, err := db.Publication(t.Context(), remote.URL, creds.UserID, testutil.TestProjectHash, id)
 			if err != nil || after == nil {
 				t.Fatalf("missing replacement receipt: %v", err)
 			}
-			if before.Receipt.TranscriptID != after.Receipt.TranscriptID || before.Receipt.TranscriptURL != after.Receipt.TranscriptURL || before.Receipt.ContentHash == after.Receipt.ContentHash || after.Receipt.Visibility != requestedVisibility || after.Receipt.Applied.License == nil || *after.Receipt.Applied.License != requestedLicense {
+			if before.Receipt.TranscriptID != after.Receipt.TranscriptID || before.Receipt.TranscriptURL != after.Receipt.TranscriptURL || before.Receipt.ContentHash == after.Receipt.ContentHash || after.Receipt.Visibility != expectedVisibility || after.Receipt.Applied.License == nil || *after.Receipt.Applied.License != expectedLicense {
 				t.Fatal("replacement receipt lost identity, access, license, or changed content")
 			}
 			mu.Lock()

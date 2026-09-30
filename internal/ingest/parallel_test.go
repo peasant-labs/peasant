@@ -450,6 +450,90 @@ func TestStagingBuffer_FullReturnsFalse(t *testing.T) {
 	}
 }
 
+// TestStagingBuffer_WrapGapIsReleasedWithTheCopy pins the ring accounting at a
+// slab wrap. When a copy would straddle the end of the slab, its producer also
+// skips the remainder of the slab; that skipped span must be released by the
+// same acknowledgement that frees the copy. Otherwise every wrap permanently
+// shrinks the arena, and a run whose bytes wrap often stalls in copyToArena
+// waiting for space that can never be freed.
+func TestStagingBuffer_WrapGapIsReleasedWithTheCopy(t *testing.T) {
+	// arenaSize/2 < payloadLen < arenaSize forces the second copy to wrap.
+	const (
+		arenaSize  = 1000
+		payloadLen = 600
+		cycles     = 7
+	)
+	b := NewStagingBuffer(cycles, arenaSize)
+	payload := make([]byte, payloadLen)
+
+	for cycle := 0; cycle < cycles; cycle++ {
+		result := makeResult(sid(fmt.Sprintf("wrap-%d", cycle)), nil)
+		result.transcriptData = payload
+		if !b.Add(t.Context(), result) {
+			t.Fatalf("cycle %d: Add rejected a payload the arena can hold", cycle)
+		}
+		batch := b.Drain()
+		if len(batch.Results) != 1 {
+			t.Fatalf("cycle %d: drained %d results, want 1", cycle, len(batch.Results))
+		}
+		b.AckBatch(batch)
+		if used := b.ArenaUsed(); used != 0 {
+			t.Fatalf("cycle %d: arena still holds %d bytes after every copy was acked; a wrap leaked capacity", cycle, used)
+		}
+		// ArenaUsed clamps a negative value to zero, so compare the raw
+		// counters too: freeing the wrap gap twice would still read as zero
+		// used, while the tail would have overshot the head.
+		if head, tail := b.arenaHead.Load(), b.arenaTail.Load(); head != tail {
+			t.Fatalf("cycle %d: arena head = %d, tail = %d after every copy was acked; want them equal", cycle, head, tail)
+		}
+	}
+}
+
+// TestStagingBuffer_WrapGapReleasedWhenTheSlotArrayIsExhausted covers the other
+// path that frees arena bytes: Add rolls its copy back when no slot is left.
+// Reaching that path takes a copy the arena can place after earlier copies were
+// acked, so the rollback must release the gap the copy claimed along with the
+// copy itself — otherwise those bytes are lost before any acknowledgement can
+// free them, and ArenaUsed never returns to zero.
+func TestStagingBuffer_WrapGapReleasedWhenTheSlotArrayIsExhausted(t *testing.T) {
+	const (
+		arenaSize  = 1000
+		payloadLen = 600
+	)
+	b := NewStagingBuffer(1, arenaSize) // one slot only
+
+	first := makeResult(sid("first"), nil)
+	first.transcriptData = make([]byte, payloadLen)
+	if !b.Add(t.Context(), first) {
+		t.Fatal("first Add should succeed")
+	}
+	batch := b.Drain()
+	if len(batch.Results) != 1 {
+		t.Fatalf("drained %d results, want 1", len(batch.Results))
+	}
+	b.AckBatch(batch)
+
+	// The slot array is now exhausted. This copy can still be placed because the
+	// first copy's bytes were acked, and it wraps the slab.
+	second := makeResult(sid("second"), nil)
+	second.transcriptData = make([]byte, payloadLen)
+	if b.Add(t.Context(), second) {
+		t.Fatal("Add into an exhausted slot array should return false")
+	}
+
+	// The rolled-back copy and the wrap gap it claimed are gone, so the arena is
+	// empty again.
+	if used := b.ArenaUsed(); used != 0 {
+		t.Fatalf("arena used = %d after the rollback, want 0; the rollback lost the wrap gap", used)
+	}
+	// ArenaUsed clamps a negative value to zero, so compare the raw counters
+	// too: freeing the wrap gap twice would still read as zero used, while the
+	// tail would have overshot the head.
+	if head, tail := b.arenaHead.Load(), b.arenaTail.Load(); head != tail {
+		t.Fatalf("arena head = %d, tail = %d after the rollback, want them equal", head, tail)
+	}
+}
+
 func TestStagingBuffer_NilMetaDrainsImmediately(t *testing.T) {
 	b := NewStagingBuffer(4, 1024*1024)
 	b.Add(t.Context(), workerResult{meta: nil}) // no metadata — treated as root

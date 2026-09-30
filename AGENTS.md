@@ -239,11 +239,14 @@ the server serves the newly built assets before you trust a screenshot or a comp
   sessions annotate it. Keep bound and candidate/temporal associations distinct. Keep unattached
   sessions discoverable.
 - A wire change lands through the schema contract ceremony first.
-- The `changes` label and the `/review` routes stay in force until a user-ratified replacement
-  lands. Do not rename or delete them silently.
+- The `changes` label and the `/review` routes stay in force. In the home-first registry
+  `changes` is a route-only section (`inNav: false`): it keeps its id, label and routes, and
+  `home` leads the nav instead. Do not rename or delete the label or the routes silently.
 - `/share` is the canonical share surface. The persistent top-nav action routes there. It stays
-  outside the fairtrade graph-section registry. `GRAPH_APP_SECTIONS` in fairtrade owns the
-  registry and fixes it to `analytics | changes | code map`. Do not add a `/push` alternate
+  outside the fairtrade section registry. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
+  `home | settings` in the nav, then `analytics | changes | code map` by route only.
+  `GRAPH_APP_SECTIONS` is its deprecated alias with the earlier three-entry value. Derive the nav
+  and routes from the registry and fail loudly on an unmapped id. Do not add a `/push` alternate
   route.
 - When you replace the share-bridge UI, keep these semantics: auto-scan of uncached selections;
   caching of success and of honest failure, keyed by `(level, session)`, across navigation;

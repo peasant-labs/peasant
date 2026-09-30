@@ -25,9 +25,13 @@ and to prove that every test still runs exactly once across the passes.
   record. Its `partition` entries run in the **no-race pass** and are excluded
   from the race pass; its `protected` entries are pinned into the race pass and
   must never be registered as partition members.
-- Under `RACE=1` the gate runs a **race pass** (every listed test minus the
+- With the race pass on (`-race`; `make check` passes the flag explicitly,
+  deriving it from its `RACE` make variable, which CI sets to `0`) the gate
+  runs a
+  **race pass** (every listed test minus the
   partition members) and a **no-race pass** (exactly the partition members).
-  Under `RACE=0` it runs a **single no-race pass** over every test, but still
+  With the flag off (the default) it runs a **single no-race pass** over every
+  test, but still
   computes the plan and applies the screen. The gate computes the plan from
   `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
 
@@ -99,7 +103,8 @@ counter-example into `partition` fails the test.
 
 ### The four-rule exactly-once screen
 
-The screen merges the passes and checks, in both `RACE` modes:
+The screen merges the passes and checks, in both race modes (`-race` on and
+`-race=false`):
 
 1. **exactly-once** — a test that ran in more than one pass is a double-run (FAIL);
 2. **partition containment** — a partition member must not run in the race pass (FAIL);
@@ -115,7 +120,7 @@ screen FAIL, or invocation error makes the gate exit non-zero.
 
 Each `go test` invocation is a recordable unit with a `{unit, class, wall, user,
 system}` record. The race pass records one unit per package (class `race`); the
-`RACE=1` no-race pass records one unit per partition test, carrying that entry's
+race-mode no-race pass records one unit per partition test, carrying that entry's
 class. `user`/`system` come from `getrusage(RUSAGE_CHILDREN)`; under concurrency
 the counter is process-global, so per-unit CPU is best-effort while **wall is
 always exact**.

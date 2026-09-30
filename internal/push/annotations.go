@@ -140,7 +140,8 @@ type AnnotationSelection struct {
 	// applied to the annotation path (so a narrowed `selection` narrows
 	// annotations too, not just sessions). nil = no session filter. Annotations
 	// not tied to a session are not excluded by this gate on its own; an active
-	// repository scope still applies its independent attribution rule.
+	// repository scope still applies its independent attribution rule, and
+	// SessionsOnly withholds them.
 	SessionIDs map[string]bool
 	// RepositoryProjectHashes, when non-empty, is the set of canonical project
 	// identities a repository-scoped push covers. It closes the one hole the
@@ -150,6 +151,32 @@ type AnnotationSelection struct {
 	// it belongs to the repository the user consented to. Empty means no
 	// repository scope, and the pre-existing session-gate behaviour is unchanged.
 	RepositoryProjectHashes map[string]bool
+	// SessionsOnly makes SessionIDs the whole scope: an annotation is published
+	// only when its target names one of those sessions. A push of sessions the
+	// user chose one by one needs it, because an annotation with no target
+	// session, such as a project label or a review of another annotation, can
+	// describe sessions outside that choice.
+	SessionsOnly bool
+}
+
+// WithinPublishedSessions narrows the selection to the sessions a run left on
+// the village: uploaded, or already there unchanged. A session that failed or
+// was held back has nothing on the village to annotate, and an annotation that
+// names no session is withheld. The label keys (IDs, content hashes) are kept,
+// and a session outside the selection's own SessionIDs stays outside.
+func (s AnnotationSelection) WithinPublishedSessions(result *PushResult) AnnotationSelection {
+	sessions := map[string]bool{}
+	if result != nil {
+		for _, session := range result.Sessions {
+			switch session.Status {
+			case PushStatusNew, PushStatusUpdated, PushStatusSkipped:
+				if s.SessionIDs == nil || s.SessionIDs[session.SessionID] {
+					sessions[session.SessionID] = true
+				}
+			}
+		}
+	}
+	return AnnotationSelection{IDs: s.IDs, ContentHashes: s.ContentHashes, SessionIDs: sessions, SessionsOnly: true}
 }
 
 var _ ingest.AnnotationReadSelection = AnnotationSelection{}
@@ -214,7 +241,7 @@ func (s AnnotationSelection) unresolvedAnchorMatches(row ingest.AnnotationTarget
 	if s.SessionIDs != nil && !s.SessionIDs[row.SessionID] {
 		return false
 	}
-	if len(s.RepositoryProjectHashes) > 0 && s.SessionIDs == nil {
+	if s.attributionRequired() && s.SessionIDs == nil {
 		return false
 	}
 	if s.IsEmpty() {
@@ -226,18 +253,26 @@ func (s AnnotationSelection) unresolvedAnchorMatches(row ingest.AnnotationTarget
 	return row.ContentHash != nil && s.ContentHashes[*row.ContentHash]
 }
 
+// attributionRequired reports whether a row with no target session must prove
+// it belongs to the scope: under a repository scope, or when SessionIDs is the
+// whole scope, where nothing can prove it.
+func (s AnnotationSelection) attributionRequired() bool {
+	return len(s.RepositoryProjectHashes) > 0 || s.SessionsOnly
+}
+
 // sessionMatches applies the selected-session gate and, independently, the
 // repository-attribution gate. A nil SessionIDs set imposes no session filter,
-// but non-empty RepositoryProjectHashes still fail closed.
+// but non-empty RepositoryProjectHashes or SessionsOnly still fail closed.
 //
 // A row with no target session is not session-scoped. Without a repository scope
 // it passes, as it always has. With one it must instead prove it belongs to that
 // repository by targeting one of its project identities; anything Peasant cannot
 // attribute is withheld, because a per-repository hook publishing unattributable
-// annotations would carry content the user's consent never covered.
+// annotations would carry content the user's consent never covered. SessionsOnly
+// withholds it the same way, with no project identity to prove it by.
 func (s AnnotationSelection) sessionMatches(row ingest.AnnotationPushRow) bool {
-	repositoryScoped := len(s.RepositoryProjectHashes) > 0
-	if s.SessionIDs == nil && !repositoryScoped {
+	attributed := s.attributionRequired()
+	if s.SessionIDs == nil && !attributed {
 		return true
 	}
 
@@ -251,22 +286,26 @@ func (s AnnotationSelection) sessionMatches(row ingest.AnnotationPushRow) bool {
 			return row.SessionID != nil && s.SessionIDs[*row.SessionID]
 		}
 	case schema.TargetProject:
-		if repositoryScoped {
+		// Only a repository scope names projects a row can prove it belongs
+		// to; under SessionsOnly the set is empty, so every project row is
+		// withheld.
+		if attributed {
 			return row.ProjectHash != nil && s.RepositoryProjectHashes[*row.ProjectHash]
 		}
 		return true
 	}
 
 	// Selection-only behavior historically admits targets without session
-	// context. A repository scope cannot: no field on this row proves ownership.
-	return !repositoryScoped
+	// context. A repository scope or SessionsOnly cannot: no field on this row
+	// proves ownership.
+	return !attributed
 }
 
 // PushAnnotations sends all system-origin annotations to the village.
 //
 // Equivalent to PushAnnotationsSelected with an empty selection (push
-// everything) at the default concurrency. Retained for callers that do not
-// narrow the set (e.g. the web sync handler).
+// everything) at the default concurrency. It has no production caller: every
+// publishing path passes the selection it is scoped to.
 func PushAnnotations(
 	ctx context.Context,
 	client *village.VillageClient,

@@ -106,7 +106,7 @@ For Village authentication (`peasant village login`, push, and pull), see
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Show what would be pushed (mirrors the real run exactly) without pushing |
-| `--visibility <v>` | Set visibility (`private` or `public`) |
+| `--visibility <v>` | Set visibility (`private` or `public`). Also changes every already-published session the run selects, including ones shared with collectives; without it an update keeps the visibility a transcript has on the Village |
 | `--timing` | Report per-phase timing (handshake/server split, redaction, annotation batches) to stderr + a per-upload JSONL under the state dir. Off by default. |
 | `--concurrency <n>` | Parallel uploads + HTTP connection-pool size (default `max(1, NumCPU/2)`; raise toward `~2×NumCPU` for a large cold push). |
 | `--annotation-id <ids>` / `--annotation-hash <hashes>` | Restrict the annotation push to specific annotations |
@@ -186,6 +186,20 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--no-browser` | Do not auto-open browser |
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
+
+The server listens on the loopback interface only: `127.0.0.1`, and `::1` when the host has an
+IPv6 loopback. Other machines cannot reach it. `peasant web start` exits with an error while
+another process already accepts connections on the port, including a dashboard that is already
+running, whether from this version or an earlier one. Open the running dashboard, or run
+`peasant web stop` and start it again, or choose another port with `--port`.
+
+Every request must name the server by a loopback `Host` (`localhost`, `127.0.0.1`, or `[::1]`),
+so a proxy or port forward that passes its own hostname as `Host` gets `403`.
+A state-changing request (any method other than `GET`, `HEAD`, or `OPTIONS`) and a WebSocket
+connection that carry an `Origin` header must come from the dashboard's own origin. Other
+requests get `403`. Local clients that send no `Origin` header are accepted, such as `curl`,
+`peasant web stop`, and the TUI. A browser request without an `Origin` whose `Sec-Fetch-Site`
+header says it came from another origin is still refused.
 
 ### `peasant open` output
 

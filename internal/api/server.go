@@ -82,7 +82,9 @@ type Server struct {
 	cfg    ServerConfig
 	server *http.Server
 	hub    *Hub
-	ln     net.Listener
+	// lns are the loopback listeners Listen bound: IPv4 first, then IPv6
+	// when the host has an IPv6 loopback.
+	lns []net.Listener
 
 	// groupedMu guards groupedVariants. Registration happens during Listen and,
 	// for a route owner that registers later, before Serve; handlers read it.
@@ -111,11 +113,11 @@ func (s *Server) spawnBackground(ctx context.Context, fn func(context.Context)) 
 	}()
 }
 
-// Addr returns the listener's address after ListenAndServe has bound.
+// Addr returns the IPv4 loopback address after Listen has bound.
 // Returns nil if the server has not started listening.
 func (s *Server) Addr() net.Addr {
-	if s.ln != nil {
-		return s.ln.Addr()
+	if len(s.lns) > 0 {
+		return s.lns[0].Addr()
 	}
 	return nil
 }
@@ -134,8 +136,8 @@ func NewServer(cfg ServerConfig) *Server {
 	return s
 }
 
-// Listen binds the server to the configured port and sets up routes.
-// After Listen returns, Addr() returns the bound address.
+// Listen binds the server to the configured port on the loopback interface
+// and sets up routes. After Listen returns, Addr() returns the bound address.
 // Call Serve to start accepting connections.
 func (s *Server) Listen(ctx context.Context) error {
 	mux := http.NewServeMux()
@@ -230,17 +232,15 @@ func (s *Server) Listen(ctx context.Context) error {
 		})
 	}
 
-	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	s.server = &http.Server{
-		Addr:    addr,
-		Handler: requestLogger(mux),
+		Handler: requestLogger(localRequestGuard(mux)),
 	}
 
-	ln, err := net.Listen("tcp", addr)
+	lns, err := listenLoopback(s.cfg.Port)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", addr, err)
+		return err
 	}
-	s.ln = ln
+	s.lns = lns
 
 	return nil
 }
@@ -248,7 +248,7 @@ func (s *Server) Listen(ctx context.Context) error {
 // Serve starts accepting connections and blocks until shutdown.
 // Listen must be called first.
 func (s *Server) Serve(ctx context.Context) error {
-	if s.ln == nil {
+	if len(s.lns) == 0 {
 		return fmt.Errorf("server not listening; call Listen first")
 	}
 
@@ -257,13 +257,15 @@ func (s *Server) Serve(ctx context.Context) error {
 		go s.hub.Run(ctx)
 	}
 
-	port := s.ln.Addr().(*net.TCPAddr).Port
+	port := s.lns[0].Addr().(*net.TCPAddr).Port
 	log.Printf("Peasant web dashboard listening on http://localhost:%d", port)
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- s.server.Serve(s.ln)
-	}()
+	errCh := make(chan error, len(s.lns))
+	for _, ln := range s.lns {
+		go func() {
+			errCh <- s.server.Serve(ln)
+		}()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -274,6 +276,10 @@ func (s *Server) Serve(ctx context.Context) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+		// One listener failed; stop the others so none keeps serving alone.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.ServerShutdownGrace)
+		defer cancel()
+		_ = s.Shutdown(shutdownCtx)
 		return err
 	}
 }
@@ -648,7 +654,9 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleShutdown(_ context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Only allow shutdown from localhost
+		// Only allow shutdown from localhost. This reads the peer address the
+		// kernel reports, not a header the client sets, so it stays a backstop
+		// even though the loopback bind already keeps other hosts out.
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		isLocal := false
 		for _, addr := range defaults.LocalhostAddrs {
