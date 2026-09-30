@@ -80,12 +80,15 @@ func NewSharePipeline(pipelineStore PipelineStore, transport Transport, creds *a
 // a first publication opens private and no license is sent, whatever the
 // configuration says, so neither a configured visibility nor a configured
 // default license reaches Village. The collective steps that follow decide who
-// can read the transcript. A publish from the local web and a hook push under
-// an auto-publish rule both publish this way.
+// can read the transcript. An update asks for no change, so it keeps the
+// audience and the license the transcript has. A publish from the local web
+// and a hook push under an auto-publish rule both publish this way.
 func CollectiveAudience(cfg *config.Config, runCfg PipelineConfig) (*config.Config, PipelineConfig) {
 	narrowed := *cfg
 	narrowed.Push.License = ""
 	runCfg.Visibility = schema.VisibilityPrivate
+	runCfg.License = ""
+	runCfg.ChangeVisibility, runCfg.ChangeLicense = false, false
 	return &narrowed, runCfg
 }
 

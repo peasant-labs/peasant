@@ -49,6 +49,7 @@ requiredNames:
   - recorded-repo-installs-every-rule-event
   - rule-that-does-not-cover-the-repository-installs-nothing
   - covered-push-publishes-private-and-shares
+  - covered-update-keeps-the-collectives
   - folder-rule-covers-the-push
   - uncovered-push-is-unchanged
   - rule-without-events-leaves-the-push-unchanged
@@ -246,6 +247,18 @@ cases:
     config: {visibility: public, license: CC-BY-4.0}
     expect:
       publishes: 1
+      license: ""
+      ownerUpdates: 0
+      audience: {platform: approved, review: pending}
+
+  - name: covered-update-keeps-the-collectives
+    driver: push
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform, review]}
+    config: {visibility: public, license: CC-BY-4.0}
+    again: [--force]
+    expect:
+      publishes: 2
       license: ""
       ownerUpdates: 0
       audience: {platform: approved, review: pending}
