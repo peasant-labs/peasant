@@ -1,183 +1,99 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import {
+  headerFailures,
+  loadShellHeaderManifest,
+  routePageFile,
+  shippedItems,
+} from '../../scripts/visual/shell-header-manifest.mjs';
+import { ROUTE_ONLY_SECTIONS } from '@/lib/nav/sections';
+import { OPEN_COMMAND_PALETTE_EVENT } from '@/components/command/CommandPalette';
 import { TopNavbar } from './TopNavbar';
 
-// TopNavbar reads usePathname from next/navigation.
 let currentPathname = '/';
 vi.mock('next/navigation', () => ({
   usePathname: () => currentPathname,
 }));
 
-// The code map section is gated on the server-advertised capability set
-// (ServerCapabilitiesContext). Tests drive the ReadonlySet<string> of advertised
-// tokens directly — the same shape the real provider exposes — so the mock reads
-// as the token set the shell reacts to, not a boolean proxy.
-let capabilities: ReadonlySet<string> = new Set();
+let theme: 'light' | 'dark' = 'light';
+const toggle = vi.fn();
+vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme, toggle }) }));
+
+// The header reads the advertised capability set. The code-map token is
+// advertised here on purpose: an experimental server must not bring a
+// route-only section back into the header.
 vi.mock('@/contexts/ServerCapabilitiesContext', () => ({
-  useServerCapabilities: () => ({
-    status: 'ready',
-    capabilities,
-  }),
+  useServerCapabilities: () => ({ status: 'ready', capabilities: new Set(['code_map_navigation_v1']) }),
 }));
 
-describe('TopNavbar — graph shell nav', () => {
-  afterEach(() => {
-    cleanup();
-    currentPathname = '/';
-    capabilities = new Set();
+const manifest = loadShellHeaderManifest();
+const shipped = shippedItems(manifest);
+
+afterEach(() => {
+  cleanup();
+  currentPathname = '/';
+  theme = 'light';
+  toggle.mockClear();
+});
+
+describe('TopNavbar — the local shell header manifest', () => {
+  it.each(['light', 'dark'] as const)('holds every show, hide and route rule in the %s theme', (mode) => {
+    theme = mode;
+    render(<TopNavbar />);
+    expect(headerFailures(manifest, { theme: mode, shipped })).toEqual([]);
   });
 
-  it('renders exactly the three graph-shell links in analytics-first order on an experimental server', () => {
-    capabilities = new Set(['code_map_navigation_v1']);
-    render(<TopNavbar connected />);
-    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+  it.each(['/', '/analytics', '/review/peasant', '/map/peasant', '/projects/peasant/sess-0001', '/share/'])(
+    'holds on %s, a route-only page included',
+    (pathname) => {
+      currentPathname = pathname;
+      render(<TopNavbar />);
+      expect(headerFailures(manifest, { theme: 'light', shipped })).toEqual([]);
+    },
+  );
 
-    // The changes section is labelled "home" and leads the nav (LABEL_OVERRIDES
-    // and LEAD_SECTION_ID in lib/nav/sections.ts) — it owns `/`, the page the
-    // app opens on.
-    const home = screen.getByRole('link', { name: 'home' });
-    const map = screen.getByRole('link', { name: 'code map' });
-    const analytics = screen.getByRole('link', { name: 'analytics' });
-
-    expect(home).toHaveAttribute('href', '/');
-    expect(map).toHaveAttribute('href', '/map');
-    expect(analytics).toHaveAttribute('href', '/analytics');
-
-    // Home leads; the remaining sections keep fairtrade's own relative order.
-    const labels = Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
-    expect(labels).toEqual(['home', 'analytics', 'code map']);
-
-    // Shared fairtrade chrome uses lowercase labels, not title-cased app labels.
-    expect(screen.queryByText('Analytics')).not.toBeInTheDocument();
-    expect(screen.queryByText('Code Map')).not.toBeInTheDocument();
-    expect(screen.queryByText('Home')).not.toBeInTheDocument();
-    expect(screen.queryByText('changes')).not.toBeInTheDocument();
-
-    // The other retired labels stay gone from persistent chrome.
-    expect(screen.queryByText('Overview')).not.toBeInTheDocument();
-    expect(screen.queryByText('Review')).not.toBeInTheDocument();
-    expect(screen.queryByText('Share')).not.toBeInTheDocument();
-    expect(screen.queryByText('Contribute')).not.toBeInTheDocument();
+  it('leaves settings out until the settings page exists, so the link is never dead', () => {
+    // Written against the current tree: flips to "must show" the moment the page file lands.
+    render(<TopNavbar />);
+    const link = document.querySelector(manifest.show.settings.selector);
+    expect(link !== null).toBe(shipped.settings);
   });
 
-  it('shelves the code map link on a default (non-experimental) server', () => {
-    render(<TopNavbar connected />);
-    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
-
-    expect(screen.queryByRole('link', { name: 'code map' })).not.toBeInTheDocument();
-    const labels = Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
-    expect(labels).toEqual(['home', 'analytics']);
+  it('switches the theme from its icon-only button', () => {
+    render(<TopNavbar />);
+    const button = screen.getByRole('button', { name: 'Switch to dark mode' });
+    expect(button).toHaveAttribute('title', 'Switch to dark mode');
+    expect(button.textContent).toBe('');
+    fireEvent.click(button);
+    expect(toggle).toHaveBeenCalledTimes(1);
   });
 
-  it('mounts the persistent share action on the production /share route', () => {
-    render(<TopNavbar connected />);
-
-    const share = screen.getByRole('link', { name: 'share' });
-    expect(share).toHaveAttribute('href', '/share');
-    expect(share.className).toContain('btn-primary');
+  it('opens the command palette from the search button', () => {
+    const opened = vi.fn();
+    window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, opened);
+    render(<TopNavbar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open the command palette (Command or Control + K)' }));
+    window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, opened);
+    expect(opened).toHaveBeenCalledTimes(1);
   });
+});
 
-  it('marks the share action current on the production /share/ pathname', () => {
-    currentPathname = '/share/';
-    render(<TopNavbar connected />);
-    expect(screen.getByRole('link', { name: 'share' })).toHaveAttribute('aria-current', 'page');
+describe('route-only sections', () => {
+  it('are exactly the manifest routes, and each still has its page', () => {
+    expect(ROUTE_ONLY_SECTIONS.map((section) => section.href).sort()).toEqual(Object.keys(manifest.routes).sort());
+    for (const path of Object.keys(manifest.routes)) {
+      expect(routePageFile(path), `${path} must keep its page`).not.toBeNull();
+    }
   });
+});
 
-  // The active section is a FILLED AMBER PILL — bg-amber + on-amber text + amber border —
-  // matching the fairtrade in-use demo's `.iu-subnav-item.active`, not an underline marker.
-  function expectActivePill(link: HTMLElement) {
-    expect(link.className).toContain('bg-amber');
-    expect(link.className).toContain('text-on-amber');
-    expect(link.className).toContain('border-amber');
-    expect(link).toHaveAttribute('aria-current', 'page');
-    // No leftover underline-marker child element.
-    expect(link.querySelector('span[aria-hidden]')).toBeNull();
-  }
-
-  function expectInactivePill(link: HTMLElement) {
-    expect(link.className).not.toContain('bg-amber');
-    expect(link.className).not.toContain('text-on-amber');
-    expect(link).not.toHaveAttribute('aria-current');
-  }
-
-  it('marks Changes active on / with aria-current', () => {
-    capabilities = new Set(['code_map_navigation_v1']);
-    currentPathname = '/';
-    render(<TopNavbar connected />);
-    expectActivePill(screen.getByRole('link', { name: 'home' }));
-    expectInactivePill(screen.getByRole('link', { name: 'code map' }));
-  });
-
-  it('marks Changes active on /review/* paths', () => {
-    capabilities = new Set(['code_map_navigation_v1']);
-    currentPathname = '/review/peasant';
-    render(<TopNavbar connected />);
-    expectActivePill(screen.getByRole('link', { name: 'home' }));
-    expectInactivePill(screen.getByRole('link', { name: 'code map' }));
-  });
-
-  it('marks Map active on /map/* paths', () => {
-    capabilities = new Set(['code_map_navigation_v1']);
-    currentPathname = '/map/peasant';
-    render(<TopNavbar connected />);
-    expectActivePill(screen.getByRole('link', { name: 'code map' }));
-    expectInactivePill(screen.getByRole('link', { name: 'home' }));
-  });
-
-  it('marks Map active on /projects/{name}/{id} viewer routes', () => {
-    capabilities = new Set(['code_map_navigation_v1']);
-    currentPathname = '/projects/peasant/sess-0001';
-    render(<TopNavbar connected />);
-    expectActivePill(screen.getByRole('link', { name: 'code map' }));
-    expectInactivePill(screen.getByRole('link', { name: 'home' }));
-  });
-
-  it('marks Analytics active on /analytics', () => {
-    currentPathname = '/analytics';
-    render(<TopNavbar connected />);
-    expectActivePill(screen.getByRole('link', { name: 'analytics' }));
-  });
-
-  it('keeps the connection badge (plain-language, local-only)', () => {
-    render(<TopNavbar connected={false} />);
-    expect(screen.getByText('connecting…')).toBeInTheDocument();
-    render(<TopNavbar connected />);
-    expect(screen.getByText('live · local')).toBeInTheDocument();
-  });
-
-  it('shows the word "Search" beside the ⌘K shortcut on the palette button', () => {
-    render(<TopNavbar connected />);
-    const button = screen.getByRole('button', {
-      name: 'Open the command palette (Command or Control + K)',
-    });
-    // Reads as a search affordance, not a bare icon: word plus shortcut.
-    expect(button).toHaveTextContent('search');
-    expect(button.querySelector('kbd')?.textContent).toBe('⌘K');
-  });
-
-  it('de-emphasizes the connected badge: no box border in the steady state', () => {
-    render(<TopNavbar connected />);
-    const badge = screen.getByText('live · local');
-    // Connected = quiet glance: no border / box, just text-ink-3.
-    expect(badge.className).not.toMatch(/\bborder\b/);
-    expect(badge.className).toContain('text-ink-3');
-  });
-
-  it('keeps the disconnected badge bordered and colored for attention', () => {
-    render(<TopNavbar connected={false} />);
-    const badge = screen.getByText('connecting…');
-    expect(badge.className).toMatch(/\bborder\b/);
-    expect(badge.className).toContain('text-danger');
-  });
-
-  it('orders the connection badge before the Search control in the right cluster', () => {
-    render(<TopNavbar connected />);
-    const badge = screen.getByText('live · local');
-    const search = screen.getByRole('button', {
-      name: 'Open the command palette (Command or Control + K)',
-    });
-    // The de-emphasized status leads; the interactive Search control anchors
-    // the right edge — DOCUMENT_POSITION_FOLLOWING means search comes after.
-    expect(badge.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+describe('shell header manifest loader', () => {
+  it('rejects a manifest that drops a required name', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { SHELL_HEADER_FIXTURE } = await import('../../scripts/visual/shell-header-manifest.mjs');
+    const source = readFileSync(SHELL_HEADER_FIXTURE, 'utf8');
+    const withoutShare = source.replace(/  share-button:\n    selector: [^\n]+\n/, '');
+    expect(withoutShare).not.toBe(source);
+    expect(() => loadShellHeaderManifest(withoutShare)).toThrow(/hide is missing required names: share-button/);
   });
 });

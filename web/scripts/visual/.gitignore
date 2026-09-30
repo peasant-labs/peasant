@@ -33,9 +33,11 @@
 !strike-smoke-fixture.mjs
 !search-share-visual.mjs
 !grouped-list-visual.mjs
+!shell-header-manifest.mjs
 !testdata/
 !testdata/transcript-input.yaml
 !testdata/search-share.yaml
+!testdata/shell-header.yaml
 # baseline/ holds the committed golden references (not ephemeral captures) so the
 # gates are self-contained — no /tmp dependency.
 !baseline/

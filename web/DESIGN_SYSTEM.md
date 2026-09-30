@@ -202,7 +202,16 @@ duration-200`). Respect `prefers-reduced-motion`. No decorative motion.
 
 ## 2. Information architecture (the lifecycle)
 
-The top nav is still the lifecycle, read left→right from "on your machine"
+> **Superseded for the header.** The local header is now one row — the
+> `peasant` home link, search (⌘K), the registry's nav sections other than home,
+> and an icon-only theme toggle — with no connection indicator and no share
+> action. The sections come from fairtrade's `LOCAL_APP_SECTIONS` through
+> `src/lib/nav/sections.ts`; analytics, changes and the code map are reached by
+> route only. A stopped local app is reported by fairtrade's
+> `LocalOfflineBanner` under the header. The table and rules below record the
+> earlier lifecycle nav.
+
+The top nav was the lifecycle, read left→right from "on your machine"
 outward: understand what's on your machine, review what's changing, then (and
 only then) choose what leaves. **3 items only:**
 

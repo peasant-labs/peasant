@@ -13,9 +13,11 @@
  */
 export const UI_CAPABILITY = {
   /**
-   * Makes code-map entry points discoverable in persistent navigation and the
-   * command palette. It does NOT gate the direct `/map` or `/projects` routes,
-   * which stay reachable by URL regardless of this capability.
+   * Gates code-map entry points in persistent navigation and the command
+   * palette. The local app registry keeps the code map route-only, so today it
+   * surfaces nothing; it applies again if the registry lists the code map in
+   * the nav. It does NOT gate the direct `/map` or `/projects` routes, which
+   * stay reachable by URL regardless of this capability.
    */
   codeMapNavigationV1: 'code_map_navigation_v1',
 } as const;
