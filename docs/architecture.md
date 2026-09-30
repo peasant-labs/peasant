@@ -212,11 +212,13 @@ flowchart TB
 `peasant web start` wires `internal/api` over the store. The WebSocket hub pushes session lists
 and session detail. The REST routes serve lists, the code map, review, annotations, and the
 `/share` sync endpoints. The sync handler runs the same `push.Pipeline` as
-`peasant village push`.
+`peasant village push`. The settings handler reads every `config.yaml` key and changes one
+key at a time with `config.Parse` and `config.SaveAtomicYAML`, so `peasant config` sees each
+change. A saved setting applies to the sync handler at once.
 
 | Component | Package | Description |
 |---|---|---|
-| api | `internal/api` | `Server`, `Hub`, `StoreDataProvider`, `spaHandler`, sync handler. |
+| api | `internal/api` | `Server`, `Hub`, `StoreDataProvider`, `spaHandler`, sync handler, settings handler. |
 | transcript | `internal/transcript` | `EntriesToTurns`, `SessionToDetail`, snapshot detail builders. |
 | push | `internal/push` | Target selection, preflight, re-redaction, mapping, upload, receipts. |
 | village client | `internal/village` | Village HTTP client for publish, pull, and schema negotiation. |
@@ -721,7 +723,7 @@ sequenceDiagram
 | `internal/indexformat` | Outcome IR and index result versions. | ingest, store |
 | `internal/store` | SQLite schema, migrations, readers, writers. | nearly every command |
 | `internal/transcript` | Stored entries to turns to `SessionDetailPayload`. | api, export, tui |
-| `internal/api` | HTTP server, WebSocket hub, data providers, sync handler. | `web start`, `tui` |
+| `internal/api` | HTTP server, WebSocket hub, data providers, sync handler, settings handler. | `web start`, `tui` |
 | `internal/push` | Publication pipeline and the push wizard. | `village push`, api sync handler |
 | `internal/pull` | Pull pipeline for Village transcripts and annotations. | `village transcripts pull` |
 | `internal/village` | Village HTTP client. | push, pull, api |
