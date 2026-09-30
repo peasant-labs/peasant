@@ -11,6 +11,7 @@ interface SourceToken {
 interface GeometryFixture {
   variable: string;
   value: string;
+  bodyVariable: string;
   headerRow: SourceToken;
   noticeHeight: SourceToken;
   consumers: SourceToken[];
@@ -27,20 +28,23 @@ const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf
 const REQUIRED_CONSUMERS = ['src/app/layout.tsx', 'src/components/session-detail/v2/SessionDetailV2.tsx'];
 
 describe('app shell geometry', () => {
-  it('declares the top chrome height once: the header row plus the offline notice', () => {
+  it('declares where content starts once: the header row plus the offline notice', () => {
     const globals = source('src/app/globals.css');
     expect(globals).toContain(`${fixture.variable}: ${fixture.value};`);
     expect(globals.split(`${fixture.variable}:`)).toHaveLength(2);
+    // The full-height body is derived from it, once, and the share page fills it.
+    expect(globals.split(`${fixture.bodyVariable}:`)).toHaveLength(2);
+    expect(globals).toContain(`height: var(${fixture.bodyVariable});`);
   });
 
-  it('keeps the header row at --nav-h, and lets only the notice grow the chrome', () => {
+  it('keeps the header row at --nav-h, and lets only the notice move where content starts', () => {
     const header = source(fixture.headerRow.path);
     expect(header).toContain(fixture.headerRow.token);
     expect(header).not.toContain(`var(${fixture.variable})`);
     expect(source(fixture.noticeHeight.path)).toContain(fixture.noticeHeight.token);
   });
 
-  it('clears the chrome with the same height in the main offset and the transcript bound', () => {
+  it('clears the header and notice with the same height in the main offset and the transcript bound', () => {
     const paths = fixture.consumers.map((consumer) => consumer.path);
     expect(REQUIRED_CONSUMERS.filter((path) => !paths.includes(path))).toEqual([]);
     for (const consumer of fixture.consumers) {

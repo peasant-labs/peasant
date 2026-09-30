@@ -13,6 +13,14 @@
      of the page while it shows. The notice writes its own measured height to
      --app-notice-height and clears it when it goes. */
   --app-header-height: calc(var(--nav-h) + var(--app-notice-height, 0px));
+  /* The height a full-height page (the transcript, /share) fills below that.
+     While the notice shows on a small or zoomed screen the page keeps a floor
+     (24rem, or the whole screen under the header when that is less), so the
+     document scrolls the notice away instead of crushing the page. */
+  --app-body-height: max(
+    calc(100dvh - var(--app-header-height)),
+    min(24rem, calc(100dvh - var(--nav-h)))
+  );
 
   /* ─── v2 semantic palette — app-supplementary tokens (dark default) ───── */
   /* Fairtrade owns: canvas, surface-*, ink-*, rule-*, danger-*, warning-*,
@@ -72,6 +80,16 @@
 
   /* Charts paint from fairtrade's own --chart-* tokens (components.css);
      nothing app-side overrides them anymore. */
+}
+
+/* Where the offline notice is pinned under the header (a screen with room for
+   it: LocalOfflineNotice uses the same query), focused elements must scroll
+   clear of both. Elsewhere only the header is fixed, which fairtrade's own
+   scroll-padding-top (--nav-h) already clears. */
+@media (min-height: 40rem) and (min-width: 48rem) {
+  html {
+    scroll-padding-top: var(--app-header-height);
+  }
 }
 
 /* ============================================
@@ -764,7 +782,7 @@ textarea::placeholder {
    after breadcrumbs, title, rail, and footer without guessed offsets. */
 .share-page {
   height: calc(100vh - var(--app-header-height));
-  height: calc(100dvh - var(--app-header-height));
+  height: var(--app-body-height);
   min-height: 0;
 }
 .share-wizard {

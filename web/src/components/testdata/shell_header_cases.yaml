@@ -1,6 +1,6 @@
 # Where the component tests hold the local shell manifest
-# (scripts/visual/testdata/shell-header.yaml). The loaders in
-# TopNavbar.test.tsx and CommandPalette.test.tsx require every name below.
+# (scripts/visual/testdata/shell-header.yaml). The loader,
+# src/test/fixtures/shellHeaderCases.ts, requires every name below.
 #
 # pages: pathnames the header must look the same on — home, each route-only
 #   section, a transcript, and the canonical /share route.

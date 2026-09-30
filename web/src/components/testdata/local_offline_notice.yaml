@@ -17,9 +17,12 @@
 #                         the page mounted
 #   sockets: <n>          how many sockets the provider has opened so far
 #   healthChecks: <n>     how many health requests the page has made so far
-#   announce: stopped | back | none
-#                         what the always-mounted live region says now
-#   focused: main         keyboard focus is on the page body
+#   announce: stopped | still | back | none
+#                         what the always-mounted live region says now (the
+#                         shell manifest's announcements; `still` is followed
+#                         by the time of the failed check)
+#   focused: main | elsewhere
+#                         keyboard focus is on the page body, or is not
 #
 # startCommands: the command the notice offers for the port the page came
 # from. `peasant web start` listens on 8690 unless told otherwise.
@@ -127,6 +130,8 @@ cases:
       - wait: 0
       - expect: hidden
       - announce: back
+      # Focus was never in the notice, so recovery must not move it.
+      - focused: elsewhere
 
   - name: returning-socket-clears-a-failed-check
     steps:
@@ -176,3 +181,79 @@ cases:
       - expect: hidden
       - announce: back
       - focused: main
+
+  - name: failed-try-again-stays-usable
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - healthChecks: 2
+      - retry: true
+      - wait: 0
+      - announce: still
+      # A failed check does not reconnect: still the one closed socket.
+      - sockets: 1
+      - retry: true
+      - wait: 0
+      - healthChecks: 4
+      - sockets: 1
+      - expect: shown
+
+  - name: second-outage-keeps-grace
+    steps:
+      - health: up
+      - socket: open
+      - socket: close
+      - wait: 2000
+      - expect: shown
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - socket: close
+      - wait: 0
+      - expect: hidden
+
+  - name: unanswered-retry-does-not-reconnect
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - sockets: 2
+      - socket: close
+      - health: hang
+      - retry: true
+      - wait: 2000
+      - sockets: 3
+      - socket: close
+      # The hung `try again` times out at 4 s: a timeout is no answer, so it
+      # must not reconnect ahead of the backoff (due at 7 s).
+      - wait: 2000
+      - sockets: 3
+      - expect: shown
+
+  - name: stale-check-loses-to-newer-answer
+    steps:
+      - health: up
+      - socket: open
+      - health: hang
+      - socket: close
+      - wait: 1000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - health: up
+      - wait: 1000
+      - socket: close
+      - wait: 900
+      - expect: hidden
+      # The first check times out at 3 s, after the newer one answered: it
+      # must not raise the notice.
+      - wait: 200
+      - expect: hidden

@@ -12,6 +12,7 @@ import {
 } from '@/test/strictYaml';
 import { LayoutShell } from './LayoutShell';
 import { OFFLINE_ANNOUNCEMENTS, startCommandFor } from './LocalOfflineNotice';
+import { loadShellHeaderManifest } from '../../scripts/visual/shell-header-manifest.mjs';
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'dark', toggle: vi.fn() }) }));
@@ -35,8 +36,8 @@ type Step =
   | { checkedAt: number }
   | { sockets: number }
   | { healthChecks: number }
-  | { announce: 'stopped' | 'back' | 'none' }
-  | { focused: 'main' };
+  | { announce: 'stopped' | 'still' | 'back' | 'none' }
+  | { focused: 'main' | 'elsewhere' };
 
 const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'focus', 'expect', 'checkedAt', 'sockets', 'healthChecks', 'announce', 'focused'] as const;
 const REQUIRED_CASES = [
@@ -51,6 +52,10 @@ const REQUIRED_CASES = [
   'returning-socket-clears-a-failed-check',
   'late-failure-loses-to-reconnected-socket',
   'try-again-reconnects-at-once',
+  'failed-try-again-stays-usable',
+  'second-outage-keeps-grace',
+  'unanswered-retry-does-not-reconnect',
+  'stale-check-loses-to-newer-answer',
 ];
 /** The ports the start-command rows must cover: none, the default, and at least one other. */
 const REQUIRED_PORTS = ['', '8690'];
@@ -171,6 +176,7 @@ async function advance(ms: number) {
 }
 
 const notice = () => screen.queryByRole('region', { name: 'peasant is not running' });
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const liveRegion = () => {
   const region = [...document.querySelectorAll('p[role="status"]')].find((element) => element.classList.contains('sr-only'));
   if (!region) throw new Error('the always-mounted offline live region is missing');
@@ -184,10 +190,12 @@ function expectShown() {
   const header = document.querySelector('header');
   expect(header?.className).toContain('fixed');
   expect(header?.contains(region)).toBe(false);
+  // Absolute under the header by default; pinned only where the screen has room (a media variant).
   const wrapper = region!.parentElement!;
-  expect(wrapper.className).toContain('absolute');
-  expect(wrapper.className).toContain('top-[var(--nav-h)]');
-  expect(wrapper.className).not.toContain('fixed');
+  expect(wrapper.classList.contains('absolute')).toBe(true);
+  expect(wrapper.classList.contains('top-[var(--nav-h)]')).toBe(true);
+  expect(wrapper.classList.contains('fixed')).toBe(false);
+  expect(wrapper.classList.contains('[@media(min-height:40rem)_and_(min-width:48rem)]:fixed')).toBe(true);
   // It names this computer, never the internet, and offers the way back.
   expect(within(region!).getByRole('status')).toHaveTextContent(
     "peasant isn't running on this computer. your internet is fine: this page talks to the peasant app on your machine.",
@@ -213,7 +221,8 @@ describe('LocalOfflineNotice', () => {
     const mountedAt = Date.now();
     render(
       <LayoutShell>
-        <main>body</main>
+        {/* As app/layout.tsx mounts it: a programmatic focus target. */}
+        <main tabIndex={-1}>body</main>
       </LayoutShell>,
     );
     await advance(0);
@@ -238,14 +247,25 @@ describe('LocalOfflineNotice', () => {
       }
       else if ('sockets' in step) expect(MockWebSocket.instances).toHaveLength(step.sockets);
       else if ('healthChecks' in step) expect(healthChecks).toBe(step.healthChecks);
-      else if ('announce' in step) expect(liveRegion().textContent).toBe(step.announce === 'none' ? '' : OFFLINE_ANNOUNCEMENTS[step.announce]);
-      else if ('focused' in step) expect(document.activeElement?.tagName).toBe('MAIN');
+      else if ('announce' in step) {
+        const text = liveRegion().textContent ?? '';
+        if (step.announce === 'none') expect(text).toBe('');
+        else if (step.announce === 'still') expect(text).toMatch(new RegExp(`^${escapeRegExp(OFFLINE_ANNOUNCEMENTS.stillStopped)} \\d{2}:\\d{2}:\\d{2}\\.$`));
+        else expect(text).toBe(OFFLINE_ANNOUNCEMENTS[step.announce]);
+      } else if ('focused' in step) {
+        if (step.focused === 'main') expect(document.activeElement?.tagName).toBe('MAIN');
+        else expect(document.activeElement?.tagName).not.toBe('MAIN');
+      }
       else if (step.expect === 'shown') expectShown();
       else expectHidden();
     }
     // The first-run tour is never mounted, online or off.
     expect(screen.queryByTestId('tour-provider')).toBeNull();
     expect(screen.queryByRole('dialog', { name: /^Product tour/ })).toBeNull();
+  });
+
+  it('announces exactly what the shell manifest says', () => {
+    expect(OFFLINE_ANNOUNCEMENTS).toEqual(loadShellHeaderManifest().announcements);
   });
 
   it.each(fixture.startCommands.map((row) => [row.port || '(none)', row] as const))(

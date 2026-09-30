@@ -1,0 +1,24 @@
+# isSectionActive: a section matches its own page and anything under it; home
+# owns `/` exactly. `section` names a registry id this app routes. The test
+# requires every name below.
+cases:
+  - name: home-on-root
+    section: home
+    pathname: /
+    active: true
+  - name: home-not-on-a-section-page
+    section: home
+    pathname: /review/
+    active: false
+  - name: section-on-its-page-with-trailing-slash
+    section: analytics
+    pathname: /analytics/
+    active: true
+  - name: section-below-its-page
+    section: analytics
+    pathname: /analytics/x
+    active: true
+  - name: section-not-on-a-lookalike-path
+    section: analytics
+    pathname: /analyticsx
+    active: false

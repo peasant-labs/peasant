@@ -6,8 +6,10 @@ import { EmptyState, FeedbackPanel } from "@/lib/ft-ui";
  * different ways and leaked the word "WebSocket" to users. The model:
  *
  * - The **offline notice** (LocalOfflineNotice, under the header) is the one
- *   PERSISTENT signal. It shows only while the app is unreachable and gives
- *   the start command and `try again`; a reachable app shows nothing.
+ *   app-level signal. It shows only while the app is unreachable — pinned where
+ *   the screen has room, scrolling with the page on a small or zoomed screen —
+ *   and gives the start command and `try again`; a live region announces the
+ *   change. A reachable app shows nothing.
  * - A page renders <Disconnected/> only when losing the connection is the
  *   reason its content area is empty (so the user isn't left staring at an
  *   endless skeleton). It's contextual, not a second copy of the notice.

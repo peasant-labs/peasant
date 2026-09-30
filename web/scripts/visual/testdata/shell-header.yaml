@@ -11,10 +11,12 @@
 #          page file exists the item must NOT show (a link to it would be dead);
 #          once it exists the item MUST show.
 #          `labels`: the accessible name per theme (the mode it switches to).
+#          `icon`: the item leads with a glyph.
 # hide     items that must not come back, each named by the evidence of the old
 #          control: a selector anywhere on the page and/or text in the header.
-# routes   the route-only sections. Nothing in the persistent chrome (the header
-#          and the offline notice) or the palette links to them, and each still mounts its page by URL. `mount` is the
+# routes   the route-only sections. Nothing outside the page body (<main>) — the
+#          header, the offline notice, any nav beside them — or the palette
+#          links to them, and each still mounts its page by URL. `mount` is the
 #          selector the page's body mounts; `project: true` means the gate opens
 #          a mock project's page under the route (`<path>/<project hash>/`).
 # palette  command ids (`data-command-id`) the palette must never offer
@@ -35,6 +37,7 @@ show:
   settings:
     selector: 'header a[href="/settings"]'
     text: settings
+    icon: true
     page: src/app/settings/page.tsx
 hide:
   connection-pill:
@@ -64,3 +67,11 @@ palette:
   require:
     - 'nav:/'
     - 'action:theme'
+# What the notice's always-mounted live region says (LocalOfflineNotice.tsx's
+# OFFLINE_ANNOUNCEMENTS must equal these; the offline gate listens for them and
+# uses them as build-provenance markers). stillStopped is followed by the time
+# of the failed check.
+announcements:
+  stopped: "peasant isn't running on this computer."
+  stillStopped: "peasant still isn't running on this computer. checked"
+  back: peasant is running again.

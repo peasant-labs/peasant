@@ -2,10 +2,12 @@
 # plus, while it shows, the local offline notice at the top of the page. It is
 # declared once, with no breakpoint override (the header is one row at every
 # width), and grown by the notice's measured height. The header row itself is
-# fairtrade's --nav-h and must not grow with the notice. The test requires
-# every consumer path below.
+# fairtrade's --nav-h and must not grow with the notice. --app-body-height is
+# what a full-height page fills below it, with a floor on short screens. The
+# test requires every consumer path below.
 variable: --app-header-height
 value: calc(var(--nav-h) + var(--app-notice-height, 0px))
+bodyVariable: --app-body-height
 headerRow:
   path: src/components/TopNavbar.tsx
   token: h-[var(--nav-h)]
@@ -15,8 +17,11 @@ noticeHeight:
 consumers:
   - path: src/app/layout.tsx
     token: pt-[var(--app-header-height)]
+  # <main> is where the offline notice returns focus when it goes.
+  - path: src/app/layout.tsx
+    token: <main tabIndex={-1}
   - path: src/components/session-detail/v2/SessionDetailV2.tsx
-    token: h-[calc(100dvh-var(--app-header-height))]
+    token: h-[var(--app-body-height)]
 forbidden:
   - calc(100vh - 64px)
   - calc(100dvh - 64px)
