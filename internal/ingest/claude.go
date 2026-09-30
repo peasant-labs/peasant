@@ -28,13 +28,22 @@ type ClaudeAdapter struct {
 	// reminedCount is how many evidence records the most recent Discover had
 	// to mine again. It describes that one call and is overwritten by the next.
 	reminedCount int
+	// diagnostics names the transcripts the most recent Discover left out. It
+	// describes that one call and is replaced by the next.
+	diagnostics []DiscoveryDiagnostic
 }
 
 var _ SourceAdapter = (*ClaudeAdapter)(nil)
 var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
 var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
 var _ DiscoveryStatistics = (*ClaudeAdapter)(nil)
+var _ DiscoveryDiagnosticReporter = (*ClaudeAdapter)(nil)
 var _ OriginEvidenceMiner = (*ClaudeAdapter)(nil)
+
+// ClaudeDiagnosticDuplicateAgentTranscript is the discovery diagnostic code for
+// a workflow transcript left out because an earlier transcript already carries
+// its agent id.
+const ClaudeDiagnosticDuplicateAgentTranscript = "claude_duplicate_agent_transcript"
 
 // NewClaudeAdapter creates a ClaudeAdapter with injected dependencies.
 func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapter {
@@ -122,15 +131,25 @@ type claudeFileOpener interface {
 
 // Discover walks each configured source path looking for *.jsonl files.
 // It identifies root sessions (UUID.jsonl at the project slug level) and links
-// subagent sessions found under {uuid}/subagents/agent-*.jsonl.
+// the subagent sessions under {uuid}/subagents/, both agent-*.jsonl directly
+// there and agent-*.jsonl inside a workflow run, {uuid}/subagents/workflows/wf_*/.
 //
 // Uses a two-pass approach: first collects all file entries, then processes
 // roots before subagents. This ensures parent sessions are registered before
 // subagent linking, regardless of filesystem walk order.
 //
+// Workflow transcripts are admitted after the plain subagents. One whose agent
+// id an earlier transcript already carries is left out and named in
+// DiscoveryDiagnostics, because two transcripts under one session id would
+// collide in the store.
+//
 // Per RFC Section 6.4, symlinks are skipped silently.
 func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	var sessions []DiscoveredSession
+	a.diagnostics = nil
+	// admitted maps each subagent session id to the transcript that carries it
+	// in this discovery, so a workflow transcript never claims an id twice.
+	admitted := make(map[SessionID]ResolvedPath)
 
 	// Mining a transcript is the expensive part of Claude discovery: it reads
 	// the whole file and parses every line. Load what an earlier run mined,
@@ -158,6 +177,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 
 		var rootEntries []rootEntry
 		var subagentEntries []subagentEntry
+		var workflowEntries []subagentEntry
 
 		// Pass 1: Collection — walk and categorize files.
 		walkErr := a.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -200,17 +220,22 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				return nil
 			}
 
-			// Subagent session: {project-slug}/{uuid}/subagents/agent-{hex}.jsonl (depth 4)
-			if len(parts) == 4 && parts[2] == defaults.DirSubagents.String() && strings.HasPrefix(parts[3], defaults.ClaudeSubagentPrefix) {
-				parentUUIDStr := parts[1]
-				subagentIDStr := strings.TrimSuffix(parts[3], defaults.ExtJSONL.String())
+			// Subagent session, directly in the parent's subagents directory or
+			// inside one of its workflow runs.
+			if parentUUIDStr, file, workflow, ok := claudeSubagentLocation(parts); ok && strings.HasPrefix(file, defaults.ClaudeSubagentPrefix) {
+				subagentIDStr := strings.TrimSuffix(file, defaults.ExtJSONL.String())
 				if _, err := NewSessionID(parentUUIDStr); err == nil {
 					if _, err := NewSessionID(subagentIDStr); err == nil {
-						subagentEntries = append(subagentEntries, subagentEntry{
+						entry := subagentEntry{
 							path:          path,
 							subagentID:    subagentIDStr,
 							parentUUIDStr: parentUUIDStr,
-						})
+						}
+						if workflow {
+							workflowEntries = append(workflowEntries, entry)
+						} else {
+							subagentEntries = append(subagentEntries, entry)
+						}
 					}
 				}
 				return nil
@@ -267,10 +292,10 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			sessions = append(sessions, ds)
 		}
 
-		for _, entry := range subagentEntries {
+		admitSubagent := func(entry subagentEntry) {
 			info, err := a.fs.Stat(entry.path)
 			if err != nil {
-				continue
+				return
 			}
 			rp := ResolvedPath(entry.path)
 
@@ -282,7 +307,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			mined[rp] = evidence
 
 			if !evidence.HasConversationRecord {
-				continue
+				return
 			}
 			parentSID, _ := NewSessionID(entry.parentUUIDStr) // already validated
 			subSID, _ := NewSessionID(entry.subagentID)       // already validated
@@ -305,7 +330,21 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				Origin:        evidence.Origin,
 				Signal:        evidence.Signal,
 			}
+			admitted[subSID] = rp
 			sessions = append(sessions, ds)
+		}
+
+		for _, entry := range subagentEntries {
+			admitSubagent(entry)
+		}
+		// A workflow transcript keeps its run directory in its source path,
+		// which is the run id's provenance on the stored child.
+		for _, entry := range workflowEntries {
+			if kept, taken := admitted[SessionID(entry.subagentID)]; taken {
+				a.diagnostics = append(a.diagnostics, claudeDuplicateAgentDiagnostic(entry.path, kept))
+				continue
+			}
+			admitSubagent(entry)
 		}
 	}
 
@@ -318,6 +357,52 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 // ReminedCount reports how many cached evidence records the most recent Discover
 // had to mine again. See DiscoveryStatistics for the scoping rule.
 func (a *ClaudeAdapter) ReminedCount() int { return a.reminedCount }
+
+// DiscoveryDiagnostics names the transcripts the most recent Discover left out.
+func (a *ClaudeAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
+	return append([]DiscoveryDiagnostic(nil), a.diagnostics...)
+}
+
+// claudeSubagentLocation splits a root-relative Claude path into the parent
+// session directory and the file name of the subagent transcript it holds. A
+// subagent transcript sits in its parent's subagents directory, either directly
+// or inside one workflow run directory:
+//
+//	{project-slug}/{uuid}/subagents/agent-{hex}.jsonl
+//	{project-slug}/{uuid}/subagents/workflows/wf_{run}/agent-{hex}.jsonl
+//
+// workflow reports the second layout. Any other path is not a subagent path.
+func claudeSubagentLocation(parts []string) (parent, file string, workflow, ok bool) {
+	if len(parts) < 4 || parts[2] != defaults.DirSubagents.String() {
+		return "", "", false, false
+	}
+	switch {
+	case len(parts) == 4:
+		return parts[1], parts[3], false, true
+	case len(parts) == 6 && parts[3] == defaults.DirClaudeWorkflows.String() && isClaudeWorkflowRun(parts[4]):
+		return parts[1], parts[5], true, true
+	default:
+		return "", "", false, false
+	}
+}
+
+// isClaudeWorkflowRun reports whether a directory name is a workflow run id.
+func isClaudeWorkflowRun(name string) bool {
+	return len(name) > len(defaults.ClaudeWorkflowRunPrefix) && strings.HasPrefix(name, defaults.ClaudeWorkflowRunPrefix)
+}
+
+// claudeDuplicateAgentDiagnostic reports a workflow transcript left out because
+// the transcript at kept already carries its agent id.
+func claudeDuplicateAgentDiagnostic(skipped string, kept ResolvedPath) DiscoveryDiagnostic {
+	return DiscoveryDiagnostic{
+		Provider: HarnessClaudeCode,
+		Code:     ClaudeDiagnosticDuplicateAgentTranscript,
+		Location: skipped,
+		Summary:  "another transcript already records this agent",
+		Detail: fmt.Sprintf("ClaudeAdapter.Discover left out this workflow transcript because %s carries the same agent id "+
+			"and one session id holds one transcript; %s is ingested as before and this file is not changed", kept, kept),
+	}
+}
 
 // MineOriginEvidence re-reads one Claude transcript that is still on disk and
 // returns the origin its content decides, for the stored-row resolve pass.

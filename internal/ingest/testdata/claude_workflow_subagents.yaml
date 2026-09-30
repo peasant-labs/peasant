@@ -1,0 +1,209 @@
+# Claude Code writes a subagent transcript to one of two places under its
+# parent session directory:
+#
+#   {slug}/{uuid}/subagents/agent-{hex}.jsonl
+#   {slug}/{uuid}/subagents/workflows/wf_{run}/agent-{hex}.jsonl
+#
+# Each case is one source tree, rooted at the Claude source path. `sessions`
+# lists every session discovery must yield, exactly: `parent` is empty for a
+# root, `source` is the root-relative transcript path (a workflow child keeps
+# its run directory there, which is the run id's provenance), and `subagents`
+# lists a root's child transcript paths. `diagnostics` lists the root-relative
+# transcripts discovery must report as left out. A case with `pipeline: true`
+# is also ingested twice through the pipeline into a real store.
+#
+# required_names is a deletion-protection manifest: every listed case must be
+# present. It does not bound how many cases exist.
+required_names:
+  - workflow run agents attach to their parent
+  - workflow journal is not a transcript
+  - run directory without the workflow prefix is skipped
+  - agent directly under workflows is skipped
+  - agent nested below a run is skipped
+  - workflow agent without conversation records is skipped
+  - workflow agent sharing a plain subagent id keeps the plain transcript
+  - workflow agent sharing the id of an empty plain file is kept
+  - agent in two workflow runs keeps the first run
+  - workflow agent of an unlisted parent still names its parent
+cases:
+  - name: workflow run agents attach to their parent
+    pipeline: true
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/home/user/project","message":{"role":"user","content":"start the review workflow"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","cwd":"/home/user/project","message":{"role":"assistant","content":[{"type":"text","text":"the workflow is running"}]}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/agent-a1a1a1a1a1a1a1a1a.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"a1a1a1a1a1a1a1a1a","isSidechain":true,"type":"user","cwd":"/home/user/project","message":{"role":"user","content":"read the change"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-b1b1b1b1b1b1b1b1b.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"b1b1b1b1b1b1b1b1b","isSidechain":true,"type":"user","cwd":"/home/user/project","message":{"role":"user","content":"review correctness"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-b2b2b2b2b2b2b2b2b.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"b2b2b2b2b2b2b2b2b","isSidechain":true,"type":"user","cwd":"/home/user/project","message":{"role":"user","content":"review the tests"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        subagents:
+          - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/agent-a1a1a1a1a1a1a1a1a.jsonl
+          - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-b1b1b1b1b1b1b1b1b.jsonl
+          - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-b2b2b2b2b2b2b2b2b.jsonl
+      - id: agent-a1a1a1a1a1a1a1a1a
+        parent: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/agent-a1a1a1a1a1a1a1a1a.jsonl
+      - id: agent-b1b1b1b1b1b1b1b1b
+        parent: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-b1b1b1b1b1b1b1b1b.jsonl
+      - id: agent-b2b2b2b2b2b2b2b2b
+        parent: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-b2b2b2b2b2b2b2b2b.jsonl
+
+  - name: workflow journal is not a transcript
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"start the workflow"}}'
+      # The run journal sits beside the agents. Its name is not an agent
+      # transcript name, so a conversation-shaped record does not admit it.
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/journal.jsonl
+        lines:
+          - '{"type":"launched"}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"not an agent"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: run directory without the workflow prefix is skipped
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"start the workflow"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/run_0a1b2c3d/agent-c1c1c1c1c1c1c1c1c.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"not in a run"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_/agent-c2c2c2c2c2c2c2c2c.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"run id is empty"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: agent directly under workflows is skipped
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"start the workflow"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/agent-d1d1d1d1d1d1d1d1d.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"no run directory"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: agent nested below a run is skipped
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"start the workflow"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/nested/agent-e1e1e1e1e1e1e1e1e.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"one level too deep"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: workflow agent without conversation records is skipped
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"start the workflow"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-f1f1f1f1f1f1f1f1f.jsonl
+        lines:
+          - '{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+
+  # Claude Code can write the last turns of a workflow agent to the plain
+  # location under the same agent id. One session id holds one transcript, so
+  # the plain transcript keeps the id it has always had and the workflow file
+  # is reported rather than stored as a second session under that id.
+  - name: workflow agent sharing a plain subagent id keeps the plain transcript
+    pipeline: true
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/home/user/project","message":{"role":"user","content":"start the workflow"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/agent-a7a7a7a7a7a7a7a7a.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"a7a7a7a7a7a7a7a7a","isSidechain":true,"type":"assistant","cwd":"/home/user/project","message":{"role":"assistant","content":[{"type":"text","text":"final answer"}]}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a7a7a7a7a7a7a7a7a.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"a7a7a7a7a7a7a7a7a","isSidechain":true,"type":"user","cwd":"/home/user/project","message":{"role":"user","content":"do the work"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        subagents:
+          - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/agent-a7a7a7a7a7a7a7a7a.jsonl
+      - id: agent-a7a7a7a7a7a7a7a7a
+        parent: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/agent-a7a7a7a7a7a7a7a7a.jsonl
+    diagnostics:
+      - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a7a7a7a7a7a7a7a7a.jsonl
+
+  # The id is taken only by a transcript discovery admits. A plain file with
+  # no conversation record admits nothing, so the workflow transcript keeps it.
+  - name: workflow agent sharing the id of an empty plain file is kept
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"start the workflow"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/agent-a6a6a6a6a6a6a6a6a.jsonl
+        lines:
+          - '{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a6a6a6a6a6a6a6a6a.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"do the work"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        subagents:
+          - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a6a6a6a6a6a6a6a6a.jsonl
+      - id: agent-a6a6a6a6a6a6a6a6a
+        parent: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a6a6a6a6a6a6a6a6a.jsonl
+
+  - name: agent in two workflow runs keeps the first run
+    files:
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"start two workflows"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a8a8a8a8a8a8a8a8a.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"first run"}}'
+      - path: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_9f8e7d6c-5b4/agent-a8a8a8a8a8a8a8a8a.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"second run"}}'
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
+        subagents:
+          - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a8a8a8a8a8a8a8a8a.jsonl
+      - id: agent-a8a8a8a8a8a8a8a8a
+        parent: 11111111-1111-4111-8111-111111111111
+        source: -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_0a1b2c3d-4e5/agent-a8a8a8a8a8a8a8a8a.jsonl
+    diagnostics:
+      - -home-user-project/11111111-1111-4111-8111-111111111111/subagents/workflows/wf_9f8e7d6c-5b4/agent-a8a8a8a8a8a8a8a8a.jsonl
+
+  # A plain subagent names its parent even when the parent transcript is not
+  # discovered; a workflow agent does the same.
+  - name: workflow agent of an unlisted parent still names its parent
+    files:
+      - path: -home-user-project/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_0a1b2c3d-4e5/agent-a9a9a9a9a9a9a9a9a.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","message":{"role":"user","content":"parent transcript is gone"}}'
+    sessions:
+      - id: agent-a9a9a9a9a9a9a9a9a
+        parent: 22222222-2222-4222-8222-222222222222
+        source: -home-user-project/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_0a1b2c3d-4e5/agent-a9a9a9a9a9a9a9a9a.jsonl

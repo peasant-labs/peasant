@@ -213,6 +213,22 @@ mixed summary/snapshot artifacts never reach kickstart, ingest, or the local sto
 fails open for unreadable, empty, or malformed files: a future Claude transcript format must not
 be silently discarded merely because Peasant cannot classify it yet.
 
+A subagent transcript sits in its parent session's `subagents/` directory, either directly or in
+one workflow run directory:
+
+```text
+<project>/<session>.jsonl                                      root session
+<project>/<session>/subagents/agent-<id>.jsonl                 subagent
+<project>/<session>/subagents/workflows/wf_<run>/agent-<id>.jsonl  workflow subagent
+```
+
+Both kinds become children of `<session>` in the same way. A workflow child keeps its run
+directory in its recorded source path, which is where the run id is kept; the run's
+`journal.jsonl` is not a transcript. Claude Code can write the last turns of a workflow agent to
+the plain location under the same agent id. One session id holds one transcript, so the plain
+transcript keeps the id and discovery reports the workflow transcript as left out
+(`claude_duplicate_agent_transcript`) instead of storing it.
+
 ---
 
 ## Execution Timeline

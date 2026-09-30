@@ -26,7 +26,10 @@ type DirName string
 func (d DirName) String() string { return string(d) }
 
 const (
-	DirSubagents       DirName = "subagents"
+	DirSubagents DirName = "subagents"
+	// DirClaudeWorkflows is the directory under a Claude session's subagents
+	// directory where the workflow runtime keeps one directory per run.
+	DirClaudeWorkflows DirName = "workflows"
 	DirDebug           DirName = "debug"
 	OpenCodeDirStorage DirName = "storage"
 	OpenCodeDirSession DirName = "session"
@@ -49,8 +52,11 @@ func DebugArtifactSuffixes() []string { return []string{".json", ".log"} }
 
 // Provider-specific filename prefixes.
 const (
-	ClaudeSubagentPrefix  = "agent-"
-	OpenCodeSessionPrefix = "ses_"
+	ClaudeSubagentPrefix = "agent-"
+	// ClaudeWorkflowRunPrefix starts the name of a Claude workflow run
+	// directory; the whole directory name is the run id.
+	ClaudeWorkflowRunPrefix = "wf_"
+	OpenCodeSessionPrefix   = "ses_"
 )
 
 // ContentPreviewLimit is the maximum UTF-8 byte length for ContentPreview fields.
