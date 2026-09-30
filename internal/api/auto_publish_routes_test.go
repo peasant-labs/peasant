@@ -280,6 +280,8 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 	decodeRefusal(t, status, body, http.StatusNotFound, autoPublishNotFoundCode)
 	status, body = world.request(t, http.MethodPut, route, map[string]any{"kind": "folder", "match": world.dir, "events": []string{}, "collectives": []string{}, "visibility": "public"})
 	decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
+	status, body = world.request(t, http.MethodPut, route, map[string]any{"kind": "folder", "match": world.dir, "events": nil, "collectives": []string{}})
+	decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
 	rule.Match = "relative/*"
 	status, body = world.request(t, http.MethodPut, route, rule)
 	decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)

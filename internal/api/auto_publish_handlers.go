@@ -92,13 +92,17 @@ func (h *autoPublishHandler) handleSaveRule(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	rule := autopublish.RuleFromRequest(id, request)
-	if err := rule.Validate(); err != nil {
+	err := request.Validate()
+	if err == nil {
+		err = rule.Validate()
+	}
+	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "The auto-publish rule was not saved: "+err.Error()+". Nothing was changed.", autoPublishInvalidCode)
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	err := autopublish.Update(h.rulesPath(), func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
+	err = autopublish.Update(h.rulesPath(), func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
 		if i := slices.IndexFunc(rules, func(existing autopublish.Rule) bool { return existing.ID == id }); i >= 0 {
 			rules[i] = rule
 			return rules, nil
