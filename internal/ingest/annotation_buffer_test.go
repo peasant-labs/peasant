@@ -4,7 +4,8 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 )
 
 type intervalBufferedClassifier struct {
@@ -92,11 +93,12 @@ func TestStageAnnotateBuffered_FlushesAtRegularInterval(t *testing.T) {
 		done <- pipeline.stageAnnotateBuffered(ctx, []SessionID{sidA, sidB}, progress, classifier)
 	}()
 
+	waitCtx := testwait.Context(t)
 	select {
 	case <-classifier.secondStarted:
 	case err := <-done:
 		t.Fatalf("stageAnnotateBuffered returned before second prepare blocked: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("timed out waiting for second prepare to block")
 	}
 
@@ -104,21 +106,20 @@ func TestStageAnnotateBuffered_FlushesAtRegularInterval(t *testing.T) {
 	case <-classifier.firstFlush:
 	case err := <-done:
 		t.Fatalf("stageAnnotateBuffered returned before interval flush: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("timed out waiting for interval flush")
 	}
-	waitForAnnotationBufferProgress(t, progress, 1)
+	// The advance lands in the result goroutine after the flush, and no push
+	// signal exists for it.
+	waitForStageProgress(t, progress, StageAnnotate, 1)
 
 	close(classifier.unblockSecond)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("stageAnnotateBuffered: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for buffered annotate stage to finish")
+	if err := testwait.Receive(t, done, "buffered annotate stage to finish"); err != nil {
+		t.Fatalf("stageAnnotateBuffered: %v", err)
 	}
-	waitForAnnotationBufferProgress(t, progress, 2)
+	if got := progress.Snapshot()[StageAnnotate].Done; got < 2 {
+		t.Fatalf("ANNOTATE progress done = %d, want at least 2", got)
+	}
 
 	classifier.mu.Lock()
 	defer classifier.mu.Unlock()
@@ -127,23 +128,6 @@ func TestStageAnnotateBuffered_FlushesAtRegularInterval(t *testing.T) {
 	}
 	if len(classifier.flushes[0]) != 1 || classifier.flushes[0][0] != sidA {
 		t.Fatalf("first flush = %+v, want only first session", classifier.flushes[0])
-	}
-}
-
-func waitForAnnotationBufferProgress(t *testing.T, progress *ProgressState, want int) {
-	t.Helper()
-	deadline := time.After(2 * time.Second)
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		if got := progress.Snapshot()[StageAnnotate].Done; got >= want {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("ANNOTATE progress did not reach %d", want)
-		case <-tick.C:
-		}
 	}
 }
 
