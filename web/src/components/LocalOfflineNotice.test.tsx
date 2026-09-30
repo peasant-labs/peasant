@@ -13,6 +13,7 @@ import {
 import { LayoutShell } from './LayoutShell';
 import { OFFLINE_ANNOUNCEMENTS, startCommandFor } from './LocalOfflineNotice';
 import { loadShellHeaderManifest } from '../../scripts/visual/shell-header-manifest.mjs';
+import YAML from 'yaml';
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'dark', toggle: vi.fn() }) }));
@@ -32,6 +33,7 @@ type Step =
   | { wait: number }
   | { retry: true }
   | { focus: 'retry' | 'away' }
+  | { click: 'page' }
   | { expect: 'shown' | 'hidden' }
   | { checkedAt: number }
   | { sockets: number }
@@ -40,7 +42,7 @@ type Step =
   | { focused: 'main' | 'elsewhere' }
   | { mainFocusable: boolean };
 
-const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'focus', 'expect', 'checkedAt', 'sockets', 'healthChecks', 'announce', 'focused', 'mainFocusable'] as const;
+const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'focus', 'click', 'expect', 'checkedAt', 'sockets', 'healthChecks', 'announce', 'focused', 'mainFocusable'] as const;
 const REQUIRED_CASES = [
   'reachable-app-shows-nothing',
   'first-connect-within-grace-shows-nothing',
@@ -58,7 +60,10 @@ const REQUIRED_CASES = [
   'unanswered-retry-does-not-reconnect',
   'stale-check-loses-to-newer-answer',
   'try-again-within-grace-trusts-the-answer',
-  'superseded-try-again-stays-quiet',
+  'moot-try-again-stays-quiet',
+  'try-again-superseded-by-an-answer-stays-quiet',
+  'return-during-the-repeat-clear-stays-back',
+  'click-after-try-again-leaves-focus-alone',
 ];
 /** The ports the start-command rows must cover: none, the default, and at least one other. */
 const REQUIRED_PORTS = ['', '8690'];
@@ -102,6 +107,10 @@ function loadFixture() {
 }
 
 const fixture = loadFixture();
+/** The pinned-notice class, as the shell geometry fixture records it. */
+const NOTICE_PINNED_CLASS = (
+  YAML.parse(readFileSync(resolve(process.cwd(), 'src/components/testdata/app-shell-geometry.yaml'), 'utf8')) as { noticePinnedClass: string }
+).noticePinnedClass;
 
 // ---------------------------------------------------------------------------
 // Doubles: the browser WebSocket and the health route
@@ -198,7 +207,7 @@ function expectShown() {
   expect(wrapper.classList.contains('absolute')).toBe(true);
   expect(wrapper.classList.contains('top-[var(--nav-h)]')).toBe(true);
   expect(wrapper.classList.contains('fixed')).toBe(false);
-  expect(wrapper.classList.contains('notice-pinned:fixed')).toBe(true);
+  expect(wrapper.classList.contains(NOTICE_PINNED_CLASS)).toBe(true);
   // It names this computer, never the internet, and offers the way back.
   expect(within(region!).getByRole('status')).toHaveTextContent(
     "peasant isn't running on this computer. your internet is fine: this page talks to the peasant app on your machine.",
@@ -247,6 +256,11 @@ describe('LocalOfflineNotice', () => {
       else if ('focus' in step) {
         if (step.focus === 'retry') act(() => screen.getByRole('button', { name: 'try again' }).focus());
         else act(() => (document.activeElement as HTMLElement | null)?.blur());
+      } else if ('click' in step) {
+        const main = document.querySelector('main');
+        if (!main) throw new Error('no <main> to click');
+        fireEvent.pointerDown(main);
+        act(() => (document.activeElement as HTMLElement | null)?.blur());
       } else if ('mainFocusable' in step) expect(document.querySelector('main')?.hasAttribute('tabindex')).toBe(step.mainFocusable);
       else if ('checkedAt' in step) {
         expect(notice()?.querySelector('time')?.getAttribute('datetime')).toBe(new Date(mountedAt + step.checkedAt).toISOString());

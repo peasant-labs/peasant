@@ -26,7 +26,8 @@ export interface LocalAppHealth {
   retrying: boolean;
   /**
    * Check now; when the app answers, the socket reconnects at once. Resolves to
-   * whether it answered, or null when a newer check made the answer moot.
+   * whether it answered, or null when a newer check or a returning socket made
+   * the answer moot.
    */
   retry: () => Promise<boolean | null>;
 }
@@ -67,7 +68,8 @@ export function useLocalAppHealth(): LocalAppHealth {
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [retrying, setRetrying] = useState(false);
   // The newest check started. An older check that answers late (a timeout from
-  // an earlier drop) must not overwrite what a newer one found.
+  // an earlier drop) must not overwrite what a newer check, or a socket that
+  // came back since, found.
   const latestCheck = useRef(0);
 
   // Only the offline paths reconnect on an answer. A fresh drop leaves the
@@ -89,7 +91,12 @@ export function useLocalAppHealth(): LocalAppHealth {
   useEffect(() => {
     setSocketDown(false);
     setHealthFailed(false);
-    if (connected) return;
+    if (connected) {
+      // A socket that is back makes any check still out moot: its late answer
+      // must not leave a failure behind for the next blip.
+      latestCheck.current += 1;
+      return;
+    }
     void check(false);
     const grace = setTimeout(() => setSocketDown(true), SOCKET_GRACE_MS);
     return () => clearTimeout(grace);

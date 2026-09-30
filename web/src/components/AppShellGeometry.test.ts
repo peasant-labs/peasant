@@ -12,12 +12,21 @@ interface GeometryFixture {
   variable: string;
   value: string;
   bodyVariable: string;
+  bodyFloor: string;
   noticePinnedVariant: string;
   noticePinnedClass: string;
   headerRow: SourceToken;
   noticeHeight: SourceToken;
   consumers: SourceToken[];
   forbidden: string[];
+  restingMain: { path: string };
+}
+
+/** The media query inside the `@custom-variant notice-pinned (@media …);` declaration. */
+function pinnedQuery(variant: string): string {
+  const match = /@media\s+(\(.+\))\s*\)\s*;\s*$/.exec(variant);
+  if (!match) throw new Error(`app-shell-geometry.yaml noticePinnedVariant has no media query: ${variant}`);
+  return match[1];
 }
 
 const fixture = YAML.parse(
@@ -34,8 +43,9 @@ describe('app shell geometry', () => {
     const globals = source('src/app/globals.css');
     expect(globals).toContain(`${fixture.variable}: ${fixture.value};`);
     expect(globals.split(`${fixture.variable}:`)).toHaveLength(2);
-    // The full-height body is derived from it, once, and the share page fills it.
+    // The full-height body is derived from it, once, with its floor, and the share page fills it.
     expect(globals.split(`${fixture.bodyVariable}:`)).toHaveLength(2);
+    expect(globals).toContain(`min(${fixture.bodyFloor}, calc(100dvh - var(--nav-h)))`);
     expect(globals).toContain(`height: var(${fixture.bodyVariable});`);
   });
 
@@ -44,9 +54,15 @@ describe('app shell geometry', () => {
     expect(globals.split(fixture.noticePinnedVariant)).toHaveLength(2);
     expect(globals).toMatch(/@variant notice-pinned \{\s*scroll-padding-top: var\(--app-header-height\);/);
     // No second, hand-written copy of the query.
-    expect(globals.split('(min-height: 40rem) and (min-width: 48rem)')).toHaveLength(2);
+    expect(globals.split(pinnedQuery(fixture.noticePinnedVariant))).toHaveLength(2);
     const notice = source(fixture.noticeHeight.path);
     expect(notice).toContain(`'${fixture.noticePinnedClass}'`);
+  });
+
+  it('keeps <main> out of the tab order at rest', () => {
+    const main = /<main\b[^>]*>/.exec(source(fixture.restingMain.path));
+    expect(main, `${fixture.restingMain.path} must render <main>`).not.toBeNull();
+    expect(main![0], '<main> must carry no tabIndex at rest').not.toMatch(/tabIndex/i);
   });
 
   it('keeps the header row at --nav-h, and lets only the notice move where content starts', () => {
