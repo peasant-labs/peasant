@@ -37,8 +37,8 @@ type Rule struct {
 	Kind schema.AutoPublishRuleKind `yaml:"kind"`
 	// Match is the pattern, as the developer wrote it.
 	Match string `yaml:"match"`
-	// Events are the hooks installing the rule writes. A rule with no event
-	// is kept but publishes nothing.
+	// Events are the hooks the rule installs. A rule with no event is kept
+	// but publishes nothing.
 	Events []schema.AutoPublishEvent `yaml:"events"`
 	// Collectives are the Village collectives each transcript is shared with.
 	Collectives []schema.VillageUUID `yaml:"collectives"`
