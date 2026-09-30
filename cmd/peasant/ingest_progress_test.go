@@ -24,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -950,24 +951,56 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 		Total: 10,
 	})
 
-	var buf bytes.Buffer
-	r := newProgressProgram(&buf, state, nil)
-	// Force TTY mode to exercise the tick path.
+	w := newRenderSignalWriter()
+	r := newProgressProgram(w, state, nil)
+	// Force TTY mode; wait until the renderer has flushed a frame. With a
+	// zero-width writer the renderer emits only its flush sequence, so the
+	// signal proves the render path ran at least once; the subject here stays
+	// the tick loop terminating cleanly (a frame was drawn, not that a tick
+	// fired).
 	r.isTTY = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.Run(ctx)
 
-	// Allow a couple of ticks (100 ms each) so the ticker fires at least once.
-	time.Sleep(250 * time.Millisecond)
+	testwait.Receive(t, w.rendered, "TTY progress renderer flushed a frame")
 	cancel()
 	r.Finish(finalMessage(time.Now(), state, context.Canceled))
 	r.Wait()
 
 	// At least one Bubble Tea render should have occurred before shutdown.
-	if buf.Len() == 0 {
+	if w.Len() == 0 {
 		t.Error("TTY renderer wrote 0 bytes after ticks + cancel, want some output")
 	}
+}
+
+// renderSignalWriter records the renderer output and closes rendered once, on
+// its first Write. A zero-width output draws no visible text, so the signal
+// proves the render path ran at least once rather than that a particular frame
+// was drawn.
+type renderSignalWriter struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	rendered chan struct{}
+	once     sync.Once
+}
+
+func newRenderSignalWriter() *renderSignalWriter {
+	return &renderSignalWriter{rendered: make(chan struct{})}
+}
+
+func (w *renderSignalWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buf.Write(p)
+	w.once.Do(func() { close(w.rendered) })
+	return n, err
+}
+
+func (w *renderSignalWriter) Len() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Len()
 }
 
 func TestProgressModelControlCCancelsPipeline(t *testing.T) {
