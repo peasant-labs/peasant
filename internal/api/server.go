@@ -225,6 +225,13 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RoutePublications.String(), ph.handlePublications)
 	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
 
+	// Auto-publish rules: save or remove a rule, and install its hooks in one
+	// recorded repository.
+	aph := &autoPublishHandler{store: s.cfg.Store, config: s.cfg.Config, configHome: s.cfg.ConfigHome, dataHome: s.cfg.DataHome, stateHome: s.cfg.StateHome}
+	mux.HandleFunc("PUT "+defaults.RouteAutoPublishRule.String(), aph.handleSaveRule)
+	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
+	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)
+
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {
 		proxyURL, err := url.Parse("http://" + s.cfg.DevProxyAddr)
