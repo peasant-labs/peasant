@@ -8,7 +8,10 @@
    ============================================ */
 
 :root {
-  --app-header-height: 7rem;
+  /* The fixed top chrome: the one-row header (fairtrade's --nav-h at every
+     width) plus the local offline notice while it shows. The notice writes its
+     own measured height to --app-notice-height and clears it when it goes. */
+  --app-header-height: calc(var(--nav-h) + var(--app-notice-height, 0px));
 
   /* ─── v2 semantic palette — app-supplementary tokens (dark default) ───── */
   /* Fairtrade owns: canvas, surface-*, ink-*, rule-*, danger-*, warning-*,
@@ -68,12 +71,6 @@
 
   /* Charts paint from fairtrade's own --chart-* tokens (components.css);
      nothing app-side overrides them anymore. */
-}
-
-@media (min-width: 1024px) {
-  :root {
-    --app-header-height: 4rem;
-  }
 }
 
 /* ============================================

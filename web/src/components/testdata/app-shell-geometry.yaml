@@ -1,10 +1,17 @@
+# The fixed top chrome is the one-row header plus, while it shows, the local
+# offline notice. --app-header-height is its height: declared once, with no
+# breakpoint override (the header is one row at every width), and grown by the
+# notice's measured height. The header row itself is fairtrade's --nav-h and
+# must not grow with the notice.
 variable: --app-header-height
-breakpoints:
-  mobile: 7rem
-  desktop: 4rem
+value: calc(var(--nav-h) + var(--app-notice-height, 0px))
+headerRow:
+  path: src/components/TopNavbar.tsx
+  token: h-[var(--nav-h)]
+noticeHeight:
+  path: src/components/LocalOfflineNotice.tsx
+  token: --app-notice-height
 consumers:
-  - path: src/components/TopNavbar.tsx
-    token: h-[var(--app-header-height)]
   - path: src/app/layout.tsx
     token: pt-[var(--app-header-height)]
   - path: src/components/session-detail/v2/SessionDetailV2.tsx

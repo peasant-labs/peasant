@@ -10,6 +10,7 @@ import {
   type Command,
 } from './CommandPalette';
 import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
+import { loadShellHeaderManifest, paletteFailures } from '../../../scripts/visual/shell-header-manifest.mjs';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
@@ -17,15 +18,14 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 const toggle = vi.fn();
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle }) }));
 
-// The code-map "go to" command and per-project "· map" jumps are gated on the
+// The "go to" commands are the header's nav sections, read with the
 // server-advertised capability set (ServerCapabilitiesContext). Tests drive the
 // ReadonlySet<string> of advertised tokens directly — the shape the real
-// provider exposes — so a case reads as the token set the palette reacts to. The
-// search/discovery/retry/a11y cases exercise map commands, so the default keeps
-// the code-map token advertised; the explicit capability-matrix cases below
-// override it to prove map absence vs presence.
+// provider exposes. The default advertises the code-map token, so every case
+// also proves an experimental server brings no route-only section back.
 const CODE_MAP_ENABLED: ReadonlySet<string> = new Set(['code_map_navigation_v1']);
 let capabilities: ReadonlySet<string> = CODE_MAP_ENABLED;
+const shellManifest = loadShellHeaderManifest();
 vi.mock('@/contexts/ServerCapabilitiesContext', () => ({
   useServerCapabilities: () => ({
     status: 'ready',
@@ -134,73 +134,31 @@ describe('CommandPalette', () => {
   it('navigates to a nav section on Enter', () => {
     open();
     const input = screen.getByRole('combobox');
-    fireEvent.change(input, { target: { value: 'Go to Code Map' } });
+    fireEvent.change(input, { target: { value: 'go to home' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(push).toHaveBeenCalledWith('/map');
+    expect(push).toHaveBeenCalledWith('/');
   });
 
-  // Explicit capability-matrix cases: the code-map "go to" nav command and the
-  // per-project "· map" jump surface only when the server advertises the code-map
-  // token. The non-gated nav commands (analytics, changes) stay in canonical
-  // fairtrade order either way.
-  it('omits code-map discoverability when the server advertises no capabilities', async () => {
-    capabilities = new Set();
+  // The palette links to what the header links to and nothing more: no
+  // per-project jumps into changes or the code map, and no "go to" command for
+  // a route-only section — with or without the code-map capability.
+  it.each([
+    ['no capabilities', new Set<string>()],
+    ['the code-map token', CODE_MAP_ENABLED],
+  ])('holds the shell manifest palette rules with %s advertised', async (_label, advertised) => {
+    capabilities = advertised;
     open();
-    // Project commands populate once the shared summary resolves.
-    await waitFor(() => expect(screen.getByText('alpha-project · changes')).toBeInTheDocument());
-    // No per-project "· map" jump, and no "go to code map" nav command.
-    expect(screen.queryByText('alpha-project · map')).not.toBeInTheDocument();
-    expect(screen.queryByText('go to code map')).not.toBeInTheDocument();
-    // The non-gated nav commands remain, in canonical home-first order.
-    const home = screen.getByText('go to home');
-    const analytics = screen.getByText('go to analytics');
-    expect(home.compareDocumentPosition(analytics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('surfaces code-map discoverability when the server advertises the code-map token', async () => {
-    capabilities = new Set(['code_map_navigation_v1']);
-    open();
-    // The per-project "· map" jump appears once the shared summary resolves.
-    await waitFor(() => expect(screen.getByText('alpha-project · map')).toBeInTheDocument());
-    // "go to code map" is present, appended after the non-gated sections in
-    // canonical home · analytics · code map order.
-    const home = screen.getByText('go to home');
-    const analytics = screen.getByText('go to analytics');
-    const map = screen.getByText('go to code map');
-    expect(home.compareDocumentPosition(analytics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(analytics.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('lists the explicit session parent from the shared summary and jumps to its map', async () => {
-    open();
-    const input = screen.getByRole('combobox');
-    // Project commands appear once the summary fetch resolves.
-    await waitFor(() => expect(screen.getByText('alpha-project · map')).toBeInTheDocument());
-    fireEvent.change(input, { target: { value: 'alpha-project · map' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(push).toHaveBeenCalledWith(`/map/${PROJECT_HASH}`);
-    expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
-    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
-  });
-
-  it('retries failed project discovery on the same surface and repopulates projects', async () => {
-    let projectCalls = 0;
-    fetchMock.mockImplementation(async (input: string | URL) => {
-      const url = new URL(String(input), 'http://localhost');
-      if (url.pathname === '/api/v1/projects/summary') {
-        projectCalls += 1;
-        if (projectCalls === 1) throw new Error('database unavailable');
-        return Response.json({ projects: [{ projectHash: PROJECT_HASH, project: '/work/alpha-project', sessions: 3, recordedFiles: 1, totalFiles: 2, openChanges: 1 }] });
-      }
-      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope({ results: [] }));
-      if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
-      throw new Error(`unexpected test request ${url.pathname}`);
+    // Let any first-open request settle before reading the commands.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
     });
-    open();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'retry project discovery' }));
-    expect(await screen.findByText('alpha-project · map')).toBeInTheDocument();
-    expect(projectCalls).toBe(2);
+    expect(paletteFailures(shellManifest)).toEqual([]);
+    expect(screen.getByText('go to home')).toBeInTheDocument();
+    for (const label of ['go to analytics', 'go to changes', 'go to code map', 'alpha-project · changes', 'alpha-project · map']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+    // Project jumps are gone, so opening the palette no longer loads projects.
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/projects/summary'));
   });
 
   it('does not search for queries shorter than 2 characters', async () => {

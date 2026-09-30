@@ -1,0 +1,63 @@
+# The local app header, as a required-name manifest.
+#
+# The component test (src/components/TopNavbar.test.tsx, the command palette
+# test) and the mounted gates (shell-nav-gate.mjs, shell-nav-default-gate.mjs)
+# all read this one file through shell-header-manifest.mjs, which also pins the
+# required names below so a deleted row fails loudly.
+#
+# show     items the header must carry, each found by its selector (and, where
+#          given, its exact trimmed text).
+#          `page`: the item links to a page this app may not have yet. Until the
+#          page file exists the item must NOT show (a link to it would be dead);
+#          once it exists the item MUST show.
+#          `labels`: the accessible name per theme (the mode it switches to).
+# hide     items that must not come back, each named by the evidence of the old
+#          control: a selector and/or text anywhere in the header.
+# routes   the route-only sections. Nothing in the header or the palette links
+#          to them, and each still mounts its page by URL. `mount` is the
+#          selector the page's body mounts; `project: true` means the gate opens
+#          a mock project's page under the route (`<path>/<project hash>/`).
+# palette  command ids (`data-command-id`) the palette must never offer
+#          (`forbid`, as prefixes) and must always offer (`require`).
+show:
+  brand:
+    selector: 'header a[href="/"][aria-label="Peasant home"]'
+    text: peasant
+  search:
+    selector: 'header button[aria-label^="Open the command palette"]'
+    text: search⌘K
+  theme:
+    selector: 'header button[aria-label^="Switch to "]'
+    labels:
+      light: Switch to dark mode
+      dark: Switch to light mode
+  settings:
+    selector: 'header a[href="/settings"]'
+    text: settings
+    page: src/app/settings/page.tsx
+hide:
+  connection-pill:
+    selector: 'header .cx-pill'
+    text:
+      - live · local
+      - connecting…
+  share-button:
+    selector: 'header a[href^="/share"]'
+  section-nav:
+    selector: 'nav[aria-label="Main navigation"], header .iu-subnav'
+routes:
+  /analytics:
+    mount: .gan-root
+  /review:
+    mount: .gmp-changes-root
+    project: true
+  /map:
+    mount: .gmp-root
+    project: true
+palette:
+  forbid:
+    - 'proj-changes:'
+    - 'proj-map:'
+  require:
+    - 'nav:/'
+    - 'action:theme'

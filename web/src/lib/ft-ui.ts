@@ -66,6 +66,7 @@ import {
   CommitGraph as FtCommitGraph,
   DataState as FtDataState,
   ConnectionPill as FtConnectionPill,
+  LocalOfflineBanner as FtLocalOfflineBanner,
   TeachingEmptyState as FtTeachingEmptyState,
   useHelperSelection as ftUseHelperSelection,
 } from '@peasant-labs/fairtrade/ui';
@@ -594,6 +595,22 @@ export interface ConnectionPillProps {
   className?: string;
 }
 export const ConnectionPill = FtConnectionPill as unknown as ComponentType<ConnectionPillProps>;
+
+/**
+ * The page-level notice for a stopped local app: plain words (this computer,
+ * not the internet), the copy-able start command, `try again`, `last checked`.
+ */
+export interface LocalOfflineBannerProps extends HTMLAttributes<HTMLElement> {
+  /** `try again`; omit it and no button renders. */
+  onRetry?: () => void;
+  /** A retry is in flight: the button reports busy and ignores presses. */
+  retrying?: boolean;
+  /** When the host last checked; rendered as hh:mm:ss. */
+  checkedAt?: Date | string | number;
+  /** The command that starts the local app (default `peasant web start`). */
+  command?: string;
+}
+export const LocalOfflineBanner = FtLocalOfflineBanner as unknown as ComponentType<LocalOfflineBannerProps>;
 
 /** Empty state that TEACHES the mechanism: title, guidance prose, copy-able command chip. */
 export interface TeachingEmptyStateProps {

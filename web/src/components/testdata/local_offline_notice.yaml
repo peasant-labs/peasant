@@ -1,0 +1,101 @@
+# When the local offline notice shows. Each case drives the real LayoutShell —
+# the real WebSocketProvider through a mock socket, GET /api/v1/health through a
+# mock fetch — step by step on fake timers (LocalOfflineNotice.test.tsx).
+#
+# Steps, in order:
+#   health: up | down     how the health route answers from now on
+#   socket: open | close  the newest socket opens, or closes (a closed socket
+#                         schedules the provider's own reconnect)
+#   wait: <ms>            advance the clock; also settles pending checks
+#   retry: true           press `try again` on the notice
+#   expect: shown | hidden
+#   sockets: <n>          how many sockets the provider has opened so far
+#
+# startCommands: the command the notice offers for the port the page came
+# from. `peasant web start` listens on 8690 unless told otherwise.
+startCommands:
+  - port: ''
+    command: peasant web start
+  - port: '8690'
+    command: peasant web start
+  - port: '8691'
+    command: peasant web start --port 8691
+cases:
+  - name: reachable-app-shows-nothing
+    steps:
+      - health: up
+      - socket: open
+      - wait: 30000
+      - expect: hidden
+
+  - name: first-connect-within-grace-shows-nothing
+    steps:
+      - health: up
+      - wait: 1500
+      - expect: hidden
+      - socket: open
+      - wait: 30000
+      - expect: hidden
+
+  - name: stopped-app-shows-at-once
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+
+  - name: socket-blip-reconnects-without-notice
+    steps:
+      - health: up
+      - socket: open
+      - socket: close
+      - wait: 0
+      - sockets: 2
+      - expect: hidden
+      - socket: open
+      - wait: 30000
+      - expect: hidden
+
+  - name: socket-down-past-grace-shows
+    steps:
+      - health: up
+      - socket: open
+      - socket: close
+      - wait: 1900
+      - expect: hidden
+      - wait: 100
+      - expect: shown
+
+  - name: notice-clears-when-app-returns
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - socket: close
+      - health: up
+      - wait: 5000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+
+  - name: try-again-reconnects-at-once
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - health: up
+      - retry: true
+      - wait: 0
+      - sockets: 2
+      - socket: open
+      - wait: 0
+      - expect: hidden

@@ -102,13 +102,14 @@ When unset (the default), the page is mock-only with the deprecation banner; whe
 
 ## 3. Code map navigation entry points — `peasant web start --experimental`
 
-This is a **discoverability gate**, not a route gate. On a default server the
-code map's persistent *entry points* — the top-nav tab, the Cmd-K "go to code
-map" command, and the per-project "· map" palette jumps — are hidden. It never
-removes a route: `/map`, `/map/<project>`, and the `/projects/<name>/<id>` viewer
-deep links (which belong to the map IA) stay directly mounted and reachable in
-every mode. The shipped binary always contains the full feature; only its
-entry points in the persistent chrome are gated.
+This is a **discoverability gate**, not a route gate, and today it gates
+nothing visible. The local app's section registry (`LOCAL_APP_SECTIONS` in
+fairtrade) lists the code map by route only, so in every mode the header, the
+Cmd-K palette, and the transcript's touched-files list carry no code-map entry
+point. The gate would apply again only if the registry listed the code map in
+the nav. It never removes a route: `/map`, `/map/<project>`, and the
+`/projects/<name>/<id>` viewer deep links stay directly mounted and reachable in
+every mode. The shipped binary always contains the full feature.
 
 The `--experimental` flag currently maps to exactly one capability token,
 `code_map_navigation_v1`. It is not an "everything experimental" switch: each
@@ -121,11 +122,10 @@ just the code-map navigation entry points.
 $ peasant web start
 ```
 
-The nav shows `analytics · changes`. The map entry points are absent from the
-nav and the command palette, but the `/map`, `/map/<project>`, and
-`/projects/<name>/<id>` routes stay directly routable — in-page links such as a
-transcript's touched-files list still work — so nothing in the shell advertises
-the section while every route remains available.
+The header links only to home. The map entry points are absent from the
+header and the command palette, but the `/map`, `/map/<project>`, and
+`/projects/<name>/<id>` routes stay directly routable, so nothing in the shell
+advertises the section while every route remains available.
 
 ### Experimental
 
@@ -133,10 +133,10 @@ the section while every route remains available.
 $ peasant web start --experimental
 ```
 
-The dashboard restores the full three-section nav
-(`analytics · changes · code map`) plus the map palette commands. The flag is
-per-server-process: the same binary serves either shape, and the background
-fork (`peasant web start` without `--foreground`) forwards the flag.
+The server advertises `code_map_navigation_v1`, and the dashboard reads it, but
+the header and the palette are the same as on a default server: the registry
+keeps the code map route-only. The flag is per-server-process, and the
+background fork (`peasant web start` without `--foreground`) forwards it.
 
 ### Capability advertisement
 
@@ -155,7 +155,7 @@ advertised. Tokens come from a closed, Peasant-owned inventory; the wire envelop
 is owned by the [`github.com/peasant-labs/schema`](https://github.com/peasant-labs/schema)
 module. The gate is read once at runtime by the SPA in
 `web/src/contexts/ServerCapabilitiesContext.tsx`, which validates the response and
-**fails closed** (map entry points hidden) while loading and whenever the endpoint
+**fails closed** (no token advertised) while loading and whenever the endpoint
 is unreachable, malformed, or advertises no known token.
 
 ---
