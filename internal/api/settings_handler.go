@@ -34,7 +34,6 @@ const refusalKeyUnnamed = "(none)"
 // Error codes of the settings read.
 const (
 	settingsUnavailableCode           = "settings_unavailable"
-	settingsCatalogInvalidCode        = "settings_catalog_invalid"
 	settingsUnreadableCode            = "settings_unreadable"
 	settingsAutoPublishUnreadableCode = "settings_auto_publish_unreadable"
 	settingsValueNotAppliedCode       = "settings_value_not_applied"
@@ -87,17 +86,21 @@ func (l *liveConfig) apply(catalog []settingSpec, saved *config.Config) {
 // configuration file. config.yaml is the only store: `peasant config` and
 // every command read the same file.
 type settingsHandler struct {
+	// catalog is every key the routes serve, built when the server starts.
+	catalog []settingSpec
 	// path is the configuration file `peasant web start` loaded.
 	path string
-	// live receives each saved setting so the dashboard applies it at once.
+	// live receives the file after every good read and save, so the dashboard
+	// applies what the settings page shows.
 	live *liveConfig
 	// git detects the default user email when no configuration file exists,
 	// the way every command's config.Load does.
 	git ingest.GitResolver
 	// rules reads the saved auto-publish rules the GET answer carries.
 	rules *autoPublishHandler
-	// mu serializes updates, so two updates cannot both start from the same
-	// file and lose one of the changes.
+	// mu serializes reads and updates of the file and the live configuration,
+	// so two updates cannot both start from the same file and lose one of the
+	// changes, and a read never applies a file an update is replacing.
 	mu sync.Mutex
 }
 
@@ -110,33 +113,34 @@ func (h *settingsHandler) handleGetSettings(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusServiceUnavailable, "The settings could not be read because this server was started without a configuration file in internal/api.handleGetSettings. Nothing was read. Start the dashboard with `peasant web start`, then retry.", settingsUnavailableCode)
 		return
 	}
-	catalog, err := settingCatalog()
-	if err != nil {
-		slog.Error("settings: build the key catalog", "error", err)
-		writeAPIError(w, http.StatusInternalServerError, "The settings could not be listed because the settings catalog is invalid in internal/api.handleGetSettings: "+err.Error()+". Nothing was read. Report this defect.", settingsCatalogInvalidCode)
-		return
-	}
+	h.mu.Lock()
 	_, document, cfg, err := h.readConfig(r.Context())
+	if err == nil {
+		// The dashboard applies what the page is about to show, including a
+		// change made outside the page, such as with `peasant config`.
+		h.live.apply(h.catalog, cfg)
+	}
+	h.mu.Unlock()
 	if err != nil {
 		slog.Warn("settings: read the configuration file", "path", h.path, "error", err)
 		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be read from %s in internal/api.handleGetSettings: %v. Nothing was changed. Fix or restore the configuration file, then retry.", h.path, err), settingsUnreadableCode)
 		return
 	}
 	rules, err := h.rules.listRules(r)
+	if errors.Is(err, errAutoPublishStoreUnavailable) {
+		writeAPIError(w, http.StatusServiceUnavailable, "The settings could not be listed because the auto-publish rules need the session store, which this server runs without, in internal/api.handleGetSettings. Nothing was changed. "+autoPublishStoreRemedy, autoPublishUnavailableCode)
+		return
+	}
 	if err != nil {
 		slog.Warn("settings: read the auto-publish rules", "error", err)
-		status := http.StatusInternalServerError
-		if errors.Is(err, errAutoPublishStoreUnavailable) {
-			status = http.StatusServiceUnavailable
-		}
-		writeAPIError(w, status, fmt.Sprintf("The settings could not be listed because the auto-publish rules could not be read in internal/api.handleGetSettings: %v. Nothing was changed. Fix or remove the rules file, then retry.", err), settingsAutoPublishUnreadableCode)
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be listed because the auto-publish rules could not be read in internal/api.handleGetSettings, and nothing was changed: %v.", err), settingsAutoPublishUnreadableCode)
 		return
 	}
 	response := schema.LocalSettingsResponse{
-		Settings:    make([]schema.LocalSetting, 0, len(catalog)),
+		Settings:    make([]schema.LocalSetting, 0, len(h.catalog)),
 		AutoPublish: rules,
 	}
-	for _, spec := range catalog {
+	for _, spec := range h.catalog {
 		row, err := spec.row(document, cfg)
 		var notApplied *settingNotAppliedError
 		if errors.As(err, &notApplied) {
@@ -165,13 +169,7 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, "This server was started without a configuration file, so there is nothing to change. Nothing was changed. Start the dashboard with `peasant web start`, then retry.")
 		return
 	}
-	catalog, err := settingCatalog()
-	if err != nil {
-		slog.Error("settings: build the key catalog", "error", err)
-		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, "The settings catalog is invalid: "+err.Error()+". Nothing was changed. Report this defect.")
-		return
-	}
-	spec, ok := lookupSetting(catalog, request.Key)
+	spec, ok := lookupSetting(h.catalog, request.Key)
 	if !ok {
 		writeSettingRefusal(w, http.StatusBadRequest, request.Key, fmt.Sprintf("%s is not a setting. Nothing was changed. Use a key that GET %s lists.", request.Key, defaults.RouteSettings))
 		return
@@ -240,6 +238,9 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 		return
 	}
 	row, err := spec.row(document, saved)
+	if err == nil {
+		err = row.Validate()
+	}
 	if err != nil {
 		slog.Error("settings: render an updated setting", "key", spec.key, "error", err)
 		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be read back after the change: %v. Nothing was changed. Report this defect.", request.Key, err))
@@ -252,9 +253,10 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be saved: %v.", request.Key, err))
 		return
 	}
-	h.live.apply(catalog, saved)
+	h.live.apply(h.catalog, saved)
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &row)
+	// The row passed the contract check before the save.
+	_ = json.NewEncoder(w).Encode(row)
 }
 
 // requireOneYAMLDocument refuses a configuration file that holds more than one
@@ -311,14 +313,9 @@ func decodeSettingUpdate(body io.Reader) (schema.LocalSettingUpdateRequest, erro
 		Key string `json:"key"`
 	}
 	_ = json.Unmarshal(data, &named)
-	request := schema.LocalSettingUpdateRequest{Key: named.Key}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	var request schema.LocalSettingUpdateRequest
+	if err := decodeStrict(bytes.NewReader(data), &request); err != nil {
 		return schema.LocalSettingUpdateRequest{Key: named.Key}, err
-	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return request, errors.New("the body holds more than one JSON value")
 	}
 	return request, request.Validate()
 }

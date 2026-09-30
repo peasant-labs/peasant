@@ -155,7 +155,8 @@ func (s *Server) Listen(ctx context.Context) error {
 	// The settings catalog derives from the Config type and the `peasant
 	// config` registry. A defect there is a build defect: fail the start
 	// rather than the first settings request.
-	if _, err := settingCatalog(); err != nil {
+	catalog, err := buildSettingCatalog()
+	if err != nil {
 		return fmt.Errorf("settings catalog: %w", err)
 	}
 	mux := http.NewServeMux()
@@ -252,7 +253,7 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// Settings routes: every configuration key and auto-publish rule, and one
 	// key changed at a time.
-	settingsRoutes := &settingsHandler{path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}, rules: aph}
+	settingsRoutes := &settingsHandler{catalog: catalog, path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}, rules: aph}
 	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
 	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 

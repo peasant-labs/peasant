@@ -46,6 +46,10 @@ const (
 // errNoRule reports that no rule has the identifier.
 var errNoRule = errors.New("no auto-publish rule has this identifier")
 
+// autoPublishStoreRemedy is what to do when the server runs without the
+// session store the auto-publish rules need.
+const autoPublishStoreRemedy = "Start Peasant with its normal store, then retry."
+
 // errAutoPublishStoreUnavailable reports that the server runs without the
 // session store that names the recorded repositories.
 var errAutoPublishStoreUnavailable = errors.New("this server runs without its session store, which names the repositories Peasant recorded")
@@ -101,7 +105,7 @@ func (h *autoPublishHandler) ready(w http.ResponseWriter) bool {
 		return true
 	}
 	writeAPIError(w, http.StatusServiceUnavailable,
-		"The auto-publish rules could not be changed because this server runs without its session store, which names the repositories Peasant recorded. Nothing was changed. Start Peasant with its normal store, then retry.",
+		"The auto-publish rules could not be changed because this server runs without its session store, which names the repositories Peasant recorded. Nothing was changed. "+autoPublishStoreRemedy,
 		autoPublishUnavailableCode)
 	return false
 }

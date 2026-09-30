@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -35,8 +36,13 @@ func TestConfigShowsASettingSavedThroughTheLocalAPI(t *testing.T) {
 	go func() { served <- server.Serve(ctx) }()
 	t.Cleanup(func() {
 		cancel()
-		if err := <-served; err != nil {
-			t.Error(err)
+		select {
+		case err := <-served:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("the local server did not stop")
 		}
 	})
 	origin := "http://" + server.Addr().String()

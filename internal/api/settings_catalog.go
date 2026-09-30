@@ -2,13 +2,13 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -66,31 +66,39 @@ var settingReadOnly = []struct{ key, reason string }{
 
 // settingEffective resolves the value that applies for the keys whose stored
 // value is not already it: a raised redaction level, a visibility this version
-// publishes narrower, a tri-state field that defaults to on, and a concurrency
-// of 0 that means the CPU-derived default. A nil result means no value applies.
-var settingEffective = map[string]func(*config.Config) any{
-	"redaction.level": func(cfg *config.Config) any {
+// publishes narrower, a tri-state field that defaults to on, a concurrency of
+// 0 that means the CPU-derived default, and a push method no push applies. A
+// nil value means no value applies, and refused then says where the stored
+// value is refused.
+var settingEffective = map[string]func(*config.Config) (value any, refused string){
+	"redaction.level": func(cfg *config.Config) (any, string) {
 		if level := config.ResolveRedactionPolicy(cfg.Redaction.Level).Effective; level != "" {
-			return level
+			return level, ""
 		}
-		// A refused level applies nothing: every run that redacts refuses it.
-		return nil
+		return nil, "every command that redacts refuses it"
 	},
-	"push.visibility":         func(cfg *config.Config) any { return config.EffectiveVisibility("", cfg).Effective },
-	"push.fields.gitRemote":   func(cfg *config.Config) any { return cfg.Push.Fields.Resolve().GitRemote },
-	"push.fields.projectPath": func(cfg *config.Config) any { return cfg.Push.Fields.Resolve().ProjectPath },
-	"push.fields.projectName": func(cfg *config.Config) any { return cfg.Push.Fields.Resolve().ProjectName },
-	"push.concurrency": func(cfg *config.Config) any {
+	"push.method": func(cfg *config.Config) (any, string) {
+		if cfg.Push.Method == "" || slices.Contains(config.OfferedPushMethods, cfg.Push.Method) {
+			return cmp.Or(cfg.Push.Method, config.BaseConfig().Push.Method), ""
+		}
+		// Individual needs a session picker that does not exist yet: a push
+		// applies it only with --source-harness, which the dashboard's publish
+		// and a git hook's push never pass.
+		return nil, "the dashboard's publish and every git hook push refuse it"
+	},
+	"push.visibility":         func(cfg *config.Config) (any, string) { return config.EffectiveVisibility("", cfg).Effective, "" },
+	"push.fields.gitRemote":   func(cfg *config.Config) (any, string) { return cfg.Push.Fields.Resolve().GitRemote, "" },
+	"push.fields.projectPath": func(cfg *config.Config) (any, string) { return cfg.Push.Fields.Resolve().ProjectPath, "" },
+	"push.fields.projectName": func(cfg *config.Config) (any, string) { return cfg.Push.Fields.Resolve().ProjectName, "" },
+	"push.concurrency": func(cfg *config.Config) (any, string) {
 		concurrency, _ := push.ResolveConcurrency(false, 0, cfg.Push.Concurrency, runtime.NumCPU())
-		return concurrency
+		return concurrency, ""
 	},
 }
 
-// settingCatalog is every key of config.Config, in declaration order, each with
-// its metadata. It is derived once from the Config type and the `peasant
-// config` registry.
-var settingCatalog = sync.OnceValues(buildSettingCatalog)
-
+// buildSettingCatalog lists every key of config.Config, in declaration order,
+// each with its metadata, from the Config type and the `peasant config`
+// registry. The server builds it once, when it starts.
 func buildSettingCatalog() ([]settingSpec, error) {
 	var catalog []settingSpec
 	var walkErr error
@@ -272,12 +280,12 @@ func (s settingSpec) row(document *yaml.Node, cfg *config.Config) (schema.LocalS
 	if err != nil {
 		return schema.LocalSetting{}, err
 	}
-	effective, err := s.effectiveValue(cfg)
+	effective, refused, err := s.effectiveValue(cfg)
 	if err != nil {
 		return schema.LocalSetting{}, err
 	}
 	if !value.IsUnset() && effective.IsUnset() {
-		return schema.LocalSetting{}, &settingNotAppliedError{key: s.key, value: value, options: s.options}
+		return schema.LocalSetting{}, &settingNotAppliedError{key: s.key, value: value, refused: refused, options: s.options}
 	}
 	return schema.LocalSetting{
 		Key:             s.key,
@@ -306,33 +314,34 @@ func (s settingSpec) fileValue(document *yaml.Node) (schema.LocalSettingValue, e
 }
 
 // settingNotAppliedError reports that the configuration file names a value
-// this version applies nowhere: every run that reads it refuses it. The
-// contract has no row for such a value, so the settings read refuses instead
-// of claiming a value applies.
+// that applies nowhere the dashboard uses it. The contract has no row for such
+// a value, so the settings read refuses instead of claiming a value applies.
 type settingNotAppliedError struct {
 	key     string
 	value   schema.LocalSettingValue
+	refused string
 	options []string
 }
 
 func (e *settingNotAppliedError) Error() string {
-	return fmt.Sprintf("config.yaml sets %s to %s, which this version refuses wherever it applies the setting; set %s to one of %s with PATCH %s or in config.yaml",
-		e.key, e.value, e.key, quotedOptions(e.options), defaults.RouteSettings)
+	return fmt.Sprintf("config.yaml sets %s to %s, and %s; set %s to one of %s with PATCH %s or in config.yaml",
+		e.key, e.value, e.refused, e.key, quotedOptions(e.options), defaults.RouteSettings)
 }
 
-// effectiveValue is the value that applies under cfg.
-func (s settingSpec) effectiveValue(cfg *config.Config) (schema.LocalSettingValue, error) {
+// effectiveValue is the value that applies under cfg. When no value applies,
+// refused says where the stored value is refused.
+func (s settingSpec) effectiveValue(cfg *config.Config) (effective schema.LocalSettingValue, refused string, err error) {
 	var value any
 	if resolve, ok := settingEffective[s.key]; ok {
-		value = resolve(cfg)
+		value, refused = resolve(cfg)
 	} else {
 		field := reflect.ValueOf(cfg).Elem().FieldByIndex(s.index)
 		switch {
 		case s.kind == schema.LocalSettingChoice && !slices.Contains(s.options, field.String()):
 			if field.String() != "" {
-				// A stored choice the menu leaves out and nothing replaces
-				// applies nothing: every run that reads it refuses it.
-				return schema.LocalSettingNull(), nil
+				// Parse accepts only a type's closed set, and a menu without a
+				// resolver is that whole set, so this is a catalog defect.
+				return nil, "", fmt.Errorf("the stored value %q is outside the menu %s and no resolver names what applies; map it in settingEffective", field.String(), quotedOptions(s.options))
 			}
 			// An empty choice means the default applies.
 			field = reflect.ValueOf(config.BaseConfig()).Elem().FieldByIndex(s.index)
@@ -346,7 +355,8 @@ func (s settingSpec) effectiveValue(cfg *config.Config) (schema.LocalSettingValu
 		}
 		value = field.Interface()
 	}
-	return settingJSON(value)
+	effective, err = settingJSON(value)
+	return effective, refused, err
 }
 
 // settingJSON renders a configuration value as JSON with the yaml key names

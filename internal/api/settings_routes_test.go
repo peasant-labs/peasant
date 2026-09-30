@@ -79,6 +79,32 @@ func TestSettingsSavedThroughTheDashboardApplyAtOnce(t *testing.T) {
 	if after := preview(); !strings.Contains(after, probeRule) {
 		t.Errorf("the saved pattern %s is in config.yaml but the running dashboard does not apply it: %s", probeRule, after)
 	}
+
+	// A change made outside the page, as `peasant config` or a hand edit
+	// makes, applies once the settings page reads it, so the page never shows
+	// a value the dashboard does not apply.
+	const handRule = "settings-hand-probe"
+	edited := config.BaseConfig()
+	edited.Output.BasePath = basePath
+	edited.Redaction.CustomPatterns = []config.CustomPattern{{ID: handRule, Category: config.CategoryPII, Pattern: "here", Replacement: "[HERE]"}}
+	if err := config.SaveAtomic(path, edited); err != nil {
+		t.Fatal(err)
+	}
+	if before := preview(); strings.Contains(before, handRule) {
+		t.Fatalf("the preview applies %s before the settings read, so it cannot show the read taking effect: %s", handRule, before)
+	}
+	read, err := http.Get(baseURL + defaults.RouteSettings.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, read.Body)
+	read.Body.Close()
+	if read.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: status %d", defaults.RouteSettings, read.StatusCode)
+	}
+	if after := preview(); !strings.Contains(after, handRule) || strings.Contains(after, probeRule) {
+		t.Errorf("after the settings read the preview applies the file's patterns (%s, not %s): %s", handRule, probeRule, after)
+	}
 }
 
 // settingsRulesWorld is a mounted server over cfg, saved as config.yaml, with
