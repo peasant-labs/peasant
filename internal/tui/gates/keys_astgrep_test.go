@@ -62,10 +62,12 @@ type astGrepMatch struct {
 // rule outside this config (for example the repo-wide test-file migration-open
 // ban in ast-grep/) is reported by ast-grep as an unused suppression - a
 // diagnostic that is not a key-string hit and would otherwise be counted
-// against the key allowlist. Stale suppressions are still policed, just not
-// here: the repo-wide `ast-grep scan --error=unused-suppression --config
-// sgconfig.yml .` step in make check loads every rule, so a suppression that
-// no longer suppresses anything is an error and fails that step.
+// against the key allowlist. Stale suppressions for the ast-grep/ rules are
+// policed by the repo-wide `ast-grep scan --error=unused-suppression --config
+// sgconfig.yml .` step in make check, which loads those rules. That step does
+// not load the key rules, so a per-call suppression for a key rule is not a
+// supported mechanism: the key gate pins hit counts in its allowlist instead,
+// and a key-rule suppression fails the repo-wide step as unused.
 //
 // dir MUST be the root the rule configs' `files`/`ignores` globs (and the
 // paths ast-grep reports back) are relative to - verified empirically that
