@@ -168,9 +168,13 @@ func TestGoldenCacheCorruptFileRebuilds(t *testing.T) {
 	// Drain the hold so the next lookup re-validates, then corrupt the stamp.
 	// (Refcount cleanups run at test end; resetting the path here simulates a
 	// fresh process while the test still owns the file — no other test runs
-	// concurrently with this serial test.)
+	// concurrently with this serial test.) The read-once buffer is cleared too,
+	// so the second copy is written from the rebuilt file, not the cached
+	// pre-corruption bytes; otherwise a rebuild that published nothing would
+	// still pass.
 	goldenMu.Lock()
 	goldenPath, goldenRefs = "", 0
+	goldenBuf, goldenBufFor = nil, ""
 	goldenMu.Unlock()
 	if err := os.Chmod(template, 0o644); err != nil {
 		t.Fatal(err)
