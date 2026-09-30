@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -860,6 +861,44 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 // syncPushInvalidRequestCode marks a push request the typed contract refuses.
 const syncPushInvalidRequestCode = "sync_push_invalid_request"
 
+// syncPushRequestLimit bounds the push request body. A request names sessions
+// and collectives by identifier, so a megabyte holds thousands of each.
+const syncPushRequestLimit = 1 << 20
+
+// nullCollectiveList says why the body is refused when it sends collectives,
+// or one of its lists, as null. The contract declares them non-nullable, and
+// the typed decode would read null as an omitted list, so it is checked on the
+// raw body. It returns "" when the body sends no null list or is not an object.
+func nullCollectiveList(raw []byte) string {
+	var request struct {
+		Collectives json.RawMessage `json:"collectives"`
+	}
+	if json.Unmarshal(raw, &request) != nil || request.Collectives == nil {
+		return ""
+	}
+	if isJSONNull(request.Collectives) {
+		return "collectives is null; omit it to keep each transcript's audience"
+	}
+	var lists struct {
+		Add    json.RawMessage `json:"add"`
+		Remove json.RawMessage `json:"remove"`
+	}
+	if json.Unmarshal(request.Collectives, &lists) != nil {
+		return ""
+	}
+	if isJSONNull(lists.Add) {
+		return "collectives.add is null; omit a list you do not change"
+	}
+	if isJSONNull(lists.Remove) {
+		return "collectives.remove is null; omit a list you do not change"
+	}
+	return ""
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
 // villageUUIDPattern is the canonical lowercase form Village emits for a
 // collective, and the form the contract declares for collectives.add and
 // collectives.remove.
@@ -873,7 +912,17 @@ func decodeSyncPushRequest(body io.Reader) (schema.SyncPushRequest, push.Collect
 	refuse := func(why string) (schema.SyncPushRequest, push.CollectiveChanges, error) {
 		return schema.SyncPushRequest{}, push.CollectiveChanges{}, fmt.Errorf("what: the push request is not one this server accepts\nwhy: %s\nwhere: the JSON body of POST /api/v1/sync/push\nmeans: nothing was scanned, published, shared, or taken back\nfix: send {\"sessionIds\": [...], \"redactionLevel\"?: ..., \"collectives\"?: {\"add\"?: [...], \"remove\"?: [...]}} with no other field, then retry", why)
 	}
-	decoder := json.NewDecoder(body)
+	raw, err := io.ReadAll(io.LimitReader(body, syncPushRequestLimit+1))
+	if err != nil {
+		return refuse(fmt.Sprintf("the body could not be read: %v", err))
+	}
+	if len(raw) > syncPushRequestLimit {
+		return refuse(fmt.Sprintf("the body is larger than %d bytes", syncPushRequestLimit))
+	}
+	if why := nullCollectiveList(raw); why != "" {
+		return refuse(why)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
 		why := fmt.Sprintf("the body could not be read as the typed request: %v", err)
