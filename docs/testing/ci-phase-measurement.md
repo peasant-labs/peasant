@@ -31,7 +31,12 @@ The test command additionally reports its own internals:
   release-guard), the plan (`go test -list`) wall, the per-pass walls, and the
   combined test wall. The CI step summary carries the outer job-level split.
 - **arm64 lane:** the `make web-stub` step stamps `WEB_STUB_S`, so the Nix
-  install, the web stub, and the `go test` invocation can be separated.
+  install, the web stub, and the gate's subset invocation
+  (`cmd/testgate run -pkgs ./cmd/peasant/...,./internal/ingest/...`) can be
+  separated. Both lanes upload their out dir — `report.json` and the
+  per-package streams — as the `testgate-{amd64,arm64}-<run attempt>`
+  workflow artifacts (7-day retention), so a failed or hung lane can be
+  inspected offline (`cmd/testgate timing` reads a stream from stdin).
 
 ### Workflow changes that make the phases observable
 

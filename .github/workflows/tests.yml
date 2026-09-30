@@ -274,6 +274,14 @@ jobs:
         run: |
           set -euo pipefail
           start=$(date +%s)
+          # The gate's out dir follows its local convention — UTC-stamped
+          # $TESTGATE_OUT — redirected into $RUNNER_TEMP so the streams never
+          # touch the pool runner's persistent workspace; the GITHUB_ENV stamp
+          # is the artifact step's pointer to it. make check passes it through
+          # to `cmd/testgate run` unmodified.
+          TESTGATE_OUT="$RUNNER_TEMP/testgate/$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "TESTGATE_DIR=$TESTGATE_OUT" >> "$GITHUB_ENV"
+          export TESTGATE_OUT
           make check RACE=${{ env.RACE }}
           end=$(date +%s)
           {
@@ -295,6 +303,22 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
           key: ${{ steps.cache-go.outputs.cache-primary-key }}
+
+      # Durable gate evidence, matching the arm64 lane: report.json + the
+      # per-package go test -json streams (and stderr captures) from the out
+      # dir, inspectable offline (`testgate timing` reads a stream from stdin).
+      # The run_attempt suffix keeps a rerun from clashing with the prior
+      # attempt's artifact. A failure before the plan completes (registry,
+      # go list) leaves no out-dir at all — ignore keeps the upload from
+      # failing the already-failed job.
+      - name: Upload testgate streams
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: testgate-amd64-${{ github.run_attempt }}
+          path: ${{ env.TESTGATE_DIR }}
+          retention-days: 7
+          if-no-files-found: ignore
 
   # arm64 lane. `check` moved to the x86_64 pool, so arm64 signal would otherwise
   # disappear from CI entirely. This keeps it on a subset rather than the whole
@@ -377,7 +401,21 @@ jobs:
         run: |
           set -euo pipefail
           start=$(date +%s)
-          nix develop -c go test -timeout=30m ./cmd/peasant/... ./internal/ingest/...
+          # The gate machinery in subset mode: the plan comes from
+          # `go test -list`, the exactly-once screen is scoped to the plan (a
+          # planned package that emits no events fails), and the whole-suite
+          # budget is not applicable (TESTING.md, "Subset runs"). RACE=0 comes
+          # from the job env and -race=false pins it. The gate runs each
+          # package with -timeout=0, so this job's 20-minute cap is the wall.
+          # The out dir follows the gate's local convention — UTC-stamped
+          # $TESTGATE_OUT — and lands in $RUNNER_TEMP, not the workspace; the
+          # GITHUB_ENV stamp is the artifact step's pointer to it.
+          TESTGATE_OUT="$RUNNER_TEMP/testgate/$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "TESTGATE_DIR=$TESTGATE_OUT" >> "$GITHUB_ENV"
+          export TESTGATE_OUT
+          nix develop -c go run ./cmd/testgate run \
+            -pkgs ./cmd/peasant/...,./internal/ingest/... \
+            -race=false
           end=$(date +%s)
           {
             echo "### arm64 lane — phase wall"
@@ -386,7 +424,7 @@ jobs:
             echo "| --- | --- |"
             echo "| pre-test (job start -> test start) | $(( start - ${PHASE_START_S:-$start} )) |"
             echo "| — of which web stub | ${WEB_STUB_S:-n/a} |"
-            echo "| go test (arm64 subset) | $(( end - start )) |"
+            echo "| testgate subset | $(( end - start )) |"
             echo ""
             echo "Cache phases are the two \`cache (arm64)\` step durations (restore, then save)."
             echo "Reported, not budget-gated: the aggregate is assessed on the amd64 pool gate."
@@ -400,6 +438,24 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
           key: ${{ steps.cache-go.outputs.cache-primary-key }}
+
+      # Durable gate evidence: report.json + the per-package go test -json
+      # streams (and stderr captures) from the out dir, so a failed or hung
+      # lane can be inspected offline (testgate timing reads a stream from
+      # stdin). GitHub takes nothing structural from these; the artifact is
+      # the inspection surface, the step summary and exit code stay the gate.
+      # The run_attempt suffix keeps a rerun from clashing with the prior
+      # attempt's artifact. A failure before the plan completes (registry,
+      # go list) leaves no out-dir at all — ignore keeps the upload from
+      # failing the already-failed job.
+      - name: Upload testgate streams
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: testgate-arm64-${{ github.run_attempt }}
+          path: ${{ env.TESTGATE_DIR }}
+          retention-days: 7
+          if-no-files-found: ignore
 
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
