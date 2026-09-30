@@ -460,6 +460,26 @@ func (s Slot) UploadsFromForeignFile() bool {
 	return s.CarriesUploadSection() && executableByGit(s.Mode)
 }
 
+// Uploads reports whether git runs a village upload from this slot now: an
+// intact Peasant hook that git can execute and that names the repository it is
+// in, or a file Peasant may not touch that carries an upload section git runs.
+// It is the one answer to "does a commit or push here publish", so every
+// surface that reports it agrees.
+func (p Plan) Uploads() bool {
+	if p.UploadsFromForeignFile() {
+		return true
+	}
+	if !p.Managed() {
+		return false
+	}
+	for _, warning := range p.Warnings {
+		if warning.Kind == WarningHookNotExecutable || warning.Kind == WarningRepositoryMoved {
+			return false
+		}
+	}
+	return true
+}
+
 // Plan is the read-only answer to "what would install do for this event".
 type Plan struct {
 	Slot
