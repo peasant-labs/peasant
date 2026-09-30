@@ -41,12 +41,6 @@ import (
 // stale template.
 const cacheScheme = "v1"
 
-// cacheLockWait bounds the cross-process wait for a concurrent template
-// build: generous versus the observed ~20-60 s race-mode migration pass, so a
-// cold multi-package suite can serialize a few builds without ever waiting
-// forever. On deadline the waiter builds privately instead of failing.
-const cacheLockWait = 3 * time.Minute
-
 // buildDirMaxAge bounds orphaned build-* debris: a killed run's worst trace
 // is a build-* dir and a tiny lock file, reaped here on the next successful
 // build.
@@ -247,7 +241,11 @@ func cachedTemplateValid(dir, final string) bool {
 // into a build-* dir, publishes by atomic rename, and sweeps debris.
 func buildCachedGolden(t *testing.T, dir, final string) (string, bool) {
 	t.Helper()
-	release, err := filelock.Acquire(final+".lock", time.Now().Add(cacheLockWait))
+	// A zero deadline takes filelock.DefaultWait: generous versus the observed
+	// ~20-60 s race-mode migration pass, so a cold multi-package suite can
+	// serialize a few builds without waiting forever. On deadline the waiter
+	// builds privately instead of failing.
+	release, err := filelock.Acquire(final+".lock", time.Time{})
 	if err != nil {
 		return "", false
 	}

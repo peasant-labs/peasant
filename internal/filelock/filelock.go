@@ -14,9 +14,9 @@ import (
 	"time"
 )
 
-// DefaultWait is the bounded wait AcquireWithDeadline grants when the caller
-// passes a zero deadline: generous versus a migration pass, short enough that
-// a wedged holder never stalls a suite forever.
+// DefaultWait is the bounded wait Acquire grants when the caller passes a zero
+// deadline: generous versus a migration pass, short enough that a wedged
+// holder never stalls a suite forever.
 const DefaultWait = 3 * time.Minute
 
 // ReleaseFunc releases a lock acquired by Acquire. It closes the underlying
@@ -28,8 +28,6 @@ type ReleaseFunc func() error
 // context.DeadlineExceeded) so a deadline failure is distinguishable from a
 // cancelled caller context at the call site.
 var errDeadline = errors.New("filelock: deadline exceeded while waiting for the exclusive lock")
-
-func errDeadlineExceeded(_ time.Time) error { return errDeadline }
 
 // Acquire takes an exclusive advisory lock on the file at path, creating it
 // if needed, and returns its release function. The wait is bounded by
