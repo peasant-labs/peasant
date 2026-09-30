@@ -13,12 +13,13 @@ set -e; \
 	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
 endef
 
-# The race detector for `make check`. On by default (local runs and, in CI, the
-# release PRs and post-merge pushes that must carry full race coverage). CI
-# feature PRs pass RACE=0 to skip it: the detector amplifies the suite ~3x-16x
-# for wall time the budget can't spend on every PR, and the concurrency it
-# guards is re-tested with -race on release PRs and post-merge. See the make
-# check step in .github/workflows/tests.yml.
+# The race detector for `make check`. On by default (local runs). CI passes
+# RACE=0 for every event: the detector amplifies the suite ~3x-16x for wall
+# time the gate's budget can't spend, and the release-only race predicate that
+# used to carry release/post-merge race coverage is currently disabled (the
+# race suite does not fit the 30-minute gate budget; the re-enable note lives
+# in the check job of .github/workflows/tests.yml, pending #389). The gate
+# still plans and screens under RACE=0; local `make check` keeps the detector.
 RACE ?= 1
 GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
 
@@ -109,11 +110,11 @@ check: fmt lint
 	# only its own rules, so it cannot make that judgement - hence the flag is
 	# on the repo-wide scan, not on the key gate.
 	#
-	# The race detector (GORACE_FLAG) is on by default and gated to RACE=0 on CI
-	# feature PRs; see the RACE variable above. When RACE=0 the gate runs a single
-	# no-race pass but still plans and screens. cmd/peasant and internal/api
-	# exceed Go's 10m default under race, so the gate sets -timeout=0 and lets
-	# the job's own budget apply.
+	# The race detector (GORACE_FLAG) is on by default; CI passes RACE=0 for
+	# every event (see the RACE variable above). When RACE=0 the gate runs a
+	# single no-race pass but still plans and screens. cmd/peasant and
+	# internal/api exceed Go's 10m default under race, so the gate sets
+	# -timeout=0 and lets the job's own budget apply.
 
 # Explicit revisions keep the expensive cross-revision check out of ordinary builds.
 .PHONY: check-harvester-versions
