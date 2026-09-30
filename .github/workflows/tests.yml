@@ -355,12 +355,9 @@ jobs:
     # testable); the cap is wedging protection only. It is NOT gated on the
     # 5-minute aggregate, which is assessed on the amd64 pool gate.
     timeout-minutes: 20
-    # RACE=0 is the lane's no-race posture, enforced at the job boundary: make
-    # honors it via GORACE_FLAG, and cmd/testgate reads $RACE directly for its
-    # -race default, so the env keeps the race pass off regardless of whether
-    # the step below invokes make, plain go test, or testgate.
-    env:
-      RACE: '0'
+    # The lane's no-race posture is pinned explicitly by -race=false in the
+    # test step below: the gate's -race flag defaults ON, so the flag is the
+    # single driver. No RACE env is set here — the gate reads no environment.
     steps:
       # Job-start clock for the phase report (covers checkout, the Nix install,
       # cache restore, and the web stub).
@@ -404,9 +401,10 @@ jobs:
           # The gate machinery in subset mode: the plan comes from
           # `go test -list`, the exactly-once screen is scoped to the plan (a
           # planned package that emits no events fails), and the whole-suite
-          # budget is not applicable (TESTING.md, "Subset runs"). RACE=0 comes
-          # from the job env and -race=false pins it. The gate runs each
-          # package with -timeout=0, so this job's 20-minute cap is the wall.
+          # budget is not applicable (TESTING.md, "Subset runs"). The gate's
+          # -race flag defaults ON, so -race=false pins the lane's no-race
+          # posture explicitly. The gate runs each package with -timeout=0, so
+          # this job's 20-minute cap is the wall.
           # The out dir follows the gate's local convention — UTC-stamped
           # $TESTGATE_OUT — and lands in $RUNNER_TEMP, not the workspace; the
           # GITHUB_ENV stamp is the artifact step's pointer to it.

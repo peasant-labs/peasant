@@ -19,7 +19,10 @@ endef
 # used to carry release/post-merge race coverage is currently disabled (the
 # race suite does not fit the 30-minute gate budget; the re-enable note lives
 # in the check job of .github/workflows/tests.yml, pending #389). The gate
-# still plans and screens under RACE=0; local `make check` keeps the detector.
+# still plans and screens under -race=false; local `make check` keeps the
+# detector. RACE is a make variable, not an environment contract: the gate is
+# driven by its -race flag, which this target passes explicitly, and the
+# astgrep pass below reads GORACE_FLAG from the same source.
 RACE ?= 1
 GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
 
@@ -94,7 +97,7 @@ check: fmt lint
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
-	RACE=$(RACE) go run ./cmd/testgate run
+	go run ./cmd/testgate run -race=$(RACE)
 	# The gate above replaces the single `go test` pass. It computes the run
 	# plan from `go test -list`, runs a race pass and a no-race pass (or one
 	# no-race pass when RACE=0), merges the streams, and applies the
@@ -111,8 +114,9 @@ check: fmt lint
 	# on the repo-wide scan, not on the key gate.
 	#
 	# The race detector (GORACE_FLAG) is on by default; CI passes RACE=0 for
-	# every event (see the RACE variable above). When RACE=0 the gate runs a
-	# single no-race pass but still plans and screens. cmd/peasant and
+	# every event (see the RACE variable above). The gate is driven by its
+	# -race flag, which the invocation passes explicitly; with RACE=0 it runs
+	# a single no-race pass but still plans and screens. cmd/peasant and
 	# internal/api exceed Go's 10m default under race, so the gate sets
 	# -timeout=0 and lets the job's own budget apply.
 
