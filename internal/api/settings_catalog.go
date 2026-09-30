@@ -43,6 +43,8 @@ type settingSpec struct {
 var settingChoices = map[string]func() []string{
 	"redaction.level":      func() []string { return stringsOf(config.OfferedRedactionLevels) },
 	"push.method":          func() []string { return stringsOf(config.OfferedPushMethods) },
+	// Keep local wins over stored auto-publish intent.
+	"push.autoPublishIntent": func(cfg *config.Config) (any, string) { return cfg.Push.AutoPublishIntended(), "" },
 	"push.visibility":      func() []string { return stringsOf(schema.AllVisibilities) },
 	"push.sharePreference": func() []string { return stringsOf(config.AllSharePreferences) },
 	"push.license":         func() []string { return append([]string{""}, stringsOf(schema.AllLicenses)...) },
