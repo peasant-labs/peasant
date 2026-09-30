@@ -212,8 +212,18 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteSyncRedactions.String(), sh.handleSyncRedactions)
 	mux.HandleFunc("POST "+defaults.RouteSyncPush.String(), sh.handleSyncPush)
 	mux.HandleFunc("POST "+defaults.RouteSyncLogin.String(), sh.handleSyncLogin)
+	mux.HandleFunc("POST "+defaults.RouteSyncLogout.String(), sh.handleSyncLogout)
 	mux.HandleFunc("POST "+defaults.RouteSyncIngest.String(), sh.handleSyncIngest)
 	mux.HandleFunc("GET "+defaults.RouteSyncIngestStatus.String(), sh.handleSyncIngestStatus)
+
+	// Publishing reads: the publication state of sessions and the Village
+	// collectives the user can publish to.
+	ph := &publishingHandler{store: s.cfg.Store, configHome: s.cfg.ConfigHome}
+	if selection, ok := s.cfg.Provider.(selectionScopeReader); ok {
+		ph.selection = selection
+	}
+	mux.HandleFunc("GET "+defaults.RoutePublications.String(), ph.handlePublications)
+	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
 
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {

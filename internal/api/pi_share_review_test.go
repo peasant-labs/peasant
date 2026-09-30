@@ -81,7 +81,7 @@ func TestPiShareReviewProductionRoute(t *testing.T) {
 				}
 				return
 			}
-			var result groupedRedactionResponse
+			var result schema.SyncRedactionsResponse
 			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}

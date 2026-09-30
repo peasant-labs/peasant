@@ -1,0 +1,56 @@
+# Suggestions GET /api/v1/village/collectives?sessionId= computes for one
+# collective. The server compares schema.RemoteLabel of the session's git
+# remote with the collective's linked repositories and its linked GitHub
+# organization, so a client never normalizes a remote. A linked repository is
+# the more specific reason and wins over the organization. GitHub resolves
+# names case-insensitively, and a collective links only GitHub accounts.
+#
+# expect is the reason and match, or none.
+requiredNames:
+  - linked-repository-from-an-scp-remote
+  - linked-repository-from-an-https-remote
+  - linked-repository-ignores-case
+  - linked-organization
+  - repository-wins-over-organization
+  - another-host-never-matches
+  - another-organization-does-not-match
+  - no-remote-no-suggestion
+
+cases:
+  - name: linked-repository-from-an-scp-remote
+    remote: git@github.com:acme/tools.git
+    repositories: [acme/tools]
+    expect: {reason: linked_repository, match: "github.com:acme/tools"}
+  - name: linked-repository-from-an-https-remote
+    remote: https://github.com/acme/tools.git
+    repositories: [acme/other, acme/tools]
+    expect: {reason: linked_repository, match: "github.com:acme/tools"}
+  - name: linked-repository-ignores-case
+    remote: https://github.com/ACME/Tools
+    repositories: [acme/tools]
+    expect: {reason: linked_repository, match: "github.com:acme/tools"}
+  - name: linked-organization
+    remote: git@github.com:Acme/website.git
+    organization: acme
+    repositories: [acme/tools]
+    expect: {reason: linked_github_org, match: acme}
+  - name: repository-wins-over-organization
+    remote: git@github.com:acme/tools.git
+    organization: acme
+    repositories: [acme/tools]
+    expect: {reason: linked_repository, match: "github.com:acme/tools"}
+  - name: another-host-never-matches
+    remote: git@gitlab.com:acme/tools.git
+    organization: acme
+    repositories: [acme/tools]
+    expect: {}
+  - name: another-organization-does-not-match
+    remote: git@github.com:someone/tools.git
+    organization: acme
+    repositories: [acme/tools]
+    expect: {}
+  - name: no-remote-no-suggestion
+    remote: ""
+    organization: acme
+    repositories: [acme/tools]
+    expect: {}

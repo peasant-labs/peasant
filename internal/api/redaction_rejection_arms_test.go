@@ -229,7 +229,7 @@ func TestSyncEndpoints_OmittedLevelResolvesToAnOfferedLevel(t *testing.T) {
 
 	// The push endpoint's fill-in, same reasoning. It is checked before credential
 	// access, so an unauthenticated request still reaches the level validation.
-	body := `{"sessionIds":["` + syncValidationSessionID + `"],"visibility":"private"}`
+	body := `{"sessionIds":["` + syncValidationSessionID + `"]}`
 	pushRequest := httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(body))
 	pushResponse := httptest.NewRecorder()
 	handler := &syncHandler{store: new(store.Store), config: new(config.Config)}

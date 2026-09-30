@@ -4,14 +4,8 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
-	"mime"
-	"mime/multipart"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -140,19 +134,23 @@ func runShareStepsCase(t *testing.T, fixture shareStepsFixture, c shareStepsCase
 	db := seedShareSession(t, c.Session == shareSessionMissingModel)
 	sessionID := testutil.TestSessionUUID
 
-	remote := newShareVillage(t, fixture.Collectives)
-	for _, alias := range c.Village.FailShare {
-		remote.failShare[fixture.Collectives[alias].ID] = true
+	declared := make([]testutil.VillageCollective, 0, len(fixture.Collectives))
+	for alias, collective := range fixture.Collectives {
+		declared = append(declared, testutil.VillageCollective{ID: collective.ID, Name: alias, Acceptance: collective.Acceptance, Member: collective.Member})
 	}
-	remote.failShareRead = c.Village.FailShareRead
+	remote := testutil.NewCollectiveVillage(t, declared...)
+	for _, alias := range c.Village.FailShare {
+		remote.FailShare(fixture.Collectives[alias].ID)
+	}
+	remote.FailShareRead(c.Village.FailShareRead)
 	if c.Village.WaitingPullRequest {
-		remote.promptRequests = []schema.VillagePromptRequest{
-			{Owner: "user", Name: "repo", Number: 7, State: schema.VillagePullRequestAttachmentWaiting, Remote: "user/repo", HeadRemote: "user/repo", RequestedAt: time.Unix(1700000000, 0).UTC()},
-			{Owner: "someone", Name: "other", Number: 8, State: schema.VillagePullRequestAttachmentWaiting, Remote: "someone/other", HeadRemote: "someone/other", RequestedAt: time.Unix(1700000000, 0).UTC()},
-		}
+		remote.SetPromptRequests(
+			schema.VillagePromptRequest{Owner: "user", Name: "repo", Number: 7, State: schema.VillagePullRequestAttachmentWaiting, Remote: "user/repo", HeadRemote: "user/repo", RequestedAt: time.Unix(1700000000, 0).UTC()},
+			schema.VillagePromptRequest{Owner: "someone", Name: "other", Number: 8, State: schema.VillagePullRequestAttachmentWaiting, Remote: "someone/other", HeadRemote: "someone/other", RequestedAt: time.Unix(1700000000, 0).UTC()},
+		)
 	}
 
-	creds := &auth.Credentials{APIKey: "test-key", KeyID: "key-1", UserID: "user-1", Username: "tester", VillageURL: remote.server.URL}
+	creds := &auth.Credentials{APIKey: "test-key", KeyID: "key-1", UserID: "user-1", Username: "tester", VillageURL: remote.URL()}
 	cfg := config.BaseConfig()
 	cfg.Output.BasePath = filepath.Join(t.TempDir(), "peasant-sync")
 	cfg.Push.Visibility = schema.VisibilityPublic
@@ -184,10 +182,10 @@ func runShareStepsCase(t *testing.T, fixture shareStepsFixture, c shareStepsCase
 		}
 	}
 	if c.Village.Unreachable {
-		remote.server.Close()
+		remote.Close()
 	}
-	remote.setRequiresNewerPeasant(c.Village.RequiresNewerPeasant)
-	publishesBefore := remote.publishCount()
+	remote.RequireNewerPeasant(c.Village.RequiresNewerPeasant)
+	publishesBefore := len(remote.Publishes())
 	published, err := publish(push.CollectiveChanges{Add: ids(c.Request.Add), Remove: ids(c.Request.Remove)})
 	if err != nil {
 		t.Fatalf("publish: %v", err)
@@ -233,12 +231,21 @@ func runShareStepsCase(t *testing.T, fixture shareStepsFixture, c shareStepsCase
 	if len(result.WaitingPullRequests) != c.Expect.WaitingPullRequests {
 		t.Errorf("waitingPullRequests = %+v, want %d for the session's repository", result.WaitingPullRequests, c.Expect.WaitingPullRequests)
 	}
-	if sent := remote.publishCount() - publishesBefore; sent != *c.Expect.Publishes {
+	if sent := len(remote.Publishes()) - publishesBefore; sent != *c.Expect.Publishes {
 		t.Errorf("Village received %d publish requests, want %d", sent, *c.Expect.Publishes)
 	}
-	remote.assertPrivateWithoutLicense(t)
+	// The configuration names a default license and a public visibility; a
+	// publish from the local web sends neither.
+	for i, request := range remote.Publishes() {
+		if request.License != "" {
+			t.Errorf("publish %d carried license %q; a publish from the local web sends none", i, request.License)
+		}
+	}
+	if updates := remote.OwnerUpdates(); updates != 0 {
+		t.Errorf("Village received %d owner updates; a publish from the local web opens private and changes no visibility", updates)
+	}
 
-	audience := remote.audience()
+	audience := remote.Audience(testutil.TestSessionUUID)
 	want := map[schema.VillageUUID]schema.VillageShareStatus{}
 	for alias, status := range c.Expect.Audience {
 		want[fixture.Collectives[alias].ID] = status
@@ -321,220 +328,4 @@ func seedShareSession(t *testing.T, missingModel bool) *store.Store {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
-}
-
-// shareVillage keeps one transcript and its collectives the way Village does.
-type shareVillage struct {
-	server      *httptest.Server
-	collectives map[schema.VillageUUID]shareStepsCollective
-	names       map[schema.VillageUUID]string
-
-	mu             sync.Mutex
-	exists         bool
-	shares         map[schema.VillageUUID]schema.VillageShareStatus
-	publishes      []schema.AuthoritativePublishRequest
-	ownerUpdates   int
-	failShare      map[schema.VillageUUID]bool
-	failShareRead  bool
-	promptRequests []schema.VillagePromptRequest
-	// requiresNewerPeasant makes Village advertise a push contract window that
-	// starts above this build's, so the push stops before it sends anything.
-	requiresNewerPeasant bool
-}
-
-func (v *shareVillage) setRequiresNewerPeasant(required bool) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.requiresNewerPeasant = required
-}
-
-func newShareVillage(t *testing.T, declared map[string]shareStepsCollective) *shareVillage {
-	t.Helper()
-	v := &shareVillage{
-		collectives: map[schema.VillageUUID]shareStepsCollective{},
-		names:       map[schema.VillageUUID]string{},
-		shares:      map[schema.VillageUUID]schema.VillageShareStatus{},
-		failShare:   map[schema.VillageUUID]bool{},
-	}
-	for alias, collective := range declared {
-		v.collectives[collective.ID] = collective
-		v.names[collective.ID] = alias
-	}
-	transcriptPrefix := "/api/v1/transcripts/" + testutil.TestSessionUUID
-	v.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/schema/version":
-			window := schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1}}
-			v.mu.Lock()
-			if v.requiresNewerPeasant {
-				window.MinPushContractVersion, window.PushContractVersion = "99.0.0", "99.0.0"
-			}
-			v.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(window)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/transcripts/publish":
-			v.publish(t, w, r)
-		case r.Method == http.MethodPatch && r.URL.Path == transcriptPrefix:
-			v.mu.Lock()
-			v.ownerUpdates++
-			v.mu.Unlock()
-			t.Errorf("a publish from the local web sent an owner update; it must keep the audience and license")
-			http.Error(w, `{"error":"unexpected owner update"}`, http.StatusInternalServerError)
-		case r.Method == http.MethodPost && r.URL.Path == transcriptPrefix+"/share":
-			v.share(t, w, r)
-		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, transcriptPrefix+"/share/"):
-			v.mu.Lock()
-			delete(v.shares, schema.VillageUUID(strings.TrimPrefix(r.URL.Path, transcriptPrefix+"/share/")))
-			v.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(schema.VillageStatusResponse{Status: "unshared"})
-		case r.Method == http.MethodGet && r.URL.Path == transcriptPrefix:
-			v.readShares(w)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/users/me/prompt-requests":
-			v.mu.Lock()
-			requests := append([]schema.VillagePromptRequest{}, v.promptRequests...)
-			v.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(schema.VillagePromptRequestsResponse{Requests: requests})
-		default:
-			t.Errorf("unexpected Village request %s %s", r.Method, r.URL.Path)
-			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(v.server.Close)
-	return v
-}
-
-func (v *shareVillage) publish(t *testing.T, w http.ResponseWriter, r *http.Request) {
-	metadata := multipartField(t, r, "metadata")
-	request, err := schema.DecodeAuthoritativePublishRequest([]byte(metadata))
-	if err != nil {
-		t.Errorf("decode publish request: %v", err)
-		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
-		return
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	created := !v.exists
-	v.exists = true
-	v.publishes = append(v.publishes, request)
-	raw, err := testutil.AuthoritativePublishReceiptFromRequest(request, created)
-	var receipt schema.AuthoritativePublishResponse
-	if err == nil {
-		err = json.Unmarshal(raw, &receipt)
-	}
-	if err != nil {
-		t.Errorf("build receipt: %v", err)
-		http.Error(w, `{"error":"receipt"}`, http.StatusInternalServerError)
-		return
-	}
-	// Content lands private; a transcript shared with a collective keeps that
-	// audience when it is updated.
-	if len(v.shares) > 0 {
-		receipt.Visibility = schema.VisibilityGroup
-		receipt.Applied.NormalizedValues.Visibility = schema.VisibilityGroup
-	}
-	if created {
-		w.WriteHeader(http.StatusCreated)
-	}
-	_ = json.NewEncoder(w).Encode(receipt)
-}
-
-func (v *shareVillage) share(t *testing.T, w http.ResponseWriter, r *http.Request) {
-	var request schema.VillageShareTranscriptRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.GroupIDs) != 1 {
-		t.Errorf("share request %+v, %v: the client shares with one collective per request", request, err)
-		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
-		return
-	}
-	id := request.GroupIDs[0]
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.failShare[id] {
-		http.Error(w, `{"error":"Could not record the submission of this transcript"}`, http.StatusInternalServerError)
-		return
-	}
-	if status, live := v.shares[id]; live && (status == schema.VillageShareStatusPending || status == schema.VillageShareStatusApproved) {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(schema.VillageErrorResponse{Error: "This transcript is already submitted to 1 collective"})
-		return
-	}
-	// Village skips a collective the caller is not a member of without an error.
-	if collective, known := v.collectives[id]; known && collective.Member {
-		status := schema.VillageShareStatusApproved
-		if collective.Acceptance == schema.VillageGroupAcceptanceCurated {
-			status = schema.VillageShareStatusPending
-		}
-		v.shares[id] = status
-	}
-	shares := make([]schema.VillageTranscriptShare, 0, len(v.shares))
-	for shared := range v.shares {
-		shares = append(shares, schema.VillageTranscriptShare{GroupID: shared, GroupName: v.names[shared], SharedAt: time.Unix(1700000000, 0).UTC()})
-	}
-	_ = json.NewEncoder(w).Encode(shares)
-}
-
-func (v *shareVillage) readShares(w http.ResponseWriter) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.failShareRead {
-		http.Error(w, `{"error":"Failed to read the transcript"}`, http.StatusInternalServerError)
-		return
-	}
-	shares := make([]schema.VillageEnrichedTranscriptShare, 0, len(v.shares))
-	for id, status := range v.shares {
-		shares = append(shares, schema.VillageEnrichedTranscriptShare{TranscriptID: testutil.TestSessionUUID, GroupID: id, GroupName: v.names[id], AcceptanceMode: v.collectives[id].Acceptance, Status: status, SharedAt: time.Unix(1700000000, 0).UTC()})
-	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"enriched_shares": shares})
-}
-
-func (v *shareVillage) publishCount() int {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return len(v.publishes)
-}
-
-func (v *shareVillage) audience() map[schema.VillageUUID]schema.VillageShareStatus {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	out := make(map[schema.VillageUUID]schema.VillageShareStatus, len(v.shares))
-	for id, status := range v.shares {
-		out[id] = status
-	}
-	return out
-}
-
-// assertPrivateWithoutLicense checks that no publish carried a license, although
-// the configuration names a default one, and that no owner update moved the
-// transcript to the configured public visibility.
-func (v *shareVillage) assertPrivateWithoutLicense(t *testing.T) {
-	t.Helper()
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	for i, request := range v.publishes {
-		if request.License != "" {
-			t.Errorf("publish %d carried license %q; a publish from the local web sends none", i, request.License)
-		}
-	}
-	if v.ownerUpdates != 0 {
-		t.Errorf("Village received %d owner updates; a publish from the local web opens private and changes no visibility", v.ownerUpdates)
-	}
-}
-
-func multipartField(t *testing.T, r *http.Request, name string) string {
-	t.Helper()
-	_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil {
-		t.Errorf("publish content type: %v", err)
-		return ""
-	}
-	reader := multipart.NewReader(r.Body, params["boundary"])
-	for {
-		part, err := reader.NextPart()
-		if err != nil {
-			return ""
-		}
-		if part.FormName() == name {
-			data, _ := io.ReadAll(part)
-			return string(data)
-		}
-	}
 }
