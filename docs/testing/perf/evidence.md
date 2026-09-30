@@ -554,9 +554,9 @@ ignores `internal/store/migrations_test.go`, `internal/store/migration*_test.go`
 **Binary version matters.** The pinned devShell binary is ast-grep 0.45.0, which
 honours `// ast-grep-ignore: <rule-id> -- <reason>` (trailing reason text). The
 host's `/run/current-system/sw/bin/ast-grep` 0.42.1 does not: it treats the
-reason as part of the rule id, reports all 10 suppressions as unused, and fails
-the scan with 10 errors. Run the scan inside the devShell (`nix develop`), as
-`make check` and CI do.
+reason as part of the rule id, reports every suppression as unused, and fails
+the scan with one error per suppression. Run the scan inside the devShell
+(`nix develop`), as `make check` and CI do.
 
 ### Scan counts
 
@@ -604,9 +604,6 @@ checks. A golden copy with the skip would bypass the code under test.
 | `internal/store/store_test.go:140` | B | first open of the idempotent-reopen pair creates the database |
 | `internal/store/store_test.go:161` | B | second open must replay the migrating path on an existing file |
 | `internal/store/mixed_index_formats_test.go:99` | C | custom formats and conversion edges registered at open (persist/convert/rollback) |
-| `internal/store/mixed_index_formats_test.go:157` | C | reopen with the custom handler (stable reads after reopen) |
-| `internal/store/mixed_index_formats_test.go:240` | C | reopen with the default registry reaches the unsupported-format refusal, which only the non-skip open path runs |
-| `internal/store/mixed_index_formats_test.go:461` | C | invalid registry edges must fail the open itself and leave the path uncreated |
 | `internal/store/mixed_index_formats_test.go:514` | C | pipeline upgrade case registers its declaring harness format at open |
 | `internal/store/index_input_transactions_test.go:81` | C | conditional conversion transactions register a fault-scoped handler and edge at open |
 | `internal/store/publication_projection_test.go:66` | benchmark setup | `storetest` takes `*testing.T`, so it cannot serve a `*testing.B`; the one open runs outside the timed section |
