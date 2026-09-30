@@ -102,7 +102,7 @@ type helperGroupListingItem struct {
 	NestedMemberGroups []helperGroupListingNestedGroup `yaml:"nestedMemberGroups"`
 	// SyncStatus is asserted on the sync route only: the grouped sync row must
 	// carry the same status the flat sync route computes for that session.
-	SyncStatus string `yaml:"syncStatus"`
+	SyncStatus schema.SyncStatus `yaml:"syncStatus"`
 }
 
 // helperGroupListingNestedGroup asserts a helper that itself owns saved helpers:
