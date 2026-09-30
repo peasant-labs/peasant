@@ -154,8 +154,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}
-				// ast-grep-ignore: no-migrating-store-open-in-tests -- tests that a reopen with a custom format handler keeps stored evidence readable and unchanged; requires the migration path to run on the reopen.
-				db, err = store.Open(path, store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{}))
+				db, err = store.Open(path, store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{}), store.WithSkipMigrations())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -237,8 +236,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}
-				// ast-grep-ignore: no-migrating-store-open-in-tests -- tests that a default-registry reopen reports an unsupported stored index format while metadata stays reachable; requires the migration path to run on that reopen.
-				db, err = store.Open(path, store.WithPoolSize(1))
+				db, err = store.Open(path, store.WithPoolSize(1), store.WithSkipMigrations())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -458,8 +456,7 @@ func TestMixedIndexFormatRegistrationRejectsInvalidEdgesBeforeOpening(t *testing
 				edge.Convert = nil
 				options = append(options, store.WithIndexFormatConversions(edge))
 			}
-			// ast-grep-ignore: no-migrating-store-open-in-tests -- tests that an invalid index-format registry fails the open itself and leaves the database path uncreated; requires the full migrating open to prove the failure.
-			db, err := store.Open(path, options...)
+			db, err := store.Open(path, append(options, store.WithSkipMigrations())...)
 			if err == nil {
 				db.Close()
 				t.Fatal("invalid registry opened a database")
