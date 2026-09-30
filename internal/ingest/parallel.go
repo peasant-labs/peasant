@@ -598,9 +598,12 @@ func NewStagingBuffer(capacity int, arenaSizeBytes int64) *StagingBuffer {
 // the gap.
 //
 // If the arena has insufficient free space the call sleeps with bounded
-// backoff until Drain reclaims enough bytes. Returns (-1, 0, 0) if src is nil
-// or empty (no copy). Panics if src is larger than the arena — size the arena
-// appropriately.
+// backoff until Drain reclaims enough bytes. A wrapping claim fits only when
+// the payload is no larger than the physical start offset it wraps from, so a
+// payload larger than half the arena can be unplaceable when it must wrap;
+// keeping the arena at least twice the largest single payload keeps every wrap
+// satisfiable. Returns (-1, 0, 0) if src is nil or empty (no copy). Panics if
+// src is larger than the arena — size the arena appropriately.
 func (b *StagingBuffer) copyToArena(src []byte) (start, length, pad int64) {
 	if len(src) == 0 {
 		return -1, 0, 0
@@ -656,8 +659,8 @@ func (b *StagingBuffer) copyToArena(src []byte) (start, length, pad int64) {
 
 // Add stores a completed workerResult in the buffer. The transcriptData
 // payload (if any) is copied into the arena slab; the stored result's
-// transcriptData slice points into the arena. Add spins if the arena is
-// full until Drain reclaims space.
+// transcriptData slice points into the arena. Add sleeps with bounded backoff
+// when the arena is full and resumes as Drain + AckBatch reclaim space.
 //
 // Add is safe to call from multiple producer goroutines concurrently.
 // Returns false only if the slot array is exhausted (capacity limit hit).

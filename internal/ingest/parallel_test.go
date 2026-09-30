@@ -476,6 +476,12 @@ func TestStagingBuffer_WrapGapIsReleasedWithTheCopy(t *testing.T) {
 		if used := b.ArenaUsed(); used != 0 {
 			t.Fatalf("cycle %d: arena still holds %d bytes after every copy was acked; a wrap leaked capacity", cycle, used)
 		}
+		// ArenaUsed clamps a negative value to zero, so compare the raw
+		// counters too: freeing the wrap gap twice would still read as zero
+		// used, while the tail would have overshot the head.
+		if head, tail := b.arenaHead.Load(), b.arenaTail.Load(); head != tail {
+			t.Fatalf("cycle %d: arena head = %d, tail = %d after every copy was acked; want them equal", cycle, head, tail)
+		}
 	}
 }
 
@@ -515,6 +521,12 @@ func TestStagingBuffer_WrapGapReleasedWhenTheSlotArrayIsExhausted(t *testing.T) 
 	// empty again.
 	if used := b.ArenaUsed(); used != 0 {
 		t.Fatalf("arena used = %d after the rollback, want 0; the rollback lost the wrap gap", used)
+	}
+	// ArenaUsed clamps a negative value to zero, so compare the raw counters
+	// too: freeing the wrap gap twice would still read as zero used, while the
+	// tail would have overshot the head.
+	if head, tail := b.arenaHead.Load(), b.arenaTail.Load(); head != tail {
+		t.Fatalf("arena head = %d, tail = %d after the rollback, want them equal", head, tail)
 	}
 }
 
