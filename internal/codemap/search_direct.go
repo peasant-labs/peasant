@@ -136,7 +136,9 @@ func (s *Service) directProjectLookup(ctx context.Context, payload *schema.Searc
 // The empty snippet is the marker the command palette (#351) renders as a
 // distinct id/hash row showing the session or project identity instead of a
 // content excerpt. A session with no indexed entries still resolves at entry
-// 0, because the lookup names the session, not its transcript.
+// 0, because the lookup names the session, not its transcript. The head
+// coordinates come from a bounded one-row store read; the transcript is never
+// materialized to shape a single result.
 func (s *Service) directSessionResult(ctx context.Context, sessionID, project string, hash schema.ProjectHash) (schema.SearchResult, error) {
 	result := schema.SearchResult{
 		SessionID:   sessionID,
@@ -146,17 +148,15 @@ func (s *Service) directSessionResult(ctx context.Context, sessionID, project st
 		Role:        string(schema.RoleUser),
 		Score:       directLookupScore,
 	}
-	entries, err := s.listEntries(ctx, sessionID)
+	head, err := s.store.FirstEntry(ctx, schema.SessionID(sessionID))
 	if err != nil {
 		return schema.SearchResult{}, err
 	}
-	if len(entries) == 0 {
-		return result, nil
+	if head != nil {
+		// FirstEntry orders by entry_index, so this is the session's
+		// opening turn.
+		result.EntryIndex = head.EntryIndex
+		result.Role = string(head.Role)
 	}
-	// ListEntries orders by entry_index, so the first entry is the session's
-	// opening turn.
-	first := entries[0]
-	result.EntryIndex = first.EntryIndex
-	result.Role = string(first.Role)
 	return result, nil
 }

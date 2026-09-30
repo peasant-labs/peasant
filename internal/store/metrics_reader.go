@@ -75,6 +75,10 @@ WHERE session_id = ? AND entry_index BETWEEN ? AND ?
 ORDER BY entry_index, key`
 
 	sqlMaxEntryIndex = `SELECT COALESCE(MAX(entry_index), -1) FROM session_entries WHERE session_id = ?`
+
+	// sqlFirstEntry reads only the opening turn of a session's entry stream:
+	// the lowest entry_index with its role, in one row.
+	sqlFirstEntry = `SELECT entry_index, role FROM session_entries WHERE session_id = ? ORDER BY entry_index LIMIT 1`
 )
 
 // LookupSessionLocation returns the host_slug and parent_id for a session.
@@ -338,6 +342,48 @@ func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (
 		return -1, fmt.Errorf("store: max entry index for %s: %w", sessionID, err)
 	}
 	return maxIdx, nil
+}
+
+// EntryHead is the minimal metadata of a session's first indexed entry: the
+// deep-link coordinate and display facet a single-result read needs, without
+// the rest of the transcript.
+type EntryHead struct {
+	EntryIndex int
+	Role       schema.Role
+}
+
+// FirstEntry returns the session's first indexed entry (lowest entry_index),
+// read with a bounded one-row query; nil when the session has no indexed
+// entries (empty session or session not found in DB). Single-result readers
+// that only need the opening turn's coordinates use this instead of
+// ListEntries to avoid materializing the whole transcript.
+func (s *Store) FirstEntry(ctx context.Context, sessionID schema.SessionID) (_ *EntryHead, retErr error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return nil, err
+	}
+
+	var head *EntryHead
+	err = sqlitex.ExecuteTransient(conn, sqlFirstEntry, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			head = &EntryHead{
+				EntryIndex: stmt.ColumnInt(0),
+				Role:       schema.Role(stmt.ColumnText(1)),
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: first entry for %s: %w", sessionID, err)
+	}
+	return head, nil
 }
 
 // mergeExtIntoExtra merges ext key-value pairs into the entry's Extra JSON string.
