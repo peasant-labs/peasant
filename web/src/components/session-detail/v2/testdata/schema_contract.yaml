@@ -1,5 +1,5 @@
 cases:
-  - name: flat git context drives file navigation
+  - name: flat git context relativizes touched files
     family: flat-git-fields
     harness: antigravity
     turnsMode: populated
@@ -67,7 +67,7 @@ cases:
     expectedTurnCount: 1
     expectedFileNode: ''
     expectedScorecardState: nullable-member
-  - name: legacy working directory cannot authorize map navigation
+  - name: legacy working directory cannot relativize touched files
     family: legacy-git-context-isolation
     harness: cursor
     turnsMode: populated
