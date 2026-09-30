@@ -27,6 +27,7 @@ import { createHash } from 'node:crypto'
 export const DEFAULT_MIN_BYTES = 16 * 1024 // a full-size background-only PNG is ~5.9KB; the smallest real full surface (scorecard) is ~35KB
 export const BYTE_FLOORS = {
   'txn-scrubber': 400, // sticky condensed header; small but real, so content signal matters more than byte size
+  'offline-home-short': 8 * 1024, // a 320x256 frame (~6% of a desktop frame's pixels); real captures are ~14KB, a blank one ~1KB
 }
 export const MIN_NONBG_RATIO = 0.012 // blank = 0.00%; the least-busy real surface diverges from its background by >= 2.46%
 export const MIN_DISTINCT_COLORS = 6 // a flat fill resolves to 1 colour; the sparsest real surface (the scrubber) has 9

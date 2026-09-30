@@ -8,7 +8,7 @@
         never carries a dead link), every `hide` item is gone (connection pill, share button, section
         nav), and nothing in the header links to a route-only section; the header is ONE row of
         fairtrade's --nav-h with every item visible, inside the row and reachable by a pointer; the
-        theme button carries the label for the mode it switches to; <main> clears the fixed chrome;
+        theme button carries the label for the mode it switches to; <main> clears the fixed header;
      2. the command palette, opened the way the header's search button opens it, offers none of the
         forbidden commands (per-project changes/map jumps) and every required one, and no "go to"
         command for a route-only section;
@@ -17,11 +17,16 @@
      4. the responsive widths in src/test/testdata/shell_responsive.yaml: the same header and
         geometry checks at every width, down to 390px.
 
-   It writes a full-frame capture of home and of each route per theme (review evidence, never
-   committed) and fails closed when anything is missing, blank, overflowing, or linked.
+   Before any capture it proves the server serves THIS checkout's build (the served page references
+   exactly web/out's chunks, and they carry the shell's markers), so a stale server or another
+   worktree cannot produce mislabelled evidence. It writes a full-frame capture of home and of each
+   route per theme (review evidence, never committed) and fails closed when anything is missing,
+   blank, overflowing, or linked.
 
    The app's mode does not matter: a default server and an `--experimental` one must both pass (the
-   code-map capability must not bring a route-only section back). Start one first, for example:
+   code-map capability must not bring a route-only section back). The gate logs the served mode
+   (from GET /api/v1/config/capabilities); set SHELL_EXPECT_MODE to require one. Start a server
+   first, for example:
      ./bin/peasant web start --port 8690 --foreground --no-browser \
        --mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations
 
@@ -35,6 +40,8 @@
                           SHELL_DEFAULT_PROJECT in smoke-surfaces.mjs; a hash, not a label, so the
                           exact-path check is not tripped by the label-to-hash canonicalization)
      SHELL_RESPONSIVE_ONLY set to 1 to run only the responsive widths
+     SHELL_EXPECT_MODE    default | experimental: fail unless the server advertises exactly that
+                          mode (experimental = the code_map_navigation_v1 capability is advertised)
      CHROME_PATH          Chrome/Chromium binary (required)
      PUPPETEER_CORE       explicit puppeteer-core module path (optional)
  */
@@ -47,6 +54,7 @@ import { applyDeterminism } from './determinism.mjs'
 import { SHELL_DEFAULT_PROJECT, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import {
+  assertServedBuild,
   chromeClearance,
   headerFailures,
   headerGeometryFailures,
@@ -64,6 +72,11 @@ const CHROME = process.env.CHROME_PATH
 const ORIGIN = (process.env.PEASANT_REAL_ORIGIN || 'http://localhost:8690').replace(/\/$/, '')
 const SHELL_PROJECT = process.env.SHELL_PROJECT || SHELL_DEFAULT_PROJECT
 const RESPONSIVE_ONLY = process.env.SHELL_RESPONSIVE_ONLY === '1'
+const EXPECT_MODE = process.env.SHELL_EXPECT_MODE || ''
+if (EXPECT_MODE && EXPECT_MODE !== 'default' && EXPECT_MODE !== 'experimental') {
+  console.error(`ERROR [shell-nav-gate.mjs] SHELL_EXPECT_MODE must be default or experimental, got ${JSON.stringify(EXPECT_MODE)}.`)
+  process.exit(1)
+}
 const VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 }
 const MOBILE_VIEWPORT = { width: 390, height: 844, deviceScaleFactor: 1 }
 const RESPONSIVE_HEIGHT = 900
@@ -288,11 +301,28 @@ const assertResponsive = async (browser) => {
   await page.close()
 }
 
-// Fail-fast coordinate check BEFORE Puppeteer boots — see validate-mock-coordinates.mjs.
+// The served mode: experimental advertises the code-map navigation capability.
+const servedMode = async () => {
+  const response = await fetch(`${ORIGIN}/api/v1/config/capabilities`)
+  if (!response.ok) throw new Error(`GET ${ORIGIN}/api/v1/config/capabilities answered HTTP ${response.status}`)
+  const body = await response.json()
+  const tokens = Array.isArray(body?.uiCapabilities) ? body.uiCapabilities : []
+  return { mode: tokens.includes('code_map_navigation_v1') ? 'experimental' : 'default', tokens }
+}
+
+// Fail-fast checks BEFORE Puppeteer boots: the mock coordinates (validate-mock-coordinates.mjs),
+// the served build, and the served mode.
+let served = null
 try {
   await assertKnownProject(ORIGIN, SHELL_PROJECT, { where: 'shell-nav-gate.mjs' })
+  const provenance = await assertServedBuild({ origin: ORIGIN })
+  console.log(`OK provenance: ${ORIGIN} serves this checkout's web/out (${provenance.chunks.length} chunks) carrying ${Object.entries(provenance.markerChunks).map(([marker, chunks]) => `${marker} in ${chunks.join(' ')}`).join('; ')}`)
+  served = await servedMode()
+  const { mode, tokens } = served
+  if (EXPECT_MODE && mode !== EXPECT_MODE) throw new Error(`the server at ${ORIGIN} runs in ${mode} mode (capabilities ${JSON.stringify(tokens)}), but SHELL_EXPECT_MODE=${EXPECT_MODE}`)
+  console.log(`OK mode: ${ORIGIN} runs in ${mode} mode (capabilities ${JSON.stringify(tokens)})`)
 } catch (e) {
-  console.error(e.message)
+  console.error(`ERROR [shell-nav-gate.mjs] ${e.message}`)
   process.exit(2)
 }
 
@@ -316,7 +346,7 @@ try {
   process.exit(1)
 }
 await browser.close()
-console.log(`\nOK [shell-nav-gate.mjs] local shell header verified at ${ORIGIN}: manifest holds on home and ${Object.keys(manifest.routes).join(', ')} in ${SMOKE_THEMES.join(' + ')}, palette clean, one-row header at ${RESPONSIVE_CASES.map(({ width }) => width).join(', ')}px.`)
+console.log(`\nOK [shell-nav-gate.mjs] local shell header verified at ${ORIGIN} (${served.mode} mode, provenance checked): manifest holds on home and ${Object.keys(manifest.routes).join(', ')} in ${SMOKE_THEMES.join(' + ')}, palette clean, one-row header at ${RESPONSIVE_CASES.map(({ width }) => width).join(', ')}px.`)
 if (captured.length) {
   console.log('Shell frames:')
   for (const file of captured) console.log(`  ${file}`)
