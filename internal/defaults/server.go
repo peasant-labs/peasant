@@ -93,6 +93,10 @@ const (
 	// RouteSearch is global full-text transcript search (Cmd-K). Query in ?q=,
 	// optional ?limit=; no path param (search spans all projects).
 	RouteSearch Route = "/api/v1/search"
+
+	// RouteSettings reads every configuration key (GET) and changes one editable
+	// key in config.yaml (PATCH).
+	RouteSettings Route = "/api/v1/settings"
 )
 
 // DevProxy is the default dev-mode proxy address for the Next.js dev server.

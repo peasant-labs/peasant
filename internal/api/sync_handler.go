@@ -30,6 +30,9 @@ import (
 type syncHandler struct {
 	store  *store.Store
 	config *config.Config
+	// live, when set, replaces config: it is the configuration the server
+	// started with plus every setting saved through the settings routes.
+	live *liveConfig
 	// configHome, dataHome, and stateHome override the XDG roots this handler
 	// resolves config, data, and state paths under. Empty keeps the process
 	// environment as the default, so only tests inject explicit roots and the
@@ -71,6 +74,15 @@ func (h *syncHandler) stateDir() defaults.StateDirPath {
 // dbPath resolves the analytics database path under dataDir.
 func (h *syncHandler) dbPath() defaults.DBFilePath {
 	return defaults.ResolveDBFilePathWith(h.dataHome)
+}
+
+// currentConfig returns the configuration a request applies. A request reads
+// it once, so a setting saved while it runs does not change it halfway.
+func (h *syncHandler) currentConfig() *config.Config {
+	if h.live != nil {
+		return h.live.load()
+	}
+	return h.config
 }
 
 // credentials loads the stored village credentials from configDir.
@@ -288,7 +300,7 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	redactLevel := config.ResolveRedactionPolicy(requestedLevel).Effective
-	userPatterns, err := syncUserPatterns(h.config)
+	userPatterns, err := syncUserPatterns(h.currentConfig())
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -548,8 +560,8 @@ func (h *syncHandler) readReviewDocument(ctx context.Context, sessionIDStr strin
 		return reviewDocument{}, err
 	}
 	var fields config.PushFieldVisibility
-	if h.config != nil {
-		fields = h.config.Push.Fields
+	if cfg := h.currentConfig(); cfg != nil {
+		fields = cfg.Push.Fields
 	}
 	// Validate the same recursive redaction used by publication before reporting
 	// a successful scan. A metadata key collision must remain a failed scan.
@@ -750,7 +762,8 @@ func ruleDescription(ruleID string) string {
 func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.config == nil {
+	cfg := h.currentConfig()
+	if cfg == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "store or config not available", "")
 		return
 	}
@@ -791,7 +804,7 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	level := config.ResolveRedactionPolicy(requestedLevel).Effective
-	userPatterns, err := syncUserPatterns(h.config)
+	userPatterns, err := syncUserPatterns(cfg)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -827,12 +840,12 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
 
 	// Resolve ~ in output base path (same as CLI cmd_push.go).
-	resolvedOutput, resolveErr := ingest.NewResolvedPath(h.config.Output.BasePath)
+	resolvedOutput, resolveErr := ingest.NewResolvedPath(cfg.Output.BasePath)
 	if resolveErr != nil {
 		writeJSONError(w, http.StatusInternalServerError, "resolve output path: "+resolveErr.Error())
 		return
 	}
-	pushCfg := *h.config
+	pushCfg := *cfg
 	pushCfg.Output.BasePath = string(resolvedOutput)
 
 	// A publish from the local web is for collectives: a first publication
@@ -1030,8 +1043,8 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 	// Resolve village URL using the same precedence as the CLI:
 	// env var → config file → production default.
 	villageURL := defaults.DefaultVillageURL.String()
-	if h.config != nil && h.config.Village.URL != "" {
-		villageURL = h.config.Village.URL
+	if cfg := h.currentConfig(); cfg != nil && cfg.Village.URL != "" {
+		villageURL = cfg.Village.URL
 	}
 
 	// Clear any stale credentials so auth.Login doesn't short-circuit with
@@ -1058,7 +1071,7 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.config == nil {
+	if h.currentConfig() == nil {
 		http.Error(w, `{"error":"config not available"}`, http.StatusServiceUnavailable)
 		return
 	}
@@ -1085,7 +1098,7 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 // runIngestPipeline constructs and runs the full ingest pipeline, mirroring
 // the pattern from buildFTUEIngestRunner in cmd/peasant/cmd_kickstart.go.
 func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
-	cfg := h.config
+	cfg := h.currentConfig()
 	fs := &ingest.OSFileSystem{}
 	git := &ingest.ExecGitResolver{}
 
