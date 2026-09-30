@@ -15,6 +15,13 @@ const routerReplace = vi.hoisted(() => vi.fn());
 let currentSearchParams = new URLSearchParams();
 const PATHNAME = '/projects/alpha-project/sess-12345678';
 
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => currentSearchParams,
   usePathname: () => PATHNAME,
@@ -366,18 +373,41 @@ describe('SessionDetailV2 — the "showing every step" prelude is gone', () => {
     channelData = DETAIL;
   });
 
-  it('copies the conversation as Markdown from its new home (headerActions, not the removed prelude)', async () => {
+  it('copies the conversation as Markdown from the header\'s more menu (not the removed prelude)', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     render(<TestSessionDetail sessionId="sess-12345678" />);
 
     const headerActions = screen.getByTestId('package-header-actions');
-    fireEvent.click(within(headerActions).getByRole('button', { name: 'copy as markdown' }));
+    // The header's secondary actions live in the more menu the publish bar
+    // carries; there is no standalone copy button any more.
+    expect(within(headerActions).queryByRole('button', { name: 'copy as markdown' })).not.toBeInTheDocument();
+    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
+    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'copy as markdown' }));
 
     expect(writeText).toHaveBeenCalledTimes(1);
     const md = writeText.mock.calls[0][0] as string;
     expect(md).toContain('## You');
     expect(md).toContain('q0'); // the DETAIL fixture's first user turn
+    expect(within(headerActions).getByRole('status')).toHaveTextContent('copied as markdown');
+  });
+
+  it('keeps the session details and the copy link in the more menu', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const { container } = render(<TestSessionDetail sessionId="sess-12345678" />);
+    const headerActions = screen.getByTestId('package-header-actions');
+    const host = container.querySelector('[data-tour="transcript-view"]');
+    expect(host).toHaveClass('txn-metrics-collapsed');
+
+    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
+    expect(within(headerActions).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['show details', 'copy as markdown', 'copy link']);
+    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'show details' }));
+    expect(host).not.toHaveClass('txn-metrics-collapsed');
+
+    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
+    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'copy link' }));
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/projects/${PROJECT_HASH}/sess-12345678`);
   });
 
   it('does not render the "prompts & replies only" toggle, the "showing every step" sentence, or the steps waterfall anywhere', () => {

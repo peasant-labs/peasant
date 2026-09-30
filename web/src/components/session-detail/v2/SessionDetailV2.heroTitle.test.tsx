@@ -82,6 +82,13 @@ const fixture = loadFixture();
 let sessionDetailData: unknown;
 let qualityData: unknown;
 
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => PATHNAME,
