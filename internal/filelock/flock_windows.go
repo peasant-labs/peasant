@@ -36,7 +36,7 @@ func acquire(path string, deadline time.Time) (ReleaseFunc, error) {
 			}, nil
 		}
 		if wait := time.Until(deadline); wait <= 0 {
-			return nil, errDeadlineExceeded(deadline)
+			return nil, errDeadline
 		} else if wait < 2*time.Millisecond {
 			time.Sleep(wait)
 		} else {

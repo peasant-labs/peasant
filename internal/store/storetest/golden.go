@@ -1,10 +1,12 @@
 // Package storetest provides test helpers that use a pre-migrated "golden"
 // SQLite database so a parallel test pays only a file copy and a connection
-// open instead of re-running the migration-state check. The golden DB is shared
-// by active tests and removed when the last user of that shared template
-// finishes. This package is the only sanctioned way for tests to open a store:
-// the no-migrating-store-open-in-tests ast-grep rule forbids a skip-less
-// store.Open in _test.go outside this package and the migration suite.
+// open instead of re-running the migration-state check. A private fallback
+// build is removed when its last user finishes; an adopted cached stamp stays
+// in `.testcache/` until it is swept or the cache directory is deleted. This
+// package is the sanctioned source of migrated templates: the
+// no-migrating-store-open-in-tests ast-grep rule forbids a skip-less
+// store.Open in _test.go outside this package and the migration suite, and
+// sanctions an inline CopyGolden* followed by a store.WithSkipMigrations open.
 //
 // The template is cached per checkout under `.testcache/golden/` (gitignored,
 // keyed by schema fingerprint) so focused runs reuse it across processes; the
@@ -38,12 +40,6 @@ import (
 // file — so the new recipe builds under a new stamp instead of reusing a
 // stale template.
 const cacheScheme = "v1"
-
-// cacheLockWait bounds the cross-process wait for a concurrent template
-// build: generous versus the observed ~20-60 s race-mode migration pass, so a
-// cold multi-package suite can serialize a few builds without ever waiting
-// forever. On deadline the waiter builds privately instead of failing.
-const cacheLockWait = 3 * time.Minute
 
 // buildDirMaxAge bounds orphaned build-* debris: a killed run's worst trace
 // is a build-* dir and a tiny lock file, reaped here on the next successful
@@ -245,7 +241,11 @@ func cachedTemplateValid(dir, final string) bool {
 // into a build-* dir, publishes by atomic rename, and sweeps debris.
 func buildCachedGolden(t *testing.T, dir, final string) (string, bool) {
 	t.Helper()
-	release, err := filelock.Acquire(final+".lock", time.Now().Add(cacheLockWait))
+	// A zero deadline takes filelock.DefaultWait: generous versus the observed
+	// ~20-60 s race-mode migration pass, so a cold multi-package suite can
+	// serialize a few builds without waiting forever. On deadline the waiter
+	// builds privately instead of failing.
+	release, err := filelock.Acquire(final+".lock", time.Time{})
 	if err != nil {
 		return "", false
 	}
