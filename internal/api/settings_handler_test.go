@@ -12,12 +12,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -39,10 +42,11 @@ var settingsReadsYAML []byte
 const settingsDefaultEmail = "settings-default@example.test"
 
 type settingsKeysFixture struct {
-	RequiredNames []string `yaml:"requiredNames"`
-	Editable      []string `yaml:"editable"`
-	ReadOnly      []string `yaml:"readOnly"`
-	PeasantConfig []string `yaml:"peasantConfig"`
+	RequiredNames []string            `yaml:"requiredNames"`
+	Editable      []string            `yaml:"editable"`
+	ReadOnly      []string            `yaml:"readOnly"`
+	Choices       map[string][]string `yaml:"choices"`
+	PeasantConfig []string            `yaml:"peasantConfig"`
 }
 
 // settingUpdateSetup is what stands at the configuration path before a request.
@@ -53,6 +57,9 @@ const (
 	settingUpdateMissing    settingUpdateSetup = "missing"
 	settingUpdateDirectory  settingUpdateSetup = "directory"
 	settingUpdateUnreadable settingUpdateSetup = "unreadable"
+	// settingUpdateReadOnlyDirectory is the file in a directory the server
+	// may not write to.
+	settingUpdateReadOnlyDirectory settingUpdateSetup = "readonly-directory"
 )
 
 type settingUpdateCase struct {
@@ -66,7 +73,7 @@ type settingUpdateCase struct {
 	Effective     string             `yaml:"effective"`
 	FileContains  []string           `yaml:"fileContains"`
 	FileOmits     []string           `yaml:"fileOmits"`
-	ErrorContains string             `yaml:"errorContains"`
+	ErrorContains []string           `yaml:"errorContains"`
 }
 
 // TestSettingsServeEveryConfigKey reads testdata/settings-keys.yaml. Every
@@ -112,7 +119,7 @@ func TestSettingsServeEveryConfigKey(t *testing.T) {
 	if err := config.SaveAtomic(path, config.BaseConfig()); err != nil {
 		t.Fatal(err)
 	}
-	response := getSettings(t, &settingsHandler{path: path, rules: noAutoPublishRules(t)})
+	response := getSettings(t, newTestSettingsHandler(t, path))
 	served := map[string]bool{}
 	readOnly := map[string]bool{}
 	inPeasantConfig := map[string]bool{}
@@ -133,6 +140,17 @@ func TestSettingsServeEveryConfigKey(t *testing.T) {
 		editable[key] = !isReadOnly
 	}
 	assertExactSettingKeys(t, "editable keys", editable, fixture.Editable)
+	for _, setting := range response.Settings {
+		menu, isChoice := fixture.Choices[setting.Key]
+		if isChoice != (setting.Kind == schema.LocalSettingChoice) || !slices.Equal(setting.Options, menu) {
+			t.Errorf("%s is kind %s with options %q, want choice %v with options %q", setting.Key, setting.Kind, setting.Options, isChoice, menu)
+		}
+	}
+	for key := range fixture.Choices {
+		if !served[key] {
+			t.Errorf("choices names %s, which GET does not list", key)
+		}
+	}
 	assertExactSettingKeys(t, "keys `peasant config` edits", inPeasantConfig, fixture.PeasantConfig)
 	assertExactSettingKeys(t, "keys the `peasant config` registry writes", registryWrittenKeys(t, fixture.RequiredNames), fixture.PeasantConfig)
 }
@@ -156,13 +174,15 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 			if c.Status == 0 || c.Key == "" || c.Body == "" {
 				t.Fatal("a case needs a body, a status, and the key the response names")
 			}
-			if (c.Status == http.StatusOK) == (c.ErrorContains != "") {
+			if (c.Status == http.StatusOK) == (len(c.ErrorContains) > 0) {
 				t.Fatal("a 200 case names the saved row and a refusal names its reason, never both")
 			}
 			dir := t.TempDir()
 			path := filepath.Join(dir, "config.yaml")
 			before := arrangeConfigPath(t, c.Setup, c.File, path)
-			handler := &settingsHandler{path: path, git: &testutil.StubGitResolver{Email: settingsDefaultEmail}, rules: noAutoPublishRules(t)}
+			handler := newTestSettingsHandler(t, path)
+			running := config.BaseConfig()
+			handler.live = newLiveConfig(running)
 
 			recorder := httptest.NewRecorder()
 			handler.handleUpdateSetting(recorder, httptest.NewRequest(http.MethodPatch, defaults.RouteSettings.String(), strings.NewReader(c.Body)))
@@ -175,11 +195,19 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 				if err := json.Unmarshal(recorder.Body.Bytes(), &refusal); err != nil || refusal.Validate() != nil {
 					t.Fatalf("refusal is not a LocalSettingRefusal: %v; body: %s", err, recorder.Body)
 				}
-				if refusal.Key != c.Key || !strings.Contains(refusal.Error, c.ErrorContains) || !strings.Contains(refusal.Error, "Nothing was changed") {
-					t.Errorf("refusal = %+v, want key %q and a reason that says %q and that nothing was changed", refusal, c.Key, c.ErrorContains)
+				if refusal.Key != c.Key {
+					t.Errorf("refusal names %q, want %q", refusal.Key, c.Key)
+				}
+				for _, text := range c.ErrorContains {
+					if !strings.Contains(refusal.Error, text) {
+						t.Errorf("refusal %q does not say %q", refusal.Error, text)
+					}
 				}
 				if after := snapshotConfigPath(t, path); after != before {
 					t.Errorf("a refused update changed the configuration path:\nbefore: %s\nafter:  %s", before, after)
+				}
+				if handler.live.load() != running {
+					t.Error("a refused update changed the configuration the running server applies")
 				}
 				return
 			}
@@ -205,8 +233,13 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 					t.Errorf("config.yaml still holds %q:\n%s", text, written)
 				}
 			}
-			if _, err := config.Parse(written); err != nil {
-				t.Errorf("the saved config.yaml does not load: %v", err)
+			parsed, err := config.Parse(written)
+			if err != nil {
+				t.Fatalf("the saved config.yaml does not load: %v", err)
+			}
+			spec, _ := lookupSetting(handler.catalog, c.Key)
+			if applied, want := reflect.ValueOf(handler.live.load()).Elem().FieldByIndex(spec.index).Interface(), reflect.ValueOf(parsed).Elem().FieldByIndex(spec.index).Interface(); !reflect.DeepEqual(applied, want) {
+				t.Errorf("the running server applies %s = %v, want the saved %v", c.Key, applied, want)
 			}
 			listed := getSettings(t, handler).Settings
 			index := slices.IndexFunc(listed, func(s schema.LocalSetting) bool { return s.Key == c.Key })
@@ -254,7 +287,7 @@ func TestSettingsReadFixtures(t *testing.T) {
 			}
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			arrangeConfigPath(t, c.Setup, c.File, path)
-			handler := &settingsHandler{path: path, git: &testutil.StubGitResolver{Email: settingsDefaultEmail}, rules: noAutoPublishRules(t)}
+			handler := newTestSettingsHandler(t, path)
 			if c.Status != http.StatusOK {
 				recorder := httptest.NewRecorder()
 				handler.handleGetSettings(recorder, httptest.NewRequest(http.MethodGet, defaults.RouteSettings.String(), nil))
@@ -269,7 +302,8 @@ func TestSettingsReadFixtures(t *testing.T) {
 			if index < 0 {
 				t.Fatalf("GET does not list %s", c.Key)
 			}
-			if got := listed[index]; !sameJSON(t, got.Value, c.Value) || !sameJSON(t, got.Effective, c.Effective) {
+			effective := strings.ReplaceAll(c.Effective, "{cpu-default}", strconv.Itoa(push.DefaultConcurrencyForCPU(runtime.NumCPU())))
+			if got := listed[index]; !sameJSON(t, got.Value, c.Value) || !sameJSON(t, got.Effective, effective) {
 				t.Errorf("%s reads value %s effective %s, want value %s effective %s", c.Key, got.Value, got.Effective, c.Value, c.Effective)
 			}
 		})
@@ -289,7 +323,11 @@ func TestSettingsReturnNoCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder := httptest.NewRecorder()
-	(&settingsHandler{path: path, rules: noAutoPublishRules(t)}).handleGetSettings(recorder, httptest.NewRequest(http.MethodGet, defaults.RouteSettings.String(), nil))
+	handler := newTestSettingsHandler(t, path)
+	// The rules read from the directory that holds the credential, as they
+	// do in production.
+	handler.rules = &autoPublishHandler{configHome: hs.Config}
+	handler.handleGetSettings(recorder, httptest.NewRequest(http.MethodGet, defaults.RouteSettings.String(), nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d; body: %s", recorder.Code, recorder.Body)
 	}
@@ -301,11 +339,20 @@ func TestSettingsReturnNoCredential(t *testing.T) {
 	}
 }
 
-// noAutoPublishRules is the rule store of a config directory that holds no
-// rules file.
-func noAutoPublishRules(t *testing.T) *autoPublishHandler {
+// newTestSettingsHandler serves path with the production catalog, a stub git
+// email, and the rule store of a config directory that holds no rules file.
+func newTestSettingsHandler(t *testing.T, path string) *settingsHandler {
 	t.Helper()
-	return &autoPublishHandler{configHome: t.TempDir()}
+	catalog, err := buildSettingCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &settingsHandler{
+		catalog: catalog,
+		path:    path,
+		git:     &testutil.StubGitResolver{Email: settingsDefaultEmail},
+		rules:   &autoPublishHandler{configHome: t.TempDir()},
+	}
 }
 
 // getSettings reads GET /api/v1/settings through handler and checks the
@@ -411,7 +458,7 @@ func arrangeConfigPath(t *testing.T, setup settingUpdateSetup, file, path string
 		if err := os.Mkdir(path, defaults.PrivateDirPerm); err != nil {
 			t.Fatal(err)
 		}
-	case settingUpdateFile, settingUpdateUnreadable:
+	case settingUpdateFile, settingUpdateUnreadable, settingUpdateReadOnlyDirectory:
 		if err := os.WriteFile(path, []byte(file), defaults.PublicFilePerm); err != nil {
 			t.Fatal(err)
 		}
@@ -423,6 +470,16 @@ func arrangeConfigPath(t *testing.T, setup settingUpdateSetup, file, path string
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(path, defaults.PublicFilePerm) })
+		}
+		if setup == settingUpdateReadOnlyDirectory {
+			if os.Geteuid() == 0 {
+				t.Skip("root writes to a directory whatever its permissions, so this case cannot refuse the write")
+			}
+			dir := filepath.Dir(path)
+			if err := os.Chmod(dir, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, defaults.PrivateDirPerm) })
 		}
 	default:
 		t.Fatalf("unknown setup %q", setup)
@@ -492,4 +549,82 @@ func normalizeSetting(t *testing.T, setting schema.LocalSetting) map[string]any 
 		t.Fatal(err)
 	}
 	return out
+}
+
+// TestSettingsEveryOfferedChoiceSaves saves every offered value of every
+// editable choice key in testdata/settings-keys.yaml and reads it back, so a
+// menu cannot offer a value the configuration refuses.
+func TestSettingsEveryOfferedChoiceSaves(t *testing.T) {
+	t.Parallel()
+	var fixture settingsKeysFixture
+	if err := testutil.DecodeFixtureYAML(settingsKeysYAML, &fixture); err != nil {
+		t.Fatalf("testdata/settings-keys.yaml: %v", err)
+	}
+	saved := 0
+	for key, menu := range fixture.Choices {
+		if !slices.Contains(fixture.Editable, key) {
+			continue
+		}
+		for _, option := range menu {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			// push.sources lets by-source stand; every other key is unset.
+			if err := os.WriteFile(path, []byte("version: 1\npush:\n  sources: [claude-code]\n"), defaults.PublicFilePerm); err != nil {
+				t.Fatal(err)
+			}
+			handler := newTestSettingsHandler(t, path)
+			body, _ := json.Marshal(map[string]any{"key": key, "value": option})
+			recorder := httptest.NewRecorder()
+			handler.handleUpdateSetting(recorder, httptest.NewRequest(http.MethodPatch, defaults.RouteSettings.String(), bytes.NewReader(body)))
+			var row schema.LocalSetting
+			if err := json.Unmarshal(recorder.Body.Bytes(), &row); recorder.Code != http.StatusOK || err != nil || !sameJSON(t, row.Value, strconv.Quote(option)) {
+				t.Errorf("%s = %q: status %d, body %s", key, option, recorder.Code, recorder.Body)
+				continue
+			}
+			listed := getSettings(t, handler).Settings
+			if index := slices.IndexFunc(listed, func(s schema.LocalSetting) bool { return s.Key == key }); index < 0 || !sameJSON(t, listed[index].Value, strconv.Quote(option)) {
+				t.Errorf("%s = %q does not read back", key, option)
+			}
+			saved++
+		}
+	}
+	if saved == 0 {
+		t.Fatal("no offered choice was saved, so the test proved nothing")
+	}
+}
+
+// TestLiveConfigKeepsReadOnlyKeysOnSave applies a saved configuration that
+// differs from the running one in every key: the running server takes every
+// editable key from the saved file and keeps every read-only key, which
+// changes another way or which it binds when it starts.
+func TestLiveConfigKeepsReadOnlyKeysOnSave(t *testing.T) {
+	t.Parallel()
+	catalog, err := buildSettingCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := config.BaseConfig()
+	running.Version = 7
+	running.Selection.AutoIngestNewBranches = false
+	saved := filledConfig()
+	live := newLiveConfig(running)
+	live.apply(catalog, &saved)
+	applied := live.load()
+	field := func(cfg *config.Config, spec settingSpec) any {
+		return reflect.ValueOf(cfg).Elem().FieldByIndex(spec.index).Interface()
+	}
+	for _, spec := range catalog {
+		want := field(&saved, spec)
+		if spec.readOnly != "" {
+			if reflect.DeepEqual(field(running, spec), want) {
+				t.Fatalf("read-only %s is the same in both configurations, so the test cannot tell which one was kept", spec.key)
+			}
+			want = field(running, spec)
+		}
+		if got := field(applied, spec); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s (read-only %v) applies %v, want %v", spec.key, spec.readOnly != "", got, want)
+		}
+	}
+	if applied == running || field(running, catalog[0]) != 7 {
+		t.Error("apply changed the running snapshot in place instead of replacing it")
+	}
 }

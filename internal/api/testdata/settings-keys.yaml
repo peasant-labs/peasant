@@ -14,6 +14,10 @@
 # it), the settings the dashboard reads only when it starts, and the retired
 # keys peasant reads only to refuse or report.
 #
+# choices is the exact set of choice keys, each with its exact menu in order.
+# Every other key has no menu. A test saves every offered value of every
+# editable choice key and reads it back.
+#
 # peasantConfig is the exact set of keys the `peasant config` registry
 # writes. The test also derives the set from the registry itself; this list
 # pins it, so a probe that finds nothing cannot pass.
@@ -108,6 +112,14 @@ readOnly:
   - sources.mock.api
   - output.basePath
   - push.fields.projectHash
+choices:
+  redaction.level: [standard]
+  push.method: [all, by-source]
+  push.visibility: [private, group, public]
+  push.sharePreference: ["", share-later]
+  push.license: ["", CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0]
+  selection.mode: [all, selected]
+  display.theme: [dark, light]
 peasantConfig:
   - redaction.level
   - push.visibility
