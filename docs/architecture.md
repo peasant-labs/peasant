@@ -212,9 +212,10 @@ flowchart TB
 `peasant web start` wires `internal/api` over the store. The WebSocket hub pushes session lists
 and session detail. The REST routes serve lists, the code map, review, annotations, and the
 `/share` sync endpoints. The sync handler runs the same `push.Pipeline` as
-`peasant village push`. The settings handler reads every `config.yaml` key and changes one
-key at a time with `config.Parse` and `config.SaveAtomicYAML`, so `peasant config` sees each
-change. A saved setting applies to the sync handler at once.
+`peasant village push`. The settings handler reads every `config.yaml` key and the
+auto-publish rules, and changes one key at a time with `config.Parse` and
+`config.SaveAtomicYAML`, so `peasant config` sees each change. A saved setting applies to the
+sync handler at once.
 
 | Component | Package | Description |
 |---|---|---|
