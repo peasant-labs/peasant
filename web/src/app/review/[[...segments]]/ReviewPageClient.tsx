@@ -145,8 +145,9 @@ export function ReviewPageClient({
         )}
       </div>
 
-      {/* One disconnected strip (null while connected) — the nav pill is the
-          steady-state indicator. Replaces the old stacking strips. */}
+      {/* One disconnected strip (null while connected) for this page's data; the
+          offline notice under the header speaks for the app. Replaces the old
+          stacking strips. */}
       <ConnectionStatus connected={connected} hasData={sessions.length > 0} />
 
       {body}

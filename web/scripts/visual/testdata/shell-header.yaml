@@ -12,19 +12,20 @@
 #          once it exists the item MUST show.
 #          `labels`: the accessible name per theme (the mode it switches to).
 # hide     items that must not come back, each named by the evidence of the old
-#          control: a selector and/or text anywhere in the header.
-# routes   the route-only sections. Nothing in the header or the palette links
-#          to them, and each still mounts its page by URL. `mount` is the
+#          control: a selector anywhere on the page and/or text in the header.
+# routes   the route-only sections. Nothing in the persistent chrome (the header
+#          and the offline notice) or the palette links to them, and each still mounts its page by URL. `mount` is the
 #          selector the page's body mounts; `project: true` means the gate opens
 #          a mock project's page under the route (`<path>/<project hash>/`).
 # palette  command ids (`data-command-id`) the palette must never offer
-#          (`forbid`, as prefixes) and must always offer (`require`).
+#          (`forbid`, as prefixes) and must always offer (`require`); the
+#          loader pins the ids below as required.
 show:
   brand:
     selector: 'header a[href="/"][aria-label="Peasant home"]'
     text: peasant
   search:
-    selector: 'header button[aria-label^="Open the command palette"]'
+    selector: 'header button[aria-keyshortcuts="Meta+K Control+K"]'
     text: search⌘K
   theme:
     selector: 'header button[aria-label^="Switch to "]'
@@ -44,7 +45,9 @@ hide:
   share-button:
     selector: 'header a[href^="/share"]'
   section-nav:
-    selector: 'nav[aria-label="Main navigation"], header .iu-subnav'
+    # The old app nav, and fairtrade's section sub-nav wherever it mounts
+    # (GraphAppShell / GraphSectionNav render .iu-subnav "peasant sections").
+    selector: 'nav[aria-label="Main navigation"], .iu-subnav, nav[aria-label="peasant sections"]'
 routes:
   /analytics:
     mount: .gan-root

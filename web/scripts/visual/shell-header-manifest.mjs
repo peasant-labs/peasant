@@ -20,6 +20,8 @@ export const REQUIRED_NAMES = Object.freeze({
   show: Object.freeze(['brand', 'search', 'theme', 'settings']),
   hide: Object.freeze(['connection-pill', 'share-button', 'section-nav']),
   routes: Object.freeze(['/analytics', '/review', '/map']),
+  paletteForbid: Object.freeze(['proj-changes:', 'proj-map:']),
+  paletteRequire: Object.freeze(['nav:/', 'action:theme']),
 })
 
 /**
@@ -114,6 +116,10 @@ export function loadShellHeaderManifest(source = readFileSync(SHELL_HEADER_FIXTU
   exactKeys(palette, ['forbid', 'require'], ['forbid', 'require'], 'palette')
   stringList(palette.forbid, 'palette.forbid')
   stringList(palette.require, 'palette.require')
+  const missingForbid = REQUIRED_NAMES.paletteForbid.filter((id) => !palette.forbid.includes(id))
+  if (missingForbid.length) fail(`palette.forbid is missing required ids: ${missingForbid.join(', ')}`)
+  const missingRequire = REQUIRED_NAMES.paletteRequire.filter((id) => !palette.require.includes(id))
+  if (missingRequire.length) fail(`palette.require is missing required ids: ${missingRequire.join(', ')}`)
 
   return /** @type {ShellHeaderManifest} */ (root)
 }
@@ -180,9 +186,12 @@ export function headerFailures(manifest, context) {
     }
   }
 
-  const hrefs = [...header.querySelectorAll('a[href]')].map((link) => new URL(link.getAttribute('href'), 'http://local.invalid').pathname.replace(/\/+$/, '') || '/')
+  // The persistent chrome is the header and, while it shows, the offline notice under it: neither
+  // may link to a route-only section. Page bodies may (a code-map breadcrumb links to /map).
+  const chrome = [header, document.querySelector('section[aria-label="peasant is not running"]')].filter(Boolean)
+  const hrefs = chrome.flatMap((part) => [...part.querySelectorAll('a[href]')]).map((link) => new URL(link.getAttribute('href'), 'http://local.invalid').pathname.replace(/\/+$/, '') || '/')
   for (const path of Object.keys(manifest.routes)) {
-    if (hrefs.some((href) => href === path || href.startsWith(`${path}/`))) failures.push(`route ${path}: the header links to it`)
+    if (hrefs.some((href) => href === path || href.startsWith(`${path}/`))) failures.push(`route ${path}: the persistent chrome links to it`)
   }
   return failures
 }

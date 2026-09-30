@@ -6,7 +6,9 @@ import {
   routePageFile,
   shippedItems,
 } from '../../scripts/visual/shell-header-manifest.mjs';
+import { GRAPH_APP_SECTIONS, GraphSectionNav } from '@peasant-labs/fairtrade/graph';
 import { ROUTE_ONLY_SECTIONS } from '@/lib/nav/sections';
+import { SHELL_HEADER_CASES } from '@/test/fixtures/shellHeaderCases';
 import { OPEN_COMMAND_PALETTE_EVENT } from '@/components/command/CommandPalette';
 import { TopNavbar } from './TopNavbar';
 
@@ -43,14 +45,28 @@ describe('TopNavbar — the local shell header manifest', () => {
     expect(headerFailures(manifest, { theme: mode, shipped })).toEqual([]);
   });
 
-  it.each(['/', '/analytics', '/review/peasant', '/map/peasant', '/projects/peasant/sess-0001', '/share/'])(
-    'holds on %s, a route-only page included',
-    (pathname) => {
+  it.each(SHELL_HEADER_CASES.pages.map((page) => [page.name, page.pathname] as const))(
+    'holds on the %s page (%s)',
+    (_name, pathname) => {
       currentPathname = pathname;
       render(<TopNavbar />);
       expect(headerFailures(manifest, { theme: 'light', shipped })).toEqual([]);
     },
   );
+
+  it("reports fairtrade's own section sub-nav if it comes back, wherever it mounts", () => {
+    // The likeliest way the section nav returns is fairtrade's shell sub-nav
+    // mounted beside the header, not inside it.
+    render(
+      <>
+        <TopNavbar />
+        <main>
+          <GraphSectionNav sections={GRAPH_APP_SECTIONS} hrefFor={(section: { id: string }) => `/${section.id}`} />
+        </main>
+      </>,
+    );
+    expect(headerFailures(manifest, { theme: 'light', shipped })).toContain(`section-nav: present (${manifest.hide['section-nav'].selector})`);
+  });
 
   it('leaves settings out until the settings page exists, so the link is never dead', () => {
     // Written against the current tree: flips to "must show" the moment the page file lands.
@@ -72,7 +88,9 @@ describe('TopNavbar — the local shell header manifest', () => {
     const opened = vi.fn();
     window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, opened);
     render(<TopNavbar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open the command palette (Command or Control + K)' }));
+    const search = screen.getByRole('button', { name: /^search/ });
+    expect(search).toHaveAttribute('aria-keyshortcuts', 'Meta+K Control+K');
+    fireEvent.click(search);
     window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, opened);
     expect(opened).toHaveBeenCalledTimes(1);
   });

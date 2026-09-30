@@ -1,3 +1,4 @@
+import type { LucideIcon } from 'lucide-react';
 import { LOCAL_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
 import { UI_CAPABILITY, type UICapabilityToken } from '@/lib/capabilities/tokens';
 
@@ -21,6 +22,8 @@ export interface NavSection {
   label: string;
   /** Hover description (also reusable as a palette hint). */
   title?: string;
+  /** The glyph the section's header link leads with. */
+  icon?: LucideIcon;
   /**
    * The server-advertised capability token required to expose this section in
    * persistent chrome. Absent means always visible; present means the section
@@ -105,6 +108,14 @@ function sectionMeetsCapability(section: NavSection, capabilities: ReadonlySet<s
 /** The nav sections to expose given the server's advertised capability set. */
 export function visibleNavSections(capabilities: ReadonlySet<string>): NavSection[] {
   return NAV_SECTIONS.filter((section) => sectionMeetsCapability(section, capabilities));
+}
+
+/**
+ * The links the header carries beside its brand: the visible nav sections
+ * other than the one that owns `/`, which the `peasant` brand link already is.
+ */
+export function headerNavSections(capabilities: ReadonlySet<string>): NavSection[] {
+  return visibleNavSections(capabilities).filter((section) => section.href !== '/');
 }
 
 /**

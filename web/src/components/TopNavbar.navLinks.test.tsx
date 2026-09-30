@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { Settings } from 'lucide-react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { headerFailures, loadShellHeaderManifest, shippedItems } from '../../scripts/visual/shell-header-manifest.mjs';
 import { TopNavbar } from './TopNavbar';
@@ -9,9 +10,8 @@ vi.mock('@/lib/nav/sections', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/nav/sections')>();
   return {
     ...actual,
-    visibleNavSections: () => [
-      { id: 'home', href: '/', label: 'home' },
-      { id: 'settings', href: '/settings', label: 'settings', title: 'Every peasant setting.' },
+    headerNavSections: () => [
+      { id: 'settings', href: '/settings', label: 'settings', title: 'Every peasant setting.', icon: Settings },
     ],
   };
 });
@@ -37,6 +37,9 @@ describe('TopNavbar — nav sections from the registry', () => {
     expect(settings).toHaveAttribute('href', '/settings');
     expect(settings).toHaveAttribute('title', 'Every peasant setting.');
     expect(settings).not.toHaveAttribute('aria-current');
+    // fairtrade's small ghost button, leading with the section's own glyph.
+    expect(settings.className).toBe('btn btn-ghost btn-sm');
+    expect(settings.querySelector('svg.lucide-settings')).not.toBeNull();
     expect(screen.queryByRole('link', { name: 'home' })).not.toBeInTheDocument();
     // With the page shipped, the manifest now requires the link.
     expect(headerFailures(manifest, { theme: 'dark', shipped: { ...shippedItems(manifest), settings: true } })).toEqual([]);

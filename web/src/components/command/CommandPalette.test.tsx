@@ -11,6 +11,7 @@ import {
 } from './CommandPalette';
 import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
 import { loadShellHeaderManifest, paletteFailures } from '../../../scripts/visual/shell-header-manifest.mjs';
+import { SHELL_HEADER_CASES } from '@/test/fixtures/shellHeaderCases';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
@@ -88,7 +89,6 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input: string | URL) => {
     const url = new URL(String(input), 'http://localhost');
-    if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
     if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope({ results: [] }));
     if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
     throw new Error(`unexpected test request ${url.pathname}`);
@@ -142,11 +142,8 @@ describe('CommandPalette', () => {
   // The palette links to what the header links to and nothing more: no
   // per-project jumps into changes or the code map, and no "go to" command for
   // a route-only section — with or without the code-map capability.
-  it.each([
-    ['no capabilities', new Set<string>()],
-    ['the code-map token', CODE_MAP_ENABLED],
-  ])('holds the shell manifest palette rules with %s advertised', async (_label, advertised) => {
-    capabilities = advertised;
+  it.each(SHELL_HEADER_CASES.paletteCapabilities.map((set) => [set.name, set.tokens] as const))('holds the shell manifest palette rules with capability set %s advertised', async (_name, tokens) => {
+    capabilities = new Set(tokens);
     open();
     // Let any first-open request settle before reading the commands.
     await act(async () => {
@@ -159,6 +156,26 @@ describe('CommandPalette', () => {
     }
     // Project jumps are gone, so opening the palette no longer loads projects.
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/projects/summary'));
+  });
+
+  it('retries failed search discovery on the same surface and shows the results', async () => {
+    const valid = validFixture.search as Record<string, unknown>;
+    let discoveryCalls = 0;
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
+      if (url.pathname === '/api/v1/web/discovery') {
+        discoveryCalls += 1;
+        if (discoveryCalls === 1) throw new Error('discovery unavailable');
+        return Response.json(validFixture.discovery);
+      }
+      throw new Error(`unexpected test request ${url.pathname}`);
+    });
+    open();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pipeline' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'retry search discovery' }));
+    expect(await screen.findByText('fix the [pipeline] retry')).toBeInTheDocument();
+    expect(discoveryCalls).toBe(2);
   });
 
   it('does not search for queries shorter than 2 characters', async () => {
@@ -181,7 +198,6 @@ describe('CommandPalette', () => {
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
-      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
     });
     open();
@@ -207,7 +223,6 @@ describe('CommandPalette', () => {
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(validFixture.discovery);
-      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
     });
     open();
@@ -229,7 +244,6 @@ describe('CommandPalette', () => {
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(search));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
-      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
     });
     open();

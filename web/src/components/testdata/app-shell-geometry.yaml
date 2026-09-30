@@ -1,8 +1,9 @@
-# The fixed top chrome is the one-row header plus, while it shows, the local
-# offline notice. --app-header-height is its height: declared once, with no
-# breakpoint override (the header is one row at every width), and grown by the
-# notice's measured height. The header row itself is fairtrade's --nav-h and
-# must not grow with the notice.
+# --app-header-height is where page content starts: the fixed one-row header
+# plus, while it shows, the local offline notice at the top of the page. It is
+# declared once, with no breakpoint override (the header is one row at every
+# width), and grown by the notice's measured height. The header row itself is
+# fairtrade's --nav-h and must not grow with the notice. The test requires
+# every consumer path below.
 variable: --app-header-height
 value: calc(var(--nav-h) + var(--app-notice-height, 0px))
 headerRow:
@@ -10,7 +11,7 @@ headerRow:
   token: h-[var(--nav-h)]
 noticeHeight:
   path: src/components/LocalOfflineNotice.tsx
-  token: --app-notice-height
+  token: setProperty('--app-notice-height'
 consumers:
   - path: src/app/layout.tsx
     token: pt-[var(--app-header-height)]

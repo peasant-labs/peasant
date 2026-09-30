@@ -272,8 +272,9 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - The local header is one row: the `peasant` home link, search (⌘K), the nav sections other than
   home, and an icon-only theme toggle. It carries no connection indicator. When the local app is
   unreachable (`GET /api/v1/health` fails or the WebSocket stays down), fairtrade's
-  `LocalOfflineBanner` shows under the header with the start command and `try again`; it names
-  this computer, never the internet. `web/scripts/visual/testdata/shell-header.yaml` is the
+  `LocalOfflineBanner` shows at the top of the page under the header, with the start command and
+  `try again`. Its copy says the app on this computer is not running and that the internet is
+  fine; never replace it with copy that reads as an internet outage. `web/scripts/visual/testdata/shell-header.yaml` is the
   required-name manifest for the header, and the component tests and the mounted shell gates
   read it.
 - When you replace the share-bridge UI, keep these semantics: auto-scan of uncached selections;

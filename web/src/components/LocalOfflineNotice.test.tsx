@@ -11,7 +11,7 @@ import {
   requireUniqueNames,
 } from '@/test/strictYaml';
 import { LayoutShell } from './LayoutShell';
-import { startCommandFor } from './LocalOfflineNotice';
+import { OFFLINE_ANNOUNCEMENTS, startCommandFor } from './LocalOfflineNotice';
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'dark', toggle: vi.fn() }) }));
@@ -24,24 +24,36 @@ vi.mock('@/components/tour/TourProvider', () => ({
 // Fixture
 // ---------------------------------------------------------------------------
 
+type HealthMode = 'up' | 'down' | 'error' | 'hang';
 type Step =
-  | { health: 'up' | 'down' }
+  | { health: HealthMode }
   | { socket: 'open' | 'close' }
   | { wait: number }
   | { retry: true }
+  | { focus: 'retry' }
   | { expect: 'shown' | 'hidden' }
-  | { sockets: number };
+  | { checkedAt: number }
+  | { sockets: number }
+  | { healthChecks: number }
+  | { announce: 'stopped' | 'back' | 'none' }
+  | { focused: 'main' };
 
-const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'expect', 'sockets'] as const;
+const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'focus', 'expect', 'checkedAt', 'sockets', 'healthChecks', 'announce', 'focused'] as const;
 const REQUIRED_CASES = [
   'reachable-app-shows-nothing',
   'first-connect-within-grace-shows-nothing',
   'stopped-app-shows-at-once',
+  'error-status-counts-as-stopped',
+  'unanswered-check-times-out',
   'socket-blip-reconnects-without-notice',
   'socket-down-past-grace-shows',
-  'notice-clears-when-app-returns',
+  'recheck-reconnects-at-once',
+  'returning-socket-clears-a-failed-check',
+  'late-failure-loses-to-reconnected-socket',
   'try-again-reconnects-at-once',
 ];
+/** The ports the start-command rows must cover: none, the default, and at least one other. */
+const REQUIRED_PORTS = ['', '8690'];
 
 function loadFixture() {
   const path = resolve(process.cwd(), 'src/components/testdata/local_offline_notice.yaml');
@@ -54,6 +66,11 @@ function loadFixture() {
     if (typeof row.port !== 'string' || typeof row.command !== 'string') throw new Error(`startCommands[${index}] needs string port and command`);
     return { port: row.port, command: row.command };
   });
+  const ports = startCommands.map((row) => row.port);
+  const missingPorts = REQUIRED_PORTS.filter((port) => !ports.includes(port));
+  if (missingPorts.length || !ports.some((port) => !REQUIRED_PORTS.includes(port))) {
+    throw new Error('local offline notice fixture.startCommands must cover no port, 8690, and a non-default port');
+  }
   const cases = root.cases.map((value, index) => requireRecord(value, `cases[${index}]`));
   requireUniqueNames(cases, 'local offline notice fixture.cases');
   const names = new Set(cases.map((row) => row.name));
@@ -102,22 +119,32 @@ class MockWebSocket {
   }
 }
 
-let healthUp = true;
+let health: HealthMode = 'up';
+let healthChecks = 0;
 let originalWebSocket: typeof globalThis.WebSocket;
+
+function healthResponse(signal: AbortSignal | null | undefined): Promise<Response> {
+  healthChecks += 1;
+  if (health === 'up') return Promise.resolve(Response.json({ status: 'ok' }));
+  if (health === 'error') return Promise.resolve(new Response('unavailable', { status: 503 }));
+  if (health === 'down') return Promise.reject(new TypeError('Failed to fetch'));
+  // hang: never answers; only the page's own timeout ends it.
+  return new Promise<Response>((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+  });
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
   MockWebSocket.instances = [];
-  healthUp = true;
+  health = 'up';
+  healthChecks = 0;
   originalWebSocket = globalThis.WebSocket;
   // @ts-expect-error — a scripted stand-in for the browser WebSocket.
   globalThis.WebSocket = MockWebSocket;
-  vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
-    if (url.pathname === '/api/v1/health') {
-      if (!healthUp) throw new TypeError('Failed to fetch');
-      return Response.json({ status: 'ok' });
-    }
+    if (url.pathname === '/api/v1/health') return healthResponse(init?.signal);
     if (url.pathname === '/api/v1/config/capabilities') return Response.json({ uiCapabilities: [] });
     throw new Error(`unexpected test request ${url.pathname}`);
   }));
@@ -144,14 +171,23 @@ async function advance(ms: number) {
 }
 
 const notice = () => screen.queryByRole('region', { name: 'peasant is not running' });
+const liveRegion = () => {
+  const region = [...document.querySelectorAll('p[role="status"]')].find((element) => element.classList.contains('sr-only'));
+  if (!region) throw new Error('the always-mounted offline live region is missing');
+  return region;
+};
 
 function expectShown() {
   const region = notice();
   expect(region, 'the offline notice must show').not.toBeNull();
-  // It sits in the fixed top chrome, directly under the header.
-  const chrome = document.querySelector('header')?.parentElement;
-  expect(chrome?.contains(region)).toBe(true);
-  expect(chrome?.firstElementChild?.tagName).toBe('HEADER');
+  // Under the fixed header, at the top of the page and scrolling with it: never fixed itself.
+  const header = document.querySelector('header');
+  expect(header?.className).toContain('fixed');
+  expect(header?.contains(region)).toBe(false);
+  const wrapper = region!.parentElement!;
+  expect(wrapper.className).toContain('absolute');
+  expect(wrapper.className).toContain('top-[var(--nav-h)]');
+  expect(wrapper.className).not.toContain('fixed');
   // It names this computer, never the internet, and offers the way back.
   expect(within(region!).getByRole('status')).toHaveTextContent(
     "peasant isn't running on this computer. your internet is fine: this page talks to the peasant app on your machine.",
@@ -159,7 +195,7 @@ function expectShown() {
   // The start command is for the port this page came from.
   expect(within(region!).getByText(startCommandFor(window.location.port))).toBeInTheDocument();
   expect(within(region!).getByRole('button', { name: 'try again' })).toBeInTheDocument();
-  // The fixed chrome grows by the notice while it shows.
+  // Page content starts below it while it shows.
   expect(document.documentElement.style.getPropertyValue('--app-notice-height')).toMatch(/^\d+(\.\d+)?px$/);
 }
 
@@ -174,6 +210,7 @@ function expectHidden() {
 
 describe('LocalOfflineNotice', () => {
   it.each(fixture.cases.map((row) => [row.name, row.steps] as const))('%s', async (_name, steps) => {
+    const mountedAt = Date.now();
     render(
       <LayoutShell>
         <main>body</main>
@@ -181,7 +218,7 @@ describe('LocalOfflineNotice', () => {
     );
     await advance(0);
     for (const step of steps) {
-      if ('health' in step) healthUp = step.health === 'up';
+      if ('health' in step) health = step.health;
       else if ('socket' in step) {
         const socket = newestSocket();
         await act(async () => {
@@ -195,7 +232,14 @@ describe('LocalOfflineNotice', () => {
         });
       } else if ('wait' in step) await advance(step.wait);
       else if ('retry' in step) fireEvent.click(screen.getByRole('button', { name: 'try again' }));
+      else if ('focus' in step) act(() => screen.getByRole('button', { name: 'try again' }).focus());
+      else if ('checkedAt' in step) {
+        expect(notice()?.querySelector('time')?.getAttribute('datetime')).toBe(new Date(mountedAt + step.checkedAt).toISOString());
+      }
       else if ('sockets' in step) expect(MockWebSocket.instances).toHaveLength(step.sockets);
+      else if ('healthChecks' in step) expect(healthChecks).toBe(step.healthChecks);
+      else if ('announce' in step) expect(liveRegion().textContent).toBe(step.announce === 'none' ? '' : OFFLINE_ANNOUNCEMENTS[step.announce]);
+      else if ('focused' in step) expect(document.activeElement?.tagName).toBe('MAIN');
       else if (step.expect === 'shown') expectShown();
       else expectHidden();
     }
