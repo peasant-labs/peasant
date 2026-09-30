@@ -9,7 +9,9 @@
 # cmd/peasant/republish_audience_test.go:
 #
 #   web   the Share wizard: POST /api/v1/sync/push on the running local server,
-#         with the body web/src/lib/share/push.ts sends (visibility public);
+#         with the body web/src/lib/share/push.ts sends: the typed request,
+#         which carries no visibility and no license, so a first publish from
+#         the web opens private and unlicensed;
 #   hook  the upload command a managed Git hook runs, from githooks, without
 #         the --repository scope, which narrows the candidates and nothing else;
 #   cli   peasant village push --non-interactive, plus the case's flags.
@@ -44,14 +46,15 @@
 # Deleting a case fails republish-audience.manifest.yaml, and the driver
 # requires each door to keep a collective-only transcript collective-only.
 cases:
+  # The configured default license and visibility reach no web publish.
   - name: web-update-keeps-collective-only
-    configured: {visibility: private, license: CC-BY-4.0}
+    configured: {visibility: public, license: CC-BY-4.0}
     first: {door: web}
-    expectFirst: {failed: false, published: true, license: CC-BY-4.0, visibilityUpdates: [public], visibility: public, villageLicense: CC-BY-4.0}
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: private, villageLicense: none}
     ownerShares: true
     change: content
     update: {door: web}
-    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group, villageLicense: CC-BY-4.0}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group, villageLicense: none}
 
   - name: hook-update-keeps-collective-only
     configured: {visibility: public, license: CC-BY-4.0}
@@ -73,9 +76,9 @@ cases:
 
   # The receipt says public and the configuration says private. Neither is a
   # reason to upload an unchanged session, and the hook must not narrow it.
-  - name: hook-leaves-an-unchanged-web-publication-alone
+  - name: hook-leaves-an-unchanged-public-publication-alone
     configured: {visibility: private, license: none}
-    first: {door: web}
+    first: {door: cli, flags: [--visibility, public]}
     expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public, villageLicense: none}
     ownerShares: true
     change: none
@@ -118,7 +121,7 @@ cases:
   # an owner update alone: the content is already there.
   - name: cli-visibility-flag-reaches-an-unchanged-transcript
     configured: {visibility: private, license: none}
-    first: {door: web}
+    first: {door: cli, flags: [--visibility, public]}
     expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public, villageLicense: none}
     ownerShares: true
     change: none
@@ -158,14 +161,15 @@ cases:
 
   # The first publish lands private and its owner visibility update fails, so
   # no receipt is written. The Village answers the retry as an update, and the
-  # retry still finishes the first publish.
-  - name: web-retry-finishes-a-first-publish-whose-visibility-update-failed
-    configured: {visibility: private, license: none}
-    first: {door: web, failVisibilityUpdates: true}
+  # retry still finishes the first publish. A web publish sends no visibility
+  # update, so the hook opens this one at its configured public.
+  - name: hook-retry-finishes-a-first-publish-whose-visibility-update-failed
+    configured: {visibility: public, license: none}
+    first: {door: hook, failVisibilityUpdates: true}
     expectFirst: {failed: true, published: true, license: none, visibilityUpdates: [public], visibility: private, villageLicense: none}
     ownerShares: false
     change: none
-    update: {door: web}
+    update: {door: hook}
     expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public, villageLicense: none}
 
   # The Village commits the first upload, but its answer is lost, so only the
@@ -181,13 +185,13 @@ cases:
 
   # The owner shared the unfinished publication with collectives before the
   # retry. That choice on the Village stands.
-  - name: web-retry-keeps-an-owner-share-made-meanwhile
-    configured: {visibility: private, license: none}
-    first: {door: web, failVisibilityUpdates: true}
+  - name: hook-retry-keeps-an-owner-share-made-meanwhile
+    configured: {visibility: public, license: none}
+    first: {door: hook, failVisibilityUpdates: true}
     expectFirst: {failed: true, published: true, license: none, visibilityUpdates: [public], visibility: private, villageLicense: none}
     ownerShares: true
     change: none
-    update: {door: web}
+    update: {door: hook}
     expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group, villageLicense: none}
 
   # The local receipt said private; the explicit change reaches the Village by
