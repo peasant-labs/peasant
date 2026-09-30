@@ -110,8 +110,8 @@ func TestHandleSyncPush_PublishesOnlyTheAnnotationsOfThePublishedSessions(t *tes
 	cfg.Output.BasePath = base
 	response := httptest.NewRecorder()
 	hs.handler(db, cfg).handleSyncPush(response, httptest.NewRequest(http.MethodPost, "/api/v1/sync/push",
-		strings.NewReader(`{"sessionIds":["`+publishedID+`"],"visibility":"private"}`)))
-	var result pushResponse
+		strings.NewReader(`{"sessionIds":["`+publishedID+`"]}`)))
+	var result schema.SyncPushResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || response.Code != http.StatusOK || result.New != 1 {
 		t.Fatalf("Share push: status=%d result=%+v err=%v body=%s", response.Code, result, err, response.Body)
 	}
