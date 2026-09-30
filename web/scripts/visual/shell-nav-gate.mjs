@@ -6,7 +6,7 @@
 
      1. home `/`: every `show` item is present (settings only once its page ships, so the header
         never carries a dead link), every `hide` item is gone (connection pill, share button, section
-        nav), and nothing in the header links to a route-only section; the header is ONE row of
+        nav), and nothing outside the page body (<main>) links to a route-only section; the header is ONE row of
         fairtrade's --nav-h with every item visible, inside the row and reachable by a pointer; the
         theme button carries the label for the mode it switches to; <main> clears the fixed header;
      2. the command palette, opened the way the header's search button opens it, offers none of the
@@ -15,11 +15,12 @@
      3. every route-only section still resolves by URL: /analytics, and /review and /map under a mock
         project, each mounting its body non-blank under the SAME quiet header;
      4. the responsive widths in src/test/testdata/shell_responsive.yaml: the same header and
-        geometry checks at every width, down to 390px.
+        geometry checks at every width, down to the 320px reflow width.
 
-   Before any capture it proves the server serves THIS checkout's build (the served page references
-   exactly web/out's chunks, and they carry the shell's markers), so a stale server or another
-   worktree cannot produce mislabelled evidence. It writes a full-frame capture of home and of each
+   Before any capture it proves the server serves THIS checkout's build (served-build.mjs: the served
+   page references exactly web/out's chunks, and they carry the shell's markers; with PEASANT_BIN
+   set it also checks that binary is not older than web/out), so a stale server or another worktree
+   cannot produce mislabelled evidence. It writes a full-frame capture of home and of each
    route per theme (review evidence, never committed) and fails closed when anything is missing,
    blank, overflowing, or linked.
 
@@ -42,6 +43,8 @@
      SHELL_RESPONSIVE_ONLY set to 1 to run only the responsive widths
      SHELL_EXPECT_MODE    default | experimental: fail unless the server advertises exactly that
                           mode (experimental = the code_map_navigation_v1 capability is advertised)
+     PEASANT_BIN          the binary serving PEASANT_REAL_ORIGIN (optional): the provenance check
+                          then also proves it is not older than web/out
      CHROME_PATH          Chrome/Chromium binary (required)
      PUPPETEER_CORE       explicit puppeteer-core module path (optional)
  */
@@ -53,8 +56,8 @@ import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { SHELL_DEFAULT_PROJECT, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
+import { assertServedBuild, shellProvenanceMarkers } from './served-build.mjs'
 import {
-  assertServedBuild,
   chromeClearance,
   headerFailures,
   headerGeometryFailures,
@@ -88,7 +91,7 @@ const FONTS = [
   '400 16px "Atkinson Hyperlegible Mono"', '600 16px "Atkinson Hyperlegible Mono"',
 ]
 const RESPONSIVE_FIXTURE_PATH = join(HERE, '..', '..', 'src', 'test', 'testdata', 'shell_responsive.yaml')
-const REQUIRED_WIDTHS = ['desktop', 'tablet', 'compact_tablet', 'mobile_wide', 'mobile_narrow']
+const REQUIRED_WIDTHS = ['desktop', 'tablet', 'compact_tablet', 'mobile_wide', 'mobile_narrow', 'reflow']
 
 const gateError = ({ what, why, where, means, fix }) => new Error([
   `what: ${what}`, `why: ${why}`, `where: ${where}`, `means: ${means}`, `fix: ${fix}`,
@@ -315,8 +318,8 @@ const servedMode = async () => {
 let served = null
 try {
   await assertKnownProject(ORIGIN, SHELL_PROJECT, { where: 'shell-nav-gate.mjs' })
-  const provenance = await assertServedBuild({ origin: ORIGIN })
-  console.log(`OK provenance: ${ORIGIN} serves this checkout's web/out (${provenance.chunks.length} chunks) carrying ${Object.entries(provenance.markerChunks).map(([marker, chunks]) => `${marker} in ${chunks.join(' ')}`).join('; ')}`)
+  const provenance = await assertServedBuild({ origin: ORIGIN, markers: shellProvenanceMarkers(manifest), bin: process.env.PEASANT_BIN || undefined })
+  console.log(`OK provenance: ${ORIGIN} serves this checkout's web/out (${provenance.chunks.length} chunks${provenance.binChecked ? `, ${process.env.PEASANT_BIN} not older than it` : ''}) carrying ${Object.entries(provenance.markerChunks).map(([marker, chunks]) => `${marker} in ${chunks.join(' ')}`).join('; ')}`)
   served = await servedMode()
   const { mode, tokens } = served
   if (EXPECT_MODE && mode !== EXPECT_MODE) throw new Error(`the server at ${ORIGIN} runs in ${mode} mode (capabilities ${JSON.stringify(tokens)}), but SHELL_EXPECT_MODE=${EXPECT_MODE}`)

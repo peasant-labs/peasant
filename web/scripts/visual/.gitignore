@@ -33,6 +33,7 @@
 !search-share-visual.mjs
 !grouped-list-visual.mjs
 !shell-header-manifest.mjs
+!served-build.mjs
 !testdata/
 !testdata/transcript-input.yaml
 !testdata/search-share.yaml

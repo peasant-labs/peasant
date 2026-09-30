@@ -4,7 +4,8 @@
 # gate asserts the shell-header.yaml manifest, that every header item (brand,
 # search, theme; settings once its page ships) is visible, inside the row and
 # reachable by a pointer, that nothing overflows sideways, and that <main>
-# clears the fixed chrome. The gate requires every name below.
+# clears the header (and the offline notice while it shows). `reflow` is the
+# WCAG 1.4.10 reflow width. The gate requires every name below.
 cases:
   - name: desktop
     width: 1460
@@ -16,3 +17,5 @@ cases:
     width: 480
   - name: mobile_narrow
     width: 390
+  - name: reflow
+    width: 320
