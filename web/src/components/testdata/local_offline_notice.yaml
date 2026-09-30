@@ -13,6 +13,8 @@
 #   retry: true           press `try again` on the notice
 #   focus: retry | away   put keyboard focus on `try again`, or take it off
 #                         whatever holds it (to <body>)
+#   click: page           press the pointer on the page body (plain text), which
+#                         moves focus to <body> without a focus event
 #   expect: shown | hidden
 #   checkedAt: <ms>       the notice's `last checked` time is this many ms after
 #                         the page mounted
@@ -170,6 +172,14 @@ cases:
       - socket: open
       - wait: 2500
       - expect: hidden
+      # The late failure must leave nothing behind: the next blip, with the app
+      # running, shows and announces nothing.
+      - announce: none
+      - health: up
+      - socket: close
+      - wait: 0
+      - expect: hidden
+      - announce: none
 
   - name: try-again-reconnects-at-once
     steps:
@@ -298,7 +308,7 @@ cases:
       - expect: hidden
       - announce: back
 
-  - name: superseded-try-again-stays-quiet
+  - name: moot-try-again-stays-quiet
     steps:
       - health: up
       - socket: open
@@ -317,3 +327,72 @@ cases:
       # nothing.
       - wait: 2500
       - announce: back
+
+  - name: try-again-superseded-by-an-answer-stays-quiet
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - socket: close
+      - wait: 2000
+      - sockets: 3
+      - socket: close
+      - health: hang
+      - retry: true
+      - health: up
+      # The 5 s recheck answers while the retry still hangs, and reconnects.
+      - wait: 2000
+      - healthChecks: 4
+      - sockets: 4
+      # The retry then times out: superseded, it says nothing.
+      - wait: 1100
+      - expect: shown
+      - announce: stopped
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+
+  - name: return-during-the-repeat-clear-stays-back
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - retry: true
+      - wait: 0
+      - announce: none
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+      - wait: 100
+      - announce: back
+
+  - name: click-after-try-again-leaves-focus-alone
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - focus: retry
+      - retry: true
+      - wait: 100
+      - announce: still
+      # The reader clicks back into the page before the app returns.
+      - click: page
+      - health: up
+      - wait: 1000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - focused: elsewhere
+      - mainFocusable: false

@@ -75,31 +75,58 @@ export function LocalOfflineNotice() {
   const ref = useRef<HTMLDivElement>(null);
   const focusInside = useRef(false);
   const wasOffline = useRef(false);
+  // The notice height last published, and whether the notice was pinned then.
+  const published = useRef({ height: 0, pinned: false });
   const offlineNow = useRef(offline);
   offlineNow.current = offline;
   const [announcement, setAnnouncement] = useState('');
 
+  // Publish the notice's height. Where the notice scrolls with the page, a
+  // reader scrolled down keeps their place: <main>'s top padding grows by the
+  // notice (which the browser's scroll anchoring does not follow), so the page
+  // scrolls by the same amount, and back when the notice goes.
   useLayoutEffect(() => {
     const element = ref.current;
     if (!offline || !element) return;
     const root = document.documentElement;
-    const publish = () => root.style.setProperty('--app-notice-height', `${element.getBoundingClientRect().height}px`);
+    const keepPlace = (delta: number, pinned: boolean) => {
+      if (delta !== 0 && !pinned && window.scrollY > 0) window.scrollBy(0, delta);
+    };
+    const publish = () => {
+      const height = element.getBoundingClientRect().height;
+      const pinned = getComputedStyle(element).position === 'fixed';
+      root.style.setProperty('--app-notice-height', `${height}px`);
+      keepPlace(height - published.current.height, pinned);
+      published.current = { height, pinned };
+    };
     publish();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
     observer?.observe(element);
     return () => {
       observer?.disconnect();
       root.style.removeProperty('--app-notice-height');
+      keepPlace(-published.current.height, published.current.pinned);
+      published.current = { height: 0, pinned: false };
     };
   }, [offline]);
 
+  // Whether keyboard focus is in the notice: set by focus moving in or out,
+  // and cleared by a click elsewhere (a click on plain text moves focus to
+  // <body> without a focus event).
   useEffect(() => {
     if (!offline) return;
     const onFocusIn = (event: FocusEvent) => {
       focusInside.current = !!ref.current?.contains(event.target as Node);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) focusInside.current = false;
+    };
     document.addEventListener('focusin', onFocusIn);
-    return () => document.removeEventListener('focusin', onFocusIn);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
   }, [offline]);
 
   useEffect(() => {
@@ -118,10 +145,11 @@ export function LocalOfflineNotice() {
 
   // A failed `try again` is read out each time: the text is cleared first, so
   // two failures in the same second still change the region. An answer made
-  // moot (null) or a page back online says nothing.
+  // moot (null: a newer check, or the app came back) says nothing, and nor
+  // does a failure the app's return overtakes during the clear.
   const tryAgain = () => {
     void retry().then((answered) => {
-      if (answered !== false || !offlineNow.current) return;
+      if (answered !== false) return;
       const text = `${OFFLINE_ANNOUNCEMENTS.stillStopped} ${clockTime(new Date())}.`;
       setAnnouncement('');
       setTimeout(() => {
