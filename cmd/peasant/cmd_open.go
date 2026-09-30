@@ -341,7 +341,10 @@ func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ing
 		if err != nil {
 			return failed(firstErrorLine(err))
 		}
-		if !waitForWebServer(deps.client, base, deps.readyWait, deps.readyInterval) {
+		// keep `peasant open` budget-only even if its command context becomes
+		// cancellable; making it cancellable must also keep the PID file of a
+		// server that is still starting (tracked as a follow-up)
+		if !waitForWebServer(context.WithoutCancel(cmd.Context()), deps.client, base, deps.readyWait, deps.readyInterval) {
 			// The forked server is gone or never answered; a PID file left behind
 			// would point `peasant web stop` at a process that is not it.
 			if pidFile != "" {

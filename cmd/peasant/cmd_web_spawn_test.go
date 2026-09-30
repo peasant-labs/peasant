@@ -72,7 +72,9 @@ func TestWaitForWebServerStopsAtItsWait(t *testing.T) {
 	client := &http.Client{Timeout: time.Hour}
 
 	done := make(chan bool, 1)
-	go func() { done <- waitForWebServer(client, server.URL, 50*time.Millisecond, 10*time.Millisecond) }()
+	go func() {
+		done <- waitForWebServer(t.Context(), client, server.URL, 50*time.Millisecond, 10*time.Millisecond)
+	}()
 	select {
 	case ready := <-done:
 		if ready {
