@@ -66,9 +66,10 @@ surface rendered non-empty), separate from the demo-parity pixel diff.
 | `boot-peasant.mjs` | Host-integration check (oracle arm 2): boots the **real** `/projects/[name]/[id]` route against a running backend and asserts the composite renders through the real `SessionDetailV2` adapter + WebSocket path (exit 2 if `.txn-app` never mounts). The fixture route is backend-free, so this is the only arm that exercises the real transport. Validates its `PEASANT_PROJECT` coordinate against the live backend first (`validate-mock-coordinates.mjs`) so a stale default fails loud, not as a misleading transport-broken diagnosis. |
 | `validate-mock-coordinates.mjs` | Shared fail-fast guard against a recurring bug class: a script/fixture's hardcoded mock project literal drifting from the Go mock's actual catalog. Queries the live `GET /api/v1/projects/summary` (the same endpoint the Home picker uses) before any script boots Puppeteer, and throws an actionable error naming the exact invalid coordinate + the current valid set if it doesn't match. Wired into `boot-peasant.mjs`, `full-app-smoke.mjs`, `shell-nav-gate.mjs`, `shell-nav-default-gate.mjs`, and `transcript-input-gate.mjs`. |
 | `inspect-feedback-shoot.mjs` | Captures the dev-only inspect + feedback tool (armed picker, note popup, saved + re-armed, and `?fb=off`) in both themes over a running `next dev`. It verifies build provenance first (the served JS chunk must carry the change marker), asserts the in-browser flow — arm from the control and from `c`, the pick, the `POST /api/v1/local/feedback` payload, the re-arm, and the disable switch — and fulfills the save locally so the run never writes `llm/ui-feedback.md`. The tool is dev-gated, so this arm is the only one that can see it: every other capture script holds it off with `?fb=off`. |
-| `shell-nav-gate.mjs` | Local shell header gate (connected arm), against a running app in either mode: first proves the server serves this checkout's `web/out` (`assertServedBuild`) and logs the served mode (`SHELL_EXPECT_MODE` can require one), then holds the mounted header to `testdata/shell-header.yaml` through `shell-header-manifest.mjs` (the same checks the component tests run) on home and on every route-only page (`/analytics`, and `/review` and `/map` under `SHELL_PROJECT`) in both themes — required items present (settings only once its page ships), removed items (connection pill, share button, section nav anywhere on the page) gone, no header or notice link to a route-only section — plus one-row `--nav-h` geometry with every item visible and reachable, `<main>` clearing the header, and a palette with no per-project or route-only jump. Runs the same header checks at every width in `src/test/testdata/shell_responsive.yaml` and writes full-frame review captures. |
-| `shell-nav-default-gate.mjs` | Local shell offline gate (server-stopped arm): boots its own default-mode `bin/peasant`, verifies build provenance (`assertServedBuild`: binary not older than `web/out`, served chunks identical to `web/out`, the shell's markers present), holds home and a transcript to the header manifest while connected, then STOPS the server with each page open and asserts fairtrade's `LocalOfflineBanner` shows under the fixed header, at the top of the page and not fixed itself — this computer, not the internet; `peasant web start --port <page port>`; `try again` — with the host live region announcing the stop, the header manifest intact, `<main>` clearing the header plus the notice, and no second scroll on the transcript; on a 320×256 (zoomed) screen it scrolls `try again` into reach below the header; captures desktop, 390px and the scrolled 320×256 frame in both themes; restarts the server, presses `try again`, and asserts the notice clears and the return is announced. |
-| `shell-header-manifest.mjs` | The one reader of `testdata/shell-header.yaml` (strict, required names pinned) and the self-contained DOM checks shared by the component tests (jsdom) and the two shell gates (`page.evaluate`): `headerFailures`, `paletteFailures`, and the browser-only `headerGeometryFailures` and `chromeClearance`; plus the Node-side `assertServedBuild` both gates run before trusting a capture. |
+| `shell-nav-gate.mjs` | Local shell header gate (connected arm), against a running app in either mode: first proves the server serves this checkout's `web/out` (`served-build.mjs`; with `PEASANT_BIN` also that the binary is not older) and logs the served mode (`SHELL_EXPECT_MODE` can require one), then holds the mounted header to `testdata/shell-header.yaml` through `shell-header-manifest.mjs` (the same checks the component tests run) on home and on every route-only page (`/analytics`, and `/review` and `/map` under `SHELL_PROJECT`) in both themes — required items present (settings only once its page ships), removed items (connection pill, share button, fairtrade's section sub-nav anywhere on the page) gone, no link to a route-only section anywhere outside `<main>` — plus one-row `--nav-h` geometry with every item visible and reachable, `<main>` clearing the header, and a palette with no per-project or route-only jump. Runs the same header checks at every width in `src/test/testdata/shell_responsive.yaml`, down to the 320px reflow width, and writes full-frame review captures. |
+| `shell-nav-default-gate.mjs` | Local shell offline gate (server-stopped arm): boots its own default-mode `bin/peasant`, verifies build provenance (`served-build.mjs`: binary not older than `web/out`, served chunks identical to `web/out`, the shell's markers present), holds each page to the header manifest while connected, then STOPS the server with the page open and asserts fairtrade's `LocalOfflineBanner` shows directly under the fixed header — pinned where the screen has room, in the page flow elsewhere (`chromeClearance`) — this computer, not the internet; `peasant web start --port <page port>`; `try again` — with the live region announcing the stop, the header manifest intact and `<main>` clearing the header plus the notice. Case checks: no second scroll on the desktop transcript; `try again` scrolled into reach at 320×256; the transcript (320×256) and `/share` (320×568) keep their floor fully in view; the pinned notice on screen on a page scrolled down at 1440×700. Then a `try again` with the server still down is announced with the check time; after a restart, `try again` clears the notice and the return is announced. Captures every case in both themes. |
+| `shell-header-manifest.mjs` | The one reader of `testdata/shell-header.yaml` (strict, required names pinned) and the self-contained DOM checks shared by the component tests (jsdom) and the two shell gates (`page.evaluate`): `headerFailures`, `paletteFailures`, and the browser-only `headerGeometryFailures` and `chromeClearance` (which also returns the notice's measured placement). |
+| `served-build.mjs` | Build provenance for any gate that boots or targets a served build: `assertServedBuild({ origin, markers, bin? })` proves the served page references exactly `web/out/index.html`'s chunks, those chunks carry every marker the caller names, and (given `bin`) the binary is not older than `web/out`; `shellProvenanceMarkers(manifest)` names the shell's markers (`--app-notice-height` and the manifest's `back` / `stillStopped` announcements). |
 | `context-navigation-shoot.mjs` | Mounted current-parent and child-context navigation evidence on the REAL binary: boots `bin/peasant` with the mock store and opens the child transcript through the real WebSocket `session_detail` payload, so the stored `context_from` source, the stored `started_by` parent, and the retained earlier-history partition all arrive through the real store → decoration boundary → adapter → composite path. It asserts the two stable links, that the disclosure toggle writes only `earlier=` (the reader's view is held by the browser's scroll anchoring for exactly the inserted height — compared and retained, not merely recorded), following the current-parent link to the EXACT stored parent, and Back restoring the child's route, disclosure, `.txn-stream` offset, selected turn, and query — the asserted state is the one pictured, and the state is re-sampled after each key capture to prove it. Reopening the search panel is a separate, labelled action that runs the viewer's own match jump, so it gets its own sample and its own capture instead of being folded into the restoration claim. Also asserts a reload, a copied disclosed link, and the honest unavailable reference for a child whose target is no longer stored. Both themes; served-chunk + embedded-binary build provenance is asserted before any capture. Fixture: `internal/mock/testdata/context_navigation.yaml` (shared with the Go mock provider via `context-navigation-fixture.mjs`). |
 | `stitch-sxs.mjs` | Builds the height-matched **REFERENCE \| SUBJECT** composites per surface per theme (`REF_DIR`/`APP_DIR`) into a `SURFACE_SET`-distinct `SXS_OUT_SUBDIR` (`sxs-smoke`/`sxs`). Both panes drawn to the taller height, top-aligned; the shorter is **padded, never scaled**, with a sampled background + a dashed end-hairline. For `transcript`/`changes`, a missing subject capture becomes a labeled placeholder so the set stays complete (gate still fails on the missing pair). For `smoke`, a missing reference OR subject capture writes **no placeholder at all** — the surface is skipped and logged as a `FAIL`, so durable smoke evidence can never contain a fake stand-in. **Default `REF_DIR=demo`** pairs the fairtrade demo reference against the app captures (the retired pre-composite-migration `tb` golden was removed — see the Oracle section above). |
 
@@ -301,41 +302,51 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   its own default-mode `bin/peasant` on `PEASANT_OFFLINE_PORT` (default `8698`), so nothing else may
   hold that port; it kills that server by its own process handle on exit, failure or signal, removes the
   temp config dir it made, and rewrites `server.log` per run. `pnpm shell:gate` runs both arms.
-- **provenance first:** both gates run `assertServedBuild` before any capture — the served page must
-  reference exactly `web/out/index.html`'s chunks and those chunks must carry `--app-notice-height`,
-  `peasant is not running` and `peasant is running again` — so a stale server or another worktree fails
-  before it can produce mislabelled evidence.
+- **provenance first:** both gates run `served-build.mjs`'s `assertServedBuild` before any capture — the
+  served page must reference exactly `web/out/index.html`'s chunks and those chunks must carry
+  `--app-notice-height` and the manifest's `back` and `stillStopped` announcements (the `stopped` one
+  repeats fairtrade's banner headline, so it proves nothing about this build) — so a stale server or
+  another worktree fails before it can produce mislabelled evidence. The offline gate also checks its
+  binary is not older than `web/out`; the header gate does so only when `PEASANT_BIN` names it.
 - **the manifest:** `testdata/shell-header.yaml` names what the header must carry (`brand`, `search`,
   `theme`, and `settings` once `src/app/settings/page.tsx` exists — before that a settings link would
   be dead, so it must be absent), what must not come back (`connection-pill`, `share-button`,
   `section-nav` — fairtrade's sub-nav included, wherever it mounts), the route-only sections that must
-  still resolve (`/analytics`, `/review`, `/map`), and the palette commands forbidden (`proj-changes:`,
-  `proj-map:`) and required. The component tests (`TopNavbar.test.tsx`, `CommandPalette.test.tsx`,
+  still resolve (`/analytics`, `/review`, `/map`) and that nothing outside `<main>` may link to, the
+  palette commands forbidden (`proj-changes:`, `proj-map:`) and required, and the live region's
+  announcements (`stopped`, `stillStopped`, `back`). The component tests (`TopNavbar.test.tsx`, `CommandPalette.test.tsx`,
   `LayoutShell.capabilities.test.tsx`) read the same file through `shell-header-manifest.mjs`, so the unit
   render and the served build are held to one list.
 - **what the header arm asserts:** on home and on each route-only page, in both themes: the manifest;
   one row of `--nav-h` with every item visible, inside the row and reachable by a pointer; `<main>`
   clearing the header; theme attributes; and a palette that offers no per-project or route-only jump.
-  The responsive arm repeats the header checks at every width in `src/test/testdata/shell_responsive.yaml`.
+  The responsive arm repeats the header checks at every width in `src/test/testdata/shell_responsive.yaml`,
+  down to the 320px `reflow` row.
   It checks the header's own overflow, not the page body's (the home project picker already scrolls
   sideways at 390px; that body is rebuilt separately).
-- **what the offline arm asserts:** with each page open and the server killed: the notice under the
-  fixed header, at the top of the page and in the page flow (no fixed ancestor; its top is the header's
-  bottom at scroll 0) — "peasant isn't running on this computer", "your internet is fine",
-  `peasant web start --port <port>`, `try again` — the host live region saying "peasant stopped on this
-  computer.", the header manifest intact, `--app-notice-height` set, `<main>` clearing the header plus
-  the notice, and no document scroll under the transcript. On a 320×256 screen (400% zoom) the notice is
-  taller than the viewport, and the gate proves the document scrolls `try again` into view, below the
-  header and reachable by a pointer. After a restart and `try again`: the notice gone, the page back
-  under the header, and the live region saying "peasant is running again.".
+- **what the offline arm asserts:** with each page open and the server killed: the notice directly under
+  the fixed header — pinned (`position: fixed`, its top at the header's bottom) where the screen has room
+  (`(min-height: 40rem) and (min-width: 48rem)`), in the page flow with no fixed ancestor elsewhere — with
+  "peasant isn't running on this computer", "your internet is fine", `peasant web start --port <port>`
+  and `try again`; the live region saying the manifest's `stopped` text; the header manifest intact;
+  `--app-notice-height` set; `<main>` clearing the header plus the notice. Per case: the 1440×900
+  transcript owns the only scroller; at 320×256 (400% zoom) the notice is taller than the viewport and
+  the document scrolls `try again` into view below the header, reachable by a pointer; the transcript at
+  320×256 and `/share` at 320×568, scrolled to the bottom, keep their floor (`min(24rem, screen height −
+  header)`) fully in view below the header; home at 1440×700, scrolled down before the server stops,
+  shows the pinned notice on screen under the header. Then `try again` with the server still down makes
+  the live region say the `stillStopped` text with the check time; after a restart, `try again` clears
+  the notice, returns the page under the header, and the live region says the `back` text.
 - **the tour:** the gate can only see a tour overlay, and the tour never starts on its own, so the
   mounted check cannot tell a mounted tour provider from an unmounted one. The unmount itself is guarded
   by `LocalOfflineNotice.test.tsx` (a mounted provider would render its marker).
 - **no SxS arm:** the fairtrade in-use demo's local app renders a section sub-nav, not this header, so a
   demo-vs-app composite would compare different chromes; both gates assert the mounted shell directly.
+  peasant-labs/fairtrade-design-system#139 (the demo carries this header, or fairtrade exports it) is
+  what brings a demo-left / app-right arm back, for the header and the offline notice.
 - **outputs:** `scripts/visual/shell/<theme>/shell-{home,home-mobile,route-analytics,route-review,route-map}.png`
-  and `scripts/visual/shell-offline/<theme>/{home,transcript,home-mobile,home-short}.png` — review
-  artifacts, never committed.
+  and `scripts/visual/shell-offline/<theme>/{home,transcript,home-mobile,home-short,transcript-short,share-mobile,home-scrolled}.png`
+  — review artifacts, never committed.
 - **mock limitation:** the mock data store cannot serve the grouped sessions route (`GET
   /api/v1/sessions?view=grouped` answers 500), so the home body shows that error panel in mock captures;
   the header gate ignores exactly that console error.
@@ -345,20 +356,28 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
     comes back.
   - *Necessity:* jsdom computes no layout, hit-testing or real socket close; the component tests hold the
     same manifest checks but cannot see geometry, reachability or a real process exit.
-  - *Production path:* the embedded `bin/peasant` build (provenance checked), its real routes, socket and
-    health route; nothing is mocked but the data store.
-  - *Cost:* one headless browser; the header gate drives 2 themes × (home, 390px, 3 routes) + 5 widths in
-    about a minute; the offline gate runs 8 stop/restart cycles (2 themes × 4 pages) in about two minutes.
-  - *Lifetime:* the header gate spawns no server; the offline gate kills its server on exit, failure and
-    signal and removes its temp config dir; a SIGKILL of the gate itself orphans the server, and the next
-    run then fails loudly on the busy port.
+  - *Production path:* the real routes, socket and health route of a running `bin/peasant`; nothing is
+    mocked but the data store. The offline gate proves its binary embeds this checkout's `web/out`; the
+    header gate proves the served chunks equal `web/out`, and the binary too only when `PEASANT_BIN` is
+    given.
+  - *Cost:* one headless browser; the header gate drives 2 themes × (home, 390px, 3 routes) + 6 widths in
+    about a minute; the offline gate runs 14 stop/restart cycles (2 themes × 7 cases) in about four
+    minutes.
+  - *Lifetime:* the header gate spawns no server; the offline gate kills its server and removes its temp
+    config dir on exit, failure, SIGINT and SIGTERM. A SIGKILL of the gate itself orphans the server and
+    leaks the temp config dir; the next run then fails loudly on the busy port.
   - *Concurrency:* the header gate uses the caller's origin; the offline gate uses one fixed port
-    (checked free first) and its own capture dir.
+    (checked free first). Both write to a capture dir that is fixed per checkout (`<base>/shell`,
+    `<base>/shell-offline`), so two concurrent runs from one checkout overwrite each other's frames and
+    `server.log`; pass a different `<base>` (or the capture-dir variables) per run.
   - *CI parity:* neither runs in CI; both need `make build` and a Chrome binary, and run from a clean
     checkout.
-  - *Evidence:* full-frame captures of the mounted shell in both themes, desktop, 390px and 320×256.
-  - *Mutation:* a re-added pill or share link, a section sub-nav, a dead settings link, a fixed notice, a
-    missing live-region announcement or an unreachable `try again` each fail a named check.
+  - *Evidence:* full-frame captures of the mounted shell in both themes: desktop, 390px, 320×256 (home and
+    transcript), 320×568 (`/share`) and a scrolled 1440×700 page.
+  - *Mutation:* a re-added pill or share link, any link to a route-only section outside `<main>` (and
+    fairtrade's section sub-nav anywhere), a dead settings link, a notice fixed on a small screen or
+    unpinned on a roomy one, a crushed full-height page, a missing live-region announcement, or an
+    unreachable `try again` each fail a named check.
   - *Exit condition:* when the visual harness is consolidated into one toolkit, or the shell header gets
     a fairtrade demo counterpart, fold these gates into it and retire the duplicated boot/probe code.
 
