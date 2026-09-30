@@ -193,8 +193,9 @@ jobs:
     #   (startsWith(github.event.pull_request.title, 'release(') ||
     #    startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
     #    && '1' || '0'
-    # -- once the test-performance work in #389 lands. Local `make check` keeps
-    # RACE=1 (the Makefile default); see CONTRIBUTING.md.
+    # -- once the test-performance work in #389 lands. The Makefile default is
+    # RACE=0 everywhere now too; race is opt-in (`make check RACE=1`); see
+    # CONTRIBUTING.md.
     # TMPDIR=/tmp is load-bearing on the pool, not a workaround. The pool
     # exports its work dir as TMPDIR and that dir lives under the desktop user's
     # home (~/.local/share/github-runner-containers/work/...), so every test temp

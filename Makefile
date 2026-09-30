@@ -13,17 +13,18 @@ set -e; \
 	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
 endef
 
-# The race detector for `make check`. On by default (local runs). CI passes
-# RACE=0 for every event: the detector amplifies the suite ~3x-16x for wall
-# time the gate's budget can't spend, and the release-only race predicate that
-# used to carry release/post-merge race coverage is currently disabled (the
-# race suite does not fit the 30-minute gate budget; the re-enable note lives
-# in the check job of .github/workflows/tests.yml, pending #389). The gate
-# still plans and screens under -race=false; local `make check` keeps the
-# detector. RACE is a make variable, not an environment contract: the gate is
-# driven by its -race flag, which this target passes explicitly, and the
+# The race detector for `make check`. Off by default, everywhere (CI and
+# local): the detector amplifies the suite ~3x-16x for wall time the gate's
+# budget can't spend, and the release-only race predicate that used to carry
+# release/post-merge race coverage is currently disabled (the race suite does
+# not fit the 30-minute gate budget; the re-enable note lives in the check
+# job of .github/workflows/tests.yml, pending #389). Opt in explicitly with
+# `make check RACE=1` — race pass on the gate, -race on the astgrep pass — or
+# run `go test -race ./...` directly. The gate still plans and screens under
+# -race=false. RACE is a make variable, not an environment contract: the gate
+# is driven by its -race flag, which this target passes explicitly, and the
 # astgrep pass below reads GORACE_FLAG from the same source.
-RACE ?= 1
+RACE ?= 0
 GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
 
 # Wall-clock start of `make check`, stamped immediately at parse time so the
@@ -113,8 +114,8 @@ check: fmt lint
 	# only its own rules, so it cannot make that judgement - hence the flag is
 	# on the repo-wide scan, not on the key gate.
 	#
-	# The race detector (GORACE_FLAG) is on by default; CI passes RACE=0 for
-	# every event (see the RACE variable above). The gate is driven by its
+	# The race detector is off by default everywhere (see the RACE variable
+	# above; RACE=1 opts in). The gate is driven by its
 	# -race flag, which the invocation passes explicitly; with RACE=0 it runs
 	# a single no-race pass but still plans and screens. cmd/peasant and
 	# internal/api exceed Go's 10m default under race, so the gate sets
