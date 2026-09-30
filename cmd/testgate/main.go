@@ -5,7 +5,9 @@
 // race pass and a no-race pass (no-race-partition.yaml), executes both, merges
 // their streams, and verifies that every test ran exactly once. A package the
 // registry names that produced no test events fails; an unregistered one that
-// produced none is only reported. RACE=0 collapses to a single no-race pass but
+// produced none is only reported. By default the gate runs a single no-race
+// pass (plan + screen still apply); -race selects the two-pass race+no-race
+// run.
 // still plans and screens.
 //
 // -pkgs narrows the run to a comma-separated set of package patterns (default
@@ -49,7 +51,7 @@ func main() {
 	registry := fs.String("registry", "", "path to no-race-partition.yaml (default: repo root)")
 	outDir := fs.String("out", "", "directory for streams and profiles (default: $TESTGATE_OUT or .agents.local/testgate/<ts>)")
 	parallel := fs.Int("p", runtime.GOMAXPROCS(0), "packages to invoke concurrently (default: GOMAXPROCS)")
-	raceFlag := fs.Bool("race", os.Getenv("RACE") != "0", "run the race pass (default: $RACE != 0)")
+	raceFlag := fs.Bool("race", false, "run the two-pass race+no-race run (default off: a single no-race pass)")
 	pkgsFlag := fs.String("pkgs", "./...", "run/plan: comma-separated repo-relative package patterns (default: ./...)")
 	pkgFlag := fs.String("pkg", "", "profile: repo-relative package to profile (e.g. ./internal/ingest)")
 	batchesFlag := fs.Int("n", 0, "profile: concurrent batches (default: half the cores, a quarter under -race)")
@@ -146,7 +148,7 @@ flags:
   -registry PATH   registry fixture (default: <repo>/no-race-partition.yaml)
   -out DIR         stream output dir (default: .agents.local/testgate/<ts>)
   -p N             packages invoked concurrently (default: GOMAXPROCS)
-  -race            run the race pass (default: $RACE != 0)
+  -race            run the two-pass race+no-race run (default off: a single no-race pass)
   -pkgs PATTERNS   run/plan: comma-separated repo-relative package patterns
                    (default: ./...); a narrower set is a SUBSET run, whose
                    result is not a full-suite result and which reports the
@@ -367,7 +369,7 @@ func printPlan(plan *testgate.Plan, race bool) {
 		fmt.Printf("  race pass:    %d packages, %d tests\n", racePkgs, raceTests)
 		fmt.Printf("  no-race pass: %d packages, %d tests\n", noRacePkgs, noRaceTests)
 	} else {
-		fmt.Printf("  single no-race pass (RACE=0): %d packages\n", len(plan.Packages))
+		fmt.Printf("  single no-race pass (single pass): %d packages\n", len(plan.Packages))
 	}
 	fmt.Println("  registered packages:")
 	for _, p := range plan.Packages {
@@ -704,7 +706,7 @@ func printControls(concurrency int, race bool) {
 	if race {
 		fmt.Printf("race:                   on (pass A)\n")
 	} else {
-		fmt.Printf("race:                   off (RACE=0; single pass, plan + screen still run)\n")
+		fmt.Printf("race:                   off (single no-race pass; plan + screen still run)\n")
 	}
 }
 
