@@ -40,7 +40,7 @@ cases:
     provenance: {source: boundary, ref: search-direct-exact-shape-only}
     mutation: {description: lengthen the digest by one character so the hash constructor rejects it}
     input:
-      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234567890
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef123456789
     expected:
       kind: none
 
