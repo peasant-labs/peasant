@@ -16,6 +16,8 @@ requiredNames:
   - a visibility this version does not publish reads the one it does
   - an unset project path reads as sent
   - a concurrency of 0 reads the CPU-derived default
+  - an auto-publish intent beside a plan to publish applies
+  - an auto-publish intent beside keep local does not apply
   - a refused level fails the read with its remedy
   - a push method no push applies fails the read with its remedy
   - an invalid file fails the read
@@ -90,6 +92,25 @@ cases:
     key: push.concurrency
     value: '0'
     effective: '{cpu-default}'
+  - name: an auto-publish intent beside a plan to publish applies
+    file: |
+      version: 1
+      push:
+        sharePreference: share-later
+        autoPublishIntent: true
+    status: 200
+    key: push.autoPublishIntent
+    value: 'true'
+    effective: 'true'
+  - name: an auto-publish intent beside keep local does not apply
+    file: |
+      version: 1
+      push:
+        autoPublishIntent: true
+    status: 200
+    key: push.autoPublishIntent
+    value: 'true'
+    effective: 'false'
   - name: a refused level fails the read with its remedy
     file: |
       version: 1

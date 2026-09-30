@@ -269,6 +269,14 @@ func (p SharePreference) IsValid() bool { return slices.Contains(AllSharePrefere
 // AllSharePreferences is the closed set of publication preferences.
 var AllSharePreferences = []SharePreference{SharePreferenceKeepLocal, SharePreferenceShareLater}
 
+// AutoPublishIntended reports whether the user asked to publish automatically
+// and still plans to publish. Keep-local wins: an intent stored beside a
+// keep-local preference is not an intent, so the two never hold together
+// whichever of them was written last.
+func (p PushConfig) AutoPublishIntended() bool {
+	return p.AutoPublishIntent && p.SharePreference == SharePreferenceShareLater
+}
+
 // Visibility controls the default visibility for pushed transcripts.
 // Type alias for schema.Visibility — single source of truth in the
 // github.com/peasant-labs/schema module.
@@ -405,6 +413,13 @@ type PushConfig struct {
 	// or intends to publish later. Chosen during kickstart. Empty is treated as
 	// keep-local. It is a stored preference only and never triggers a publish.
 	SharePreference SharePreference `yaml:"sharePreference,omitempty"`
+	// AutoPublishIntent records the "yes" answer to kickstart's "publish
+	// automatically?" question. It is an intent only: it installs no hook,
+	// saves no auto-publish rule, and publishes nothing. The rules in
+	// hooks.yaml decide what a push publishes. The intent lets the first
+	// publish offer auto-publish already ticked. It holds only beside
+	// SharePreferenceShareLater; see AutoPublishIntended.
+	AutoPublishIntent bool `yaml:"autoPublishIntent,omitempty"`
 	// License is the default content license a transcript's first publication
 	// carries (chosen during kickstart). An update of a transcript this machine
 	// has published to the village account keeps the license it has there;
