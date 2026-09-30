@@ -4,7 +4,10 @@ The pipeline's wall-clock target is assessed on the **amd64 pool gate** (the
 `check` job in `.github/workflows/tests.yml`). The **arm64 subset lane**
 (`check-arm64`) is measured and reported but is **not** budget-gated: its
 wall-clock variance on a 2-vCPU runner is not deterministically testable, and it
-improves derivatively from the shared test-infrastructure work. The harvester
+improves derivatively from the shared test-infrastructure work. The lane is
+**release-only** (release PRs, release tags, and on-demand dispatches); ordinary
+PRs do not run it, so its numbers come from release runs and dispatches. The
+harvester
 version guard and the CGO=0 job are not budget lanes and are out of scope here.
 
 This document is the phase-measurement **plan and reading guide**. It exists so
@@ -111,7 +114,7 @@ The committed budget fixture (not the job timeout) is what fails a slow suite.
 
 > The **amd64 pool aggregate** is the workflow's wall from `determine-runner`
 > start to the last amd64-pool job finishing, on an ordinary feature PR,
-> excluding the arm64 lane and the release-only jobs.
+> excluding the release-only arm64 lane and the release-only jobs.
 
 The amd64-pool jobs parallelize behind `determine-runner`, so the aggregate is
 the **maximum** of their walls, not their sum. On a feature PR the gate is the
