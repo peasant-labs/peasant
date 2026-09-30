@@ -6,8 +6,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/schema"
 )
 
@@ -483,6 +484,7 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 	const arenaSize = 1024
 	const payloadSize = 600
 	b := NewStagingBuffer(4, arenaSize)
+	waitCtx := testwait.Context(t)
 
 	payload := func(id string) workerResult {
 		meta := &UnifiedMetadata{SessionID: SessionID(id)}
@@ -503,7 +505,6 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 	// Drain + Ack from the main goroutine — Ack frees the first entry's arena
 	// space, unblocking the spinning producer. Without concurrent Drain+Ack,
 	// the producer spins forever (the original deadlock).
-	deadline := time.After(5 * time.Second)
 	for {
 		batch := b.Drain()
 		if len(batch.Results) > 0 {
@@ -511,7 +512,7 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 			break
 		}
 		select {
-		case <-deadline:
+		case <-waitCtx.Done():
 			t.Fatal("deadlock: Drain never returned eligible entries; producer is stuck on full arena")
 		default:
 			runtime.Gosched()
@@ -523,7 +524,7 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 		if !ok {
 			t.Fatal("second Add should succeed after AckBatch frees arena space")
 		}
-	case <-time.After(5 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("deadlock: second Add never completed after AckBatch freed arena space")
 	}
 
@@ -637,51 +638,53 @@ func TestStagingBuffer_MultipleInFlightBatches(t *testing.T) {
 
 // TestStagingBuffer_BoundedBackoff verifies that copyToArena does not
 // spin-lock when the arena is full: instead it sleeps with bounded
-// exponential backoff. We confirm that a producer blocked on a tiny arena
-// is eventually unblocked after AckBatch frees space, and that the test
-// itself completes within a reasonable wall-clock time (ruling out
-// tight-spin CPU waste). Scenario 7 from the BDD spec.
+// exponential backoff. The test runs in a synctest bubble, so the producer
+// parks in the fake-clock backoff without wall time; synctest.Wait then proves
+// the producer is inside that wait, and the backoff timer lets it finish once
+// Drain + AckBatch frees arena space. Scenario 7 from the BDD spec.
 func TestStagingBuffer_BoundedBackoff(t *testing.T) {
-	// Arena: 512 bytes. Each payload: 300 bytes → second Add blocks.
-	const arenaSize = 512
-	const payloadSize = 300
-	b := NewStagingBuffer(4, arenaSize)
+	synctest.Test(t, func(t *testing.T) {
+		// Arena: 512 bytes. Each payload: 300 bytes → second Add blocks.
+		const arenaSize = 512
+		const payloadSize = 300
+		b := NewStagingBuffer(4, arenaSize)
 
-	payload := func(id string) workerResult {
-		meta := &UnifiedMetadata{SessionID: SessionID(id)}
-		return workerResult{meta: meta, transcriptData: make([]byte, payloadSize)}
-	}
+		payload := func(id string) workerResult {
+			meta := &UnifiedMetadata{SessionID: SessionID(id)}
+			return workerResult{meta: meta, transcriptData: make([]byte, payloadSize)}
+		}
 
-	// First Add fits.
-	if !b.Add(payload("x")) {
-		t.Fatal("first Add should succeed")
-	}
+		// First Add fits.
+		if !b.Add(payload("x")) {
+			t.Fatal("first Add should succeed")
+		}
 
-	// Second Add will block in copyToArena (arena full).
-	// Launch it in a goroutine and track when it returns.
-	addDone := make(chan bool, 1)
-	go func() {
-		addDone <- b.Add(payload("y"))
-	}()
+		// Second Add blocks in copyToArena (arena full).
+		addDone := make(chan bool, 1)
+		go func() {
+			addDone <- b.Add(payload("y"))
+		}()
 
-	// Wait a moment to let the producer enter the backoff loop.
-	time.Sleep(5 * time.Millisecond)
+		// Once Wait returns, the producer is durably blocked in the backoff.
+		synctest.Wait()
+		select {
+		case <-addDone:
+			t.Fatal("second Add completed before the arena was drained")
+		default:
+		}
 
-	// Drain + AckBatch — frees arena space, unblocking the producer.
-	batch := b.Drain()
-	if len(batch.Results) == 0 {
-		t.Fatal("expected at least one result from Drain")
-	}
-	b.AckBatch(batch)
+		// Drain + AckBatch frees arena space; the producer's backoff timer then
+		// wakes it without the test blocking on real time.
+		batch := b.Drain()
+		if len(batch.Results) == 0 {
+			t.Fatal("expected at least one result from Drain")
+		}
+		b.AckBatch(batch)
 
-	select {
-	case ok := <-addDone:
-		if !ok {
+		if !<-addDone {
 			t.Fatal("second Add should succeed after AckBatch frees arena space")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("bounded backoff: producer never unblocked after AckBatch")
-	}
+	})
 }
 
 // assertIDs checks that the drained results contain exactly the given session IDs (order-insensitive).
