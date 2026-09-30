@@ -9,25 +9,37 @@ Turn on auto-publish for one repository, in one step.
 auto reads the collectives you published to last from the village: the
 collectives that can read, or wait to read, the transcript this computer
 published last for your account. It saves an auto-publish rule for this
-repository in hooks.yaml in the config directory (a rule for its git remote,
-or for its folder when it has none), and installs the rule's hooks, the
-managed pre-push hook at first, in this repository. Peasant installs a hook
+repository in hooks.yaml in the config directory: a rule for its origin remote,
+or for exactly its folder when it has none. Then it installs the rule's hooks,
+the managed pre-push hook at first, in this repository. Peasant installs a hook
 only in a repository it has recorded sessions in, so run it in a repository
 you have opened a session of.
 
 From then on, every git push runs the upload for this repository. Its
 sessions are published redacted and private, with no license, and each
-transcript the push sends is shared with the rule's collectives. Nothing is
-held back for review: running this command is the consent. The hook always
-exits successfully, so a failed upload never blocks the push.
+transcript the push sends is shared with the rule's collectives. A transcript
+that is already public is not updated by a rule. Nothing is held back for
+review: running this command is the consent. The hook always exits
+successfully, so a failed upload never blocks the push.
 
 Running it again updates the rule to the collectives you published to last.
-Nothing is installed in any other repository. Change or remove the rule in the
-local web settings, and remove the hook with 'peasant village hooks uninstall'.
+Nothing is installed in any other repository. To pause the rule, set its
+events to [] in hooks.yaml; to remove it, delete it from hooks.yaml; to remove
+the hook, run 'peasant village hooks uninstall'. A rule in hooks.yaml looks
+like this:
 
-It prints one line naming the collectives. A hook file Peasant did not write
-is never changed: the rule is saved, the reason and the section to add by hand
-are printed, and the command fails.
+  version: 1
+  autoPublish:
+    - id: repo-3f2a1c9e4b7d
+      kind: remote          # or folder: a glob such as ~/work/*
+      match: github.com/acme/tools
+      events: [pre-push]    # and/or post-commit; [] pauses the rule
+      collectives: [11111111-1111-4111-8111-111111111111]
+
+It prints one line naming the collectives the repository now publishes to,
+from every rule that covers it. A hook file Peasant did not write is never
+changed: the rule is saved, the reason and the section to add by hand are
+printed, and the command fails.
 
 ```
 peasant village auto [--dir <repo>] [flags]

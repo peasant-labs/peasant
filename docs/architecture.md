@@ -35,7 +35,7 @@ machine, keeps its own copy and index, and shows the sessions in a local web app
 off the machine only when the developer publishes, pulls, logs in, syncs model prices, or
 upgrades. There is no telemetry and no background upload. The git hook upload runs only after
 the developer installs the hook with `peasant village hooks install`, `peasant village auto`, or
-the install action of the local settings page.
+the settings install route of the local API.
 
 Elements:
 
@@ -432,9 +432,10 @@ sequenceDiagram
 
 The hook exists only after `peasant village hooks install --event post-commit` or
 `--event pre-push`, or after an auto-publish rule's hooks are installed with `peasant village
-auto` or from the settings page. The hook always exits 0, so a Village failure never blocks git.
-When an auto-publish rule in `hooks.yaml` covers the repository, the upload publishes private
-with no license and then shares each transcript it sent with the rule's collectives.
+auto` or the settings install route. The hook always exits 0, so a Village failure never blocks
+git. When an auto-publish rule in `hooks.yaml` binds a session the upload sends, the upload
+publishes collectives-only (private, no license) and then shares each bound transcript it sent
+with its rule's collectives.
 
 ```mermaid
 sequenceDiagram
@@ -635,9 +636,10 @@ sequenceDiagram
 
 ### Git hook upload
 
-`internal/githooks/script.go` renders the hook command. `cmd/peasant/cmd_push.go` runs it. When
-an auto-publish rule covers the repository (`internal/autopublish`), the run publishes private and
-`push.SharePublish.ShareSent` then shares each transcript it sent with the rule's collectives.
+`internal/githooks/script.go` renders the hook command. `cmd/peasant/cmd_push.go` runs it. Before
+the upload, `cmd/peasant/cmd_push_auto_publish.go` matches each session the run would send against
+the rules (`autopublish.Decide`); when a rule binds one, the run publishes collectives-only and
+`push.RuleShare` then shares each bound transcript it sent with its rule's collectives.
 
 ```mermaid
 sequenceDiagram
@@ -725,7 +727,7 @@ sequenceDiagram
 | `internal/village` | Village HTTP client. | push, pull, api |
 | `internal/auth` | Loopback OAuth login, `credentials.json`. | `village login`, api sync handler |
 | `internal/githooks` | Installs, checks, and removes the upload hooks. | `village hooks` |
-| `internal/autopublish` | Auto-publish rules in `hooks.yaml`, and the one matcher that decides which rules cover a repository. | `village push`, `village auto`, api settings routes |
+| `internal/autopublish` | Auto-publish rules in `hooks.yaml`, and the one matcher that decides which rules bind a repository. | `village push`, `village auto`, api settings routes |
 | `internal/gitops` | Read-only git for the code map and review. | codemap |
 | `internal/codemap`, `internal/codegraph` | Code map and change review graphs. | api map and review routes |
 | `internal/config` | Settings, selection, redaction policy. | CLI, api, push |

@@ -223,12 +223,18 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - The consented publication paths are the `/share` wizard, the upload hook installed by
   `peasant village hooks install`, the auto-publish hook, and attaching the prompts behind a pull
   request. The auto-publish hook is the same managed hook, installed by `peasant village auto` or
-  by the install action of the settings page, for a repository that an auto-publish rule in
-  `hooks.yaml` covers. The rule is the binding: its push publishes that repository's sessions
-  redacted and private, and shares each transcript it sends with the rule's collectives, never
-  with the public. `autopublish.Rule` is the one matcher of rules, server-side; do not implement
-  it again in React. A rule installs no hook by itself: a hook is installed one repository at a
-  time, by an explicit act, and only in a repository Peasant has recorded sessions in. Attaching
+  by the settings install route, for a repository that an auto-publish rule in `hooks.yaml`
+  covers. The rule is the binding. `autopublish.Decide` is the one matcher of rules,
+  server-side; do not implement it again in React. It is applied per session, to the repository
+  the session was recorded in. A push that sends a bound session publishes collectives-only:
+  private, no license, and each bound transcript is shared with its rule's collectives, never
+  with the public. A session a paused rule (no event) covers is not published, a transcript that
+  is already public is not updated, and a collective that rejected or lost a transcript is not
+  asked again. A rule installs no hook by itself: `peasant village auto` and the settings install
+  route install one repository at a time, by an explicit act, and only in a repository Peasant
+  has recorded sessions in. Any managed hook applies the rules, including one installed with
+  `peasant village hooks install`, so saving a rule changes what an installed hook publishes.
+  Attaching
   is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
   transcripts already published. Do not add a path that publishes without one of these, and do
   not create a binding for the developer.
