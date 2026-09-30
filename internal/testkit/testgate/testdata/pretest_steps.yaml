@@ -37,9 +37,9 @@ steps:
     fragment: "go vet ./..."
   - step: ast-grep-scan
     program: ast-grep
-    args: ["scan", "--config", "sgconfig.yml", "."]
+    args: ["scan", "--error=unused-suppression", "--config", "sgconfig.yml", "."]
     target: check
-    fragment: "ast-grep scan --config sgconfig.yml ."
+    fragment: "ast-grep scan --error=unused-suppression --config sgconfig.yml ."
   - step: ast-grep-gate-test
     program: go
     args: ["test", "-race", "-tags=astgrep", "./internal/tui/gates/..."]

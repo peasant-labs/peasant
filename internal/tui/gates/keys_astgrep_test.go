@@ -7,8 +7,8 @@
 // the default, hermetic test run never depends on the ast-grep binary being
 // on PATH. It is invoked explicitly via `go test -tags=astgrep
 // ./internal/tui/gates/...`, added as its own step in `make check` right
-// after the pre-existing (and already ast-grep-dependent) `ast-grep scan
-// --config sgconfig.yml .` line.
+// after the pre-existing (and already ast-grep-dependent) repo-wide
+// `ast-grep scan` step.
 //
 // Validated against ast-grep 0.45.0 (this repo's flake.nix-pinned
 // devShell/CI version) and 0.43.0 (a newer ambient version): both produce
@@ -37,7 +37,7 @@ const astGrepBin = "ast-grep"
 
 // astRulesConfigRelPath is the module-root-relative path to the key-string
 // rules' own sgconfig.yml - kept separate from the repo-root sgconfig.yml
-// so the plain `ast-grep scan --config sgconfig.yml .` step in `make check`
+// so the repo-wide `ast-grep scan` step in `make check`
 // never sees these rules (see astrules/sgconfig.yml's own doc comment).
 const astRulesConfigRelPath = "internal/tui/gates/astrules/sgconfig.yml"
 
@@ -62,10 +62,10 @@ type astGrepMatch struct {
 // rule outside this config (for example the repo-wide test-file migration-open
 // ban in ast-grep/) is reported by ast-grep as an unused suppression - a
 // diagnostic that is not a key-string hit and would otherwise be counted
-// against the key allowlist. ast-grep only reports unused suppressions
-// meaningfully when a scan enables every rule; the repo-wide `ast-grep scan
-// --config sgconfig.yml .` step in make check remains the place that polices
-// stale suppressions.
+// against the key allowlist. Stale suppressions are still policed, just not
+// here: the repo-wide `ast-grep scan --error=unused-suppression --config
+// sgconfig.yml .` step in make check loads every rule, so a suppression that
+// no longer suppresses anything is an error and fails that step.
 //
 // dir MUST be the root the rule configs' `files`/`ignores` globs (and the
 // paths ast-grep reports back) are relative to - verified empirically that
