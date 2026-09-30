@@ -504,10 +504,14 @@ export default function HomePage() {
     (connected || summaries !== null);
 
   // The session list: the sync list joined with the publications read. It
-  // reads nothing while a selection failure or recovery state owns the page.
+  // reads nothing while a selection failure or recovery state owns the page,
+  // and reads again when the set of sessions changes. A live session's growing
+  // turn count alone does not trigger a reread: that would reread the whole
+  // list every broadcast tick while an agent works.
+  const sessionSetKey = useMemo(() => sessions.map((session) => session.id).join("\n"), [sessions]);
   const rootSessions = useRootSessions({
     enabled: !sessionsError && !summariesSelectionFailed && !selectionRecovery,
-    invalidationKey: sessionsData,
+    invalidationKey: sessionSetKey,
   });
   const rootRows = groupedSectionVisible ? rootSessions.rows : null;
   const publicationById = useMemo(
