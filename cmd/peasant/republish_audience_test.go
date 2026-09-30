@@ -297,19 +297,24 @@ func (d *audienceDoors) run(t *testing.T, run audienceRun) (failed bool, said st
 		return result.Errors > 0, string(raw)
 	case audienceDoorHook:
 		argv := githooks.RepositoryArgv("", githooks.Binding{ConfigPath: d.cfgPath, ConfigDir: d.dir, DataDir: d.dir, StateDir: d.dir, Timeout: time.Minute})
-		return d.execute(argv[1:])
+		return d.execute(t, argv[1:])
 	default:
 		args := []string{"--config", d.cfgPath, "--config-dir", d.dir, "--data-dir", d.dir, "--state-dir", d.dir, "village", "push", "--non-interactive"}
-		return d.execute(append(args, run.Flags...))
+		return d.execute(t, append(args, run.Flags...))
 	}
 }
 
 // audienceSessionErrors reads the failed-session count from the transcript
 // result line the command prints: the quiet form a hook uses, or the summary.
 // A failed session does not fail the command, so its exit alone cannot say.
+// audienceNothingToPublish is how a run that uploads nothing says so instead
+// of printing a result line.
+const audienceNothingToPublish = "already pushed with unchanged content"
+
 var audienceSessionErrors = regexp.MustCompile(`(?m)^(?:pushed \d+ session\(s\), |Summary: \d+ new, \d+ updated, )(\d+) error\(s\)`)
 
-func (d *audienceDoors) execute(args []string) (failed bool, said string) {
+func (d *audienceDoors) execute(t *testing.T, args []string) (failed bool, said string) {
+	t.Helper()
 	root := buildRootCommand()
 	var output bytes.Buffer
 	root.SetOut(&output)
@@ -320,7 +325,12 @@ func (d *audienceDoors) execute(args []string) (failed bool, said string) {
 	if err != nil {
 		return true, said
 	}
+	// Fail closed: a run that exits cleanly without the result line has not
+	// said whether a session failed, and reading that as success would hide one.
 	match := audienceSessionErrors.FindStringSubmatch(output.String())
+	if match == nil && !strings.Contains(output.String(), audienceNothingToPublish) {
+		t.Fatalf("the command printed no transcript result line, so a failed session cannot be told from a success:\n%s", said)
+	}
 	return match != nil && match[1] != "0", said
 }
 

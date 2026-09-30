@@ -106,7 +106,7 @@ For Village authentication (`peasant village login`, push, and pull), see
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Show what would be pushed (mirrors the real run exactly) without pushing |
-| `--visibility <v>` | Set visibility (`private` or `public`). Also changes sessions already published; without it an update keeps the visibility a transcript has on the Village, including a share with collectives |
+| `--visibility <v>` | Set visibility (`private` or `public`). Also changes every already-published session the run selects, including ones shared with collectives; without it an update keeps the visibility a transcript has on the Village |
 | `--timing` | Report per-phase timing (handshake/server split, redaction, annotation batches) to stderr + a per-upload JSONL under the state dir. Off by default. |
 | `--concurrency <n>` | Parallel uploads + HTTP connection-pool size (default `max(1, NumCPU/2)`; raise toward `~2×NumCPU` for a large cold push). |
 | `--annotation-id <ids>` / `--annotation-hash <hashes>` | Restrict the annotation push to specific annotations |

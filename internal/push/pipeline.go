@@ -126,6 +126,7 @@ type PipelineStore interface {
 	SavePublication(context.Context, store.PublicationRecord) error
 	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
 	LatestPublicationAttempt(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationAttemptDiagnostic, error)
+	HasPublication(context.Context, string) (bool, error)
 }
 
 // NewPipeline creates a push Pipeline with the given dependencies.
@@ -230,8 +231,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	license := p.resolveLicense()
 	// An explicit change also moves published transcripts, so one this version
 	// would downgrade is refused before anything is read or sent.
-	if p.changesVisibility() && config.EffectiveVisibility(p.runCfg.Visibility, p.cfg).Downgraded() {
-		return nil, fmt.Errorf("refuse the requested visibility change before any upload: %w", config.VisibilityChangeRefusal(p.runCfg.Visibility))
+	if p.changesVisibility() {
+		if refusal := config.VisibilityChangeRefusal(p.runCfg.Visibility); refusal != nil {
+			return nil, fmt.Errorf("refuse the requested visibility change before any upload: %w", refusal)
+		}
 	}
 
 	// 2. Guard: individual mode is not yet implemented.
@@ -999,8 +1002,15 @@ func (p *Pipeline) pushSession(
 	// 4c. An update sends no license unless the caller asked for one. Village
 	// then keeps the license the transcript has; a configured default is a
 	// choice for new publications, not an instruction to relicense published
-	// ones. Before the upload, the local receipt is the only evidence that this
-	// account already published this session on this village.
+	// ones. Before the upload, a local receipt is the only evidence that the
+	// session was published. The exact receipt (this village account, the
+	// session's current project identity) is what the skip rule compares; the
+	// question "published before?" also counts a receipt under an earlier
+	// project identity or another account, because a harvest can re-attribute
+	// a session to a new project while the village keeps the same transcript.
+	// Counting too much only withholds a license or a visibility update, which
+	// an explicit flag can still send; counting too little would relicense or
+	// widen a published transcript.
 	projectHash, hashErr := schema.NewProjectHash(string(input.ReceiptProjectHash))
 	if hashErr != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
@@ -1009,7 +1019,13 @@ func (p *Pipeline) pushSession(
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
 	}
-	if previous != nil && !p.changesLicense() {
+	publishedBefore := previous != nil
+	if !publishedBefore {
+		if publishedBefore, err = p.store.HasPublication(ctx, sess.SessionID); err != nil {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
+		}
+	}
+	if publishedBefore && !p.changesLicense() {
 		license = ""
 	}
 
@@ -1226,7 +1242,7 @@ func (p *Pipeline) pushSession(
 	// an upload it answered as an update can still be finishing a first
 	// publish an earlier attempt started (unfinishedFirstPublish).
 	firstPublish := receipt.Created
-	if !firstPublish && previous == nil && !p.changesVisibility() && schema.Visibility(receipt.Visibility) == schema.VisibilityPrivate {
+	if !firstPublish && !publishedBefore && !p.changesVisibility() && schema.Visibility(receipt.Visibility) == schema.VisibilityPrivate {
 		firstPublish, err = p.unfinishedFirstPublish(ctx, projectHash, sess.SessionID)
 		if err != nil {
 			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publication content succeeded but its earlier attempts could not be read, so its visibility was not converged and no local terminal receipt was advanced; retry this session: %w", err)}
@@ -1239,6 +1255,9 @@ func (p *Pipeline) pushSession(
 			updated, _, updateErr := client.UpdateOwner(uploadCtx, receipt.TranscriptID, schema.OwnerTranscriptUpdateRequest{Visibility: &desired})
 			if updateErr != nil {
 				primary := fmt.Errorf("publication content succeeded but visibility convergence failed; the remote resource remains at its authoritative access state and no local terminal receipt was advanced; retry this session to apply the requested visibility: %w", updateErr)
+				if held {
+					primary = fmt.Errorf("the village did not apply the requested visibility to a transcript this account already published; no content was sent and the local receipt is unchanged; if the transcript no longer exists on the village, rerun with --force to publish it again: %w", updateErr)
+				}
 				diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
 				defer cancelDiagnostic()
 				_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStageVisibility, Message: primary.Error()})
@@ -1289,10 +1308,11 @@ func (p *Pipeline) pushSession(
 }
 
 // alreadyHeld reports whether the village already holds what this operation
-// would leave it holding, so uploading it again would change nothing. It is
-// consulted only when the caller asked for no change, so visibility takes no
-// part: an update leaves the audience alone, and a receipt whose visibility
-// differs from the configured default is no reason to upload.
+// would leave it holding, so uploading it again would change nothing.
+// Visibility takes no part: an update leaves the audience alone, and a
+// receipt whose visibility differs from the configured default is no reason
+// to upload. An explicit visibility change on a held operation is sent as an
+// owner update alone.
 //
 // An operation that sends no license keeps the one the village holds. That
 // leaves the village exactly where the recorded operation left it when that
@@ -1318,12 +1338,14 @@ func alreadyHeld(receipt schema.AuthoritativePublishResponse, operation schema.C
 // unfinishedFirstPublish reports whether an upload the village answered as an
 // update finishes a first publish an earlier attempt started. The village
 // created the transcript on that attempt, so it no longer says created. What
-// says so here is that no terminal receipt was ever written for the session,
-// while an attempt to publish it was recorded: the upload failed or its answer
-// was lost, the owner visibility update failed, or the receipt was not saved.
-// The caller asks only while the village still holds the transcript at the
-// private visibility new content lands at, so an owner who shared or widened
-// it on the village since keeps that choice.
+// says so here is that no receipt for the session was ever written, while an
+// attempt to publish it was recorded: the upload failed or its answer was
+// lost, or the owner visibility update failed. A failed receipt save does not
+// count: by then the village had already applied every change the attempt
+// owed, so the visibility it holds now is the owner's. The caller asks only
+// while the village still holds the transcript at the private visibility new
+// content lands at, so an owner who shared or widened it since keeps that
+// choice.
 //
 // The read runs on a context of its own, like the receipt write: the upload
 // already happened, and losing this read to the upload budget would send the
@@ -1335,7 +1357,7 @@ func (p *Pipeline) unfinishedFirstPublish(ctx context.Context, projectHash schem
 	if err != nil {
 		return false, err
 	}
-	return attempt != nil, nil
+	return attempt != nil && attempt.Stage != store.PublicationAttemptStagePersistence, nil
 }
 
 // preflightOutcome separates the candidates a run may still publish from the

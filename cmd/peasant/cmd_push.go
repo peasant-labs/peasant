@@ -322,8 +322,8 @@ func BuildPushCommand() *cobra.Command {
 					if !requested.IsValid() {
 						return fmt.Errorf("invalid --visibility %q (valid: %s)", visibility, config.ImplementedVisibilityMenu())
 					}
-					if config.EffectiveVisibility(requested, cfg).Downgraded() {
-						return fmt.Errorf("invalid --visibility %q: %w", visibility, config.VisibilityChangeRefusal(requested))
+					if refusal := config.VisibilityChangeRefusal(requested); refusal != nil {
+						return fmt.Errorf("invalid --visibility %q: %w", visibility, refusal)
 					}
 				}
 
@@ -794,7 +794,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without uploading")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
 	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
-	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes sessions already published, which otherwise keep the visibility they have on the village", config.ImplementedVisibilityMenu()))
+	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes every already-published session the run selects, including ones shared with collectives on the village, which otherwise keep the visibility they have there", config.ImplementedVisibilityMenu()))
 	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also changes sessions already published. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt on this machine is sent the configured license", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")

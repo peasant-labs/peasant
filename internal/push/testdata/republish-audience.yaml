@@ -189,3 +189,23 @@ cases:
     change: none
     update: {door: web}
     expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group, villageLicense: none}
+
+  # The local receipt said private; the explicit change reaches the Village by
+  # owner update alone, and the receipt records what the Village answered.
+  - name: cli-visibility-flag-updates-the-receipt-of-an-unchanged-transcript
+    configured: {visibility: private, license: none}
+    first: {door: cli}
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: private, villageLicense: none}
+    ownerShares: true
+    change: none
+    update: {door: cli, flags: [--visibility, public]}
+    expectUpdate: {failed: false, published: false, license: none, visibilityUpdates: [public], visibility: public, villageLicense: none}
+
+  - name: cli-retry-finishes-a-first-publish-whose-visibility-update-failed
+    configured: {visibility: public, license: none}
+    first: {door: cli, failVisibilityUpdates: true}
+    expectFirst: {failed: true, published: true, license: none, visibilityUpdates: [public], visibility: private, villageLicense: none}
+    ownerShares: false
+    change: none
+    update: {door: cli}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public, villageLicense: none}

@@ -883,9 +883,9 @@ func assertDisclosureMatchesDowngrade(t *testing.T, downgraded bool, full, brief
 	}
 }
 
-// TestVisibilityMenu_DerivesFromTheContract proves the flag's validation message
-// is derived from the closed set rather than restated, so it cannot drift from
-// what the contract accepts.
+// TestVisibilityMenu_DerivesFromTheContract proves the menu of visibilities a
+// configuration accepts is derived from the closed set rather than restated, so
+// it cannot drift from what the contract accepts.
 func TestVisibilityMenu_DerivesFromTheContract(t *testing.T) {
 	t.Parallel()
 	menu := VisibilityMenu()

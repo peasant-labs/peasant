@@ -103,7 +103,9 @@ owner update follows.
 This is not a new repair API, CLI command, or automatic republish policy. An ordinary update
 keeps the visibility and license the transcript has on the Village: the configured
 `push.visibility` and `push.license` apply to a first publication only, and only the
-`--visibility` and `--license` flags change a transcript that is already published. One
-exception remains: without the local receipt for this Village account, Peasant cannot tell an
-update from a first publication before the upload, so it sends the configured license. Do not
-use this procedure to remove an irrevocable license.
+`--visibility` and `--license` flags change a transcript that is already published. A receipt
+for the session under an earlier project identity counts too. One exception remains: with no
+local receipt for the session at all, as after a reset database or on another machine, Peasant
+cannot tell an update from a first publication before the upload, so it sends the configured
+license; and if an attempt to publish it failed first, it also converges a private transcript
+to the requested visibility. Do not use this procedure to remove an irrevocable license.

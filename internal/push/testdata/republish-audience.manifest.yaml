@@ -16,3 +16,5 @@ requiredNames:
   - cli-license-flag-relicenses-an-unchanged-transcript
   - hook-retry-finishes-a-first-publish-whose-answer-was-lost
   - web-retry-keeps-an-owner-share-made-meanwhile
+  - cli-visibility-flag-updates-the-receipt-of-an-unchanged-transcript
+  - cli-retry-finishes-a-first-publish-whose-visibility-update-failed

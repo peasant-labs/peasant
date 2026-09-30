@@ -1,0 +1,10 @@
+# Required-name manifest for testdata/first_publish_decision.yaml. Name-only:
+# testutil.ValidateRequiredNames compares the name sets.
+requiredNames:
+  - a-created-transcript-opens-at-the-requested-visibility
+  - a-retry-after-a-lost-answer-finishes-the-first-publish
+  - a-retry-after-a-failed-owner-update-finishes-the-first-publish
+  - a-retry-after-a-failed-receipt-save-keeps-the-owner-choice
+  - a-retry-keeps-an-owner-share-made-meanwhile
+  - an-update-of-a-published-session-keeps-its-audience-and-license
+  - an-update-after-a-project-re-attribution-keeps-its-audience-and-license

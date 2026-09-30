@@ -1247,6 +1247,19 @@ func (s *StubPushStore) RecordPublicationAttempt(_ context.Context, diagnostic s
 	return nil
 }
 
+// HasPublication reports whether any stored receipt belongs to the session,
+// under any village account or project identity.
+func (s *StubPushStore) HasPublication(_ context.Context, sessionID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, record := range s.Publications {
+		if record.SessionID == sessionID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // LatestPublicationAttempt returns the most recently recorded attempt for one
 // publication identity, or nil when none was recorded.
 func (s *StubPushStore) LatestPublicationAttempt(_ context.Context, origin, owner string, projectHash schema.ProjectHash, sessionID string) (*store.PublicationAttemptDiagnostic, error) {
@@ -1396,6 +1409,11 @@ type StubPublisher struct {
 	AuthoritativeCalls []schema.AuthoritativePublishRequest
 	ReceiptContentHash schema.TranscriptContentHash
 	ReceiptFingerprint schema.PublishRequestFingerprint
+	// ReceiptVisibility, when set, is the visibility the receipt reports the
+	// transcript at; unset reports private, where new content lands.
+	ReceiptVisibility schema.Visibility
+	// OwnerUpdates records every owner update request, in order.
+	OwnerUpdates []schema.OwnerTranscriptUpdateRequest
 
 	// Schema-version preflight double (push version-negotiation gate).
 	// SchemaVersionResp is returned by GetSchemaVersion; nil means the village
@@ -1472,9 +1490,16 @@ func (s *StubPublisher) PublishAuthoritative(ctx context.Context, request schema
 	if s.ReceiptFingerprint != "" {
 		response.RequestOperationFingerprint = s.ReceiptFingerprint
 	}
+	if s.ReceiptVisibility != "" {
+		response.Visibility = s.ReceiptVisibility
+		response.Applied.NormalizedValues.Visibility = s.ReceiptVisibility
+	}
 	return response, status, err
 }
 func (s *StubPublisher) UpdateOwner(_ context.Context, id schema.TranscriptID, request schema.OwnerTranscriptUpdateRequest) (schema.OwnerTranscriptUpdateResponse, int, error) {
+	s.mu.Lock()
+	s.OwnerUpdates = append(s.OwnerUpdates, request)
+	s.mu.Unlock()
 	visibility := schema.TranscriptUpdateVisibility(schema.VisibilityPrivate)
 	if request.Visibility != nil {
 		visibility = *request.Visibility

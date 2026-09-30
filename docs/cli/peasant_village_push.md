@@ -53,7 +53,7 @@ peasant village push [flags]
       --timeout duration              Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a village that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach the village. Default: no budget. Git hooks always pass one.
       --timing                        Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.
       --verbose                       Show per-session detail
-      --visibility string             Override visibility for this run (private, public). Also changes sessions already published, which otherwise keep the visibility they have on the village
+      --visibility string             Override visibility for this run (private, public). Also changes every already-published session the run selects, including ones shared with collectives on the village, which otherwise keep the visibility they have there
       --yes                           (alias for --non-interactive)
 ```
 
