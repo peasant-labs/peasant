@@ -484,8 +484,14 @@ const DefaultMaxDrainBatch = 512
 // (payload was nil or empty).
 type stagedEntry struct {
 	result     workerResult
-	arenaStart int64 // offset into arena where transcriptData begins
+	arenaStart int64 // linear arena offset where transcriptData begins
 	arenaLen   int64 // length of transcriptData in arena (0 = no arena copy)
+	// arenaPad is the wrap gap this entry's copy skipped: the bytes between
+	// the end of the previous copy and the next slab boundary. It is freed by
+	// the same ack (or Add rollback) that frees arenaLen, so a wrap never
+	// permanently removes capacity from the ring. 0 for a copy that did not
+	// follow a wrap.
+	arenaPad int64
 }
 
 // StagingBuffer holds completed workerResults in memory while they wait for
@@ -503,12 +509,19 @@ type stagedEntry struct {
 //
 // The arena is treated as a ring: arenaHead bumps forward as entries are
 // added; Drain advances arenaTail past the regions freed by released entries.
-// Producers spin (runtime.Gosched) when the arena has insufficient contiguous
-// space, blocking until Drain reclaims bytes.
+// Producers sleep with bounded backoff when the arena has insufficient space,
+// waking as Drain + AckBatch reclaim bytes.
 //
-// A payload that does not fit in the remaining arena space (e.g. a single
-// transcript larger than the whole arena) is stored as a plain heap slice
-// and does not consume arena space; arenaLen is recorded as 0 for such entries.
+// A copy never straddles the end of the slab. When one would, its producer
+// reserves the tail of the slab as a gap ahead of its own bytes, so every copy
+// stays contiguous (physical index = linear coordinate % arenaSize). The gap is
+// charged to the copy that follows it and released by that copy's AckBatch —
+// or by Add's rollback when the slot array is exhausted — so wrapping can never
+// leave the ring permanently smaller.
+//
+// A non-nil payload larger than the whole arena cannot be made contiguous at
+// all: copyToArena panics instead of silently starving. arenaLen==0 is recorded
+// only for a payload that was nil or empty and consumed no arena space.
 //
 // # Concurrency model
 //
@@ -577,13 +590,23 @@ func NewStagingBuffer(capacity int, arenaSizeBytes int64) *StagingBuffer {
 	}
 }
 
-// copyToArena copies src into the arena ring and returns (start, length).
-// If the arena has insufficient free space the call spins until Drain
-// reclaims enough bytes. Returns (-1, 0) if src is nil or empty (no copy).
-// Panics if src is larger than the arena — size the arena appropriately.
-func (b *StagingBuffer) copyToArena(src []byte) (start, length int64) {
+// copyToArena copies src into the arena ring and returns
+// (start, length, pad). start is the linear coordinate of the copy's first
+// byte; length is len(src); pad is the wrap gap the reservation skipped ahead
+// of the copy (0 unless the copy was placed after the slab wrapped), which the
+// caller must charge to this entry so the ack that frees the copy also releases
+// the gap.
+//
+// If the arena has insufficient free space the call sleeps with bounded
+// backoff until Drain reclaims enough bytes. A wrapping claim fits only when
+// the payload is no larger than the physical start offset it wraps from, so a
+// payload larger than half the arena can be unplaceable when it must wrap;
+// keeping the arena at least twice the largest single payload keeps every wrap
+// satisfiable. Returns (-1, 0, 0) if src is nil or empty (no copy). Panics if
+// src is larger than the arena — size the arena appropriately.
+func (b *StagingBuffer) copyToArena(src []byte) (start, length, pad int64) {
 	if len(src) == 0 {
-		return -1, 0
+		return -1, 0, 0
 	}
 	sz := int64(len(src))
 	arenaSize := int64(len(b.arena))
@@ -601,32 +624,31 @@ func (b *StagingBuffer) copyToArena(src []byte) (start, length int64) {
 		tail := b.arenaTail.Load()
 		head := b.arenaHead.Load()
 		free := arenaSize - (head - tail)
-		if free >= sz {
-			// Try to claim [head, head+sz) in the arena.
-			// We use the linear (non-wrapping) coordinate space; actual index
-			// is head % arenaSize. We require the region to not straddle the
-			// end of the slab — if it would, pad head to the next wrap boundary
-			// and retry so that all copies are contiguous.
-			linearStart := head
-			physStart := head % arenaSize
-			if physStart+sz > arenaSize {
-				// Would straddle end: advance head to the wrap boundary and retry.
-				// The gap bytes are wasted but the invariant (contiguous copy) holds.
-				gap := arenaSize - physStart
-				if b.arenaHead.CompareAndSwap(head, head+gap) {
-					// Retry with the new head after the wrap.
-					backoff = backoffMin // reset on successful CAS
-					continue
-				}
-				continue
-			}
-			if b.arenaHead.CompareAndSwap(head, head+sz) {
+
+		// We use the linear (non-wrapping) coordinate space; the physical index
+		// is coordinate % arenaSize. A copy must not straddle the end of the
+		// slab, so when it would, the reservation also skips the remainder of
+		// the slab. The skipped gap is part of the same CAS, which charges it
+		// to this copy: the ack that frees the copy releases the gap too.
+		gap := int64(0)
+		if physStart := head % arenaSize; physStart+sz > arenaSize {
+			gap = arenaSize - physStart
+		}
+		claim := gap + sz
+
+		// The wrap gap counts against the ring's free space, so the whole claim
+		// must fit. Otherwise the tail has to advance (Drain + AckBatch) first.
+		if free >= claim {
+			if b.arenaHead.CompareAndSwap(head, head+claim) {
+				start = head + gap
+				physStart := start % arenaSize
 				copy(b.arena[physStart:physStart+sz], src)
-				return linearStart, sz
+				return start, sz, gap
 			}
 			// CAS lost to another producer; retry.
 			continue
 		}
+
 		// Arena full — bounded exponential sleep until Drain advances arenaTail.
 		time.Sleep(backoff)
 		if backoff < backoffMax {
@@ -637,15 +659,15 @@ func (b *StagingBuffer) copyToArena(src []byte) (start, length int64) {
 
 // Add stores a completed workerResult in the buffer. The transcriptData
 // payload (if any) is copied into the arena slab; the stored result's
-// transcriptData slice points into the arena. Add spins if the arena is
-// full until Drain reclaims space.
+// transcriptData slice points into the arena. Add sleeps with bounded backoff
+// when the arena is full and resumes as Drain + AckBatch reclaim space.
 //
 // Add is safe to call from multiple producer goroutines concurrently.
 // Returns false only if the slot array is exhausted (capacity limit hit).
 func (b *StagingBuffer) Add(r workerResult) bool {
 	// Copy transcript bytes into the arena before claiming a slot.
 	// Arena operations are lock-free CAS-based; multiple producers copy concurrently.
-	aStart, aLen := b.copyToArena(r.transcriptData)
+	aStart, aLen, aPad := b.copyToArena(r.transcriptData)
 	if aLen > 0 {
 		physStart := aStart % int64(len(b.arena))
 		r.transcriptData = b.arena[physStart : physStart+aLen]
@@ -662,7 +684,9 @@ func (b *StagingBuffer) Add(r workerResult) bool {
 		idx := b.count.Load()
 		if int(idx) >= len(b.slots) {
 			if aLen > 0 {
-				b.arenaTail.Add(aLen)
+				// Release the rolled-back copy and the wrap gap it claimed,
+				// matching what AckBatch would have freed for this entry.
+				b.arenaTail.Add(aLen + aPad)
 			}
 			return false
 		}
@@ -671,6 +695,7 @@ func (b *StagingBuffer) Add(r workerResult) bool {
 				result:     r,
 				arenaStart: aStart,
 				arenaLen:   aLen,
+				arenaPad:   aPad,
 			}
 			b.state[idx].Store(1) // publish: slot ready for draining
 			return true
@@ -791,7 +816,10 @@ func (b *StagingBuffer) Drain() DrainBatch {
 func (b *StagingBuffer) AckBatch(batch DrainBatch) {
 	var freedArenaBytes int64
 	for _, idx := range batch.Claimed {
-		freedArenaBytes += b.slots[idx].arenaLen
+		// arenaPad is the wrap gap this entry's copy skipped; it was charged to
+		// the entry at copy time, so freeing it here keeps the ring's capacity
+		// intact across wraps.
+		freedArenaBytes += b.slots[idx].arenaLen + b.slots[idx].arenaPad
 		b.state[idx].Store(3) // acked
 	}
 
