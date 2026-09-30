@@ -64,11 +64,13 @@ surface rendered non-empty), separate from the demo-parity pixel diff.
 | `peasant-shoot.mjs` | Captures the 10 transcript surfaces for one theme. Most surfaces are captured at the base viewport (`captureBeyondViewport:true`); the full trace canvas (whose content scrolls inside the bounded `.txn-stream`) is captured in FULL by temporarily growing the viewport to the stream's natural height (`shotTall`, ported from fairtrade's own `shootdemo.mjs`). Every capture passes the non-empty `SurfaceGate`. **Two-tier failures** (below). |
 | `surface-gate.mjs` | The shared non-empty assertion (byte floor, non-background ratio, distinct-colour count, no byte-identical duplicates). Vendored from the demo side so both are held to the same bar. |
 | `boot-peasant.mjs` | Host-integration check (oracle arm 2): boots the **real** `/projects/[name]/[id]` route against a running backend and asserts the composite renders through the real `SessionDetailV2` adapter + WebSocket path (exit 2 if `.txn-app` never mounts). The fixture route is backend-free, so this is the only arm that exercises the real transport. Validates its `PEASANT_PROJECT` coordinate against the live backend first (`validate-mock-coordinates.mjs`) so a stale default fails loud, not as a misleading transport-broken diagnosis. |
-| `validate-mock-coordinates.mjs` | Shared fail-fast guard against a recurring bug class: a script/fixture's hardcoded mock project literal drifting from the Go mock's actual catalog. Queries the live `GET /api/v1/projects/summary` (the same endpoint the Home picker uses) before any script boots Puppeteer, and throws an actionable error naming the exact invalid coordinate + the current valid set if it doesn't match. Wired into `boot-peasant.mjs`, `full-app-smoke.mjs`, `shell-nav-gate.mjs`, and `transcript-input-gate.mjs`. |
+| `validate-mock-coordinates.mjs` | Shared fail-fast guard against a recurring bug class: a script/fixture's hardcoded mock project literal drifting from the Go mock's actual catalog. Queries the live `GET /api/v1/projects/summary` (the same endpoint the Home picker uses) before any script boots Puppeteer, and throws an actionable error naming the exact invalid coordinate + the current valid set if it doesn't match. Wired into `boot-peasant.mjs`, `full-app-smoke.mjs`, `shell-nav-gate.mjs`, `shell-nav-default-gate.mjs`, and `transcript-input-gate.mjs`. |
 | `inspect-feedback-shoot.mjs` | Captures the dev-only inspect + feedback tool (armed picker, note popup, saved + re-armed, and `?fb=off`) in both themes over a running `next dev`. It verifies build provenance first (the served JS chunk must carry the change marker), asserts the in-browser flow — arm from the control and from `c`, the pick, the `POST /api/v1/local/feedback` payload, the re-arm, and the disable switch — and fulfills the save locally so the run never writes `llm/ui-feedback.md`. The tool is dev-gated, so this arm is the only one that can see it: every other capture script holds it off with `?fb=off`. |
-| `shell-nav-gate.mjs` | Graph shell frame boot check: drives the fairtrade in-use graph demo and the running app through `analytics`, `code map`, and `changes` in both themes, verifies nav order, active state (a filled amber pill — bg-amber/text-on-amber/border-amber — matching the demo's `.iu-subnav-item.active`), theme attrs, route/view mount points, and non-blank body selectors — drilling `code map`/`changes` into a representative `SHELL_PROJECT`-scoped surface past the picker — then writes fairtrade-left/current-app-right full-frame shell captures for the SxS arm. |
+| `shell-nav-gate.mjs` | Local shell header gate (connected arm), against a running app in either mode: holds the mounted header to `testdata/shell-header.yaml` through `shell-header-manifest.mjs` (the same checks the component tests run) on home and on every route-only page (`/analytics`, and `/review` and `/map` under `SHELL_PROJECT`) in both themes — required items present (settings only once its page ships), removed items (connection pill, share button, section nav) gone, no header link to a route-only section — plus one-row `--nav-h` geometry with every item visible and reachable, `<main>` clearing the fixed chrome, and a palette with no per-project or route-only jump. Runs the same header checks at every width in `src/test/testdata/shell_responsive.yaml` and writes full-frame review captures. |
+| `shell-nav-default-gate.mjs` | Local shell offline gate (server-stopped arm): boots its own default-mode `bin/peasant`, verifies build provenance (binary not older than `web/out`, served chunks identical to `web/out`, offline-notice markers present), holds home and a transcript to the header manifest while connected, then STOPS the server with the pages open and asserts fairtrade's `LocalOfflineBanner` shows under the header in the fixed chrome — this computer, not the internet; `peasant web start --port <page port>`; `try again` — with the header manifest intact, the tour unmounted, `<main>` clearing the grown chrome, and no second scroll on the transcript; captures desktop and 390px frames in both themes; restarts the server, presses `try again`, and asserts the notice clears. |
+| `shell-header-manifest.mjs` | The one reader of `testdata/shell-header.yaml` (strict, required names pinned) and the self-contained DOM checks shared by the component tests (jsdom) and the two shell gates (`page.evaluate`): `headerFailures`, `paletteFailures`, and the browser-only `headerGeometryFailures` and `chromeClearance`. |
 | `context-navigation-shoot.mjs` | Mounted current-parent and child-context navigation evidence on the REAL binary: boots `bin/peasant` with the mock store and opens the child transcript through the real WebSocket `session_detail` payload, so the stored `context_from` source, the stored `started_by` parent, and the retained earlier-history partition all arrive through the real store → decoration boundary → adapter → composite path. It asserts the two stable links, that the disclosure toggle writes only `earlier=` (the reader's view is held by the browser's scroll anchoring for exactly the inserted height — compared and retained, not merely recorded), following the current-parent link to the EXACT stored parent, and Back restoring the child's route, disclosure, `.txn-stream` offset, selected turn, and query — the asserted state is the one pictured, and the state is re-sampled after each key capture to prove it. Reopening the search panel is a separate, labelled action that runs the viewer's own match jump, so it gets its own sample and its own capture instead of being folded into the restoration claim. Also asserts a reload, a copied disclosed link, and the honest unavailable reference for a child whose target is no longer stored. Both themes; served-chunk + embedded-binary build provenance is asserted before any capture. Fixture: `internal/mock/testdata/context_navigation.yaml` (shared with the Go mock provider via `context-navigation-fixture.mjs`). |
-| `stitch-sxs.mjs` | Builds the height-matched **REFERENCE \| SUBJECT** composites per surface per theme (`REF_DIR`/`APP_DIR`) into a `SURFACE_SET`-distinct `SXS_OUT_SUBDIR` (`sxs-smoke`/`sxs-shell`/`sxs`). Both panes drawn to the taller height, top-aligned; the shorter is **padded, never scaled**, with a sampled background + a dashed end-hairline. For `transcript`/`changes`/`shell`, a missing subject capture becomes a labeled placeholder so the set stays complete (gate still fails on the missing pair). For `smoke`, a missing reference OR subject capture writes **no placeholder at all** — the surface is skipped and logged as a `FAIL`, so durable smoke evidence can never contain a fake stand-in. **Default `REF_DIR=demo`** pairs the fairtrade demo reference against the app captures (the retired pre-composite-migration `tb` golden was removed — see the Oracle section above). |
+| `stitch-sxs.mjs` | Builds the height-matched **REFERENCE \| SUBJECT** composites per surface per theme (`REF_DIR`/`APP_DIR`) into a `SURFACE_SET`-distinct `SXS_OUT_SUBDIR` (`sxs-smoke`/`sxs`). Both panes drawn to the taller height, top-aligned; the shorter is **padded, never scaled**, with a sampled background + a dashed end-hairline. For `transcript`/`changes`, a missing subject capture becomes a labeled placeholder so the set stays complete (gate still fails on the missing pair). For `smoke`, a missing reference OR subject capture writes **no placeholder at all** — the surface is skipped and logged as a `FAIL`, so durable smoke evidence can never contain a fake stand-in. **Default `REF_DIR=demo`** pairs the fairtrade demo reference against the app captures (the retired pre-composite-migration `tb` golden was removed — see the Oracle section above). |
 
 ## Two-tier failure contract
 
@@ -179,11 +181,15 @@ review-capture/                         # runtime output (ephemeral, gitignored)
 | `APP_DIR` | `peasant` | stitch (subject/right capture subdir) |
 | `APP_LABEL` | peasant wiring caption | stitch (subject column caption) |
 | `PEASANT_REAL_ORIGIN` | `http://localhost:8690` | boot (backend-served real app origin) |
-| `DEMO_URL` | `http://localhost:5180` | shell nav gate fairtrade demo origin |
-| `SHELL_CAPTURE_DIR` | `<base>/shell` | shell nav gate current peasant app capture destination |
-| `SHELL_REFERENCE_DIR` | `<base>/shell-demo` | shell nav gate fairtrade in-use demo capture destination; generated and ignored |
-| `SHELL_PROJECT` | the canonical `ProjectHash` for the mock's `fortuna` project (`SHELL_DEFAULT_PROJECT` in `smoke-surfaces.mjs`) | shell nav gate: mock project used to drill code-map/changes past the picker into a representative, project-scoped surface (must exist in the running app's mock store; a hash, not a label, so the gate's exact-URL check isn't tripped by the legitimate legacy-label-to-hash redirect) |
-| `SXS_OUT_SUBDIR` | per `SURFACE_SET` (`smoke`→`sxs-smoke`, `shell`→`sxs-shell`, else `sxs`) | stitch: output subdir for composites, kept DISTINCT per arm so smoke-SxS and shell/nav-SxS evidence can never be confused for one another |
+| `DEMO_URL` | `http://localhost:5180` | demo shoot: fairtrade demo origin |
+| `SHELL_CAPTURE_DIR` | `<base>/shell` | shell header gate capture destination |
+| `SHELL_PROJECT` | the canonical `ProjectHash` for the mock's `fortuna` project (`SHELL_DEFAULT_PROJECT` in `smoke-surfaces.mjs`) | shell header gate: mock project the project-scoped route-only pages (`/review/<hash>/`, `/map/<hash>/`) open under (must exist in the running app's mock store; a hash, not a label, so the gate's exact-path check isn't tripped by the legitimate label-to-hash canonicalization) |
+| `SHELL_RESPONSIVE_ONLY` | unset | shell header gate: `1` runs only the responsive widths |
+| `PEASANT_BIN` | `<repo>/bin/peasant` | shell offline gate: the binary it boots |
+| `PEASANT_OFFLINE_PORT` | `8698` | shell offline gate: the port it boots the binary on (must be free) |
+| `PEASANT_OFFLINE_CONFIG_DIR` | a fresh temp dir | shell offline gate: config dir of the booted server |
+| `SHELL_OFFLINE_CAPTURE_DIR` | `<base>/shell-offline` | shell offline gate capture destination (also holds `server.log`) |
+| `SXS_OUT_SUBDIR` | per `SURFACE_SET` (`smoke`→`sxs-smoke`, else `sxs`) | stitch: output subdir for composites, kept DISTINCT per arm so smoke-SxS evidence can never be confused with the transcript/changes composites |
 | `PEASANT_PROJECT` / `PEASANT_SESSION` | `fortuna` / a mock session | boot (real viewer route); validated against the live backend's mock catalog before use (`validate-mock-coordinates.mjs`) |
 
 ---
@@ -227,9 +233,9 @@ lockfile is regenerated. Run the Fairtrade demo from the checkout matching that 
 ### 2. `./bin/peasant web start` — run the real binary
 - **cmd:** `cd PEASANT && ./bin/peasant web start --port 8690 --foreground --no-browser --mock-data-store=web,sessions,qualitySessions,annotations,review`
 - **when:** to hit the SERVED HTTP routes (the real artifact). `review` in the mock store is
-  REQUIRED for `/review`. Add `--experimental` when a gate drives the NAV to the code map
-  (`shell-nav-gate.mjs`): the code map section is shelved from the shell chrome by default
-  (see `EXPERIMENTAL.md`), though `/map/<project>/` stays directly routable either way.
+  REQUIRED for `/review`. `--experimental` only advertises the code-map capability; the local
+  header and palette are the same in both modes (the code map is route-only, see `EXPERIMENTAL.md`),
+  and `/map/<project>/` stays directly routable either way — `shell-nav-gate.mjs` must pass on both.
 - **expect:** `curl -sf localhost:8690/api/v1/health`; serves `/review/<project>/`,
   `/projects/<project>/<session>/` (transcript), `/` (dashboard), `/map/<project>/`.
 
@@ -269,8 +275,8 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
 - **what:** reuses the same surface registry as `full-app-smoke.mjs` and stitches the current real-binary
   screenshots from `scripts/visual/smoke/<theme>/<surface>.png` against the COMMITTED durable baseline at
   `scripts/visual/baseline/smoke-baseline/<theme>/<surface>.png` into `scripts/visual/sxs-smoke/<theme>/`
-  — a DISTINCT directory from shell/nav SxS (§4c) and the transcript/changes `sxs/` so reviewers never
-  mix up which evidence they're looking at.
+  — a DISTINCT directory from the transcript/changes `sxs/` so reviewers never mix up which evidence
+  they're looking at.
 - **references are DURABLE, never placeholder:** the six smoke surfaces (`analytics`, `dashboard`, `map`,
   `review-change-detail`, `review-changes`, `transcript`) each have a COMMITTED reference baseline at
   `scripts/visual/baseline/smoke-baseline/<theme>/<surface>.png` (blessed the same way the `changes` arm's
@@ -284,35 +290,40 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
 - **why:** smoke and SxS share one surface manifest, so adding a first-class smoke surface wires it into
   visual-review SxS without copying another hardcoded list.
 
-### 4c. Graph shell frame SxS + boot gate
-- **cmd:** `cd PEASANT/web && pnpm shell:gate` with §2's peasant server running (mock store MUST include the
-  project `SHELL_PROJECT` resolves to — default the mock's `fortuna` project, given as its canonical
-  `ProjectHash`) and FAIRTRADE `pnpm dev` serving the in-use demo at `DEMO_URL` (default
-  `http://localhost:5180`).
-- **what:** captures the fairtrade in-use graph demo full shell frame as the REFERENCE/left side and the current
-  peasant app full shell frame as the SUBJECT/right side for `analytics`, `code map`, and `changes` in both
-  themes. Here "shell" means the persistent product header, graph section nav, active state, route/view wiring,
-  and visible mounted body content below the nav. The peasant side asserts exact three-link order/hrefs,
-  `aria-current`, and the active section's FILLED AMBER PILL (bg-amber + on-amber text + amber border, on the
-  link element itself — matching the fairtrade demo's `.iu-subnav-item.active`, not an underline marker),
-  theme attrs, route mounts, and body selectors. The fairtrade side asserts the canonical graph-demo order,
-  active state, theme, graph app selection, and non-blank view body before taking each reference capture.
-- **representative body content, not the picker:** the bare `/map` and `/` (changes) nav hrefs land on the
-  CROSS-PROJECT picker by design (the production IA). After confirming the nav itself lands there correctly,
-  the gate drills into a real, project-scoped surface — `/map/{SHELL_PROJECT}/` (`.mc` canvas) and
-  `/review/{SHELL_PROJECT}/` (`.gmp-changes-root`) — for the actual shell capture, so the SxS shows chrome +
-  representative mounted content, never the picker/default route. The shell capture also hides any element
-  flagged `data-visual-exclude` before the screenshot (a generic hook for interim/transient copy that would
-  otherwise skew fairtrade-reference parity comparisons) — the production feature itself is untouched. No
-  production element currently carries this flag.
-- **outputs:** fairtrade reference captures under `scripts/visual/shell-demo/<theme>/shell-{analytics,map,changes}.png`,
-  current peasant captures under `scripts/visual/shell/<theme>/shell-{analytics,map,changes}.png`, and SxS
-  composites under `scripts/visual/sxs-shell/<theme>/shell-{analytics,map,changes}.png` — a DISTINCT
-  directory from the smoke SxS (§4b) so the two evidence sets can never be confused.
-- **fail-closed behavior:** the boot arm exits non-zero on broken nav, missing route/view mounts, blank body
-  captures, or missing demo/app server. The SxS arm runs in `IMGDIFF_MODE=presence`: `NO-REF`, `NO-APP`, or zero paired surfaces
-  fails, while size/pixel drift is preserved in the composite for human review instead of being treated as
-  a pixel-parity gate between different hosts.
+### 4c. Local shell gates (header manifest + offline notice)
+- **header (connected) cmd:** `cd PEASANT/web && pnpm boot:shell` with §2's peasant server running (mock
+  store MUST include the project `SHELL_PROJECT` resolves to — default the mock's `fortuna` project,
+  given as its canonical `ProjectHash`). Run it against a default server AND an `--experimental` one:
+  both must pass, since the code-map capability must not bring a route-only section back.
+- **offline (server stopped) cmd:** `cd PEASANT/web && pnpm shell:offline` after `make build`. It boots
+  its own default-mode `bin/peasant` on `PEASANT_OFFLINE_PORT` (default `8698`), so nothing else may
+  hold that port, and kills it on exit. `pnpm shell:gate` runs both arms.
+- **the manifest:** `testdata/shell-header.yaml` names what the header must carry (`brand`, `search`,
+  `theme`, and `settings` once `src/app/settings/page.tsx` exists — before that a settings link would
+  be dead, so it must be absent), what must not come back (`connection-pill`, `share-button`,
+  `section-nav`), the route-only sections that must still resolve (`/analytics`, `/review`, `/map`),
+  and the palette commands forbidden (`proj-changes:`, `proj-map:`) and required. The component tests
+  (`TopNavbar.test.tsx`, `CommandPalette.test.tsx`, `LayoutShell.capabilities.test.tsx`) read the same
+  file through `shell-header-manifest.mjs`, so the unit render and the served build are held to one list.
+- **what the header arm asserts:** on home and on each route-only page, in both themes: the manifest;
+  one row of `--nav-h` with every item visible, inside the row and reachable by a pointer; `<main>`
+  clearing the fixed chrome; theme attributes; and a palette that offers no per-project or route-only
+  jump. The responsive arm repeats the header checks at every width in `src/test/testdata/shell_responsive.yaml`.
+  It checks the header's own overflow, not the page body's (the home project picker already scrolls
+  sideways at 390px on develop; that body is rebuilt separately).
+- **what the offline arm asserts:** build provenance first; then, with the pages open and the server
+  killed, the notice under the header in the fixed chrome — "peasant isn't running on this computer",
+  "your internet is fine", `peasant web start --port <port>`, `try again` — the header manifest intact,
+  no tour, `--app-notice-height` set, `<main>` clearing the grown chrome, and no document scroll under
+  the transcript; after a restart and `try again`, the notice gone.
+- **no SxS arm:** the fairtrade in-use demo's local app renders a section sub-nav, not this header, so a
+  demo-vs-app composite would compare different chromes; both gates assert the mounted shell directly.
+- **outputs:** `scripts/visual/shell/<theme>/shell-{home,home-mobile,route-analytics,route-review,route-map}.png`
+  and `scripts/visual/shell-offline/<theme>/{home,transcript,home-mobile}.png` — review artifacts, never
+  committed.
+- **mock limitation:** the mock data store cannot serve the grouped sessions route (`GET
+  /api/v1/sessions?view=grouped` answers 500 on develop too), so the home body shows that error panel in
+  mock captures; the header gate ignores exactly that console error.
 
 ### 4d. Mounted context / current-parent navigation (real binary, both themes)
 - **cmd:** `cd PEASANT/web && CHROME_PATH=$(command -v google-chrome) pnpm visual:context-navigation` (this script boots its own `bin/peasant` on `PEASANT_CONTEXT_NAV_PORT`, default `8793`; `PEASANT_CONTEXT_NAV_SKIP_BUILD=1` reuses an existing `bin/peasant`).

@@ -1,22 +1,18 @@
-expectedCaseCount: 5
+# Viewport widths the mounted shell gate (scripts/visual/shell-nav-gate.mjs)
+# drives the local header through. The header is one row of fairtrade's --nav-h
+# (56px) at every width, so no row carries its own height: at each width the
+# gate asserts the shell-header.yaml manifest, that every header item (brand,
+# search, theme; settings once its page ships) is visible, inside the row and
+# reachable by a pointer, that nothing overflows sideways, and that <main>
+# clears the fixed chrome. The gate requires every name below.
 cases:
   - name: desktop
     width: 1460
-    expectedHeaderHeight: 64
-    commandPaletteVisible: true
   - name: tablet
     width: 768
-    expectedHeaderHeight: 112
-    commandPaletteVisible: true
   - name: compact_tablet
     width: 540
-    expectedHeaderHeight: 112
-    commandPaletteVisible: false
   - name: mobile_wide
     width: 480
-    expectedHeaderHeight: 112
-    commandPaletteVisible: false
   - name: mobile_narrow
     width: 390
-    expectedHeaderHeight: 112
-    commandPaletteVisible: false

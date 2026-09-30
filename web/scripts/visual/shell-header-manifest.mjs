@@ -209,3 +209,69 @@ export function paletteFailures(manifest) {
   if (routeLinks.length) failures.push(`the palette links to route-only sections: ${routeLinks.join(', ')}`)
   return failures
 }
+
+/* ── Browser-only probes ─────────────────────────────────────────────────────────────────────────
+   These read layout (rects, hit-testing, computed styles), which jsdom does not compute, so only the
+   mounted gates run them. Self-contained for page.evaluate like the checks above. */
+
+/**
+ * Checks the header's geometry: one row of fairtrade's --nav-h at the current width, no horizontal
+ * overflow of the header itself (the page body's width is its own page's concern), and every item the manifest expects visible, inside the header row, and reachable by a
+ * pointer (the element at its centre is the item or inside it). Returns every failure.
+ * @param {ShellHeaderManifest} manifest
+ * @param {{ shipped: Record<string, boolean> }} context
+ * @returns {string[]}
+ */
+export function headerGeometryFailures(manifest, context) {
+  const failures = []
+  const header = document.querySelector('header')
+  if (!header) return ['no <header> is mounted']
+  const navHeight = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-h'))
+  const box = header.getBoundingClientRect()
+  if (!Number.isFinite(navHeight) || navHeight <= 0) failures.push('--nav-h is not defined on the root')
+  else if (Math.abs(box.height - navHeight) > 0.5) failures.push(`the header is ${box.height}px tall, not one ${navHeight}px row`)
+  if (box.left < 0 || box.right > window.innerWidth + 0.5) failures.push(`the header spans ${box.left}..${box.right}px in a ${window.innerWidth}px viewport`)
+  if (header.scrollWidth > header.clientWidth) failures.push(`the header overflows: scrollWidth ${header.scrollWidth} > clientWidth ${header.clientWidth}`)
+
+  for (const [name, item] of Object.entries(manifest.show)) {
+    if (context.shipped[name] === false) continue
+    const element = document.querySelector(item.selector)
+    if (!element) continue // headerFailures reports a missing item
+    const rect = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    if (style.display === 'none' || style.visibility === 'hidden' || rect.width === 0 || rect.height === 0) {
+      failures.push(`${name}: not visible`)
+      continue
+    }
+    if (rect.left < 0 || rect.right > window.innerWidth + 0.5) failures.push(`${name}: clipped horizontally (${rect.left}..${rect.right}px)`)
+    if (rect.top < box.top - 0.5 || rect.bottom > box.bottom + 0.5) failures.push(`${name}: outside the header row (${rect.top}..${rect.bottom}px vs ${box.top}..${box.bottom}px)`)
+    const x = Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2))
+    const y = Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2))
+    const hit = document.elementFromPoint(x, y)
+    if (!hit || (hit !== element && !element.contains(hit))) failures.push(`${name}: covered at its centre by ${hit ? hit.tagName.toLowerCase() + (hit.className ? '.' + String(hit.className).split(/\s+/).join('.') : '') : 'nothing'}`)
+  }
+  return failures
+}
+
+/**
+ * Checks that the page body clears the fixed top chrome (the header plus the offline notice while
+ * it shows): <main>'s top padding equals the chrome's height, and --app-header-height resolves to
+ * it. Returns every failure, and the measured heights for the log.
+ * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainPaddingTop: number }}
+ */
+export function chromeClearance() {
+  const failures = []
+  const header = document.querySelector('header')
+  const chrome = header?.parentElement
+  const main = document.querySelector('main')
+  if (!header || !chrome || !main) return { failures: ['the header, its chrome or <main> is not mounted'], chrome: 0, header: 0, notice: 0, mainPaddingTop: 0 }
+  const chromeHeight = chrome.getBoundingClientRect().height
+  const headerHeight = header.getBoundingClientRect().height
+  const notice = chrome.querySelector('section[aria-label="peasant is not running"]')
+  const noticeHeight = notice ? chromeHeight - headerHeight : 0
+  const mainPaddingTop = Number.parseFloat(getComputedStyle(main).paddingTop)
+  if (getComputedStyle(chrome).position !== 'fixed') failures.push(`the top chrome is position:${getComputedStyle(chrome).position}, not fixed`)
+  if (Math.abs(mainPaddingTop - chromeHeight) > 1) failures.push(`<main> clears ${mainPaddingTop}px but the top chrome is ${chromeHeight}px tall`)
+  if (!notice && Math.abs(chromeHeight - headerHeight) > 0.5) failures.push(`the chrome is ${chromeHeight}px with no notice, taller than the ${headerHeight}px header`)
+  return { failures, chrome: chromeHeight, header: headerHeight, notice: noticeHeight, mainPaddingTop }
+}
