@@ -3,6 +3,7 @@ requiredNames:
   - ses_direct_hit
   - uuid_with_surrounding_spaces_direct_hit
   - project_hash_direct_hit
+  - project_hash_resolves_own_project
   - uuid_short_circuits_fts
   - project_hash_short_circuits_fts
   - unknown_uuid_returns_empty

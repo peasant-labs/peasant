@@ -47,6 +47,13 @@ func fxBase() int64 { return testutil.TestSessionStartTime.UnixMilli() }
 // fixture project hash and cwd.
 func seedSession(t *testing.T, s *store.Store, sessionID, gitBranch string, startMs, endMs int64) {
 	t.Helper()
+	seedSessionInProject(t, s, sessionID, gitBranch, startMs, endMs, fxProjectHash)
+}
+
+// seedSessionInProject is seedSession with an explicit project hash, for
+// fixtures that must distinguish two projects.
+func seedSessionInProject(t *testing.T, s *store.Store, sessionID, gitBranch string, startMs, endMs int64, projectHash schema.ProjectHash) {
+	t.Helper()
 	ingested := endMs + 1
 	meta := &schema.UnifiedMetadata{
 		SessionID:    schema.SessionID(sessionID),
@@ -54,7 +61,7 @@ func seedSession(t *testing.T, s *store.Store, sessionID, gitBranch string, star
 		Model:        testutil.TestModel,
 		HostSlug:     schema.HostSlug(testutil.TestHostSlug),
 		Project: schema.ProjectContext{
-			Hash:     schema.ProjectHash(fxProjectHash),
+			Hash:     projectHash,
 			Name:     "repo",
 			FilePath: fxCwd,
 		},

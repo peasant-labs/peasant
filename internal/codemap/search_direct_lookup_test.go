@@ -30,6 +30,9 @@ var searchDirectLookupManifestYAML []byte
 type directLookupSession struct {
 	ID      string `yaml:"id"`
 	Content string `yaml:"content"`
+	// ProjectHash is optional; empty seeds the shared fixture project hash.
+	// Cases that must distinguish two projects set it explicitly.
+	ProjectHash string `yaml:"project_hash"`
 }
 
 type directLookupInput struct {
@@ -52,6 +55,11 @@ type directLookupExpected struct {
 	// markers are covered by the existing search tests; when present it must
 	// run parallel to the other expected arms.
 	Snippets []string `yaml:"snippets"`
+	// FTSSnippetMarkers asserts every result's snippet carries the FTS
+	// bracket markers, proving the query was served by the content path
+	// rather than a direct lookup. Cases that fall through to FTS set it;
+	// direct cases omit it (their snippets are pinned empty above).
+	FTSSnippetMarkers bool `yaml:"fts_snippet_markers"`
 }
 
 func decodeSearchDirectLookupCorpus(data []byte) (testcase.Corpus[directLookupInput, directLookupExpected], error) {
@@ -72,6 +80,11 @@ func decodeSearchDirectLookupCorpus(data []byte) (testcase.Corpus[directLookupIn
 		for _, session := range tc.Input.Sessions {
 			if session.ID == "" {
 				return testcase.Corpus[directLookupInput, directLookupExpected]{}, fmt.Errorf("search direct lookup fixture case %q seeds a session with an empty id", tc.Name)
+			}
+			if session.ProjectHash != "" {
+				if _, err := schema.NewProjectHash(session.ProjectHash); err != nil {
+					return testcase.Corpus[directLookupInput, directLookupExpected]{}, fmt.Errorf("search direct lookup fixture case %q seeds an invalid project hash %q: %w", tc.Name, session.ProjectHash, err)
+				}
 			}
 		}
 		n := len(tc.Expected.SessionIDs)
@@ -163,13 +176,18 @@ func TestSearchDirectLookupFixtureGuards(t *testing.T) {
 // seedDirectLookupSessions inserts one session row per fixture session in
 // input order; a session with empty content gets no indexed entries. Start
 // times increase with input order, so the last session listed is the newest —
-// the one a project-hash hit identifies.
+// the one a project-hash hit identifies. A session with an explicit
+// project_hash seeds that project instead of the shared fixture project.
 func seedDirectLookupSessions(t *testing.T, s *store.Store, sessions []directLookupSession) {
 	t.Helper()
 	base := fxBase()
 	for i, session := range sessions {
 		startMs := base + int64(i+1)*1000
-		seedSession(t, s, session.ID, "", startMs, startMs+500)
+		hash := fxProjectHash
+		if session.ProjectHash != "" {
+			hash = schema.ProjectHash(session.ProjectHash)
+		}
+		seedSessionInProject(t, s, session.ID, "", startMs, startMs+500, hash)
 		if session.Content != "" {
 			seedEntries(t, s, session.ID, []entrySpec{userTurn(startMs, session.Content)})
 		}
@@ -240,36 +258,13 @@ func TestSearch_DirectLookup(t *testing.T) {
 					t.Errorf("snippets = %v, want %v", gotSnippets, tc.Expected.Snippets)
 				}
 			}
+			if tc.Expected.FTSSnippetMarkers {
+				for i, result := range payload.Results {
+					if !strings.Contains(result.Snippet, "[") || !strings.Contains(result.Snippet, "]") {
+						t.Errorf("result %d snippet = %q, want FTS match markers (the fall-through path must have served this query)", i, result.Snippet)
+					}
+				}
+			}
 		})
-	}
-}
-
-// TestSearch_NearMissFallsThroughToFTS proves a 63-hex token never takes the
-// direct path: only the FTS read can return indexed content quoting it, and
-// the hit carries FTS snippet markers rather than the direct empty marker.
-func TestSearch_NearMissFallsThroughToFTS(t *testing.T) {
-	t.Parallel()
-	s := storetest.Open(t)
-	seedDirectLookupSessions(t, s, []directLookupSession{
-		{ID: "77777777-7777-7777-7777-777777777777", Content: "release marker abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234567 end"},
-	})
-	svc := codemap.NewService(
-		s,
-		func(string) gitops.Repository { return noRepo() },
-		codegraph.NewGraphBuilder(),
-		sessionvisibility.All(),
-	)
-	got, err := svc.Search(context.Background(), "abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234567", 20)
-	if err != nil {
-		t.Fatalf("Search(63-hex token): %v", err)
-	}
-	if len(got.Results) != 1 {
-		t.Fatalf("results for 63-hex token = %d, want 1 via FTS fall-through: %+v", len(got.Results), got.Results)
-	}
-	if got.Results[0].SessionID != "77777777-7777-7777-7777-777777777777" {
-		t.Errorf("sessionId = %q, want the quoting session", got.Results[0].SessionID)
-	}
-	if !strings.Contains(got.Results[0].Snippet, "[") || !strings.Contains(got.Results[0].Snippet, "]") {
-		t.Errorf("snippet missing FTS markers, the direct path must not have served this query: %q", got.Results[0].Snippet)
 	}
 }

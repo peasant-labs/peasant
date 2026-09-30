@@ -64,6 +64,23 @@ cases:
       roles: [user]
       snippets: [""]
 
+  - name: project_hash_resolves_own_project
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-exact-project-hash}
+    mutation: {description: "query project A's hash while project B holds the globally newest session, and expect project A's own newest session with A's hash"}
+    input:
+      query: bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "project A's only session", project_hash: bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "project B's newer session"}
+    expected:
+      session_ids: [11111111-1111-1111-1111-111111111111]
+      project_hashes: [bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222]
+      entry_indexes: [0]
+      roles: [user]
+      snippets: [""]
+
   - name: uuid_short_circuits_fts
     classification: must-pass
     provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-no-fts-on-id}
@@ -144,6 +161,7 @@ cases:
       project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
       entry_indexes: [0]
       roles: [user]
+      fts_snippet_markers: true
 
   - name: near_miss_bare_ses_prefix_falls_through
     classification: must-pass
@@ -159,6 +177,7 @@ cases:
       project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
       entry_indexes: [0]
       roles: [user]
+      fts_snippet_markers: true
 
   - name: near_miss_uppercase_uuid_falls_through
     classification: must-pass
@@ -174,6 +193,7 @@ cases:
       project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
       entry_indexes: [0]
       roles: [user]
+      fts_snippet_markers: true
 
   - name: plain_content_query_unchanged
     classification: must-pass
@@ -190,6 +210,7 @@ cases:
       project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678, abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
       entry_indexes: [0, 0]
       roles: [user, user]
+      fts_snippet_markers: true
 
   - name: direct_hit_second_window_exhausted
     classification: must-pass
