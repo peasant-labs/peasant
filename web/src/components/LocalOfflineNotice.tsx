@@ -89,8 +89,9 @@ export function LocalOfflineNotice() {
     const element = ref.current;
     if (!offline || !element) return;
     const root = document.documentElement;
+    // Instant, even where the page scrolls smoothly: keeping a place must not visibly move it.
     const keepPlace = (delta: number, pinned: boolean) => {
-      if (delta !== 0 && !pinned && window.scrollY > 0) window.scrollBy(0, delta);
+      if (delta !== 0 && !pinned && window.scrollY > 0) window.scrollBy({ top: delta, behavior: 'instant' });
     };
     const publish = () => {
       const height = element.getBoundingClientRect().height;
