@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,14 +83,8 @@ type registryMembershipFile struct {
 func loadRegistryMembership(t *testing.T) registryMembershipFile {
 	t.Helper()
 	var file registryMembershipFile
-	decoder := yaml.NewDecoder(bytes.NewReader(registryMembershipYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&file); err != nil {
+	if err := testutil.DecodeFixtureYAML(registryMembershipYAML, &file); err != nil {
 		t.Fatalf("decode registry membership fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("registry membership fixture must be a single document, got %v", err)
 	}
 	if len(file.Partition) == 0 || len(file.Protected) == 0 {
 		t.Fatal("registry membership fixture must list at least one partition and one protected entry")
