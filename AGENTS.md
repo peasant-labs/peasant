@@ -216,15 +216,22 @@ the server serves the newly built assets before you trust a screenshot or a comp
   by itself.
 - Do not add a fail-closed gate on deep links. An earlier attempt was withdrawn as a misread of
   the user's intent. Do not reintroduce it without a new, explicit ratification.
-- Publishing is a separate, user-initiated action: the `/share` wizard. It never runs
-  automatically or in the background. It draws only from the sessions the user recorded. Pulled
-  transcripts are not re-pushable. Governance for re-sharing pulled sessions is a tracked
-  follow-up.
+- Publishing is a separate, user-initiated action: the `/share` wizard. Nothing is published
+  without an explicit act: a click, or a binding the developer set up. It draws only from the
+  sessions the user recorded. Pulled transcripts are not re-pushable. Governance for re-sharing
+  pulled sessions is a tracked follow-up.
 - The consented publication paths are the `/share` wizard, the upload hook installed by
-  `peasant village hooks install`, and attaching the prompts behind a pull request. Attaching is
-  a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
+  `peasant village hooks install`, the auto-publish hook, and attaching the prompts behind a pull
+  request. The auto-publish hook is the same managed hook, installed by `peasant village auto` or
+  by the install action of the settings page, for a repository that an auto-publish rule in
+  `hooks.yaml` covers. The rule is the binding: its push publishes that repository's sessions
+  redacted and private, and shares each transcript it sends with the rule's collectives, never
+  with the public. `autopublish.Rule` is the one matcher of rules, server-side; do not implement
+  it again in React. A rule installs no hook by itself: a hook is installed one repository at a
+  time, by an explicit act, and only in a repository Peasant has recorded sessions in. Attaching
+  is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
   transcripts already published. Do not add a path that publishes without one of these, and do
-  not make any of them automatic.
+  not create a binding for the developer.
 - One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
   user-facing lists show only the configured selection. An explicit session selection must not
   widen visibility to the sibling sessions of its project. Apply the boundary server-side.
