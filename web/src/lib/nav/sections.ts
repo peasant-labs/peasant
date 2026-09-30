@@ -1,4 +1,4 @@
-import type { LucideIcon } from 'lucide-react';
+import { Settings, type LucideIcon } from 'lucide-react';
 import { LOCAL_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
 import { UI_CAPABILITY, type UICapabilityToken } from '@/lib/capabilities/tokens';
 
@@ -40,7 +40,7 @@ export interface LocalSection extends NavSection {
 
 type LocalSectionId = 'home' | 'settings' | 'analytics' | 'changes' | 'map';
 
-type SectionRoute = Omit<NavSection, 'id' | 'label'>;
+type SectionRoute = Omit<NavSection, 'id' | 'label' | 'icon'>;
 
 /**
  * The page each registry id owns in this app. `null` means the app has no page
@@ -70,6 +70,14 @@ const ROUTES: Record<LocalSectionId, SectionRoute | null> = {
   },
 };
 
+/**
+ * The glyph a nav section's header link leads with. Recorded here, beside the
+ * route map, so the link carries it the moment its page ships.
+ */
+const ICONS: Partial<Record<LocalSectionId, LucideIcon>> = {
+  settings: Settings,
+};
+
 function assertKnownSection(id: string): asserts id is LocalSectionId {
   if (!Object.hasOwn(ROUTES, id)) {
     throw new Error(
@@ -84,7 +92,7 @@ export const LOCAL_SECTIONS: readonly LocalSection[] = LOCAL_APP_SECTIONS.flatMa
   assertKnownSection(section.id);
   const route = ROUTES[section.id];
   if (route === null) return [];
-  return [{ ...route, id: section.id, label: section.label, inNav: section.inNav !== false }];
+  return [{ ...route, icon: ICONS[section.id], id: section.id, label: section.label, inNav: section.inNav !== false }];
 });
 
 /** The sections persistent chrome may link to: listed in the nav and routed here. */

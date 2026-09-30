@@ -399,7 +399,7 @@ describe('SessionDetailV2 — the "showing every step" prelude is gone', () => {
   it('keeps the bounded transcript-view shell height class intact after the prelude removal', () => {
     const { container } = render(<TestSessionDetail sessionId="sess-12345678" />);
     expect(container.querySelector('[data-tour="transcript-view"]')).toHaveClass(
-      'h-[calc(100dvh-var(--app-header-height))]',
+      'h-[var(--app-body-height)]',
     );
   });
 

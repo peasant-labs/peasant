@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConnectionState } from '@/contexts/WebSocketContext';
 import { getApiBaseUrl } from '@/lib/api/base';
 
@@ -24,8 +24,8 @@ export interface LocalAppHealth {
   checkedAt: Date | null;
   /** A `try again` check is in flight. */
   retrying: boolean;
-  /** Check now; when the app answers, the socket reconnects at once. */
-  retry: () => void;
+  /** Check now; when the app answers, the socket reconnects at once. Resolves to whether it answered. */
+  retry: () => Promise<boolean>;
 }
 
 async function healthAnswers(): Promise<boolean> {
@@ -61,16 +61,22 @@ export function useLocalAppHealth(): LocalAppHealth {
   const [healthFailed, setHealthFailed] = useState(false);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // The newest check started. An older check that answers late (a timeout from
+  // an earlier drop) must not overwrite what a newer one found.
+  const latestCheck = useRef(0);
 
   // Only the offline paths reconnect on an answer. A fresh drop leaves the
   // reconnect to the provider's backoff, so a socket that opens and closes at
   // once cannot be retried faster than that backoff.
   const check = useCallback(
     async (reconnectIfAnswered: boolean) => {
+      const id = ++latestCheck.current;
       const answered = await healthAnswers();
+      if (id !== latestCheck.current) return answered;
       setCheckedAt(new Date());
       setHealthFailed(!answered);
       if (answered && reconnectIfAnswered) reconnect();
+      return answered;
     },
     [reconnect],
   );
@@ -94,7 +100,7 @@ export function useLocalAppHealth(): LocalAppHealth {
 
   const retry = useCallback(() => {
     setRetrying(true);
-    void check(true).finally(() => setRetrying(false));
+    return check(true).finally(() => setRetrying(false));
   }, [check]);
 
   return { offline, checkedAt, retrying, retry };

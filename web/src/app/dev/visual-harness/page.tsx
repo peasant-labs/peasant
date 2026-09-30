@@ -144,12 +144,12 @@ export default function VisualHarnessPage() {
       // `<main className="... pt-[var(--app-header-height)] ...">`), which already reserves
       // `var(--app-header-height)` at the top even though no real TopNavbar renders on a `/dev/*`
       // route — the padding is unconditional. This wrapper uses the SAME Tailwind arbitrary-value
-      // class `SessionDetailV2` uses (`h-[calc(100dvh-var(--app-header-height))]`) to claim
+      // class `SessionDetailV2` uses (`h-[var(--app-body-height)]`) to claim
       // exactly the space below that reservation — a raw inline `style` calc() referencing the
       // custom property did not resolve reliably, so match production's proven class instead of
       // reinventing the subtraction. This harness's own 44px header strip is then a flex sibling
       // inside that same bound, with the composite taking the flex-1 remainder.
-      className="flex h-[calc(100dvh-var(--app-header-height))] flex-col"
+      className="flex h-[var(--app-body-height)] flex-col"
       style={{ background: 'var(--canvas)', color: 'var(--ink)' }}
     >
       {/* Harness chrome — identity + the theme toggle the capture script drives. Fixed height (not
@@ -199,7 +199,7 @@ export default function VisualHarnessPage() {
       </header>
 
       {/* The flex remainder below the harness's own 44px header, within the outer wrapper already
-          bounded to `calc(100dvh-var(--app-header-height))` — `min-h-0` lets this item shrink
+          bounded to `var(--app-body-height)` — `min-h-0` lets this item shrink
           below its content's natural size (without it, a flex item defaults to its content size
           and never actually clips): the composite owns exactly one inner scroller (`.txn-stream`),
           not the page. */}

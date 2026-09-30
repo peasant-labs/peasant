@@ -25,11 +25,12 @@ export const REQUIRED_NAMES = Object.freeze({
 })
 
 /**
- * @typedef {{ selector: string, text?: string, labels?: { light: string, dark: string }, page?: string }} ShowItem
+ * @typedef {{ selector: string, text?: string, labels?: { light: string, dark: string }, page?: string, icon?: boolean }} ShowItem
  * @typedef {{ selector?: string, text?: string[] }} HideItem
  * @typedef {{ mount: string, project?: boolean }} RouteItem
  * @typedef {{ forbid: string[], require: string[] }} PaletteRules
- * @typedef {{ show: Record<string, ShowItem>, hide: Record<string, HideItem>, routes: Record<string, RouteItem>, palette: PaletteRules }} ShellHeaderManifest
+ * @typedef {{ stopped: string, stillStopped: string, back: string }} Announcements
+ * @typedef {{ show: Record<string, ShowItem>, hide: Record<string, HideItem>, routes: Record<string, RouteItem>, palette: PaletteRules, announcements: Announcements }} ShellHeaderManifest
  */
 
 const fail = (what) => {
@@ -74,14 +75,15 @@ export function loadShellHeaderManifest(source = readFileSync(SHELL_HEADER_FIXTU
   const document = YAML.parseDocument(source, { strict: true, uniqueKeys: true })
   if (document.errors.length) fail(`invalid YAML: ${document.errors.map((error) => error.message).join('; ')}`)
   const root = record(document.toJS(), 'root')
-  exactKeys(root, ['show', 'hide', 'routes', 'palette'], ['show', 'hide', 'routes', 'palette'], 'root')
+  exactKeys(root, ['show', 'hide', 'routes', 'palette', 'announcements'], ['show', 'hide', 'routes', 'palette', 'announcements'], 'root')
 
   const show = record(root.show, 'show')
   requireNames(show, REQUIRED_NAMES.show, 'show')
   for (const [name, value] of Object.entries(show)) {
     const item = record(value, `show.${name}`)
-    exactKeys(item, ['selector', 'text', 'labels', 'page'], ['selector'], `show.${name}`)
+    exactKeys(item, ['selector', 'text', 'labels', 'page', 'icon'], ['selector'], `show.${name}`)
     nonEmptyString(item.selector, `show.${name}.selector`)
+    if ('icon' in item && item.icon !== true) fail(`show.${name}.icon must be true when present`)
     if ('text' in item) nonEmptyString(item.text, `show.${name}.text`)
     if ('page' in item) nonEmptyString(item.page, `show.${name}.page`)
     if ('labels' in item) {
@@ -120,6 +122,10 @@ export function loadShellHeaderManifest(source = readFileSync(SHELL_HEADER_FIXTU
   if (missingForbid.length) fail(`palette.forbid is missing required ids: ${missingForbid.join(', ')}`)
   const missingRequire = REQUIRED_NAMES.paletteRequire.filter((id) => !palette.require.includes(id))
   if (missingRequire.length) fail(`palette.require is missing required ids: ${missingRequire.join(', ')}`)
+
+  const announcements = record(root.announcements, 'announcements')
+  exactKeys(announcements, ['stopped', 'stillStopped', 'back'], ['stopped', 'stillStopped', 'back'], 'announcements')
+  for (const key of ['stopped', 'stillStopped', 'back']) nonEmptyString(announcements[key], `announcements.${key}`)
 
   return /** @type {ShellHeaderManifest} */ (root)
 }
@@ -176,6 +182,7 @@ export function headerFailures(manifest, context) {
       const actual = element.getAttribute('aria-label')
       if (actual !== expected) failures.push(`${name}: labelled ${JSON.stringify(actual)} in the ${context.theme} theme, expected ${JSON.stringify(expected)}`)
     }
+    if (item.icon && !element.querySelector('svg')) failures.push(`${name}: has no leading glyph`)
   }
 
   const headerText = textOf(header)
@@ -186,10 +193,12 @@ export function headerFailures(manifest, context) {
     }
   }
 
-  // The persistent chrome is the header and, while it shows, the offline notice under it: neither
-  // may link to a route-only section. Page bodies may (a code-map breadcrumb links to /map).
-  const chrome = [header, document.querySelector('section[aria-label="peasant is not running"]')].filter(Boolean)
-  const hrefs = chrome.flatMap((part) => [...part.querySelectorAll('a[href]')]).map((link) => new URL(link.getAttribute('href'), 'http://local.invalid').pathname.replace(/\/+$/, '') || '/')
+  // Nothing outside the page body may link to a route-only section: not the header, the offline
+  // notice, or any nav mounted beside them. The page body (<main>) may (a code-map breadcrumb links
+  // to /map), and so may nothing in an open dialog (the palette is checked on its own).
+  const hrefs = [...document.querySelectorAll('a[href]')]
+    .filter((link) => !link.closest('main') && !link.closest('[role="dialog"]'))
+    .map((link) => new URL(link.getAttribute('href'), 'http://local.invalid').pathname.replace(/\/+$/, '') || '/')
   for (const path of Object.keys(manifest.routes)) {
     if (hrefs.some((href) => href === path || href.startsWith(`${path}/`))) failures.push(`route ${path}: the persistent chrome links to it`)
   }

@@ -482,13 +482,14 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   );
 
   return (
-    // The app shell publishes one responsive header height for both its main
-    // offset and bounded viewers, including the mobile two-row header.
+    // The app shell publishes the height a full-height page fills below the
+    // header (and the offline notice while it shows), with a floor so a short
+    // screen scrolls the notice away instead of crushing the transcript.
     <div
       ref={transcriptHostRef}
       data-tour="transcript-view"
       className={[
-        'flex h-[calc(100dvh-var(--app-header-height))] flex-col',
+        'flex h-[var(--app-body-height)] flex-col',
         metricsOpen ? '' : 'txn-metrics-collapsed',
         activeTab === 'highlights' ? '' : 'txn-hints-hidden',
       ]

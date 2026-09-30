@@ -11,12 +11,12 @@ import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
 /**
  * LayoutShell wraps the app in the WebSocket provider and renders the
  * persistent chrome: the fixed one-row header and, under it while the local app
- * is unreachable, the offline notice. The notice is not fixed: it sits at the
- * top of the page and scrolls with it, so it can never cover the page or itself
- * on a short screen. `--app-header-height` is where page content starts (the
- * header plus the notice while it shows), which the page body clears. The
- * WebSocket connection lives here — pages subscribe/unsubscribe to channels
- * without tearing down the socket.
+ * is unreachable, the offline notice (pinned where the screen has room, at the
+ * top of the page and scrolling with it elsewhere — see LocalOfflineNotice).
+ * `--app-header-height` is where page content starts (the header plus the
+ * notice while it shows), which the page body clears. The WebSocket connection
+ * lives here — pages subscribe/unsubscribe to channels without tearing down the
+ * socket.
  *
  * The first-run tour (components/tour) is not mounted. Its provider, steps and
  * the `data-tour` anchors stay in the tree so it can come back.

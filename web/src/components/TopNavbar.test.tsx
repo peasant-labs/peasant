@@ -68,6 +68,27 @@ describe('TopNavbar — the local shell header manifest', () => {
     expect(headerFailures(manifest, { theme: 'light', shipped })).toContain(`section-nav: present (${manifest.hide['section-nav'].selector})`);
   });
 
+  it('reports any link to a route-only section outside the page body, whatever its markup', () => {
+    // A hand-written nav beside the header, not fairtrade's: the route links alone must fail it.
+    render(
+      <>
+        <TopNavbar />
+        <nav aria-label="sections">
+          <a href="/analytics">analytics</a>
+          <a href="/review">changes</a>
+        </nav>
+        <main>
+          {/* The page body may link into a route-only section (a code-map breadcrumb does). */}
+          <a href="/map">map</a>
+        </main>
+      </>,
+    );
+    const failures = headerFailures(manifest, { theme: 'light', shipped });
+    expect(failures).toContain('route /analytics: the persistent chrome links to it');
+    expect(failures).toContain('route /review: the persistent chrome links to it');
+    expect(failures).not.toContain('route /map: the persistent chrome links to it');
+  });
+
   it('leaves settings out until the settings page exists, so the link is never dead', () => {
     // Written against the current tree: flips to "must show" the moment the page file lands.
     render(<TopNavbar />);
