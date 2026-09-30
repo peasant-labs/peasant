@@ -453,10 +453,10 @@ Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
 positive integer, else the default.
 
 The golden-template cache stamp keys on the schema version and a fingerprint of
-the migration SQL. Connection pragmas and the salt-table DDL are outside that
-fingerprint, so after editing one of them on a branch, delete `.testcache/`
-(or bump `cacheScheme` in the helper) to keep a stale template from being
-reused.
+the migration SQL. Connection pragmas, the salt-table DDL, and the Go-driven
+migration phase (`schema_v23.go`) are outside that fingerprint, so after editing
+one of them on a branch, delete `.testcache/` (or bump `cacheScheme` in the
+helper) to keep a stale template from being reused.
 
 ## Go WebSocket E2E (verified)
 

@@ -572,12 +572,13 @@ Before, by package: `cmd/peasant` 92, `internal/ingest` 55, `internal/store` 29,
 Final scan (ast-grep 0.45.0, worktree root):
 
 ```
-$ ast-grep scan --config sgconfig.yml .
+$ ast-grep scan --error=unused-suppression --config sgconfig.yml .
 $ echo $?
 0
 ```
 
-No output, no findings, no unused-suppression hints. The scoped
+No output, no findings, no unused-suppression diagnostics; the error flag makes
+a stale suppression fail this step. The scoped
 `ast-grep scan --config sgconfig.yml cmd internal` gives the same result.
 
 ### Rule checks (scratch tree under /tmp/opencode, not committed)
@@ -604,7 +605,7 @@ checks. A golden copy with the skip would bypass the code under test.
 | `internal/store/store_test.go:140` | B | first open of the idempotent-reopen pair creates the database |
 | `internal/store/store_test.go:161` | B | second open must replay the migrating path on an existing file |
 | `internal/store/mixed_index_formats_test.go:99` | C | custom formats and conversion edges registered at open (persist/convert/rollback) |
-| `internal/store/mixed_index_formats_test.go:514` | C | pipeline upgrade case registers its declaring harness format at open |
+| `internal/store/mixed_index_formats_test.go:511` | C | pipeline upgrade case registers its declaring harness format at open |
 | `internal/store/index_input_transactions_test.go:81` | C | conditional conversion transactions register a fault-scoped handler and edge at open |
 | `internal/store/publication_projection_test.go:66` | benchmark setup | `storetest` takes `*testing.T`, so it cannot serve a `*testing.B`; the one open runs outside the timed section |
 
@@ -613,9 +614,10 @@ Class E (first-run CLI cases) never shows up in the scan, because the command do
 the open, not the test. That list is in the `cmd/peasant` conversion section
 above.
 
-The `storetest` package doc (`internal/store/storetest/golden.go`) says that the
-package is the only sanctioned way for tests to open a store, and it names this
-rule.
+The `storetest` package doc (`internal/store/storetest/golden.go`) names the
+package as the sanctioned source of migrated templates, states that inline
+`CopyGolden*` plus `store.WithSkipMigrations()` opens are likewise sanctioned,
+and names this rule.
 
 ### Focused smoke (one converted test per package, `-race -count=1`)
 

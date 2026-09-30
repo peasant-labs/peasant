@@ -1,12 +1,14 @@
 package storetest
 
 import (
-	"crypto/sha256"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/store"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 func TestOpenPreparedPreparesMissingPath(t *testing.T) {
@@ -30,19 +32,42 @@ func TestCopyGoldenToIfAbsentKeepsExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first OpenPrepared: %v", err)
 	}
+	// Make the file observably differ from the golden template: a marker table
+	// the template does not carry. An always-overwrite implementation loses it.
+	ctx := context.Background()
+	conn, err := db.Pool().Take(ctx)
+	if err != nil {
+		t.Fatalf("take a connection: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE keep_marker (x INTEGER);`, nil); err != nil {
+		db.Pool().Put(conn)
+		t.Fatalf("create the marker table: %v", err)
+	}
+	db.Pool().Put(conn)
 	if err := db.Close(); err != nil {
-		t.Fatalf("close prepared store: %v", err)
+		t.Fatalf("close the prepared store: %v", err)
 	}
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read prepared file: %v", err)
-	}
+
 	CopyGoldenToIfAbsent(t, path)
-	after, err := os.ReadFile(path)
+
+	db, err = store.Open(path, store.WithSkipMigrations())
 	if err != nil {
-		t.Fatalf("read prepared file after the second call: %v", err)
+		t.Fatalf("reopen the prepared file: %v", err)
 	}
-	if sha256.Sum256(before) != sha256.Sum256(after) {
+	t.Cleanup(func() { _ = db.Close() })
+	conn, err = db.Pool().Take(ctx)
+	if err != nil {
+		t.Fatalf("take a connection after the second call: %v", err)
+	}
+	defer db.Pool().Put(conn)
+	found := false
+	err = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'keep_marker'`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	})
+	if err != nil {
+		t.Fatalf("query the marker table: %v", err)
+	}
+	if !found {
 		t.Fatal("an existing prepared path was overwritten")
 	}
 }
