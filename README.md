@@ -84,6 +84,7 @@ privacy boundaries, and recovery behavior.
 | `peasant metrics compute` | Compute session metrics from stored transcripts |
 | `peasant web start` | Start the web dashboard server (default port 8690) |
 | `peasant web stop` | Stop the web dashboard server |
+| `peasant open --session <id>` | Record one session with its commits and open its transcript in the web dashboard (see [output](#peasant-open-output)) |
 | `peasant tui` | Launch the terminal UI (deprecated; use `peasant web` and `peasant annotate`) |
 | `peasant kickstart` | Run the first-time setup wizard |
 | `peasant export sessions` | Export session transcripts as JSON |
@@ -185,6 +186,38 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--no-browser` | Do not auto-open browser |
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
+
+### `peasant open` output
+
+`peasant open --session <id>` harvests that one session with commit detection, starts the web
+dashboard when it is not running, checks that the dashboard serves the session, opens the
+transcript in the browser, and prints two lines on stdout:
+
+```
+peasant: opened "<title>" · not published
+http://localhost:8690/projects/<project-hash>/<session-id>
+```
+
+The state reads `published` when the local store holds a Village publication receipt for the
+session. A session with no generated title prints `peasant: opened an untitled session`. The
+command opens the browser itself, so a caller must not open the address again.
+
+When a step fails, the command prints one line on stderr and exits 1:
+
+```
+peasant: <step> failed: <reason>; fix: <action>
+```
+
+The step is one of `session check`, `harvest`, `session lookup`, `dashboard start`, or
+`dashboard check`. A command in the fix carries whichever of `--config`, `--config-dir`,
+`--data-dir`, and `--state-dir` the run was given. The command never opens the dashboard root in place of the
+session.
+
+| Flag | Description |
+|------|-------------|
+| `--session <id>` | The session to record and open (required) |
+| `--port <n>` | Port of the web dashboard (default 8690, as for `peasant web start`) |
+| `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
 
 ### `peasant tui` flags (deprecated)
 

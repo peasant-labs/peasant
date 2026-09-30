@@ -126,6 +126,30 @@ func (s *Store) Publication(ctx context.Context, origin, owner string, projectHa
 	return out, nil
 }
 
+// HasPublication reports whether the store holds a publication receipt for the
+// session, from any Village origin and owner and under any project hash.
+// SavePublication writes a receipt only after Village confirmed the publish, so
+// its presence is the local record that the session was published. The read is
+// keyed on the session alone: a later harvest can re-attribute the session to a
+// new project hash, and the receipt keeps the hash it was published under until
+// the next publish.
+func (s *Store) HasPublication(ctx context.Context, sessionID string) (bool, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return false, fmt.Errorf("check publication receipt: acquire SQLite connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	found := false
+	err = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_publications WHERE session_id=? LIMIT 1`, &sqlitex.ExecOptions{Args: []any{sessionID}, ResultFunc: func(*sqlite.Stmt) error {
+		found = true
+		return nil
+	}})
+	if err != nil {
+		return false, fmt.Errorf("check publication receipt: query session %q: %w", sessionID, err)
+	}
+	return found, nil
+}
+
 func (s *Store) RecordPublicationAttempt(ctx context.Context, d PublicationAttemptDiagnostic) error {
 	if d.VillageOrigin == "" || d.OwnerUserID == "" || d.SessionID == "" || d.ProjectHash == "" || d.Stage == "" || d.Message == "" {
 		return fmt.Errorf("record publication attempt: origin, owner, project, session, stage, and actionable message are required")
