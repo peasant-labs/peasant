@@ -192,6 +192,23 @@ func TestLocalPublishingRoutesAnswerWithTheSchemaTypes(t *testing.T) {
 			t.Fatalf("sync row before the publish = %+v", row)
 		}
 	}
+
+	// Taking a collective back goes through the same route and revokes its
+	// members' access on Village.
+	status, body := world.request(t, http.MethodPost, defaults.RouteSyncPush.String(), schema.SyncPushRequest{
+		SessionIDs:  []string{insideSessionID},
+		Collectives: &schema.SyncPushCollectives{Remove: []schema.VillageUUID{publishingCollectives["platform"].ID}},
+	})
+	var removed schema.SyncPushResponse
+	decodeContract(t, status, body, &removed)
+	removal := removed.Sessions[0].Steps
+	if removed.Skipped != 1 || len(removal) != 2 || removal[1].Step != schema.SyncPushStepRemoveCollective || removal[1].Outcome != schema.SyncPushStepSucceeded || *removal[1].CollectiveID != publishingCollectives["platform"].ID {
+		t.Fatalf("removal through the mounted route = %s", body)
+	}
+	audience := world.village.Audience(schema.TranscriptID(insideSessionID))
+	if _, stillReads := audience[publishingCollectives["platform"].ID]; stillReads || audience[publishingCollectives["review"].ID] != schema.VillageShareStatusPending {
+		t.Fatalf("Village audience after the removal = %v; platform must be gone and review still pending", audience)
+	}
 	var published schema.LocalSyncSessionsPayload
 	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String(), &published)
 	for _, row := range published.Sessions {

@@ -59,6 +59,19 @@ func TestSessionPublicationsFollowTheSessionAcrossProjects(t *testing.T) {
 		t.Fatalf("attempts = %+v; want only the latest attempt of the published session", attempts)
 	}
 
+	// Publishing the session under its new project writes a second receipt,
+	// which Village updated later; that one wins.
+	if err := s.SavePublication(ctx, moved); err != nil {
+		t.Fatalf("save the receipt under the new project: %v", err)
+	}
+	receipts, err = s.SessionPublications(ctx, primary.VillageOrigin, primary.OwnerUserID, ids)
+	if err != nil {
+		t.Fatalf("session receipts after the second publish: %v", err)
+	}
+	if got := receipts[primary.SessionID]; got.Receipt.TranscriptID != moved.Receipt.TranscriptID || got.ProjectHash != moved.ProjectHash {
+		t.Fatalf("receipt after the second publish = %+v; want the later receipt under %s", got, moved.ProjectHash)
+	}
+
 	assertNoPublicationState(t, s, "another owner", primary.VillageOrigin, primary.OwnerUserID+"-other", ids)
 	assertNoPublicationState(t, s, "another Village", primary.VillageOrigin+"/other", primary.OwnerUserID, ids)
 }
