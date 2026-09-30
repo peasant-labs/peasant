@@ -20,11 +20,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -44,9 +44,6 @@ type Rule struct {
 	Collectives []schema.VillageUUID `yaml:"collectives"`
 }
 
-// villageUUID is the canonical lowercase form Village uses for a collective.
-var villageUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-
 // Validate checks the rule the way the contract does, and that its pattern can
 // be read for its kind and its collectives are Village identifiers.
 func (r Rule) Validate() error {
@@ -60,7 +57,7 @@ func (r Rule) Validate() error {
 		return fmt.Errorf("auto-publish rule %q: %w", r.ID, err)
 	}
 	for _, collective := range r.Collectives {
-		if !villageUUID.MatchString(string(collective)) {
+		if !village.IsCollectiveID(collective) {
 			return fmt.Errorf("auto-publish rule %q: collective %q is not a Village collective identifier; use the lowercase UUID Village shows for the collective", r.ID, collective)
 		}
 	}
@@ -78,23 +75,17 @@ func RuleFromRequest(id string, request schema.AutoPublishRuleRequest) Rule {
 }
 
 // Covers reports whether the rule's pattern names the repository. It says
-// nothing about whether the rule publishes: see Applies.
+// nothing about whether the rule publishes: a rule with no event covers a
+// repository and publishes nothing.
 func (r Rule) Covers(repo Repository) bool {
 	switch r.Kind {
 	case schema.AutoPublishRuleFolder:
 		return folderMatches(r.Match, repo.Root)
 	case schema.AutoPublishRuleRemote:
-		return remoteMatches(r.Match, repo.Remote)
+		return remoteMatches(r.Match, repo.Remote) || remoteMatches(r.Match, repo.Origin)
 	default:
 		return false
 	}
-}
-
-// Applies reports whether a push of the repository publishes under the rule:
-// the rule covers it and names at least one hook event. A rule without an
-// event is kept, and publishes nothing.
-func (r Rule) Applies(repo Repository) bool {
-	return len(r.Events) > 0 && r.Covers(repo)
 }
 
 // HookEvents returns the rule's events as the hook events githooks manages.
@@ -112,40 +103,53 @@ func (r Rule) HookEvents() ([]githooks.Event, error) {
 	return events, nil
 }
 
-// Applying returns the rules that publish a push of the repository, in file
-// order.
-func Applying(rules []Rule, repo Repository) []Rule {
-	var applying []Rule
-	for _, rule := range rules {
-		if rule.Applies(repo) {
-			applying = append(applying, rule)
-		}
-	}
-	return applying
+// Decision is what the rules decide for one repository.
+type Decision struct {
+	// Rules are the identifiers of the rules that publish the repository: they
+	// cover it and name at least one event. File order.
+	Rules []string
+	// Collectives are the collectives those rules share with, each once, in
+	// the order the rules name them. Overlapping rules add their collectives
+	// together: each is a binding the developer set up.
+	Collectives []schema.VillageUUID
+	// Events are the hook events those rules name, each once.
+	Events []schema.AutoPublishEvent
+	// Paused are the identifiers of the rules that cover the repository but
+	// name no event. A paused rule publishes nothing, and it still says the
+	// developer bound the repository, so a push must not publish it another
+	// way.
+	Paused []string
 }
 
-// Collectives returns every collective the rules share with, each once, in
-// the order the rules name them. Overlapping rules add their collectives
-// together: each is a binding the developer set up.
-func Collectives(rules []Rule) []schema.VillageUUID {
-	var collectives []schema.VillageUUID
+// Covered reports whether any rule covers the repository, publishing or
+// paused.
+func (d Decision) Covered() bool { return len(d.Rules) > 0 || len(d.Paused) > 0 }
+
+// Decide runs the one matcher: which rules cover the repository, and what they
+// publish it to.
+func Decide(rules []Rule, repo Repository) Decision {
+	var decision Decision
 	for _, rule := range rules {
+		if !rule.Covers(repo) {
+			continue
+		}
+		if len(rule.Events) == 0 {
+			decision.Paused = append(decision.Paused, rule.ID)
+			continue
+		}
+		decision.Rules = append(decision.Rules, rule.ID)
 		for _, collective := range rule.Collectives {
-			if !slices.Contains(collectives, collective) {
-				collectives = append(collectives, collective)
+			if !slices.Contains(decision.Collectives, collective) {
+				decision.Collectives = append(decision.Collectives, collective)
+			}
+		}
+		for _, event := range rule.Events {
+			if !slices.Contains(decision.Events, event) {
+				decision.Events = append(decision.Events, event)
 			}
 		}
 	}
-	return collectives
-}
-
-// IDs returns the rules' identifiers, in order.
-func IDs(rules []Rule) []string {
-	ids := make([]string, len(rules))
-	for i, rule := range rules {
-		ids[i] = rule.ID
-	}
-	return ids
+	return decision
 }
 
 // --- folder globs ---
@@ -190,7 +194,51 @@ func folderMatches(pattern, root string) bool {
 	if err != nil {
 		return false
 	}
-	return matchSegments(segments, splitPath(filepath.ToSlash(filepath.Clean(root))))
+	path := splitPath(filepath.ToSlash(filepath.Clean(root)))
+	if matchSegments(segments, path) {
+		return true
+	}
+	// Git reports a root with its symlinks resolved, so /tmp/x arrives as
+	// /private/tmp/x. The glob's literal prefix is resolved the same way.
+	resolved := resolveLiteralPrefix(segments)
+	return !slices.Equal(resolved, segments) && matchSegments(resolved, path)
+}
+
+// resolveLiteralPrefix resolves the symlinks in the leading segments that hold
+// no glob character, and keeps the rest of the glob as it is.
+func resolveLiteralPrefix(segments []string) []string {
+	literal := 0
+	for literal < len(segments) && !strings.ContainsAny(segments[literal], globMeta) {
+		literal++
+	}
+	for ; literal > 0; literal-- {
+		prefix := "/" + strings.Join(segments[:literal], "/")
+		if real, err := filepath.EvalSymlinks(filepath.FromSlash(prefix)); err == nil {
+			return append(splitPath(filepath.ToSlash(real)), segments[literal:]...)
+		}
+	}
+	return segments
+}
+
+// globMeta are the characters filepath.Match reads as a pattern.
+const globMeta = `*?[\`
+
+// FolderMatch is the folder glob that names exactly the directory root: each
+// glob character in it is escaped, so a folder named "a*b" or "[old]" is
+// covered, and a sibling is not.
+func FolderMatch(root string) string {
+	segments := splitPath(filepath.ToSlash(filepath.Clean(root)))
+	for i, segment := range segments {
+		var b strings.Builder
+		for _, r := range segment {
+			if strings.ContainsRune(globMeta, r) {
+				b.WriteByte('\\')
+			}
+			b.WriteRune(r)
+		}
+		segments[i] = b.String()
+	}
+	return "/" + strings.Join(segments, "/")
 }
 
 func matchSegments(pattern, path []string) bool {
@@ -285,6 +333,9 @@ func validateMatch(kind schema.AutoPublishRuleKind, match string) error {
 		}
 		if _, err := path.Match(label, ""); errors.Is(err, path.ErrBadPattern) {
 			return fmt.Errorf("the remote pattern %q is malformed; close every '[' and escape a literal '\\'", match)
+		}
+		if _, repoPath, _ := strings.Cut(label, ":"); !strings.Contains(repoPath, "/") {
+			return fmt.Errorf("the remote pattern %q names an owner but no repository, so it matches no remote; write %s/* for every repository of the owner", match, strings.TrimSuffix(match, "/"))
 		}
 		return nil
 	default:

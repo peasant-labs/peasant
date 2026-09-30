@@ -3,22 +3,28 @@
 # `peasant village auto` prints.
 #
 # Each case names the driver that runs it (autopublishtest.Driver):
-#   matcher       internal/autopublish  Applying on the repository below; "~"
-#                                       is the home directory.
-#   validate      internal/autopublish  the rule is refused when read.
+#   matcher       internal/autopublish  Decide on the repository below; "~/"
+#                                       in its root is the home directory.
+#   validate      internal/autopublish  the rule, or the rules file, is
+#                                       refused when read.
 #   install       internal/api          PUT the rules, then POST install for
 #                                       the recorded or the unrecorded
 #                                       repository, on the mounted server.
-#   push          cmd/peasant           `peasant village push --repository`
-#                                       in the recorded repository, against a
-#                                       Village double.
-#   hook          cmd/peasant           git push through the hook the rule
-#                                       installed, with an upload that fails.
+#   rule-body     internal/api          a body the settings routes refuse.
+#   push          cmd/peasant           `peasant village push` over sessions
+#                                       recorded in the world's repositories,
+#                                       against a Village double.
+#   hook          cmd/peasant           git push through the hook
+#                                       `peasant village auto` installed, with
+#                                       an upload that fails.
 #   village-auto  cmd/peasant           `peasant village auto` in the recorded
 #                                       repository.
 #
-# In a match, "{world}" is the directory holding the world's repositories,
-# and "{remote}" the recorded repository's remote in bare form. Rules name collectives by alias.
+# autopublishtest.fieldsOf names the fields each driver reads; a case that
+# sets another field is refused when the fixture loads. In a match,
+# "{world}" is the directory holding the world's repositories, and "{remote}"
+# the recorded repository's remote in bare form. Rules name collectives by
+# alias.
 #
 # Every case is required by name. The first eight are the acceptance cases
 # of auto-publish rules; the rest guard the behavior around them.
@@ -33,33 +39,61 @@ requiredNames:
   - village-auto-output
   - double-star-matches-any-depth
   - folder-rule-does-not-cover-a-nested-repository
+  - escaped-folder-covers-only-itself
+  - escaped-folder-covers-itself
   - remote-wildcard-ignores-case
   - remote-wildcard-stays-in-one-segment
   - remote-pattern-in-scp-form
+  - remote-pattern-as-a-url
+  - remote-pattern-with-a-user-and-a-port
+  - remote-rule-matches-the-origin-of-a-fork-branch
   - remote-rule-skips-a-repository-without-a-remote
   - folder-rule-does-not-read-the-remote
-  - rule-without-events-publishes-nothing
+  - rule-without-events-is-paused
   - folder-glob-must-be-absolute
   - malformed-folder-glob
   - remote-pattern-needs-a-path
+  - remote-pattern-needs-a-repository
+  - malformed-remote-pattern
   - unknown-kind
   - repeated-event
   - collective-must-be-a-village-identifier
   - identifier-must-fit-a-url-path
+  - file-repeats-an-identifier
+  - file-of-another-version
+  - file-rule-without-an-events-list
+  - file-with-an-unknown-field
   - recorded-repo-installs-every-rule-event
+  - remote-rule-installs-in-its-repository
   - rule-that-does-not-cover-the-repository-installs-nothing
+  - paused-rule-installs-nothing
+  - rule-body-with-a-visibility-is-refused
+  - rule-body-with-null-events-is-refused
+  - rule-body-with-a-relative-glob-is-refused
+  - rule-body-with-two-values-is-refused
+  - install-body-without-a-path-is-refused
   - covered-push-publishes-private-and-shares
   - covered-update-keeps-the-collectives
+  - update-does-not-resubmit-a-rejected-share
+  - unchanged-session-is-not-shared-again
   - folder-rule-covers-the-push
+  - folder-rule-covers-a-repository-without-a-remote
+  - rules-bind-each-session-by-its-own-clone
+  - unscoped-push-applies-the-rules
   - uncovered-push-is-unchanged
-  - rule-without-events-leaves-the-push-unchanged
+  - paused-rule-publishes-nothing
+  - public-transcript-is-not-updated-under-a-rule
   - visibility-flag-is-refused-under-a-rule
+  - license-flag-is-refused-under-a-rule
   - unreadable-rules-refuse-the-push
   - failed-share-names-the-session
+  - village-auto-reads-the-last-publication
   - village-auto-again-updates-the-rule
+  - village-auto-names-every-rule-that-covers-the-repository
   - village-auto-needs-a-publication
   - village-auto-needs-a-collective
   - village-auto-needs-a-recorded-repository
+  - village-auto-needs-a-sign-in
   - village-auto-keeps-a-foreign-hook
 
 collectives:
@@ -114,6 +148,20 @@ cases:
     repository: {root: /home/dev/work/tools/vendor/lib}
     expect: {applying: [], collectives: []}
 
+  - name: escaped-folder-covers-only-itself
+    driver: matcher
+    rules:
+      - {id: literal, kind: folder, match: '/home/dev/work/a\*b', events: [pre-push], collectives: [platform]}
+    repository: {root: /home/dev/work/aXb}
+    expect: {applying: [], collectives: []}
+
+  - name: escaped-folder-covers-itself
+    driver: matcher
+    rules:
+      - {id: literal, kind: folder, match: '/home/dev/work/a\*b', events: [pre-push], collectives: [platform]}
+    repository: {root: '/home/dev/work/a*b'}
+    expect: {applying: [literal], collectives: [platform]}
+
   - name: remote-wildcard-ignores-case
     driver: matcher
     rules:
@@ -135,6 +183,27 @@ cases:
     repository: {root: /home/dev/src/tools, remote: "https://github.com/acme/tools"}
     expect: {applying: [acme], collectives: [platform]}
 
+  - name: remote-pattern-as-a-url
+    driver: matcher
+    rules:
+      - {id: acme, kind: remote, match: "https://github.com/acme/tools.git", events: [pre-push], collectives: [platform]}
+    repository: {root: /home/dev/src/tools, remote: "git@github.com:acme/tools.git"}
+    expect: {applying: [acme], collectives: [platform]}
+
+  - name: remote-pattern-with-a-user-and-a-port
+    driver: matcher
+    rules:
+      - {id: acme, kind: remote, match: "ssh://git@gitlab.example.com:2222/acme/tools.git", events: [pre-push], collectives: [platform]}
+    repository: {root: /home/dev/src/tools, remote: "https://gitlab.example.com/acme/tools"}
+    expect: {applying: [acme], collectives: [platform]}
+
+  - name: remote-rule-matches-the-origin-of-a-fork-branch
+    driver: matcher
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    repository: {root: /home/dev/src/tools, remote: "https://github.com/dev/tools.git", origin: "https://github.com/acme/tools.git"}
+    expect: {applying: [acme], collectives: [platform]}
+
   - name: remote-rule-skips-a-repository-without-a-remote
     driver: matcher
     rules:
@@ -149,14 +218,14 @@ cases:
     repository: {root: /home/dev/src/acme, remote: "https://github.com/dev/work/acme.git"}
     expect: {applying: [], collectives: []}
 
-  - name: rule-without-events-publishes-nothing
+  - name: rule-without-events-is-paused
     driver: matcher
     rules:
       - {id: paused, kind: folder, match: "~/work/**", events: [], collectives: [platform]}
     repository: {root: ~/work/tools}
-    expect: {applying: [], collectives: []}
+    expect: {applying: [], paused: [paused], collectives: []}
 
-  # --- rules that are refused when read ---
+  # --- rules and files that are refused when read ---
   - name: folder-glob-must-be-absolute
     driver: validate
     rules:
@@ -174,6 +243,18 @@ cases:
     rules:
       - {id: acme, kind: remote, match: github.com, events: [pre-push], collectives: [platform]}
     expect: {invalid: names no host and repository path}
+
+  - name: remote-pattern-needs-a-repository
+    driver: validate
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme, events: [pre-push], collectives: [platform]}
+    expect: {invalid: "write github.com/acme/* for every repository"}
+
+  - name: malformed-remote-pattern
+    driver: validate
+    rules:
+      - {id: acme, kind: remote, match: "github.com/acme/[tools", events: [pre-push], collectives: [platform]}
+    expect: {invalid: 'remote pattern "github.com/acme/[tools" is malformed'}
 
   - name: unknown-kind
     driver: validate
@@ -198,6 +279,37 @@ cases:
     rules:
       - {id: acme/tools, kind: folder, match: /home/dev/work, events: [pre-push], collectives: [platform]}
     expect: {invalid: identifier}
+
+  - name: file-repeats-an-identifier
+    driver: validate
+    rulesFile: |
+      version: 1
+      autoPublish:
+        - {id: acme, kind: folder, match: /home/dev/a, events: [pre-push], collectives: []}
+        - {id: acme, kind: folder, match: /home/dev/b, events: [pre-push], collectives: []}
+    expect: {invalid: listed twice}
+
+  - name: file-of-another-version
+    driver: validate
+    rulesFile: |
+      version: 2
+      autoPublish: []
+    expect: {invalid: version 2}
+
+  - name: file-rule-without-an-events-list
+    driver: validate
+    rulesFile: |
+      autoPublish:
+        - {id: acme, kind: folder, match: /home/dev/a, collectives: []}
+    expect: {invalid: no events or no collectives list}
+
+  - name: file-with-an-unknown-field
+    driver: validate
+    rulesFile: |
+      version: 1
+      autoPublish:
+        - {id: acme, kind: folder, match: /home/dev/a, events: [], collectives: [], visibility: public}
+    expect: {invalid: field visibility not found}
 
   # --- installing a rule's hooks through the settings routes ---
   - name: unrecorded-repo-not-installed
@@ -232,14 +344,65 @@ cases:
       hooks: {pre-push: installed, post-commit: installed}
       installed: [recorded]
 
+  - name: remote-rule-installs-in-its-repository
+    driver: install
+    rules:
+      - {id: acme, kind: remote, match: "github.com/acme/tools", events: [pre-push], collectives: [platform]}
+    install: recorded
+    remoteRecorded: true
+    expect:
+      status: 200
+      hooks: {pre-push: installed}
+      label: "github.com:acme/tools"
+      installed: [recorded]
+
   - name: rule-that-does-not-cover-the-repository-installs-nothing
     driver: install
     rules:
       - {id: elsewhere, kind: remote, match: "github.com/acme/other", events: [pre-push], collectives: [platform]}
     install: recorded
+    remoteRecorded: true
     expect: {status: 400, code: auto_publish_repository_not_covered, installed: []}
 
-  # --- a push the rules may cover ---
+  - name: paused-rule-installs-nothing
+    driver: install
+    rules:
+      - {id: paused, kind: folder, match: "{world}/*", events: [], collectives: [platform]}
+    install: recorded
+    expect: {status: 400, code: auto_publish_rule_invalid, installed: []}
+
+  # --- bodies the settings routes refuse ---
+  - name: rule-body-with-a-visibility-is-refused
+    driver: rule-body
+    method: PUT
+    body: '{"kind": "folder", "match": "/home/dev/work", "events": [], "collectives": [], "visibility": "public"}'
+    expect: {status: 400, code: auto_publish_rule_invalid}
+
+  - name: rule-body-with-null-events-is-refused
+    driver: rule-body
+    method: PUT
+    body: '{"kind": "folder", "match": "/home/dev/work", "events": null, "collectives": []}'
+    expect: {status: 400, code: auto_publish_rule_invalid}
+
+  - name: rule-body-with-a-relative-glob-is-refused
+    driver: rule-body
+    method: PUT
+    body: '{"kind": "folder", "match": "work/*", "events": ["pre-push"], "collectives": []}'
+    expect: {status: 400, code: auto_publish_rule_invalid}
+
+  - name: rule-body-with-two-values-is-refused
+    driver: rule-body
+    method: PUT
+    body: '{"kind": "folder", "match": "/home/dev/work", "events": [], "collectives": []} {}'
+    expect: {status: 400, code: auto_publish_rule_invalid}
+
+  - name: install-body-without-a-path-is-refused
+    driver: rule-body
+    method: POST
+    body: '{"path": ""}'
+    expect: {status: 400, code: auto_publish_rule_invalid}
+
+  # --- a push the rules may bind ---
   - name: covered-push-publishes-private-and-shares
     driver: push
     rules:
@@ -263,12 +426,61 @@ cases:
       ownerUpdates: 0
       audience: {platform: approved, review: pending}
 
+  - name: update-does-not-resubmit-a-rejected-share
+    driver: push
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform, review]}
+    config: {visibility: private}
+    villageDecides: {review: rejected, platform: retracted}
+    again: [--force]
+    expect:
+      publishes: 2
+      audience: {platform: retracted, review: rejected}
+
+  - name: unchanged-session-is-not-shared-again
+    driver: push
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: private}
+    villageDecides: {platform: retracted}
+    again: []
+    expect: {publishes: 1, audience: {platform: retracted}}
+
   - name: folder-rule-covers-the-push
     driver: push
     rules:
       - {id: world, kind: folder, match: "{world}/*", events: [post-commit], collectives: [research]}
     config: {visibility: private, license: CC-BY-4.0}
     expect: {publishes: 1, license: "", audience: {research: approved}}
+
+  - name: folder-rule-covers-a-repository-without-a-remote
+    driver: push
+    noRemote: true
+    rules:
+      - {id: world, kind: folder, match: "{world}/*", events: [pre-push], collectives: [research]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 1, license: "", ownerUpdates: 0, audience: {research: approved}}
+
+  - name: rules-bind-each-session-by-its-own-clone
+    driver: push
+    cloneSession: true
+    rules:
+      - {id: tools, kind: folder, match: "{world}/tools", events: [pre-push], collectives: [research]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect:
+      publishes: 2
+      license: ""
+      ownerUpdates: 0
+      audience: {research: approved}
+      cloneAudience: {}
+
+  - name: unscoped-push-applies-the-rules
+    driver: push
+    unscoped: true
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 1, license: "", ownerUpdates: 0, audience: {platform: approved}}
 
   - name: uncovered-push-is-unchanged
     driver: push
@@ -277,12 +489,22 @@ cases:
     config: {visibility: private, license: CC-BY-4.0}
     expect: {publishes: 1, license: CC-BY-4.0, audience: {}}
 
-  - name: rule-without-events-leaves-the-push-unchanged
+  - name: paused-rule-publishes-nothing
     driver: push
     rules:
       - {id: paused, kind: remote, match: github.com/acme/tools, events: [], collectives: [platform]}
-    config: {visibility: private, license: CC-BY-4.0}
-    expect: {publishes: 1, license: CC-BY-4.0, audience: {}}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 0, audience: {}, outputContains: [rule paused covers it and names no hook event]}
+
+  - name: public-transcript-is-not-updated-under-a-rule
+    driver: push
+    before: true
+    publicBefore: true
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: private}
+    flags: [--force]
+    expect: {publishes: 1, audience: {}, outputContains: [is public, never publicly]}
 
   - name: visibility-flag-is-refused-under-a-rule
     driver: push
@@ -290,7 +512,15 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: private}
     flags: [--visibility, public]
-    expect: {publishes: 0, audience: {}, errorContains: [--visibility was given, rule acme, nothing was uploaded]}
+    expect: {publishes: 0, audience: {}, errorContains: [--visibility was given, nothing was uploaded]}
+
+  - name: license-flag-is-refused-under-a-rule
+    driver: push
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: private}
+    flags: [--license, CC0-1.0]
+    expect: {publishes: 0, audience: {}, errorContains: [--license was given, nothing was uploaded]}
 
   - name: unreadable-rules-refuse-the-push
     driver: push
@@ -310,34 +540,55 @@ cases:
     expect:
       publishes: 1
       audience: {}
-      errorContains: [published private but not shared with every collective, stopped at sharing with collective 11111111-1111-4111-8111-111111111111]
+      errorContains: [published private but not shared with every collective]
+      outputContains: [abcd1234-abcd-4bcd-8bcd-abcdef123456, stopped at sharing with collective 11111111-1111-4111-8111-111111111111, "--force"]
+      attemptContains: stopped at sharing with collective 11111111-1111-4111-8111-111111111111
 
   # --- the hook a rule installed ---
   - name: failed-upload-exits-zero
     driver: hook
-    rules:
-      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     uploadExits: [1, 3]
 
   # --- peasant village auto ---
   - name: village-auto-output
     driver: village-auto
-    published: true
-    shared: {review: pending, platform: approved}
+    publications:
+      - shared: {review: pending, platform: approved}
     expect:
       output: "peasant: this repo now publishes automatically on git push, to platform, review · change it in settings\n"
       rule: {kind: remote, match: "{remote}", events: [pre-push], collectives: [platform, review]}
+      installed: [recorded]
+      binding: true
+
+  - name: village-auto-reads-the-last-publication
+    driver: village-auto
+    publications:
+      - shared: {platform: approved}
+      - shared: {review: approved, research: retracted}
+    expect:
+      output: "peasant: this repo now publishes automatically on git push, to review · change it in settings\n"
+      rule: {kind: remote, match: "{remote}", events: [pre-push], collectives: [review]}
       installed: [recorded]
 
   - name: village-auto-again-updates-the-rule
     driver: village-auto
     rules:
       - {id: mine, kind: remote, match: "{remote}", events: [post-commit], collectives: [research]}
-    published: true
-    shared: {platform: approved}
+    publications:
+      - shared: {platform: approved}
     expect:
-      output: "peasant: this repo now publishes automatically on git push, to platform · change it in settings\n"
+      output: "peasant: this repo now publishes automatically on git commit and git push, to platform · change it in settings\n"
       rule: {kind: remote, match: "{remote}", events: [post-commit, pre-push], collectives: [platform]}
+      installed: [recorded]
+
+  - name: village-auto-names-every-rule-that-covers-the-repository
+    driver: village-auto
+    rules:
+      - {id: world, kind: folder, match: "{world}/*", events: [pre-push], collectives: [research]}
+    publications:
+      - shared: {platform: approved}
+    expect:
+      output: "peasant: this repo now publishes automatically on git push, to research, platform · change it in settings\n"
       installed: [recorded]
 
   - name: village-auto-needs-a-publication
@@ -346,21 +597,26 @@ cases:
 
   - name: village-auto-needs-a-collective
     driver: village-auto
-    published: true
-    shared: {}
+    publications:
+      - shared: {}
     expect: {errorContains: [shared with no collective, nothing was changed], installed: []}
 
   - name: village-auto-needs-a-recorded-repository
     driver: village-auto
-    published: true
-    shared: {platform: approved}
+    publications:
+      - shared: {platform: approved}
     unrecorded: true
     expect: {errorContains: [recorded no session, nothing was changed], installed: []}
 
+  - name: village-auto-needs-a-sign-in
+    driver: village-auto
+    signedOut: true
+    expect: {errorContains: [not signed in, nothing was changed], installed: []}
+
   - name: village-auto-keeps-a-foreign-hook
     driver: village-auto
-    published: true
-    shared: {platform: approved}
+    publications:
+      - shared: {platform: approved}
     foreignHook: |
       #!/bin/sh
       echo "team policy check"

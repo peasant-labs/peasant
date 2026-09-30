@@ -8,6 +8,7 @@ package autopublishtest
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -21,29 +22,46 @@ import (
 const Path = "internal/autopublish/testdata/auto-publish-rules.yaml"
 
 // Driver names the test that runs a case. The set is closed: every case is
-// run by exactly one test, and each test asserts it ran every case it owns.
+// run by exactly one test, each test asserts it ran every case it owns, and a
+// source guard asserts each driver has exactly one test.
 type Driver string
 
 const (
 	// DriverMatcher runs the matcher on a repository (internal/autopublish).
 	DriverMatcher Driver = "matcher"
-	// DriverValidate reads a rule that must be refused (internal/autopublish).
+	// DriverValidate reads a rule, or a rules file, that must be refused
+	// (internal/autopublish).
 	DriverValidate Driver = "validate"
-	// DriverInstall saves a rule and installs it through the mounted settings
-	// routes (internal/api).
+	// DriverInstall saves the rules and installs the first one through the
+	// mounted settings routes (internal/api).
 	DriverInstall Driver = "install"
-	// DriverPush runs `peasant village push --repository` in a repository a
-	// rule may cover, against a Village double (cmd/peasant).
+	// DriverRuleBody sends a body the settings routes must refuse
+	// (internal/api).
+	DriverRuleBody Driver = "rule-body"
+	// DriverPush runs `peasant village push` against a Village double
+	// (cmd/peasant).
 	DriverPush Driver = "push"
-	// DriverHook runs the managed hook a rule installed through git push, with
-	// an upload that fails (cmd/peasant).
+	// DriverHook installs a rule's hook with `peasant village auto` and runs it
+	// through git push with an upload that fails (cmd/peasant).
 	DriverHook Driver = "hook"
 	// DriverVillageAuto runs `peasant village auto` (cmd/peasant).
 	DriverVillageAuto Driver = "village-auto"
 )
 
 // AllDrivers is the closed driver set.
-var AllDrivers = []Driver{DriverMatcher, DriverValidate, DriverInstall, DriverPush, DriverHook, DriverVillageAuto}
+var AllDrivers = []Driver{DriverMatcher, DriverValidate, DriverInstall, DriverRuleBody, DriverPush, DriverHook, DriverVillageAuto}
+
+// fieldsOf are the case and expectation fields each driver reads, by YAML
+// name. A case that sets another field would assert nothing with it.
+var fieldsOf = map[Driver][]string{
+	DriverMatcher:     {"rules", "repository", "applying", "paused", "collectives"},
+	DriverValidate:    {"rules", "rulesFile", "invalid"},
+	DriverInstall:     {"rules", "install", "foreignHook", "remoteRecorded", "status", "code", "hooks", "remedyContains", "snippetContains", "label", "installed"},
+	DriverRuleBody:    {"method", "body", "status", "code"},
+	DriverPush:        {"rules", "rulesFile", "config", "flags", "unscoped", "noRemote", "cloneSession", "before", "publicBefore", "failShare", "villageDecides", "again", "errorContains", "outputContains", "publishes", "license", "audience", "cloneAudience", "ownerUpdates", "attemptContains"},
+	DriverHook:        {"rules", "uploadExits"},
+	DriverVillageAuto: {"rules", "foreignHook", "publications", "unrecorded", "signedOut", "errorContains", "output", "rule", "installed", "binding"},
+}
 
 // Collective is one collective the Village double knows, by alias.
 type Collective struct {
@@ -59,7 +77,13 @@ type Fixture struct {
 	Cases         []Case                `yaml:"cases"`
 }
 
-// Case is one named case. A driver reads only the fields it documents.
+// Publication is one session published, in order, and the collectives its
+// transcript is shared with afterwards, by alias.
+type Publication struct {
+	Shared map[string]schema.VillageShareStatus `yaml:"shared"`
+}
+
+// Case is one named case. A driver reads only the fields fieldsOf names.
 type Case struct {
 	Name   string `yaml:"name"`
 	Driver Driver `yaml:"driver"`
@@ -68,87 +92,111 @@ type Case struct {
 	// match is the directory that holds the world's repositories, and
 	// "{remote}" the recorded repository's remote in bare form.
 	Rules []autopublish.Rule `yaml:"rules"`
-	// RulesFile, when set, is written as hooks.yaml verbatim instead of Rules
-	// (push).
+	// RulesFile, when set, is hooks.yaml verbatim instead of Rules.
 	RulesFile string `yaml:"rulesFile"`
-	// Repository is what the matcher reads (matcher).
+	// Repository is what the matcher reads; "~/" in its root is the home
+	// directory.
 	Repository struct {
 		Root   string `yaml:"root"`
 		Remote string `yaml:"remote"`
+		Origin string `yaml:"origin"`
 	} `yaml:"repository"`
 	// Install names the repository the install call names: recorded or
-	// unrecorded (install).
-	Install string `yaml:"install"`
+	// unrecorded. RemoteRecorded gives the recorded repository an origin.
+	Install        string `yaml:"install"`
+	RemoteRecorded bool   `yaml:"remoteRecorded"`
 	// ForeignHook is the content of a pre-push hook Peasant did not write,
-	// placed in the recorded repository first (install, village-auto).
+	// placed in the target repository first.
 	ForeignHook string `yaml:"foreignHook"`
-	// Config is the push configuration (push).
+	// Method and Body are a request the settings routes must refuse; Body is
+	// sent verbatim to the rule route, or to the install route for POST.
+	Method string `yaml:"method"`
+	Body   string `yaml:"body"`
+	// Config is the push configuration.
 	Config struct {
 		Visibility schema.Visibility `yaml:"visibility"`
 		License    schema.License    `yaml:"license"`
 	} `yaml:"config"`
-	// Flags are extra push flags (push).
-	Flags []string `yaml:"flags"`
-	// Again, when set, pushes a second time with these flags after the
-	// first push, which runs without Flags (push).
-	Again []string `yaml:"again"`
-	// FailShare names collectives the Village double refuses to share with
-	// (push).
+	// Flags are extra flags of the push; Unscoped drops --repository.
+	Flags    []string `yaml:"flags"`
+	Unscoped bool     `yaml:"unscoped"`
+	// NoRemote gives the world's repositories no remote. CloneSession records
+	// a second session in another clone of the same remote.
+	NoRemote     bool `yaml:"noRemote"`
+	CloneSession bool `yaml:"cloneSession"`
+	// Before publishes the sessions once, with no rule, before the case's
+	// rules are written; PublicBefore then records the transcript as public.
+	Before       bool `yaml:"before"`
+	PublicBefore bool `yaml:"publicBefore"`
+	// FailShare names collectives the Village double refuses to share with.
 	FailShare []string `yaml:"failShare"`
-	// UploadExits are the exit statuses of the failing uploads the hook runs
-	// (hook).
+	// VillageDecides sets shares on Village after the push, as a collective
+	// owner or the developer would; Again then pushes once more with these
+	// flags.
+	VillageDecides map[string]schema.VillageShareStatus `yaml:"villageDecides"`
+	Again          []string                             `yaml:"again"`
+	// UploadExits are the exit statuses of the failing uploads the hook runs.
 	UploadExits []int `yaml:"uploadExits"`
-	// Published says a session was published before the command runs, and
-	// Shared the collectives its transcript is shared with, with their status
-	// (village-auto).
-	Published bool                                 `yaml:"published"`
-	Shared    map[string]schema.VillageShareStatus `yaml:"shared"`
-	// Unrecorded runs the command in a repository with no recorded session
-	// (village-auto).
+	// Publications are published in order before the command runs.
+	Publications []Publication `yaml:"publications"`
+	// Unrecorded runs the command in a repository with no recorded session;
+	// SignedOut runs it with no stored credential.
 	Unrecorded bool   `yaml:"unrecorded"`
+	SignedOut  bool   `yaml:"signedOut"`
 	Expect     Expect `yaml:"expect"`
 }
 
-// Expect is what a case asserts. A driver asserts only the fields it
-// documents.
+// Expect is what a case asserts. A driver asserts only the fields fieldsOf
+// names.
 type Expect struct {
 	// Applying are the identifiers of the rules that publish the repository,
-	// and Collectives the aliases of the collectives it is shared with, in
-	// order (matcher).
+	// Paused the ones that cover it and name no event, and Collectives the
+	// aliases of the collectives it is shared with, in order.
 	Applying    []string `yaml:"applying"`
+	Paused      []string `yaml:"paused"`
 	Collectives []string `yaml:"collectives"`
-	// Invalid is part of the reason the rule is refused (validate).
+	// Invalid is part of the reason the rule or file is refused.
 	Invalid string `yaml:"invalid"`
-	// Status and Code are the install answer; Hooks each event's status;
-	// RemedyContains and SnippetContains parts of a hook's remedy (install).
+	// Status and Code are the route's answer; Hooks each event's status;
+	// RemedyContains and SnippetContains parts of a hook's remedy; Label the
+	// repository's remote label.
 	Status          int                                                      `yaml:"status"`
 	Code            string                                                   `yaml:"code"`
 	Hooks           map[schema.AutoPublishEvent]schema.AutoPublishHookStatus `yaml:"hooks"`
 	RemedyContains  []string                                                 `yaml:"remedyContains"`
 	SnippetContains []string                                                 `yaml:"snippetContains"`
+	Label           string                                                   `yaml:"label"`
 	// Installed names the repositories that hold a Peasant-managed pre-push
-	// hook afterwards (install, village-auto).
+	// hook afterwards.
 	Installed []string `yaml:"installed"`
-	// ErrorContains are parts of the command's error; none means it succeeds
-	// (push, village-auto).
-	ErrorContains []string `yaml:"errorContains"`
+	// ErrorContains are parts of the command's error, none meaning it
+	// succeeds; OutputContains parts of its standard error.
+	ErrorContains  []string `yaml:"errorContains"`
+	OutputContains []string `yaml:"outputContains"`
 	// Publishes counts the uploads Village received; License is the license
-	// the upload carried; Audience the transcript's collectives afterwards, by
-	// alias; OwnerUpdates the owner visibility updates (push).
-	Publishes    *int                                 `yaml:"publishes"`
-	License      schema.License                       `yaml:"license"`
-	Audience     map[string]schema.VillageShareStatus `yaml:"audience"`
-	OwnerUpdates int                                  `yaml:"ownerUpdates"`
-	// Output is the exact standard output (village-auto).
+	// every upload carried; Audience and CloneAudience the collectives of the
+	// recorded and the clone session's transcripts afterwards, by alias;
+	// OwnerUpdates the owner visibility updates; AttemptContains part of the
+	// session's latest failed attempt.
+	Publishes       *int                                 `yaml:"publishes"`
+	License         schema.License                       `yaml:"license"`
+	Audience        map[string]schema.VillageShareStatus `yaml:"audience"`
+	CloneAudience   map[string]schema.VillageShareStatus `yaml:"cloneAudience"`
+	OwnerUpdates    int                                  `yaml:"ownerUpdates"`
+	AttemptContains string                               `yaml:"attemptContains"`
+	// Output is the exact standard output.
 	Output string `yaml:"output"`
-	// Rule is the rule hooks.yaml holds afterwards; "{remote}" in its match is
-	// the world's remote in bare form (village-auto).
+	// Rule is the one rule hooks.yaml holds afterwards; "{remote}" in its
+	// match is the world's remote in bare form.
 	Rule *struct {
 		Kind        schema.AutoPublishRuleKind `yaml:"kind"`
 		Match       string                     `yaml:"match"`
 		Events      []schema.AutoPublishEvent  `yaml:"events"`
 		Collectives []string                   `yaml:"collectives"`
 	} `yaml:"rule"`
+	// Binding says the installed hook binds the command's config, data, and
+	// state directories.
+	Binding bool `yaml:"binding"`
 }
 
 // Load reads and validates the fixture from the module root.
@@ -158,42 +206,66 @@ func Load(t *testing.T) Fixture {
 	if err != nil {
 		t.Fatalf("%s: %v", Path, err)
 	}
-	return Parse(t, raw)
-}
-
-// Parse validates the fixture and resolves collective aliases in its rules.
-func Parse(t testing.TB, raw []byte) Fixture {
-	t.Helper()
 	var fixture Fixture
 	if err := testutil.DecodeNamedFixtureYAML(raw, &fixture); err != nil {
 		t.Fatalf("%s: %v", Path, err)
 	}
 	for i := range fixture.Cases {
 		c := &fixture.Cases[i]
-		if !slices.Contains(AllDrivers, c.Driver) {
+		allowed, ok := fieldsOf[c.Driver]
+		if !ok {
 			t.Fatalf("%s: case %q names driver %q; use one of %v", Path, c.Name, c.Driver, AllDrivers)
+		}
+		for _, field := range setFields(*c) {
+			if !slices.Contains(allowed, field) {
+				t.Fatalf("%s: case %q sets %q, which the %s driver does not read; move it or drop it", Path, c.Name, field, c.Driver)
+			}
 		}
 		for j := range c.Rules {
 			for k, alias := range c.Rules[j].Collectives {
-				collective, ok := fixture.Collectives[string(alias)]
-				if !ok {
-					t.Fatalf("%s: case %q names collective %q, which the fixture does not declare", Path, c.Name, alias)
-				}
-				c.Rules[j].Collectives[k] = collective.ID
+				c.Rules[j].Collectives[k] = fixture.collective(t, c.Name, string(alias)).ID
 			}
 		}
-		aliases := append(append(mapKeys(c.Shared), mapKeys(c.Expect.Audience)...), c.FailShare...)
-		aliases = append(aliases, c.Expect.Collectives...)
+		aliases := append(append(mapKeys(c.VillageDecides), mapKeys(c.Expect.Audience)...), c.FailShare...)
+		aliases = append(append(aliases, mapKeys(c.Expect.CloneAudience)...), c.Expect.Collectives...)
+		for _, publication := range c.Publications {
+			aliases = append(aliases, mapKeys(publication.Shared)...)
+		}
 		if c.Expect.Rule != nil {
 			aliases = append(aliases, c.Expect.Rule.Collectives...)
 		}
 		for _, alias := range aliases {
-			if _, ok := fixture.Collectives[alias]; !ok {
-				t.Fatalf("%s: case %q names collective %q, which the fixture does not declare", Path, c.Name, alias)
-			}
+			fixture.collective(t, c.Name, alias)
 		}
 	}
 	return fixture
+}
+
+func (f Fixture) collective(t testing.TB, name, alias string) Collective {
+	t.Helper()
+	collective, ok := f.Collectives[alias]
+	if !ok {
+		t.Fatalf("%s: case %q names collective %q, which the fixture does not declare", Path, name, alias)
+	}
+	return collective
+}
+
+// setFields lists the YAML names of the case and expectation fields a case
+// sets, besides its name and driver.
+func setFields(c Case) []string {
+	var set []string
+	collect := func(v reflect.Value) {
+		for i := 0; i < v.NumField(); i++ {
+			name, _, _ := strings.Cut(v.Type().Field(i).Tag.Get("yaml"), ",")
+			if name == "name" || name == "driver" || name == "expect" || v.Field(i).IsZero() {
+				continue
+			}
+			set = append(set, name)
+		}
+	}
+	collect(reflect.ValueOf(c))
+	collect(reflect.ValueOf(c.Expect))
+	return set
 }
 
 // RulesFor returns the case's rules with the placeholders of their matches
@@ -218,6 +290,16 @@ func (f Fixture) IDs(aliases []string) []schema.VillageUUID {
 		ids[i] = f.Collectives[alias].ID
 	}
 	return ids
+}
+
+// Alias returns the alias of the collective id, or "" for an unknown one.
+func (f Fixture) Alias(id schema.VillageUUID) string {
+	for alias, collective := range f.Collectives {
+		if collective.ID == id {
+			return alias
+		}
+	}
+	return ""
 }
 
 // For returns the cases of one driver, failing the test when it owns none: a

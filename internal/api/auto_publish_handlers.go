@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"sync"
@@ -24,13 +25,12 @@ import (
 type autoPublishHandler struct {
 	store  *store.Store
 	config *config.Config
-	// configHome, dataHome, and stateHome are the XDG roots this server runs
-	// under. The rules file lives in the config directory, and a hook the
-	// server installs is bound to the same roots, so it reads the same rules,
-	// configuration, and store.
+	// configHome is the XDG config root this server runs under; the rules
+	// file lives in its config directory.
 	configHome string
-	dataHome   string
-	stateHome  string
+	// binding is bound into every hook the server installs, so the hook reads
+	// the same rules, configuration, and store as the server.
+	binding githooks.Binding
 	// mu serializes this server's rule changes and installs.
 	mu sync.Mutex
 }
@@ -51,10 +51,7 @@ func (h *autoPublishHandler) rulesPath() string {
 }
 
 func (h *autoPublishHandler) hooks() autopublish.Hooks {
-	return autopublish.Hooks{
-		Lifecycle: githooks.New(githooks.NewExecGit()),
-		Binding:   githooks.Binding{ConfigDir: h.configHome, DataDir: h.dataHome, StateDir: h.stateHome},
-	}
+	return autopublish.Hooks{Lifecycle: githooks.New(githooks.NewExecGit()), Binding: h.binding}
 }
 
 // recorded lists the repositories Peasant has recorded sessions in.
@@ -87,7 +84,7 @@ func (h *autoPublishHandler) handleSaveRule(w http.ResponseWriter, r *http.Reque
 	}
 	id := r.PathValue("id")
 	var request schema.AutoPublishRuleRequest
-	if err := decodeStrict(r, &request); err != nil {
+	if err := decodeStrict(http.MaxBytesReader(w, r.Body, ruleBodyLimit), &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "The auto-publish rule "+id+" was not saved because the body is not a rule: "+err.Error()+". Nothing was changed. Send kind, match, events, and collectives, then retry.", autoPublishInvalidCode)
 		return
 	}
@@ -184,7 +181,7 @@ func (h *autoPublishHandler) handleInstall(w http.ResponseWriter, r *http.Reques
 	}
 	id := r.PathValue("id")
 	var request schema.AutoPublishInstallRequest
-	if err := decodeStrict(r, &request); err != nil {
+	if err := decodeStrict(http.MaxBytesReader(w, r.Body, ruleBodyLimit), &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "No hook was installed for rule "+id+" because the body does not name a repository: "+err.Error()+". Send the path of one recorded repository the rule covers, then retry.", autoPublishInvalidCode)
 		return
 	}
@@ -227,8 +224,8 @@ func (h *autoPublishHandler) handleInstall(w http.ResponseWriter, r *http.Reques
 
 // decodeStrict decodes a JSON body into a contract type, refusing an unknown
 // field, a missing body, and anything after the one value.
-func decodeStrict(r *http.Request, into any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
+func decodeStrict(body io.Reader, into any) error {
+	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(into); err != nil {
 		return err
@@ -238,6 +235,9 @@ func decodeStrict(r *http.Request, into any) error {
 	}
 	return nil
 }
+
+// ruleBodyLimit bounds a rule or install body: each is a few short fields.
+const ruleBodyLimit = 1 << 20
 
 // writeContract answers 200 with a contract value, after checking it the way
 // a client does. A value that breaks the contract is not sent.

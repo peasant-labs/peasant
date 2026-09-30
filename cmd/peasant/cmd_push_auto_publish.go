@@ -4,13 +4,19 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/autopublish"
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
 
@@ -20,74 +26,181 @@ func autoPublishRulesPath(cmd *cobra.Command) string {
 	return autopublish.Path(defaults.ResolveConfigDirPathWith(configDirOverride(cmd)))
 }
 
-// autoPublishRules returns the auto-publish rules that publish a push of the
-// repository the run is scoped to, through the one matcher. A rules file that
-// cannot be read refuses the push: a rule decides who can read a transcript,
-// and publishing without knowing it could send the transcript to the wrong
-// audience.
-func autoPublishRules(ctx context.Context, cmd *cobra.Command, run pushRun) ([]autopublish.Rule, error) {
+// autoPublishPlan is what the auto-publish rules decide for one push.
+//
+// The rules are matched per session, against the repository the session was
+// recorded in, because a repository-scoped push selects sessions by project
+// identity: every clone of a remote is in the scope of every other clone's
+// push. When any session of the push is bound by a rule, the whole push
+// publishes collectives-only (private, no license): a session no rule covers
+// is then published private and shared with no one, which is never wider than
+// what it would otherwise get.
+type autoPublishPlan struct {
+	// collectives are the collectives each session a rule publishes is shared
+	// with, by session. Empty when no rule publishes a session of this push.
+	collectives map[string][]schema.VillageUUID
+	// rules are the identifiers of the rules that publish in this push.
+	rules []string
+	// held are the bound sessions this push leaves out, with the reason.
+	held map[string]string
+	// unbound counts the sessions of a bound push that no rule covers.
+	unbound int
+}
+
+// bound reports whether a rule binds any session of this push.
+func (p autoPublishPlan) bound() bool { return len(p.collectives) > 0 || len(p.held) > 0 }
+
+// planAutoPublish matches every session this push would send against the
+// rules in hooks.yaml. A rules file that cannot be read refuses the push: a
+// rule decides who can read a transcript, so it is never guessed at.
+func planAutoPublish(ctx context.Context, cmd *cobra.Command, db *store.Store, cfg *config.Config, runCfg push.PipelineConfig, run pushRun, creds *auth.Credentials) (autoPublishPlan, error) {
 	path := autoPublishRulesPath(cmd)
 	rules, err := autopublish.Load(path)
-	if err != nil {
-		return nil, fmt.Errorf("village push: %w; nothing was uploaded", err)
-	}
-	if len(rules) == 0 {
-		return nil, nil
-	}
-	repo := autopublish.Repository{Root: run.pushedRoot, Remote: run.pushedRemote}
-	if repo.Root == "" {
-		// The lookup ahead of the clock resolves a repository only when it has
-		// a remote. A folder rule can cover one without.
-		repo, err = autopublish.Resolve(ctx, &ingest.ExecGitResolver{}, run.repository())
+	if err != nil || len(rules) == 0 {
 		if err != nil {
-			return nil, fmt.Errorf("village push: read the repository the auto-publish rules in %s are matched against: %w; nothing was uploaded", path, err)
+			err = fmt.Errorf("village push: %w; nothing was uploaded", err)
+		}
+		return autoPublishPlan{}, err
+	}
+	candidates, err := push.QueryPushCandidates(ctx, db, push.PushCandidateQuery{
+		Force: runCfg.Force, SourceProvider: runCfg.SourceProvider, Method: cfg.Push.Method, Sources: cfg.Push.Sources,
+	})
+	if err != nil {
+		return autoPublishPlan{}, fmt.Errorf("village push: read the sessions to match against the auto-publish rules in %s: %w; nothing was uploaded", path, err)
+	}
+	candidates = filterToSelectedSessions(candidates, runCfg.FilterSessionIDs)
+	candidates, _ = push.ApplySelection(candidates, runCfg.Selection)
+	candidates = push.ApplyRepositoryScope(candidates, runCfg.Repository)
+
+	git := &ingest.ExecGitResolver{}
+	repositories := map[string]autopublish.Repository{}
+	var pushed *autopublish.Repository
+	repositoryOf := func(row ingest.PushSessionRow) autopublish.Repository {
+		if repo, ok := repositories[row.ProjectPath]; ok {
+			return repo
+		}
+		repo, resolveErr := autopublish.Resolve(ctx, git, row.ProjectPath)
+		if resolveErr != nil {
+			// The directory the session was recorded in is gone. A scoped push
+			// admitted it by identity, so it belongs to the pushed repository;
+			// an unscoped one still knows its recorded remote.
+			repo = autopublish.Repository{Remote: row.GitRemote}
+			if runCfg.Repository != nil {
+				if pushed == nil {
+					resolved := autopublish.Repository{Root: run.pushedRoot, Remote: run.pushedRemote}
+					if resolved.Root == "" {
+						resolved, _ = autopublish.Resolve(ctx, git, run.repository())
+					}
+					pushed = &resolved
+				}
+				repo = *pushed
+			}
+		}
+		repositories[row.ProjectPath] = repo
+		return repo
+	}
+
+	plan := autoPublishPlan{collectives: map[string][]schema.VillageUUID{}, held: map[string]string{}}
+	var unbound []string
+	for _, row := range candidates {
+		decision := autopublish.Decide(rules, repositoryOf(row))
+		switch {
+		case !decision.Covered():
+			unbound = append(unbound, row.SessionID)
+		case len(decision.Rules) == 0:
+			plan.held[row.SessionID] = fmt.Sprintf("auto-publish rule %s covers it and names no hook event, so it is paused and publishes nothing", strings.Join(decision.Paused, ", "))
+		default:
+			plan.collectives[row.SessionID] = decision.Collectives
+			for _, id := range decision.Rules {
+				if !slices.Contains(plan.rules, id) {
+					plan.rules = append(plan.rules, id)
+				}
+			}
 		}
 	}
-	return autopublish.Applying(rules, repo), nil
+	if !plan.bound() {
+		return autoPublishPlan{}, nil
+	}
+	plan.unbound = len(unbound)
+
+	// An update keeps the audience a transcript has, so a transcript that is
+	// already public would take the new content public. A rule never
+	// publishes publicly: such a session is held, and the reason says how to
+	// resolve it.
+	bound := make([]string, 0, len(plan.collectives))
+	for id := range plan.collectives {
+		bound = append(bound, id)
+	}
+	receipts, err := db.SessionPublications(ctx, creds.VillageURL, creds.UserID, bound)
+	if err != nil {
+		return autoPublishPlan{}, fmt.Errorf("village push: read the publication receipts of the sessions the auto-publish rules bind: %w; nothing was uploaded", err)
+	}
+	for id, record := range receipts {
+		if record.Receipt.Visibility == schema.VisibilityPublic {
+			delete(plan.collectives, id)
+			plan.held[id] = fmt.Sprintf("its transcript %s is public, and an auto-publish rule publishes only to collectives, never publicly; make it private or share it with collectives on Village, or remove the rule from %s", record.Receipt.TranscriptURL, path)
+		}
+	}
+	return plan, nil
 }
 
 // refuseAudienceFlagsUnderRules refuses --visibility and --license on a push a
-// rule covers. The rule is the audience the developer set up for this
-// repository; a flag that publishes another way is refused rather than
-// silently overridden in either direction.
-func refuseAudienceFlagsUnderRules(cmd *cobra.Command, rules []autopublish.Rule) error {
+// rule binds. The rule is the audience the developer set up; a flag that
+// publishes another way is refused rather than silently overridden in either
+// direction.
+func refuseAudienceFlagsUnderRules(cmd *cobra.Command, plan autoPublishPlan) error {
 	for _, flag := range []string{"visibility", "license"} {
 		if cmd.Flags().Changed(flag) {
 			return fmt.Errorf(
-				"village push: --%s was given, but auto-publish rule %s covers this repository, so its sessions publish private and are shared only with the rule's collectives; nothing was uploaded; drop --%s, or remove the rule from %s",
-				flag, strings.Join(autopublish.IDs(rules), ", "), flag, autoPublishRulesPath(cmd))
+				"village push: --%s was given, but an auto-publish rule binds sessions of this push, so they publish private and are shared only with their rule's collectives; nothing was uploaded; drop --%s, or remove the rule from %s",
+				flag, flag, autoPublishRulesPath(cmd))
 		}
 	}
 	return nil
 }
 
-// describeAutoPublish is the line a push under rules prints before it runs.
-func describeAutoPublish(rules []autopublish.Rule) string {
-	return fmt.Sprintf("auto-publish: rule %s covers this repository; its sessions publish private and are shared with %d collective(s)",
-		strings.Join(autopublish.IDs(rules), ", "), len(autopublish.Collectives(rules)))
+// reportAutoPublishPlan prints what the rules decided before the push runs. A
+// held session is reported even under --quiet: it is not published, and the
+// reason is the fix.
+func reportAutoPublishPlan(w io.Writer, quiet bool, plan autoPublishPlan) {
+	if !quiet && len(plan.rules) > 0 {
+		fmt.Fprintf(w, "auto-publish: rule %s binds %d session(s) of this push; they publish private and are shared with their rule's collectives\n",
+			strings.Join(plan.rules, ", "), len(plan.collectives))
+	}
+	if !quiet && plan.unbound > 0 {
+		fmt.Fprintf(w, "auto-publish: %d other session(s) of this push are bound by no rule; they publish private and are shared with no one\n", plan.unbound)
+	}
+	held := make([]string, 0, len(plan.held))
+	for id := range plan.held {
+		held = append(held, id)
+	}
+	sort.Strings(held)
+	for _, id := range held {
+		fmt.Fprintf(w, "auto-publish: session %s was not published: %s\n", id, plan.held[id])
+	}
 }
 
-// reportAutoPublishShares prints what sharing did, and returns an error naming
-// every transcript that was published but not shared with each collective of
-// the rules. quiet keeps the summary line out, never a failure.
+// reportAutoPublishShares prints what sharing did, and every session that was
+// published but not shared as its rule asks, whatever else ended the run.
+// quiet keeps the summary line out, never a failure. It returns an error when
+// any session was not shared.
 func reportAutoPublishShares(w io.Writer, quiet bool, results []schema.SyncPushSessionResult, err error) error {
 	if err != nil {
-		return fmt.Errorf("auto-publish: the push ran, but what it published could not be read back, so no transcript was shared with the rule's collectives: %w; publish the sessions again from the local web", err)
+		fmt.Fprintf(w, "auto-publish: the push ran, but what it published could not be read back, so no transcript was shared with its rule's collectives: %v\n", err)
+		return fmt.Errorf("auto-publish: no transcript was shared with its rule's collectives: %w", err)
 	}
-	var failed []string
-	shared, waiting := 0, 0
+	failed, shared, waiting := 0, 0, 0
 	for _, result := range results {
 		if result.Status == schema.SyncPushSessionError {
-			failed = append(failed, result.SessionID+": "+result.Error)
+			failed++
+			fmt.Fprintf(w, "auto-publish: session %s was published private but not shared with every collective of its rule: %s\n", result.SessionID, result.Error)
 			continue
 		}
 		for _, step := range result.Steps {
-			switch step.Outcome {
-			case schema.SyncPushStepSucceeded:
-				if step.Step == schema.SyncPushStepAddCollective {
-					shared++
-				}
-			case schema.SyncPushStepPendingApproval:
+			switch {
+			case step.Step == schema.SyncPushStepAddCollective && step.Outcome == schema.SyncPushStepSucceeded:
+				shared++
+			case step.Outcome == schema.SyncPushStepPendingApproval:
 				waiting++
 			}
 		}
@@ -95,9 +208,8 @@ func reportAutoPublishShares(w io.Writer, quiet bool, results []schema.SyncPushS
 	if !quiet && len(results) > 0 {
 		fmt.Fprintf(w, "auto-publish: %d share(s) made, %d waiting for a collective owner's approval\n", shared, waiting)
 	}
-	if len(failed) > 0 {
-		return fmt.Errorf("auto-publish: %d transcript(s) were published private but not shared with every collective of the rule; nothing else was changed:\n  %s\nFix: publish them again from the local web, or push again after the session changes",
-			len(failed), strings.Join(failed, "\n  "))
+	if failed > 0 {
+		return fmt.Errorf("auto-publish: %d transcript(s) were published private but not shared with every collective of their rule; the sessions and the retry command are printed above", failed)
 	}
 	return nil
 }

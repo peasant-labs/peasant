@@ -1,0 +1,18 @@
+# The receipts `peasant village auto` reads the last publication from, and
+# what each account on each Village reads. A receipt answers for its own
+# account on its own Village only, and "last" is the one Village updated last.
+receipts:
+  - {name: older-of-the-account, origin: "https://api.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970202, transcript: 20d59925-36bc-424c-a789-8be54d970202, updatedAt: 5}
+  - {name: last-of-the-account, origin: "https://api.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970201, transcript: 20d59925-36bc-424c-a789-8be54d970201, updatedAt: 9}
+  - {name: another-account, origin: "https://api.village.example", owner: owner-2, session: 10d59925-36bc-424c-a789-8be54d970203, transcript: 20d59925-36bc-424c-a789-8be54d970203, updatedAt: 20}
+  - {name: another-village, origin: "https://other.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970204, transcript: 20d59925-36bc-424c-a789-8be54d970204, updatedAt: 30}
+requiredNames:
+  - the-account-reads-its-last-receipt
+  - another-account-reads-its-own
+  - another-village-reads-its-own
+  - an-account-with-no-receipt-reads-none
+cases:
+  - {name: the-account-reads-its-last-receipt, origin: "https://api.village.example", owner: owner-1, want: last-of-the-account}
+  - {name: another-account-reads-its-own, origin: "https://api.village.example", owner: owner-2, want: another-account}
+  - {name: another-village-reads-its-own, origin: "https://other.village.example", owner: owner-1, want: another-village}
+  - {name: an-account-with-no-receipt-reads-none, origin: "https://api.village.example", owner: owner-3, want: ""}

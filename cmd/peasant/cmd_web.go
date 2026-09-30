@@ -224,6 +224,13 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		Store:        analyticsStore,
 		Config:       cfg,
 		OutputDir:    outputDir,
+		// The directory overrides this command runs with, so the settings
+		// routes read this config directory's rules, and a hook the server
+		// installs runs against this configuration and store.
+		ConfigHome:  configDirOverride(cmd),
+		DataHome:    dataDirOverride(cmd),
+		StateHome:   stateDirOverride(cmd),
+		HookBinding: hookBinding(cmd),
 	})
 
 	return srv.ListenAndServe(ctx)

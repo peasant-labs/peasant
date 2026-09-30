@@ -6,6 +6,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/store"
 )
 
@@ -45,6 +46,7 @@ func (hs testXDGHomes) handler(db *store.Store, cfg *config.Config) *syncHandler
 // config wires a ServerConfig to these roots, preserving the caller's fields.
 func (hs testXDGHomes) config(cfg ServerConfig) ServerConfig {
 	cfg.ConfigHome, cfg.DataHome, cfg.StateHome = hs.Config, hs.Data, hs.State
+	cfg.HookBinding = githooks.Binding{ConfigDir: hs.Config, DataDir: hs.Data, StateDir: hs.State}
 	return cfg
 }
 

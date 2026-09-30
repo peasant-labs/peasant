@@ -24,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/annotations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	schema "github.com/peasant-labs/schema"
@@ -67,14 +68,16 @@ type ServerConfig struct {
 	// The server serves a transcript download from here, so a server started
 	// with --data-dir resolves the same tree the harvest wrote.
 	OutputDir string
-	// ConfigHome, DataHome, and StateHome override the XDG roots the sync
-	// handler resolves its config, data, and state paths under (the same
-	// overrides the --config-dir/--data-dir/--state-dir flags carry). Empty
-	// falls back to the process environment, so the composition root keeps the
-	// environment as the default and only tests inject explicit roots.
+	// ConfigHome, DataHome, and StateHome override the XDG roots the handlers
+	// resolve their config, data, and state paths under: the overrides the
+	// --config-dir/--data-dir/--state-dir flags carry. Empty falls back to the
+	// process environment.
 	ConfigHome string
 	DataHome   string
 	StateHome  string
+	// HookBinding is bound into every git hook the server installs, so the
+	// hook runs with the configuration, rules, and store the server runs with.
+	HookBinding githooks.Binding
 }
 
 // Server is the HTTP server for the web dashboard.
@@ -227,7 +230,7 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// Auto-publish rules: save or remove a rule, and install its hooks in one
 	// recorded repository.
-	aph := &autoPublishHandler{store: s.cfg.Store, config: s.cfg.Config, configHome: s.cfg.ConfigHome, dataHome: s.cfg.DataHome, stateHome: s.cfg.StateHome}
+	aph := &autoPublishHandler{store: s.cfg.Store, config: s.cfg.Config, configHome: s.cfg.ConfigHome, binding: s.cfg.HookBinding}
 	mux.HandleFunc("PUT "+defaults.RouteAutoPublishRule.String(), aph.handleSaveRule)
 	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
 	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)

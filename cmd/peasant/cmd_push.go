@@ -22,7 +22,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/auth"
-	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
@@ -77,6 +76,11 @@ func BuildPushCommand() *cobra.Command {
 			"--concurrency to about 2x NumCPU to scale throughput up to the village's capacity; confirm\n" +
 			"with --timing. The default stays at max(1, NumCPU/2) — sufficient for the common\n" +
 			"steady-state re-push, where the manifest skip means little goes over the wire.)\n\n" +
+			"Auto-publish rules — when a rule in hooks.yaml in the config directory binds a session\n" +
+			"this push sends (matched against the repository the session was recorded in), the push\n" +
+			"publishes collectives-only: private, with no license, and each bound transcript it sent\n" +
+			"is shared with its rule's collectives. --visibility and --license are then refused. A\n" +
+			"session a paused rule covers, or whose transcript is already public, is not published.\n\n" +
 			"Exit status — a caller that branches on it, including a generated Git hook, needs the\n" +
 			"one distinction it cannot read out of prose: whether anything was published at all.\n\n" +
 			"  0  the run succeeded.\n" +
@@ -328,8 +332,6 @@ func BuildPushCommand() *cobra.Command {
 					}
 				}
 
-				// autoPublish holds the rules that cover the pushed repository.
-				var autoPublish []autopublish.Rule
 				runCfg := push.PipelineConfig{
 					DryRun:         dryRun,
 					Force:          force,
@@ -368,24 +370,6 @@ func BuildPushCommand() *cobra.Command {
 					// which is what a hook runs with.
 					if level != outputQuiet {
 						fmt.Fprintf(cmd.ErrOrStderr(), "scope: %s\n", scope.Describe())
-					}
-					// An auto-publish rule the developer set up for this
-					// repository decides its audience: the push publishes
-					// private, sends no license, and shares each transcript it
-					// sends with the rule's collectives.
-					rules, rulesErr := autoPublishRules(ctx, cmd, run)
-					if rulesErr != nil {
-						return rulesErr
-					}
-					if len(rules) > 0 {
-						if flagErr := refuseAudienceFlagsUnderRules(cmd, rules); flagErr != nil {
-							return flagErr
-						}
-						cfg, runCfg = push.CollectiveAudience(cfg, runCfg)
-						autoPublish = rules
-						if level != outputQuiet {
-							fmt.Fprintln(cmd.ErrOrStderr(), describeAutoPublish(rules))
-						}
 					}
 				}
 				// Branch-aware selection filter. When selection.mode=selected,
@@ -450,6 +434,27 @@ func BuildPushCommand() *cobra.Command {
 						return nil
 					}
 					runCfg.FilterSessionIDs = wizardIDs
+				}
+
+				// The auto-publish rules the developer set up decide the audience
+				// of the sessions they bind: such a push publishes private, sends
+				// no license, and shares each transcript it sends with its rule's
+				// collectives. The sessions this push would send are matched
+				// here, after every narrowing, so the rules see what is sent.
+				autoPublish, planErr := planAutoPublish(ctx, cmd, db, cfg, runCfg, run, creds)
+				if planErr != nil {
+					return planErr
+				}
+				if autoPublish.bound() {
+					if flagErr := refuseAudienceFlagsUnderRules(cmd, autoPublish); flagErr != nil {
+						return flagErr
+					}
+					cfg, runCfg = push.CollectiveAudience(cfg, runCfg)
+					runCfg.HeldSessionIDs = make(map[string]bool, len(autoPublish.held))
+					for id := range autoPublish.held {
+						runCfg.HeldSessionIDs[id] = true
+					}
+					reportAutoPublishPlan(cmd.ErrOrStderr(), level == outputQuiet, autoPublish)
 				}
 
 				if redactionPolicy.Raised() {
@@ -659,12 +664,12 @@ func BuildPushCommand() *cobra.Command {
 				run.annotationSummary = annSummary
 
 				// Under an auto-publish rule, each transcript the run sent is
-				// shared with the rule's collectives. Nothing is shared on a dry
+				// shared with its rule's collectives. Nothing is shared on a dry
 				// run, and a run that sent nothing shares nothing.
 				var shared []schema.SyncPushSessionResult
 				var shareErr error
-				if len(autoPublish) > 0 && !dryRun {
-					shared, shareErr = push.SharePublish{Store: db, Village: client, Creds: creds}.ShareSent(runCtx, result, autopublish.Collectives(autoPublish))
+				if len(autoPublish.collectives) > 0 && !dryRun {
+					shared, shareErr = push.RuleShare{Store: db, Village: client, Creds: creds, Retry: run.repositoryCommand() + " --force"}.Run(runCtx, result, autoPublish.collectives)
 				}
 
 				// Close the profile run span over the measured stages. A failed
@@ -800,15 +805,14 @@ func BuildPushCommand() *cobra.Command {
 					}
 				}
 
+				// Share failures are printed here, so the budget explanation below
+				// cannot hide them.
 				shareFailure := reportAutoPublishShares(cmd.ErrOrStderr(), level == outputQuiet || jsonOutput, shared, shareErr)
 
-				// Return the first fatal error (transcript before annotation, then
-				// sharing). The budget check below turns it into the budget's own
+				// Return the fatal errors (transcript before annotation, then
+				// sharing). The budget check below turns them into the budget's own
 				// explanation when the cap is what ended the run.
-				if stageErr := firstPushStageError(transcErr, annErr); stageErr != nil {
-					return stageErr
-				}
-				return shareFailure
+				return errors.Join(firstPushStageError(transcErr, annErr), shareFailure)
 			}(ctx)
 
 			// A budget that ran out is reported as itself: the raw "context
@@ -842,7 +846,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().StringVar(&profileOutput, "profile-output", "", "Write a local JSON v1 push profile to this file (local diagnostic only, mode 0600). Parent directory must exist. Enables profiling; prints path and bottleneck hints to stderr unless --quiet. Works with --json and --timing.")
 	cmd.Flags().StringVar(&profileTrace, "profile-trace", "", "Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output and a distinct regular-file destination with an existing parent. JSON records an opaque trace reference, not the path; the actual path is printed to stderr unless --quiet.")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the village pool toward the <5s target.")
-	cmd.Flags().StringVar(&repository, "repository", "", "Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. When an auto-publish rule in hooks.yaml covers the repository, its sessions publish private with no license and each transcript sent is shared with the rule's collectives; --visibility and --license are then refused. Default: every configured session")
+	cmd.Flags().StringVar(&repository, "repository", "", "Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a village that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach the village. Default: no budget. Git hooks always pass one.")
 
 	return cmd

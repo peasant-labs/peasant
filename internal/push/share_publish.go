@@ -157,34 +157,129 @@ func (s SharePublish) Run(ctx context.Context, sessionIDs []string, changes Coll
 	return SharePublishResult{Response: response, Pushed: pushed}, nil
 }
 
-// ShareSent shares each transcript a finished run sent with the collectives: the
-// sessions whose content the run published or updated, which is what a hook
-// push under an auto-publish rule does after its upload. A session the run
-// skipped as unchanged, held, or failed is not shared: sharing never follows a
-// failure, and an unchanged transcript keeps the readers it has. Each result
-// lists the session's steps in the order they ran, the content step first.
-func (s SharePublish) ShareSent(ctx context.Context, pushed *PushResult, collectives []schema.VillageUUID) ([]schema.SyncPushSessionResult, error) {
-	if pushed == nil || len(collectives) == 0 {
+// RuleShareStore is the local store surface sharing under an auto-publish rule
+// reads and writes: the sessions and their receipts, and the attempt ledger a
+// failed share is recorded in.
+type RuleShareStore interface {
+	SharePublishStore
+	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
+}
+
+var _ RuleShareStore = (*store.Store)(nil)
+
+// RuleShare shares the transcripts a hook push sent with the collectives an
+// auto-publish rule binds their sessions to.
+type RuleShare struct {
+	Store   RuleShareStore
+	Village CollectiveSharer
+	Creds   *auth.Credentials
+	// Retry is the command that publishes and shares again, named in the
+	// reason recorded for a failed share.
+	Retry string
+}
+
+// Run shares each transcript the finished run sent (published or updated)
+// with the collectives its session is bound to. A session the run skipped as
+// unchanged, held, or failed is not shared: sharing never follows a failure,
+// and an unchanged transcript keeps the readers it has.
+//
+// An update does not undo a decision made on Village since the last push: a
+// collective that already holds the transcript, or whose share was rejected,
+// retracted, or revoked, is skipped with the reason, and only a collective
+// that never had a share is asked. A share that fails is recorded as the
+// session's latest failed attempt, so the local publication state shows it.
+func (s RuleShare) Run(ctx context.Context, pushed *PushResult, collectives map[string][]schema.VillageUUID) ([]schema.SyncPushSessionResult, error) {
+	if pushed == nil {
 		return nil, nil
 	}
 	var sent []string
+	updated := map[string]bool{}
 	for _, result := range pushed.Sessions {
-		if result.Status == PushStatusNew || result.Status == PushStatusUpdated {
+		if (result.Status == PushStatusNew || result.Status == PushStatusUpdated) && len(collectives[result.SessionID]) > 0 {
 			sent = append(sent, result.SessionID)
+			updated[result.SessionID] = result.Status == PushStatusUpdated
 		}
 	}
 	if len(sent) == 0 {
 		return nil, nil
 	}
-	contents, _, err := s.contentOutcomes(ctx, sent, pushed, nil)
+	contents, _, err := SharePublish{Store: s.Store, Creds: s.Creds}.contentOutcomes(ctx, sent, pushed, nil)
 	if err != nil {
 		return nil, err
 	}
 	results := make([]schema.SyncPushSessionResult, 0, len(sent))
 	for _, id := range sent {
-		results = append(results, runSessionSteps(ctx, s.Village, contents[id], CollectiveChanges{Add: collectives}))
+		outcome := contents[id]
+		add, decided := collectives[id], []schema.SyncPushStepResult(nil)
+		if updated[id] && outcome.transcript != nil {
+			add, decided, err = s.undecided(ctx, outcome.transcript.Receipt.TranscriptID, add)
+			if err != nil {
+				result := schema.SyncPushSessionResult{SessionID: id, Status: schema.SyncPushSessionError, Title: outcome.title, TranscriptURL: outcome.transcript.Receipt.TranscriptURL,
+					Error: "the content was published, but reading who can read the transcript failed, so it was not shared again: " + err.Error()}
+				result.Steps = []schema.SyncPushStepResult{*outcome.content}
+				results = append(results, s.recorded(ctx, outcome, result))
+				continue
+			}
+		}
+		result := runSessionSteps(ctx, s.Village, outcome, CollectiveChanges{Add: add})
+		result.Steps = append(result.Steps, decided...)
+		if result.Status == schema.SyncPushSessionError {
+			// The next push does not send an unchanged session again, so it
+			// does not retry the share either: name the command that does.
+			result.Error = strings.TrimSuffix(result.Error, " Publish again to retry.")
+		}
+		results = append(results, s.recorded(ctx, outcome, result))
 	}
 	return results, nil
+}
+
+// undecided splits the collectives into the ones to ask and a skipped step for
+// each one that already has a share of the transcript, live or decided.
+func (s RuleShare) undecided(ctx context.Context, transcript schema.TranscriptID, collectives []schema.VillageUUID) ([]schema.VillageUUID, []schema.SyncPushStepResult, error) {
+	var ask []schema.VillageUUID
+	var skipped []schema.SyncPushStepResult
+	for _, id := range collectives {
+		collective := id
+		// The latest event of the share history says what the collective, or
+		// the developer, last did with this transcript there.
+		latest, err := s.Village.LatestShareStatus(ctx, transcript, id)
+		if err != nil {
+			return nil, nil, err
+		}
+		reason := ""
+		switch latest {
+		case "":
+			ask = append(ask, id)
+			continue
+		case schema.VillageShareStatusApproved, schema.VillageShareStatusPending:
+			reason = "the collective already holds this transcript or its share waits for approval"
+		case schema.VillageShareStatusRejected:
+			reason = "the collective's owner rejected this transcript, and a rule does not submit it again; share it again on Village if you want to"
+		default:
+			reason = "this transcript was taken back from the collective, and a rule does not share it again; share it again on Village if you want to"
+		}
+		skipped = append(skipped, schema.SyncPushStepResult{Step: schema.SyncPushStepAddCollective, CollectiveID: &collective, Outcome: schema.SyncPushStepSkipped, Reason: reason})
+	}
+	return ask, skipped, nil
+}
+
+// recorded records a failed session as its latest failed attempt, under the
+// access stage: the content is published and who can read it is not what the
+// rule asks.
+func (s RuleShare) recorded(ctx context.Context, outcome contentOutcome, result schema.SyncPushSessionResult) schema.SyncPushSessionResult {
+	if result.Status != schema.SyncPushSessionError || outcome.transcript == nil {
+		return result
+	}
+	if s.Retry != "" {
+		result.Error += " Retry with: " + s.Retry
+	}
+	diagnosticCtx, cancel := persistenceContext(ctx)
+	defer cancel()
+	_ = s.Store.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{
+		VillageOrigin: s.Creds.VillageURL, OwnerUserID: s.Creds.UserID, SessionID: result.SessionID,
+		ProjectHash: outcome.transcript.ProjectHash, Stage: store.PublicationAttemptStageVisibility, Message: result.Error,
+	})
+	return result
 }
 
 // contentOutcome is what happened to one session's content, and the transcript
