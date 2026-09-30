@@ -30,6 +30,11 @@ already published to the village account keeps the visibility and license
 it has there, including a share with collectives. If visibility convergence or local receipt
 persistence fails, no terminal local receipt is recorded, so the next
 repository-scoped run retries that session.
+When an auto-publish rule in hooks.yaml in the config directory covers the
+repository (see 'peasant village auto'), the rule decides the audience instead:
+a first publication opens private with no license, an update keeps the audience
+the transcript has, and each transcript the push sends is shared with the rule's
+collectives, never with the public.
 --timeout caps the WHOLE upload, so a village that accepts a connection and then
 stops answering cannot hold git up: the per-request client timeout does not bound
 a push, which issues several requests in sequence. Giving up is a warning, not a
@@ -365,10 +370,16 @@ func renderInstallEnvironmentNotices(cmd *cobra.Command, report githooks.ChangeR
 	if len(installed) == 0 {
 		return
 	}
-	stderr := cmd.ErrOrStderr()
+	renderPeasantPathNotice(cmd, installed)
+	renderSettingsNotices(cmd, installed, report.Repository.Root)
+}
+
+// renderPeasantPathNotice warns, for each installed event, when git will not
+// find the peasant binary the hook runs.
+func renderPeasantPathNotice(cmd *cobra.Command, installed []githooks.Event) {
 	if _, err := exec.LookPath("peasant"); err != nil {
 		for _, event := range installed {
-			fmt.Fprintf(stderr,
+			fmt.Fprintf(cmd.ErrOrStderr(),
 				"notice: the peasant binary is not on this shell's PATH (%v). "+
 					"The %s hook resolves it from the PATH git runs with, so until peasant is on that PATH every %s prints "+
 					"'the peasant command was not found' and uploads nothing. "+
@@ -376,7 +387,6 @@ func renderInstallEnvironmentNotices(cmd *cobra.Command, report githooks.ChangeR
 				err, event, event)
 		}
 	}
-	renderSettingsNotices(cmd, installed, report.Repository.Root)
 }
 
 // renderStatusEnvironmentNotices repeats the settings disclosures for the hooks
