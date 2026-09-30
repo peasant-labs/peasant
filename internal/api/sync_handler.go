@@ -93,17 +93,22 @@ func syncUserPatterns(cfg *config.Config) ([]redact.UserPattern, error) {
 // --------------------------------------------------------------------------
 
 type syncSessionResponse struct {
-	ID          string `json:"id"`
-	Harness     string `json:"harness"`
-	ProjectName string `json:"projectName"`
-	ProjectHash string `json:"projectHash"`
-	HostSlug    string `json:"hostSlug"`
-	StartTime   string `json:"startTime"`
-	DurationMs  int64  `json:"durationMs"`
-	TotalTokens int    `json:"totalTokens"`
-	TurnCount   int    `json:"turnCount"`
-	Model       string `json:"model"`
-	SyncStatus  string `json:"syncStatus"`
+	ID          string            `json:"id"`
+	Harness     string            `json:"harness"`
+	ProjectName string            `json:"projectName"`
+	ProjectHash string            `json:"projectHash"`
+	HostSlug    string            `json:"hostSlug"`
+	StartTime   string            `json:"startTime"`
+	DurationMs  int64             `json:"durationMs"`
+	TotalTokens int               `json:"totalTokens"`
+	TurnCount   int               `json:"turnCount"`
+	Model       string            `json:"model"`
+	SyncStatus  schema.SyncStatus `json:"syncStatus"`
+	// HoldReason says why a held row waits. Only a held row carries one.
+	HoldReason schema.SyncHoldReason `json:"holdReason,omitempty"`
+	// PreviouslyPushed reports that this session was published before, whatever
+	// its status now: a held row can have been published.
+	PreviouslyPushed bool `json:"previouslyPushed"`
 }
 
 func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request) {
@@ -156,17 +161,19 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 	for _, entry := range entries {
 		s := entry.row
 		result = append(result, syncSessionResponse{
-			ID:          s.SessionID,
-			Harness:     s.ModelHarness,
-			ProjectName: s.ProjectName,
-			ProjectHash: s.ProjectHash,
-			HostSlug:    s.HostSlug,
-			StartTime:   time.UnixMilli(s.StartMs).UTC().Format(time.RFC3339),
-			DurationMs:  s.DurationMs,
-			TotalTokens: s.TokensTotal,
-			TurnCount:   s.TurnCount,
-			Model:       s.ModelID,
-			SyncStatus:  entry.status,
+			ID:               s.SessionID,
+			Harness:          s.ModelHarness,
+			ProjectName:      s.ProjectName,
+			ProjectHash:      s.ProjectHash,
+			HostSlug:         s.HostSlug,
+			StartTime:        time.UnixMilli(s.StartMs).UTC().Format(time.RFC3339),
+			DurationMs:       s.DurationMs,
+			TotalTokens:      s.TokensTotal,
+			TurnCount:        s.TurnCount,
+			Model:            s.ModelID,
+			SyncStatus:       entry.status,
+			HoldReason:       entry.hold,
+			PreviouslyPushed: s.PushedAt != nil,
 		})
 	}
 
@@ -174,22 +181,24 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 	w.Write(data)
 }
 
-// computeSyncStatus determines the sync status for a session row.
-// Sessions without a coherent database capture are held until normal ingest.
-func computeSyncStatus(s ingest.PushSessionRow, heldMap map[string]bool, readiness ingest.PublicationReadiness) string {
-	if heldMap[s.SessionID] {
-		return "held"
+// computeSyncStatus determines the sync status for a session row, and why a held
+// row waits. A session whose metrics are not computed yet is held for its
+// metrics; one without a coherent database capture is held for its publication
+// metadata. Both wait for normal ingest.
+func computeSyncStatus(s ingest.PushSessionRow, metricsMissing, metadataReady bool) (schema.SyncStatus, schema.SyncHoldReason) {
+	if metricsMissing {
+		return schema.SyncStatusHeld, schema.SyncHoldReasonMetricsMissing
 	}
-	if readiness != ingest.PublicationReady {
-		return "held"
+	if !metadataReady {
+		return schema.SyncStatusHeld, schema.SyncHoldReasonMetadataMissing
 	}
 	if s.PushedAt == nil {
-		return "new"
+		return schema.SyncStatusNew, ""
 	}
 	if s.IngestedMs > *s.PushedAt {
-		return "updated"
+		return schema.SyncStatusUpdated, ""
 	}
-	return "synced"
+	return schema.SyncStatusSynced, ""
 }
 
 // --------------------------------------------------------------------------
