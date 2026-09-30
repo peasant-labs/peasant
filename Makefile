@@ -1,6 +1,6 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
+.PHONY: build run clean web web-stub fmt lint check race dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
 
 VERSION ?=
 
@@ -19,9 +19,10 @@ endef
 # release/post-merge race coverage is currently disabled (the race suite does
 # not fit the 30-minute gate budget; the re-enable note lives in the check
 # job of .github/workflows/tests.yml, pending #389). Opt in explicitly with
-# `make check RACE=1` — race pass on the gate, -race on the astgrep pass — or
-# run `go test -race ./...` directly. The gate still plans and screens under
-# -race=false. RACE is a make variable, not an environment contract: the gate
+# `make race` (equivalent to `make check RACE=1` — race pass on the gate,
+# -race on the astgrep pass) or run `go test -race ./...` directly. The gate
+# still plans and screens under -race=false. RACE is a make variable, not an
+# environment contract: the gate
 # is driven by its -race flag, which this target passes explicitly, and the
 # astgrep pass below reads GORACE_FLAG from the same source.
 RACE ?= 0
@@ -120,6 +121,17 @@ check: fmt lint
 	# a single no-race pass but still plans and screens. cmd/peasant and
 	# internal/api exceed Go's 10m default under race, so the gate sets
 	# -timeout=0 and lets the job's own budget apply.
+
+# The race-opt-in gate: check with the detector on, locally. The local
+# counterpart to CI's RACE=0; CONTRIBUTING names this as the pre-push race
+# pass. Re-invokes make rather than setting a target-specific RACE:
+# GORACE_FLAG is a := immediate, expanded empty at parse time, so a
+# target-specific RACE=1 would leave the astgrep pass silently no-race while
+# the gate went -race=1. Re-entry re-parses with RACE=1 and both derivations
+# see it.
+.PHONY: race
+race:
+	@$(MAKE) --no-print-directory check RACE=1
 
 # Explicit revisions keep the expensive cross-revision check out of ordinary builds.
 .PHONY: check-harvester-versions
