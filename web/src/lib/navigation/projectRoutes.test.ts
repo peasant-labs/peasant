@@ -43,9 +43,9 @@ const cases = loadFixture(source);
 
 describe('project route fixture contract', () => {
   it('is strict, complete, and non-vacuous', () => {
-    expect(() => loadFixture(source.replace('expectedCaseCount: 30', 'expectedCaseCount: 29'))).toThrow(/exactly 30/);
+    expect(() => loadFixture(source.replace('expectedCaseCount: 32', 'expectedCaseCount: 31'))).toThrow(/exactly 32/);
     expect(() => loadFixture(source.replace('canonical map round trip', 'renamed map behavior'))).toThrow(/missing required semantic branch/);
-    expect(() => loadFixture(source.replace('expectedCaseCount: 30', 'unknown: true\nexpectedCaseCount: 30'))).toThrow(/fields/);
+    expect(() => loadFixture(source.replace('expectedCaseCount: 32', 'unknown: true\nexpectedCaseCount: 32'))).toThrow(/fields/);
     expect(() => loadFixture(`${source}\n---\n{}`)).toThrow();
   });
 });
@@ -74,6 +74,7 @@ describe.each(cases)('$name', (fixture) => {
           originBranch: null,
           returnLocation: null,
           earlierHistoryOpen: [],
+          publish: false,
         });
         expect(hash && query && transcriptHref(hash, fixture.sessionId, {
           turn: query.turn ?? undefined,
@@ -95,10 +96,20 @@ describe.each(cases)('$name', (fixture) => {
           originBranch: null,
           returnLocation: null,
           earlierHistoryOpen: ['earlier-0', 'earlier-1'],
+          publish: false,
         });
         expect(hash && query && transcriptHref(hash, fixture.sessionId, {
           turn: query.turn ?? undefined,
           earlierHistoryOpen: query.earlierHistoryOpen,
+        })).toBe(fixture.expected);
+        break;
+      }
+      case 'transcript-publish': {
+        const query = parseTranscriptRouteQuery(fixture.search);
+        expect(query?.publish).toBe(true);
+        expect(hash && query && transcriptHref(hash, fixture.sessionId, {
+          turn: query.turn ?? undefined,
+          publish: query.publish,
         })).toBe(fixture.expected);
         break;
       }

@@ -73,7 +73,13 @@ const MAP_FIELDS = new Set(['node', 'mode', 'grain', 'expand', 'filter', 'focus'
 const REVIEW_FIELDS = new Set(['branch']);
 /** Transcript route parameter naming each disclosed retained-history section. */
 export const EarlierHistoryParam = 'earlier';
-const TRANSCRIPT_FIELDS = new Set(['turn', 'scope', 'scopeVal', 'origin', 'originNode', 'originBranch', 'returnTo', EarlierHistoryParam]);
+/**
+ * Transcript route parameter that opens the publish popup on arrival
+ * (`?publish=open`). `/share?sessionId=<id>` sends a reader here with it.
+ */
+export const PublishParam = 'publish';
+const PUBLISH_OPEN = 'open';
+const TRANSCRIPT_FIELDS = new Set(['turn', 'scope', 'scopeVal', 'origin', 'originNode', 'originBranch', 'returnTo', EarlierHistoryParam, PublishParam]);
 // Repeatable transcript field: one entry per disclosed earlier-history section.
 const TRANSCRIPT_REPEATABLE_FIELDS = new Set([EarlierHistoryParam]);
 // The retained-history section identifier the transcript viewer publishes for a
@@ -238,6 +244,8 @@ export type TranscriptHrefOptions = {
   returnLocation?: ReturnLocation;
   /** Retained-history section identifiers the reader has disclosed. */
   earlierHistoryOpen?: readonly string[];
+  /** Open the publish popup on arrival. */
+  publish?: boolean;
 };
 
 export function transcriptHref(projectHash: ProjectHash, sessionId: string, options: TranscriptHrefOptions = {}): string {
@@ -250,6 +258,7 @@ export function transcriptHref(projectHash: ProjectHash, sessionId: string, opti
   appendValue(params, 'originBranch', options.originBranch);
   for (const section of normalizeEarlierSections(options.earlierHistoryOpen ?? [])) params.append(EarlierHistoryParam, section);
   if (options.returnLocation) params.set('returnTo', formatReturnLocation(options.returnLocation));
+  if (options.publish) params.set(PublishParam, PUBLISH_OPEN);
   const query = params.toString();
   return `/projects/${projectHash}/${safeBuilderSegment(sessionId, 'transcript')}${query ? `?${query}` : ''}`;
 }
@@ -351,6 +360,8 @@ export type TranscriptRouteQuery = {
   returnLocation: ReturnLocation | null;
   /** Retained-history sections the reader had disclosed, canonicalized. */
   earlierHistoryOpen: readonly string[];
+  /** Whether the route asks for the publish popup to open. */
+  publish: boolean;
 };
 
 export function parseTranscriptRouteQuery(search: string | URLSearchParams): TranscriptRouteQuery | null {
@@ -376,6 +387,8 @@ export function parseTranscriptRouteQuery(search: string | URLSearchParams): Tra
   const rawReturn = params.get('returnTo');
   const parsedReturn = parseReturnLocation(rawReturn);
   if (rawReturn && !parsedReturn) return null;
+  const rawPublish = params.get(PublishParam);
+  if (rawPublish != null && rawPublish !== PUBLISH_OPEN) return null;
   return {
     turn,
     scope: rawScope as TranscriptScope | null,
@@ -385,6 +398,7 @@ export function parseTranscriptRouteQuery(search: string | URLSearchParams): Tra
     originBranch,
     returnLocation: parsedReturn,
     earlierHistoryOpen: normalizeEarlierSections(earlier),
+    publish: rawPublish === PUBLISH_OPEN,
   };
 }
 
