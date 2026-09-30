@@ -31,6 +31,17 @@ export interface PushResult {
 }
 
 /**
+ * The body POST /api/v1/sync/push takes from the wizard: the sessions and the
+ * redaction level, and nothing else.
+ */
+export function pushRequestBody(
+  sessionIds: string[],
+  redactionLevel: SelectableRedactionLevel,
+): { sessionIds: string[]; redactionLevel: SelectableRedactionLevel } {
+  return { sessionIds, redactionLevel };
+}
+
+/**
  * Run the real push for the given sessions at the given redaction level. Throws
  * with the server's error message (e.g. the "run 'peasant village login' first"
  * 401) on failure.
@@ -45,14 +56,11 @@ export async function runPush(
   const resp = await fetch(`${getApiBaseUrl()}/api/v1/sync/push`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionIds,
-      redactionLevel,
-      // The visibility a first publish opens at: the commons is public by
-      // design (the wizard frames it so). It never changes a transcript that is
-      // already published; an update keeps the audience it has on the village.
-      visibility: 'public',
-    }),
+    // The push request is typed and closed: it names the sessions and the
+    // redaction level, and the server refuses a visibility or a license. A
+    // first publication opens private, and an update keeps the audience the
+    // transcript has.
+    body: JSON.stringify(pushRequestBody(sessionIds, redactionLevel)),
   });
   if (!resp.ok) {
     const body = (await resp.json().catch(() => null)) as { error?: string } | null;
