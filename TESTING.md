@@ -25,11 +25,13 @@ and to prove that every test still runs exactly once across the passes.
   record. Its `partition` entries run in the **no-race pass** and are excluded
   from the race pass; its `protected` entries are pinned into the race pass and
   must never be registered as partition members.
-- With the race pass on (`-race`, the flag's default; `make check` derives it
-  from its `RACE` make variable, which CI passes as `RACE=0`) the gate runs a
+- With the race pass on (`-race`; `make check` passes the flag explicitly,
+  deriving it from its `RACE` make variable, which CI sets to `0`) the gate
+  runs a
   **race pass** (every listed test minus the
   partition members) and a **no-race pass** (exactly the partition members).
-  With `-race=false` it runs a **single no-race pass** over every test, but still
+  With the flag off (the default) it runs a **single no-race pass** over every
+  test, but still
   computes the plan and applies the screen. The gate computes the plan from
   `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
 
