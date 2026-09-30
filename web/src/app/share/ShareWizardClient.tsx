@@ -16,14 +16,10 @@ import {
   type WizardStep as FtWizardStep,
 } from '@/lib/ft-ui';
 import { SessionPicker } from '@/components/share/SessionPicker';
-import { LabelsStep } from '@/components/share/LabelsStep';
-import {
-  RedactionStep,
-  type RedactionCache,
-} from '@/components/share/RedactionStep';
+import { RedactionStep } from '@/components/share/RedactionStep';
 import { PushStep } from '@/components/share/PushStep';
-import type { ShareDiscoveryResult, ShareSession, ShareHierarchySession, ShareHelperContext, ShareHelperGroup, LabelSelection } from '@/lib/share/types';
-import { emptyLabelSelection } from '@/lib/share/types';
+import { usePublishState } from '@/contexts/PublishContext';
+import type { ShareDiscoveryResult, ShareSession, ShareHierarchySession, ShareHelperContext, ShareHelperGroup } from '@/lib/share/types';
 import { HelperScopeExpiredError, type HelperMembersPage } from '@/components/share/HelperGroupTree';
 import { summarizePrompt } from '@peasant-labs/fairtrade/ui';
 import {
@@ -38,8 +34,10 @@ import { decodeGroupedSyncList, decodeHelperMembers } from '@/lib/api/grouped-sy
 import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 import type { ShareFooterActions } from '@/components/share/footer-actions';
 
-// Prior-version Contribute wizard: superseded by the fairtrade graph shell lift,
-// a deprecation candidate retained for evidence exits until its replacement lands.
+// Prior-version Contribute wizard: a deprecation candidate. A single transcript
+// is published from its own page, through the publish popup; this wizard stays
+// reachable for publishing several sessions at once and for the evidence exits
+// (?sessions=) the changes and code-map pages link here.
 
 interface BackendSessionSummary {
   id: string;
@@ -297,25 +295,25 @@ async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: n
 }
 
 
-// Local step-id union — the four visible wizard steps.
-type WizardStep = 'select' | 'labels' | 'redact' | 'submit';
+// Local step-id union — the three visible wizard steps.
+type WizardStep = 'select' | 'redact' | 'submit';
 
 // Step descriptors for the fairtrade StepIndicator rail.
 // Title-case labels render lowercase in the browser via CSS (swz-label text-transform).
 const WIZARD_STEPS: FtWizardStep[] = [
   { id: 'select', label: 'choose' },
-  { id: 'labels', label: 'labels' },
   { id: 'redact', label: 'redact' },
   { id: 'submit', label: 'submit' },
 ];
 
-// Deep-link contract. Four visible steps; legacy step names keep working by
+// Deep-link contract. Three visible steps; legacy step names keep working by
 // mapping onto the current ones.
 const STEP_ALIASES: Record<string, WizardStep> = {
   select: 'select',
-  // The old forced "annotations" step is now the optional Labels step.
-  annotations: 'labels',
-  labels: 'labels',
+  // The labels step is gone: the push never sent the labels it asked for. Its
+  // old names open the chooser, the step it followed.
+  annotations: 'select',
+  labels: 'select',
   redact: 'redact',
   // "push"/"contribute" both meant the final step — now Submit.
   push: 'submit',
@@ -329,15 +327,17 @@ function resolveDeepLinkStep(raw: string | null): WizardStep | null {
 }
 
 // Linear advance order for the visible step machine.
-const STEP_ORDER: WizardStep[] = ['select', 'labels', 'redact', 'submit'];
+const STEP_ORDER: WizardStep[] = ['select', 'redact', 'submit'];
 
 export function ShareWizardClient() {
   const { config, loading, error: configError } = useMockConfig();
   const searchParams = useSearchParams();
 
   // Deep-link contract: /share?sessionId={id}&step={select|redact|push|contribute}
-  // Legacy step names (annotations, redact, push) still resolve. Both params
-  // are optional and silently ignored when invalid.
+  // Legacy step names (annotations, labels, push) still resolve. Both params
+  // are optional and silently ignored when invalid. A sessionId with no step
+  // never reaches this wizard: the share page opens that transcript's publish
+  // popup instead (see SharePageClient).
   const deepLinkSessionId = searchParams?.get('sessionId') ?? null;
   const deepLinkStep = resolveDeepLinkStep(searchParams?.get('step') ?? null);
 
@@ -360,7 +360,7 @@ export function ShareWizardClient() {
     [linkedIds],
   );
 
-  // Wizard navigation — visible steps: Choose → Labels → Redact → Submit.
+  // Wizard navigation — visible steps: Choose → Redact → Submit.
   const [step, setStep] = useState<WizardStep>('select');
   const [footerActions, setFooterActions] = useState<ShareFooterActions | null>(null);
 
@@ -374,20 +374,13 @@ export function ShareWizardClient() {
   // user opts an item out), so there is no explicit approval gate anymore.
   // Submit is reachable as soon as a non-empty selection exists.
 
-  // Labels chosen on the (optional) Labels step. These are real annotations
-  // (GET /api/v1/annotations) grouped auto/manual; the included ids flow into
-  // the push selection (`peasant push --annotation-id`). Carried in wizard
-  // state and surfaced in the Submit transparency panel.
-  const [labels, setLabels] = useState<LabelSelection>(() => emptyLabelSelection());
-
   // Config-aware data fetching
   const [discovery, setDiscovery] = useState<ShareDiscoveryResult<ShareHierarchySession> | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  // Whether session data (and, by extension, labels) should come from mock.
-  // Mirrors the same toggle used for session discovery so the Labels step reads
-  // mock annotations when the rest of the wizard is mocked.
+  // Whether session data (and, by extension, the redaction scan) should come
+  // from mock. Mirrors the same toggle used for session discovery.
   const useMock = useMemo(
     () => !!config && config.enabled && !!config.web?.includes('sessions'),
     [config],
@@ -423,7 +416,7 @@ export function ShareWizardClient() {
     }
   }, [config, loading, configError, retryCount, useMock, linkedIds]);
 
-  // Selection is session-ids (Labels/Redaction/Push keep their props). The
+  // Selection is session-ids (Redaction/Push keep their props). The
   // Choose starts empty so the user opts in. A ?sessionId= deep-link
   // is the only thing that preselects, and only that one session.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -534,11 +527,10 @@ export function ShareWizardClient() {
   const [redactionLevel, setRedactionLevel] =
     useState<SelectableRedactionLevel>(DEFAULT_REDACTION_LEVEL);
 
-  // Cache completed scans for the lifetime of this wizard. Entries include
+  // The (level, session) scan cache is app-level, shared with the publish
+  // popup, so a scan outlives this wizard as well as its steps. Entries include
   // failures so revisiting Redact cannot turn an honest warning into all-clear.
-  const [redactionCache, setRedactionCache] = useState<RedactionCache>(
-    () => new Map(),
-  );
+  const { redactionCache, updateRedactionCache } = usePublishState();
 
   // Advance to the next step and mark the current step as complete in the
   // rail (olive + check). Each step's registered footer action calls this.
@@ -563,11 +555,11 @@ export function ShareWizardClient() {
     });
   }, []);
 
-  // Which steps the StepIndicator allows jumping to. Choose and Labels are
-  // always reachable; Redact and Submit need a non-empty selection. Redaction
-  // is safe-by-default, so Submit is no longer gated behind an approval.
+  // Which steps the StepIndicator allows jumping to. Choose is always
+  // reachable; Redact and Submit need a non-empty selection. Redaction is
+  // safe-by-default, so Submit is not gated behind an approval.
   const reachable = useMemo<Set<WizardStep>>(() => {
-    const r = new Set<WizardStep>(['select', 'labels']);
+    const r = new Set<WizardStep>(['select']);
     if (selectedIds.size > 0) {
       r.add('redact');
       r.add('submit');
@@ -623,7 +615,7 @@ export function ShareWizardClient() {
   const disc = discovery!;
 
   // The Choose list, filtered to the evidence set when one rode in on the
-  // URL. Labels/Redact/Submit keep the full list — the selection (which only
+  // URL. Redact/Submit keep the full list — the selection (which only
   // ever contains visible Choose rows) is what scopes them.
   // The unioned list already carries the linked sessions the discovery list
   // withheld, so filtering it resolves a link to a hidden session instead of
@@ -717,19 +709,7 @@ export function ShareWizardClient() {
             />
           )}
 
-          {/* Step 2 — Labels (optional, skippable). */}
-          {step === 'labels' && (
-            <LabelsStep
-              sessions={allSessions}
-              selectedIds={selectedIds}
-              onLabelsChange={setLabels}
-              onNext={goNext}
-              onFooterActionsChange={setFooterActions}
-              useMock={useMock}
-            />
-          )}
-
-          {/* Step 3 — Redact. Safe-by-default: everything flagged is redacted
+          {/* Step 2 — Redact. Safe-by-default: everything flagged is redacted
               unless the user opts an item out. No gate — onNext just advances. */}
           {step === 'redact' && (
             <RedactionStep
@@ -740,18 +720,17 @@ export function ShareWizardClient() {
               onNext={goNext}
               onFooterActionsChange={setFooterActions}
               cache={redactionCache}
-              onCacheChange={setRedactionCache}
+              onCacheChange={updateRedactionCache}
               useMock={useMock}
             />
           )}
 
-          {/* Step 4 — Submit. Reachable once a selection exists; redaction is
+          {/* Step 3 — Submit. Reachable once a selection exists; redaction is
               safe-by-default so there is no approval gate. */}
           {step === 'submit' && selectedIds.size > 0 && (
             <PushStep
               sessions={allSessions}
               selectedIds={selectedIds}
-              labels={labels}
               redactionLevel={redactionLevel}
               useMock={useMock}
               onFooterActionsChange={setFooterActions}
