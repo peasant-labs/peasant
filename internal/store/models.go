@@ -46,6 +46,8 @@ func (s *Store) SyncModels(ctx context.Context, models []ingest.ModelInfo) error
 	}
 	defer s.pool.Put(conn)
 
+	// The deferred end commits only when err is nil and rolls back otherwise,
+	// so every failure below must assign err before returning.
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
 
@@ -65,10 +67,13 @@ func (s *Store) SyncModels(ctx context.Context, models []ingest.ModelInfo) error
 		clearErr := stmt.ClearBindings()
 		switch {
 		case stepErr != nil:
+			err = stepErr
 			return fmt.Errorf("store: upsert model %s/%s: %w", m.ModelID, m.ProviderKey, stepErr)
 		case resetErr != nil:
+			err = resetErr
 			return fmt.Errorf("store: reset model upsert after %s/%s: %w", m.ModelID, m.ProviderKey, resetErr)
 		case clearErr != nil:
+			err = clearErr
 			return fmt.Errorf("store: clear model upsert bindings after %s/%s: %w", m.ModelID, m.ProviderKey, clearErr)
 		}
 	}
