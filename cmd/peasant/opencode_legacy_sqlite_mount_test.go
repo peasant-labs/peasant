@@ -249,7 +249,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			}
 
 			databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
-			localStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			localStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("open mounted harvest store: %v", err)
 			}
@@ -340,7 +340,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if !harvestSummaryHasCount(output, firstRows, "unchanged") {
 				t.Fatalf("first ordinary repeat did not skip captured sources:\n%s", output)
 			}
-			repeatedStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			repeatedStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("reopen repeated harvest store: %v", err)
 			}
@@ -368,7 +368,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if !harvestSummaryHasCount(output, 1, "updated") || !harvestSummaryHasCount(output, 1, "unchanged") {
 				t.Fatalf("selected SQLite session change did not isolate freshness from the unchanged sibling session:\n%s", output)
 			}
-			changedStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			changedStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("reopen changed-source store: %v", err)
 			}
@@ -470,7 +470,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if reindexErr != nil {
 				t.Fatalf("reindex managed legacy projection through mounted command: %v\n%s", reindexErr, reindexOutput)
 			}
-			reindexStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			reindexStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("reopen reindexed store: %v", err)
 			}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
@@ -168,7 +169,7 @@ func TestRetainedUnknownStreamAndRetainedBatch(t *testing.T) {
 			if c.LegacyOmission {
 				meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, schema.DiagnosticEntry{ErrorType: "record_too_large", Location: "synthetic prior source", Message: "an older capture omitted a source record without a positional placeholder"})
 			}
-			database, err := store.Open(t.TempDir() + "/unknown.db")
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

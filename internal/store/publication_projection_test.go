@@ -63,6 +63,7 @@ func BenchmarkPublicationLibrary(b *testing.B) {
 	if fixture.Name != "large-recorded-library" || fixture.Sessions < 1800 || fixture.Entries < 1 || fixture.Bytes < 1 {
 		b.Fatal("invalid large-library measurement fixture")
 	}
+	// ast-grep-ignore: no-migrating-store-open-in-tests -- benchmark setup outside the measured section: storetest helpers require *testing.T, so the corpus is built with one migrating open.
 	s, err := store.Open(filepath.Join(b.TempDir(), "library.db"))
 	if err != nil {
 		b.Fatal(err)

@@ -88,7 +88,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			harvest()
 			dbPath := string(defaults.ResolveDBFilePathWith(dir))
 			open := func() *store.Store {
-				db, err := store.Open(dbPath)
+				db, err := openPreparedStore(t, dbPath)
 				if err != nil {
 					t.Fatal(err)
 				}

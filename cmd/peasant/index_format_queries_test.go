@@ -89,7 +89,12 @@ func TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection(t *testing.
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(dbPath, store.WithPoolSize(1))
+			// Seed the exact path the command opens from the pre-migrated
+			// golden copy, so the setup open and the command's own open find
+			// no pending migrations; the seeded sessions and annotations below
+			// are unchanged.
+			storetest.CopyGoldenTo(t, dbPath)
+			db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

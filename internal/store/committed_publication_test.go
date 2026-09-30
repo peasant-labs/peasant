@@ -69,19 +69,24 @@ func loadCommittedPublicationFixtures(t *testing.T) committedPublicationFixture 
 
 func openCommittedPublicationStore(t *testing.T, path, root string, supported bool) (*store.Store, store.SessionLocker) {
 	t.Helper()
-	options := []store.OpenOption{store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat())}
 	locker, err := store.NewFileSessionLocker(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The helper reopens the same path with different options (committed vs
+	// legacy reads); prepare a missing path from the golden so a reopen keeps
+	// the seeded rows.
+	storetest.CopyGoldenToIfAbsent(t, path)
+	var db *store.Store
 	if supported {
 		artifacts, err := store.NewOSGenerationArtifactStore(root)
 		if err != nil {
 			t.Fatal(err)
 		}
-		options = append(options, store.WithGenerationArtifacts(artifacts, locker))
+		db, err = store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+	} else {
+		db, err = store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 	}
-	db, err := store.Open(path, options...)
 	if err != nil {
 		t.Fatal(err)
 	}

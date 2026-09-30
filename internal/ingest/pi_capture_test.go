@@ -14,7 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -131,10 +131,7 @@ func testPiCapture(t *testing.T, c piCaptureCase, id, otherID, initial, validApp
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(filepath.Join(root, "db.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := storetest.OpenWith(t)
 	defer db.Close()
 	filesystem := &piCaptureTimingFS{OSFileSystem: &ingest.OSFileSystem{}, path: source}
 	cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessPi: {Enabled: true, Paths: []ingest.ResolvedPath{resolved}}}, OutputDir: out, Parallelism: 1}

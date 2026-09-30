@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -79,8 +80,8 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			if err := os.WriteFile(sourcePath, []byte(transcript), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(root, "peasant.db")
-			db, err := store.Open(path)
+			path := storetest.CopyGoldenDB(t)
+			db, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -115,7 +116,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(path)
+			db, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

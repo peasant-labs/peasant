@@ -123,7 +123,7 @@ func openSeedStore(t *testing.T, dir, name string) *store.Store {
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		storetest.CopyGoldenTo(t, dbPath)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("%s: open store: %v", name, err)
 	}
@@ -694,7 +694,7 @@ func TestCLI_SessionsList_Tag(t *testing.T) {
 
 	// Add a tag to the first session only.
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("TestCLI_SessionsList_Tag: open store: %v", err)
 	}

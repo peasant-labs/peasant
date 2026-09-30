@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -213,8 +214,8 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			meta.ModelHarness = fixture.Harness
 			meta.Source.FilePath = session.SourcePath.String()
 			meta.Source.Format = session.SourceFormat
-			path := t.TempDir() + "/content.db"
-			database, err := store.Open(path)
+			path := storetest.CopyGoldenDB(t)
+			database, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -241,7 +242,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(path)
+			database, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

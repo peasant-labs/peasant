@@ -145,7 +145,7 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*inges
 	var state *ingest.SessionIndexState
 	// One snapshot, one statement: the publication binding and the content
 	// capture status describe the same instant as the index columns.
-	err := sqlitex.ExecuteTransient(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
+	err := sqlitex.Execute(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
 s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
 `+publicationCaptureRevisionSQL+`,
 CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,

@@ -12,6 +12,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -90,7 +91,7 @@ func TestOpenCodeLegacyJSONUnknownStoreAndReindex(t *testing.T) {
 			if len(evidence.Payload) < 8192 || !bytes.Contains(evidence.Payload, []byte("9007199254740993")) || !bytes.Contains(evidence.Payload, []byte("FULL_UNKNOWN_TAIL")) || !bytes.Contains(evidence.Payload, []byte(secret)) {
 				t.Fatal("opaque payload truncated, rounded, or not raw source bytes")
 			}
-			db, err := store.Open(filepath.Join(t.TempDir(), "legacy.db"))
+			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

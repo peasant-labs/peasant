@@ -16,7 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/schema"
@@ -172,7 +171,7 @@ func TestPiKickstartMountedDiscoveryThroughStoredImport(t *testing.T) {
 			if saved.Selection.Mode != config.SelectionModeSelected || len(selected) != 1 || selected[0] != row.SessionID {
 				t.Fatalf("mounted consent did not persist the explicit session choice: %+v", saved.Selection)
 			}
-			db, err := store.Open(defaults.ResolveDBFilePathWith(root).String())
+			db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(root).String())
 			if err != nil {
 				t.Fatal(err)
 			}

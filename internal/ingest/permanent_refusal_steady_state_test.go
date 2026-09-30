@@ -12,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -66,7 +67,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
-			database, err := store.Open(filepath.Join(t.TempDir(), "steady.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

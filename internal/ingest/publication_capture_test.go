@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
@@ -146,8 +147,8 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			factory := publicationAdapterFactory(t, harness, environment)
 			indexer := publicationIndexer(t, harness, filesystem)
 			cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{harness: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}}}, OutputDir: ingest.ResolvedPath(t.TempDir()), Parallelism: 1}
-			dbPath := filepath.Join(t.TempDir(), "peasant.db")
-			database, err := store.Open(dbPath)
+			dbPath := storetest.CopyGoldenDB(t)
+			database, err := store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -292,7 +293,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(dbPath)
+			database, err = store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -370,7 +371,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				if err := database.Close(); err != nil {
 					t.Fatal(err)
 				}
-				database, err = store.Open(dbPath)
+				database, err = store.Open(dbPath, store.WithSkipMigrations())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -477,7 +478,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(dbPath)
+			database, err = store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

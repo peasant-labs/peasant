@@ -570,7 +570,7 @@ func createAssociationRoundTripAnnotation(t *testing.T, dbPath string, associati
 	if err != nil {
 		t.Fatalf("association_roundtrip session_id %q is not a valid session ID: %v", fixture.SessionID, err)
 	}
-	localStore, err := store.Open(dbPath, store.WithPoolSize(1))
+	localStore, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatalf("open production store for association_roundtrip seed at %s: %v", dbPath, err)
 	}

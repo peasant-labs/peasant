@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -81,7 +82,7 @@ func testCapturedFileOrdinaryLifecycle(t *testing.T, fixture capturedSourceCase)
 			t.Fatal(err)
 		}
 	}
-	db, err := store.Open(filepath.Join(root, "peasant.db"))
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

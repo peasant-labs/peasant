@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -22,7 +21,7 @@ func TestKickstartRescan_ReusesMinedTranscriptEvidence(t *testing.T) {
 	fs := testutil.NewCountingFS(testutil.NewMemFS())
 	writeRescanSources(t, fs.MemFS, fixtures, ingestedAt)
 
-	database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+	database, err := openPreparedStore(t, filepath.Join(t.TempDir(), "peasant.db"))
 	if err != nil {
 		t.Fatalf("open the local store: %v", err)
 	}

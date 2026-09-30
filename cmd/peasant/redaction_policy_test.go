@@ -15,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/redact"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -322,7 +321,7 @@ func readRecordedSlug(t *testing.T, world harvestWorld) recordedSlug {
 		t.Fatalf("one recorded session must write exactly one slug directory, got %v", directories)
 	}
 
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(world.root)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(world.root)))
 	if err != nil {
 		t.Fatalf("open the analytics store: %v", err)
 	}

@@ -259,7 +259,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		revisions = revisionMaps[0]
 	}
 	hasSourceFingerprint := false
-	if err = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM pragma_table_info('sessions') WHERE name='source_fingerprint'`, &sqlitex.ExecOptions{ResultFunc: func(*sqlite.Stmt) error { hasSourceFingerprint = true; return nil }}); err != nil {
+	if err = sqlitex.Execute(conn, `SELECT 1 FROM pragma_table_info('sessions') WHERE name='source_fingerprint'`, &sqlitex.ExecOptions{ResultFunc: func(*sqlite.Stmt) error { hasSourceFingerprint = true; return nil }}); err != nil {
 		return fmt.Errorf("store: inspect sessions source evidence column: %w", err)
 	}
 	// Topological sort: parents before children to satisfy the FK constraint
@@ -339,7 +339,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 				projectCanonicalRemote = canonical
 			}
 		}
-		if err = sqlitex.ExecuteTransient(conn, sqlInsertProject, &sqlitex.ExecOptions{
+		if err = sqlitex.Execute(conn, sqlInsertProject, &sqlitex.ExecOptions{
 			Args: []any{
 				string(m.Project.Hash),
 				m.Project.FilePath, // canonical_cwd
@@ -361,7 +361,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		if canonicalRemote != "" {
 			canonicalRemoteVal = canonicalRemote
 		}
-		if err = sqlitex.ExecuteTransient(conn, sqlInsertHostSlug, &sqlitex.ExecOptions{
+		if err = sqlitex.Execute(conn, sqlInsertHostSlug, &sqlitex.ExecOptions{
 			Args: []any{
 				opaqueHostID,
 				string(m.HostSlug),
@@ -391,7 +391,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 					available = true
 				} else {
 					var parentExists bool
-					if err = sqlitex.ExecuteTransient(conn, sqlSessionExists, &sqlitex.ExecOptions{
+					if err = sqlitex.Execute(conn, sqlSessionExists, &sqlitex.ExecOptions{
 						Args:       []any{string(*scheduling)},
 						ResultFunc: func(stmt *sqlite.Stmt) error { parentExists = true; return nil },
 					}); err != nil {
@@ -406,7 +406,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 				cacheParent = nil
 			} else if !batchIDs[*m.ParentUUID] {
 				var parentExists bool
-				if err = sqlitex.ExecuteTransient(conn, sqlSessionExists, &sqlitex.ExecOptions{
+				if err = sqlitex.Execute(conn, sqlSessionExists, &sqlitex.ExecOptions{
 					Args:       []any{string(*m.ParentUUID)},
 					ResultFunc: func(stmt *sqlite.Stmt) error { parentExists = true; return nil },
 				}); err != nil {
@@ -449,7 +449,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		} else {
 			sessionSQL = sqlInsertSessionBeforeSourceFingerprint
 		}
-		if err = sqlitex.ExecuteTransient(conn, sessionSQL, &sqlitex.ExecOptions{
+		if err = sqlitex.Execute(conn, sessionSQL, &sqlitex.ExecOptions{
 			Args: sessionArgs,
 		}); err != nil {
 			return fmt.Errorf("store: insert session %s: %w", m.SessionID, err)
@@ -467,7 +467,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 				float64(m.Stats.DurationMs) / 60000.0,
 			}
 		}
-		if err = sqlitex.ExecuteTransient(conn, sqlInsertSessionMetrics, &sqlitex.ExecOptions{
+		if err = sqlitex.Execute(conn, sqlInsertSessionMetrics, &sqlitex.ExecOptions{
 			Args: metricArgs,
 		}); err != nil {
 			return fmt.Errorf("store: insert session_metrics %s: %w", m.SessionID, err)

@@ -58,7 +58,7 @@ func (s *Store) LoadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath
 	defer s.pool.Put(conn)
 
 	records := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence)
-	err = sqlitex.ExecuteTransient(conn, sqlSelectClaudeEvidence, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, sqlSelectClaudeEvidence, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			record, ok := scanClaudeEvidence(stmt)
 			if ok {

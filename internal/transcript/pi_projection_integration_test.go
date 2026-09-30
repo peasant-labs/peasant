@@ -99,7 +99,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			ctx := context.Background()
 			sid := schema.SessionID(testutil.TestSessionUUID)
 			path := storetest.CopyGoldenDB(t)
-			db, err := store.Open(path)
+			db, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +119,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(path)
+			db, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
