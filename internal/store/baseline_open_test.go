@@ -518,55 +518,91 @@ func runConcurrentFreshOpenCase(t *testing.T) {
 	t.Helper()
 	const rounds = 3
 	for round := 0; round < rounds; round++ {
-		path := filepath.Join(t.TempDir(), fmt.Sprintf("concurrent-%d.db", round))
-		const openers = 2
-		stores := make([]*Store, openers)
-		errs := make([]error, openers)
-		var wg sync.WaitGroup
-		start := make(chan struct{})
-		for i := 0; i < openers; i++ {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				<-start
-				stores[i], errs[i] = Open(path, WithPoolSize(1))
-			}(i)
-		}
-		close(start)
-		done := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(60 * time.Second):
-			t.Fatal("concurrent fresh opens did not finish within the bounded wait")
-		}
-		for i := 0; i < openers; i++ {
-			if errs[i] != nil {
-				t.Fatalf("concurrent opener %d failed: %v", i, errs[i])
+		round := round
+		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "concurrent.db")
+			const openers = 2
+			type openResult struct {
+				store *Store
+				err   error
 			}
-			store := stores[i]
-			if got := mustSchemaVersion(t, path); got != CurrentSchemaVersion() {
-				_ = store.Close()
-				t.Fatalf("concurrent open round %d left user_version %d, want %d", round, got, CurrentSchemaVersion())
+			results := make([]openResult, openers)
+			var mu sync.Mutex
+			// abandoned reports that the bounded wait gave up. The first opener
+			// to observe it owns and closes the store it just opened, so a late
+			// success is never left unowned.
+			abandoned := false
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			for i := 0; i < openers; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					<-start
+					// store.Open is not cancellable, so a timed-out wait cannot
+					// stop this call; the opener must close its own result.
+					store, err := Open(path, WithPoolSize(1))
+					mu.Lock()
+					if abandoned {
+						mu.Unlock()
+						if store != nil {
+							_ = store.Close()
+						}
+						return
+					}
+					results[i] = openResult{store: store, err: err}
+					mu.Unlock()
+				}(i)
 			}
-			conn, err := store.Pool().Take(t.Context())
-			if err != nil {
-				_ = store.Close()
-				t.Fatalf("concurrent opener %d could not take a connection: %v", i, err)
+			close(start)
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+			timedOut := false
+			select {
+			case <-done:
+			case <-time.After(60 * time.Second):
+				mu.Lock()
+				abandoned = true
+				mu.Unlock()
+				timedOut = true
 			}
-			if got := scalarText(t, conn, "SELECT COUNT(*) FROM annotation_types"); got != "11" {
+			// Cleanup owns every store this round produced, before any assertion
+			// runs, so a failure cannot leak a successful sibling. It holds mu so
+			// it never races a late opener's store assignment.
+			t.Cleanup(func() {
+				mu.Lock()
+				defer mu.Unlock()
+				for _, result := range results {
+					if result.store != nil {
+						_ = result.store.Close()
+					}
+				}
+			})
+			if timedOut {
+				t.Fatal("concurrent fresh opens did not finish within the bounded wait; store.Open is not cancellable, so a late opener closes its own store")
+			}
+			for i := 0; i < openers; i++ {
+				if results[i].err != nil {
+					t.Fatalf("concurrent opener %d failed: %v", i, results[i].err)
+				}
+				store := results[i].store
+				if got := mustSchemaVersion(t, path); got != CurrentSchemaVersion() {
+					t.Fatalf("concurrent open round %d left user_version %d, want %d", round, got, CurrentSchemaVersion())
+				}
+				conn, err := store.Pool().Take(t.Context())
+				if err != nil {
+					t.Fatalf("concurrent opener %d could not take a connection: %v", i, err)
+				}
+				if got := scalarText(t, conn, "SELECT COUNT(*) FROM annotation_types"); got != "11" {
+					store.Pool().Put(conn)
+					t.Fatalf("concurrent opener %d saw %s seeded annotation types, want 11", i, got)
+				}
 				store.Pool().Put(conn)
-				_ = store.Close()
-				t.Fatalf("concurrent opener %d saw %s seeded annotation types, want 11", i, got)
 			}
-			store.Pool().Put(conn)
-			if err := store.Close(); err != nil {
-				t.Fatalf("close concurrent opener %d: %v", i, err)
-			}
-		}
+		})
 	}
 }
 
