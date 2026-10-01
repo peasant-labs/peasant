@@ -1560,14 +1560,14 @@ func (p *OAuthPage) Reset() {
 func (p *OAuthPage) displayOptions() ([]string, []string) {
 	if p.existingUser != "" {
 		return []string{
-				fmt.Sprintf("Continue as %s", p.existingUser),
-				"Log in with a different account",
-				"Stay local",
-			}, []string{
-				"Already authenticated — no action needed",
-				"Authenticate with a different GitHub account",
-				"All data stays on your machine",
-			}
+			fmt.Sprintf("Continue as %s", p.existingUser),
+			"Log in with a different account",
+			"Stay local",
+		}, []string{
+			"Already authenticated — no action needed",
+			"Authenticate with a different GitHub account",
+			"All data stays on your machine",
+		}
 	}
 	return p.options, p.descriptions
 }
