@@ -528,6 +528,34 @@ partition:
       presence assertions remain exact.
     cost: { wall_ms: 2150, cpu_ms: 2620 }
 
+  - package: internal/ingest
+    test: TestContentRecoveryScope
+    class: single-threaded-bytes
+    evidence: '#TestContentRecoveryScope'
+    justification: >-
+      Subject. Content recovery is scoped: harness, since and allowed-session
+      filters select the right targets, future-schema and future-producer rows
+      are refused, unreadable rows are handled, and repeated harvests reach a
+      steady state with the same counts and diagnostics. Concurrency actually
+      exercised. One or more real pipeline runs over a store with an
+      unreadable-row wrapper, each overlapping the DIFF pool, EXTRACT+WRITE
+      workers, StagingBuffer, drainLoop and indexLoop. Why the detector is not
+      this test's oracle. The assertions read per-run counts, diagnostics and
+      stored state after the last run; a race corrupts those products rather
+      than producing a distinct assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the repeated-run steady-state interaction is
+      uncovered; the retained tests bound the underlying primitives.
+      Detector-independent guarantees kept. The scope filters and steady-state
+      counts stay asserted.
+    cost: { wall_ms: 1520, cpu_ms: 2040 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI

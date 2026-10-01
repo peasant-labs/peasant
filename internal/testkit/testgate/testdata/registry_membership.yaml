@@ -36,5 +36,6 @@ partition:
   - internal/ingest|TestRetainedContentBackfill
   - internal/ingest|TestNativeUnknownSourceToPublication
   - cmd/peasant|TestPiHarvestCommonModes
+  - internal/ingest|TestContentRecoveryScope
 protected:
   - internal/ingest|TestOpenCodeNativeCLI
