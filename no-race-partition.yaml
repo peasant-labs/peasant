@@ -407,6 +407,35 @@ partition:
       position ordering and the egress oracle all stay asserted.
     cost: { wall_ms: 3630, cpu_ms: 3980 }
 
+  - package: internal/ingest
+    test: TestOrdinaryHarvestSettlesStaleIndexSessions
+    class: single-threaded-bytes
+    evidence: '#TestOrdinaryHarvestSettlesStaleIndexSessions'
+    justification: >-
+      Subject. Stale stored sessions settle across two ordinary harvests: the
+      first advances the producer revision, records the input proof and
+      establishes the missing artifact identity while storing the represented
+      entries; the second reads no transcript and reports nothing; refused input
+      leaves the stale state untouched and the refusal is reported. Concurrency
+      actually exercised. Two sequential pipeline runs over one store, each with
+      the concurrent DIFF classifier pool, EXTRACT+WRITE workers, StagingBuffer,
+      drainLoop and indexLoop; the test also drives a CountingFS under them. Why
+      the detector is not this test's oracle. The assertions read stored index
+      state, capture status and diagnostics after each run; a race would show as
+      a wrong state or a panic, not a detector assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race confined to the two-run settling interaction is
+      uncovered; the retained tests bound the underlying machinery.
+      Detector-independent guarantees kept. The two-run contract and the
+      untouched-refusal state stay asserted.
+    cost: { wall_ms: 1940, cpu_ms: 2400 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI

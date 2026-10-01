@@ -32,5 +32,6 @@ partition:
   - internal/ingest|TestPublicationCaptureNormalIngestRecovery
   - internal/ingest|TestNormalIngestStoresAuthoritativeContent
   - internal/ingest|TestPiUnknownPersistence
+  - internal/ingest|TestOrdinaryHarvestSettlesStaleIndexSessions
 protected:
   - internal/ingest|TestOpenCodeNativeCLI
