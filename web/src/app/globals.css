@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/* Keep resets before the canonical base: a later Tailwind preflight would
+   turn Fairtrade headings back into inherited body weight. Each surface's
+   published CSS is explicit because the library does not inject styles. */
+@import "@peasant-labs/fairtrade/components.css";
+@import "@peasant-labs/fairtrade/graph.css";
+@import "@peasant-labs/fairtrade/analytics.css";
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 /* A screen with room to pin the local offline notice under the header: the one

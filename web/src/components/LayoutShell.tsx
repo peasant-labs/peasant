@@ -23,7 +23,6 @@ import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
  * the `data-tour` anchors stay in the tree so it can come back.
  * The publish scan cache and in-flight publishes also live here,
  * so they outlive the pages that use them.
-
  */
 export function LayoutShell({ children }: { children: ReactNode }) {
   return (
