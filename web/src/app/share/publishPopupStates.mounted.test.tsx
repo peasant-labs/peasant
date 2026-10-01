@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ReactNode } from 'react';
+import { parseDocument } from 'yaml';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -400,3 +401,66 @@ describe('/share?sessionId opens the publish popup on that transcript', () => {
     expect(replaced).toEqual([]);
   });
 });
+
+// A direct draft-unit test cannot observe a real control click between the DOM
+// readiness commit and the passive initializer. Hold that read, then dispatch
+// the mounted button's native click at the actual picker commit. Each test owns
+// and disconnects its observer and releases its held response even on failure.
+interface AudienceReadinessCase {
+  name: string;
+  base: string;
+  delayedRoute: string;
+  readinessSelector: string;
+  removeButton: string;
+}
+function audienceReadinessCases(): AudienceReadinessCase[] {
+  const source = readFileSync(resolve(process.cwd(), 'src/app/share/testdata/publish-popup-readiness.yaml'), 'utf8');
+  const doc = parseDocument(source, { strict: true, uniqueKeys: true });
+  if (doc.errors.length || /^---\s*$/m.test(source)) throw new Error('audience readiness fixture requires one valid YAML document');
+  const root = doc.toJS();
+  const required = ['an-audience-removal-survives-collective-readiness'];
+  if (!root || Object.keys(root).sort().join() !== 'cases,requiredNames' || JSON.stringify(root.requiredNames) !== JSON.stringify(required) || !Array.isArray(root.cases)) throw new Error('audience readiness fixture requires its named case');
+  for (const row of root.cases) {
+    if (!row || Object.keys(row).sort().join() !== 'base,delayedRoute,name,readinessSelector,removeButton'
+      || Object.values(row).some((value) => typeof value !== 'string' || !value)
+      || !fixture.cases.some((entry) => entry.name === row.base)
+      || !row.delayedRoute.startsWith('/api/v1/') || !row.readinessSelector || !row.removeButton.startsWith('remove ')) throw new Error('invalid audience readiness fixture case');
+  }
+  if (JSON.stringify(root.cases.map((row: AudienceReadinessCase) => row.name)) !== JSON.stringify(required)) throw new Error('audience readiness case names differ');
+  return root.cases;
+}
+for (const row of audienceReadinessCases()) {
+  it(row.name, async () => {
+    const entry = fixture.cases.find((candidate) => candidate.name === row.base)!;
+    const world = createPublishWorld(fixture, entry, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    installWorld(world, { hold: (url) => url.includes(row.delayedRoute) ? held : undefined });
+    const user = userEvent.setup();
+    let observer: MutationObserver | undefined;
+    let clicked = false;
+    try {
+      render(<Page />);
+      await runStep('open', user);
+      await within(dialog()).findByRole('button', { name: row.removeButton }, WAIT);
+      observer = new MutationObserver(() => {
+        const ready = document.querySelector(row.readinessSelector);
+        if (clicked || !ready) return;
+        const remove = within(dialog()).getByRole('button', { name: row.removeButton });
+        clicked = true;
+        remove.click();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      release();
+      await waitFor(() => expect(clicked).toBe(true), WAIT);
+      await runStep('publish', user);
+      await waitFor(() => expect(world.pushRequests.length).toBe(1), WAIT);
+      expect(world.pushRequests).toEqual([expectedPushBody(fixture, entry, SESSION_ID)]);
+      const expectedBarText = 'text' in entry.expect.bar ? entry.expect.bar.text : '';
+      await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveTextContent(expectedBarText), WAIT);
+    } finally {
+      observer?.disconnect();
+      release();
+    }
+  });
+}
