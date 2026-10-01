@@ -1,0 +1,8 @@
+requiredNames: [service-failure, unavailable-service]
+cases:
+  - name: service-failure
+    status: 500
+    error: sign-in could not be read
+  - name: unavailable-service
+    status: 503
+    error: sign-in service unavailable

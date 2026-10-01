@@ -55,6 +55,27 @@ export function loadSettingsResponse(): LocalSettingsResponse {
   return parsed.data;
 }
 
+export interface SettingsAuthRecoveryCase {
+  name: string;
+  status: number;
+  error: string;
+}
+
+export function loadAuthRecoveryCases(): SettingsAuthRecoveryCase[] {
+  const path = 'src/app/settings/testdata/settings-auth-recovery.yaml';
+  const root = requireRecord(read(path), path);
+  requireExactRequiredFields(root, ['requiredNames', 'cases'], path);
+  if (!Array.isArray(root.cases)) throw new Error(`${path}.cases must be a list`);
+  const cases = root.cases.map((value) => {
+    const row = requireRecord(value, path);
+    requireExactRequiredFields(row, ['name', 'status', 'error'], path);
+    if (typeof row.status !== 'number' || typeof row.error !== 'string') throw new Error(`${path}: invalid recovery case`);
+    return row;
+  });
+  requireNames(root, cases, path);
+  return cases as unknown as SettingsAuthRecoveryCase[];
+}
+
 export interface SettingsGroupFixture {
   name: string;
   open: boolean;

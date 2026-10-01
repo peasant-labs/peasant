@@ -228,7 +228,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
       const kept = removed.repositories.filter((repository) => repository.hooks.some((hook) => hook.status === AutoPublishHookStatus.Installed)).length;
       setRemovalNote(kept === 0
         ? `removed ${rule.match}.`
-        : `removed ${rule.match}. its hook stays in ${kept} ${kept === 1 ? 'repository' : 'repositories'} and runs on each push until you remove it with peasant village hooks uninstall.`);
+        : `removed ${rule.match}. its hook stays in ${kept} ${kept === 1 ? 'repository' : 'repositories'} as files. rule-required hooks publish only if another active binding covers the repository and event. separately installed terminal hooks keep their own consent.`);
     } catch (failure) {
       setListStatus({ state: 'failed', error: failure instanceof Error ? failure.message : String(failure) });
     }
