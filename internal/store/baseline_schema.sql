@@ -947,4 +947,11 @@ INSERT INTO "type_origins" ("id", "name") VALUES (2, 'user');
 INSERT INTO "type_origins" ("id", "name") VALUES (3, 'group');
 INSERT INTO "value_domain_kinds" ("id", "name") VALUES (1, 'enumerated');
 INSERT INTO "value_domain_kinds" ("id", "name") VALUES (2, 'described');
+DELETE FROM "session_entries_fts_config";
+INSERT INTO "session_entries_fts_config" ("k", "v") VALUES ('version', 4);
+
+DELETE FROM "session_entries_fts_data";
+INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (1, X'000000000000');
+INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (10, X'00000000000000');
+
 PRAGMA user_version = 61;

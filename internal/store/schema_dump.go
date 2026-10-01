@@ -400,6 +400,18 @@ func dataTables(meta map[string]tableMeta) []string {
 	return tables
 }
 
+// shadowTables returns the FTS5 shadow tables, in name order.
+func shadowTables(meta map[string]tableMeta) []string {
+	var tables []string
+	for name, m := range meta {
+		if m.Type == "shadow" {
+			tables = append(tables, name)
+		}
+	}
+	sort.Strings(tables)
+	return tables
+}
+
 // dumpTables returns the tables the comparison dump reads rows from, in name
 // order. Unlike the serializer it includes sqlite_sequence, whose single row
 // is part of the compared state; the catalog table itself stays excluded
@@ -574,10 +586,7 @@ func serializeBaselineSQL(conn *sqlite.Conn) ([]byte, error) {
 
 	// FTS5 shadow storage: the virtual table's CREATE pre-populates an empty
 	// index, so the chain snapshot's post-rebuild rows are restored explicitly.
-	for _, table := range dataTables(meta) {
-		if meta[table].Type != "shadow" {
-			continue
-		}
+	for _, table := range shadowTables(meta) {
 		columns, err := loadTableColumns(conn, table)
 		if err != nil {
 			return nil, err
