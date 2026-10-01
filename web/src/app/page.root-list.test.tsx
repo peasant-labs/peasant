@@ -445,6 +445,33 @@ describe('root page list reads', () => {
   });
 });
 
+const tipRoot = requireRecord(parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/app/testdata/root-auto-publish-tip.yaml'), 'utf8'), 'root automatic publishing tip'), 'root automatic publishing tip');
+requireExactRequiredFields(tipRoot, ['requiredNames', 'cases'], 'root automatic publishing tip');
+const requiredTipNames = ['home-guidance-can-be-dismissed-without-changing-the-transcript-exit'];
+if (!Array.isArray(tipRoot.requiredNames) || [...tipRoot.requiredNames].sort().join() !== requiredTipNames.sort().join() || !Array.isArray(tipRoot.cases)) throw new Error('automatic publishing tip fixture requires its named mounted case');
+const tipCases = tipRoot.cases.map((row) => requireRecord(row, 'root automatic publishing tip case'));
+requireUniqueNames(tipCases, 'root automatic publishing tip cases');
+if (tipCases.map((row) => row.name).sort().join() !== requiredTipNames.sort().join()) throw new Error('automatic publishing tip cases differ from the required names');
+for (const row of tipCases) {
+  requireExactRequiredFields(row, ['name', 'session', 'copy', 'command', 'dismiss'], 'root automatic publishing tip case');
+  const spec = requireRecord(row.session, 'automatic publishing tip session') as unknown as SessionSpec;
+  it(String(row.name), async () => {
+    const requests = serve([spec]);
+    render(<HomePage />);
+    const list = await screen.findByRole('region', { name: 'sessions' });
+    const tip = screen.getByRole('complementary', { name: 'auto-publish tip' });
+    expect(tip.textContent?.replace(/\s+/g, ' ').trim()).toBe(row.copy);
+    expect(tip.querySelector('code')).toHaveTextContent(String(row.command));
+    expect(tip.querySelector('[data-brand="claude"]')).not.toBeNull();
+    const exit = within(list).getByRole('link', { name: spec.id });
+    expect(exit).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
+    fireEvent.click(within(tip).getByRole('button', { name: String(row.dismiss) }));
+    expect(screen.queryByRole('complementary', { name: 'auto-publish tip' })).not.toBeInTheDocument();
+    expect(exit).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
+    expect(requests.every((url) => !url.pathname.startsWith('/api/v1/settings'))).toBe(true);
+  });
+}
+
 interface AudienceRefreshCase {
   name: string;
   initialCount: number;
