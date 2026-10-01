@@ -26,11 +26,10 @@ type FixtureCase = Record<(typeof fields)[number], string>;
 
 function loadFixture(yaml: string): FixtureCase[] {
   const root = requireRecord(parseStrictYAML(yaml, 'project route fixture'), 'project route fixture');
-  requireExactRequiredFields(root, ['expectedCaseCount', 'requiredNames', 'cases'], 'project route fixture');
+  requireExactRequiredFields(root, ['requiredNames', 'cases'], 'project route fixture');
   if (!Array.isArray(root.requiredNames) || root.requiredNames.some((name) => typeof name !== 'string')) throw new Error('project route fixture requiredNames must be strings');
   const requiredNames = root.requiredNames as string[];
   if (new Set(requiredNames).size !== requiredNames.length) throw new Error('project route fixture requiredNames must be unique');
-  if (root.expectedCaseCount !== requiredNames.length) throw new Error(`project route fixture requires exactly ${requiredNames.length} cases`);
   if (!Array.isArray(root.cases) || root.cases.length !== requiredNames.length) throw new Error(`project route fixture requires exactly ${requiredNames.length} cases`);
   const cases = root.cases.map((value, index) => requireRecord(value, `project route fixture.cases[${index}]`));
   requireUniqueNames(cases, 'project route fixture.cases');
@@ -43,9 +42,8 @@ const cases = loadFixture(source);
 
 describe('project route fixture contract', () => {
   it('is strict, complete, and non-vacuous', () => {
-    expect(() => loadFixture(source.replace('expectedCaseCount: 32', 'expectedCaseCount: 31'))).toThrow(/exactly 32/);
     expect(() => loadFixture(source.replace('canonical map round trip', 'renamed map behavior'))).toThrow(/missing required semantic branch/);
-    expect(() => loadFixture(source.replace('expectedCaseCount: 32', 'unknown: true\nexpectedCaseCount: 32'))).toThrow(/fields/);
+    expect(() => loadFixture(source.replace('requiredNames:', 'unknown: true\nrequiredNames:'))).toThrow(/fields/);
     expect(() => loadFixture(`${source}\n---\n{}`)).toThrow();
   });
 });

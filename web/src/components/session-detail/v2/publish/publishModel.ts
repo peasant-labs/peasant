@@ -17,6 +17,7 @@ import type {
   SyncPushStepResult,
 } from '@peasant-labs/schema';
 import type { PublishAccessItem as AccessItem, PublishState } from '@/lib/ft-ui';
+import { pushRequestBody } from '@/lib/share/push';
 import type { SelectableRedactionLevel } from '@/lib/share/redactions';
 import type { Redaction } from '@/types/messages';
 
@@ -132,24 +133,38 @@ export function suggestionNote(collective: LocalVillageCollective): string | und
 }
 
 /**
- * A curated collective holds a new share for its owner's approval. This is
- * copy only: the push result says what village did.
+ * Village holds every share with a curated collective for its owner's
+ * approval. This restates its acceptance mode as copy and decides nothing: the
+ * push result says what village did.
  */
 function waitsForApproval(collective: LocalVillageCollective | undefined): boolean {
-  return collective?.group.acceptance_mode === 'curated' && collective.group.role !== 'owner';
+  return collective?.group.acceptance_mode === 'curated';
 }
 
-/** The rows of "who can read it" after this publish. */
+/** The collectives that can read the transcript now or wait for approval. */
+export function currentReaderIds(publication: LocalPublication | null): string[] {
+  if (publication?.state !== 'published') return [];
+  return (publication.audience ?? [])
+    .filter((member) => member.status === 'approved' || member.status === 'pending')
+    .map((member) => member.collectiveId);
+}
+
+/**
+ * The rows of "who can read it" after this publish. They follow what village
+ * holds now, whatever the popup's heading says: once the transcript is
+ * published (an update, or a first publish that stopped after village took it)
+ * its readers are listed, so removing one takes it back.
+ */
 export function accessItems(options: {
-  mode: 'publish' | 'update';
   publication: LocalPublication | null;
   collectives: readonly LocalVillageCollective[];
   draft: AccessDraft;
 }): AccessItem[] {
-  const { mode, publication, collectives, draft } = options;
+  const { publication, collectives, draft } = options;
+  const published = publication?.state === 'published';
   const byId = new Map(collectives.map((collective) => [collective.group.id, collective]));
   const items: AccessItem[] = [];
-  if (mode === 'update') {
+  if (published) {
     for (const member of publication?.audience ?? []) {
       if (member.status !== 'approved' && member.status !== 'pending') continue;
       const collective = byId.get(member.collectiveId);
@@ -170,7 +185,7 @@ export function accessItems(options: {
       name: collective.group.name,
       members: collective.group.member_count,
       note: suggestionNote(collective),
-      pending: waitsForApproval(collective) ? 'approval' : mode === 'update' ? 'adding' : undefined,
+      pending: waitsForApproval(collective) ? 'approval' : published ? 'adding' : undefined,
     });
   }
   return items;
@@ -184,13 +199,14 @@ export function addToDraft(draft: AccessDraft, id: string): AccessDraft {
 }
 
 /**
- * Remove a collective from the draft: one this publish adds is simply dropped;
- * one that reads the transcript now is marked for removal.
+ * Remove a collective from the draft. One that can read the transcript now is
+ * marked for removal, so the push takes the transcript back from it, even when
+ * the draft also asked to add it; one this publish would only add is dropped.
  */
-export function removeFromDraft(draft: AccessDraft, id: string): AccessDraft {
-  if (draft.add.includes(id)) return { ...draft, add: draft.add.filter((entry) => entry !== id) };
-  if (draft.remove.includes(id)) return draft;
-  return { ...draft, remove: [...draft.remove, id] };
+export function removeFromDraft(draft: AccessDraft, id: string, readers: readonly string[]): AccessDraft {
+  const add = draft.add.filter((entry) => entry !== id);
+  if (!readers.includes(id)) return { ...draft, add };
+  return { add, remove: draft.remove.includes(id) ? draft.remove : [...draft.remove, id] };
 }
 
 /** Keep a collective pending removal. */
@@ -265,18 +281,27 @@ export function reviewMatches(sessionId: string, redactions: readonly Redaction[
 // ---------------------------------------------------------------------------
 
 /**
- * The typed push for one session. It names only the change the reader asked
- * for, so an update without one keeps the audience the transcript has.
+ * The typed push for one session, through the builder the wizard shares. It
+ * names only the change the reader asked for, so an update without one keeps
+ * the audience. An add the reader cannot see (a collective no longer listed) is
+ * not sent, and neither is an add of a collective that already reads it.
  */
-export function pushRequest(sessionId: string, redactionLevel: SelectableRedactionLevel, draft: AccessDraft): SyncPushRequest {
-  const request: SyncPushRequest = { sessionIds: [sessionId], redactionLevel };
-  if (draft.add.length || draft.remove.length) {
-    request.collectives = {
-      ...(draft.add.length ? { add: [...draft.add] } : {}),
-      ...(draft.remove.length ? { remove: [...draft.remove] } : {}),
-    };
-  }
-  return request;
+export function pushRequest(
+  sessionId: string,
+  redactionLevel: SelectableRedactionLevel,
+  draft: AccessDraft,
+  options: { listed: readonly string[]; readers: readonly string[] },
+): SyncPushRequest {
+  return pushRequestBody([sessionId], redactionLevel, {
+    add: draft.add.filter((id) => options.listed.includes(id) && !options.readers.includes(id)),
+    remove: draft.remove.filter((id) => options.readers.includes(id)),
+  });
+}
+
+/** One line of a server message, for the popup's stopped line. */
+export function oneLine(text: string, limit = 220): string {
+  const line = text.split('\n')[0].trim().replace(/[.;:\s]+$/, '');
+  return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
 }
 
 export type PublishOutcome =
@@ -303,48 +328,91 @@ function stepSubject(step: SyncPushStepResult, names: ReadonlyMap<string, string
   }
 }
 
+/** The step's subject, with the server's reason when it gave one. */
+function stepLine(step: SyncPushStepResult, names: ReadonlyMap<string, string>): string {
+  const subject = stepSubject(step, names);
+  return step.reason ? `${subject}: ${oneLine(step.reason)}` : subject;
+}
+
 /**
- * What the popup shows after the push answered: where it stopped, or the
- * village link with the collectives that read it and the ones that wait for an
- * owner's approval. Everything comes from the push result's steps.
+ * What the popup shows after the push answered: where it stopped and why, or
+ * the village link with the collectives that read it and the ones that wait
+ * for an owner's approval.
+ *
+ * Who can read it comes from the publication read after the push, the same
+ * source as the bar, when that read is given; otherwise from the push's steps.
+ * A collective the reader asked to add that village did not take (a skipped
+ * or unattempted share) stops the popup on that collective with village's
+ * reason, so the popup never says it published to a collective that cannot
+ * read it.
  */
 export function publishOutcome(options: {
   response: SyncPushResponse;
   sessionId: string;
   names: ReadonlyMap<string, string>;
-  audience: readonly LocalPublicationAudienceMember[];
+  /** The audience before the push, used when no read after it is given. */
+  audienceBefore: readonly LocalPublicationAudienceMember[];
+  /** The audience the publication read reports after the push. */
+  audienceAfter?: readonly LocalPublicationAudienceMember[];
+  /** The collectives the push asked to add. */
+  requestedAdds: readonly string[];
   fallbackUrl?: string;
 }): PublishOutcome {
-  const { response, sessionId, names, audience, fallbackUrl } = options;
+  const { response, sessionId, names, audienceBefore, audienceAfter, requestedAdds, fallbackUrl } = options;
   const result = response.sessions.find((session) => session.sessionId === sessionId);
   if (!result) return { kind: 'stopped', stoppedAt: 'reading village’s answer' };
-  if (result.status === 'held') return { kind: 'stopped', stoppedAt: 'waiting for this session’s ingest to finish' };
   const steps = result.steps ?? [];
+  if (result.status === 'held') {
+    const reason = steps.find((step) => step.step === 'content')?.reason;
+    return { kind: 'stopped', stoppedAt: reason ? `waiting for this session’s ingest to finish: ${oneLine(reason)}` : 'waiting for this session’s ingest to finish' };
+  }
   if (result.status === 'error') {
     const failed = steps.find((step) => step.outcome === 'failed');
-    return { kind: 'stopped', stoppedAt: failed ? stepSubject(failed, names) : 'publishing' };
+    if (failed) return { kind: 'stopped', stoppedAt: stepLine(failed, names) };
+    return { kind: 'stopped', stoppedAt: result.error ? `publishing: ${oneLine(result.error)}` : 'publishing' };
   }
   const url = result.transcriptUrl ?? fallbackUrl;
   if (!url) return { kind: 'stopped', stoppedAt: 'reading the transcript’s link' };
 
-  const removed = new Set(steps.filter((step) => step.step === 'remove_collective' && step.outcome === 'succeeded').map((step) => step.collectiveId));
-  const readers = audience.filter((member) => member.status === 'approved' && !removed.has(member.collectiveId)).map((member) => member.name);
-  const pending = audience.filter((member) => member.status === 'pending' && !removed.has(member.collectiveId)).map((member) => member.name);
-  for (const step of steps) {
-    if (step.step !== 'add_collective' || !step.collectiveId) continue;
-    const name = names.get(step.collectiveId);
-    if (!name) continue;
-    if (step.outcome === 'succeeded' && !readers.includes(name)) readers.push(name);
-    if (step.outcome === 'pending_approval' && !pending.includes(name)) pending.push(name);
+  let readers: LocalPublicationAudienceMember[];
+  let pending: LocalPublicationAudienceMember[];
+  if (audienceAfter) {
+    readers = audienceAfter.filter((member) => member.status === 'approved');
+    pending = audienceAfter.filter((member) => member.status === 'pending');
+  } else {
+    const removed = new Set(steps.filter((step) => step.step === 'remove_collective' && step.outcome === 'succeeded').map((step) => step.collectiveId));
+    readers = audienceBefore.filter((member) => member.status === 'approved' && !removed.has(member.collectiveId));
+    pending = audienceBefore.filter((member) => member.status === 'pending' && !removed.has(member.collectiveId));
+    for (const step of steps) {
+      if (step.step !== 'add_collective' || !step.collectiveId) continue;
+      const member = { collectiveId: step.collectiveId, name: names.get(step.collectiveId) ?? 'a collective' };
+      if (step.outcome === 'succeeded' && !readers.some((entry) => entry.collectiveId === member.collectiveId)) readers.push({ ...member, status: 'approved' });
+      if (step.outcome === 'pending_approval' && !pending.some((entry) => entry.collectiveId === member.collectiveId)) pending.push({ ...member, status: 'pending' });
+    }
   }
-  const request = result.waitingPullRequests?.[0];
+  const holds = new Set([...readers, ...pending].map((member) => member.collectiveId));
+  const missed = requestedAdds.find((id) => !holds.has(id));
+  if (missed) {
+    const step = steps.find((entry) => entry.step === 'add_collective' && entry.collectiveId === missed);
+    const name = names.get(missed) ?? 'a collective';
+    return { kind: 'stopped', stoppedAt: step ? stepLine(step, names) : `sharing it with ${name}` };
+  }
+
+  // A pull request is named only when exactly one waits for this repository:
+  // with several, "comment /peasant attach on it" could point at the wrong one.
+  const requests = result.waitingPullRequests ?? [];
+  const request = requests.length === 1 ? requests[0] : undefined;
+  // fairtrade names the place a pull request is open as its `branch`; the push
+  // reports the repository, not the branch, so the repository is named.
   const pullRequest = request
     ? { number: request.number, branch: `${request.owner}/${request.name}`, href: `https://github.com/${request.owner}/${request.name}/pull/${request.number}` }
     : undefined;
-  // The heading names the collectives the transcript went to. When every one
-  // waits for an owner's approval, it names those, and the line below says so.
+  const readerNames = readers.map((member) => member.name);
+  const pendingNames = pending.map((member) => member.name);
+  // Approved readers and pending shares stay distinct: fairtrade names a
+  // pending-only result as submitted, without claiming those members can read it.
   return {
-    kind: pending.length ? 'waits-approval' : 'done',
-    done: { url, collectives: readers.length ? readers : pending, pending, ...(pullRequest ? { pullRequest } : {}) },
+    kind: pendingNames.length ? 'waits-approval' : 'done',
+    done: { url, collectives: readerNames, pending: pendingNames, ...(pullRequest ? { pullRequest } : {}) },
   };
 }

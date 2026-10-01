@@ -24,7 +24,7 @@ function loadFixture(): Fixture {
 }
 
 const fixture = loadFixture();
-const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
+const response = (body: unknown) => Response.json(body);
 
 function syncStatusFor(shareStatus: string): 'new' | 'updated' | 'synced' | 'held' {
   if (shareStatus === 'updated') return 'updated';
@@ -49,7 +49,7 @@ function groupedSyncPayload() {
   })));
 }
 
-function installFetch(items: unknown = fixture.items, annotationsGate: Promise<void> = Promise.resolve(), redactionsGate: Promise<void> = Promise.resolve()) {
+function installFetch(items: unknown = fixture.items, redactionsGate: Promise<void> = Promise.resolve()) {
   // Routed by EXACT path, never by containment. Containment dispatch is first
   // match wins, so a sessions-adjacent route would be swallowed by the sessions
   // arm and answered with the discovery list — and a test asserting the other
@@ -62,9 +62,6 @@ function installFetch(items: unknown = fixture.items, annotationsGate: Promise<v
         return response(groupedSyncPayload());
       case '/api/v1/web/discovery':
         return response({ items });
-      case '/api/v1/annotations':
-        await annotationsGate;
-        return response({ annotations: [] });
       case '/api/v1/sync/redactions':
         await redactionsGate;
         return response({ categories: [] });
@@ -87,7 +84,7 @@ describe('mounted Share production boundary', () => {
   it('decodes, joins, groups, tri-state selects eligible IDs, and submits them through PushStep', async () => {
     let releaseRedactions!: () => void;
     const redactionsGate = new Promise<void>((resolve) => { releaseRedactions = resolve; });
-    const fetchMock = installFetch(fixture.items, Promise.resolve(), redactionsGate);
+    const fetchMock = installFetch(fixture.items, redactionsGate);
     const user = userEvent.setup();
     render(<ShareWizardClient />);
     const projects = await screen.findAllByRole('region', { name: 'project alpha' });

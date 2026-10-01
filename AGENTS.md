@@ -216,11 +216,11 @@ the server serves the newly built assets before you trust a screenshot or a comp
   by itself.
 - Do not add a fail-closed gate on deep links. An earlier attempt was withdrawn as a misread of
   the user's intent. Do not reintroduce it without a new, explicit ratification.
-- Publishing is a separate, user-initiated action: the `/share` wizard. Nothing is published
+- Publishing is a separate, user-initiated action: the transcript publish popup or the multi-session `/share` wizard. Nothing is published
   without an explicit act: a click, or a binding the developer set up. It draws only from the
   sessions the user recorded. Pulled transcripts are not re-pushable. Governance for re-sharing
   pulled sessions is a tracked follow-up.
-- The consented publication paths are the `/share` wizard, the upload hook installed by
+- The consented publication paths are the transcript publish popup, the `/share` wizard, the upload hook installed by
   `peasant village hooks install`, the auto-publish hook, and attaching the prompts behind a pull
   request. The auto-publish hook is the same managed hook, installed by `peasant village auto` or
   by the settings install route, for a repository that an auto-publish rule in `hooks.yaml`
@@ -261,8 +261,9 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - The `changes` label and the `/review` routes stay in force. In the home-first registry
   `changes` is a route-only section (`inNav: false`): it keeps its id, label and routes, and
   `home` leads the nav instead. Do not rename or delete the label or the routes silently.
-- `/share` is the canonical share surface. It stays outside the fairtrade section registry, and
-  the local header does not link to it. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
+- `/share` is the canonical publish route: one-session links open the transcript popup;
+  multi-session and wizard-step links retain the wizard. It stays
+  outside the fairtrade section registry, and the local header does not link to it. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
   `home | settings` in the nav, then `analytics | changes | code map` by route only.
   `GRAPH_APP_SECTIONS` is its deprecated alias with the earlier three-entry value. Derive the nav
   and routes from the registry (`web/src/lib/nav/sections.ts`) and fail loudly on an unmapped id.
@@ -283,7 +284,7 @@ the server serves the newly built assets before you trust a screenshot or a comp
   category inconsistency.
 - peasant-labs/fairtrade-design-system#3 tracks the official review, redaction, consent, and
   share composition. Per-category filtering in `RedactionReview` is
-  peasant-labs/fairtrade-design-system#4. Peasant owns the `/share` scan, cache, auth, and
+  peasant-labs/fairtrade-design-system#4. Peasant owns the transcript popup and `/share` scan, app-level cache, auth, and
   network orchestration, and the Village transport.
 - The code map is a known comprehension gap. Future work needs progressive, task-oriented
   disclosure and a real-project user acceptance test. Do not add more text around the same dense

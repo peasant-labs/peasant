@@ -123,8 +123,6 @@ function installFetch(): ReturnType<typeof vi.fn> {
       }
       case '/api/v1/web/discovery':
         return response({ items: fixture.items });
-      case '/api/v1/annotations':
-        return response({ annotations: [] });
       case '/api/v1/sync/redactions':
         return response({ categories: [] });
       default:

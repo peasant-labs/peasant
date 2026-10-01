@@ -318,6 +318,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     sessionId,
     title: sessionTitle ?? UNTITLED_SESSION_TITLE,
     turns,
+    loaded: detail != null,
     moreItems,
     openOnArrival: routeQuery.publish,
     onArrivalHandled: dropPublishRequest,

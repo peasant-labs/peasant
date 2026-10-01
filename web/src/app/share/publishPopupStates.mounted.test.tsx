@@ -32,7 +32,7 @@ const PROJECT_HASH = 'b'.repeat(64) as ProjectHash;
 const SESSION_ID = 'sess_publishstates';
 const TITLE = 'Fix flaky ingest test';
 /** A flow is several Local API round trips; give each wait room on a busy machine. */
-const WAIT = { timeout: 5000 };
+const WAIT = { timeout: 3500 };
 
 let pathname = `/projects/${PROJECT_HASH}/${SESSION_ID}`;
 let search = '';
@@ -49,7 +49,7 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/contexts/WebSocketContext', () => ({
   useChannel: (sub: { id?: string; topic?: string }) => {
-    if (sub?.id) return { data: sub.id === SESSION_ID ? detail : undefined, connected: true, error: null };
+    if (sub?.id) return { data: sub.id === SESSION_ID ? sessionDetail : undefined, connected: true, error: null };
     // The quality channel names the session's generated title.
     return { data: { sessions: [QUALITY_SESSION] }, connected: true, error: null };
   },
@@ -121,6 +121,8 @@ const detail: SessionDetailPayload = (() => {
   return durable;
 })();
 
+let sessionDetail: SessionDetailPayload | undefined = detail;
+
 type World = ReturnType<typeof createPublishWorld>;
 
 interface WorldOptions {
@@ -177,6 +179,7 @@ function primaryButton(): HTMLButtonElement | null {
 }
 
 async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
+  if (step === 'arrive') return;
   if (step === 'open') {
     const action = await waitFor(() => within(bar()).getByRole('button', { name: /^(publish|update|manage)$/ }), WAIT);
     await user.click(action);
@@ -192,9 +195,14 @@ async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
       const found = primaryButton();
       expect(found).not.toBeNull();
       expect(found).toBeEnabled();
+      expect(found).not.toHaveAttribute('aria-disabled', 'true');
       return found as HTMLButtonElement;
     }, WAIT);
     await user.click(button);
+    return;
+  }
+  if (step === 'retry' || step === 'rescan') {
+    await user.click(await within(dialog()).findByRole('button', { name: step === 'retry' ? 'retry' : /re-scan/ }, WAIT));
     return;
   }
   const [verb, ...rest] = step.split(' ');
@@ -202,6 +210,7 @@ async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => {
+  sessionDetail = detail;
   pathname = `/projects/${PROJECT_HASH}/${SESSION_ID}`;
   search = '';
   replaced.length = 0;
@@ -231,18 +240,23 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
     const world = createPublishWorld(fixture, entry, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
     installWorld(world);
     const user = userEvent.setup();
+    if (entry.steps.includes('arrive')) search = 'publish=open';
     render(<Page />);
 
-    await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull(), WAIT);
+    if ('alert' in entry.expect.bar) await within(bar()).findByRole('alert', {}, WAIT);
+    else await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull(), WAIT);
     for (const step of entry.steps) await runStep(step, user);
 
     const expected = entry.expect;
     await waitFor(() => {
-      const label = bar().querySelector<HTMLElement>('.pub-state');
-      expect(label?.dataset.state).toBe(expected.bar.state);
-      expect(label?.textContent).toBe(expected.bar.text);
+      if ('alert' in expected.bar) expect(within(bar()).getByRole('alert')).toHaveTextContent(expected.bar.alert);
+      else {
+        const label = bar().querySelector<HTMLElement>('.pub-state');
+        expect(label?.dataset.state).toBe(expected.bar.state);
+        expect(label?.textContent).toBe(expected.bar.text);
+      }
     }, WAIT);
-    expect(within(bar()).getByRole('button', { name: expected.bar.action })).toBeInTheDocument();
+    if (!('alert' in expected.bar)) expect(within(bar()).getByRole('button', { name: expected.bar.action })).toBeInTheDocument();
     // The viewer's own tail and outcome chip are off: the bar is the header's only action.
     expect(screen.queryByRole('button', { name: /^share$/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /search this transcript/ })).toBeInTheDocument();
@@ -257,19 +271,19 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
       const heading = document.getElementById(dialog().getAttribute('aria-labelledby') ?? '');
       expect(heading?.textContent).toBe(popup.heading.replace('{title}', TITLE));
       for (const text of popup.texts) expect(dialog().textContent).toContain(text);
+      if (popup.link) expect(within(dialog()).getByRole('link', { name: popup.link.text })).toHaveAttribute('href', popup.link.href);
       const primary = primaryButton();
       if (popup.primary === null) {
         expect(primary).toBeNull();
       } else {
         expect(primary?.textContent?.trim()).toBe(popup.primary.label);
-        if (popup.primary.enabled) expect(primary).toBeEnabled();
-        else expect(primary).toBeDisabled();
+        expect(primary?.disabled === true || primary?.getAttribute('aria-disabled') === 'true').toBe(!popup.primary.enabled);
       }
     }, WAIT);
     const pushBody = expectedPushBody(fixture, entry, SESSION_ID);
     if (pushBody === null) expect(world.pushRequests).toEqual([]);
     else expect(world.pushRequests.at(-1)).toEqual(pushBody);
-  });
+  }, 15000);
 });
 
 describe('the app-level scan cache under the transcript page', () => {
@@ -278,6 +292,20 @@ describe('the app-level scan cache under the transcript page', () => {
     if (!found) throw new Error(`fixture case ${name} is missing`);
     return found;
   }
+
+  it('scans an arrival link only after the session detail is loaded', async () => {
+    const world = createPublishWorld(fixture, caseNamed('ready-to-publish'), { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+    const fetchMock = installWorld(world);
+    sessionDetail = undefined;
+    search = 'publish=open';
+    const view = render(<Page />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), WAIT);
+    expect(world.scanRequests).toBe(0);
+    sessionDetail = detail;
+    view.rerender(<Page />);
+    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'), WAIT);
+    expect(world.scanRequests).toBe(1);
+  });
 
   it('starts no second scan when the reader leaves and returns during a scan, and shows its result', async () => {
     const world = createPublishWorld(fixture, caseNamed('ready-to-publish'), { sessionId: SESSION_ID, turns: detail.turns ?? [] });

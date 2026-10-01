@@ -11,12 +11,13 @@
 
 import { parseDocument } from 'yaml'
 
-const CASE_FIELDS = ['name', 'wireframe', 'publication', 'signIn', 'village', 'scan', 'push', 'steps', 'expect']
+const CASE_FIELDS = ['name', 'publication', 'signIn', 'village', 'scan', 'push', 'steps', 'expect']
 const ROOT_FIELDS = ['requiredNames', 'wizardLinks', 'collectives', 'matches', 'pullRequest', 'cases']
-const SIGN_IN = ['signed-in', 'signed-out', 'waits']
-const SCAN = ['matches', 'failure', 'pending']
-const PUSH = /^(published|pending|approval|stopped:.+)$/
-const STEP = /^(open|connect|publish|add .+|remove .+)$/
+const SIGN_IN = ['signed-in', 'signed-out', 'waits', 'login-failed', 'already-authenticated']
+const SCAN = ['matches', 'failure', 'pending', 'matches-then-failure']
+const PUSH = /^(published|pending|approval|unauthorized|held|content-failed|(stopped|stopped-once|skipped):.+)$/
+const STEP = /^(arrive|open|connect|publish|retry|rescan|add .+|remove .+)$/
+const AUDIENCE_READ = ['ok', 'unreachable', 'missing', 'failed']
 const BAR_STATES = ['not-published', 'publishing', 'published', 'new-turns', 'auto-publish', 'outside-lists']
 const ACTIONS = ['publish', 'update', 'manage']
 
@@ -69,14 +70,26 @@ function parseExpect(value, catalog, where) {
   const expect = record(value, where)
   exactFields(expect, ['bar', 'popup', 'request'], ['bar', 'popup'], where)
   const bar = record(expect.bar, `${where}.bar`)
-  exactFields(bar, ['state', 'text', 'action'], ['state', 'text', 'action'], `${where}.bar`)
-  oneOf(bar.state, BAR_STATES, `${where}.bar.state`)
-  text(bar.text, `${where}.bar.text`)
-  oneOf(bar.action, ACTIONS, `${where}.bar.action`)
+  if ('alert' in bar) {
+    // The bar could not read the publication: it shows the reason, no status.
+    exactFields(bar, ['alert'], ['alert'], `${where}.bar`)
+    text(bar.alert, `${where}.bar.alert`)
+  } else {
+    exactFields(bar, ['state', 'text', 'action'], ['state', 'text', 'action'], `${where}.bar`)
+    oneOf(bar.state, BAR_STATES, `${where}.bar.state`)
+    text(bar.text, `${where}.bar.text`)
+    oneOf(bar.action, ACTIONS, `${where}.bar.action`)
+  }
   let popup = null
   if (expect.popup !== null) {
     popup = record(expect.popup, `${where}.popup`)
-    exactFields(popup, ['heading', 'texts', 'primary'], ['heading', 'texts', 'primary'], `${where}.popup`)
+    exactFields(popup, ['heading', 'texts', 'primary', 'link'], ['heading', 'texts', 'primary'], `${where}.popup`)
+    if (popup.link !== undefined) {
+      const link = record(popup.link, `${where}.popup.link`)
+      exactFields(link, ['text', 'href'], ['text', 'href'], `${where}.popup.link`)
+      text(link.text, `${where}.popup.link.text`)
+      text(link.href, `${where}.popup.link.href`)
+    }
     text(popup.heading, `${where}.popup.heading`)
     list(popup.texts, `${where}.popup.texts`).forEach((entry, index) => text(entry, `${where}.popup.texts[${index}]`))
     if (popup.primary !== null) {
@@ -116,7 +129,7 @@ export function loadPublishStates(source) {
   const collectives = list(root.collectives, 'collectives').map((value, index) => {
     const where = `collectives[${index}]`
     const collective = record(value, where)
-    exactFields(collective, ['name', 'members', 'acceptance', 'suggestion'], ['name', 'members', 'acceptance'], where)
+    exactFields(collective, ['name', 'members', 'acceptance', 'suggestion', 'role'], ['name', 'members', 'acceptance'], where)
     text(collective.name, `${where}.name`)
     if (!Number.isSafeInteger(collective.members) || collective.members < 0) fail(`${where}.members`, 'expected a count')
     oneOf(collective.acceptance, ['open', 'verified_only', 'curated'], `${where}.acceptance`)
@@ -134,8 +147,9 @@ export function loadPublishStates(source) {
   const matches = list(root.matches, 'matches').map((value, index) => {
     const where = `matches[${index}]`
     const match = record(value, where)
-    const fields = ['category', 'rule', 'display', 'original', 'replacement', 'entryIndex']
-    exactFields(match, fields, fields, where)
+    const fields = ['category', 'rule', 'display', 'original', 'replacement', 'entryIndex', 'count']
+    exactFields(match, fields, fields.filter((field) => field !== 'count'), where)
+    if (match.count !== undefined && (!Number.isSafeInteger(match.count) || match.count < 1)) fail(`${where}.count`, 'expected a positive occurrence count')
     oneOf(match.category, ['CREDENTIAL', 'PII', 'PATH', 'INTERNAL'], `${where}.category`)
     for (const field of ['rule', 'display', 'original', 'replacement']) text(match[field], `${where}.${field}`)
     if (!Number.isSafeInteger(match.entryIndex) || match.entryIndex < 0) fail(`${where}.entryIndex`, 'expected a turn index')
@@ -150,9 +164,9 @@ export function loadPublishStates(source) {
     const entry = record(value, where)
     exactFields(entry, CASE_FIELDS, CASE_FIELDS, where)
     text(entry.name, `${where}.name`)
-    text(entry.wireframe, `${where}.wireframe`)
     const publication = record(entry.publication, `${where}.publication`)
-    exactFields(publication, ['state', 'outsideSelection', 'autoPublish', 'newTurns', 'audience'], ['state'], `${where}.publication`)
+    exactFields(publication, ['state', 'outsideSelection', 'autoPublish', 'newTurns', 'audience', 'audienceRead'], ['state'], `${where}.publication`)
+    if (publication.audienceRead !== undefined) oneOf(publication.audienceRead, AUDIENCE_READ, `${where}.publication.audienceRead`)
     oneOf(publication.state, ['unpublished', 'published'], `${where}.publication.state`)
     for (const flag of ['outsideSelection', 'autoPublish']) {
       if (publication[flag] !== undefined && typeof publication[flag] !== 'boolean') fail(`${where}.publication.${flag}`, 'expected a boolean')
@@ -164,10 +178,11 @@ export function loadPublishStates(source) {
       fail(`${where}.publication`, 'an unpublished case has no new turns and no audience')
     }
     oneOf(entry.signIn, SIGN_IN, `${where}.signIn`)
-    names(entry.village, catalog, `${where}.village`)
+    if (entry.village !== 'unreachable') names(entry.village, catalog, `${where}.village`)
     oneOf(entry.scan, SCAN, `${where}.scan`)
     if (typeof entry.push !== 'string' || !PUSH.test(entry.push)) fail(`${where}.push`, `unknown push ${JSON.stringify(entry.push)}`)
-    if (entry.push.startsWith('stopped:')) names([entry.push.slice('stopped:'.length)], catalog, `${where}.push`)
+    const pushTarget = entry.push.match(/^(?:stopped|stopped-once|skipped):(.+)$/)
+    if (pushTarget) names([pushTarget[1]], catalog, `${where}.push`)
     list(entry.steps, `${where}.steps`).forEach((step, stepIndex) => {
       if (typeof step !== 'string' || !STEP.test(step)) fail(`${where}.steps[${stepIndex}]`, `unknown step ${JSON.stringify(step)}`)
       const collective = step.replace(/^(add|remove) /, '')
@@ -218,7 +233,12 @@ export function publishedAtFor(turns, newTurns) {
 /**
  * The Local API one case serves. `respond` answers a publishing route, or
  * returns null for any other route; `{ pending: true }` is a request that never
- * answers. A push changes what the next publication read returns.
+ * answers. It answers as the server does (internal/api/publishing_handlers.go,
+ * sync_handler.go, internal/push/share_publish.go): a request with a missing or
+ * wrong parameter is refused with the server's 400, a signed-out computer
+ * reads every session unpublished and is refused the collectives and the push,
+ * errors are JSON `{ error, code }`, and a push changes what the next
+ * publication read says.
  */
 export function createPublishWorld(fixture, entry, { sessionId, turns }) {
   const byName = new Map(fixture.collectives.map((collective) => [collective.name, collective]))
@@ -230,13 +250,19 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
     publishedAt: entry.publication.state === 'published' ? publishedAtFor(turns, entry.publication.newTurns) : undefined,
     audience: (entry.publication.audience ?? []).map((name) => ({ collectiveId: byName.get(name).id, name, status: 'approved' })),
   }
+  const pushTarget = entry.push.match(/^(stopped|stopped-once|skipped):(.+)$/)
+  const target = pushTarget ? { kind: pushTarget[1], id: byName.get(pushTarget[2]).id } : null
   let signedIn = entry.signIn === 'signed-in'
+  let pushes = 0
   const world = { pushRequests: [], scanRequests: 0, respond }
+
+  const refuse = (status, error, code) => ({ status, json: code ? { error, code } : { error } })
 
   function group(collective) {
     return {
       ...GROUP_BASE,
       acceptance_mode: collective.acceptance,
+      role: collective.role ?? GROUP_BASE.role,
       id: collective.id,
       linked_github_org: collective.suggestion?.reason === 'linked_github_org' ? collective.suggestion.match : null,
       member_count: collective.members,
@@ -245,9 +271,10 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
   }
 
   function publicationRow(withAudience) {
-    const row = { sessionId, state: publication.state, outsideSelection: publication.outsideSelection, autoPublish: publication.autoPublish }
-    if (publication.state === 'published') {
-      Object.assign(row, { transcriptId: FIXTURE_TRANSCRIPT_ID, transcriptUrl: FIXTURE_TRANSCRIPT_URL, publishedAt: publication.publishedAt })
+    const row = { sessionId, state: 'unpublished', outsideSelection: publication.outsideSelection, autoPublish: publication.autoPublish }
+    // A signed-out computer holds no account to read receipts for.
+    if (signedIn && publication.state === 'published') {
+      Object.assign(row, { state: 'published', transcriptId: FIXTURE_TRANSCRIPT_ID, transcriptUrl: FIXTURE_TRANSCRIPT_URL, publishedAt: publication.publishedAt })
       if (withAudience) row.audience = publication.audience
     }
     return row
@@ -258,11 +285,11 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
     for (const match of fixture.matches) {
       let category = categories.find((entry) => entry.category === match.category)
       if (!category) categories.push(category = { category: match.category, totalCount: 0, rules: [] })
-      category.totalCount += 1
+      category.totalCount += match.count ?? 1
       category.rules.push({
         ruleId: match.rule,
         displayName: match.display,
-        count: 1,
+        count: match.count ?? 1,
         items: [{
           category: match.category,
           ruleId: match.rule,
@@ -277,15 +304,19 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
         }],
       })
     }
-    return { total: fixture.matches.length, categories }
+    return { total: categories.reduce((sum, category) => sum + category.totalCount, 0), categories }
   }
 
   function push(body) {
-    world.pushRequests.push(body)
+    pushes += 1
     const add = body.collectives?.add ?? []
     const remove = body.collectives?.remove ?? []
-    const stoppedAt = entry.push.startsWith('stopped:') ? byName.get(entry.push.slice('stopped:'.length)).id : null
-    const steps = [{ step: 'content', outcome: 'succeeded' }]
+    const failsNow = target && (target.kind === 'stopped' || (target.kind === 'stopped-once' && pushes === 1))
+    const contentSkipped = publication.state === 'published' && entry.publication.newTurns === 0;
+    const unavailable = entry.push === 'held' || entry.push === 'content-failed';
+    const steps = [{ step: 'content', outcome: entry.push === 'content-failed' ? 'failed' : unavailable || contentSkipped ? 'skipped' : 'succeeded',
+      ...(unavailable ? { reason: entry.push === 'held' ? 'the session is held until ingest completes; nothing was sent' : 'sending the content failed: village answered 502' } : {}) }];
+    if (unavailable) return { new: 0, updated: 0, skipped: entry.push === 'held' ? 1 : 0, errors: entry.push === 'content-failed' ? 1 : 0, sessions: [{ sessionId, status: entry.push === 'held' ? 'held' : 'error', steps }] };
     for (const id of remove) steps.push({ step: 'remove_collective', collectiveId: id, outcome: 'succeeded' })
     let failed = false
     for (const id of add) {
@@ -293,13 +324,17 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
         steps.push({ step: 'add_collective', collectiveId: id, outcome: 'not_attempted' })
         continue
       }
-      if (id === stoppedAt) {
+      if (failsNow && id === target.id) {
         failed = true
         steps.push({ step: 'add_collective', collectiveId: id, outcome: 'failed', reason: 'sharing with this collective failed, so it cannot read the transcript: village answered 502' })
         continue
       }
+      if (target?.kind === 'skipped' && id === target.id) {
+        steps.push({ step: 'add_collective', collectiveId: id, outcome: 'skipped', reason: 'Village did not share the transcript with this collective: it shares only with a collective you are a member of that accepts your contributions' })
+        continue
+      }
       const curated = byId.get(id)?.acceptance === 'curated'
-      steps.push({ step: 'add_collective', collectiveId: id, outcome: entry.push === 'approval' && curated ? 'pending_approval' : 'succeeded' })
+      steps.push({ step: 'add_collective', collectiveId: id, outcome: curated ? 'pending_approval' : 'succeeded' })
     }
     const wasPublished = publication.state === 'published'
     publication.state = 'published'
@@ -312,7 +347,7 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
     }
     const result = {
       sessionId,
-      status: failed ? 'error' : wasPublished ? 'updated' : 'new',
+      status: failed ? 'error' : contentSkipped ? 'skipped' : wasPublished ? 'updated' : 'new',
       steps,
       transcriptUrl: FIXTURE_TRANSCRIPT_URL,
       waitingPullRequests: [{
@@ -325,29 +360,43 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
         state: 'waiting',
       }],
     }
-    if (failed) result.error = `stopped at sharing with collective ${stoppedAt}: sharing with this collective failed. Village kept the transcript at ${FIXTURE_TRANSCRIPT_URL}. Publish again to retry.`
+    if (failed) result.error = `stopped at sharing with collective ${target.id}: sharing with this collective failed. Village kept the transcript at ${FIXTURE_TRANSCRIPT_URL}. Publish again to retry.`
     return {
       new: !failed && !wasPublished ? 1 : 0,
-      updated: !failed && wasPublished ? 1 : 0,
-      skipped: 0,
+      updated: !failed && wasPublished && !contentSkipped ? 1 : 0,
+      skipped: !failed && contentSkipped ? 1 : 0,
       errors: failed ? 1 : 0,
       sessions: [result],
     }
   }
 
-  /** Answer one request: `{ status, json }`, `{ status, text }`, `{ pending: true }`, or null. */
+  /** Answer one request: `{ status, json }`, `{ pending: true }`, or null. */
   function respond({ method, url, body }) {
     const parsed = new URL(url, 'http://peasant.local')
+    const query = parsed.searchParams
     const route = `${method} ${parsed.pathname.replace(/\/$/, '')}`
     switch (route) {
       case 'GET /api/v1/sync/auth':
         return { status: 200, json: signedIn ? { authenticated: true, username: 'alice-dev', villageUrl: FIXTURE_VILLAGE, villageConfigured: true } : { authenticated: false } }
       case 'POST /api/v1/sync/login':
-        if (entry.signIn === 'signed-out') signedIn = true
-        return { status: 200, json: { status: 'pending' } }
-      case 'GET /api/v1/publications':
-        return { status: 200, json: { publications: [publicationRow(parsed.searchParams.get('include') === 'audience')] } }
+        if (entry.signIn === 'login-failed') return refuse(502, 'github sign-in could not be started: connection refused')
+        if (entry.signIn === 'signed-out' || entry.signIn === 'already-authenticated') signedIn = true
+        return { status: 200, json: { status: entry.signIn === 'already-authenticated' ? 'already_authenticated' : 'pending' } }
+      case 'GET /api/v1/publications': {
+        if (query.get('sessionIds') !== sessionId) return refuse(400, 'The publication state could not be read because the request named no session in query field "sessionIds".', 'publications_session_ids_required')
+        if (entry.publication.audienceRead === 'failed') return refuse(503, 'the local publication store could not be read; inspect the Peasant log')
+        const include = query.get('include')
+        if (include !== null && include !== 'audience') return refuse(400, `query field "include" is ${JSON.stringify(include)}, and the only value it takes is "audience".`, 'publications_include_unknown')
+        if (include === 'audience' && signedIn && publication.state === 'published') {
+          if (entry.publication.audienceRead === 'unreachable') return refuse(502, 'The publication state could not name who can read the transcript because Village could not be read.', 'village_unreachable')
+          if (entry.publication.audienceRead === 'missing') return refuse(502, `Village no longer holds transcript ${FIXTURE_TRANSCRIPT_ID}, which this computer's receipt names. Run 'peasant village push --force' choosing only this session to publish it again.`, 'village_transcript_missing')
+        }
+        return { status: 200, json: { publications: [publicationRow(include === 'audience')] } }
+      }
       case 'GET /api/v1/village/collectives':
+        if (!signedIn) return refuse(401, 'The Village collectives could not be listed because this computer is not signed in to Village.', 'village_signed_out')
+        if (query.get('sessionId') !== sessionId) return refuse(400, 'the collectives read names no session to suggest collectives for')
+        if (entry.village === 'unreachable') return refuse(502, 'The Village collectives could not be listed because Village could not be read: connection refused.', 'village_unreachable')
         return {
           status: 200,
           json: {
@@ -358,15 +407,17 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
           },
         }
       case 'GET /api/v1/sync/redactions':
+        if (query.get('session_id') !== sessionId || query.get('level') !== 'standard') return refuse(400, 'the redaction preview names no session or a level this version does not offer')
         world.scanRequests += 1
         if (entry.scan === 'pending') return { pending: true }
-        if (entry.scan === 'failure') return { status: 500, text: 'the local scan could not read this session: open the Peasant log for the cause' }
+        if (entry.scan === 'failure' || (entry.scan === 'matches-then-failure' && world.scanRequests > 1)) {
+          return refuse(500, 'the local scan could not read this session: open the Peasant log for the cause')
+        }
         return { status: 200, json: redactions() }
       case 'POST /api/v1/sync/push':
-        if (entry.push === 'pending') {
-          world.pushRequests.push(body)
-          return { pending: true }
-        }
+        world.pushRequests.push(body)
+        if (!signedIn || entry.push === 'unauthorized') return refuse(401, "not authenticated — run 'peasant village login' first")
+        if (entry.push === 'pending') return { pending: true }
         return { status: 200, json: push(body) }
       default:
         return null

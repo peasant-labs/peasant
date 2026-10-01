@@ -110,7 +110,8 @@ function usePush(sessionIds: string[], redactionLevel: SelectableRedactionLevel,
           const r = byId.get(id);
           if (!r) return { sessionId: id, state: 'skipped' };
           if (r.status === 'error') return { sessionId: id, state: 'error', error: r.error };
-          if (r.status === 'skipped') return { sessionId: id, state: 'skipped' };
+          // A held session waits for ingest: nothing was sent, so it is not done.
+          if (r.status === 'skipped' || r.status === 'held') return { sessionId: id, state: 'skipped' };
           return { sessionId: id, state: 'done' };
         }),
       );

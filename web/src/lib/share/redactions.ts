@@ -117,10 +117,16 @@ function requireMatchingCategory(
  * The level filtering is server-side (the redactor only detects what that level
  * strips), so the client does not re-filter by category.
  */
-export async function fetchRedactionPreview(
+export interface RedactionPreview {
+  redactions: Redaction[];
+  /** All occurrences, including matches omitted from the capped preview. */
+  matchCount: number;
+}
+
+export async function fetchRedactionScan(
   sessionId: string,
   level: RedactionLevel,
-): Promise<Redaction[]> {
+): Promise<RedactionPreview> {
   const params = new URLSearchParams({ session_id: sessionId, level });
   const resp = await fetch(`${getApiBaseUrl()}/api/v1/sync/redactions?${params.toString()}`);
   if (!resp.ok) {
@@ -153,5 +159,13 @@ export async function fetchRedactionPreview(
       }
     }
   }
-  return out;
+  if (!Number.isSafeInteger(data.total) || data.total < out.length) {
+    throw new Error('redaction scan returned an invalid occurrence count; sharing remains blocked');
+  }
+  return { redactions: out, matchCount: data.total };
+}
+
+/** The sample-only adapter used by existing review consumers. */
+export async function fetchRedactionPreview(sessionId: string, level: RedactionLevel): Promise<Redaction[]> {
+  return (await fetchRedactionScan(sessionId, level)).redactions;
 }
