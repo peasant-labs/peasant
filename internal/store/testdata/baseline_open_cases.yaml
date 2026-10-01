@@ -154,3 +154,17 @@ shadowMutations:
     - name: shadow-data-block
       table: session_entries_fts_data
       statement: "UPDATE session_entries_fts_data SET block = X'0000000000000001' WHERE id = 1"
+
+# Replacements of the emitted runtime clock expression. Both the artifact shape
+# check and the raw interval check must reject each replacement, even after the
+# artifact is regenerated. Each row is named and required;
+# TestBaselineClockCellMutations drives them.
+clockMutations:
+  requiredNames:
+    - clock-expression-zeroed
+    - clock-expression-frozen-literal
+  mutations:
+    - name: clock-expression-zeroed
+      replacement: "0"
+    - name: clock-expression-frozen-literal
+      replacement: "1000000000000"

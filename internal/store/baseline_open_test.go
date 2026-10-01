@@ -67,10 +67,23 @@ type baselineShadowMutationsFixture struct {
 	Mutations     []baselineShadowMutationFixture `yaml:"mutations"`
 }
 
+// baselineClockMutationFixture names one replacement of the emitted runtime
+// clock expression in the baseline artifact. Both clock checks must reject it.
+type baselineClockMutationFixture struct {
+	Name        string `yaml:"name"`
+	Replacement string `yaml:"replacement"`
+}
+
+type baselineClockMutationsFixture struct {
+	RequiredNames []string                       `yaml:"requiredNames"`
+	Mutations     []baselineClockMutationFixture `yaml:"mutations"`
+}
+
 type baselineOpenCaseFixtures struct {
 	RequiredNames   []string                       `yaml:"requiredNames"`
 	Cases           []baselineOpenCaseFixture      `yaml:"cases"`
 	ClockCells      baselineClockCellsFixture      `yaml:"clockCells"`
+	ClockMutations  baselineClockMutationsFixture  `yaml:"clockMutations"`
 	ShadowMutations baselineShadowMutationsFixture `yaml:"shadowMutations"`
 }
 
@@ -182,6 +195,17 @@ func validateBaselineOpenCaseFixtures(fixtures baselineOpenCaseFixtures) error {
 		}
 	}
 	if err := validateOpenCaseNames(fixtures.ShadowMutations.RequiredNames, mutationNames, "baseline shadow mutation"); err != nil {
+		return err
+	}
+
+	clockMutationNames := make([]string, 0, len(fixtures.ClockMutations.Mutations))
+	for _, mutation := range fixtures.ClockMutations.Mutations {
+		clockMutationNames = append(clockMutationNames, mutation.Name)
+		if strings.TrimSpace(mutation.Replacement) == "" {
+			return fmt.Errorf("internal/store/testdata/baseline_open_cases.yaml: clock mutation %q has a blank replacement; name the literal that replaces the runtime expression", mutation.Name)
+		}
+	}
+	if err := validateOpenCaseNames(fixtures.ClockMutations.RequiredNames, clockMutationNames, "baseline clock mutation"); err != nil {
 		return err
 	}
 	return nil
