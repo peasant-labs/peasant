@@ -17,6 +17,8 @@ import (
 //go:embed testdata/connection-lifetime.yaml
 var connectionLifetimeFixture []byte
 
+const authorizationDenialFixtureName = "retired cleanup cannot bypass the current authorization denial"
+
 type connectionLifetimeCase struct {
 	Name       string `yaml:"name"`
 	Scenario   string `yaml:"scenario"`
@@ -40,7 +42,7 @@ func loadConnectionLifetimeFixtures(t *testing.T) []connectionLifetimeCase {
 	required := map[string]bool{
 		"retired cleanup preserves a newly registered connection":            false,
 		"retired cleanup preserves current authorization and busy callbacks": false,
-		"retired cleanup cannot bypass the current authorization denial":     false,
+		authorizationDenialFixtureName:                                       false,
 		"successful close releases its own registrations":                    false,
 		"duplicate close cannot clean a replacement connection":              false,
 		"nil close retains its explicit error":                               false,
@@ -51,6 +53,13 @@ func loadConnectionLifetimeFixtures(t *testing.T) []connectionLifetimeCase {
 			t.Fatalf("unknown or duplicate connection lifetime fixture %q", c.Name)
 		}
 		required[c.Name] = true
+		if c.Name == authorizationDenialFixtureName {
+			if !c.DenySelect || c.Scenario != "replacement" {
+				t.Fatal("authorization denial fixture must deny SELECT on the replacement connection")
+			}
+		} else if c.DenySelect {
+			t.Fatalf("fixture %q cannot claim authorization denial", c.Name)
+		}
 		switch c.Scenario {
 		case "replacement-before-callbacks", "replacement", "owner-close", "duplicate-close", "nil-close":
 		default:
