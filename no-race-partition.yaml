@@ -613,6 +613,36 @@ partition:
       stay exact.
     cost: { wall_ms: 31801, cpu_ms: 33401 }
 
+  - package: internal/ingest
+    test: TestUnknownLocalRetentionBeyondTransferBudget
+    class: single-threaded-bytes
+    evidence: '#TestUnknownLocalRetentionBeyondTransferBudget'
+    justification: >-
+      Subject. Local retention beyond the transfer budget: a multi-megabyte
+      unknown payload is certified as full local evidence, its bytes survive a
+      close and reopen, and native earlier partitions are retained. Concurrency
+      actually exercised. Each parallel subtest opens its own golden-copy store
+      and runs a real pipeline, overlapping the DIFF pool, EXTRACT+WRITE
+      workers, the StagingBuffer, drainLoop and indexLoop, then closes and
+      reopens the store and reads a generation snapshot. Why the detector is not
+      this test's oracle. The assertions read the certified capture, reopened
+      bytes, generation partitions and re-marshalled records; a race corrupts
+      those products instead of producing its own assertion. Retained race
+      coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. This was the suite's heaviest detector-taxed run; a race
+      reachable only under its large-payload workload is no longer observed,
+      and the retained tests bound the primitives rather than that workload.
+      Detector-independent guarantees kept. The full-evidence certification and
+      byte-preservation assertions stay.
+    cost: { wall_ms: 31802, cpu_ms: 33402 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI

@@ -39,5 +39,6 @@ partition:
   - internal/ingest|TestContentRecoveryScope
   - internal/ingest|TestPipelineRetainedAdapterMaintenance
   - internal/ingest|TestConcreteParserFailurePreservesOtherSessions
+  - internal/ingest|TestUnknownLocalRetentionBeyondTransferBudget
 protected:
   - internal/ingest|TestOpenCodeNativeCLI
