@@ -3,7 +3,7 @@
  *
  * It boots bin/peasant twice, each on its own throwaway XDG directories so no
  * real session store is read:
- *   - with the mock store (`web,search`), which serves the WebSocket topics
+ *   - with the mock store (`web,dashboard,sessions,trends,qualitySessions,search`), which serves the WebSocket topics
  *     (sessions, titles, dashboard, trends), the project summary and search;
  *   - with no mock store, for the empty install.
  * The mock store holds no sync list and no publication receipts, so the
@@ -297,6 +297,15 @@ async function listedRows(page) {
 async function resetList(page) {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-root-session-list] tbody tr', { visible: true, timeout: 20000 }).catch(() => fail('the session list never mounted after a reload'))
+  await waitForStats(page, 'the reloaded list')
+}
+
+async function waitForStats(page, where) {
+  await page.waitForSelector('[role="img"][aria-label^="sessions per week, last 8 weeks:"]', { visible: true, timeout: 10000 }).catch(() => fail(`${where}: the weekly session bars never mounted`))
+  await page.waitForFunction(() => {
+    const stats = document.querySelector('[aria-label="general stats"]')?.textContent ?? ''
+    return stats.includes('this week') && stats.includes('longest streak') && stats.includes('median session')
+  }, { timeout: 10000 }).catch(() => fail(`${where}: the complete stats strip never mounted`))
 }
 
 async function runPopulated(browser, gate, theme, viewport, answers) {
@@ -306,6 +315,7 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
   try {
     await page.waitForSelector('[data-root-session-list] tbody tr', { visible: true, timeout: 20000 }).catch(() => fail(`${where}: the session list never mounted`))
     await page.waitForSelector('.sst-pair', { visible: true, timeout: 10000 }).catch(() => fail(`${where}: the stats strip never mounted`))
+    await waitForStats(page, where)
     const probe = await probeStyles(page, where)
     if (probe.theme !== theme) fail(`${where}: data-theme is ${probe.theme}`)
 
@@ -343,6 +353,7 @@ async function runSelection(browser, gate, theme, viewport, answers, summaryBase
   let page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { ...summaryBase, selection: FIXTURE.selectionNotice } })
   try {
     await page.waitForSelector('[data-root-session-list] tbody tr', { visible: true, timeout: 20000 }).catch(() => fail(`${where}: the list never mounted under a selection notice`))
+    await waitForStats(page, `${where}/selection-notice`)
     const notice = await page.evaluate(() => [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent.trim()).find((text) => text.includes('hidden by a saved selection')) ?? '')
     const { hiddenProjects, hiddenSessions } = FIXTURE.selectionNotice
     if (notice !== `${hiddenProjects} projects and ${hiddenSessions} sessions hidden by a saved selection`) fail(`${where}: selection notice reads ${JSON.stringify(notice)}`)
@@ -382,7 +393,7 @@ if (!CHROME) fail('CHROME_PATH is unset; set it to google-chrome or chromium')
 const chunks = assertProvenance()
 mkdirSync(OUT, { recursive: true })
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
-const mockServer = boot(PORT, 'web,search')
+const mockServer = boot(PORT, 'web,dashboard,sessions,trends,qualitySessions,search')
 const emptyServer = boot(PORT + 1, 'none')
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
 try {
