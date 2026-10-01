@@ -64,6 +64,7 @@ type CollectiveVillage struct {
 	shareStall           time.Duration
 	publishes            []schema.AuthoritativePublishRequest
 	ownerUpdates         int
+	ownerVisibilities    []schema.TranscriptUpdateVisibility
 	failPublish          bool
 	failShare            map[schema.VillageUUID]bool
 	conflictShare        map[schema.VillageUUID]bool
@@ -247,6 +248,22 @@ func (v *CollectiveVillage) OwnerUpdates() int {
 	return v.ownerUpdates
 }
 
+// OwnerVisibilities returns visibility changes actually requested by the CLI.
+// This double deliberately refuses owner updates rather than applying them.
+func (v *CollectiveVillage) OwnerVisibilities() []schema.TranscriptUpdateVisibility {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return append([]schema.TranscriptUpdateVisibility(nil), v.ownerVisibilities...)
+}
+
+// Public reports the actual audience state retained by the Village double,
+// including owner visibility updates after content publication.
+func (v *CollectiveVillage) Public(transcript schema.TranscriptID) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.public[transcript]
+}
+
 // Audience returns the collectives that can read the transcript or will once
 // their owner approves it: its approved and pending share rows.
 func (v *CollectiveVillage) Audience(transcript schema.TranscriptID) map[schema.VillageUUID]schema.VillageShareStatus {
@@ -305,8 +322,15 @@ func (v *CollectiveVillage) transcript(w http.ResponseWriter, r *http.Request, r
 	case r.Method == http.MethodGet && share == "":
 		v.readShares(w, transcript)
 	case r.Method == http.MethodPatch && share == "":
+		var request schema.OwnerTranscriptUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			v.t.Errorf("decode owner update: %v", err)
+		}
 		v.mu.Lock()
 		v.ownerUpdates++
+		if request.Visibility != nil {
+			v.ownerVisibilities = append(v.ownerVisibilities, *request.Visibility)
+		}
 		v.mu.Unlock()
 		http.Error(w, `{"error":"this double does not apply owner updates"}`, http.StatusInternalServerError)
 	case r.Method == http.MethodPost && share == "share":

@@ -29,6 +29,7 @@
 # Every case is required by name. The first eight are the acceptance cases
 # of auto-publish rules; the rest guard the behavior around them.
 requiredNames:
+  - uncovered-public-push-requests-an-owner-update
   - multiple-documents-refuse-a-save
   - active-document-followed-by-paused-document
   - paused-document-followed-by-active-document
@@ -447,6 +448,8 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform, review]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      visibilityIntent: private
+      public: false
       outputContains: ["rule acme binds 1 session(s)", "1 share(s) made, 1 waiting"]
       publishes: 1
       license: ""
@@ -460,6 +463,8 @@ cases:
     config: {visibility: public, license: CC-BY-4.0}
     again: [--force]
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 2
       license: ""
       ownerUpdates: 0
@@ -473,6 +478,8 @@ cases:
     villageDecides: {review: rejected, platform: retracted}
     again: [--force]
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 2
       audience: {}
 
@@ -483,14 +490,14 @@ cases:
     config: {visibility: private}
     villageDecides: {platform: retracted}
     again: []
-    expect: {publishes: 1, audience: {}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, audience: {}}
 
   - name: folder-rule-covers-the-push
     driver: push
     rules:
       - {id: world, kind: folder, match: "{world}/*", events: [post-commit], collectives: [research]}
     config: {visibility: private, license: CC-BY-4.0}
-    expect: {publishes: 1, license: "", audience: {research: approved}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, license: "", audience: {research: approved}}
 
   - name: folder-rule-covers-a-repository-without-a-remote
     driver: push
@@ -498,7 +505,7 @@ cases:
     rules:
       - {id: world, kind: folder, match: "{world}/*", events: [pre-push], collectives: [research]}
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 1, license: "", ownerUpdates: 0, audience: {research: approved}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, license: "", ownerUpdates: 0, audience: {research: approved}}
 
   - name: rules-bind-each-session-by-its-own-clone
     driver: push
@@ -507,6 +514,8 @@ cases:
       - {id: tools, kind: folder, match: "{world}/tools", events: [pre-push], collectives: [research]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 2
       license: ""
       ownerUpdates: 0
@@ -520,6 +529,8 @@ cases:
       - {id: gone, kind: folder, match: "{world}/gone", events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 2
       license: ""
       ownerUpdates: 0
@@ -534,6 +545,8 @@ cases:
       - {id: gone, kind: folder, match: "{world}/gone", events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 2
       license: ""
       ownerUpdates: 0
@@ -547,6 +560,8 @@ cases:
       - {id: world, kind: folder, match: "{world}/*", events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 2
       license: ""
       ownerUpdates: 0
@@ -559,14 +574,14 @@ cases:
     rules:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 1, license: "", ownerUpdates: 0, audience: {platform: approved}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, license: "", ownerUpdates: 0, audience: {platform: approved}}
 
   - name: uncovered-push-is-unchanged
     driver: push
     rules:
       - {id: other, kind: remote, match: github.com/acme/other, events: [pre-push], collectives: [platform]}
     config: {visibility: private, license: CC-BY-4.0}
-    expect: {publishes: 1, license: CC-BY-4.0, audience: {}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, license: CC-BY-4.0, audience: {}}
 
   - name: paused-rule-publishes-nothing
     driver: push
@@ -574,6 +589,8 @@ cases:
       - {id: paused, kind: remote, match: github.com/acme/tools, events: [], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 0
       audience: {}
       outputContains: [1 session(s) were not published because their rule holds them, "nothing was published; the auto-publish rules held 1 session(s)"]
@@ -584,7 +601,7 @@ cases:
       - {id: paused, kind: remote, match: github.com/acme/tools, events: [], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     flags: [--verbose]
-    expect: {publishes: 0, audience: {}, outputContains: [rule paused covers it and names no hook event]}
+    expect: {visibilityIntent: private, public: false, publishes: 0, audience: {}, outputContains: [rule paused covers it and names no hook event]}
 
   - name: public-transcript-is-not-updated-under-a-rule
     driver: push
@@ -594,7 +611,7 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: private}
     flags: [--force, --verbose]
-    expect: {publishes: 1, audience: {}, outputContains: [is public on Village, never publicly, make the transcript private on Village]}
+    expect: {visibilityIntent: private, public: true, publishes: 1, audience: {}, outputContains: [is public on Village, never publicly, make the transcript private on Village]}
 
   - name: public-hold-is-released-when-made-private
     driver: push
@@ -606,7 +623,7 @@ cases:
     flags: [--force]
     privateBeforeAgain: true
     again: [--force]
-    expect: {publishes: 2, license: "", audience: {platform: approved}}
+    expect: {visibilityIntent: private, public: false, publishes: 2, license: "", audience: {platform: approved}}
 
   - name: visibility-flag-is-refused-under-a-rule
     driver: push
@@ -614,7 +631,7 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: private}
     flags: [--visibility, public]
-    expect: {publishes: 0, audience: {}, errorContains: [--visibility was given, nothing was uploaded]}
+    expect: {visibilityIntent: private, public: false, publishes: 0, audience: {}, errorContains: [--visibility was given, nothing was uploaded]}
 
   - name: license-flag-is-refused-under-a-rule
     driver: push
@@ -622,7 +639,7 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: private}
     flags: [--license, CC0-1.0]
-    expect: {publishes: 0, audience: {}, errorContains: [--license was given, nothing was uploaded]}
+    expect: {visibilityIntent: private, public: false, publishes: 0, audience: {}, errorContains: [--license was given, nothing was uploaded]}
 
   - name: unreadable-rules-refuse-the-push
     driver: push
@@ -631,7 +648,7 @@ cases:
       autoPublish:
         - {id: acme, kind: branch, match: main, events: [pre-push], collectives: []}
     config: {visibility: private}
-    expect: {publishes: 0, audience: {}, errorContains: [auto-publish rules, nothing was uploaded]}
+    expect: {visibilityIntent: private, public: false, publishes: 0, audience: {}, errorContains: [auto-publish rules, nothing was uploaded]}
 
   - name: failed-share-names-the-session
     driver: push
@@ -640,6 +657,8 @@ cases:
     config: {visibility: private}
     failShare: [platform]
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 1
       audience: {}
       errorContains: [published private but not shared with every collective]
@@ -654,6 +673,8 @@ cases:
     stallShare: true
     flags: [--timeout, 6s]
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 1
       audience: {}
       errorContains: [ran out of its 6s budget]
@@ -800,7 +821,7 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: private}
     failTranscriptRead: true
-    expect: {publishes: 33, audience: {}, reads: 0}
+    expect: {visibilityIntent: private, public: false, publishes: 33, audience: {}, reads: 0}
 
   - name: unreadable-audience-holds-the-update
     driver: push
@@ -811,6 +832,8 @@ cases:
     config: {visibility: private}
     failTranscriptRead: true
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 1
       audience: {}
       outputContains: ["could not be read from Village", "retry when Village answers"]
@@ -824,6 +847,8 @@ cases:
     config: {visibility: private}
     failShareRead: true
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 2
       audience: {}
       errorContains: ["not shared"]
@@ -837,7 +862,7 @@ cases:
     rules:
       - {id: notes, kind: remote, match: github.com/other/notes, events: [pre-push], collectives: [platform]}
     config: {visibility: private, license: CC-BY-4.0}
-    expect: {publishes: 1, license: CC-BY-4.0, audience: {}, others: {unrelated: {}}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, license: CC-BY-4.0, audience: {}, others: {unrelated: {}}}
 
   - name: rule-outside-selection-keeps-the-selected-audience
     driver: push
@@ -848,7 +873,7 @@ cases:
     rules:
       - {id: notes, kind: remote, match: github.com/other/notes, events: [pre-push], collectives: [platform]}
     config: {visibility: private, license: CC-BY-4.0}
-    expect: {publishes: 1, license: CC-BY-4.0, audience: {}, others: {unrelated: {}}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, license: CC-BY-4.0, audience: {}, others: {unrelated: {}}}
 
   - name: folder-rule-binds-a-gone-subfolder
     driver: push
@@ -856,7 +881,7 @@ cases:
     rules:
       - {id: tools, kind: folder, match: "{world}/tools", events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 2, audience: {platform: approved}, others: {gone-subfolder: {platform: approved}}}
+    expect: {visibilityIntent: private, public: false, publishes: 2, audience: {platform: approved}, others: {gone-subfolder: {platform: approved}}}
 
   - name: remote-rule-binds-a-gone-clone
     driver: push
@@ -864,7 +889,7 @@ cases:
     rules:
       - {id: tools, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 2, audience: {platform: approved}, others: {gone: {platform: approved}}}
+    expect: {visibilityIntent: private, public: false, publishes: 2, audience: {platform: approved}, others: {gone: {platform: approved}}}
 
   - name: remote-double-wildcard-is-refused
     driver: validate
@@ -879,7 +904,7 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     again: [--force, --require-auto-publish-rule]
-    expect: {publishes: 1, audience: {platform: approved}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, audience: {platform: approved}}
 
   - name: rule-required-hook-keeps-a-retained-binding
     driver: push
@@ -889,7 +914,7 @@ cases:
       - {id: research, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [research]}
     config: {visibility: public, license: CC-BY-4.0}
     again: [--force, --require-auto-publish-rule]
-    expect: {publishes: 2, audience: {platform: approved, research: approved}}
+    expect: {visibilityIntent: private, public: false, publishes: 2, audience: {platform: approved, research: approved}}
 
   - name: rule-required-hook-stops-at-a-paused-binding
     driver: push
@@ -897,14 +922,14 @@ cases:
     rules:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 0, audience: {}}
+    expect: {visibilityIntent: private, public: false, publishes: 0, audience: {}}
 
   - name: rule-required-hook-keeps-unbound-sessions-out
     driver: push
     flags: [--require-auto-publish-rule]
     rules: []
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 0, audience: {}}
+    expect: {visibilityIntent: private, public: false, publishes: 0, audience: {}}
 
   - name: paused-session-is-absent-from-redaction-record
     driver: push
@@ -913,6 +938,8 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      visibilityIntent: private
+      public: false
       publishes: 0
       audience: {}
       outputContains: ["paused and publishes nothing"]
@@ -958,7 +985,7 @@ cases:
     deleteRule: push
     again: [--force, --require-auto-publish-rule, --auto-publish-event, pre-push]
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 1, audience: {platform: approved}, others: {}}
+    expect: {visibilityIntent: private, public: false, publishes: 1, audience: {platform: approved}, others: {}}
   - name: rule-required-commit-keeps-a-commit-binding
     driver: push
     flags: [--require-auto-publish-rule, --auto-publish-event, post-commit]
@@ -968,7 +995,7 @@ cases:
     deleteRule: push
     again: [--force, --require-auto-publish-rule, --auto-publish-event, post-commit]
     config: {visibility: public, license: CC-BY-4.0}
-    expect: {publishes: 2, audience: {review: pending}, others: {}}
+    expect: {visibilityIntent: private, public: false, publishes: 2, audience: {review: pending}, others: {}}
 
   - name: active-document-followed-by-paused-document
     driver: validate
@@ -1030,3 +1057,17 @@ cases:
       autoPublish:
         - {id: work, kind: remote, match: github.com/acme/tools, events: [], collectives: []}
     expect: {status: 500}
+
+  - name: uncovered-public-push-requests-an-owner-update
+    driver: push
+    rules:
+      - {id: other, kind: remote, match: github.com/acme/other, events: [pre-push], collectives: [platform]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect:
+      publishes: 1
+      visibilityIntent: private
+      public: false
+      ownerUpdates: 1
+      ownerVisibilities: [public]
+      license: CC-BY-4.0
+      audience: {}
