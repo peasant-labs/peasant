@@ -12,7 +12,7 @@
 import { parseDocument } from 'yaml'
 
 const CASE_FIELDS = ['name', 'publication', 'signIn', 'village', 'scan', 'push', 'steps', 'expect']
-const ROOT_FIELDS = ['requiredNames', 'wizardLinks', 'collectives', 'matches', 'pullRequest', 'cases']
+const ROOT_FIELDS = ['requiredNames', 'mobileCases', 'wizardLinks', 'collectives', 'matches', 'pullRequest', 'cases']
 const SIGN_IN = ['signed-in', 'signed-out', 'waits', 'login-failed', 'already-authenticated']
 const SCAN = ['matches', 'failure', 'pending', 'matches-then-failure']
 const PUSH = /^(published|pending|approval|unauthorized|held|content-failed|(stopped|stopped-once|skipped):.+)$/
@@ -72,8 +72,9 @@ function parseExpect(value, catalog, where) {
   const bar = record(expect.bar, `${where}.bar`)
   if ('alert' in bar) {
     // The bar could not read the publication: it shows the reason, no status.
-    exactFields(bar, ['alert'], ['alert'], `${where}.bar`)
+    exactFields(bar, ['alert', 'retry'], ['alert', 'retry'], `${where}.bar`)
     text(bar.alert, `${where}.bar.alert`)
+    if (typeof bar.retry !== 'boolean') fail(`${where}.bar.retry`, 'expected whether retry is shown')
   } else {
     exactFields(bar, ['state', 'text', 'action'], ['state', 'text', 'action'], `${where}.bar`)
     oneOf(bar.state, BAR_STATES, `${where}.bar.state`)
@@ -196,7 +197,9 @@ export function loadPublishStates(source) {
   for (const name of requiredNames) if (!caseNames.includes(name)) fail('cases', `the required state ${JSON.stringify(name)} has no case`)
   for (const name of caseNames) if (!requiredNames.includes(name)) fail('requiredNames', `the case ${JSON.stringify(name)} is not a required state`)
 
-  return { requiredNames, wizardLinks, collectives, matches, pullRequest, cases }
+  const mobileCases = list(root.mobileCases, 'mobileCases').map((name, index) => text(name, `mobileCases[${index}]`))
+  if (new Set(mobileCases).size !== mobileCases.length || mobileCases.some((name) => !caseNames.includes(name))) fail('mobileCases', 'expected unique existing case names')
+  return { requiredNames, mobileCases, wizardLinks, collectives, matches, pullRequest, cases }
 }
 
 /** The fixture's collective identifier at a catalog position: a valid v4 UUID. */

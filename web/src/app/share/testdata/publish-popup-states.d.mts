@@ -20,7 +20,7 @@ export interface PublishStatesMatch {
 }
 
 export interface PublishStatesExpect {
-  bar: { state: string; text: string; action: 'publish' | 'update' | 'manage' } | { alert: string };
+  bar: { state: string; text: string; action: 'publish' | 'update' | 'manage' } | { alert: string; retry: boolean };
   popup: null | {
     heading: string;
     texts: string[];
@@ -50,6 +50,7 @@ export interface PublishStatesCase {
 
 export interface PublishStatesFixture {
   requiredNames: string[];
+  mobileCases: string[];
   wizardLinks: string[];
   collectives: PublishStatesCollective[];
   matches: PublishStatesMatch[];

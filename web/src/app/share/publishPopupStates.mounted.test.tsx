@@ -242,6 +242,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
     const user = userEvent.setup();
     if (entry.steps.includes('arrive')) search = 'publish=open';
     render(<Page />);
+    await screen.findByRole('group', { name: 'publish' }, WAIT);
 
     if ('alert' in entry.expect.bar) await within(bar()).findByRole('alert', {}, WAIT);
     else await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull(), WAIT);
@@ -249,7 +250,10 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
 
     const expected = entry.expect;
     await waitFor(() => {
-      if ('alert' in expected.bar) expect(within(bar()).getByRole('alert')).toHaveTextContent(expected.bar.alert);
+      if ('alert' in expected.bar) {
+        expect(within(bar()).getByRole('alert')).toHaveTextContent(expected.bar.alert);
+        expect(within(bar()).queryByRole('button', { name: 'retry' }) !== null).toBe(expected.bar.retry);
+      }
       else {
         const label = bar().querySelector<HTMLElement>('.pub-state');
         expect(label?.dataset.state).toBe(expected.bar.state);
