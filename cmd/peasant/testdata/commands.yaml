@@ -117,6 +117,8 @@ commands:
       - { name: concurrency, type: int, default: "0" }
       - { name: repository, type: string, default: "" }
       - { name: timeout, type: duration, default: "0s" }
+      - { name: require-auto-publish-rule, type: bool, default: "false" }
+      - { name: auto-publish-event, type: string, default: "" }
     exit_cases:
       - args: ["--help"]
         expect_error: false

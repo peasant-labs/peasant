@@ -51,7 +51,11 @@ successfully, so a failed upload never blocks the push.
 Running it again updates the rule to the collectives you published to last.
 Nothing is installed in any other repository. To pause the rule, set its
 events to [] in hooks.yaml; to remove it, delete it from hooks.yaml; to remove
-the hook, run 'peasant village hooks uninstall'. A rule in hooks.yaml looks
+the hook, run 'peasant village hooks uninstall'. A hook installed for a rule
+requires an active matching binding before publishing: deleting or pausing its
+last binding stops it, while a retained active binding can keep it publishing.
+The hook file stays in place. Separately installed terminal hooks retain their
+own consent. A rule looks
 like this:
 
   version: 1
@@ -61,6 +65,11 @@ like this:
       match: github.com/acme/tools
       events: [pre-push]    # and/or post-commit; [] pauses the rule
       collectives: [11111111-1111-4111-8111-111111111111]
+
+Folder globs name the repository root, with case-sensitive matching. '*' stays
+within one segment, '**' spans depth, and '~' means home. A symlink in the
+literal prefix is resolved. Remote patterns ignore case and '*' stays within
+one segment; name subgroup depth explicitly, as host/group/*/*.
 
 It prints one line naming the collectives the repository now publishes to,
 from every rule that covers it. A hook file Peasant did not write is never

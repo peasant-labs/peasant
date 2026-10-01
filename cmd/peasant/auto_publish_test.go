@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,9 +32,11 @@ import (
 const autoPublishSessionID = "abcd1234-abcd-4bcd-8bcd-abcdef123456"
 
 var autoPublishExtraIDs = map[string]string{
-	"clone":  "abcd1234-abcd-4bcd-8bcd-abcdef120000",
-	"gone":   "abcd1234-abcd-4bcd-8bcd-abcdef120010",
-	"linked": "abcd1234-abcd-4bcd-8bcd-abcdef120020",
+	"clone":          "abcd1234-abcd-4bcd-8bcd-abcdef120000",
+	"gone":           "abcd1234-abcd-4bcd-8bcd-abcdef120010",
+	"linked":         "abcd1234-abcd-4bcd-8bcd-abcdef120020",
+	"unrelated":      "abcd1234-abcd-4bcd-8bcd-abcdef120030",
+	"gone-subfolder": "abcd1234-abcd-4bcd-8bcd-abcdef120040",
 }
 
 var autoPublishLaterIDs = []string{"abcd1234-abcd-4bcd-8bcd-abcdef120001", "abcd1234-abcd-4bcd-8bcd-abcdef120002"}
@@ -96,7 +99,13 @@ func newAutoPublishWorld(t *testing.T, fixture autopublishtest.Fixture, c autopu
 	if c.Config.License != "" {
 		body += "  license: " + string(c.Config.License) + "\n"
 	}
+	if c.Selected {
+		body += "selection:\n  mode: selected\n  harnesses:\n    claude-code:\n      sessions: [" + autoPublishSessionID + "]\n"
+	}
 	w.cfgPath = writeCfg(t, w.dir, "auto-publish.yaml", body)
+	for i := 0; i < c.Historical; i++ {
+		w.seed(t, fmt.Sprintf("abcd1234-abcd-4bcd-8bcd-%012d", 1000+i), w.repo)
+	}
 	return w
 }
 
@@ -105,6 +114,18 @@ func newAutoPublishWorld(t *testing.T, fixture autopublishtest.Fixture, c autopu
 func (w *autoPublishWorld) seedExtra(t *testing.T, role string) {
 	t.Helper()
 	switch role {
+	case "gone-subfolder":
+		sub := filepath.Join(w.repo, "services")
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		w.seed(t, autoPublishExtraIDs[role], sub)
+		if err := os.RemoveAll(sub); err != nil {
+			t.Fatal(err)
+		}
+	case "unrelated":
+		hooksGit(t, w.fresh, "", "remote", "set-url", "origin", "https://github.com/other/notes.git")
+		w.seed(t, autoPublishExtraIDs[role], w.fresh)
 	case "clone":
 		w.seed(t, autoPublishExtraIDs[role], w.fresh)
 	case "gone":
@@ -140,7 +161,7 @@ func (w *autoPublishWorld) seed(t *testing.T, sessionID, dir string) {
 	}
 	remote := ""
 	if w.remote {
-		remote = autoPublishRemote
+		remote, _ = (&ingest.ExecGitResolver{}).RemoteURL(t.Context(), dir)
 	}
 	entry := makeCmdStoreEntry(t, sessionID, "github.com-acme-tools", remote, "main", 1700000000000, dir)
 	entry.Metadata.Project.Hash = hash
@@ -168,7 +189,7 @@ func (w *autoPublishWorld) rulesPath() string {
 
 // binding is what a hook installed by a command of the world binds.
 func (w *autoPublishWorld) binding() githooks.Binding {
-	return githooks.Binding{ConfigDir: w.dir, DataDir: w.dir, StateDir: w.dir}
+	return githooks.Binding{ConfigDir: w.dir, DataDir: w.dir, StateDir: w.dir, RequireAutoPublishRule: true, AutoPublishEvent: githooks.EventPrePush}
 }
 
 func (w *autoPublishWorld) writeRules(t *testing.T, c autopublishtest.Case) {
@@ -299,6 +320,8 @@ func TestAutoPublishPush(t *testing.T) {
 				w.village.SetPublic(autoPublishSessionID, c.VillagePublic)
 			}
 			w.writeRules(t, c)
+			w.village.FailTranscriptRead(c.FailTranscriptRead)
+			w.village.FailShareRead(c.FailShareRead)
 			for _, alias := range c.FailShare {
 				w.village.FailShare(fixture.Collectives[alias].ID)
 			}
@@ -310,6 +333,13 @@ func TestAutoPublishPush(t *testing.T) {
 			if c.Again != nil {
 				if err != nil {
 					t.Fatalf("the first push failed: %v\n%s", err, output.String())
+				}
+				if c.DeleteRule != "" {
+					if err := autopublish.Update(w.rulesPath(), func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
+						return slices.DeleteFunc(rules, func(rule autopublish.Rule) bool { return rule.ID == c.DeleteRule }), nil
+					}); err != nil {
+						t.Fatal(err)
+					}
 				}
 				w.share(autoPublishSessionID, c.VillageDecides)
 				if c.PrivateBeforeAgain {
@@ -325,6 +355,14 @@ func TestAutoPublishPush(t *testing.T) {
 				}
 			}
 
+			for _, part := range c.Expect.OutputOmits {
+				if strings.Contains(output.String(), part) {
+					t.Errorf("output must omit %q: %s", part, output.String())
+				}
+			}
+			if c.Expect.Reads != nil && w.village.TranscriptReads() != *c.Expect.Reads {
+				t.Errorf("transcript reads = %d, want %d", w.village.TranscriptReads(), *c.Expect.Reads)
+			}
 			publishes := w.village.Publishes()
 			if len(publishes) != *c.Expect.Publishes {
 				t.Fatalf("Village received %d uploads, want %d\n%s", len(publishes), *c.Expect.Publishes, output.String())
@@ -410,7 +448,6 @@ func TestAutoPublishHookNeverBlocksThePush(t *testing.T) {
 			if stdout, stderr, err := w.run(t, BuildVillageCommand(), "auto", "--dir", w.repo); err != nil {
 				t.Fatalf("village auto: %v\n%s%s", err, stdout, stderr)
 			}
-			w.village.Close()
 
 			remote := filepath.Join(w.world, "remote.git")
 			hooksGit(t, w.world, "", "init", "--quiet", "--bare", remote)
@@ -449,15 +486,21 @@ func TestVillageAuto(t *testing.T) {
 			t.Parallel()
 			w := newAutoPublishWorld(t, fixture, c)
 			w.publish(t, c.Publications)
+			w.village.FailTranscriptRead(c.FailTranscriptRead)
 			// The rules are written after the publications, so the audience
 			// the command reads is the one the case shares, not a rule's.
 			if len(c.Rules) > 0 {
 				w.writeRules(t, c)
 			}
 			if c.ForkUpstream {
+				hooksGit(t, w.repo, "", "-c", "user.name=dev", "-c", "user.email=dev@example.test", "commit", "--quiet", "--allow-empty", "-m", "start")
 				hooksGit(t, w.repo, "", "remote", "add", "fork", "https://github.com/dev/tools.git")
 				hooksGit(t, w.repo, "", "config", "branch.main.remote", "fork")
 				hooksGit(t, w.repo, "", "config", "branch.main.merge", "refs/heads/main")
+				repo, resolveErr := autopublish.Resolve(t.Context(), &ingest.ExecGitResolver{}, w.repo, true)
+				if resolveErr != nil || repo.Remote == repo.Origin {
+					t.Fatalf("fork setup must have distinct origin and upstream: %+v, %v", repo, resolveErr)
+				}
 			}
 			if c.HooksPath != "" {
 				hooksGit(t, w.repo, "", "config", "core.hooksPath", c.HooksPath)

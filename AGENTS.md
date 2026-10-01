@@ -227,12 +227,17 @@ the server serves the newly built assets before you trust a screenshot or a comp
   covers. The rule is the binding. `autopublish.Decide` is the one matcher of rules,
   server-side; do not implement it again in React. `peasant village push`, which a managed hook
   runs, applies it per session, to the repository the session was recorded in (a linked
-  worktree counts as its main repository). A push that sends a bound session publishes
+  worktree counts as its main repository). A gone directory is matched by its
+  recorded path and ancestors because its repository root is no longer known;
+  a deleted nested repository can inherit a containing folder rule. A push that sends a bound session publishes
   collectives-only: private, no license, and each bound transcript is shared with its rule's
   collectives, never with the public. A session a paused rule (no event) covers is not
   published, a transcript that is public on Village is not updated, and a collective that
   rejected or lost a transcript is not asked again. Kickstart's publication and the local web's
-  publish do not read the rules. A rule installs no hook by itself: `peasant village auto` and
+  publish do not read the rules. A rule-installed hook requires an active matching binding; deleting or
+  pausing the last binding stops its publication while retaining its hook file.
+  Separately installed plain terminal hooks retain their independent consent.
+  A rule installs no hook by itself: `peasant village auto` and
   the settings install route install one repository at a time, by an explicit act, and only in
   a repository Peasant has recorded sessions in. Any managed hook applies the rules, including
   one installed with `peasant village hooks install`, so saving a rule changes what an installed

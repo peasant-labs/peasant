@@ -29,6 +29,21 @@
 # Every case is required by name. The first eight are the acceptance cases
 # of auto-publish rules; the rest guard the behavior around them.
 requiredNames:
+  - rule-required-push-stops-with-only-a-commit-binding
+  - rule-required-commit-keeps-a-commit-binding
+  - paused-session-is-absent-from-redaction-record
+  - rule-required-hook-stops-after-deletion
+  - rule-required-hook-keeps-a-retained-binding
+  - rule-required-hook-stops-at-a-paused-binding
+  - rule-required-hook-keeps-unbound-sessions-out
+  - unchanged-bound-session-needs-no-visibility-read
+  - unreadable-audience-holds-the-update
+  - unreadable-share-history-stops-the-share
+  - unrelated-rule-keeps-the-scoped-audience
+  - rule-outside-selection-keeps-the-selected-audience
+  - folder-rule-binds-a-gone-subfolder
+  - remote-rule-binds-a-gone-clone
+  - remote-double-wildcard-is-refused
   - folder-glob-match
   - remote-match
   - no-match
@@ -106,6 +121,12 @@ requiredNames:
   - village-auto-needs-a-recorded-repository
   - village-auto-needs-a-sign-in
   - village-auto-keeps-a-foreign-hook
+
+  - unreadable-rules-refuse-a-save
+  - missing-store-refuses-a-save
+  - missing-store-refuses-a-delete
+  - missing-store-refuses-an-install
+  - village-auto-unreadable-audience-changes-nothing
 
 collectives:
   platform: {id: 11111111-1111-4111-8111-111111111111, name: platform, acceptance: open}
@@ -416,10 +437,12 @@ cases:
   # --- a push the rules may bind ---
   - name: covered-push-publishes-private-and-shares
     driver: push
+    flags: [--verbose]
     rules:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform, review]}
     config: {visibility: public, license: CC-BY-4.0}
     expect:
+      outputContains: ["rule acme binds 1 session(s)", "1 share(s) made, 1 waiting"]
       publishes: 1
       license: ""
       ownerUpdates: 0
@@ -763,3 +786,181 @@ cases:
       errorContains: [the rule is saved, pre-push hook was not installed]
       rule: {kind: remote, match: "{remote}", events: [pre-push], collectives: [platform]}
       installed: []
+
+  - name: unchanged-bound-session-needs-no-visibility-read
+    driver: push
+    historical: 32
+    before: true
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: private}
+    failTranscriptRead: true
+    expect: {publishes: 33, audience: {}, reads: 0}
+
+  - name: unreadable-audience-holds-the-update
+    driver: push
+    before: true
+    flags: [--force, --verbose]
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: private}
+    failTranscriptRead: true
+    expect:
+      publishes: 1
+      audience: {}
+      outputContains: ["could not be read from Village", "retry when Village answers"]
+
+  - name: unreadable-share-history-stops-the-share
+    driver: push
+    before: true
+    flags: [--force]
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: private}
+    failShareRead: true
+    expect:
+      publishes: 2
+      audience: {}
+      errorContains: ["not shared"]
+      outputContains: ["reading who can read the transcript failed", "--force"]
+      attemptContains: "--force"
+
+  - name: unrelated-rule-keeps-the-scoped-audience
+    driver: push
+    sessions: [unrelated]
+    flags: [--visibility, private, --license, CC-BY-4.0]
+    rules:
+      - {id: notes, kind: remote, match: github.com/other/notes, events: [pre-push], collectives: [platform]}
+    config: {visibility: private, license: CC-BY-4.0}
+    expect: {publishes: 1, license: CC-BY-4.0, audience: {}, others: {unrelated: {}}}
+
+  - name: rule-outside-selection-keeps-the-selected-audience
+    driver: push
+    selected: true
+    unscoped: true
+    sessions: [unrelated]
+    flags: [--visibility, private, --license, CC-BY-4.0]
+    rules:
+      - {id: notes, kind: remote, match: github.com/other/notes, events: [pre-push], collectives: [platform]}
+    config: {visibility: private, license: CC-BY-4.0}
+    expect: {publishes: 1, license: CC-BY-4.0, audience: {}, others: {unrelated: {}}}
+
+  - name: folder-rule-binds-a-gone-subfolder
+    driver: push
+    sessions: [gone-subfolder]
+    rules:
+      - {id: tools, kind: folder, match: "{world}/tools", events: [pre-push], collectives: [platform]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 2, audience: {platform: approved}, others: {gone-subfolder: {platform: approved}}}
+
+  - name: remote-rule-binds-a-gone-clone
+    driver: push
+    sessions: [gone]
+    rules:
+      - {id: tools, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 2, audience: {platform: approved}, others: {gone: {platform: approved}}}
+
+  - name: remote-double-wildcard-is-refused
+    driver: validate
+    rules:
+      - {id: subgroups, kind: remote, match: gitlab.com/group/**, events: [pre-push], collectives: [platform]}
+    expect: {invalid: "name each level"}
+
+  - name: rule-required-hook-stops-after-deletion
+    driver: push
+    deleteRule: acme
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+    config: {visibility: public, license: CC-BY-4.0}
+    again: [--force, --require-auto-publish-rule]
+    expect: {publishes: 1, audience: {platform: approved}}
+
+  - name: rule-required-hook-keeps-a-retained-binding
+    driver: push
+    deleteRule: platform
+    rules:
+      - {id: platform, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+      - {id: research, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [research]}
+    config: {visibility: public, license: CC-BY-4.0}
+    again: [--force, --require-auto-publish-rule]
+    expect: {publishes: 2, audience: {platform: approved, research: approved}}
+
+  - name: rule-required-hook-stops-at-a-paused-binding
+    driver: push
+    flags: [--force, --require-auto-publish-rule, --visibility, private]
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [], collectives: [platform]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 0, audience: {}}
+
+  - name: rule-required-hook-keeps-unbound-sessions-out
+    driver: push
+    flags: [--require-auto-publish-rule]
+    rules: []
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 0, audience: {}}
+
+  - name: paused-session-is-absent-from-redaction-record
+    driver: push
+    flags: [--verbose]
+    rules:
+      - {id: acme, kind: remote, match: github.com/acme/tools, events: [], collectives: [platform]}
+    config: {visibility: public, license: CC-BY-4.0}
+    expect:
+      publishes: 0
+      audience: {}
+      outputContains: ["paused and publishes nothing"]
+      outputOmits: ["rule set version:"]
+
+  - name: unreadable-rules-refuse-a-save
+    driver: rule-body
+    method: PUT
+    body: '{"kind":"remote","match":"github.com/acme/tools","events":["pre-push"],"collectives":["11111111-1111-4111-8111-111111111111"]}'
+    rulesFile: 'version: ['
+    expect: {status: 500}
+  - name: missing-store-refuses-a-save
+    driver: rule-body
+    method: PUT
+    unavailable: true
+    expect: {status: 503, code: auto_publish_unavailable}
+  - name: missing-store-refuses-a-delete
+    driver: rule-body
+    method: DELETE
+    unavailable: true
+    expect: {status: 503, code: auto_publish_unavailable}
+  - name: missing-store-refuses-an-install
+    driver: rule-body
+    method: POST
+    unavailable: true
+    expect: {status: 503, code: auto_publish_unavailable}
+  - name: village-auto-unreadable-audience-changes-nothing
+    driver: village-auto
+    publications:
+      - shared: {platform: approved}
+    failTranscriptRead: true
+    expect:
+      errorContains: [collectives of the transcript, nothing was changed, retry]
+      ruleIds: []
+      installed: []
+
+  - name: rule-required-push-stops-with-only-a-commit-binding
+    driver: push
+    flags: [--require-auto-publish-rule, --auto-publish-event, pre-push]
+    rules:
+      - {id: push, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+      - {id: commit, kind: remote, match: github.com/acme/tools, events: [post-commit], collectives: [review]}
+    deleteRule: push
+    again: [--force, --require-auto-publish-rule, --auto-publish-event, pre-push]
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 1, audience: {platform: approved}, others: {}}
+  - name: rule-required-commit-keeps-a-commit-binding
+    driver: push
+    flags: [--require-auto-publish-rule, --auto-publish-event, post-commit]
+    rules:
+      - {id: push, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
+      - {id: commit, kind: remote, match: github.com/acme/tools, events: [post-commit], collectives: [review]}
+    deleteRule: push
+    again: [--force, --require-auto-publish-rule, --auto-publish-event, post-commit]
+    config: {visibility: public, license: CC-BY-4.0}
+    expect: {publishes: 2, audience: {review: pending}, others: {}}

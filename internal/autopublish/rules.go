@@ -96,10 +96,10 @@ func (r Rule) Covers(repo Repository) bool {
 	}
 }
 
-// HookEvents returns the rule's events as the hook events githooks manages.
+// hookEvents returns the rule's events as the hook events githooks manages.
 // The two closed sets name the same hooks; an event githooks does not know
 // fails, so a rule never installs a hook it did not name.
-func (r Rule) HookEvents() ([]githooks.Event, error) {
+func (r Rule) hookEvents() ([]githooks.Event, error) {
 	events := make([]githooks.Event, 0, len(r.Events))
 	for _, event := range r.Events {
 		parsed, err := githooks.ParseEvent(string(event))
@@ -133,9 +133,43 @@ type Decision struct {
 // paused.
 func (d Decision) Covered() bool { return len(d.Rules) > 0 || len(d.Paused) > 0 }
 
+// Outcome is what a decision means for a session of the repository.
+type Outcome int
+
+const (
+	// Unbound: no rule covers the repository, so the rules say nothing about
+	// how its sessions publish.
+	Unbound Outcome = iota
+	// Paused: rules cover the repository and none names an event, so a push
+	// publishes nothing of it.
+	Paused
+	// Bound: a rule publishes the repository, private, to its collectives.
+	Bound
+)
+
+// Outcome says what the decision means for a session of the repository. It
+// is the one reading of a decision: the push, and the local web reporting
+// what a hook push does, both ask it.
+func (d Decision) Outcome() Outcome {
+	switch {
+	case len(d.Rules) > 0:
+		return Bound
+	case len(d.Paused) > 0:
+		return Paused
+	default:
+		return Unbound
+	}
+}
+
 // Decide runs the one matcher: which rules cover the repository, and what they
 // publish it to.
 func Decide(rules []Rule, repo Repository) Decision {
+	return DecideForEvent(rules, repo, "")
+}
+
+// DecideForEvent uses the canonical matcher with the consent for one hook event.
+// An empty event keeps the ordinary explicit-push behavior.
+func DecideForEvent(rules []Rule, repo Repository, event schema.AutoPublishEvent) Decision {
 	var decision Decision
 	for _, rule := range rules {
 		if !rule.Covers(repo) {
@@ -143,6 +177,9 @@ func Decide(rules []Rule, repo Repository) Decision {
 		}
 		if len(rule.Events) == 0 {
 			decision.Paused = append(decision.Paused, rule.ID)
+			continue
+		}
+		if event != "" && !slices.Contains(rule.Events, event) {
 			continue
 		}
 		decision.Rules = append(decision.Rules, rule.ID)
@@ -341,6 +378,9 @@ func validateMatch(kind schema.AutoPublishRuleKind, match string) error {
 		}
 		if _, err := path.Match(label, ""); errors.Is(err, path.ErrBadPattern) {
 			return fmt.Errorf("the remote pattern %q is malformed; close every '[' and escape a literal '\\'", match)
+		}
+		if strings.Contains(match, "**") {
+			return fmt.Errorf("the remote pattern %q holds '**', but in a remote pattern '*' stays within one path segment and '**' reaches no deeper; name each level, as in host/group/*/* for the repositories of a group's subgroups", match)
 		}
 		if _, repoPath, _ := strings.Cut(label, ":"); !strings.Contains(repoPath, "/") {
 			return fmt.Errorf("the remote pattern %q names an owner but no repository, so it matches no remote; write %s/* for every repository of the owner", match, strings.TrimSuffix(match, "/"))

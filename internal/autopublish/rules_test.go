@@ -2,12 +2,16 @@ package autopublish_test
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -144,9 +148,6 @@ func TestFolderMatchNamesExactlyItsFolder(t *testing.T) {
 	}
 }
 
-// driverCall finds a driver test's call for its fixture cases.
-var driverCall = regexp.MustCompile(`\.For\(t, autopublishtest\.(Driver\w+)\)`)
-
 // TestEveryDriverHasOneTest guards the fixture against a deleted, renamed, or
 // duplicated driver test: its cases would then run nowhere, or twice, while
 // the required-name manifest stayed green.
@@ -159,12 +160,48 @@ func TestEveryDriverHasOneTest(t *testing.T) {
 			if err != nil || entry.IsDir() || !strings.HasSuffix(path, "_test.go") {
 				return err
 			}
-			raw, err := os.ReadFile(path)
+			source, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 			if err != nil {
 				return err
 			}
-			for _, match := range driverCall.FindAllStringSubmatch(string(raw), -1) {
-				calls[match[1]]++
+			for _, declaration := range source.Decls {
+				fn, ok := declaration.(*ast.FuncDecl)
+				if !ok || !strings.HasPrefix(fn.Name.Name, "Test") || fn.Body == nil {
+					continue
+				}
+				var owned []string
+				skipped := false
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					call, ok := node.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					selector, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					if selector.Sel.Name == "Skip" || selector.Sel.Name == "SkipNow" || selector.Sel.Name == "Skipf" {
+						skipped = true
+					}
+					if selector.Sel.Name != "For" || len(call.Args) != 2 {
+						return true
+					}
+					argument, ok := call.Args[1].(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					qualifier, ok := argument.X.(*ast.Ident)
+					if ok && qualifier.Name == "autopublishtest" {
+						owned = append(owned, argument.Sel.Name)
+					}
+					return true
+				})
+				if skipped && len(owned) > 0 {
+					t.Errorf("%s %s skips a fixture driver", path, fn.Name.Name)
+				}
+				for _, driver := range owned {
+					calls[driver]++
+				}
 			}
 			return nil
 		})
@@ -260,5 +297,89 @@ func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// Concurrent edits must preserve the whole rule set; each edit holds the file
+// lock through its read, callback and atomic write.
+func TestConcurrentUpdatesRetainEveryRule(t *testing.T) {
+	t.Parallel()
+	fixture := autopublishtest.Load(t)
+	path := filepath.Join(t.TempDir(), "hooks.yaml")
+	start := make(chan struct{})
+	errors := make(chan error, len(fixture.Cases))
+	want := map[string]bool{}
+	var group sync.WaitGroup
+	for _, c := range fixture.Cases {
+		if c.Driver != autopublishtest.DriverMatcher {
+			continue
+		}
+		if len(c.Rules) == 0 {
+			continue
+		}
+		rule := c.Rules[0]
+		rule.ID = c.Name
+		want[rule.ID] = true
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			errors <- autopublish.Update(path, func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
+				runtime.Gosched()
+				return append(rules, rule), nil
+			})
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := autopublish.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range got {
+		if !want[rule.ID] {
+			t.Errorf("unexpected rule %q", rule.ID)
+		}
+		delete(want, rule.ID)
+	}
+	if len(want) > 0 {
+		t.Fatalf("concurrent edits lost rules: %v", want)
+	}
+}
+
+func TestUpdatePreservesAnUnreadableFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "hooks.yaml")
+	raw := []byte("autoPublish: [unfinished")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	err := autopublish.Update(path, func(rules []autopublish.Rule) ([]autopublish.Rule, error) { called = true; return nil, nil })
+	if err == nil || called {
+		t.Fatalf("unreadable rules must refuse before the callback: %v, called=%v", err, called)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil || string(after) != string(raw) {
+		t.Fatalf("unreadable file changed: %q, %v", after, readErr)
+	}
+}
+
+// A missing recorded path is not the directory the command happens to run in.
+func TestSessionRepositoryNeverUsesTheCurrentDirectory(t *testing.T) {
+	t.Parallel()
+	const remote = "https://github.com/acme/tools.git"
+	repo := autopublish.SessionRepository(t.Context(), &ingest.ExecGitResolver{}, "", remote, false)
+	if repo.Root != "" || repo.MainRoot != "" || repo.Gone != "" || repo.Remote != remote || repo.Origin != remote {
+		t.Fatalf("empty recorded path resolved to a repository: %+v", repo)
+	}
+	if _, err := autopublish.Resolve(t.Context(), &ingest.ExecGitResolver{}, "", false); err == nil {
+		t.Fatal("an empty directory resolved to the command's repository")
 	}
 }

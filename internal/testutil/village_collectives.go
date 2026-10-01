@@ -68,6 +68,8 @@ type CollectiveVillage struct {
 	failShare            map[schema.VillageUUID]bool
 	conflictShare        map[schema.VillageUUID]bool
 	failShareRead        bool
+	failTranscriptRead   bool
+	transcriptReads      int
 	requiresNewerPeasant bool
 	collectivesStatus    int
 	repositoriesStatus   int
@@ -131,6 +133,20 @@ func (v *CollectiveVillage) FailShareRead(fail bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.failShareRead = fail
+}
+
+// FailTranscriptRead makes the owned transcript read fail closed.
+func (v *CollectiveVillage) FailTranscriptRead(fail bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.failTranscriptRead = fail
+}
+
+// TranscriptReads is the number of visibility and share-list reads.
+func (v *CollectiveVillage) TranscriptReads() int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.transcriptReads
 }
 
 // RequireNewerPeasant makes the double advertise a push contract window that
@@ -424,6 +440,11 @@ func (v *CollectiveVillage) share(w http.ResponseWriter, r *http.Request, transc
 func (v *CollectiveVillage) readShares(w http.ResponseWriter, transcript schema.TranscriptID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.transcriptReads++
+	if v.failTranscriptRead {
+		http.Error(w, `{"error":"Transcript read unavailable"}`, http.StatusInternalServerError)
+		return
+	}
 	shares, exists := v.transcripts[transcript]
 	if !exists {
 		http.Error(w, `{"error":"Transcript not found"}`, http.StatusNotFound)

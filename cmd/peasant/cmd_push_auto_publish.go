@@ -59,12 +59,15 @@ func (p autoPublishPlan) bound() bool { return len(p.collectives) > 0 || len(p.h
 // planAutoPublish matches every session this push would send against the
 // rules in hooks.yaml. A rules file that cannot be read refuses the push: a
 // rule decides who can read a transcript, so it is never guessed at.
-func planAutoPublish(ctx context.Context, cmd *cobra.Command, db *store.Store, cfg *config.Config, runCfg push.PipelineConfig, creds *auth.Credentials) (autoPublishPlan, error) {
+func planAutoPublish(ctx context.Context, cmd *cobra.Command, db *store.Store, cfg *config.Config, runCfg push.PipelineConfig, requireRule bool, event schema.AutoPublishEvent) (autoPublishPlan, error) {
 	path := autoPublishRulesPath(cmd)
 	rules, err := autopublish.Load(path)
 	if err != nil || len(rules) == 0 {
 		if err != nil {
 			err = fmt.Errorf("village push: %w; nothing was uploaded", err)
+		}
+		if requireRule && err == nil {
+			return autoPublishPlan{pinned: map[string]bool{}}, nil
 		}
 		return autoPublishPlan{}, err
 	}
@@ -74,9 +77,7 @@ func planAutoPublish(ctx context.Context, cmd *cobra.Command, db *store.Store, c
 	if err != nil {
 		return autoPublishPlan{}, fmt.Errorf("village push: read the sessions to match against the auto-publish rules in %s: %w; nothing was uploaded", path, err)
 	}
-	candidates = filterToSelectedSessions(candidates, runCfg.FilterSessionIDs)
-	candidates, _ = push.ApplySelection(candidates, runCfg.Selection)
-	candidates = push.ApplyRepositoryScope(candidates, runCfg.Repository)
+	candidates, _ = push.NarrowCandidates(candidates, runCfg)
 
 	// Only a remote rule reads remotes, and each read is a git process
 	// inside the hook's budget.
@@ -87,25 +88,22 @@ func planAutoPublish(ctx context.Context, cmd *cobra.Command, db *store.Store, c
 		if repo, ok := repositories[row.ProjectPath]; ok {
 			return repo
 		}
-		repo, resolveErr := autopublish.Resolve(ctx, git, row.ProjectPath, remotes)
-		if resolveErr != nil {
-			// The directory the session was recorded in is gone, or is not in
-			// a repository: match its path and the remote it recorded.
-			repo = autopublish.Repository{Gone: row.ProjectPath, Remote: row.GitRemote, Origin: row.GitRemote}
-		}
+		repo := autopublish.SessionRepository(ctx, git, row.ProjectPath, row.GitRemote, remotes)
 		repositories[row.ProjectPath] = repo
 		return repo
 	}
 
 	plan := autoPublishPlan{pinned: map[string]bool{}, collectives: map[string][]schema.VillageUUID{}, held: map[string]string{}}
 	for _, row := range candidates {
-		decision := autopublish.Decide(rules, repositoryOf(row))
-		switch {
-		case !decision.Covered():
+		decision := autopublish.DecideForEvent(rules, repositoryOf(row), event)
+		switch decision.Outcome() {
+		case autopublish.Unbound:
 			plan.unbound++
-			plan.pinned[row.SessionID] = true
-		case len(decision.Rules) == 0:
-			plan.held[row.SessionID] = fmt.Sprintf("auto-publish rule %s covers it and names no hook event, so it is paused and publishes nothing", strings.Join(decision.Paused, ", "))
+			if !requireRule {
+				plan.pinned[row.SessionID] = true
+			}
+		case autopublish.Paused:
+			plan.held[row.SessionID] = fmt.Sprintf("auto-publish rule %s covers it and names no hook event, so it is paused and publishes nothing; restore its events in hooks.yaml, or publish by hand from /share", strings.Join(decision.Paused, ", "))
 		default:
 			plan.pinned[row.SessionID] = true
 			plan.collectives[row.SessionID] = decision.Collectives
@@ -120,52 +118,40 @@ func planAutoPublish(ctx context.Context, cmd *cobra.Command, db *store.Store, c
 		plan.unbound = 0
 		return plan, nil
 	}
-	if runCfg.DryRun {
-		return plan, nil
-	}
-	if err := holdPublicTranscripts(ctx, db, creds, &plan); err != nil {
-		return autoPublishPlan{}, err
-	}
 	return plan, nil
 }
 
-// holdPublicTranscripts holds each bound session whose transcript is public
-// on Village now. An update keeps the audience a transcript has, so it would
-// take the new content public, and a rule never publishes publicly. Village
-// is asked, not the local receipt, so a transcript made private there is
-// published again, and one made public there since the last push is held. A
-// transcript whose audience cannot be read is held too.
-func holdPublicTranscripts(ctx context.Context, db *store.Store, creds *auth.Credentials, plan *autoPublishPlan) error {
-	bound := make([]string, 0, len(plan.collectives))
-	for id := range plan.collectives {
-		bound = append(bound, id)
-	}
-	receipts, err := db.SessionPublications(ctx, creds.VillageURL, creds.UserID, bound)
-	if err != nil {
-		return fmt.Errorf("village push: read the publication receipts of the sessions the auto-publish rules bind: %w; nothing was uploaded", err)
-	}
-	client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
-	for id, record := range receipts {
-		visibility, readErr := client.TranscriptVisibility(ctx, record.Receipt.TranscriptID)
-		switch {
-		case readErr != nil:
-			plan.held[id] = fmt.Sprintf("who can read its transcript %s could not be read from Village (%v), and an auto-publish rule publishes only to collectives, so it was not updated; retry when Village answers", record.Receipt.TranscriptURL, readErr)
-		case visibility == schema.VillageTranscriptVisibilityPublic:
-			plan.held[id] = fmt.Sprintf("its transcript %s is public on Village, and an auto-publish rule publishes only to collectives, never publicly; make the transcript private on Village, and the next push updates it and shares it with the rule's collectives", record.Receipt.TranscriptURL)
-		default:
-			continue
+// updateHold asks Village at the point the pipeline will send an update. An
+// unchanged session is skipped before this read, and a first upload needs none.
+func (p autoPublishPlan) updateHold(db *store.Store, creds *auth.Credentials, client *village.VillageClient) func(context.Context, string) string {
+	return func(ctx context.Context, id string) string {
+		if len(p.collectives[id]) == 0 {
+			return ""
 		}
-		delete(plan.collectives, id)
-		delete(plan.pinned, id)
+		receipts, err := db.SessionPublications(ctx, creds.VillageURL, creds.UserID, []string{id})
+		if err != nil {
+			return fmt.Sprintf("its publication receipt could not be read (%v); retry when the local store answers", err)
+		}
+		record, ok := receipts[id]
+		if !ok {
+			return "its prior publication has no local receipt; retry after its receipt is restored"
+		}
+		visibility, err := client.TranscriptVisibility(ctx, record.Receipt.TranscriptID)
+		if err != nil {
+			return fmt.Sprintf("who can read its transcript %s could not be read from Village (%v), and an auto-publish rule publishes only to collectives, so it was not updated; retry when Village answers", record.Receipt.TranscriptURL, err)
+		}
+		if visibility == schema.VillageTranscriptVisibilityPublic {
+			return fmt.Sprintf("its transcript %s is public on Village, and an auto-publish rule publishes only to collectives, never publicly; make the transcript private on Village, and the next push updates it and shares it with the rule's collectives", record.Receipt.TranscriptURL)
+		}
+		return ""
 	}
-	return nil
 }
 
 // refuseAudienceFlagsUnderRules refuses --visibility and --license on a push a
 // rule binds. The rule is the audience the developer set up; a flag that
 // publishes another way is refused rather than silently overridden in either
 // direction.
-func refuseAudienceFlagsUnderRules(cmd *cobra.Command, plan autoPublishPlan) error {
+func refuseAudienceFlagsUnderRules(cmd *cobra.Command) error {
 	for _, flag := range []string{"visibility", "license"} {
 		if cmd.Flags().Changed(flag) {
 			return fmt.Errorf(

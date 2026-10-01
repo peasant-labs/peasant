@@ -12,7 +12,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -493,16 +492,8 @@ func (p *Pipeline) getTargetSessions(ctx context.Context, parentSpanID string) (
 	baseCount = len(base)
 
 	selectionSpan := rec.StartChildSpan(perf.StagePushSelection, parentSpanID, nil)
-	base = p.filterByWizardSelection(base)
-	if p.runCfg.PinnedSessionIDs != nil {
-		base = slices.DeleteFunc(base, func(s ingest.PushSessionRow) bool { return !p.runCfg.PinnedSessionIDs[s.SessionID] })
-	}
-	kept, withheld := ApplySelection(base, p.runCfg.Selection)
-	kept = ApplyRepositoryScope(kept, p.runCfg.Repository)
-	// The withheld notice runs AFTER the repository narrowing, not before it: a
-	// hook firing in one repository must not report branch conflicts belonging
-	// to another one on every commit.
-	p.noticeWithheld(ApplyRepositoryScope(withheld, p.runCfg.Repository))
+	kept, withheld := NarrowCandidates(base, p.runCfg)
+	p.noticeWithheld(withheld)
 	selectionSpan.End(perf.OutcomeOK, nil)
 	return kept, baseCount, nil
 }
@@ -533,6 +524,40 @@ func orderForBudget(ctx context.Context, sessions []ingest.PushSessionRow) []ing
 		return ordered[i].SessionID < ordered[j].SessionID
 	})
 	return ordered
+}
+
+// NarrowCandidates narrows push candidates the way a run does, in the run's
+// order: to the wizard's choice, to the sessions the auto-publish rules
+// pinned, to the saved selection, then to the repository scope. Everything
+// that describes a run before it starts (the rules' plan and the redaction
+// record) narrows through it, so it describes what the run sends. withheld
+// are the sessions the selection kept out, within the repository scope: a
+// hook firing in one repository must not report branch conflicts belonging
+// to another one on every commit.
+func NarrowCandidates(sessions []ingest.PushSessionRow, runCfg PipelineConfig) (kept, withheld []ingest.PushSessionRow) {
+	if len(runCfg.FilterSessionIDs) > 0 {
+		chosen := make(map[string]bool, len(runCfg.FilterSessionIDs))
+		for _, id := range runCfg.FilterSessionIDs {
+			chosen[id] = true
+		}
+		sessions = keepSessions(sessions, chosen)
+	}
+	if runCfg.PinnedSessionIDs != nil {
+		sessions = keepSessions(sessions, runCfg.PinnedSessionIDs)
+	}
+	kept, withheld = ApplySelection(sessions, runCfg.Selection)
+	return ApplyRepositoryScope(kept, runCfg.Repository), ApplyRepositoryScope(withheld, runCfg.Repository)
+}
+
+// keepSessions returns the sessions keep names, in order, in a new slice.
+func keepSessions(sessions []ingest.PushSessionRow, keep map[string]bool) []ingest.PushSessionRow {
+	out := make([]ingest.PushSessionRow, 0, len(sessions))
+	for _, session := range sessions {
+		if keep[session.SessionID] {
+			out = append(out, session)
+		}
+	}
+	return out
 }
 
 // ApplyRepositoryScope narrows sessions to the canonical project identities one
@@ -862,25 +887,6 @@ func (p *Pipeline) noticeWithheld(withheld []ingest.PushSessionRow) {
 	}
 }
 
-// filterByWizardSelection applies the FilterSessionIDs whitelist if set.
-// When FilterSessionIDs is nil or empty, all sessions pass through.
-func (p *Pipeline) filterByWizardSelection(sessions []ingest.PushSessionRow) []ingest.PushSessionRow {
-	if len(p.runCfg.FilterSessionIDs) == 0 {
-		return sessions
-	}
-	allowed := make(map[string]struct{}, len(p.runCfg.FilterSessionIDs))
-	for _, id := range p.runCfg.FilterSessionIDs {
-		allowed[id] = struct{}{}
-	}
-	var out []ingest.PushSessionRow
-	for _, s := range sessions {
-		if _, ok := allowed[s.SessionID]; ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // pushSession publishes one coherent database capture without source file access.
 func (p *Pipeline) pushSession(
 	ctx context.Context,
@@ -1195,6 +1201,14 @@ func (p *Pipeline) pushSession(
 	held := !p.runCfg.Force && sess.PushedAt != nil && previous != nil && alreadyHeld(previous.Receipt, operation, expectedFingerprint)
 	if held && !p.changesVisibility() {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusSkipped}
+	}
+	// An update is asked about here, where the run knows it is one and has
+	// sent nothing yet, so a run asks once per session it updates and never
+	// for a session it skips as unchanged.
+	if !held && publishedBefore && p.runCfg.UpdateHold != nil {
+		if reason := p.runCfg.UpdateHold(ctx, sess.SessionID); reason != "" {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
+		}
 	}
 	var (
 		receipt    schema.AuthoritativePublishResponse

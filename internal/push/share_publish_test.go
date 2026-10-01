@@ -359,3 +359,38 @@ func seedShareContent(t *testing.T, db *store.Store, missingModel bool, text str
 	meta.Stats = ingest.StatsInfo{TurnCount: 1, DurationMs: 60000}
 	testutil.SeedReadyPublication(t, db, &meta, []schema.SessionEntry{{SessionID: meta.SessionID, EntryIndex: 1, Harness: meta.ModelHarness, Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &text}})
 }
+
+// TestRuleShareRecordsASentTranscriptAfterCancellation protects the boundary
+// between the spent upload budget and durable recording of an unshared upload.
+func TestRuleShareRecordsASentTranscriptAfterCancellation(t *testing.T) {
+	t.Parallel()
+	db := seedShareSession(t, false)
+	fixture := loadShareStepsFixture(t)
+	collective := fixture.Collectives["platform"].ID
+	remote := testutil.NewCollectiveVillage(t, testutil.VillageCollective{ID: collective, Name: "team", Acceptance: schema.VillageGroupAcceptanceOpen, Member: true})
+	creds := &auth.Credentials{APIKey: "test-key", KeyID: "key-1", UserID: "user-1", VillageURL: remote.URL()}
+	client := village.NewVillageClient(remote.URL(), creds.APIKey, nil)
+	cfg := config.BaseConfig()
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline, err := push.NewSharePipeline(db, client, creds, cfg, redactor, []string{testutil.TestSessionUUID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := pipeline.Run(t.Context())
+	if err != nil || sent.New != 1 {
+		t.Fatalf("publish before cancel: %+v, %v", sent, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	results, err := (push.RuleShare{Store: db, Village: client, Creds: creds, Retry: "peasant village push --force"}).Run(ctx, sent, map[string][]schema.VillageUUID{testutil.TestSessionUUID: {collective}})
+	if err != nil || len(results) != 1 || results[0].Status != schema.SyncPushSessionError || !strings.Contains(results[0].Error, "--force") {
+		t.Fatalf("canceled sharing must read the sent transcript and name the retry: %+v, %v", results, err)
+	}
+	attempts, err := db.SessionPublicationAttempts(t.Context(), creds.VillageURL, creds.UserID, []string{testutil.TestSessionUUID})
+	if err != nil || !strings.Contains(attempts[testutil.TestSessionUUID].Message, "--force") {
+		t.Fatalf("unshared transcript attempt: %+v, %v", attempts, err)
+	}
+}

@@ -1,0 +1,50 @@
+requiredNames:
+  - terminal-hook-with-no-rule
+  - guarded-hook-with-no-rule
+  - guarded-hook-after-binding-deleted
+  - terminal-hook-after-binding-deleted
+  - hand-added-rule-guard
+  - unreadable-rules-refuse-publication
+  - paused-binding-stays-dormant
+  - guarded-push-keeps-an-overlapping-push-binding
+  - guarded-push-stops-with-only-a-commit-binding
+cases:
+  - name: terminal-hook-with-no-rule
+    expect: true
+  - name: guarded-hook-with-no-rule
+    guarded: true
+    expect: false
+  - name: guarded-hook-after-binding-deleted
+    guarded: true
+    events: [pre-push]
+    delete: true
+    expect: false
+  - name: terminal-hook-after-binding-deleted
+    events: [pre-push]
+    delete: true
+    expect: true
+  - name: hand-added-rule-guard
+    guarded: true
+    manual: true
+    events: [pre-push]
+    expect: true
+  - name: unreadable-rules-refuse-publication
+    corrupt: true
+    expect: false
+  - name: paused-binding-stays-dormant
+    guarded: true
+    events: []
+    expect: false
+
+  - name: guarded-push-keeps-an-overlapping-push-binding
+    guarded: true
+    events: [pre-push]
+    retainedEvents: [pre-push]
+    delete: true
+    expect: true
+  - name: guarded-push-stops-with-only-a-commit-binding
+    guarded: true
+    events: [pre-push]
+    retainedEvents: [post-commit]
+    delete: true
+    expect: false

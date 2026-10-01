@@ -355,7 +355,10 @@ func contentOutcomes(ctx context.Context, sessions SharePublishStore, creds *aut
 			case PushStatusHeld:
 				outcome.status = schema.SyncPushSessionHeld
 				content.Outcome = schema.SyncPushStepSkipped
-				content.Reason = "the session is held until ingest completes; nothing was sent"
+				content.Reason = "the session is held back; nothing was sent"
+				if result.HeldReason != "" {
+					content.Reason = "nothing was sent: " + result.HeldReason
+				}
 			default:
 				outcome.status = schema.SyncPushSessionError
 				content.Outcome = schema.SyncPushStepFailed
