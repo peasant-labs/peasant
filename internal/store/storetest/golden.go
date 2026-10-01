@@ -38,8 +38,10 @@ import (
 // _install_salt row, no seed rows). Bump it when the recipe changes — seeds,
 // pragmas, build steps, or a dependency bump that could alter the written
 // file — so the new recipe builds under a new stamp instead of reusing a
-// stale template.
-const cacheScheme = "v1"
+// stale template. v2: a fresh database is now created from the committed
+// baseline snapshot, so the recipe changed even though the resulting schema
+// did not.
+const cacheScheme = "v2"
 
 // buildDirMaxAge bounds orphaned build-* debris: a killed run's worst trace
 // is a build-* dir and a tiny lock file, reaped here on the next successful
