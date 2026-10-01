@@ -227,6 +227,8 @@ async function probe(page, theme, entry) {
       actionRadius: style('.pub-bar .pub-bar-action', 'borderTopLeftRadius'),
       dialogRadius: style('[role="dialog"]', 'borderTopLeftRadius'),
       dialogBody: style('[role="dialog"] .pub-line', 'fontSize'),
+      dialogHeadingWeight: style('[role="dialog"] .dlg-head h3', 'fontWeight'),
+      dialogHeadingFamily: style('[role="dialog"] .dlg-head h3', 'fontFamily'),
       atkinson: document.fonts.check('16px "Atkinson Hyperlegible"'),
     }
   }, THEME_ATTRIBUTES)
@@ -235,6 +237,7 @@ async function probe(page, theme, entry) {
   if (!found.atkinson || !/atkinson/i.test(found.body) || /mono/i.test(found.body.split(',')[0])) throw fail(`probing ${entry.name}`, `the body font is ${JSON.stringify(found.body)}`)
   if (!('alert' in entry.expect.bar) && !/atkinson.*mono/i.test((found.barLabel ?? '').split(',')[0])) throw fail(`probing ${entry.name}`, `the bar status font is ${JSON.stringify(found.barLabel)}, not the mono chrome`)
   if (!('alert' in entry.expect.bar) && found.actionRadius !== '0px') throw fail(`probing ${entry.name}`, `the bar action has radius ${found.actionRadius}`)
+  if (found.dialogHeadingWeight !== null && found.dialogHeadingWeight !== '700') throw fail(`probing ${entry.name}`, `the canonical popup heading weight is ${found.dialogHeadingWeight}, not 700`)
   if (found.dialogRadius !== null && found.dialogRadius !== '0px') throw fail(`probing ${entry.name}`, `the popup has radius ${found.dialogRadius}`)
   if (found.dialogBody !== null && parseFloat(found.dialogBody) < 16) throw fail(`probing ${entry.name}`, `the popup body text is ${found.dialogBody}, under the 16px floor`)
   return found
