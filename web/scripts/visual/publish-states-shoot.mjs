@@ -25,7 +25,8 @@
  *       PEASANT_PUBLISH_STATES_ONLY         comma-separated case names to shoot
  *       PUPPETEER_CORE                      explicit puppeteer-core module path
  */
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -48,7 +49,8 @@ const ONLY = (process.env.PEASANT_PUBLISH_STATES_ONLY || '').split(',').map((nam
 const PROJECT = 'fortuna'
 const SESSION = 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'
 /** Bytes only this change introduces, located in the binary and the served chunk. */
-const FEATURE_BYTES = ['reading your collectives on village']
+const FEATURE_BYTES = ['reading your collectives on village', 'village no longer holds this transcript: run peasant village push --force for this session']
+const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const DESKTOP = { width: 1440, height: 1080, deviceScaleFactor: 1 }
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
 /** The cases also shot at phone width: the bar, a first publish, and an update. */
@@ -92,7 +94,9 @@ async function assertServedChunk(chunkPath) {
   if (!response || response.status !== 200) throw fail('verifying the served artifact', `GET ${servedPath} returned ${response?.status ?? 0}`)
   const body = await response.text()
   if (!FEATURE_BYTES.every((signature) => body.includes(signature))) throw fail('verifying the served artifact', `the served chunk ${servedPath} does not carry ${FEATURE_BYTES.join(', ')}`)
-  return servedPath
+  const sha256 = hash(Buffer.from(body))
+  if (sha256 !== hash(readFileSync(chunkPath))) throw fail('verifying the served artifact', `the served chunk differs from this worktree's export`)
+  return { path: servedPath, sha256 }
 }
 
 /**
@@ -306,7 +310,7 @@ await pause(500)
 if (serverDown) healthy = false
 if (!healthy) { console.error(`ERROR [publish-states-shoot] the real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`); await teardown(); process.exit(2) }
 
-const evidence = { fixture: 'web/src/app/share/testdata/publish-popup-states.yaml', chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunk: null, captures: [] }
+const evidence = { sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim(), binarySha256: hash(readFileSync(BIN)), packagePins: JSON.parse(readFileSync(join(WEB, 'package.json'), 'utf8')).dependencies, fixture: 'web/src/app/share/testdata/publish-popup-states.yaml', chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunk: null, captures: [] }
 try {
   evidence.servedChunk = await assertServedChunk(chunkPath)
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new' })
