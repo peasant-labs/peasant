@@ -203,7 +203,7 @@ async function openPage(browser, origin, theme, viewport, routes) {
   return page
 }
 
-async function shoot(page, gate, file, label, { clipHeight } = {}) {
+async function shoot(page, gate, file, label, { clipHeight, contentSelector } = {}) {
   mkdirSync(dirname(file), { recursive: true })
   await pause(300)
   if (clipHeight) {
@@ -212,7 +212,22 @@ async function shoot(page, gate, file, label, { clipHeight } = {}) {
   } else {
     await page.screenshot({ path: file, fullPage: true })
   }
-  await gate.assert(label, file, { sel: 'full page', where: 'root-page-visual.mjs' })
+  if (contentSelector) {
+    // A short recovery panel paints only a small part of the full frame. Keep
+    // the complete shell capture, and apply the unchanged pixel gate to the
+    // actual mounted panel rather than the empty space below it.
+    const full = await gate.measure(file)
+    if (full.bytes < 16 * 1024 || full.w !== await page.evaluate(() => document.documentElement.clientWidth)) fail(`${label}: incomplete full-frame capture`)
+    const header = await page.$('header')
+    if (!header || !(await header.boundingBox())) fail(`${label}: shell header missing`)
+    const panel = await page.$(contentSelector)
+    if (!panel) fail(`${label}: mounted content missing (${contentSelector})`)
+    const contentFile = file.replace(/\.png$/, '.content.png')
+    await panel.screenshot({ path: contentFile })
+    await gate.assert(`${label}/content`, contentFile, { sel: contentSelector, where: 'root-page-visual.mjs' })
+  } else {
+    await gate.assert(label, file, { sel: 'full page', where: 'root-page-visual.mjs' })
+  }
 }
 
 /** Computed-style claims the design system makes about this page. */
@@ -334,7 +349,7 @@ async function runSelection(browser, gate, theme, viewport, answers, summaryBase
     await page.waitForSelector('[role="status"][aria-label="project selection recovery"]', { visible: true, timeout: 20000 }).catch(() => fail(`${where}: the recovery panel never mounted`))
     const leaked = await page.evaluate(() => ({ list: !!document.querySelector('[data-root-session-list]'), strip: !!document.querySelector('.sst') }))
     if (leaked.list || leaked.strip) fail(`${where}: the recovery state still shows ${JSON.stringify(leaked)}`)
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-recovery.png'), `${where}/selection-recovery`)
+    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-recovery.png'), `${where}/selection-recovery`, { contentSelector: '[role="status"][aria-label="project selection recovery"]' })
   } finally {
     await page.close()
   }
