@@ -10,6 +10,9 @@
  * browser fulfils GET /api/v1/sync/sessions and GET /api/v1/publications from
  * the mock sessions and the pattern in testdata/root-page.yaml. The project
  * summary is intercepted only for the selection notice and recovery states.
+ * The corpus's fixed historical dates leave current trends empty. The named
+ * trends fixture replaces only trends payloads on the real WebSocket, so the
+ * mounted stats strip and eight weekly bars have representative evidence.
  * The page, the shell, the fairtrade components and every request path stay
  * real.
  *
@@ -61,6 +64,9 @@ const FEATURE_GROUPS = [
 const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
 const pause = (ms) => new Promise((done) => setTimeout(done, ms))
 const fail = (message) => { throw new Error(`Root page visual harness failed: ${message}`) }
+if (FIXTURE.trends?.name !== 'eight-active-weeks-show-the-summary-and-weekly-bars'
+  || !Array.isArray(FIXTURE.trends.weeklySessions) || FIXTURE.trends.weeklySessions.length !== 8
+  || !FIXTURE.trends.weeklySessions.every((count) => Number.isSafeInteger(count) && count >= 0)) fail('the named eight-week trends fixture is missing or invalid')
 
 function filesBelow(directory) {
   if (!existsSync(directory)) return []
@@ -196,6 +202,26 @@ async function openPage(browser, origin, theme, viewport, routes) {
     localStorage.setItem('peasant-theme', value)
     document.documentElement.setAttribute('data-theme', value)
   }, theme)
+  if (routes.answers) {
+    const dayMs = 86_400_000
+    const now = new Date()
+    const monday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - ((now.getUTCDay() + 6) % 7) * dayMs
+    const days = FIXTURE.trends.weeklySessions.map((sessions, index, weeks) => ({ date: new Date(monday - (weeks.length - 1 - index) * 7 * dayMs).toISOString().slice(0, 10), tokens: 0, sessions }))
+    await page.evaluateOnNewDocument((host, trends) => {
+      const NativeWebSocket = window.WebSocket
+      window.WebSocket = class extends NativeWebSocket {
+        constructor(url, protocols) {
+          super(url, protocols)
+          if (new URL(url).host !== host) return
+          this.addEventListener('message', (event) => {
+            let message
+            try { message = JSON.parse(event.data) } catch { return }
+            if (message.type === 'trends') Object.defineProperty(event, 'data', { value: JSON.stringify({ ...message, data: trends }) })
+          })
+        }
+      }
+    }, new URL(origin).host, { days, totalTokens: 0, totalSessions: days.reduce((sum, day) => sum + day.sessions, 0) })
+  }
   await page.setRequestInterception(true)
   installRoutes(page, routes)
   const response = await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' })
@@ -301,7 +327,8 @@ async function resetList(page) {
 }
 
 async function waitForStats(page, where) {
-  await page.waitForSelector('[role="img"][aria-label^="sessions per week, last 8 weeks:"]', { visible: true, timeout: 10000 }).catch(() => fail(`${where}: the weekly session bars never mounted`))
+  const weeklyLabel = `sessions per week, last 8 weeks: ${FIXTURE.trends.weeklySessions.join(', ')}`
+  await page.waitForSelector(`[role="img"][aria-label="${weeklyLabel}"]`, { visible: true, timeout: 10000 }).catch(() => fail(`${where}: the weekly session bars never mounted with the fixture values`))
   await page.waitForFunction(() => {
     const stats = document.querySelector('[aria-label="general stats"]')?.textContent ?? ''
     return stats.includes('this week') && stats.includes('longest streak') && stats.includes('median session')
@@ -393,10 +420,14 @@ if (!CHROME) fail('CHROME_PATH is unset; set it to google-chrome or chromium')
 const chunks = assertProvenance()
 mkdirSync(OUT, { recursive: true })
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
-const mockServer = boot(PORT, 'web,dashboard,sessions,trends,qualitySessions,search')
-const emptyServer = boot(PORT + 1, 'none')
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
+const servers = []
+let browser
 try {
+  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
+  const mockServer = boot(PORT, 'web,dashboard,sessions,trends,qualitySessions,search')
+  servers.push(mockServer)
+  const emptyServer = boot(PORT + 1, 'none')
+  servers.push(emptyServer)
   await waitHealthy(MOCK_ORIGIN, mockServer)
   await waitHealthy(EMPTY_ORIGIN, emptyServer)
   for (const chunk of chunks) {
@@ -413,6 +444,7 @@ try {
   const summaryBase = await (await fetch(`${MOCK_ORIGIN}/api/v1/projects/summary`)).json()
   if (!Array.isArray(mockSessions) || mockSessions.length < FIXTURE.pattern.length) fail(`the mock store served ${mockSessions?.length} sessions; the pattern needs at least ${FIXTURE.pattern.length}`)
   const answers = publishingAnswers(mockSessions)
+  if (FIXTURE.trends.weeklySessions.reduce((sum, count) => sum + count, 0) !== mockSessions.length) fail('the trends fixture does not total the mock session corpus')
 
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of THEMES) {
@@ -425,9 +457,16 @@ try {
   }
   console.log(`captures=${OUT}/{dark,light}/{desktop,phone}/{filter-all,filter-not-published,filter-published,filter-auto,search,selection-notice,selection-recovery,empty}.png`)
 } finally {
-  await browser.close()
-  for (const booted of [mockServer, emptyServer]) {
-    booted.server.kill('SIGTERM')
+  const cleanup = await Promise.allSettled([browser?.close(), ...servers.map(async (booted) => {
+    await new Promise((resolve, reject) => {
+      if (booted.server.exitCode !== null || booted.server.signalCode !== null) return resolve()
+      const terminate = setTimeout(() => booted.server.kill('SIGKILL'), 2000)
+      const deadline = setTimeout(() => reject(new Error('the owned capture server did not stop within five seconds')), 5000)
+      booted.server.once('exit', () => { clearTimeout(terminate); clearTimeout(deadline); resolve() })
+      booted.server.kill('SIGTERM')
+    })
     rmSync(booted.home, { recursive: true, force: true })
-  }
+  })])
+  const failures = cleanup.filter((result) => result.status === 'rejected').map((result) => result.reason)
+  if (failures.length) throw new AggregateError(failures, 'root-page capture cleanup failed')
 }
