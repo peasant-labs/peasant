@@ -7,6 +7,9 @@ import { SETTING_GROUP_OF } from '@/lib/settings/catalog';
 import { SETTING_ROW_STATES } from '@/lib/ft-ui';
 import {
   loadInstallCases,
+  loadPendingInstallCases,
+  loadPendingRuleWriteCases,
+  loadPendingPatternWriteCases,
   loadAuthRecoveryCases,
   loadServerKeyNames,
   loadSettingWrites,
@@ -119,17 +122,28 @@ describe('settings page groups', () => {
   for (const testCase of loadAuthRecoveryCases()) {
     it(`recovers sign-in reads in StrictMode: ${testCase.name}`, async () => {
       let recovered = false;
-      serve('GET', '/api/v1/sync/auth', () => recovered
-        ? answer(200, { authenticated: false })
-        : answer(testCase.status, { error: testCase.error }));
+      let loggedOut = false;
+      serve('GET', '/api/v1/sync/auth', () => {
+        if (testCase.afterLogout && !loggedOut) return answer(200, { authenticated: true, username: 'alice-dev', villageUrl: 'https://api.village.peasantlabs.org' });
+        return recovered ? answer(200, { authenticated: false }) : answer(testCase.status, { error: testCase.error });
+      });
+      serve('POST', '/api/v1/sync/logout', () => { loggedOut = true; return answer(200, { status: 'logged_out' }); });
       render(<StrictMode><SettingsPageClient /></StrictMode>);
+      if (testCase.afterLogout) {
+        await waitFor(() => expect(within(rowOf('village.connected')).getByText('@alice-dev')).toBeInTheDocument());
+        fireEvent.click(within(rowOf('village.connected')).getByRole('button', { name: 'log out' }));
+      }
       expect(await screen.findByRole('button', { name: 'retry sign-in' })).toBeVisible();
       expect(screen.getByRole('alert')).toHaveTextContent(testCase.error);
       expect(document.querySelector('details.srow-group')).not.toBeNull();
+      expect(screen.queryAllByText('@alice-dev')).toHaveLength(0);
+      expect(screen.queryByRole('button', { name: 'log out' })).toBeNull();
       recovered = true;
       fireEvent.click(screen.getByRole('button', { name: 'retry sign-in' }));
       await waitFor(() => expect(screen.queryByRole('button', { name: 'retry sign-in' })).toBeNull());
       expect(rowOf('village.connected')).toHaveTextContent('not connected');
+      expect(screen.queryAllByText('@alice-dev')).toHaveLength(0);
+      expect(mutations().map(({ method, path }) => `${method} ${path}`)).toEqual(testCase.afterLogout ? ['POST /api/v1/sync/logout'] : []);
     });
   }
 
@@ -267,6 +281,53 @@ describe('settings page village and projects', () => {
 });
 
 describe('settings page custom patterns', () => {
+  for (const testCase of loadPendingPatternWriteCases()) {
+    it(testCase.name, async () => {
+      const settings = loadSettingsResponse();
+      const setting = settings.settings.find(({ key }) => key === 'redaction.custom_patterns')!;
+      setting.value = setting.effective = testCase.patterns;
+      mountServer({ settings });
+      let persisted: unknown = testCase.patterns;
+      let release!: () => void;
+      serve('PATCH', '/api/v1/settings', (body) => {
+        const value = (body as { value: unknown }).value;
+        const saved = () => {
+          persisted = value;
+          return answer(200, { ...setting, value, effective: value });
+        };
+        if (mutations().length === 1) return new Promise<Answer>((resolve) => { release = () => resolve(saved()); });
+        return saved();
+      });
+      await mountPage();
+      const block = rowOf('redaction.custom_patterns');
+      const [first, second] = testCase.patterns;
+      fireEvent.click(within(block).getByRole('button', { name: `more for ${first.id}` }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'remove' }));
+      await waitFor(() => expect(release).toBeTypeOf('function'));
+      expect(within(block).getByRole('button', { name: 'add a pattern' })).toBeDisabled();
+      fireEvent.click(within(block).getByRole('button', { name: `more for ${second.id}` }));
+      for (const item of await screen.findAllByRole('menuitem')) expect(item).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(screen.getByRole('menuitem', { name: 'remove' }));
+      fireEvent.click(within(block).getByRole('button', { name: 'add a pattern' }));
+      expect(mutations().map(({ body }) => body)).toEqual([{ key: setting.key, value: [second] }]);
+      expect(persisted).toEqual(testCase.patterns);
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      release();
+      await waitFor(() => expect(within(block).queryByText(first.id)).toBeNull());
+      expect(persisted).toEqual([second]);
+      expect(within(block).getByRole('button', { name: 'add a pattern' })).toBeEnabled();
+      fireEvent.click(within(block).getByRole('button', { name: `more for ${second.id}` }));
+      expect(await screen.findByRole('menuitem', { name: 'remove' })).not.toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(screen.getByRole('menuitem', { name: 'remove' }));
+      await within(block).findByText('no patterns yet. the built-in rules still apply.');
+      expect(persisted).toBeNull();
+      expect(mutations().map(({ body }) => body)).toEqual([
+        { key: setting.key, value: [second] },
+        { key: setting.key, value: null },
+      ]);
+    });
+  }
+
   it('adds a pattern with one write of the whole list, and keeps the list when the write is refused', async () => {
     let refuse = true;
     serve('PATCH', '/api/v1/settings', (body) => {
@@ -311,6 +372,72 @@ describe('settings page load', () => {
 });
 
 describe('auto-publish install', () => {
+  for (const testCase of loadPendingInstallCases()) {
+    it(testCase.name, async () => {
+      const rule = testCase.rule;
+      mountServer({ settings: withRules([rule]), auth: { authenticated: true, username: 'alice-dev' } });
+      let release!: (reply: Answer) => void;
+      serve('POST', `/api/v1/settings/auto-publish/${rule.id}/install`, () => new Promise<Answer>((resolve) => { release = resolve; }));
+      serve('PUT', `/api/v1/settings/auto-publish/${rule.id}`, (body) => answer(200, { ...rule, ...(body as object), repositories: [] }));
+      await mountPage();
+      const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
+      const item = group.querySelector<HTMLElement>(`[data-rule-id="${rule.id}"]`)!;
+      const menu = within(item).getByRole('button', { name: `more for ${rule.match}` });
+      const toggle = within(item).getByRole('switch');
+      if (testCase.openForm) {
+        fireEvent.click(menu);
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'edit' }));
+        await within(group).findByRole('checkbox', { name: 'Acme Platform' });
+        expect(within(group).getByRole('button', { name: 'save rule' })).toBeEnabled();
+      }
+      fireEvent.click(within(group).getByRole('button', { name: 'install in 1 repository' }));
+      await waitFor(() => expect(release).toBeTypeOf('function'));
+      expect(toggle).toBeDisabled();
+
+      fireEvent.click(toggle);
+      fireEvent.click(menu);
+      for (const entry of await screen.findAllByRole('menuitem')) expect(entry).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(screen.getByRole('menuitem', { name: 'remove' }));
+      expect(item).toBeInTheDocument();
+      fireEvent.keyDown(menu, { key: 'Escape' });
+      if (testCase.openForm) {
+        const form = within(group).getByRole('form', { name: `edit ${rule.match}` });
+        for (const control of form.querySelectorAll('input,select,button')) expect(control).toBeDisabled();
+        fireEvent.click(within(form).getByRole('button', { name: 'save rule' }));
+        fireEvent.click(within(form).getByRole('button', { name: 'cancel' }));
+        expect(form).toBeInTheDocument();
+      } else {
+        const add = within(group).getByRole('button', { name: 'add a folder or repository' });
+        expect(add).toBeDisabled();
+        fireEvent.click(add);
+        expect(within(group).queryByRole('form')).toBeNull();
+      }
+      expect(mutations().map(({ method, path }) => `${method} ${path}`)).toEqual([`POST /api/v1/settings/auto-publish/${rule.id}/install`]);
+      const repository = rule.repositories[0];
+      release(answer(200, { ...repository, hooks: repository.hooks.map((hook) => ({ ...hook, status: 'installed' })) }));
+      await within(group).findByRole('list', { name: 'install results' });
+      expect(toggle).toBeEnabled();
+      expect(menu).toBeEnabled();
+      if (testCase.openForm) {
+        const form = within(group).getByRole('form', { name: `edit ${rule.match}` });
+        for (const control of form.querySelectorAll('input,select,button')) expect(control).toBeEnabled();
+        fireEvent.change(within(form).getByLabelText('folder'), { target: { value: testCase.nextMatch } });
+        fireEvent.click(within(form).getByRole('button', { name: 'save rule' }));
+        await waitFor(() => expect(group.querySelector('[data-rule-id]')?.textContent).toContain(testCase.nextMatch));
+      } else {
+        expect(within(group).getByRole('button', { name: 'add a folder or repository' })).toBeEnabled();
+        fireEvent.click(toggle);
+        await within(group).findByText(/paused, publishes nothing/);
+      }
+      expect(mutations().map(({ method, path }) => `${method} ${path}`)).toEqual([
+        `POST /api/v1/settings/auto-publish/${rule.id}/install`,
+        `PUT /api/v1/settings/auto-publish/${rule.id}`,
+      ]);
+      expect((mutations()[1].body as { events: string[]; match: string })).toMatchObject(testCase.openForm
+        ? { events: rule.events, match: testCase.nextMatch }
+        : { events: [], match: rule.match });
+    });
+  }
   it.each(loadInstallCases().map((testCase) => [testCase.name, testCase] as const))('%s', async (_name, testCase) => {
     mountServer({ settings: withRules(testCase.rules) });
     serve('POST', '/api/v1/settings/auto-publish/acme-work/install', (body) => testCase.answers[(body as { path: string }).path]);
@@ -339,6 +466,45 @@ describe('auto-publish install', () => {
 });
 
 describe('auto-publish rules', () => {
+  for (const testCase of loadPendingRuleWriteCases()) {
+    it(testCase.name, async () => {
+      const [first, second] = testCase.rules;
+      mountServer({ settings: withRules(testCase.rules) });
+      let release!: (reply: Answer) => void;
+      serve('PUT', `/api/v1/settings/auto-publish/${first.id}`, () => new Promise<Answer>((resolve) => { release = resolve; }));
+      serve('PUT', `/api/v1/settings/auto-publish/${second.id}`, (body) => answer(200, { ...second, ...(body as object), repositories: [] }));
+      await mountPage();
+      const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
+      const ruleItem = (id: string) => group.querySelector<HTMLElement>(`[data-rule-id="${id}"]`)!;
+      const firstToggle = within(ruleItem(first.id)).getByRole('switch');
+      const secondToggle = within(ruleItem(second.id)).getByRole('switch');
+      fireEvent.click(firstToggle);
+      await waitFor(() => expect(release).toBeTypeOf('function'));
+      expect(firstToggle).toBeDisabled();
+      expect(secondToggle).toBeDisabled();
+      const install = within(group).getByRole('button', { name: 'install in 2 repositories' });
+      expect(install).toBeDisabled();
+      fireEvent.click(secondToggle);
+      fireEvent.click(install);
+      fireEvent.click(within(ruleItem(second.id)).getByRole('button', { name: `more for ${second.match}` }));
+      for (const entry of await screen.findAllByRole('menuitem')) expect(entry).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(screen.getByRole('menuitem', { name: 'remove' }));
+      fireEvent.keyDown(screen.getByRole('menuitem', { name: 'remove' }), { key: 'Escape' });
+      expect(mutations().map(({ method, path }) => `${method} ${path}`)).toEqual([`PUT /api/v1/settings/auto-publish/${first.id}`]);
+      release(answer(200, { ...first, events: [], repositories: [] }));
+      await within(ruleItem(first.id)).findByText(/paused, publishes nothing/);
+      expect(within(ruleItem(second.id)).getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+      expect(secondToggle).toBeEnabled();
+      expect(within(group).getByRole('button', { name: 'install in 1 repository' })).toBeEnabled();
+      fireEvent.click(secondToggle);
+      await within(ruleItem(second.id)).findByText(/paused, publishes nothing/);
+      expect(within(ruleItem(first.id)).getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+      expect(mutations().map(({ method, path, body }) => ({ method, path, events: (body as { events: string[] }).events }))).toEqual([
+        { method: 'PUT', path: `/api/v1/settings/auto-publish/${first.id}`, events: [] },
+        { method: 'PUT', path: `/api/v1/settings/auto-publish/${second.id}`, events: [] },
+      ]);
+    });
+  }
   const rule: AutoPublishRule = {
     id: 'acme-work',
     kind: 'folder',

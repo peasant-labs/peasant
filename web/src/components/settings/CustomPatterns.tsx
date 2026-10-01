@@ -53,6 +53,7 @@ export function CustomPatterns({ setting, onSaved }: { setting: LocalSetting; on
   const busy = status.state === 'pending';
 
   const write = async (next: CustomPattern[]): Promise<boolean> => {
+    if (busy) return false;
     setStatus({ state: 'pending' });
     try {
       const saved = await updateSetting(setting.key, next.length === 0 ? null : next);
@@ -67,7 +68,7 @@ export function CustomPatterns({ setting, onSaved }: { setting: LocalSetting; on
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || busy) return;
     const draft = { ...editing.draft, id: editing.draft.id.trim() };
     const next = editing.index === null
       ? [...patterns, draft]
@@ -91,7 +92,7 @@ export function CustomPatterns({ setting, onSaved }: { setting: LocalSetting; on
           {tag && <Chip size="sm" className="srow-tag">{tag}</Chip>}
         </span>
         {setting.editable && editing === null && (
-          <Button variant="secondary" size="sm" icon={Plus} onClick={() => { setStatus({ state: 'idle' }); setEditing({ index: null, draft: EMPTY }); }}>add a pattern</Button>
+          <Button variant="secondary" size="sm" icon={Plus} disabled={busy} onClick={() => { if (busy) return; setStatus({ state: 'idle' }); setEditing({ index: null, draft: EMPTY }); }}>add a pattern</Button>
         )}
       </div>
 
@@ -115,8 +116,8 @@ export function CustomPatterns({ setting, onSaved }: { setting: LocalSetting; on
                   align="end"
                   size="sm"
                   items={[
-                    { label: 'edit', onSelect: () => { setStatus({ state: 'idle' }); setEditing({ index, draft: pattern }); } },
-                    { label: 'remove', danger: true, onSelect: () => { void write(patterns.filter((_, at) => at !== index)); } },
+                    { label: 'edit', disabled: busy, onSelect: () => { if (busy) return; setStatus({ state: 'idle' }); setEditing({ index, draft: pattern }); } },
+                    { label: 'remove', danger: true, disabled: busy, onSelect: () => { void write(patterns.filter((_, at) => at !== index)); } },
                   ]}
                 />
               )}

@@ -184,8 +184,13 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
   const [draft, setDraft] = useState<RuleDraft | null>(null);
   const [formStatus, setFormStatus] = useState<BlockStatus>({ state: 'idle' });
   const [listStatus, setListStatus] = useState<BlockStatus>({ state: 'idle' });
+  const [switchPending, setSwitchPending] = useState(false);
   const [removalNote, setRemovalNote] = useState<string | null>(null);
   const [install, setInstall] = useState<{ running: boolean; done: number; total: number; outcomes: InstallOutcome[] } | null>(null);
+  // Rule and install responses describe the whole rules snapshot captured by
+  // their action. Serialize mutations so a late response cannot restore consent
+  // or replace another rule decision made while it was pending.
+  const busy = install?.running === true || switchPending || listStatus.state === 'pending' || formStatus.state === 'pending';
   const pending = pendingInstalls(rules);
   const pendingRepos = new Set(pending.map((item) => item.path)).size;
   const outcomes = install?.outcomes ?? [];
@@ -205,10 +210,17 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
     });
 
   const setPublishing = async (rule: AutoPublishRule, on: boolean) => {
-    replaceRule(await put(rule, { events: on ? [AutoPublishEvent.PrePush] : [] }));
+    if (busy) return;
+    setSwitchPending(true);
+    try {
+      replaceRule(await put(rule, { events: on ? [AutoPublishEvent.PrePush] : [] }));
+    } finally {
+      setSwitchPending(false);
+    }
   };
 
   const switchEvent = async (rule: AutoPublishRule, event: AutoPublishEvent) => {
+    if (busy) return;
     setListStatus({ state: 'pending' });
     try {
       replaceRule(await put(rule, { events: [event] }));
@@ -219,6 +231,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
   };
 
   const remove = async (rule: AutoPublishRule) => {
+    if (busy) return;
     setListStatus({ state: 'pending' });
     setRemovalNote(null);
     try {
@@ -236,7 +249,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!draft) return;
+    if (!draft || busy) return;
     setFormStatus({ state: 'pending' });
     try {
       const saved = await saveAutoPublishRule(draft.id, {
@@ -254,6 +267,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
   };
 
   const runInstall = async () => {
+    if (busy) return;
     const plan = pending;
     setInstall({ running: true, done: 0, total: plan.length, outcomes: [] });
     const outcomes: InstallOutcome[] = [];
@@ -276,6 +290,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
   };
 
   const openForm = (rule?: AutoPublishRule) => {
+    if (busy) return;
     setFormStatus({ state: 'idle' });
     setDraft(rule
       ? { id: rule.id, isNew: false, kind: rule.kind, match: rule.match, event: rule.events[0] ?? '', collectives: [...rule.collectives] }
@@ -300,6 +315,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
                   help={`${kindWords(rule.kind)} · ${rule.events.length === 0 ? 'paused, publishes nothing' : `publishes to ${collectiveWords(rule.collectives, collectives)} ${rule.events.map(eventWords).join(' and ')}`}`}
                   control="switch"
                   value={rule.events.length > 0}
+                  disabled={busy}
                   onCommit={(next) => setPublishing(rule, Boolean(next))}
                 />
                 <div className="stg-rule-foot">
@@ -319,9 +335,9 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
                     align="end"
                     size="sm"
                     items={[
-                      { label: 'edit', onSelect: () => openForm(rule) },
-                      ...(event ? [{ label: `publish ${eventWords(other)} instead`, onSelect: () => { void switchEvent(rule, other); } }] : []),
-                      { label: 'remove', danger: true, onSelect: () => { void remove(rule); } },
+                      { label: 'edit', disabled: busy, onSelect: () => openForm(rule) },
+                      ...(event ? [{ label: `publish ${eventWords(other)} instead`, disabled: busy, onSelect: () => { void switchEvent(rule, other); } }] : []),
+                      { label: 'remove', danger: true, disabled: busy, onSelect: () => { void remove(rule); } },
                     ]}
                   />
                 </div>
@@ -352,7 +368,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
               </ul>
               <p className="stg-note">nothing is installed until you choose to. peasant never overwrites a hook it did not write.</p>
               <div className="stg-install-actions">
-                <Button variant="primary" onClick={runInstall} disabled={install?.running === true} loading={install?.running === true}>
+                <Button variant="primary" onClick={runInstall} disabled={busy} loading={install?.running === true}>
                   install in {pendingRepos} {pendingRepos === 1 ? 'repository' : 'repositories'}
                 </Button>
                 {install?.running && <span className="stg-progress" aria-live="polite">installing <span className="tnum">{install.done + 1}</span> of <span className="tnum">{install.total}</span></span>}
@@ -394,7 +410,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
               label="what it matches"
               value={draft.kind}
               onChange={(event) => setDraft({ ...draft, kind: event.target.value as AutoPublishRuleKind })}
-              disabled={formStatus.state === 'pending'}
+              disabled={busy}
               options={[{ value: AutoPublishRuleKind.Folder, label: 'a folder' }, { value: AutoPublishRuleKind.Remote, label: 'a git remote' }]}
             />
             <div className="stg-mono-field">
@@ -405,14 +421,14 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
                 hint={draft.kind === AutoPublishRuleKind.Remote ? 'a remote, or a pattern such as github.com:acme/*.' : 'a folder, or a glob such as ~/work/acme/**.'}
                 value={draft.match}
                 onChange={(event) => setDraft({ ...draft, match: event.target.value })}
-                disabled={formStatus.state === 'pending'}
+                disabled={busy}
               />
             </div>
             <Select
               label="publish"
               value={draft.event}
               onChange={(event) => setDraft({ ...draft, event: event.target.value as AutoPublishEvent | '' })}
-              disabled={formStatus.state === 'pending'}
+              disabled={busy}
               options={[
                 { value: AutoPublishEvent.PrePush, label: eventWords(AutoPublishEvent.PrePush) },
                 { value: AutoPublishEvent.PostCommit, label: eventWords(AutoPublishEvent.PostCommit) },
@@ -420,7 +436,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
               ]}
             />
           </div>
-          <fieldset className="stg-collectives" disabled={formStatus.state === 'pending'}>
+          <fieldset className="stg-collectives" disabled={busy}>
             <legend className="label">publish to</legend>
             {!signedIn ? (
               <p className="stg-note">sign in to village to pick collectives: run peasant village login, or sign in from the publish popup.</p>
@@ -442,14 +458,14 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
           </fieldset>
           <p className="stg-note">sessions recorded where this rule matches publish redacted to these collectives, with no review. saving installs no hook.</p>
           <div className="stg-form-actions">
-            <Button type="submit" variant="primary" size="sm" disabled={formStatus.state === 'pending' || draft.match.trim() === '' || draft.collectives.length === 0}>save rule</Button>
-            <Button type="button" variant="ghost" size="sm" disabled={formStatus.state === 'pending'} onClick={() => { setDraft(null); setFormStatus({ state: 'idle' }); }}>cancel</Button>
+            <Button type="submit" variant="primary" size="sm" disabled={busy || draft.match.trim() === '' || draft.collectives.length === 0}>save rule</Button>
+            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { setDraft(null); setFormStatus({ state: 'idle' }); }}>cancel</Button>
           </div>
           <StatusLine status={formStatus} settledWord="saved" />
         </form>
       ) : (
         <div className="stg-add">
-          <Button variant="secondary" icon={Plus} onClick={() => openForm()}>add a folder or repository</Button>
+          <Button variant="secondary" icon={Plus} disabled={busy} onClick={() => openForm()}>add a folder or repository</Button>
         </div>
       )}
     </div>
