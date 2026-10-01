@@ -436,6 +436,34 @@ partition:
       untouched-refusal state stay asserted.
     cost: { wall_ms: 1940, cpu_ms: 2400 }
 
+  - package: internal/ingest
+    test: TestRetainedContentBackfill
+    class: single-threaded-bytes
+    evidence: '#TestRetainedContentBackfill'
+    justification: >-
+      Subject. Retained content backfill recovers the full text for every
+      targeted session, including a 102-session case, reports each refused or
+      unavailable recovery once with the preservation phrase the user reads,
+      and never fabricates publication proof. Concurrency actually exercised.
+      Seed writes are batched into one metadata commit and one entry write set,
+      then one real pipeline run overlaps DIFF, EXTRACT+WRITE, the StagingBuffer,
+      drainLoop and indexLoop over the store. Why the detector is not this
+      test's oracle. The assertions read full text, capture rows, diagnostics
+      and publication readiness after the run; a race corrupts those products
+      rather than producing a distinct assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the bulk seed path or the 102-session backfill
+      workload is uncovered here; the retained tests bound the primitives.
+      Detector-independent guarantees kept. Every content, diagnostic and
+      readiness assertion stays.
+    cost: { wall_ms: 1980, cpu_ms: 2590 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
