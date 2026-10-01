@@ -10,6 +10,7 @@
 # requiredNames is the deletion guard. It names every state the bar and the
 # popup must reach; a case leaves only by removing its name here too, and a case
 # without a name here is refused.
+mobileCases: [not-published, ready-to-publish, update-with-new-turns]
 requiredNames:
   - only-curated-collective-waits
   - removes-final-collective
@@ -577,7 +578,7 @@ cases:
     push: published
     steps: [arrive]
     expect:
-      bar: { alert: the publish state could not be read }
+      bar: { alert: the publish state could not be read, retry: true }
       popup:
         heading: publish “{title}”
         texts: ['reading whether this is published: the local publication store could not be read']
@@ -592,7 +593,7 @@ cases:
     push: published
     steps: [arrive]
     expect:
-      bar: { alert: 'village no longer holds this transcript: run peasant village push --force for this session' }
+      bar: { alert: 'village no longer holds this transcript: run peasant village push --force for this session', retry: false }
       popup:
         heading: publish “{title}”
         texts: ['run peasant village push --force for this session']

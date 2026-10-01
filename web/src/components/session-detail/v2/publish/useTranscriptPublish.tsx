@@ -448,9 +448,9 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
             <span role="alert" className="font-mono text-[14px] text-ink-2" title={read.message}>
               {read.transcriptMissing ? TRANSCRIPT_MISSING : 'the publish state could not be read'}
             </span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={reread}>
+            {!read.transcriptMissing && <button type="button" className="btn btn-ghost btn-sm" onClick={reread}>
               <RotateCw size={14} aria-hidden="true" /> retry
-            </button>
+            </button>}
           </>
         )}
         <Menu icon={MoreHorizontal} ariaLabel="more" size="sm" align="end" items={moreItems} />

@@ -33,7 +33,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
-import { createPublishWorld, loadPublishStates } from '../../src/app/share/testdata/publish-popup-states.mjs'
+import { createPublishWorld, expectedPushBody, loadPublishStates } from '../../src/app/share/testdata/publish-popup-states.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -54,7 +54,7 @@ const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const DESKTOP = { width: 1440, height: 1080, deviceScaleFactor: 1 }
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
 /** The cases also shot at phone width: the bar, a first publish, and an update. */
-const MOBILE_CASES = ['not-published', 'ready-to-publish', 'update-with-new-turns']
+
 const THEME_ATTRIBUTES = ['data-theme', 'data-tb-theme']
 const PUBLISHING_ROUTES = /\/api\/v1\/(sync\/auth|sync\/login|publications|village\/collectives|sync\/redactions|sync\/push)(\/|\?|$)/
 const pause = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -174,6 +174,8 @@ async function assertExpected(page, entry) {
     const problems = []
     if ('alert' in expect.bar) {
       if (!document.querySelector('[role="alert"]')?.textContent.includes(expect.bar.alert)) problems.push('missing publication alert')
+      const retry = [...document.querySelectorAll('[role="group"][aria-label="publish"] button')].some((button) => button.textContent.trim() === 'retry')
+      if (retry !== expect.bar.retry) problems.push('wrong publication recovery action')
     } else {
     if (label?.getAttribute('data-state') !== expect.bar.state) problems.push(`bar state ${label?.getAttribute('data-state')}`)
     if (label?.textContent !== expect.bar.text) problems.push(`bar text ${JSON.stringify(label?.textContent)}`)
@@ -258,6 +260,9 @@ async function shoot(browser, gate, fixture, entry, theme, viewport, turns, evid
     for (const step of entry.steps) await runStep(page, step)
     try {
       await assertExpected(page, entry)
+      const expected = expectedPushBody(fixture, entry, SESSION)
+      const actual = world.pushRequests.at(-1) ?? null
+      if (JSON.stringify(expected) !== JSON.stringify(actual)) throw fail(`checking ${entry.name}`, 'the mounted push request differs from the fixture')
     } catch (error) {
       const failed = join(OUT, 'failed', `${theme}-${viewport.isMobile ? 'mobile' : 'desktop'}-${entry.name}.png`)
       mkdirSync(dirname(failed), { recursive: true })
@@ -320,7 +325,7 @@ try {
   for (const theme of SMOKE_THEMES) {
     for (const entry of cases) {
       await shoot(browser, gate, fixture, entry, theme, DESKTOP, turns, evidence)
-      if (MOBILE_CASES.includes(entry.name)) await shoot(browser, gate, fixture, entry, theme, MOBILE, turns, evidence)
+      if (fixture.mobileCases.includes(entry.name)) await shoot(browser, gate, fixture, entry, theme, MOBILE, turns, evidence)
     }
   }
   mkdirSync(OUT, { recursive: true })
