@@ -31,7 +31,7 @@ func TestWebServerRunsWithTheCommandsDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := githooks.Binding{ConfigDir: config, DataDir: data, StateDir: state}
-	if got.ConfigHome != config || got.DataHome != data || got.StateHome != state || got.HookBinding != want || got.Port != 1 {
+	if got.ConfigHome != config || got.DataHome != data || got.StateHome != state || got.HookBinding != want || got.Port != 1 || got.ConfigPath != "settings.yaml" {
 		t.Fatalf("server config = homes %q %q %q, binding %+v, port %d; want %q %q %q and %+v, keeping the rest", got.ConfigHome, got.DataHome, got.StateHome, got.HookBinding, got.Port, config, data, state, want)
 	}
 }
