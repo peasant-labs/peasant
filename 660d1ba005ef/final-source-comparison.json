@@ -1,0 +1,28 @@
+{
+  "originalCapturedSource": "660d1ba005efa3957d71dd9988b62244576e9a53",
+  "finalSource": "fba12e2be5075fdc85303c6c72707a9891f29f1d",
+  "paths": [
+    "web/src",
+    "web/package.json",
+    "web/pnpm-lock.yaml",
+    "web/scripts/visual/publish-states-shoot.mjs"
+  ],
+  "diff": "",
+  "allChangedFiles": [
+    "web/scripts/visual/root-page-visual.mjs",
+    "web/scripts/visual/testdata/root-page.yaml"
+  ],
+  "productionSourceByteIdentical": true,
+  "originalPathObjects": {
+    "web/src": "542e4742bb7f84cd6bb90d91d6fe441d1fa7bb03",
+    "web/package.json": "a713da47d6adfbe312b35c760ca668f87407787e",
+    "web/pnpm-lock.yaml": "863ae32433d4ec86ecc521aaa77c00a17bc93a40",
+    "web/scripts/visual/publish-states-shoot.mjs": "1f70dada9ccc310f2872f101566286068f951abc"
+  },
+  "finalPathObjects": {
+    "web/src": "542e4742bb7f84cd6bb90d91d6fe441d1fa7bb03",
+    "web/package.json": "a713da47d6adfbe312b35c760ca668f87407787e",
+    "web/pnpm-lock.yaml": "863ae32433d4ec86ecc521aaa77c00a17bc93a40",
+    "web/scripts/visual/publish-states-shoot.mjs": "1f70dada9ccc310f2872f101566286068f951abc"
+  }
+}

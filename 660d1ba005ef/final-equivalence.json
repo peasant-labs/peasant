@@ -1,0 +1,24 @@
+{
+  "finalSource": "fba12e2be5075fdc85303c6c72707a9891f29f1d",
+  "finalTree": "793b3057eefe4df160ac43dde0fd38f618df3e4c",
+  "originalCapturedSource": "660d1ba005efa3957d71dd9988b62244576e9a53",
+  "originalEvidence": "evidence.json",
+  "productionSourcePaths": [
+    "web/src",
+    "web/package.json",
+    "web/pnpm-lock.yaml",
+    "web/scripts/visual/publish-states-shoot.mjs"
+  ],
+  "productionSourceByteIdentical": true,
+  "changedFiles": [
+    "web/scripts/visual/root-page-visual.mjs",
+    "web/scripts/visual/testdata/root-page.yaml"
+  ],
+  "binaryVersion": "peasant v0.7.1-dev.116+fba12e2be",
+  "binarySHA256": "3c701f97e94558705e617a73c02cd469e2d7c264767d267ac1057f0c70ac0f61",
+  "ownedServerPort": 8858,
+  "originalAndFinalServedChunkSHA256": "e732cacc611f7352fd921a8c8f0917aa921075e04ac6ad7386e1b06f791e4590",
+  "servedChunkByteIdentical": true,
+  "checkedAt": "2026-10-01T22:06:23.540Z",
+  "captureStatement": "The original 80 screenshots retain source660d provenance. This verifies unchanged production source and unchanged popup bytes served by the freshly rebuilt final source."
+}
