@@ -1,0 +1,9 @@
+== testdata/rollup/mega-giga-sample.txt
+detector          0 rows      0.00 s   0.00%
+adjacent          0 rows      0.00 s   0.00%
+runtime-other     0 rows      0.00 s   0.00%
+engine            0 rows      0.00 s   0.00%
+driver            1 rows 375000000.00 s  25.00%
+application       1 rows 1125000000.00 s  75.00%
+other             0 rows      0.00 s   0.00%
+accounted         2 rows 1500000000.00 s 100.00%  (total sampled 1500000000.00s)

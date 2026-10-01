@@ -1,0 +1,8 @@
+File: milliseconds.test
+Type: cpu
+Duration: 1.00s, Total samples = 1.00s (100.00%)
+      flat  flat%   sum%        cum   cum%
+   250ms 25.00% 25.00%      250ms 25.00%  runtime.checkptrAlignment
+   250ms 25.00% 50.00%      250ms 25.00%  runtime.findObject
+   250ms 25.00% 75.00%      250ms 25.00%  runtime.memmove
+   250ms 25.00% 100.00%     250ms 25.00%  internal/runtime/atomic.Xadd
