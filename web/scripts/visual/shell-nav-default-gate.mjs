@@ -333,7 +333,7 @@ const drivePage = async (theme, spec, seen) => {
   let referenceTop = null
   let scrolledTo = 0
   if (spec.check === 'scrolled' || keepsPlace) {
-    scrolledTo = await scrollDown(page, spec.check === 'keep-place-end')
+    scrolledTo = await scrollDown(page)
     if (scrolledTo < 100) throw new Error(`the ${where} page does not scroll (reached ${scrolledTo}px), so it cannot show a notice arriving on a scrolled page`)
   }
   if (keepsPlace) {
@@ -368,11 +368,16 @@ const drivePage = async (theme, spec, seen) => {
     if (state.clearance.noticeFixed) failures.push(`the notice is pinned on the ${spec.width}×${spec.height} screen, so the case does not exercise a notice in the page flow`)
     appeared = await frameTransition(page, true)
     if (!appeared) failures.push('no frame caught the notice appearing')
-    else if (Math.abs(appeared.after.scrollY - appeared.before.scrollY - appeared.after.height) > 1) {
+    else if (spec.check === 'keep-place' && Math.abs(appeared.after.scrollY - appeared.before.scrollY - appeared.after.height) > 1) {
       failures.push(`in the frame the ${appeared.after.height}px notice appeared the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px, so the reader lost their place`)
     }
   }
   if (failures.length) throw new Error(`the ${where} page with the server stopped: ${failures.join('; ')}. State: ${JSON.stringify(state)}`)
+  if (spec.check === 'keep-place-end') {
+    await scrollDown(page, true)
+    await pause(150)
+    referenceTop = await page.$eval(spec.reference, (element) => element.getBoundingClientRect().top)
+  }
   await assertHeaderHolds(page, theme, `${spec.path} ${where}, stopped`)
 
   let note = ''

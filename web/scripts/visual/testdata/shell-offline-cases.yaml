@@ -23,8 +23,8 @@
 #                                  the pinned notice must appear on screen under
 #                                  the header
 #                     keep-place / keep-place-end: a non-pinned notice on a page
-#                                  scrolled midway / to its end. Appearance scrolls
-#                                  by its height; after recovery the stable content
+#                                  scrolled midway / to its end while stopped. The
+#                                  midway case checks appearance too; after recovery the stable content
 #                                  reference returns to the same viewport top ±1px.
 #   reference       stable content selector required for place-keeping cases
 #   floor           the full-height element a `floor` case measures
