@@ -1,0 +1,89 @@
+{
+  "sourceHead": "e3fa32760491dd306006c5c94e586245fa09cbb4",
+  "binarySha256": "2e97bd169e995e3ef1d67c14921cb7734da3c9079705b79993bf8b663aa80a20",
+  "referenceHead": "708c858face29261b41faa0a91f0e9167b30dc45",
+  "referenceProvenance": "/tmp/codex-overhaul/fairtrade-main-preview-provenance.json",
+  "referenceProvenanceSha256": "108bd9b6213ef90813199418fd306b1c2178bf97e78d94a68b83fa5c412b2c0a",
+  "pairs": [
+    {
+      "surface": "home",
+      "theme": "dark",
+      "reference": "/tmp/peasant-ui-canonical-sxs/canonical-home-dark.png",
+      "subject": "/tmp/peasant9-home-e3fa327/dark/desktop/filter-all.png",
+      "output": "/tmp/peasant9-canonical-sxs/home-dark.png",
+      "dimensions": [
+        {
+          "width": 1440,
+          "height": 1080
+        },
+        {
+          "width": 1440,
+          "height": 2267
+        }
+      ],
+      "referenceSha256": "e1168ce859567c52735fd27227e0ab63afa78e2f749e28a868b6a876c65aa859",
+      "subjectSha256": "11f98bd76c607a04f4352b13641009c2719664025ba2983585d83df039cc1ca7",
+      "comparisonSha256": "27556ae6b7a760095447e2cfbf9021e620bb73fa8f6f9cdb8b3eb957b6439a60"
+    },
+    {
+      "surface": "consent",
+      "theme": "dark",
+      "reference": "/tmp/codex-overhaul/fairtrade-captures/publish-ready-dark.png",
+      "subject": "/tmp/peasant9-consent-review-e3fa327/dark/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-review.png",
+      "output": "/tmp/peasant9-canonical-sxs/consent-dark.png",
+      "dimensions": [
+        {
+          "width": 1440,
+          "height": 1080
+        },
+        {
+          "width": 1440,
+          "height": 1080
+        }
+      ],
+      "referenceSha256": "01d38a366b113b06e24f2131c107c52f2c66803b81a5e2a63de3d9c45467d7ac",
+      "subjectSha256": "d493df9d051c8a89a5ec2d3824257b29350db24e3d0e791e301210f0e3fae311",
+      "comparisonSha256": "6e6a6ace3f29e6bf8b828d470dc9d088a2beb76c82f6a77587ca61be4a4f3755"
+    },
+    {
+      "surface": "home",
+      "theme": "light",
+      "reference": "/tmp/peasant-ui-canonical-sxs/canonical-home-light.png",
+      "subject": "/tmp/peasant9-home-e3fa327/light/desktop/filter-all.png",
+      "output": "/tmp/peasant9-canonical-sxs/home-light.png",
+      "dimensions": [
+        {
+          "width": 1440,
+          "height": 1080
+        },
+        {
+          "width": 1440,
+          "height": 2267
+        }
+      ],
+      "referenceSha256": "f7265678cc09de96b643cfabfd52da06f82bd94a59154fc05241757bfc67beb8",
+      "subjectSha256": "a1b8267f3fe8764bef1dd9a1a7a62d33ce1d2c65889f45887c495c47e02d82b8",
+      "comparisonSha256": "fb424ca44324aaddfa4830eb31f1c198fffef974efa74c862250753c53a843d1"
+    },
+    {
+      "surface": "consent",
+      "theme": "light",
+      "reference": "/tmp/codex-overhaul/fairtrade-captures/publish-ready-light.png",
+      "subject": "/tmp/peasant9-consent-review-e3fa327/light/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-review.png",
+      "output": "/tmp/peasant9-canonical-sxs/consent-light.png",
+      "dimensions": [
+        {
+          "width": 1440,
+          "height": 1080
+        },
+        {
+          "width": 1440,
+          "height": 1080
+        }
+      ],
+      "referenceSha256": "963d25af6ae4d8209a57198df167e1c302b2ecac7c28316c4dfb07b0911a8cb9",
+      "subjectSha256": "c465c59036c63cbeb911f64b68ed6a5042ce05c3aaf55fc8fd464bca03b40144",
+      "comparisonSha256": "8f83ad4fb0ad471277c5683d645de6a40b7ac239d593d9344396f7c0af481ea5"
+    }
+  ]
+}

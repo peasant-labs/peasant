@@ -6,9 +6,14 @@
   "inspected": [
     "home tip in both themes at desktop and phone",
     "all sixteen consent review/result frames",
-    "all six official Freeze sheets"
+    "all six official Freeze sheets",
+    "four complete canonical main reference | exact Peasant Home/consent comparisons in both themes"
   ],
   "images": {
+    "canonical/consent-dark.png": "6e6a6ace3f29e6bf8b828d470dc9d088a2beb76c82f6a77587ca61be4a4f3755",
+    "canonical/consent-light.png": "8f83ad4fb0ad471277c5683d645de6a40b7ac239d593d9344396f7c0af481ea5",
+    "canonical/home-dark.png": "27556ae6b7a760095447e2cfbf9021e620bb73fa8f6f9cdb8b3eb957b6439a60",
+    "canonical/home-light.png": "fb424ca44324aaddfa4830eb31f1c198fffef974efa74c862250753c53a843d1",
     "consent-result/dark/desktop/blocked-hook-keeps-publication-and-offers-settings-result.png": "9a1ad8be77c80363526166ec43610173c809a16d3b96d990ea82f18a59ddff20",
     "consent-result/dark/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-result.png": "4038af1ef87b851dd90e034ecc2071b192ada60265a6a1ec906b3a06c565ece2",
     "consent-result/dark/mobile/blocked-hook-keeps-publication-and-offers-settings-result.png": "bb18ab7d8637758b42af13220db4875a83418dc88314dabe32b6e1203e539880",
@@ -35,5 +40,6 @@
     "tui/ingest-progress.png": "bcd13672a6ab6cd08194a55d817ac7806bc3ad7361aaf73c23eab67d6235e0eb",
     "tui/push.png": "0f6d1bbd2e0badc4642381c9b4abf36e069632446aec99df4b6603bada871ade",
     "tui/selection.png": "95d8853e65cbe9725bff87e84b0d52480051ef29e3039715cfed8d237e09bda2"
-  }
+  },
+  "canonicalHead": "708c858face29261b41faa0a91f0e9167b30dc45"
 }
