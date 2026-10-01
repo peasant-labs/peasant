@@ -183,7 +183,7 @@ function primaryButton(): HTMLButtonElement | null {
   return buttons[buttons.length - 1] ?? null;
 }
 
-async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
+async function runStep(step: string, user: ReturnType<typeof userEvent.setup>, keepRemoval = false) {
   if (step === 'arrive') return;
   if (step === 'open') {
     const action = await waitFor(() => within(bar()).getByRole('button', { name: /^(publish|update|manage)$/ }), WAIT);
@@ -211,7 +211,16 @@ async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
     return;
   }
   const [verb, ...rest] = step.split(' ');
-  await user.click(await within(dialog()).findByRole('button', { name: `${verb} ${rest.join(' ')}` }, WAIT));
+  const button = await within(dialog()).findByRole('button', { name: `${verb} ${rest.join(' ')}` }, WAIT);
+  const connectedBeforeClick = button.isConnected;
+  await user.click(button);
+  if (verb === 'remove') {
+    await waitFor(() => {
+      const evidence = JSON.stringify({ step, keepRemoval, connectedBeforeClick, connectedAfterClick: button.isConnected, popup: dialog().textContent });
+      if (!keepRemoval) expect(within(dialog()).queryByRole('button', { name: `remove ${rest.join(' ')}` }), evidence).not.toBeInTheDocument();
+      else expect(within(dialog()).queryByRole('button', { name: `keep ${rest.join(' ')}` }), evidence).toBeInTheDocument();
+    }, WAIT);
+  }
 }
 
 beforeEach(() => {
@@ -252,7 +261,11 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
 
     if ('alert' in entry.expect.bar) await within(bar()).findByRole('alert', {}, WAIT);
     else await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull(), WAIT);
-    for (const step of entry.steps) await runStep(step, user);
+    const actionSnapshots: { step: string; text: string }[] = [];
+    for (const step of entry.steps) {
+      await runStep(step, user, entry.expect.request?.remove.includes(step.replace(/^remove /, '')) ?? false);
+      actionSnapshots.push({ step, text: screen.queryByRole('dialog')?.textContent ?? '' });
+    }
 
     const expected = entry.expect;
     await waitFor(() => {
@@ -263,7 +276,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
       else {
         const label = bar().querySelector<HTMLElement>('.pub-state');
         expect(label?.dataset.state).toBe(expected.bar.state);
-        expect(label?.textContent).toBe(expected.bar.text);
+        expect(label?.textContent, JSON.stringify({ requests: world.pushRequests, actions: actionSnapshots })).toBe(expected.bar.text);
       }
     }, WAIT);
     if (!('alert' in expected.bar)) expect(within(bar()).getByRole('button', { name: expected.bar.action })).toBeInTheDocument();
@@ -503,6 +516,7 @@ describe.each(automaticFixture.cases)('automatic publishing consent: $name', (en
     const checkbox = await within(dialog()).findByRole('checkbox', { name: 'publish this repo automatically on git push' }, WAIT);
     expect((checkbox as HTMLInputElement).checked).toBe(entry.intent === true);
     if (entry.action === 'toggle') await user.click(checkbox);
+    for (const name of entry.add ?? []) await runStep(`add ${name}`, user);
     expect(mutations).toEqual([]);
     expect(world.pushRequests).toEqual([]);
     await runStep('publish', user);
@@ -538,7 +552,8 @@ describe.each(automaticFixture.cases)('automatic publishing consent: $name', (en
     if (entry.expect === 'manual') expect(mutations).toEqual([]);
     else if (entry.expect !== 'refused') {
       expect(mutations[0]?.method).toBe('PUT');
-      expect(mutations[0]?.body).toEqual({ sessionId: SESSION_ID, events: ['pre-push'], collectives: fixture.collectives.slice(0, 2).map((item) => item.id) });
+      expect(mutations[0]?.body).toEqual({ sessionId: SESSION_ID, events: ['pre-push'], collectives: [...fixture.collectives.slice(0, 2), ...(entry.add ?? []).map((name) => fixture.collectives.find((item) => item.name === name)!)].map((item) => item.id) });
+      if (entry.add?.length) expect(dialog().textContent).toContain(base.expect.popup!.texts[0]);
       expect(mutations[0]?.path.split('/').at(-1)).toMatch(/^[0-9a-f-]{36}$/);
       const failedSave = entry.setup === 'save-error' || entry.setup === 'malformed' || entry.setup.startsWith('wrong-');
       expect(mutations.map((item) => item.method)).toEqual(failedSave ? ['PUT'] : ['PUT', 'POST']);

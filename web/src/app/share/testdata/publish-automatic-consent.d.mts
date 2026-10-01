@@ -8,6 +8,7 @@ export interface AutomaticConsentCase {
   setup: 'installed' | 'blocked' | 'failed' | 'save-error' | 'malformed' | 'install-error' | 'wrong-id' | 'wrong-event' | 'wrong-audience' | 'wrong-paused' | 'wrong-duplicate';
   leave: boolean;
   expect: string;
+  add?: string[];
 }
 export interface AutomaticConsentFixture { repository: string; cases: AutomaticConsentCase[] }
 export function loadAutomaticConsent(source: string, fixture: PublishStatesFixture): AutomaticConsentFixture;
