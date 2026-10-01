@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-10-01T22:56:10.309Z",
+  "sourceHead": "708c858face29261b41faa0a91f0e9167b30dc45",
+  "sourceTree": "84386f32f9538d67bc216aaa7b46e0d60486005b",
+  "url": "http://localhost:6132/?app=transcript&publish=ready&bar=not-published&theme=dark#inuse",
+  "assets": [
+    {
+      "path": "/assets/index-C21m9eOo.css",
+      "sha256": "da7e148909b3a5736946fe74449859dccfbd74b1c70f326b8e19d88a757715a4",
+      "bytes": 419744
+    },
+    {
+      "path": "/assets/index-DnNb_2Lk.js",
+      "sha256": "da9405e80b875d9662721e849ffe926b5c81f3a0c262dd4b36eafdc44c596775",
+      "bytes": 2008320
+    }
+  ],
+  "fixProof": {
+    "matchCount": 9,
+    "shownExamples": 3
+  },
+  "popupText": "publish “Port the transcript canvas into the shared package”what leaves your machine re-scan9 matches · all redactedshow 3 exampleswho can read itAcme Platformsuggested · repo acme/ingest-api is linked12 membersAcme Companysuggested · github org acme87 membersadd a collectiveML Reading Groupcurated · waits for the owner’s approval21 members addpublish this repo automatically on git pushsame collectives · change it in settingsnothing leaves your machine until you publish.cancelpublish to 2 collectives"
+}
