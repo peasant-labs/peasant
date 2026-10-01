@@ -36,7 +36,7 @@
     "shell:gate": "pnpm boot:shell && pnpm shell:offline"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.22",
+    "@peasant-labs/fairtrade": "0.0.24",
     "@peasant-labs/schema": "0.20.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
