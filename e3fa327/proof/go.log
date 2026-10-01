@@ -1,0 +1,6 @@
+ok  	github.com/peasant-labs/peasant/internal/api	13.204s
+ok  	github.com/peasant-labs/peasant/internal/config	(cached) [no tests to run]
+ok  	github.com/peasant-labs/peasant/internal/tui/kickstart	(cached)
+ok  	github.com/peasant-labs/peasant/internal/autopublish	(cached) [no tests to run]
+ok  	github.com/peasant-labs/peasant/internal/githooks	(cached) [no tests to run]
+ok  	github.com/peasant-labs/peasant/cmd/peasant	13.563s

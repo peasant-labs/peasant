@@ -1,0 +1,6 @@
+provenance chunks=web/out/_next/static/chunks/app/page-e8bd70aeba61be9e.js,web/out/_next/static/chunks/app/page-e8bd70aeba61be9e.js,web/out/_next/static/chunks/df8e723d-c9b0dad1fd97a064.js served=true
+OK dark/desktop counts={"all":15,"not-published":9,"published":6,"auto":4}
+OK dark/phone counts={"all":15,"not-published":9,"published":6,"auto":4}
+OK light/desktop counts={"all":15,"not-published":9,"published":6,"auto":4}
+OK light/phone counts={"all":15,"not-published":9,"published":6,"auto":4}
+captures=/tmp/peasant9-home-e3fa327/{dark,light}/{desktop,phone}/{filter-all,filter-not-published,filter-published,filter-auto,search,selection-notice,selection-recovery,empty}.png

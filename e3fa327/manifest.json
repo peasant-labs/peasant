@@ -1,0 +1,39 @@
+{
+  "sourceHead": "e3fa32760491dd306006c5c94e586245fa09cbb4",
+  "binarySha256": "2e97bd169e995e3ef1d67c14921cb7734da3c9079705b79993bf8b663aa80a20",
+  "fairtrade": "0.0.24",
+  "schema": "0.27.0",
+  "inspected": [
+    "home tip in both themes at desktop and phone",
+    "all sixteen consent review/result frames",
+    "all six official Freeze sheets"
+  ],
+  "images": {
+    "consent-result/dark/desktop/blocked-hook-keeps-publication-and-offers-settings-result.png": "9a1ad8be77c80363526166ec43610173c809a16d3b96d990ea82f18a59ddff20",
+    "consent-result/dark/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-result.png": "4038af1ef87b851dd90e034ecc2071b192ada60265a6a1ec906b3a06c565ece2",
+    "consent-result/dark/mobile/blocked-hook-keeps-publication-and-offers-settings-result.png": "bb18ab7d8637758b42af13220db4875a83418dc88314dabe32b6e1203e539880",
+    "consent-result/dark/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-result.png": "56bdacf93ddafdfd36ee2d8d01ac502f52dad5778025201ade97a26ad6a72492",
+    "consent-result/light/desktop/blocked-hook-keeps-publication-and-offers-settings-result.png": "ad0eb65367f0a37a7b939f3253fb8353f9be87931b2b6cec4648a69afd76d4b9",
+    "consent-result/light/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-result.png": "05fefda2301dfb38b91329f899789a273fed646ddfc1ec499bb37e0089581e17",
+    "consent-result/light/mobile/blocked-hook-keeps-publication-and-offers-settings-result.png": "67d9e35df1652a53fdcca84fbbd6c4aa7f7c5d6f4eb09de08668771f41039ee4",
+    "consent-result/light/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-result.png": "3e953cb52ecb477da9ce7aed44b02222e3a8056d172a8efb14f82ad3c4fd6059",
+    "consent-review/dark/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-review.png": "d493df9d051c8a89a5ec2d3824257b29350db24e3d0e791e301210f0e3fae311",
+    "consent-review/dark/desktop/manual-publish-does-not-create-a-rule-review.png": "0e56c68a962f2524a6197d96acc8c02a9c9155e79260a260b060e3b92868be44",
+    "consent-review/dark/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-review.png": "34b6befbeb6fac6a5b38312f3ccfe5544534a6d244b63c89053a767b54d767da",
+    "consent-review/dark/mobile/manual-publish-does-not-create-a-rule-review.png": "c554d0283797a77f87baa1bd8a89fd56963eace6a74d7950d3937513bf942d02",
+    "consent-review/light/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-review.png": "c465c59036c63cbeb911f64b68ed6a5042ce05c3aaf55fc8fd464bca03b40144",
+    "consent-review/light/desktop/manual-publish-does-not-create-a-rule-review.png": "c1409328079f595fb339e5a68cd3ed72dc39d1bbdb6cd0a4328001706484773c",
+    "consent-review/light/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-review.png": "5695895038b957ffbe19a1426476d8456cea6e120fe0f651f18517ef39b65b31",
+    "consent-review/light/mobile/manual-publish-does-not-create-a-rule-review.png": "ca6e59b547d95f31c2f76ba8c38c1b0d96d8767dba9872e56294dfc964460f73",
+    "home/dark/desktop/filter-all.png": "11f98bd76c607a04f4352b13641009c2719664025ba2983585d83df039cc1ca7",
+    "home/dark/phone/filter-all.png": "d79e27fe29e32a0fcf010574dcfe89c839e6ea2b1c169c8755b9b41a5add55de",
+    "home/light/desktop/filter-all.png": "a1b8267f3fe8764bef1dd9a1a7a62d33ce1d2c65889f45887c495c47e02d82b8",
+    "home/light/phone/filter-all.png": "4fc43a01a9046c7547264de083f40cbe3265444217a0a6a6f94139d000f85c55",
+    "tui/guided-dark.png": "fbe5c5562b037594ee2065e89d4db19ade1bb0b872835e5b243b6d5ed24a0aea",
+    "tui/guided-light.png": "350b1eb96fb004e50ea7b0929d5ba3a207c0b04f2c6f1f8fc69131fefa7fe38e",
+    "tui/ingest-completion.png": "a36c32aa4d0a95fbe4680cc435f73298e31d3f0bd4ff7e4afd0e4b6d4492ebd0",
+    "tui/ingest-progress.png": "bcd13672a6ab6cd08194a55d817ac7806bc3ad7361aaf73c23eab67d6235e0eb",
+    "tui/push.png": "0f6d1bbd2e0badc4642381c9b4abf36e069632446aec99df4b6603bada871ade",
+    "tui/selection.png": "95d8853e65cbe9725bff87e84b0d52480051ef29e3039715cfed8d237e09bda2"
+  }
+}

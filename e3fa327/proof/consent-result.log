@@ -1,0 +1,12 @@
+[publish-states-shoot] provenance OK: web/out/_next/static/chunks/app/projects/[[...segments]]/page-036578ea04e9e6eb.js carries reading your collectives on village, village no longer holds this transcript: run peasant village push --force for this session, confirming automatic publishing consent
+[publish-states-shoot] starting bin/peasant on :8847 (mock store: web,dashboard,sessions,trends,map,review,qualitySessions,annotations) …
+  dark desktop checked-confirmation-uses-stored-session-and-confirmed-root-result -> /tmp/peasant9-consent-result-e3fa327/dark/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-result.png
+  dark mobile checked-confirmation-uses-stored-session-and-confirmed-root-result -> /tmp/peasant9-consent-result-e3fa327/dark/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-result.png
+  dark desktop blocked-hook-keeps-publication-and-offers-settings-result -> /tmp/peasant9-consent-result-e3fa327/dark/desktop/blocked-hook-keeps-publication-and-offers-settings-result.png
+  dark mobile blocked-hook-keeps-publication-and-offers-settings-result -> /tmp/peasant9-consent-result-e3fa327/dark/mobile/blocked-hook-keeps-publication-and-offers-settings-result.png
+  light desktop checked-confirmation-uses-stored-session-and-confirmed-root-result -> /tmp/peasant9-consent-result-e3fa327/light/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-result.png
+  light mobile checked-confirmation-uses-stored-session-and-confirmed-root-result -> /tmp/peasant9-consent-result-e3fa327/light/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-result.png
+  light desktop blocked-hook-keeps-publication-and-offers-settings-result -> /tmp/peasant9-consent-result-e3fa327/light/desktop/blocked-hook-keeps-publication-and-offers-settings-result.png
+  light mobile blocked-hook-keeps-publication-and-offers-settings-result -> /tmp/peasant9-consent-result-e3fa327/light/mobile/blocked-hook-keeps-publication-and-offers-settings-result.png
+
+OK [publish-states-shoot] 8 mounted captures; evidence in /tmp/peasant9-consent-result-e3fa327/evidence.json

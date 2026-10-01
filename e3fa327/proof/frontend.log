@@ -1,0 +1,435 @@
+$ vitest run
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v2.1.9 /Users/vitorhugo/Documents/Projects/polyrepo/peasant/peasant-9--feat--kickstart-auto-publish/web
+
+ ✓ src/lib/api/grouped.test.ts (25 tests) 57ms
+ ✓ src/contexts/__tests__/WebSocketContext.test.tsx (28 tests) 132ms
+ ✓ src/lib/api/map.test.ts (37 tests) 86ms
+ ✓ src/components/session-detail/v2/lib/scopeTurns.test.ts (56 tests) 26ms
+ ✓ src/app/review/[[...segments]]/ReviewSurface.test.tsx (26 tests) 503ms
+ ✓ src/app/review/[[...segments]]/lifted-surface.test.tsx (15 tests) 642ms
+   ✓ lifted <Changes> — interaction + state > renders accessible many-to-many, legacy, and truly-unlinked session actions 323ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.test.tsx (15 tests) 398ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.realViewer.test.tsx (5 tests) 533ms
+ ✓ src/components/share/RedactionStep.test.tsx (12 tests) 805ms
+ ✓ src/app/share/ShareWizardClient.test.tsx (12 tests) 513ms
+stderr | src/app/page.root-list.test.tsx > root page publish filters > all-counts
+An update to Kn inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/dev/DevAnnotateOverlay.test.tsx (31 tests) 571ms
+stderr | src/app/page.test.tsx > HomePage — the changes-first picker > mounts the grouped local session list from the grouped REST route
+An update to GroupedSessionsSection inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to GroupedSessionsSection inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx (6 tests) 80ms
+stderr | src/app/page.test.tsx > HomePage — the changes-first picker > retains the cross-project filter and top-level pager: cross-project-filter-and-top-level-paging
+An update to GroupedSessionsSection inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to GroupedSessionsSection inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/app/page.root-list.test.tsx > root page publish filters > not-published-counts
+An update to Kn inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/review/[[...segments]]/changeGraphLayout.test.ts (25 tests) 20ms
+stderr | src/app/page.root-list.test.tsx > root page publish filters > published-counts
+An update to Kn inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/app/page.test.tsx > HomePage — the changes-first picker > retains the cross-project filter and top-level pager: harness-filter-narrows-the-same-set
+An update to GroupedSessionsSection inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to GroupedSessionsSection inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/app/page.root-list.test.tsx > root page publish filters > auto-counts
+An update to Kn inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/app/share/ShareWizardClient.helper-groups.test.tsx > mounted Share helper-group chooser > selects exactly one eligible helper member and pushes only its transcript id
+Each child in a list should have a unique "key" prop.
+
+Check the render method of `SessionPicker`. See https://react.dev/link/warning-keys for more information.
+
+ ✓ src/app/page.test.tsx (24 tests) 1412ms
+ ✓ src/components/map/layout.test.ts (29 tests) 6ms
+ ✓ src/app/review/[[...segments]]/ReviewRouter.test.tsx (12 tests) 382ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.qualityMedianBridge.test.tsx (4 tests) 116ms
+stderr | src/app/page.root-list.test.tsx > root page list reads > reads the list again when the session set changes, not when a live session grows
+An update to Kn inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/map/lib/mapData.test.ts (32 tests) 84ms
+stderr | src/app/settings/SettingsPageClient.test.tsx > settings page writes > a write in flight is pending
+An update to us inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to us inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to us inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/review/[[...segments]]/ReviewPageClient.test.tsx (43 tests) 2378ms
+ ✓ src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx (12 tests) 1263ms
+   ✓ mounted context and starter navigation on the production transcript route > restores the child query, disclosure, scroll, and selection after Back from the target 421ms
+ ✓ src/components/LocalOfflineNotice.test.tsx (25 tests) 1175ms
+stderr | src/app/page.root-list.test.tsx > home-guidance-can-be-dismissed-without-changing-the-transcript-exit
+An update to Kn inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/map/MapCanvas.test.tsx (12 tests) 201ms
+ ✓ src/app/map/[[...segments]]/MapRail.test.tsx (11 tests) 355ms
+ ✓ src/app/page.root-list.test.tsx (16 tests) 2735ms
+   ✓ root page publish filters > all-counts 354ms
+   ✓ root page publish filters > load-more 755ms
+   ✓ root page list reads > searches through the grouped search route and shows the match and the publish state 374ms
+ ✓ src/app/map/[[...segments]]/MapShell.test.tsx (33 tests) 2876ms
+ ✓ src/app/review/[[...segments]]/ChangeGraph.test.tsx (16 tests) 940ms
+   ✓ ChangeGraph — show older > caps the initial window and expands to the full payload on click 426ms
+ ✓ src/app/share/ShareWizardClient.helper-groups.test.tsx (7 tests) 2505ms
+   ✓ mounted Share helper-group chooser > selects exactly one eligible helper member and pushes only its transcript id 484ms
+   ✓ mounted Share helper-group chooser > keeps an earlier helper pick when a second helper group is expanded 498ms
+   ✓ mounted Share helper-group chooser > keeps a pick on one page of a group while an independent group keeps its own paging state 427ms
+   ✓ mounted Share helper-group chooser > selects a nested helper member without widening to its owner or the parent group 338ms
+   ✓ mounted Share helper-group chooser > refreshes the changed originating list on scope expiry and prunes the stale member pick 303ms
+ ✓ src/lib/sessions/helperGroups.test.ts (23 tests) 13ms
+ ✓ src/components/map/MapSquareNode.test.tsx (44 tests) 233ms
+ ✓ src/lib/quality/utils.test.ts (28 tests) 6ms
+ ✓ src/components/session-detail/v2/canvas/TurnLabelPopover.test.tsx (15 tests) 576ms
+ ✓ src/types/messages.test.ts (29 tests) 6ms
+ ✓ src/app/map/lib/codeMapRouteState.test.ts (20 tests) 103ms
+ ✓ src/lib/quality/types.test.ts (21 tests) 17ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.heroTitle.test.tsx (6 tests) 359ms
+ ✓ src/app/map/[[...segments]]/MapShell.realCodeMap.test.tsx (22 tests) 4123ms
+   ✓ MapShell - REAL CodeMap composition + interaction > mounted navigator keyboard moves the real roving tab stop and selects the focused code area 666ms
+ ✓ src/app/share/ShareWizardClient.mounted.test.tsx (5 tests) 670ms
+   ✓ mounted Share production boundary > decodes, joins, groups, tri-state selects eligible IDs, and submits them through PushStep 643ms
+ ✓ src/lib/api/annotations.test.ts (15 tests) 6ms
+ ✓ src/components/command/CommandPalette.test.tsx (15 tests) 2081ms
+   ✓ CommandPalette > retries failed search discovery on the same surface and shows the results 384ms
+ ✓ src/components/map/keyboard.test.ts (21 tests) 2ms
+ ✓ src/components/sessions/GroupedLocalSessions.test.tsx (7 tests) 426ms
+ ✓ src/lib/navigation/useProjectIdentity.test.ts (8 tests) 380ms
+ ✓ src/lib/navigation/projectRoutes.test.ts (33 tests) 72ms
+stderr | src/app/share/ShareWizardClient.wire-decode.test.tsx > mounted Share chooser wire decoding > mounts the chooser for the unmutated baseline payloads
+Each child in a list should have a unique "key" prop.
+
+Check the render method of `SessionPicker`. See https://react.dev/link/warning-keys for more information.
+
+ ✓ src/app/settings/SettingsPageClient.test.tsx (32 tests) 5252ms
+   ✓ settings page groups > recovers sign-in reads in StrictMode: service-failure 378ms
+   ✓ auto-publish install > installing locks an open edit form until its response completes 376ms
+ ✓ src/app/review/[[...segments]]/caption.test.ts (13 tests) 9ms
+ ✓ src/lib/adapters/changes.test.ts (9 tests) 2ms
+ ✓ src/app/share/ShareWizardClient.wire-decode.test.tsx (6 tests) 546ms
+ ✓ src/app/share/ShareWizardClient.linked-sessions.test.tsx (2 tests) 268ms
+ ✓ src/components/session-detail/v2/lib/useEntryLabels.test.ts (8 tests) 129ms
+ ✓ src/components/sessions/GroupedSessionsSection.test.tsx (6 tests) 275ms
+ ✓ src/app/share/ShareWizardClient.redaction-flow.test.tsx (2 tests) 603ms
+   ✓ ShareWizardClient redaction flow > preserves an in-flight and completed scan across mounted wizard navigation 474ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.relationshipNavigation.test.tsx (9 tests) 109ms
+ ✓ src/app/projects/[[...segments]]/ProjectsRouter.test.tsx (12 tests) 389ms
+ ✓ src/test/font-import-guard.test.ts (5 tests) 69ms
+ ✓ src/app/sessions/[[...segments]]/SessionsRouter.test.tsx (6 tests) 314ms
+ ✓ src/app/review/[[...segments]]/ChangeTreemap.test.tsx (9 tests) 290ms
+ ✓ src/components/sessions/AllSessions.test.tsx (10 tests) 340ms
+ ✓ src/app/review/[[...segments]]/signals.test.ts (8 tests) 9ms
+ ✓ src/hooks/useTourState.test.ts (11 tests) 94ms
+ ✓ src/schemaRuntimeArchitecture.test.ts (7 tests) 20ms
+ ✓ src/components/TopNavbar.test.tsx (15 tests) 204ms
+ ✓ src/app/review/[[...segments]]/changeTreemapLayout.test.ts (9 tests) 5ms
+ ✓ src/components/AppShellGeometry.test.ts (5 tests) 3ms
+ ✓ src/components/share/SessionPicker.test.tsx (1 test) 992ms
+   ✓ SessionPicker large-history interactions > preserves leaf and ancestor tri-state semantics without remeasuring the rail on selection changes 991ms
+ ✓ src/components/map/intensity.test.ts (39 tests) 5ms
+ ✓ src/components/share/PushStep.test.tsx (3 tests) 304ms
+ ✓ src/lib/share/redactionScan.test.tsx (6 tests) 144ms
+ ✓ src/components/LayoutShell.capabilities.test.tsx (11 tests) 533ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.strike.test.tsx (1 test) 470ms
+   ✓ mounted Strike transcript > renders the canonical payload through SessionDetailV2 and the real TranscriptViewer 469ms
+ ✓ src/lib/share/push.test.ts (5 tests) 7ms
+ ✓ src/components/session-detail/v2/publish/publishModel.test.ts (18 tests) 17ms
+ ✓ src/app/map/[[...segments]]/MapRouter.test.tsx (5 tests) 464ms
+ ✓ src/lib/home/rootStats.test.ts (5 tests) 2ms
+ ✓ src/contexts/ServerCapabilitiesContext.test.tsx (13 tests) 666ms
+ ✓ src/app/analytics/AnalyticsPageClient.test.tsx (5 tests) 142ms
+ ✓ src/lib/nav/sections.test.ts (9 tests) 17ms
+ ✓ src/components/map/TimeStrip.test.tsx (7 tests) 376ms
+stderr | src/hooks/useMockConfig.test.ts > useMockConfig > fetches mock config on mount
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/review/[[...segments]]/timelineNavigation.test.ts (20 tests) 312ms
+stderr | src/hooks/useMockConfig.test.ts > useMockConfig > refetch function triggers new fetch
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/share/testdata/helper-groups-fixture.test.ts (8 tests) 63ms
+ ✓ src/hooks/useMockConfig.test.ts (7 tests) 309ms
+ ✓ src/lib/share/group.test.ts (4 tests) 2ms
+ ✓ src/app/review/[[...segments]]/changeRecap.test.ts (7 tests) 12ms
+ ✓ src/lib/share/redactions.test.ts (8 tests) 110ms
+ ✓ src/hooks/useTheme.test.tsx (4 tests) 59ms
+ ✓ src/components/Explainer.test.tsx (4 tests) 191ms
+ ✓ src/components/picker/ProjectPicker.test.tsx (4 tests) 404ms
+ ✓ src/components/session-detail/v2/lib/relationshipLink.test.ts (12 tests) 130ms
+ ✓ src/app/review/[[...segments]]/ReviewRouter.strike.test.tsx (1 test) 249ms
+ ✓ src/lib/adapters/analytics.test.ts (4 tests) 8ms
+ ✓ src/lib/share/hierarchy.test.ts (1 test) 2ms
+ ✓ src/components/MultiSelectPopover.test.tsx (4 tests) 307ms
+ ✓ src/test/fixtures/localReviewClarity.test.ts (4 tests) 11ms
+ ✓ src/lib/api/discovery.test.ts (5 tests) 3ms
+ ✓ src/components/picker/SelectionRecoveryPanel.test.tsx (4 tests) 67ms
+ ✓ src/lib/skeleton.test.tsx (5 tests) 49ms
+ ✓ src/test/strictYaml.test.ts (1 test) 4ms
+ ✓ src/components/TopNavbar.navLinks.test.tsx (2 tests) 62ms
+ ✓ src/app/map/[[...segments]]/CodeMapComposition.test.tsx (1 test) 328ms
+   ✓ CodeMap real package composition > renders adapted map topology with real CodeMap controls and search-driven grain state 327ms
+ ✓ src/components/Term.test.tsx (4 tests) 27ms
+ ✓ src/components/session-detail/v2/waterfall.test.ts (5 tests) 2ms
+ ✓ src/app/map/lib/codeMapRouteState.errors.test.ts (2 tests) 2ms
+ ✓ src/components/session-detail/v2/turnNav.test.ts (5 tests) 1ms
+ ✓ src/components/session-detail/v2/panels/TurnTouchedFiles.test.tsx (1 test) 23ms
+ ✓ src/app/share/publishPopupStates.mounted.test.tsx (65 tests) 19545ms
+   ✓ publish state 'not-published' on /projects/[name]/[id] > mounts the bar and the popup the case expects 424ms
+   ✓ publish state 'connect-to-village' on /projects/[name]/[id] > mounts the bar and the popup the case expects 472ms
+   ✓ publish state 'waiting-for-github' on /projects/[name]/[id] > mounts the bar and the popup the case expects 431ms
+   ✓ publish state 'scanning' on /projects/[name]/[id] > mounts the bar and the popup the case expects 598ms
+   ✓ publish state 'scan-failed' on /projects/[name]/[id] > mounts the bar and the popup the case expects 416ms
+   ✓ publish state 'not-in-a-collective' on /projects/[name]/[id] > mounts the bar and the popup the case expects 419ms
+   ✓ publish state 'ready-to-publish' on /projects/[name]/[id] > mounts the bar and the popup the case expects 537ms
+   ✓ publish state 'publishing' on /projects/[name]/[id] > mounts the bar and the popup the case expects 516ms
+   ✓ publish state 'published-done' on /projects/[name]/[id] > mounts the bar and the popup the case expects 604ms
+   ✓ publish state 'waits-for-approval' on /projects/[name]/[id] > mounts the bar and the popup the case expects 778ms
+   ✓ publish state 'stopped-at-a-step' on /projects/[name]/[id] > mounts the bar and the popup the case expects 506ms
+   ✓ publish state 'update-with-new-turns' on /projects/[name]/[id] > mounts the bar and the popup the case expects 607ms
+   ✓ publish state 'update-keeps-audience' on /projects/[name]/[id] > mounts the bar and the popup the case expects 763ms
+   ✓ publish state 'connect-completes' on /projects/[name]/[id] > mounts the bar and the popup the case expects 2416ms
+   ✓ publish state 'published-while-signed-out' on /projects/[name]/[id] > mounts the bar and the popup the case expects 2261ms
+   ✓ publish state 'stopped-rescan-fails' on /projects/[name]/[id] > mounts the bar and the popup the case expects 314ms
+
+ Test Files  104 passed (104)
+      Tests  1385 passed (1385)
+   Start at  15:41:58
+   Duration  22.96s (transform 6.15s, setup 8.41s, collect 77.07s, tests 65.22s, environment 57.50s, prepare 6.37s)
+
