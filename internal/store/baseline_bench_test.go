@@ -18,7 +18,6 @@ func BenchmarkFreshDatabaseOpen(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// ast-grep-ignore: no-migrating-store-open-in-tests -- the benchmark's subject IS the production fresh-open path.
 		s, err := Open(filepath.Join(dir, fmt.Sprintf("fresh-%d.db", i)))
 		if err != nil {
 			b.Fatalf("Open fresh database %d: %v", i, err)

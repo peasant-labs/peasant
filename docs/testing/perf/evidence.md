@@ -917,7 +917,7 @@ path, and the shipped migrations are unchanged. The snapshot is generated from
 the chain and pinned by byte equality over two independent chain builds.
 
 Vehicle: `BenchmarkFreshDatabaseOpen` in `internal/store` (committed
-benchmark-only at `5c9551ef`; the identical file sits at the slice tip). Each
+benchmark-only at `5c9551ef`; the identical file sits at the final revision). Each
 iteration opens a distinct brand-new path and closes it, so every iteration
 pays a full fresh-install.
 
@@ -943,6 +943,6 @@ the identical command's wall fell 4.31 s -> 3.32 s and allocations 2085 -> 594.
 No threshold gate: this is one serial pair on a shared box.
 
 L companion: 10.29 (before) -> 13.18 (after); the after run met the busier box,
-so the recorded gain is a floor. Both columns were measured from this slice's
-own worktree against the same benchmark file, so the only change between them
-is the fresh path itself.
+so the recorded gain is a floor. Both columns were measured in this change's own
+worktree against the same benchmark file, so the only change between them is
+the fresh path itself.

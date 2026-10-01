@@ -174,7 +174,6 @@ func baselineCaseIsObservation(kind string) bool {
 // openFreshStore opens the production fresh path on path and registers cleanup.
 func openFreshStore(t *testing.T, path string) *Store {
 	t.Helper()
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the case's subject is the production fresh-open path.
 	s, err := Open(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatalf("store.Open(%s): %v", path, err)
@@ -312,7 +311,6 @@ func runForeignApplicationIDCase(t *testing.T, c baselineOpenCaseFixture) {
 	}
 
 	before := baselineApplicationTotal()
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the case's subject is the open-time refusal.
 	opened, openErr := Open(path, WithPoolSize(1))
 	if openErr == nil {
 		_ = opened.Close()
@@ -481,7 +479,6 @@ func runConcurrentFreshOpenCase(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				<-start
-				// ast-grep-ignore: no-migrating-store-open-in-tests -- the case races the production fresh-open path.
 				stores[i], errs[i] = Open(path, WithPoolSize(1))
 			}(i)
 		}
@@ -568,6 +565,12 @@ func TestBaselineSchemaMatchesMigratedChain(t *testing.T) {
 
 // TestBaselineSchemaIsCurrent is the pin: two independent chain builds
 // serialize byte-identically, and the committed artifact matches a fresh one.
+//
+// The independent-build gate detects uncaptured nondeterminism for the random
+// generated identities; two builds sharing a wall-clock second cannot reliably
+// expose an omitted or malformed clock cell, so clock-cell completeness is
+// carried by the fixture-backed assertions in TestBaselineClockCells and the
+// clock-interval case instead.
 func TestBaselineSchemaIsCurrent(t *testing.T) {
 	first, err := GenerateSchemaBaselineSQL()
 	if err != nil {
