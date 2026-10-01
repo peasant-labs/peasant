@@ -21,9 +21,11 @@ function hostOf(url: string | undefined): string | undefined {
  * calls POST /api/v1/sync/logout, which removes the stored credential; the key
  * stays valid on Village until `peasant village logout` revokes it there.
  */
-export function VillageAccountRow({ auth, connected, onLoggedOut }: {
-  /** null while the sign-in is being read, or when it could not be read. */
+export function VillageAccountRow({ auth, readError, onRetry, connected, onLoggedOut }: {
+  /** null while the sign-in is being read. */
   auth: SyncAuthResponse | null;
+  readError?: string | null;
+  onRetry?: () => void;
   /** The village.connected key, for its tag. */
   connected: LocalSetting | undefined;
   onLoggedOut: () => void | Promise<void>;
@@ -53,7 +55,7 @@ export function VillageAccountRow({ auth, connected, onLoggedOut }: {
       ? <>connected as <strong className="stg-strong">@{auth.username}</strong></>
       : 'not connected';
   const help = auth === null
-    ? 'reading the sign-in on this computer.'
+    ? readError ? 'the sign-in could not be read.' : 'reading the sign-in on this computer.'
     : signedIn
       ? `signed in with github${host ? ` on ${host}` : ''}. log out removes the key from this computer; peasant village logout also revokes it on village.`
       : 'sign in with peasant village login, or from the publish popup.';
@@ -66,8 +68,10 @@ export function VillageAccountRow({ auth, connected, onLoggedOut }: {
           {tag && <Chip size="sm" className="srow-tag">{tag}</Chip>}
         </span>
         <span className="srow-help">{help}</span>
+        {readError && <span className="srow-error" role="alert">{readError}</span>}
         {status === 'failed' && <span className="srow-error" role="alert">{error}</span>}
       </span>
+      {readError && onRetry && <Button variant="secondary" size="sm" onClick={onRetry}>retry sign-in</Button>}
       {signedIn && (
         <span className="srow-control">
           <Button variant="secondary" size="sm" onClick={logOut} disabled={status === 'pending'}>log out</Button>

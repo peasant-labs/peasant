@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { AutoPublishRule, LocalSettingsResponse, SyncAuthResponse } from '@peasant-labs/schema';
 import SettingsPageClient from './SettingsPageClient';
@@ -6,6 +7,7 @@ import { SETTING_GROUP_OF } from '@/lib/settings/catalog';
 import { SETTING_ROW_STATES } from '@/lib/ft-ui';
 import {
   loadInstallCases,
+  loadAuthRecoveryCases,
   loadServerKeyNames,
   loadSettingWrites,
   loadSettingsGroups,
@@ -114,6 +116,23 @@ afterEach(() => {
 });
 
 describe('settings page groups', () => {
+  for (const testCase of loadAuthRecoveryCases()) {
+    it(`recovers sign-in reads in StrictMode: ${testCase.name}`, async () => {
+      let recovered = false;
+      serve('GET', '/api/v1/sync/auth', () => recovered
+        ? answer(200, { authenticated: false })
+        : answer(testCase.status, { error: testCase.error }));
+      render(<StrictMode><SettingsPageClient /></StrictMode>);
+      expect(await screen.findByRole('button', { name: 'retry sign-in' })).toBeVisible();
+      expect(screen.getByRole('alert')).toHaveTextContent(testCase.error);
+      expect(document.querySelector('details.srow-group')).not.toBeNull();
+      recovered = true;
+      fireEvent.click(screen.getByRole('button', { name: 'retry sign-in' }));
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'retry sign-in' })).toBeNull());
+      expect(rowOf('village.connected')).toHaveTextContent('not connected');
+    });
+  }
+
   it('shows exactly the manifest groups, in order, open or collapsed as listed', async () => {
     const groups = loadSettingsGroups();
     await mountPage();
@@ -363,14 +382,14 @@ describe('auto-publish rules', () => {
     expect(saves[0].body).toEqual({ kind: 'folder', match: '~/work/acme/**', events: ['pre-push'], collectives: ['3f9c1a2b-0000-4000-8000-000000000001'] });
   });
 
-  it('removes a rule and says its hooks stay until they are removed', async () => {
+  it('removes a rule and explains that retained hooks require another active binding', async () => {
     mountServer({ settings: withRules([rule]) });
     serve('DELETE', '/api/v1/settings/auto-publish/acme-work', () => answer(200, { id: 'acme-work', repositories: rule.repositories }));
     await mountPage();
     const item = document.querySelector<HTMLElement>('[data-rule-id="acme-work"]')!;
     fireEvent.click(within(item).getByRole('button', { name: 'more for ~/work/acme/**' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'remove' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('its hook stays in 1 repository and runs on each push until you remove it with peasant village hooks uninstall.');
+    expect(await screen.findByRole('status')).toHaveTextContent('its hook stays in 1 repository as files. rule-required hooks publish only if another active binding covers the repository and event. separately installed terminal hooks keep their own consent.');
     expect(document.querySelector('[data-rule-id="acme-work"]')).toBeNull();
     expect(mutations().map(({ method, path }) => `${method} ${path}`)).toEqual(['DELETE /api/v1/settings/auto-publish/acme-work']);
   });

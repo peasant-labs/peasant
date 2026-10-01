@@ -77,17 +77,22 @@ interface GroupBody {
 export default function SettingsPageClient() {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [auth, setAuth] = useState<SyncAuthResponse | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [collectives, setCollectives] = useState<CollectiveNames>(null);
   const [collectivesError, setCollectivesError] = useState<string | null>(null);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   const readAuth = useCallback(async () => {
+    setAuthError(null);
     let signIn: SyncAuthResponse;
     try {
       signIn = await fetchVillageAuth();
-    } catch {
-      // The sign-in row says it is still reading; the settings still show.
+    } catch (failure) {
+      if (alive.current) setAuthError(messageOf(failure));
       return;
     }
     if (!alive.current) return;
@@ -157,7 +162,7 @@ export default function SettingsPageClient() {
   const summary = [
     auth?.authenticated
       ? { label: 'connected as', value: `@${auth.username ?? ''}`, order: 'label-first' as const }
-      : { label: 'village', value: auth ? 'not connected' : 'reading', order: 'label-first' as const },
+      : { label: 'village', value: authError ? 'unavailable' : auth ? 'not connected' : 'reading', order: 'label-first' as const },
     publishing > 0
       ? { label: 'auto-publish on for', value: `${publishing} ${publishing === 1 ? 'rule' : 'rules'}`, order: 'label-first' as const }
       : { label: 'auto-publish', value: 'off', order: 'label-first' as const },
@@ -179,7 +184,7 @@ export default function SettingsPageClient() {
   const bodies: Record<SettingsGroupId, () => GroupBody> = {
     village: () => ({
       rows: [
-        <VillageAccountRow key="account" auth={auth} connected={take('village.connected')} onLoggedOut={onLoggedOut} />,
+        <VillageAccountRow key="account" auth={auth} readError={authError} onRetry={() => { void readAuth(); }} connected={take('village.connected')} onLoggedOut={onLoggedOut} />,
         row('push.sharePreference'),
       ],
     }),
