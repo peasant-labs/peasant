@@ -1,0 +1,47 @@
+{
+  "binarySha256": "cbce9ad1969430fa4cd92e20ec0e7e5371de5f8f4b9928aabf52ec109105a44c",
+  "chunk": "web/out/_next/static/chunks/app/settings/page-fc67337adf34af34.js",
+  "marker": "these folders and repositories publish redacted on their own",
+  "shots": [
+    "dark/default.png",
+    "dark/tagged.png",
+    "dark/install.png",
+    "dark/pending.png",
+    "dark/failed.png",
+    "dark/install-refusal.png",
+    "dark/default-390.png",
+    "light/default.png",
+    "light/tagged.png",
+    "light/install.png",
+    "light/pending.png",
+    "light/failed.png",
+    "light/install-refusal.png",
+    "light/default-390.png"
+  ],
+  "probes": [
+    {
+      "theme": "dark",
+      "rowLabelFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "helpFont": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+      "helpSize": "16px",
+      "noteSize": "16px",
+      "installRadius": "0px",
+      "groupRadius": "0px",
+      "countNumerals": "tabular-nums",
+      "installCountNumerals": "tabular-nums",
+      "tagText": "not in peasant config"
+    },
+    {
+      "theme": "light",
+      "rowLabelFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "helpFont": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+      "helpSize": "16px",
+      "noteSize": "16px",
+      "installRadius": "0px",
+      "groupRadius": "0px",
+      "countNumerals": "tabular-nums",
+      "installCountNumerals": "tabular-nums",
+      "tagText": "not in peasant config"
+    }
+  ]
+}
