@@ -302,9 +302,13 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 			step.Outcome = schema.SyncPushStepSkipped
 			step.Reason = "Village holds no transcript of this session, so no collective can read it"
 		default:
-			if err := sharer.UnshareTranscript(ctx, outcome.transcript.Receipt.TranscriptID, collective); err != nil {
+			var refusal *village.StatusError
+			if err := sharer.UnshareTranscript(ctx, outcome.transcript.Receipt.TranscriptID, collective); errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
 				step.Outcome = schema.SyncPushStepFailed
-				step.Reason = "taking the transcript back failed, so this collective can still read it: " + err.Error()
+				step.Reason = missingTranscriptReason
+			} else if err != nil {
+				step.Outcome = schema.SyncPushStepFailed
+				step.Reason = "taking the transcript back failed: " + err.Error()
 			} else {
 				step.Outcome = schema.SyncPushStepSucceeded
 			}
@@ -344,6 +348,11 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 	return result
 }
 
+// missingTranscriptReason explains a share change Village refused because the
+// transcript this computer's receipt names is gone from Village, for example
+// deleted there. An unchanged session is not uploaded again on its own.
+const missingTranscriptReason = "Village no longer holds the transcript this computer's receipt names, for example because it was deleted on Village; publish the session again with 'peasant village push --force' to recreate it, then change its collectives"
+
 // shareWithCollective offers the transcript to the step's collective and
 // reports what the collective did with it. Village's answer to a share does not
 // say whether the collective accepted it, holds it for its owner's approval, or
@@ -356,9 +365,14 @@ func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcrip
 	err := sharer.ShareTranscript(ctx, transcript, collective)
 	var refusal *village.StatusError
 	duplicate := errors.As(err, &refusal) && refusal.StatusCode == http.StatusConflict
+	if errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
+		step.Outcome = schema.SyncPushStepFailed
+		step.Reason = missingTranscriptReason
+		return step
+	}
 	if err != nil && !duplicate {
 		step.Outcome = schema.SyncPushStepFailed
-		step.Reason = "sharing with this collective failed, so it cannot read the transcript: " + err.Error()
+		step.Reason = "sharing with this collective failed: " + err.Error()
 		return step
 	}
 	status, err := sharer.LatestShareStatus(ctx, transcript, collective)
@@ -400,15 +414,6 @@ func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, s
 		fmt.Fprintf(&b, "stopped at sharing with collective %s: ", *stopped.CollectiveID)
 	}
 	b.WriteString(stopped.Reason)
-	b.WriteString(". Village kept ")
-	if outcome.transcript == nil {
-		b.WriteString("nothing of this session: no transcript was published")
-	} else {
-		fmt.Fprintf(&b, "the transcript at %s", outcome.transcript.Receipt.TranscriptURL)
-		if stopped.Step == schema.SyncPushStepContent {
-			b.WriteString(" with the content and readers it had before")
-		}
-	}
 	var applied, skippedLater []string
 	for _, step := range steps {
 		if step.CollectiveID == nil {
@@ -419,6 +424,19 @@ func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, s
 			applied = append(applied, describeStep(step))
 		case schema.SyncPushStepNotAttempted:
 			skippedLater = append(skippedLater, describeStep(step))
+		}
+	}
+	// What Village kept is said from this computer's receipt. Without one,
+	// Village may still hold content it accepted just before the stop.
+	if outcome.transcript == nil {
+		b.WriteString(". Village kept no transcript of this session that this computer has a receipt for; if Village accepted the content before the stop, publishing again records it")
+	} else {
+		fmt.Fprintf(&b, ". Village kept the transcript at %s", outcome.transcript.Receipt.TranscriptURL)
+		if stopped.Step == schema.SyncPushStepContent {
+			b.WriteString(" with the content it had before")
+			if len(applied) == 0 {
+				b.WriteString(" and the same readers")
+			}
 		}
 	}
 	if len(applied) > 0 {

@@ -245,3 +245,17 @@ func TestLocalPublishingRoutesAnswerWithTheSchemaTypes(t *testing.T) {
 		t.Fatalf("a signed-out computer reports %+v; it reports every session unpublished", signedOut.Publications[0])
 	}
 }
+
+// TestCollectiveIDPatternIsTheContractPattern keeps the collective identifier
+// check on the typed push equal to the pattern the contract declares, so a
+// change to the contract cannot leave this server refusing valid collectives.
+func TestCollectiveIDPatternIsTheContractPattern(t *testing.T) {
+	t.Parallel()
+	declared, err := schema.VillageUUID("").JSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if declared.Pattern == nil || *declared.Pattern != villageUUIDPattern.String() {
+		t.Fatalf("the typed push checks collectives against %q, but the contract declares %v", villageUUIDPattern.String(), declared.Pattern)
+	}
+}

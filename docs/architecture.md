@@ -597,8 +597,8 @@ sequenceDiagram
   push->>push: UpdateOwner if needed, SavePublication, push_log
   push->>vc: UnshareTranscript for each removed collective
   vc->>vapi: DELETE /api/v1/transcripts/{id}/share/{groupID}
-  push->>vc: ShareTranscript for each added collective, then TranscriptShares
-  vc->>vapi: POST /api/v1/transcripts/{id}/share, GET /api/v1/transcripts/{id}
+  push->>vc: ShareTranscript for each added collective, then LatestShareStatus
+  vc->>vapi: POST /api/v1/transcripts/{id}/share, GET /api/v1/users/me/collectives/{groupId}/transcripts/{id}/events
   sh->>vc: PushAnnotations
   sh-->>wiz: one result per session, its steps in run order
 ```

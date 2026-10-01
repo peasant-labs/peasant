@@ -42,6 +42,7 @@ const (
 	publicationsIncludeCode      = "publications_include_unknown"
 	villageSignedOutCode         = "village_signed_out"
 	villageUnreachableCode       = "village_unreachable"
+	villageTranscriptMissingCode = "village_transcript_missing"
 	publishingUnavailableCode    = "publishing_unavailable"
 	publishingContractBreachCode = "publishing_contract_breach"
 )
@@ -139,6 +140,13 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 					client = village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
 				}
 				audience, err := publicationAudience(r.Context(), client, transcriptID)
+				var refusal *village.StatusError
+				if errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
+					writeAPIError(w, http.StatusBadGateway,
+						"Village no longer holds transcript "+transcriptID.String()+", which this computer's receipt names for session "+id+", for example because it was deleted on Village. Nothing was returned. Publish the session again with 'peasant village push --force' to recreate it, or omit include=audience, then retry.",
+						villageTranscriptMissingCode)
+					return
+				}
 				if err != nil {
 					writeAPIError(w, http.StatusBadGateway,
 						"The publication state could not name who can read transcript "+transcriptID.String()+" because Village could not be read: "+err.Error()+". Nothing was returned. Check the connection to Village, or omit include=audience, then retry.",
@@ -256,9 +264,10 @@ func (h *publishingHandler) handleVillageCollectives(w http.ResponseWriter, r *h
 
 // linkedRepositoriesFor reads each collective's linked repositories, only when
 // a repository could match: the session has a github.com remote, because a
-// collective links GitHub repositories. A collective whose repositories the
-// caller may no longer read, because the membership changed since the list was
-// read, contributes none.
+// collective links GitHub repositories. A suggestion is a convenience, so a
+// collective whose repositories cannot be read contributes none and the list
+// is still served. Only a refused credential fails the read, so the user signs
+// in again.
 func linkedRepositoriesFor(ctx context.Context, client *village.VillageClient, groups []schema.VillageUserGroup, sessionLabel string) ([][]schema.VillageLinkedRepository, error) {
 	repositories := make([][]schema.VillageLinkedRepository, len(groups))
 	if host, _, _ := strings.Cut(sessionLabel, ":"); host != githubHost {
@@ -270,11 +279,13 @@ func linkedRepositoriesFor(ctx context.Context, client *village.VillageClient, g
 		g.Go(func() error {
 			linked, err := client.ListCollectiveRepositories(gctx, group.ID)
 			var refusal *village.StatusError
-			if errors.As(err, &refusal) && (refusal.StatusCode == http.StatusForbidden || refusal.StatusCode == http.StatusNotFound) {
-				return nil
+			if errors.As(err, &refusal) && refusal.StatusCode == http.StatusUnauthorized {
+				return err
 			}
-			repositories[i] = linked
-			return err
+			if err == nil {
+				repositories[i] = linked
+			}
+			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
