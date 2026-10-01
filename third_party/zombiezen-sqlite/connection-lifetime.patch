@@ -1,0 +1,55 @@
+--- upstream/sqlite.go
++++ local/sqlite.go
+@@ -234,15 +234,24 @@
+ 	c.unlockNote = 0
+ 	c.tls.Close()
+ 	c.tls = nil
++	c.releaseConnectionRegistrations()
++	if !res.IsSuccess() {
++		return fmt.Errorf("sqlite: close: %w", res.ToError())
++	}
++	return nil
++}
++
++// releaseConnectionRegistrations runs after sqlite3_close. That call may free
++// the native address before a concurrent OpenConn registers a new owner there.
++func (c *Conn) releaseConnectionRegistrations() {
++	allConns.mu.Lock()
++	defer allConns.mu.Unlock()
++	if allConns.table[c.conn] != c {
++		return
++	}
+ 	c.releaseAuthorizer()
+ 	busyHandlers.Delete(c.conn)
+-	allConns.mu.Lock()
+ 	delete(allConns.table, c.conn)
+-	allConns.mu.Unlock()
+-	if !res.IsSuccess() {
+-		return fmt.Errorf("sqlite: close: %w", res.ToError())
+-	}
+-	return nil
+ }
+ 
+ // AutocommitEnabled reports whether conn is in autocommit mode.
+--- upstream/go.mod
++++ local/go.mod
+@@ -9,6 +9,7 @@
+ 	github.com/chzyer/readline v1.5.0
+ 	github.com/google/go-cmp v0.6.0
+ 	golang.org/x/text v0.14.0
++	gopkg.in/yaml.v3 v3.0.1
+ 	modernc.org/libc v1.65.7
+ 	modernc.org/sqlite v1.37.1
+ )
+--- upstream/go.sum
++++ local/go.sum
+@@ -32,6 +32,9 @@
+ golang.org/x/text v0.14.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
+ golang.org/x/tools v0.33.0 h1:4qz2S3zmRxbGIhDIAgjxvFutSvH5EfnsYrRBj0UI0bc=
+ golang.org/x/tools v0.33.0/go.mod h1:CIJMaWEY88juyUfo7UbgPqbC8rU2OqfAV1h2Qp0oMYI=
++gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
++gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
++gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+ modernc.org/cc/v4 v4.26.1 h1:+X5NtzVBn0KgsBCBe+xkDC7twLb/jNVj9FPgiwSQO3s=
+ modernc.org/cc/v4 v4.26.1/go.mod h1:uVtb5OGqUKpoLWhqwNQo/8LwvoiEBLvZXIQ/SmO6mL0=
+ modernc.org/ccgo/v4 v4.28.0 h1:rjznn6WWehKq7dG4JtLRKxb52Ecv8OUGah8+Z/SfpNU=

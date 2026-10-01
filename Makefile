@@ -92,7 +92,7 @@ lint: web-stub
 	# golangci-lint run ./...
 	go vet ./...
 
-check: fmt lint
+check: fmt lint sqlite-connection-test
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
@@ -125,6 +125,12 @@ check: fmt lint
 .PHONY: check-harvester-versions
 check-harvester-versions:
 	go run ./scripts/harvester-version-guard -base "$(BASE)" -candidate "$(or $(CANDIDATE),HEAD)"
+
+# The audited SQLite fork is a separate module, outside the main Go test plan.
+.PHONY: sqlite-connection-test
+sqlite-connection-test:
+	python3 scripts/check-sqlite-fork.py
+	cd third_party/zombiezen-sqlite && GOWORK=off go test -race -count=1 ./...
 
 # Local end-to-end skip-gate harness. Requires podman + a village
 # checkout (VILLAGE_REPO, default sibling) or VILLAGE_BIN+SETUP_DEMO_BIN.

@@ -97,3 +97,6 @@ require (
 )
 
 tool github.com/peasant-labs/schema/cmd/release-guard
+
+// Preserve native connection ownership during concurrent close/open.
+replace zombiezen.com/go/sqlite => ./third_party/zombiezen-sqlite
