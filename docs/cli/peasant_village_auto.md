@@ -11,9 +11,10 @@ collectives that can read, or wait to read, the transcript this computer
 published last for your account. It saves an auto-publish rule for this
 repository in hooks.yaml in the config directory: a rule for its origin remote,
 or for exactly its folder when it has none. Then it installs the rule's hooks,
-the managed pre-push hook at first, in this repository. Peasant installs a hook
-only in a repository it has recorded sessions in, so run it in a repository
-you have opened a session of.
+the managed pre-push hook at first, in this repository. In a linked worktree,
+the rule and the hook are its main repository's, which covers every worktree.
+Peasant installs a hook only in a repository it has recorded sessions in, so
+run it in a repository you have opened a session of.
 
 From then on, every git push runs the upload for this repository. Its
 sessions are published redacted and private, with no license, and each

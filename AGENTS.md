@@ -225,17 +225,18 @@ the server serves the newly built assets before you trust a screenshot or a comp
   request. The auto-publish hook is the same managed hook, installed by `peasant village auto` or
   by the settings install route, for a repository that an auto-publish rule in `hooks.yaml`
   covers. The rule is the binding. `autopublish.Decide` is the one matcher of rules,
-  server-side; do not implement it again in React. It is applied per session, to the repository
-  the session was recorded in. A push that sends a bound session publishes collectives-only:
-  private, no license, and each bound transcript is shared with its rule's collectives, never
-  with the public. A session a paused rule (no event) covers is not published, a transcript that
-  is already public is not updated, and a collective that rejected or lost a transcript is not
-  asked again. A rule installs no hook by itself: `peasant village auto` and the settings install
-  route install one repository at a time, by an explicit act, and only in a repository Peasant
-  has recorded sessions in. Any managed hook applies the rules, including one installed with
-  `peasant village hooks install`, so saving a rule changes what an installed hook publishes.
-  Attaching
-  is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
+  server-side; do not implement it again in React. `peasant village push`, which a managed hook
+  runs, applies it per session, to the repository the session was recorded in (a linked
+  worktree counts as its main repository). A push that sends a bound session publishes
+  collectives-only: private, no license, and each bound transcript is shared with its rule's
+  collectives, never with the public. A session a paused rule (no event) covers is not
+  published, a transcript that is public on Village is not updated, and a collective that
+  rejected or lost a transcript is not asked again. Kickstart's publication and the local web's
+  publish do not read the rules. A rule installs no hook by itself: `peasant village auto` and
+  the settings install route install one repository at a time, by an explicit act, and only in
+  a repository Peasant has recorded sessions in. Any managed hook applies the rules, including
+  one installed with `peasant village hooks install`, so saving a rule changes what an installed
+  hook publishes. Attaching is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
   transcripts already published. Do not add a path that publishes without one of these, and do
   not create a binding for the developer.
 - One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
