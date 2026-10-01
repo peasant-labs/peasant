@@ -59,12 +59,13 @@ export function useRootSessions({
 /**
  * How many collectives can read each of the named published sessions, read
  * from Village through the publications read (`include=audience`). Only the
- * rows on screen are asked for, and each session once. A failed read leaves
+ * rows on screen are asked for, once per successful root-list refresh. A failed read leaves
  * those sessions out, so their label states no count rather than a wrong one.
  */
-export function usePublicationAudience(sessionIds: readonly string[]): ReadonlyMap<string, number> {
+export function usePublicationAudience(sessionIds: readonly string[], revision: unknown): ReadonlyMap<string, number> {
   const [counts, setCounts] = useState<ReadonlyMap<string, number>>(() => new Map());
   const asked = useRef(new Set<string>());
+  const generation = useRef(0);
   const mounted = useRef(true);
   const key = useMemo(() => [...new Set(sessionIds)].sort().join(','), [sessionIds]);
 
@@ -76,14 +77,21 @@ export function usePublicationAudience(sessionIds: readonly string[]): ReadonlyM
   }, []);
 
   useEffect(() => {
+    generation.current++;
+    asked.current.clear();
+    setCounts(new Map());
+  }, [revision]);
+
+  useEffect(() => {
+    const requestedGeneration = generation.current;
     const missing = key === '' ? [] : key.split(',').filter((id) => !asked.current.has(id));
     if (missing.length === 0) return;
     for (const id of missing) asked.current.add(id);
-    // An answer that arrives after the rows on screen changed still applies:
-    // the counts are keyed by session, and each session is asked once.
+    // Filter changes may retain a session's answer within this refresh, but a
+    // late answer from an older root-list refresh must not overwrite it.
     fetchPublications(missing, { audience: true })
       .then((publications) => {
-        if (!mounted.current) return;
+        if (!mounted.current || generation.current !== requestedGeneration) return;
         setCounts((previous) => {
           const next = new Map(previous);
           for (const publication of publications) {
@@ -93,11 +101,11 @@ export function usePublicationAudience(sessionIds: readonly string[]): ReadonlyM
         });
       })
       .catch(() => {
-        // Village could not be read. The labels keep stating no count; the
-        // next change of the rows on screen asks again.
+        // Retry on the next visible-set change or successful root refresh.
+        if (generation.current !== requestedGeneration) return;
         for (const id of missing) asked.current.delete(id);
       });
-  }, [key]);
+  }, [key, revision]);
 
   return counts;
 }

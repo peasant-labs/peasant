@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import HomePage from './page';
@@ -443,4 +443,69 @@ describe('root page list reads', () => {
     fireEvent.click(screen.getByRole('button', { name: 'clear search' }));
     expect(await screen.findByRole('region', { name: 'sessions' })).toBeInTheDocument();
   });
+});
+
+interface AudienceRefreshCase {
+  name: string;
+  initialCount: number;
+  initialStatus: number;
+  nextCount: number;
+  expectedBefore: string;
+  expectedAfter: string;
+}
+
+function loadAudienceRefreshCases(): AudienceRefreshCase[] {
+  const source = readFileSync(resolve(process.cwd(), 'src/app/testdata/root-audience-refresh.yaml'), 'utf8');
+  const root = requireRecord(parseStrictYAML(source, 'root audience refresh'), 'root audience refresh');
+  requireExactRequiredFields(root, ['requiredNames', 'cases'], 'root audience refresh');
+  const required = [
+    'a-root-refresh-updates-the-audience-of-the-same-session',
+    'a-root-refresh-retries-a-failed-audience-read-for-the-same-session',
+  ];
+  if (!Array.isArray(root.requiredNames) || [...root.requiredNames].sort().join() !== [...required].sort().join()) {
+    throw new Error('root audience refresh required names changed');
+  }
+  if (!Array.isArray(root.cases)) throw new Error('root audience refresh cases must be a list');
+  const cases = root.cases.map((value, index) => {
+    const where = `root audience refresh case ${index}`;
+    const row = requireRecord(value, where);
+    requireExactRequiredFields(row, ['name', 'initialCount', 'initialStatus', 'nextCount', 'expectedBefore', 'expectedAfter'], where);
+    for (const key of ['initialCount', 'nextCount']) {
+      if (!Number.isSafeInteger(row[key]) || Number(row[key]) < 0) throw new Error(`${where}.${key} is not an audience count`);
+    }
+    if (![200, 502].includes(Number(row.initialStatus))) throw new Error(`${where}.initialStatus is invalid`);
+    if (typeof row.expectedBefore !== 'string' || typeof row.expectedAfter !== 'string') throw new Error(`${where} lacks expected copy`);
+    return row;
+  });
+  requireUniqueNames(cases, 'root audience refresh cases');
+  if (cases.map((row) => row.name).sort().join() !== [...required].sort().join()) throw new Error('root audience refresh case names changed');
+  return cases as unknown as AudienceRefreshCase[];
+}
+
+describe('root publication refresh also refreshes visible audience counts', () => {
+  for (const testCase of loadAudienceRefreshCases()) {
+    it(testCase.name, async () => {
+      const specs: SessionSpec[] = [{ id: 'same-published-session', project: 'alpha', syncStatus: 'synced', state: 'published', audience: testCase.initialCount }];
+      const options: ServeOptions = { audienceStatus: testCase.initialStatus === 200 ? undefined : testCase.initialStatus };
+      const requests = serve(specs, options);
+      const audienceReads = () => requests.filter((url) => url.pathname === '/api/v1/publications' && url.searchParams.get('include') === 'audience');
+      const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length;
+      const view = render(<HomePage />);
+      const list = await screen.findByRole('region', { name: 'sessions' });
+      await waitFor(() => expect(audienceReads()).toHaveLength(1));
+      await waitFor(() => expect(stateLabel(list, specs[0].id)).toBe(testCase.expectedBefore));
+      const originalSyncReads = syncReads();
+      // The WS set changes while the actual published REST row remains the
+      // same session. This executes the production root refresh boundary.
+      specs[0].audience = testCase.nextCount;
+      options.audienceStatus = undefined;
+      topics.sessions = { sessions: [makeSession({ id: 'new-channel-row', project: 'alpha-project' })] };
+      await act(async () => { view.rerender(<HomePage />); });
+      await waitFor(() => expect(syncReads()).toBeGreaterThan(originalSyncReads));
+      await waitFor(() => expect(audienceReads()).toHaveLength(2));
+      await waitFor(() => expect(stateLabel(list, specs[0].id)).toBe(testCase.expectedAfter));
+      expect(rowsOnScreen(list)).toEqual([specs[0].id]);
+      for (const request of audienceReads()) expect(request.searchParams.get('sessionIds')).toBe(specs[0].id);
+    });
+  }
 });

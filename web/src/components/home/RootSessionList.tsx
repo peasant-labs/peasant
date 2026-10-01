@@ -112,7 +112,7 @@ export function RootSessionList({ rows, titles, previews }: RootSessionListProps
     () => visible.filter((row) => row.publication.state === 'published').map((row) => row.id),
     [visible],
   );
-  const audience = usePublicationAudience(publishedOnScreen);
+  const audience = usePublicationAudience(publishedOnScreen, rows);
 
   const columns = useMemo<DataTableColumn<ListRow>[]>(
     () => [
