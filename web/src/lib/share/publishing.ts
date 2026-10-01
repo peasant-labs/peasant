@@ -35,6 +35,8 @@ export const PublishingErrorCode = {
   VillageSignedOut: 'village_signed_out',
   /** Village could not be read. */
   VillageUnreachable: 'village_unreachable',
+  /** Village no longer holds the transcript this computer's receipt names. */
+  VillageTranscriptMissing: 'village_transcript_missing',
 } as const;
 
 export type PublishingErrorCode = (typeof PublishingErrorCode)[keyof typeof PublishingErrorCode];
@@ -127,6 +129,8 @@ export async function fetchPublication(sessionId: string, options: { audience: b
  * The publication state of one session, with its audience when village can be
  * read. When village cannot be read, the state is still the local receipt, and
  * `audienceKnown` is false so the bar leaves the count out rather than state it.
+ * When village answers that the transcript is gone, the refusal is kept: the
+ * receipt would call the session published when it is not.
  */
 export async function fetchPublicationState(sessionId: string): Promise<{ publication: LocalPublication | null; audienceKnown: boolean }> {
   try {
