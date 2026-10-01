@@ -217,11 +217,14 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector } = 
     // the complete shell capture, and apply the unchanged pixel gate to the
     // actual mounted panel rather than the empty space below it.
     const full = await gate.measure(file)
-    if (full.bytes < 16 * 1024 || full.w !== await page.evaluate(() => document.documentElement.clientWidth)) fail(`${label}: incomplete full-frame capture`)
+    const viewport = page.viewport()
+    if (full.bytes < 16 * 1024 || full.w !== viewport.width || full.h < viewport.height) fail(`${label}: incomplete full-frame capture`)
     const header = await page.$('header')
-    if (!header || !(await header.boundingBox())) fail(`${label}: shell header missing`)
+    const headerBox = header ? await header.boundingBox() : null
+    if (!headerBox || headerBox.height <= 0 || Math.abs(headerBox.width - viewport.width) > 1) fail(`${label}: shell header missing or incomplete`)
     const panel = await page.$(contentSelector)
-    if (!panel) fail(`${label}: mounted content missing (${contentSelector})`)
+    const panelBox = panel ? await panel.boundingBox() : null
+    if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > viewport.width + 1 || panelBox.y + panelBox.height > viewport.height + 1) fail(`${label}: mounted recovery panel is not fully visible (${contentSelector})`)
     const contentFile = file.replace(/\.png$/, '.content.png')
     await panel.screenshot({ path: contentFile })
     await gate.assert(`${label}/content`, contentFile, { sel: contentSelector, where: 'root-page-visual.mjs' })
