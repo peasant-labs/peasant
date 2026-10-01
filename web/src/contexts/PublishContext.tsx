@@ -28,7 +28,7 @@ export interface PublishState {
   /** How many publishes of each session have finished, success or not. */
   settled: ReadonlyMap<string, number>;
   /** Publish one session. The promise settles with the server's answer. */
-  publish: (sessionId: string, body: SyncPushRequest, collectives: number) => Promise<SyncPushResponse>;
+  publish: (sessionId: string, body: SyncPushRequest, collectives: number, afterPublish?: (response: SyncPushResponse) => Promise<void>) => Promise<SyncPushResponse>;
 }
 
 const PublishContext = createContext<PublishState | null>(null);
@@ -48,11 +48,14 @@ function usePublishStateStore(): PublishState {
   const [settled, setSettled] = useState<ReadonlyMap<string, number>>(() => new Map());
   const running = useRef(new Map<string, Promise<SyncPushResponse>>());
 
-  const publish = useCallback((sessionId: string, body: SyncPushRequest, collectives: number) => {
+  const publish = useCallback((sessionId: string, body: SyncPushRequest, collectives: number, afterPublish?: (response: SyncPushResponse) => Promise<void>) => {
     const existing = running.current.get(sessionId);
     if (existing) return existing;
     setPublishing((prev) => new Map(prev).set(sessionId, collectives));
-    const run = publishSessions(body).finally(() => {
+    const run = publishSessions(body).then(async (response) => {
+      await afterPublish?.(response);
+      return response;
+    }).finally(() => {
       running.current.delete(sessionId);
       setPublishing((prev) => {
         const next = new Map(prev);

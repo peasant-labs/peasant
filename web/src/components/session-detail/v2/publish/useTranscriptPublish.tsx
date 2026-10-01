@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MoreHorizontal, RotateCw } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import type { LocalPublication, LocalPublicationAudienceMember, LocalVillageCollective } from '@peasant-labs/schema';
 import { Menu, PublishBar, PublishDialog, type MenuItem, type PublishDialogState } from '@/lib/ft-ui';
 import { usePublishState } from '@/contexts/PublishContext';
@@ -16,6 +17,8 @@ import {
 } from '@/lib/share/publishing';
 import { useRedactionPipeline, type RedactionScanTarget } from '@/lib/share/redactionScan';
 import { DEFAULT_REDACTION_LEVEL } from '@/lib/share/redactions';
+import { fetchSettings } from '@/lib/api/settings';
+import { AutomaticPublishingError, enableAutomaticPublishing } from './automaticPublishing';
 import {
   accessItems,
   accessSummary,
@@ -75,6 +78,7 @@ type CollectivesRead =
 
 /** A step before the push that stopped; retry runs it again. */
 type Blocked = { stoppedAt: string; retry?: () => void };
+type AutomaticPreference = { status: 'loading' } | { status: 'ready'; offer: boolean } | { status: 'error'; message: string };
 
 export interface TranscriptPublishOptions {
   sessionId: string;
@@ -106,6 +110,7 @@ export interface TranscriptPublish {
  * in the app-level publish state, so they outlive this page.
  */
 export function useTranscriptPublish(options: TranscriptPublishOptions): TranscriptPublish {
+  const router = useRouter();
   const { sessionId, title, turns, loaded, moreItems, openOnArrival, onArrivalHandled } = options;
   const { redactionCache, updateRedactionCache, publishing, settled, publish } = usePublishState();
 
@@ -164,6 +169,11 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   const [query, setQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<PublishOutcome | null>(null);
+  const [automaticPreference, setAutomaticPreference] = useState<AutomaticPreference>({ status: 'loading' });
+  const [automaticNonce, setAutomaticNonce] = useState(0);
+  const [automaticChecked, setAutomaticChecked] = useState(false);
+  const [automaticFailure, setAutomaticFailure] = useState<string | null>(null);
+  const automaticRuleIds = useRef(new Map<string, string>());
 
   const openPopup = useCallback(() => {
     openGeneration.current += 1;
@@ -176,6 +186,10 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     setDraft(null);
     setOpenedAs(null);
     setQuery('');
+    setAutomaticPreference({ status: 'loading' });
+    setAutomaticChecked(false);
+    setAutomaticFailure(null);
+    setAutomaticNonce((nonce) => nonce + 1);
     // Read the audience again: who can read it may have changed on village.
     reread();
     setOpen(true);
@@ -195,6 +209,26 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     setSignInFailure(null);
     if (openOnArrival) onArrivalHandled();
   }, [onArrivalHandled, openOnArrival]);
+
+  // This is the server-effective setup preference, including keep-local
+  // precedence. It only selects the offer; a checkbox and publish confirmation
+  // are still required before any rule is saved or hook installed.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setAutomaticPreference({ status: 'loading' });
+    fetchSettings().then((settings) => {
+      const preference = settings.settings.find((setting) => setting.key === 'push.autoPublishIntent');
+      if (!preference || typeof preference.effective !== 'boolean') throw new Error('peasant did not return its effective automatic publishing preference');
+      if (live) {
+        setAutomaticPreference({ status: 'ready', offer: preference.effective });
+        setAutomaticChecked(preference.effective);
+      }
+    }).catch((error: unknown) => {
+      if (live) setAutomaticPreference({ status: 'error', message: messageOf(error) });
+    });
+    return () => { live = false; };
+  }, [automaticNonce, open]);
 
   // Whether this computer is signed in to village, asked each time it opens.
   useEffect(() => {
@@ -341,7 +375,9 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // and its audience must be known before anything is offered: a popup that
   // guessed them would publish as a first publish, or update a list it cannot
   // show.
-  const blocked: Blocked | null = signInFailure != null
+  const blocked: Blocked | null = automaticFailure !== null
+    ? { stoppedAt: automaticFailure }
+    : signInFailure != null
     ? {
       stoppedAt: signInFailure.step === 'check'
         ? `checking this computer’s village sign-in: ${oneLine(signInFailure.message)}`
@@ -357,6 +393,8 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
         ? { stoppedAt: 'reading this session: it is not recorded on this computer yet; run peasant ingest, then retry', retry: reread }
         : read.status === 'ready' && publication?.state === 'published' && !read.audienceKnown
         ? { stoppedAt: 'reading who can read it on village', retry: reread }
+        : automaticPreference.status === 'error'
+          ? { stoppedAt: `reading the automatic publishing preference: ${oneLine(automaticPreference.message)}`, retry: () => setAutomaticNonce((nonce) => nonce + 1) }
         : collectivesRead.status === 'error'
           ? { stoppedAt: `reading your collectives on village: ${oneLine(collectivesRead.message)}`, retry: () => setCollectivesNonce((nonce) => nonce + 1) }
           : null;
@@ -366,6 +404,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // An update can be sent before the collectives list arrives: its draft is
   // "no change" until the reader makes one.
   const canPublish = scanClean && signIn === 'signed-in' && blocked === null && read.status === 'ready'
+    && automaticPreference.status === 'ready'
     && (draft !== null || publishedNow === 'update');
 
   const runPublish = useCallback(async () => {
@@ -375,7 +414,18 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     setOutcome(null);
     setSubmitting(true);
     try {
-      const response = await publish(sessionId, request, readerCount);
+      const enableAutomatic = automaticChecked && publication?.autoPublish !== true;
+      const selectedCollectives = access.filter((item) => item.pending !== 'removal').map((item) => item.id);
+      const response = await publish(sessionId, request, readerCount, enableAutomatic ? async (response) => {
+        const result = response.sessions.find((item) => item.sessionId === sessionId);
+        if (!result || result.status === 'error' || result.status === 'held') return;
+        let ruleId = automaticRuleIds.current.get(sessionId);
+        if (!ruleId) {
+          ruleId = crypto.randomUUID();
+          automaticRuleIds.current.set(sessionId, ruleId);
+        }
+        await enableAutomaticPublishing(ruleId, sessionId, selectedCollectives);
+      } : undefined);
       // Who can read it now comes from the same read the bar uses.
       let audienceAfter: readonly LocalPublicationAudienceMember[] | undefined;
       try {
@@ -403,7 +453,10 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
         .map((step) => step.collectiveId) ?? []);
       setDraft((current) => (current ? { add: current.add, remove: current.remove.filter((id) => !removed.has(id)) } : current));
     } catch (error) {
-      if (error instanceof PublishingRequestError && error.status === 401) {
+      if (error instanceof AutomaticPublishingError) {
+        setAutomaticFailure(oneLine(error.message, 700));
+        reread();
+      } else if (error instanceof PublishingRequestError && error.status === 401) {
         setSignIn('signed-out');
       } else {
         setOutcome({ kind: 'stopped', stoppedAt: `sending it to village: ${oneLine(messageOf(error))}` });
@@ -411,7 +464,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     } finally {
       setSubmitting(false);
     }
-  }, [activeDraft, canPublish, listed, names, publication, publish, readerCount, readers, sessionId, publishingTo, submitting]);
+  }, [access, activeDraft, automaticChecked, canPublish, listed, names, publication, publish, readerCount, readers, reread, sessionId, publishingTo, submitting]);
 
   // The order matters: a finished publish shows its link; anything that stops
   // the flow before the push (a failed read, a sign-in) comes next; then the
@@ -423,7 +476,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     if (blocked) return 'stopped';
     if (signIn === 'waiting') return 'waiting-github';
     if (signIn === 'signed-out') return 'connect';
-    if (signIn === 'unknown' || read.status === 'loading' || scan.phase === 'scanning') return 'checking';
+    if (signIn === 'unknown' || read.status === 'loading' || scan.phase === 'scanning' || automaticPreference.status === 'loading') return 'checking';
     if (scan.scanError != null) return 'scan-failed';
     if (outcome?.kind === 'stopped') return 'stopped';
     if (collectivesRead.status === 'ready' && collectivesRead.collectives.length === 0 && access.length === 0) return 'no-collective';
@@ -433,12 +486,15 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     ? (blocked ?? (outcome?.kind === 'stopped' ? { stoppedAt: outcome.stoppedAt, retry: /push --force/.test(outcome.stoppedAt) ? undefined : () => { void runPublish(); } } : null))
     : null;
 
+  const menuItems = publication?.autoPublish || automaticFailure
+    ? [...moreItems, { label: 'automatic publishing settings', onSelect: () => router.push('/settings') }]
+    : moreItems;
   const bar = read.status === 'ready' && read.publication
     ? (
       <PublishBar
         {...barModel({ publication: read.publication, audienceKnown: read.audienceKnown, newTurns, publishingTo })}
         onAction={openPopup}
-        moreItems={moreItems}
+        moreItems={menuItems}
       />
     )
     : (
@@ -453,7 +509,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
             </button>}
           </>
         )}
-        <Menu icon={MoreHorizontal} ariaLabel="more" size="sm" align="end" items={moreItems} />
+        <Menu icon={MoreHorizontal} ariaLabel="more" size="sm" align="end" items={menuItems} />
       </span>
     );
 
@@ -481,9 +537,13 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
           },
         }
         : undefined}
-      // The auto-publish checkbox saves an auto-publish rule through the
-      // settings routes, which this build does not serve yet; it is left out
-      // rather than shown as a control that saves nothing.
+      autoPublish={automaticPreference.status === 'ready' && publication?.autoPublish !== true && automaticFailure === null
+        ? {
+          checked: automaticChecked,
+          onChange: setAutomaticChecked,
+          hint: 'selected collectives · overlapping rules still apply · change them in settings',
+        }
+        : undefined}
       accessSummary={mode === 'update' ? accessSummary(activeDraft, names) : undefined}
       onPublish={() => { void runPublish(); }}
       onConnect={connect}
