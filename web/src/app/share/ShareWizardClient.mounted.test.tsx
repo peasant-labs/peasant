@@ -64,7 +64,7 @@ function installFetch(items: unknown = fixture.items, redactionsGate: Promise<vo
         return response({ items });
       case '/api/v1/sync/redactions':
         await redactionsGate;
-        return response({ categories: [] });
+        return response({ total: 0, categories: [] });
       case '/api/v1/sync/push':
         return response({ new: 4, updated: 0, skipped: 0, errors: 0, sessions: [] });
       default:
