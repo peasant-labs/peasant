@@ -510,7 +510,16 @@ func snapshotConfigPath(t *testing.T, path string) string {
 		return "directory"
 	}
 	if info.Mode().Perm()&0o400 == 0 {
-		return fmt.Sprintf("unreadable file of %d bytes", info.Size())
+		// Read only for the test snapshot, then restore the permission
+		// boundary before the production handler runs or the test returns.
+		if err := os.Chmod(path, info.Mode().Perm()|0o400); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.Chmod(path, info.Mode().Perm()); err != nil {
+				t.Error(err)
+			}
+		}()
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
