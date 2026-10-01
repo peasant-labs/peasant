@@ -284,21 +284,15 @@ func TestBaselineClockCellMutations(t *testing.T) {
 	if err := verifyClockCellExpressions(string(artifact), cells); err != nil {
 		t.Fatalf("unmutated artifact must pass the shape check: %v", err)
 	}
-	for _, mutation := range []struct {
-		name        string
-		replacement string
-	}{
-		{name: "zero", replacement: "0"},
-		{name: "frozen-literal", replacement: "1000000000000"},
-	} {
+	for _, mutation := range fixtures.ClockMutations.Mutations {
 		mutation := mutation
-		t.Run(mutation.name, func(t *testing.T) {
-			mutated := strings.ReplaceAll(string(artifact), clockCellSQLExpression, mutation.replacement)
+		t.Run(mutation.Name, func(t *testing.T) {
+			mutated := strings.ReplaceAll(string(artifact), clockCellSQLExpression, mutation.Replacement)
 			if mutated == string(artifact) {
 				t.Fatal("the mutation changed nothing; the artifact no longer carries the runtime expression")
 			}
 			if err := verifyClockCellExpressions(mutated, cells); err == nil {
-				t.Fatalf("the shape check accepted an artifact whose clock cells were replaced with %s", mutation.name)
+				t.Fatalf("the shape check accepted an artifact whose clock cells were replaced with %q", mutation.Replacement)
 			}
 			path := filepath.Join(t.TempDir(), "mutated.db")
 			conn, err := sqlite.OpenConn(path, 0)
@@ -311,7 +305,7 @@ func TestBaselineClockCellMutations(t *testing.T) {
 			}
 			startSec := time.Now().Unix()
 			if err := verifyClockCellsWithinInterval(conn, cells, startSec, time.Now().Unix()); err == nil {
-				t.Fatalf("the interval check accepted a database whose clock cells were replaced with %s", mutation.name)
+				t.Fatalf("the interval check accepted a database whose clock cells were replaced with %q", mutation.Replacement)
 			}
 		})
 	}
