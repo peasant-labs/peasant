@@ -741,7 +741,7 @@ func readPragmaInt(conn *sqlite.Conn, statement string) (int64, error) {
 			return nil
 		},
 	}); err != nil {
-		return 0, fmt.Errorf("store: read %q: %w; the schema dump records the database identity", statement, err)
+		return 0, fmt.Errorf("store: read %q: %w", statement, err)
 	}
 	return value, nil
 }
