@@ -1,0 +1,2891 @@
+{
+  "sourceHead": "023225ee5cbe58ed36c1c568678991a4f00c197a",
+  "binarySha256": "babb7ccd2024dffbee8e22838c33d1e407dcd1a9a9ad16e010f61fd47ae5f6c0",
+  "packagePins": {
+    "@peasant-labs/fairtrade": "0.0.24",
+    "@peasant-labs/schema": "0.26.0",
+    "@xyflow/react": "^12.10.1",
+    "clsx": "^2.1.1",
+    "diff": "^9.0.0",
+    "lucide-react": "^0.575.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "recharts": "^3.7.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.0.2",
+    "tailwind-merge": "^3.5.0"
+  },
+  "fixture": "web/src/app/share/testdata/publish-popup-states.yaml",
+  "chunk": "web/out/_next/static/chunks/app/projects/[[...segments]]/page-45ed13837e70aacc.js",
+  "featureBytes": [
+    "reading your collectives on village",
+    "village no longer holds this transcript: run peasant village push --force for this session"
+  ],
+  "servedChunk": {
+    "path": "/_next/static/chunks/app/projects/%5B%5B...segments%5D%5D/page-45ed13837e70aacc.js",
+    "sha256": "9f2e2b189b939292151b53a18732f9e4e69fc1bd41953bbf3278dfe59c7bceab"
+  },
+  "captures": [
+    {
+      "case": "not-published",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/not-published.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 159643,
+        "md5": "0bd837a9e40429d2ea2a9d75046b5e6a",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.2861895576131687,
+        "bgShare": 0.5991351594650206,
+        "distinctColors": 121
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "not-published",
+      "theme": "dark",
+      "size": "mobile",
+      "file": "/tmp/peasant-publish-final-023225e/dark/mobile/not-published.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 112120,
+        "md5": "e995dad79af79fea030cc1bfcbca8899",
+        "w": 780,
+        "h": 1688,
+        "pixels": 1316640,
+        "nonbgRatio": 0.31699933163203303,
+        "bgShare": 0.5597893121886013,
+        "distinctColors": 96
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "up-to-date",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/up-to-date.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 161326,
+        "md5": "d297c318be184d76e7c4d86a7a39a12d",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.28535043724279835,
+        "bgShare": 0.5999633487654321,
+        "distinctColors": 121
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "new-turns",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/new-turns.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 161726,
+        "md5": "9db8a62bd2a4f858bb9695d0583f2fa2",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.28644225823045266,
+        "bgShare": 0.5988342335390946,
+        "distinctColors": 122
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "auto-publish-on",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/auto-publish-on.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 160714,
+        "md5": "c150631a00d51c1c38dde49d8465a892",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.28525720164609053,
+        "bgShare": 0.6000803755144033,
+        "distinctColors": 121
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "outside-saved-lists",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/outside-saved-lists.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 161581,
+        "md5": "de95c4a7fc45ab237b045999edd708c6",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.28665895061728397,
+        "bgShare": 0.5986123971193416,
+        "distinctColors": 121
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "connect-to-village",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/connect-to-village.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 228108,
+        "md5": "a3279e54eac9af327036d5bb6f8133d4",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05629822530864197,
+        "bgShare": 0.8529758230452675,
+        "distinctColors": 74
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/signed-out-on-push"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "waiting-for-github",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/waiting-for-github.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 227273,
+        "md5": "887e199803bcca0345a8fa230c8b591e",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.051639660493827164,
+        "bgShare": 0.8545679012345679,
+        "distinctColors": 60
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "scanning",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/scanning.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 259014,
+        "md5": "d2e01ae3f15f29ad06590b9ef59f98ea",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.0634593621399177,
+        "bgShare": 0.8658931327160494,
+        "distinctColors": 63
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "scan-failed",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/scan-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 266123,
+        "md5": "701e1016f59034fb45d16476894e26c0",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.0659323559670782,
+        "bgShare": 0.8284066358024691,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "not-in-a-collective",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/not-in-a-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 238216,
+        "md5": "8432912239d7bbc2d887abd089f90e80",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05406314300411522,
+        "bgShare": 0.8646714248971193,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "ready-to-publish",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/ready-to-publish.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 261115,
+        "md5": "da4f7b7be0ddb3bf0eb3669b363b80aa",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06357638888888889,
+        "bgShare": 0.8658217592592593,
+        "distinctColors": 76
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/connect-completes",
+        "dark/desktop/already-authenticated"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "ready-to-publish",
+      "theme": "dark",
+      "size": "mobile",
+      "file": "/tmp/peasant-publish-final-023225e/dark/mobile/ready-to-publish.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 161966,
+        "md5": "763812eac1b401db020d61b609bfe376",
+        "w": 780,
+        "h": 1688,
+        "pixels": 1316640,
+        "nonbgRatio": 0.0889012942034269,
+        "bgShare": 0.8900375197472354,
+        "distinctColors": 71
+      },
+      "equivalentSurfaces": [
+        "dark/mobile/connect-completes",
+        "dark/mobile/already-authenticated"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "publishing",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/publishing.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 250447,
+        "md5": "1ce379892a436433ccab61b5ce925b53",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.060581918724279836,
+        "bgShare": 0.8661323302469136,
+        "distinctColors": 61
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "published-done",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/published-done.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 240074,
+        "md5": "c309deb386b3a2a1b50db6231a18e81a",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05454153806584362,
+        "bgShare": 0.8650411522633745,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/update-adds-collective"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "waits-for-approval",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/waits-for-approval.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 243076,
+        "md5": "ab701827e70f3dfac4a4a1e11641a8d3",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05528485082304527,
+        "bgShare": 0.8683198302469136,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "stopped-at-a-step",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/stopped-at-a-step.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 265925,
+        "md5": "3bcd9d1058a122e3a15efe575d388b6d",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06194701646090535,
+        "bgShare": 0.8340522119341564,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "update-with-new-turns",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/update-with-new-turns.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 265218,
+        "md5": "9f3f7c2a8f610d9aad9afcb9ac99f4e1",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06291795267489712,
+        "bgShare": 0.873383487654321,
+        "distinctColors": 73
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "update-with-new-turns",
+      "theme": "dark",
+      "size": "mobile",
+      "file": "/tmp/peasant-publish-final-023225e/dark/mobile/update-with-new-turns.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 156186,
+        "md5": "cf35b5181de99d9dbd1649f454fdae5a",
+        "w": 780,
+        "h": 1688,
+        "pixels": 1316640,
+        "nonbgRatio": 0.08243483412322275,
+        "bgShare": 0.9029203123101227,
+        "distinctColors": 70
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "update-keeps-audience",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/update-keeps-audience.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 237622,
+        "md5": "6a7f10770db84478fa4dc4ebc972ab5d",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.0538110853909465,
+        "bgShare": 0.8658481224279836,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "connect-completes",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/connect-completes.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 261115,
+        "md5": "da4f7b7be0ddb3bf0eb3669b363b80aa",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06357638888888889,
+        "bgShare": 0.8658217592592593,
+        "distinctColors": 76
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/ready-to-publish",
+        "dark/desktop/already-authenticated"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "published-while-signed-out",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/published-while-signed-out.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 267330,
+        "md5": "752fcb36f52ee3fedd49b783c37f9387",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06138953189300411,
+        "bgShare": 0.8748405349794238,
+        "distinctColors": 74
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "manage-opens",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/manage-opens.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 264794,
+        "md5": "b92e902335f91ffe9428a44f4b6688a8",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.059598765432098764,
+        "bgShare": 0.8747653034979423,
+        "distinctColors": 74
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "update-adds-collective",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/update-adds-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 240074,
+        "md5": "c309deb386b3a2a1b50db6231a18e81a",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05454153806584362,
+        "bgShare": 0.8650411522633745,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/published-done"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "update-removes-collective",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/update-removes-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 237495,
+        "md5": "52aac4ba5e42b3ad27e55681331b9b07",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05378472222222222,
+        "bgShare": 0.8658629115226337,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/manage-removes-collective",
+        "dark/desktop/partial-publish-removes-reader"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "manage-removes-collective",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/manage-removes-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 237499,
+        "md5": "47e25d13c9bf4fa5cc645b8b3011921b",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05378536522633745,
+        "bgShare": 0.8658629115226337,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/update-removes-collective",
+        "dark/desktop/partial-publish-removes-reader"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "partial-publish-removes-reader",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/partial-publish-removes-reader.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 237499,
+        "md5": "47e25d13c9bf4fa5cc645b8b3011921b",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05378536522633745,
+        "bgShare": 0.8658629115226337,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/update-removes-collective",
+        "dark/desktop/manage-removes-collective"
+      ],
+      "pushes": 2,
+      "scans": 1
+    },
+    {
+      "case": "stopped-rescan-fails",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/stopped-rescan-fails.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 263948,
+        "md5": "067301a42e55b264a95f8fb74d7cdb7d",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06434349279835391,
+        "bgShare": 0.8261496913580247,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 2
+    },
+    {
+      "case": "skipped-collective",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/skipped-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 268162,
+        "md5": "7317bfa1a6f12dd6fdf37925e0877eac",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06229102366255144,
+        "bgShare": 0.8258063271604938,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "held-until-ingest",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/held-until-ingest.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 263649,
+        "md5": "81a5955afb90636a5ca55a5f6ac7cc75",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06238811728395062,
+        "bgShare": 0.8356012088477366,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "content-step-failed",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/content-step-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 262128,
+        "md5": "75a42bfe1ce9e9c090607b9ba2db9c65",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06169238683127572,
+        "bgShare": 0.8356012088477366,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "collectives-read-failed",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/collectives-read-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 244511,
+        "md5": "4f5f083526f681384f6729f485475b5e",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05842335390946502,
+        "bgShare": 0.821059670781893,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "audience-unknown",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/audience-unknown.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 276900,
+        "md5": "914b89c08c48623bf19e51cfed8a84c3",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06432291666666666,
+        "bgShare": 0.8542836934156378,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "signed-out-on-push",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/signed-out-on-push.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 228108,
+        "md5": "a3279e54eac9af327036d5bb6f8133d4",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05629822530864197,
+        "bgShare": 0.8529758230452675,
+        "distinctColors": 74
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/connect-to-village"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "login-start-failed",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/login-start-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 241157,
+        "md5": "b01b0103642b6cd1e5581a0e4111aa44",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.057174639917695474,
+        "bgShare": 0.8302797067901234,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "already-authenticated",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/already-authenticated.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 261115,
+        "md5": "da4f7b7be0ddb3bf0eb3669b363b80aa",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06357638888888889,
+        "bgShare": 0.8658217592592593,
+        "distinctColors": 76
+      },
+      "equivalentSurfaces": [
+        "dark/desktop/ready-to-publish",
+        "dark/desktop/connect-completes"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "publication-read-failed",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/publication-read-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/?publish=open",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": null,
+        "barLabelSize": null,
+        "actionRadius": null,
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 268843,
+        "md5": "714f643ac4b88f9e7101af33d19a4f14",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.06178690843621399,
+        "bgShare": 0.835851980452675,
+        "distinctColors": 87
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "transcript-missing",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/transcript-missing.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/?publish=open",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": null,
+        "barLabelSize": null,
+        "actionRadius": null,
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 272618,
+        "md5": "225a8bc91a09fe62082bbf5b83d8399c",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.061700102880658435,
+        "bgShare": 0.8351909722222223,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "removes-final-collective",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/removes-final-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 237852,
+        "md5": "d86191319a3912d321114dc344c5f307",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.054032278806584365,
+        "bgShare": 0.8655954218106996,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "only-curated-collective-waits",
+      "theme": "dark",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/dark/desktop/only-curated-collective-waits.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "dark",
+          "data-tb-theme": "dark"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 241502,
+        "md5": "0d28f68b5f4feb056a5525f638f53b6f",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.05477752057613169,
+        "bgShare": 0.8688792438271605,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "not-published",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/not-published.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 160828,
+        "md5": "4563f74dbd8d952863bd364f12068f57",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.04858024691358025,
+        "bgShare": 0.6011721965020577,
+        "distinctColors": 148
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "not-published",
+      "theme": "light",
+      "size": "mobile",
+      "file": "/tmp/peasant-publish-final-023225e/light/mobile/not-published.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 112300,
+        "md5": "d2599bd8109c609a84c511bad0f15201",
+        "w": 780,
+        "h": 1688,
+        "pixels": 1316640,
+        "nonbgRatio": 0.06235873131607729,
+        "bgShare": 0.5610060456920647,
+        "distinctColors": 116
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "up-to-date",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/up-to-date.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 162390,
+        "md5": "f9a30b5b37e4def9ed3bd04a5fbb02ce",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.04768389917695473,
+        "bgShare": 0.602011316872428,
+        "distinctColors": 148
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "new-turns",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/new-turns.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 162694,
+        "md5": "d80ef59561b7a44ea351a6eb1c747af6",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.04877636316872428,
+        "bgShare": 0.6009227109053498,
+        "distinctColors": 149
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "auto-publish-on",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/auto-publish-on.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 161666,
+        "md5": "b9eb005638541121bbb903474633815f",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.04759837962962963,
+        "bgShare": 0.6021045524691359,
+        "distinctColors": 148
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "outside-saved-lists",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/outside-saved-lists.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": null,
+        "dialogBody": null,
+        "dialogHeadingWeight": null,
+        "dialogHeadingFamily": null,
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 162556,
+        "md5": "fe6639e6565d0931192abbea3cb47c38",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.04897312242798354,
+        "bgShare": 0.6007060185185186,
+        "distinctColors": 148
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 0
+    },
+    {
+      "case": "connect-to-village",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/connect-to-village.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 234671,
+        "md5": "7a3fdc2b9548c0d1ec915d36aac0ad8a",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02251607510288066,
+        "bgShare": 0.8879269547325103,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/signed-out-on-push"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "waiting-for-github",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/waiting-for-github.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 233482,
+        "md5": "8e6040562a6a56c4698709b381d90837",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.01693479938271605,
+        "bgShare": 0.8896714248971194,
+        "distinctColors": 65
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "scanning",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/scanning.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 263068,
+        "md5": "a69ac1ffdb3100dbe3aea611f9efcc8b",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.029074074074074075,
+        "bgShare": 0.8977282664609053,
+        "distinctColors": 65
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "scan-failed",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/scan-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 269006,
+        "md5": "3f22bf8f8c42ebeabce71b7309abcc63",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.03142103909465021,
+        "bgShare": 0.8588670267489712,
+        "distinctColors": 77
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "not-in-a-collective",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/not-in-a-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 244078,
+        "md5": "1d017ae534a1a0721c7f93bc70e53764",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.020459104938271605,
+        "bgShare": 0.8955285493827161,
+        "distinctColors": 80
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "ready-to-publish",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/ready-to-publish.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 265095,
+        "md5": "2aa68c7e72e1417f43fdaeb5eaf27e84",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02928883744855967,
+        "bgShare": 0.897610596707819,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/connect-completes",
+        "light/desktop/already-authenticated"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "ready-to-publish",
+      "theme": "light",
+      "size": "mobile",
+      "file": "/tmp/peasant-publish-final-023225e/light/mobile/ready-to-publish.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 163846,
+        "md5": "4dea05e6c47a9a5d7c5efc3d6825062b",
+        "w": 780,
+        "h": 1688,
+        "pixels": 1316640,
+        "nonbgRatio": 0.07643699112893426,
+        "bgShare": 0.901073945801434,
+        "distinctColors": 73
+      },
+      "equivalentSurfaces": [
+        "light/mobile/connect-completes",
+        "light/mobile/already-authenticated"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "publishing",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/publishing.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 255021,
+        "md5": "be2d8927267570f3b7ae06fa219a9044",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02558127572016461,
+        "bgShare": 0.8976523919753087,
+        "distinctColors": 65
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "published-done",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/published-done.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 245302,
+        "md5": "e1a8f3500d42642b5e6543872096deb0",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.01957497427983539,
+        "bgShare": 0.8968724279835391,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/update-adds-collective"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "waits-for-approval",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/waits-for-approval.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 247565,
+        "md5": "b12821864c9391584347186826d4056b",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02065650720164609,
+        "bgShare": 0.8974183384773663,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "stopped-at-a-step",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/stopped-at-a-step.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 267920,
+        "md5": "66b5c65795379973173b16a7c316691e",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.027375900205761316,
+        "bgShare": 0.8624106224279835,
+        "distinctColors": 94
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "update-with-new-turns",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/update-with-new-turns.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 268026,
+        "md5": "079ecfacb62de207c1adeeb98b123b5d",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.028945473251028808,
+        "bgShare": 0.900659079218107,
+        "distinctColors": 77
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "update-with-new-turns",
+      "theme": "light",
+      "size": "mobile",
+      "file": "/tmp/peasant-publish-final-023225e/light/mobile/update-with-new-turns.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 156756,
+        "md5": "6d77c88e32ae578f20c1b88772b0576d",
+        "w": 780,
+        "h": 1688,
+        "pixels": 1316640,
+        "nonbgRatio": 0.07313084821971078,
+        "bgShare": 0.9123405030987969,
+        "distinctColors": 73
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "update-keeps-audience",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/update-keeps-audience.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 242845,
+        "md5": "5d05a2762a48dba2a5226ba36bc770bb",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.018964763374485598,
+        "bgShare": 0.8976170267489711,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "connect-completes",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/connect-completes.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 265095,
+        "md5": "2aa68c7e72e1417f43fdaeb5eaf27e84",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02928883744855967,
+        "bgShare": 0.897610596707819,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/ready-to-publish",
+        "light/desktop/already-authenticated"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "published-while-signed-out",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/published-while-signed-out.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 270373,
+        "md5": "3f4a376630899d69434812326300820c",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.027349537037037037,
+        "bgShare": 0.9021920010288066,
+        "distinctColors": 77
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "manage-opens",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/manage-opens.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 267793,
+        "md5": "8ff743f45060c96e2260d3f03aa667df",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.025196116255144032,
+        "bgShare": 0.9034053497942387,
+        "distinctColors": 77
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "update-adds-collective",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/update-adds-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 245302,
+        "md5": "e1a8f3500d42642b5e6543872096deb0",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.01957497427983539,
+        "bgShare": 0.8968724279835391,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/published-done"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "update-removes-collective",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/update-removes-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 242751,
+        "md5": "55ceba71b74c1ea0c01be351abf80199",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.018945473251028806,
+        "bgShare": 0.8976433899176954,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/manage-removes-collective",
+        "light/desktop/partial-publish-removes-reader"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "manage-removes-collective",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/manage-removes-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 242756,
+        "md5": "749aaf27d7b16f632e135d55ee3666d2",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.018945473251028806,
+        "bgShare": 0.8976433899176954,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/update-removes-collective",
+        "light/desktop/partial-publish-removes-reader"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "partial-publish-removes-reader",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/partial-publish-removes-reader.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 242756,
+        "md5": "749aaf27d7b16f632e135d55ee3666d2",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.018945473251028806,
+        "bgShare": 0.8976433899176954,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/update-removes-collective",
+        "light/desktop/manage-removes-collective"
+      ],
+      "pushes": 2,
+      "scans": 1
+    },
+    {
+      "case": "stopped-rescan-fails",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/stopped-rescan-fails.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 267163,
+        "md5": "4d5fc06feb944e42cf5666ff1193c5e6",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02915895061728395,
+        "bgShare": 0.8585545267489711,
+        "distinctColors": 77
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 2
+    },
+    {
+      "case": "skipped-collective",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/skipped-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 270005,
+        "md5": "4f20a884dab4a842e7e0451fd3e2200d",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02822723765432099,
+        "bgShare": 0.8532008744855967,
+        "distinctColors": 94
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "held-until-ingest",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/held-until-ingest.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 266010,
+        "md5": "323c1e0a7bbe730298df6994555345b4",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.029048996913580247,
+        "bgShare": 0.8626948302469136,
+        "distinctColors": 94
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "content-step-failed",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/content-step-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 264566,
+        "md5": "47e3c8fa2e7def5f578e7c158ec7b247",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02842914094650206,
+        "bgShare": 0.8626948302469136,
+        "distinctColors": 94
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "collectives-read-failed",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/collectives-read-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 248209,
+        "md5": "4d0f8652a0ebfaa6f38435dd4d53fd26",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02425218621399177,
+        "bgShare": 0.8519900977366255,
+        "distinctColors": 97
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "audience-unknown",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/audience-unknown.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 278356,
+        "md5": "acfaaf06259dbae695c0a9a2188c6a27",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.030697659465020576,
+        "bgShare": 0.8820498971193416,
+        "distinctColors": 94
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "signed-out-on-push",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/signed-out-on-push.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 234671,
+        "md5": "7a3fdc2b9548c0d1ec915d36aac0ad8a",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02251607510288066,
+        "bgShare": 0.8879269547325103,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/connect-to-village"
+      ],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "login-start-failed",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/login-start-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 245229,
+        "md5": "efbaf5f287fcbc3a8a48234f50402b60",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.023129501028806586,
+        "bgShare": 0.8625662294238683,
+        "distinctColors": 97
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "already-authenticated",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/already-authenticated.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 265095,
+        "md5": "2aa68c7e72e1417f43fdaeb5eaf27e84",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.02928883744855967,
+        "bgShare": 0.897610596707819,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [
+        "light/desktop/ready-to-publish",
+        "light/desktop/connect-completes"
+      ],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "publication-read-failed",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/publication-read-failed.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/?publish=open",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": null,
+        "barLabelSize": null,
+        "actionRadius": null,
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 270843,
+        "md5": "de5314d0300e08c43b997a887c69675a",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.028123713991769547,
+        "bgShare": 0.8629295267489712,
+        "distinctColors": 92
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "transcript-missing",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/transcript-missing.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/?publish=open",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": null,
+        "barLabelSize": null,
+        "actionRadius": null,
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 274575,
+        "md5": "7981fa6a6ff3abecc7906f4547e9202b",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.026854423868312757,
+        "bgShare": 0.862758487654321,
+        "distinctColors": 75
+      },
+      "equivalentSurfaces": [],
+      "pushes": 0,
+      "scans": 1
+    },
+    {
+      "case": "removes-final-collective",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/removes-final-collective.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 243088,
+        "md5": "d0c3753fff8a3f1ab27313e7cbbd1924",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.019101723251028806,
+        "bgShare": 0.8973836162551441,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    },
+    {
+      "case": "only-curated-collective-waits",
+      "theme": "light",
+      "size": "desktop",
+      "file": "/tmp/peasant-publish-final-023225e/light/desktop/only-curated-collective-waits.png",
+      "url": "http://localhost:8847/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "probes": {
+        "themes": {
+          "data-theme": "light",
+          "data-tb-theme": "light"
+        },
+        "body": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "barLabel": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "barLabelSize": "14px",
+        "actionRadius": "0px",
+        "dialogRadius": "0px",
+        "dialogBody": "16px",
+        "dialogHeadingWeight": "700",
+        "dialogHeadingFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "atkinson": true
+      },
+      "measurements": {
+        "bytes": 245958,
+        "md5": "2db29b1da2a3a06bd2ea035fead36050",
+        "w": 1440,
+        "h": 1080,
+        "pixels": 1555200,
+        "nonbgRatio": 0.020176826131687243,
+        "bgShare": 0.8979269547325103,
+        "distinctColors": 81
+      },
+      "equivalentSurfaces": [],
+      "pushes": 1,
+      "scans": 1
+    }
+  ],
+  "turns": 52
+}

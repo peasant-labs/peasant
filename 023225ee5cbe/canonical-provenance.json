@@ -1,0 +1,54 @@
+[
+  {
+    "theme": "dark",
+    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
+    "heading": "updated · no collective can read it",
+    "active": "done",
+    "focusInside": true,
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+    "radius": "0px",
+    "shell": true
+  },
+  {
+    "theme": "dark",
+    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
+    "before": {
+      "x": 60,
+      "y": 287.21875,
+      "width": 154.1875,
+      "height": 28
+    },
+    "during": {
+      "x": 60,
+      "y": 287.21875,
+      "width": 154.1875,
+      "height": 28
+    }
+  },
+  {
+    "theme": "light",
+    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
+    "heading": "updated · no collective can read it",
+    "active": "done",
+    "focusInside": true,
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+    "radius": "0px",
+    "shell": true
+  },
+  {
+    "theme": "light",
+    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
+    "before": {
+      "x": 60,
+      "y": 287.21875,
+      "width": 154.1875,
+      "height": 28
+    },
+    "during": {
+      "x": 60,
+      "y": 287.21875,
+      "width": 154.1875,
+      "height": 28
+    }
+  }
+]

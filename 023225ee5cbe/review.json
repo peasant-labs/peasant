@@ -1,0 +1,17 @@
+{
+  "sourceHead": "023225ee5cbe58ed36c1c568678991a4f00c197a",
+  "sourceTree": "3a221b8c04ee1ddb2e37f92dcfbb17d75d036d2d",
+  "binaryVersion": "peasant v0.7.1-dev.117+023225ee5",
+  "captureCount": 80,
+  "inspectedDesktopContactSheets": 4,
+  "inspectedMobileScreenshots": 6,
+  "inspectedCanonicalComparisons": 4,
+  "audienceReadinessRegression": "held collective read, actual control at DOM readiness commit, real POST and final reader assertion",
+  "originalInitializerMutation": "fails the named regression because collectives.remove is absent",
+  "frontendTests": 1363,
+  "mountedPopupTests": 44,
+  "typecheck": "passed",
+  "productionBuild": "passed",
+  "normalProductionCapture": "passed",
+  "review": "No new visual regression found. Canonical narrow breadcrumb remains tracked in Fairtrade issue132; automatic consent checkbox is supplied by the next stack layer."
+}
