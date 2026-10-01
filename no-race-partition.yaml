@@ -375,6 +375,38 @@ partition:
       kept. The full-content and digest assertions stay exact; no weakening.
     cost: { wall_ms: 2970, cpu_ms: 2790 }
 
+  - package: internal/ingest
+    test: TestPiUnknownPersistence
+    class: single-threaded-bytes
+    evidence: '#TestPiUnknownPersistence'
+    justification: >-
+      Subject. Pi retained-unknown evidence survives the whole path: the capture
+      indexer records raw source bytes at the exact positions, the pipeline
+      persists them, and export and publication emit the baseline-redacted
+      egress form with the partial diagnostic; corrupt input is refused without
+      accepting a partial capture. Concurrency actually exercised. The pipeline
+      runs over an unknownFailingStore wrapper with the full concurrent DIFF,
+      EXTRACT+WRITE, StagingBuffer, drainLoop and indexLoop machinery, then the
+      test closes and reopens the store and exports; Parallelism 1 bounds the
+      workers. Why the detector is not this test's oracle. The assertions read
+      stored entries, exported records, positions and accounting counts after
+      the run; a race corrupts those products instead of producing its own
+      assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic,
+      internal/export/generation_detail_barrier_test.go#TestGenerationDetailBarrier
+      covers the export path. Residual risk. A race particular to the failing-
+      store wrapper plus the export assembly is not observed here; the named
+      tests bound the shared primitives and the export barrier.
+      Detector-independent guarantees kept. Raw-at-rest byte equality,
+      position ordering and the egress oracle all stay asserted.
+    cost: { wall_ms: 3630, cpu_ms: 3980 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
