@@ -225,6 +225,7 @@ func inspect(event Event, path string) (Slot, error) {
 		// non-executable target as actively uploading.
 		slot.Mode = targetInfo.Mode()
 		slot.Size = targetInfo.Size()
+		slot.RequireAutoPublishRule = strings.Contains(string(content), "--require-auto-publish-rule")
 		classifyForeign(&slot, content)
 		return slot, nil
 	}
@@ -249,6 +250,7 @@ func inspect(event Event, path string) (Slot, error) {
 			event, path, err,
 		)
 	}
+	slot.RequireAutoPublishRule = strings.Contains(string(content), "--require-auto-publish-rule")
 	if IsManaged(content) {
 		slot.Ownership = OwnershipPeasant
 		slot.EmbeddedRoot = EmbeddedRepository(content)
@@ -256,6 +258,7 @@ func inspect(event Event, path string) (Slot, error) {
 		return slot, nil
 	}
 	slot.Ownership = OwnershipForeign
+	slot.RequireAutoPublishRule = strings.Contains(string(content), "--require-auto-publish-rule")
 	classifyForeign(&slot, content)
 	return slot, nil
 }
@@ -357,6 +360,7 @@ func linkTarget(path string) string {
 // explains it in that operation's own words. owner is the repository that runs
 // a shared hook path, or "" when none does; it is ignored for a private path.
 func planFor(slot Slot, repo Repository, binding Binding, op intent, owner string) (Plan, error) {
+	binding = binding.forEvent(slot.Event)
 	plan := Plan{Slot: slot}
 	if !privateHookPath(slot, repo) {
 		plan.Action = ActionRefuse
@@ -955,6 +959,7 @@ func executableByGit(mode fs.FileMode) bool {
 // installOne performs one event's mutation, re-verifying ownership immediately
 // before touching the file.
 func (l *Lifecycle) installOne(plan Plan, repo Repository, binding Binding) Result {
+	binding = binding.forEvent(plan.Event)
 	result := Result{Slot: plan.Slot, Reason: plan.Reason}
 	switch plan.Action {
 	case ActionRefuse:

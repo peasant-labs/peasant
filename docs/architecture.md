@@ -740,3 +740,8 @@ sequenceDiagram
 | `internal/tui` and subpackages | Kickstart, config editor, harvest progress, push wizard, layout kit. | `kickstart`, `config`, `harvest`, `village push` |
 | `internal/mock`, `internal/redactmock` | Mock data provider and generated mock redactions. | `web start`, `cmd/gen-mock-redactions` |
 | `cmd/gen-*`, `cmd/peasant-guided-screenshots`, `cmd/peasant-origin-audit` | Code generators and opt-in audit tools. | developers |
+
+Rule-installed upload hooks carry `--require-auto-publish-rule`: their run uses
+only sessions the canonical matcher binds to an active rule, including its
+annotation scope. Deleting the last binding leaves the hook dormant, while
+retained bindings and separately installed terminal hooks keep their consent.

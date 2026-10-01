@@ -271,6 +271,12 @@ func uploadTokens(root string, binding Binding) []token {
 		token{value: "village"}, token{value: "push"},
 		token{value: "--non-interactive"}, token{value: "--quiet"},
 		token{value: "--timeout"}, token{value: binding.UploadBudget().String()})
+	if binding.RequireAutoPublishRule {
+		tokens = append(tokens, token{value: "--require-auto-publish-rule"})
+		if binding.AutoPublishEvent != "" {
+			tokens = append(tokens, token{value: "--auto-publish-event"}, token{value: binding.AutoPublishEvent.String()})
+		}
+	}
 	if root != "" {
 		tokens = append(tokens, token{value: "--repository"}, token{value: root, quoted: true})
 	}
@@ -470,6 +476,7 @@ func ManualRecovery(root string, binding Binding) string {
 // Script renders the exact bytes Peasant writes for event in the repository
 // rooted at root, whose effective hook file is path.
 func Script(event Event, root, path string, binding Binding) (string, error) {
+	binding = binding.forEvent(event)
 	if err := validateScriptInputs(event, root, path, binding); err != nil {
 		return "", err
 	}
@@ -507,6 +514,7 @@ func Script(event Event, root, path string, binding Binding) (string, error) {
 // masks a failure of those commands when it is appended at the end of a file,
 // nor makes a following exit line unreachable when it is placed above one.
 func ManualSnippet(event Event, root, path string, binding Binding) (string, error) {
+	binding = binding.forEvent(event)
 	if err := validateScriptInputs(event, root, path, binding); err != nil {
 		return "", err
 	}

@@ -212,32 +212,20 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		outputDir = filepath.Join(dataDir, "peasant-sync")
 	}
 
-	srv := api.NewServer(withCommandDirectories(cmd, api.ServerConfig{
-		Port:         port,
-		Provider:     provider,
-		Hub:          hub,
-		DevMode:      devMode,
-		DevProxyAddr: devProxy,
-		WebAssets:    webFS,
-		MockConfig:   toMockConfigResponse(&cfg.Sources.Mock),
-		Experimental: experimental,
-		Store:        analyticsStore,
-		Config:       cfg,
-		OutputDir:    outputDir,
-	}))
+	srv := api.NewServer(webServerConfig(cmd, cfg, port, devMode, devProxy, experimental, outputDir, provider, hub, webFS, analyticsStore))
 
 	return srv.ListenAndServe(ctx)
 }
 
-// withCommandDirectories gives the server the directory overrides cmd runs
-// with, so the settings routes read this config directory's rules, and a hook
-// the server installs runs against this configuration and store.
-func withCommandDirectories(cmd *cobra.Command, cfg api.ServerConfig) api.ServerConfig {
-	cfg.ConfigHome = configDirOverride(cmd)
-	cfg.DataHome = dataDirOverride(cmd)
-	cfg.StateHome = stateDirOverride(cmd)
-	cfg.HookBinding = hookBinding(cmd)
-	return cfg
+// webServerConfig is the whole production server configuration, including the
+// directory and hook context shared by settings routes and installed hooks.
+func webServerConfig(cmd *cobra.Command, cfg *config.Config, port int, devMode bool, devProxy string, experimental bool, outputDir string, provider api.DataProvider, hub *api.Hub, assets fs.FS, db *store.Store) api.ServerConfig {
+	return api.ServerConfig{
+		Port: port, Provider: provider, Hub: hub, DevMode: devMode,
+		DevProxyAddr: devProxy, WebAssets: assets, MockConfig: toMockConfigResponse(&cfg.Sources.Mock),
+		Experimental: experimental, Store: db, Config: cfg, OutputDir: outputDir,
+		ConfigHome: configDirOverride(cmd), DataHome: dataDirOverride(cmd), StateHome: stateDirOverride(cmd), HookBinding: hookBinding(cmd),
+	}
 }
 
 // webServerSpawn is everything the detached `web start --foreground` child

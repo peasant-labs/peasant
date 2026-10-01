@@ -57,10 +57,10 @@ var fieldsOf = map[Driver][]string{
 	DriverMatcher:     {"rules", "repository", "applying", "paused", "collectives"},
 	DriverValidate:    {"rules", "rulesFile", "invalid"},
 	DriverInstall:     {"rules", "install", "foreignHook", "remoteRecorded", "status", "code", "hooks", "remedyContains", "snippetContains", "label", "installed"},
-	DriverRuleBody:    {"method", "body", "status", "code"},
-	DriverPush:        {"rules", "rulesFile", "config", "flags", "unscoped", "noRemote", "sessions", "before", "villagePublic", "failShare", "stallShare", "villageDecides", "privateBeforeAgain", "again", "errorContains", "outputContains", "publishes", "license", "audience", "others", "ownerUpdates", "attemptContains"},
+	DriverRuleBody:    {"method", "body", "rulesFile", "unavailable", "status", "code"},
+	DriverPush:        {"rules", "rulesFile", "config", "flags", "unscoped", "noRemote", "sessions", "before", "villagePublic", "failShare", "stallShare", "failTranscriptRead", "failShareRead", "selected", "historical", "deleteRule", "reads", "outputOmits", "villageDecides", "privateBeforeAgain", "again", "errorContains", "outputContains", "publishes", "license", "audience", "others", "ownerUpdates", "attemptContains"},
 	DriverHook:        {"uploadExits"},
-	DriverVillageAuto: {"rules", "foreignHook", "handAdded", "forkUpstream", "hooksPath", "publications", "unrecorded", "signedOut", "errorContains", "outputContains", "output", "rule", "ruleIds", "installed", "binding"},
+	DriverVillageAuto: {"failTranscriptRead", "rules", "foreignHook", "handAdded", "forkUpstream", "hooksPath", "publications", "unrecorded", "signedOut", "errorContains", "outputContains", "output", "rule", "ruleIds", "installed", "binding"},
 }
 
 // Collective is one collective the Village double knows, by alias.
@@ -110,8 +110,9 @@ type Case struct {
 	ForeignHook string `yaml:"foreignHook"`
 	// Method and Body are a request the settings routes must refuse; Body is
 	// sent verbatim to the rule route, or to the install route for POST.
-	Method string `yaml:"method"`
-	Body   string `yaml:"body"`
+	Unavailable bool   `yaml:"unavailable"`
+	Method      string `yaml:"method"`
+	Body        string `yaml:"body"`
 	// Config is the push configuration.
 	Config struct {
 		Visibility schema.Visibility `yaml:"visibility"`
@@ -133,8 +134,13 @@ type Case struct {
 	VillagePublic bool `yaml:"villagePublic"`
 	// FailShare names collectives the Village double refuses to share with;
 	// StallShare makes every share answer only after the push's budget.
-	FailShare  []string `yaml:"failShare"`
-	StallShare bool     `yaml:"stallShare"`
+	FailShare          []string `yaml:"failShare"`
+	StallShare         bool     `yaml:"stallShare"`
+	FailTranscriptRead bool     `yaml:"failTranscriptRead"`
+	FailShareRead      bool     `yaml:"failShareRead"`
+	DeleteRule         string   `yaml:"deleteRule"`
+	Historical         int      `yaml:"historical"`
+	Selected           bool     `yaml:"selected"`
 	// VillageDecides sets shares on Village after the push, as a collective
 	// owner or the developer would, and PrivateBeforeAgain makes the
 	// transcript private there; Again then pushes once more with these flags.
@@ -185,6 +191,8 @@ type Expect struct {
 	// succeeds; OutputContains parts of its standard error.
 	ErrorContains  []string `yaml:"errorContains"`
 	OutputContains []string `yaml:"outputContains"`
+	OutputOmits    []string `yaml:"outputOmits"`
+	Reads          *int     `yaml:"reads"`
 	// Publishes counts the uploads Village received; License is the license
 	// every upload after Before carried; Audience the collectives that can
 	// read the recorded session's transcript afterwards (approved or pending),
@@ -240,14 +248,14 @@ func Load(t *testing.T) Fixture {
 				c.Rules[j].Collectives[k] = fixture.collective(t, c.Name, string(alias)).ID
 			}
 		}
-		if (len(c.VillageDecides) > 0 || c.PrivateBeforeAgain) && c.Again == nil {
+		if (len(c.VillageDecides) > 0 || c.PrivateBeforeAgain || c.DeleteRule != "") && c.Again == nil {
 			t.Fatalf("%s: case %q changes Village between pushes but names no second push (again)", Path, c.Name)
 		}
 		if c.VillagePublic && !c.Before {
 			t.Fatalf("%s: case %q makes a transcript public but publishes none before (before)", Path, c.Name)
 		}
 		for _, session := range c.Sessions {
-			if !slices.Contains([]string{"clone", "gone", "linked"}, session) {
+			if !slices.Contains([]string{"clone", "gone", "linked", "unrelated", "gone-subfolder"}, session) {
 				t.Fatalf("%s: case %q names session %q; use clone, gone, or linked", Path, c.Name, session)
 			}
 		}

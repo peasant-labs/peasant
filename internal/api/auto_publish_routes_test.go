@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -264,14 +266,37 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 func TestAutoPublishRoutesRefuseBodies(t *testing.T) {
 	t.Parallel()
 	fixture := autopublishtest.Load(t)
-	world := newAutoPublishWorld(t, autoPublishWorldOptions{})
 	for _, c := range fixture.For(t, autopublishtest.DriverRuleBody) {
 		t.Run(c.Name, func(t *testing.T) {
+			world := newAutoPublishWorld(t, autoPublishWorldOptions{})
+			if c.RulesFile != "" {
+				if err := os.MkdirAll(filepath.Dir(world.rulesPath()), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(world.rulesPath(), []byte(c.RulesFile), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			route := ruleRoute("work")
 			if c.Method == http.MethodPost {
 				route = installRoute("work")
 			}
-			req, err := http.NewRequestWithContext(t.Context(), c.Method, world.baseURL+route, bytes.NewReader([]byte(c.Body)))
+			baseURL := world.baseURL
+			if c.Unavailable {
+				api := NewServer(world.hs.config(ServerConfig{Config: config.BaseConfig()}))
+				if err := api.Listen(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					for _, listener := range api.lns {
+						_ = listener.Close()
+					}
+				}()
+				server := httptest.NewServer(api.server.Handler)
+				defer server.Close()
+				baseURL = server.URL
+			}
+			req, err := http.NewRequestWithContext(t.Context(), c.Method, baseURL+route, bytes.NewReader([]byte(c.Body)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -285,7 +310,12 @@ func TestAutoPublishRoutesRefuseBodies(t *testing.T) {
 				t.Fatal(err)
 			}
 			decodeRefusal(t, resp.StatusCode, raw.Bytes(), c.Expect.Status, c.Expect.Code)
-			if _, err := os.Stat(world.rulesPath()); !os.IsNotExist(err) {
+			if c.RulesFile != "" {
+				raw, err := os.ReadFile(world.rulesPath())
+				if err != nil || string(raw) != c.RulesFile {
+					t.Fatalf("a refused save changed hooks.yaml: %q, %v", raw, err)
+				}
+			} else if _, err := os.Stat(world.rulesPath()); !os.IsNotExist(err) {
 				t.Fatalf("a refused body wrote hooks.yaml: %v", err)
 			}
 		})
@@ -353,7 +383,7 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 	if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
 		t.Fatalf("install = %+v", installed)
 	}
-	if hook := string(prePushHook(t, world.recorded)); !strings.Contains(hook, "--config-dir "+githooks.ShellQuote(world.hs.Config)) || !strings.Contains(hook, "--data-dir "+githooks.ShellQuote(world.hs.Data)) {
+	if hook := string(prePushHook(t, world.recorded)); !strings.Contains(hook, "--config-dir "+githooks.ShellQuote(world.hs.Config)) || !strings.Contains(hook, "--data-dir "+githooks.ShellQuote(world.hs.Data)) || !strings.Contains(hook, "--state-dir "+githooks.ShellQuote(world.hs.State)) {
 		t.Errorf("the installed hook does not bind this server's config and data directories, so it would not read its rules and store:\n%s", hook)
 	}
 	if got := autoPublish(); !got[recordedInsideSessionID] || got[recordedOutsideSessionID] {
@@ -432,5 +462,77 @@ func TestAutoPublishInstallRefusesAnUnsupportedRedactionLevel(t *testing.T) {
 	refusal := decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
 	if !strings.Contains(refusal.Error, "redaction.level") || prePushHook(t, world.recorded) != nil {
 		t.Fatalf("refusal %q; it names the level and installs nothing", refusal.Error)
+	}
+}
+
+//go:embed testdata/publication_hook_bindings.yaml
+var publicationHookBindingsYAML []byte
+
+func TestPublicationHookBindingFixtures(t *testing.T) {
+	t.Parallel()
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name           string                    `yaml:"name"`
+			Guarded        bool                      `yaml:"guarded"`
+			Manual         bool                      `yaml:"manual"`
+			Corrupt        bool                      `yaml:"corrupt"`
+			Events         []schema.AutoPublishEvent `yaml:"events"`
+			RetainedEvents []schema.AutoPublishEvent `yaml:"retainedEvents"`
+			Delete         bool                      `yaml:"delete"`
+			Expect         bool                      `yaml:"expect"`
+		} `yaml:"cases"`
+	}
+	if err := testutil.DecodeNamedFixtureYAML(publicationHookBindingsYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			world := newAutoPublishWorld(t, autoPublishWorldOptions{})
+			if c.Events != nil {
+				world.save(t, "work", schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.recorded, Events: c.Events, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}})
+			}
+			binding := githooks.Binding{ConfigDir: world.hs.Config, DataDir: world.hs.Data, StateDir: world.hs.State, RequireAutoPublishRule: c.Guarded}
+			hookPath := filepath.Join(world.recorded, ".git", "hooks", "pre-push")
+			if c.Manual {
+				snippet, err := githooks.ManualSnippet(githooks.EventPrePush, world.recorded, hookPath, binding)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(hookPath, []byte("#!/bin/sh\n"+snippet), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				report, err := githooks.New(githooks.NewExecGit()).Install(t.Context(), githooks.Request{Dir: world.recorded, Events: []githooks.Event{githooks.EventPrePush}, Binding: binding})
+				if err != nil || report.Blocked() {
+					t.Fatalf("install: %+v, %v", report, err)
+				}
+			}
+			if c.RetainedEvents != nil {
+				world.save(t, "retained", schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.recorded, Events: c.RetainedEvents, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}})
+			}
+			if c.Delete {
+				var removed schema.AutoPublishRemovalResponse
+				status, body := world.request(t, http.MethodDelete, ruleRoute("work"), nil)
+				decodeContract(t, status, body, &removed)
+			}
+			if c.Corrupt {
+				if err := os.MkdirAll(filepath.Dir(world.rulesPath()), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(world.rulesPath(), []byte("autoPublish: [unfinished"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var got schema.LocalPublicationsResponse
+			world.decode(t, http.MethodGet, defaults.RoutePublications.String()+"?sessionIds="+recordedInsideSessionID, &got)
+			if len(got.Publications) != 1 || got.Publications[0].AutoPublish != c.Expect {
+				t.Fatalf("publications: %+v; expected autoPublish=%v", got.Publications, c.Expect)
+			}
+			if raw := prePushHook(t, world.recorded); raw == nil {
+				t.Fatal("binding deletion must retain hook bytes")
+			}
+		})
 	}
 }

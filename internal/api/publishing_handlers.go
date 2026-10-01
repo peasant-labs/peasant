@@ -149,11 +149,15 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 		}
 		publishes := false
 		if repo, err := autopublish.Resolve(r.Context(), git, dir, remotes); err == nil {
-			if _, known := uploads[repo.Root]; !known {
-				uploads[repo.Root] = autopublish.Publishing(r.Context(), lifecycle, repo.Root)
-			}
 			decision := autopublish.Decide(rules, repo)
-			publishes = uploads[repo.Root] && (!decision.Covered() || len(decision.Rules) > 0)
+			if _, known := uploads[repo.Root]; !known {
+				events := make([]githooks.Event, len(decision.Events))
+				for i, event := range decision.Events {
+					events[i] = githooks.Event(event)
+				}
+				uploads[repo.Root] = lifecycle.Uploads(r.Context(), repo.Root, events)
+			}
+			publishes = uploads[repo.Root] && decision.Outcome() != autopublish.Paused
 		}
 		byDir[dir] = publishes
 		return publishes

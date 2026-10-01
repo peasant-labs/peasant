@@ -26,7 +26,9 @@ type Repository struct {
 	MainRoot string
 	// Gone is the directory a session was recorded in when that directory no
 	// longer exists, so Git can name no root. A folder rule covers it when the
-	// glob names the directory or a folder above it.
+	// glob names the directory or a folder above it: which of them was the
+	// repository root is no longer known, so a gone repository nested in a
+	// covered one is covered too.
 	Gone string
 	// Remote is the remote a repository-scoped push derives its identity
 	// from: the checkout's upstream remote, else origin, else "".
@@ -53,7 +55,7 @@ var _ RepositoryGit = (*ingest.ExecGitResolver)(nil)
 // directory that no longer exists names no repository: a parent it was inside
 // is a different repository, which Peasant has not recorded.
 func Resolve(ctx context.Context, git RepositoryGit, dir string, remotes bool) (Repository, error) {
-	root, err := ResolveRoot(ctx, git, dir)
+	root, err := resolveRoot(ctx, git, dir)
 	if err != nil {
 		return Repository{}, err
 	}
@@ -64,8 +66,28 @@ func Resolve(ctx context.Context, git RepositoryGit, dir string, remotes bool) (
 	return repo, nil
 }
 
-// ResolveRoot is the root Git reports for the existing directory dir.
-func ResolveRoot(ctx context.Context, git RepositoryGit, dir string) (string, error) {
+// SessionRepository is the repository a session was recorded in, as the
+// matcher reads it: the repository Git reports for dir, the directory the
+// session was recorded in. When dir is gone, or is not in a repository, it
+// is that path and the remote the session recorded; when no directory was
+// recorded, it is that remote alone, so only a remote rule can cover it.
+func SessionRepository(ctx context.Context, git RepositoryGit, dir, recordedRemote string, remotes bool) Repository {
+	if strings.TrimSpace(dir) == "" {
+		return Repository{Remote: recordedRemote, Origin: recordedRemote}
+	}
+	repo, err := Resolve(ctx, git, dir, remotes)
+	if err != nil {
+		return Repository{Gone: dir, Remote: recordedRemote, Origin: recordedRemote}
+	}
+	return repo
+}
+
+// resolveRoot is the root Git reports for the existing directory dir. An
+// empty dir names no directory: it is not read as the current one.
+func resolveRoot(ctx context.Context, git RepositoryGit, dir string) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		return "", errors.New("no directory was recorded")
+	}
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err
@@ -135,7 +157,7 @@ func Recorded(ctx context.Context, reader RecordedDirectories, git RepositoryGit
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if root, err := ResolveRoot(ctx, git, dir); err == nil {
+		if root, err := resolveRoot(ctx, git, dir); err == nil {
 			if main := mainRoot(root); main != "" {
 				root = main
 			}
@@ -167,10 +189,10 @@ func covered(rule Rule, repositories []Repository) []Repository {
 // repository the rule covers. Nothing is installed.
 var ErrNotCovered = errors.New("not a recorded repository the rule covers")
 
-// Target returns the recorded repository at path when the rule covers it, and
+// coveredTarget returns the recorded repository at path when the rule covers it, and
 // ErrNotCovered otherwise. Every install for a rule asks it first, so nothing
 // is installed in a repository Peasant has not recorded.
-func Target(rule Rule, path string, recorded []Repository) (Repository, error) {
+func coveredTarget(rule Rule, path string, recorded []Repository) (Repository, error) {
 	for _, repo := range covered(rule, recorded) {
 		if filepath.Clean(repo.Root) == filepath.Clean(path) {
 			return repo, nil
@@ -201,7 +223,8 @@ func (h Hooks) View(ctx context.Context, rule Rule, recorded []Repository) (sche
 // States lists the recorded repositories the rule covers, each with its hook
 // per rule event, as the hooks are now.
 func (h Hooks) States(ctx context.Context, rule Rule, recorded []Repository) ([]schema.AutoPublishRepository, error) {
-	events, err := rule.HookEvents()
+	h.Binding.RequireAutoPublishRule = true
+	events, err := rule.hookEvents()
 	if err != nil {
 		return nil, err
 	}
@@ -230,11 +253,12 @@ func (h Hooks) States(ctx context.Context, rule Rule, recorded []Repository) ([]
 // nothing and returns ErrNotCovered. The githooks report is returned too, for
 // a caller that renders its warnings.
 func (h Hooks) Install(ctx context.Context, rule Rule, path string, recorded []Repository) (schema.AutoPublishRepository, githooks.ChangeReport, error) {
-	target, err := Target(rule, path, recorded)
+	h.Binding.RequireAutoPublishRule = true
+	target, err := coveredTarget(rule, path, recorded)
 	if err != nil {
 		return schema.AutoPublishRepository{}, githooks.ChangeReport{}, err
 	}
-	events, err := rule.HookEvents()
+	events, err := rule.hookEvents()
 	if err != nil {
 		return schema.AutoPublishRepository{}, githooks.ChangeReport{}, err
 	}
@@ -307,20 +331,4 @@ func unreadable(events []githooks.Event, root string, err error) []schema.AutoPu
 func repositoryView(repo Repository, hooks []schema.AutoPublishHook) schema.AutoPublishRepository {
 	label, _ := schema.RemoteLabel(repo.Remote)
 	return schema.AutoPublishRepository{Path: repo.Root, Label: label, Hooks: hooks}
-}
-
-// Publishing reports whether a commit or push in the repository at root
-// publishes without a click: git runs an upload from one of its hooks, for a
-// rule or from the terminal (githooks.Plan.Uploads).
-func Publishing(ctx context.Context, lifecycle *githooks.Lifecycle, root string) bool {
-	report, err := lifecycle.Status(ctx, githooks.Request{Dir: root})
-	if err != nil {
-		return false
-	}
-	for _, plan := range report.Plans {
-		if plan.Uploads() {
-			return true
-		}
-	}
-	return false
 }

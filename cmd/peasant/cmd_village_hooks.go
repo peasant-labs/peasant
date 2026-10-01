@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -173,7 +176,8 @@ finds.`,
 			}
 			renderPlanReport(cmd.OutOrStdout(), binding, report)
 			renderStatusEnvironmentNotices(cmd, report)
-			return nil
+			return renderAutoPublishHookStatus(cmd, report)
+
 		},
 	}
 	addHookDirFlag(cmd, &dir)
@@ -527,4 +531,43 @@ func writeIndented(w io.Writer, text, indent string) {
 		}
 		fmt.Fprintf(w, "%s%s\n", indent, line)
 	}
+}
+
+// renderAutoPublishHookStatus names the audience a saved rule makes an
+// installed hook publish to. Removing a rule leaves config-driven hooks.
+func renderAutoPublishHookStatus(cmd *cobra.Command, report githooks.PlanReport) error {
+	root := report.Repository.Root
+	rules, err := autopublish.Load(autoPublishRulesPath(cmd))
+	if err != nil {
+		return err
+	}
+	repo := autopublish.SessionRepository(cmd.Context(), &ingest.ExecGitResolver{}, root, "", true)
+	decision := autopublish.Decide(rules, repo)
+	switch decision.Outcome() {
+	case autopublish.Bound:
+		fmt.Fprintf(cmd.OutOrStdout(), "\nauto-publish: rules %s publish private to collectives %s\n", strings.Join(decision.Rules, ", "), strings.Join(villageUUIDStrings(decision.Collectives), ", "))
+	case autopublish.Paused:
+		fmt.Fprintf(cmd.OutOrStdout(), "\nauto-publish: rules %s are paused; the hook publishes no sessions from this repository\n", strings.Join(decision.Paused, ", "))
+	default:
+		plain := false
+		for _, plan := range report.Plans {
+			if plan.Uploads() && !plan.RequireAutoPublishRule {
+				plain = true
+			}
+		}
+		if plain {
+			fmt.Fprintln(cmd.OutOrStdout(), "\nauto-publish: no rule covers this repository; its separately installed upload hook publishes using push.visibility and push.license; use 'peasant village hooks uninstall' to stop it")
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "\nauto-publish: no active binding covers this repository; rule-installed hooks publish nothing")
+		}
+	}
+	return nil
+}
+
+func villageUUIDStrings(ids []schema.VillageUUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
 }

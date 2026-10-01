@@ -1,10 +1,8 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"sync"
@@ -127,9 +125,10 @@ func (h *autoPublishHandler) handleSaveRule(w http.ResponseWriter, r *http.Reque
 // DELETE /api/v1/settings/auto-publish/{id}
 // --------------------------------------------------------------------------
 
-// handleDeleteRule removes one rule. It changes no hook: a hook keeps
-// publishing until the user removes it, and the answer reports the hooks of
-// the repositories the rule covered as they are.
+// handleDeleteRule removes a binding. Rule-installed hooks remain on disk,
+// but require an active rule before sending anything; a retained binding can
+// keep them active, while a separately installed terminal hook keeps its own
+// publication consent.
 func (h *autoPublishHandler) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	if !h.ready(w) {
@@ -139,7 +138,12 @@ func (h *autoPublishHandler) handleDeleteRule(w http.ResponseWriter, r *http.Req
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var removed autopublish.Rule
-	err := autopublish.Update(h.rulesPath(), func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
+	recorded, err := h.recorded(r)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "The rule was not removed because its recorded repositories could not be read: "+err.Error()+". Retry.", "")
+		return
+	}
+	err = autopublish.Update(h.rulesPath(), func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
 		i := slices.IndexFunc(rules, func(existing autopublish.Rule) bool { return existing.ID == id })
 		if i < 0 {
 			return nil, errNoRule
@@ -153,11 +157,6 @@ func (h *autoPublishHandler) handleDeleteRule(w http.ResponseWriter, r *http.Req
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "The auto-publish rule "+id+" was not removed: "+err.Error()+".", "")
-		return
-	}
-	recorded, err := h.recorded(r)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "The auto-publish rule "+id+" was removed, but its repositories could not be listed: "+err.Error()+". Reload the settings page.", "")
 		return
 	}
 	repositories, err := h.hooks().States(r.Context(), removed, recorded)
@@ -222,32 +221,5 @@ func (h *autoPublishHandler) handleInstall(w http.ResponseWriter, r *http.Reques
 	writeContract(w, &repository)
 }
 
-// decodeStrict decodes a JSON body into a contract type, refusing an unknown
-// field, a missing body, and anything after the one value.
-func decodeStrict(body io.Reader, into any) error {
-	decoder := json.NewDecoder(body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return err
-	}
-	if decoder.More() {
-		return errors.New("the body holds more than one JSON value")
-	}
-	return nil
-}
-
 // ruleBodyLimit bounds a rule or install body: each is a few short fields.
 const ruleBodyLimit = 1 << 20
-
-// writeContract answers 200 with a contract value, after checking it the way
-// a client does. A value that breaks the contract is not sent.
-func writeContract(w http.ResponseWriter, value contractValue) {
-	if err := value.Validate(); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "The answer breaks the Local API contract, so it is not sent: "+err.Error()+". Retry; if it repeats, report it.", "")
-		return
-	}
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-// contractValue is a contract type that checks its own invariants.
-type contractValue interface{ Validate() error }
