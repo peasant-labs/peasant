@@ -1,0 +1,50 @@
+[
+  {
+    "surface": "home",
+    "theme": "dark",
+    "url": "http://localhost:6132/?app=graph&section=home&theme=dark#inuse",
+    "heading": "your sessions",
+    "nav": "homesettings",
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+  },
+  {
+    "surface": "settings",
+    "theme": "dark",
+    "url": "http://localhost:6132/?app=graph&section=settings&theme=dark#inuse",
+    "heading": "settings",
+    "nav": "homesettings",
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+  },
+  {
+    "surface": "shell",
+    "theme": "dark",
+    "url": "http://localhost:6132/?app=graph&section=home&theme=dark#inuse",
+    "heading": "your sessions",
+    "nav": "homesettings",
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+  },
+  {
+    "surface": "home",
+    "theme": "light",
+    "url": "http://localhost:6132/?app=graph&section=home&theme=light#inuse",
+    "heading": "your sessions",
+    "nav": "homesettings",
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+  },
+  {
+    "surface": "settings",
+    "theme": "light",
+    "url": "http://localhost:6132/?app=graph&section=settings&theme=light#inuse",
+    "heading": "settings",
+    "nav": "homesettings",
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+  },
+  {
+    "surface": "shell",
+    "theme": "light",
+    "url": "http://localhost:6132/?app=graph&section=home&theme=light#inuse",
+    "heading": "your sessions",
+    "nav": "homesettings",
+    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+  }
+]
