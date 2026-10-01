@@ -127,6 +127,8 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   const [villageUrl, setVillageUrl] = useState<string | undefined>(undefined);
   const [signInFailure, setSignInFailure] = useState<string | null>(null);
   const [collectivesRead, setCollectivesRead] = useState<CollectivesRead>({ status: 'idle' });
+  // Bumped to read the collectives again: on each open, and on retry.
+  const [collectivesNonce, setCollectivesNonce] = useState(0);
   const [draft, setDraft] = useState<AccessDraft | null>(null);
   // The popup keeps the mode it opened in: a publish that stopped after village
   // took the content still retries as the publish the reader started.
@@ -141,6 +143,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     setSignInFailure(null);
     setSignIn('unknown');
     setCollectivesRead({ status: 'idle' });
+    setCollectivesNonce((nonce) => nonce + 1);
     setDraft(null);
     setOpenedAs(null);
     setQuery('');
@@ -225,9 +228,10 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       });
   }, []);
 
-  // The collectives the reader can publish to, read once signed in.
+  // The collectives the reader can publish to, read once signed in. The read's
+  // own status is not a dependency, so marking it loading never cancels it.
   useEffect(() => {
-    if (!open || signIn !== 'signed-in' || collectivesRead.status !== 'idle') return;
+    if (!open || signIn !== 'signed-in') return;
     let live = true;
     setCollectivesRead({ status: 'loading' });
     fetchVillageCollectives(sessionId)
@@ -246,7 +250,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     return () => {
       live = false;
     };
-  }, [collectivesRead.status, open, sessionId, signIn]);
+  }, [collectivesNonce, open, sessionId, signIn]);
 
   const collectives = useMemo(
     () => (collectivesRead.status === 'ready' ? collectivesRead.collectives : []),
@@ -286,12 +290,14 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   const suggestions = useMemo(() => pickerSuggestions(collectives, access, query), [access, collectives, query]);
   const readerCount = access.filter((item) => item.pending !== 'removal').length;
 
+  // The primary is on as soon as the scan is clean and someone can read the
+  // transcript. An update can be sent before the collectives list arrives: its
+  // draft is "no change" until the reader makes one.
   const runPublish = useCallback(async () => {
-    if (!draft) return;
     setOutcome(null);
     setSubmitting(true);
     try {
-      const response = await publish(sessionId, pushRequest(sessionId, DEFAULT_REDACTION_LEVEL, draft), readerCount);
+      const response = await publish(sessionId, pushRequest(sessionId, DEFAULT_REDACTION_LEVEL, activeDraft), readerCount);
       setOutcome(publishOutcome({
         response,
         sessionId,
@@ -308,13 +314,13 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     } finally {
       setSubmitting(false);
     }
-  }, [draft, names, publication, publish, readerCount, sessionId]);
+  }, [activeDraft, names, publication, publish, readerCount, sessionId]);
 
   // A step before the push that stopped, and how to retry it.
   const blocked: Blocked | null = signInFailure != null
     ? { stoppedAt: 'checking this computer’s village sign-in', retry: () => { setSignInFailure(null); setSignIn('unknown'); } }
     : collectivesRead.status === 'error'
-      ? { stoppedAt: 'reading your collectives on village', retry: () => setCollectivesRead({ status: 'idle' }) }
+      ? { stoppedAt: 'reading your collectives on village', retry: () => setCollectivesNonce((nonce) => nonce + 1) }
       : null;
 
   const dialogState: PublishDialogState = (() => {
