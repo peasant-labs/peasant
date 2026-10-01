@@ -48,14 +48,13 @@ for f in "$@"; do
     function secondsInUnit(u, what,   prefix, rest, p) {
       rest = u
       prefix = 1
-      if (rest ~ /^[kMG]/) {
-        p = substr(rest, 1, 1)
-        if (p == "k") prefix = 1000
-        else if (p == "M") prefix = 1000000
-        else if (p == "G") prefix = 1000000000
-        else fail("unknown unit prefix " p " in " u)
-        rest = substr(rest, 2)
-      }
+      # Parse an optional k/M/G scale prefix explicitly and strip it; any other
+      # first character is left in place so the unit check below stays the
+      # single loud rejection path for unknown units.
+      p = substr(rest, 1, 1)
+      if (p == "k") { prefix = 1000; rest = substr(rest, 2) }
+      else if (p == "M") { prefix = 1000000; rest = substr(rest, 2) }
+      else if (p == "G") { prefix = 1000000000; rest = substr(rest, 2) }
       if (rest == "ns") return prefix * 1e-9
       if (rest == "us" || rest == microUnit || rest == microAltUnit) return prefix * 1e-6
       if (rest == "ms") return prefix * 1e-3
