@@ -592,17 +592,25 @@ func runConcurrentFreshOpenCase(t *testing.T) {
 				if got := mustSchemaVersion(t, path); got != CurrentSchemaVersion() {
 					t.Fatalf("concurrent open round %d left user_version %d, want %d", round, got, CurrentSchemaVersion())
 				}
-				conn, err := store.Pool().Take(t.Context())
-				if err != nil {
-					t.Fatalf("concurrent opener %d could not take a connection: %v", i, err)
-				}
-				if got := scalarText(t, conn, "SELECT COUNT(*) FROM annotation_types"); got != "11" {
-					store.Pool().Put(conn)
-					t.Fatalf("concurrent opener %d saw %s seeded annotation types, want 11", i, got)
-				}
-				store.Pool().Put(conn)
+				assertSeededAnnotationTypes(t, store, i)
 			}
 		})
+	}
+}
+
+// assertSeededAnnotationTypes runs the concurrent-open smoke query on its own
+// connection. The scoped defer returns the connection before the next opener
+// takes one and before Store cleanup runs, even when the query fails inside
+// scalarText and unwinds through Fatalf.
+func assertSeededAnnotationTypes(t *testing.T, store *Store, opener int) {
+	t.Helper()
+	conn, err := store.Pool().Take(t.Context())
+	if err != nil {
+		t.Fatalf("concurrent opener %d could not take a connection: %v", opener, err)
+	}
+	defer store.Pool().Put(conn)
+	if got := scalarText(t, conn, "SELECT COUNT(*) FROM annotation_types"); got != "11" {
+		t.Fatalf("concurrent opener %d saw %s seeded annotation types, want 11", opener, got)
 	}
 }
 
