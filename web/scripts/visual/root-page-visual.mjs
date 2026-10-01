@@ -219,9 +219,13 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector } = 
     const full = await gate.measure(file)
     const viewport = page.viewport()
     if (full.bytes < 16 * 1024 || full.w !== viewport.width || full.h < viewport.height) fail(`${label}: incomplete full-frame capture`)
+    const layoutWidth = await page.$eval('header', (element) => {
+      const limit = Number.parseFloat(getComputedStyle(element).maxWidth)
+      return Math.min(window.innerWidth, Number.isFinite(limit) ? limit : window.innerWidth)
+    })
     const header = await page.$('header')
     const headerBox = header ? await header.boundingBox() : null
-    if (!headerBox || headerBox.height <= 0 || Math.abs(headerBox.width - viewport.width) > 1) fail(`${label}: shell header missing or incomplete`)
+    if (!headerBox || headerBox.height <= 0 || Math.abs(headerBox.width - layoutWidth) > 1) fail(`${label}: shell header missing or incomplete: box=${JSON.stringify(headerBox)} layoutWidth=${layoutWidth} viewport=${JSON.stringify(viewport)}`)
     const panel = await page.$(contentSelector)
     const panelBox = panel ? await panel.boundingBox() : null
     if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > viewport.width + 1 || panelBox.y + panelBox.height > viewport.height + 1) fail(`${label}: mounted recovery panel is not fully visible (${contentSelector})`)
