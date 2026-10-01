@@ -31,6 +31,8 @@ const fixture = loadPublishStates(fixtureSource);
 const PROJECT_HASH = 'b'.repeat(64) as ProjectHash;
 const SESSION_ID = 'sess_publishstates';
 const TITLE = 'Fix flaky ingest test';
+/** A flow is several Local API round trips; give each wait room on a busy machine. */
+const WAIT = { timeout: 5000 };
 
 let pathname = `/projects/${PROJECT_HASH}/${SESSION_ID}`;
 let search = '';
@@ -139,6 +141,9 @@ function installWorld(world: World, options: WorldOptions = {}) {
       body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
     });
     if (held) await held;
+    // Answer after a macrotask, as a network does: a request answered within
+    // the same turn would hide an effect that drops its own answer.
+    await new Promise((settle) => setTimeout(settle, 5));
     if (answer === null) {
       const handled = options.extra?.(url);
       if (handled) return handled;
@@ -173,13 +178,13 @@ function primaryButton(): HTMLButtonElement | null {
 
 async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
   if (step === 'open') {
-    const action = await waitFor(() => within(bar()).getByRole('button', { name: /^(publish|update|manage)$/ }));
+    const action = await waitFor(() => within(bar()).getByRole('button', { name: /^(publish|update|manage)$/ }), WAIT);
     await user.click(action);
-    await screen.findByRole('dialog');
+    await screen.findByRole('dialog', {}, WAIT);
     return;
   }
   if (step === 'connect') {
-    await user.click(await within(dialog()).findByRole('button', { name: /continue with GitHub/ }));
+    await user.click(await within(dialog()).findByRole('button', { name: /continue with GitHub/ }, WAIT));
     return;
   }
   if (step === 'publish') {
@@ -188,12 +193,12 @@ async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
       expect(found).not.toBeNull();
       expect(found).toBeEnabled();
       return found as HTMLButtonElement;
-    });
+    }, WAIT);
     await user.click(button);
     return;
   }
   const [verb, ...rest] = step.split(' ');
-  await user.click(await within(dialog()).findByRole('button', { name: `${verb} ${rest.join(' ')}` }));
+  await user.click(await within(dialog()).findByRole('button', { name: `${verb} ${rest.join(' ')}` }, WAIT));
 }
 
 beforeEach(() => {
@@ -228,7 +233,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
     const user = userEvent.setup();
     render(<Page />);
 
-    await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull());
+    await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull(), WAIT);
     for (const step of entry.steps) await runStep(step, user);
 
     const expected = entry.expect;
@@ -236,7 +241,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
       const label = bar().querySelector<HTMLElement>('.pub-state');
       expect(label?.dataset.state).toBe(expected.bar.state);
       expect(label?.textContent).toBe(expected.bar.text);
-    });
+    }, WAIT);
     expect(within(bar()).getByRole('button', { name: expected.bar.action })).toBeInTheDocument();
     // The viewer's own tail and outcome chip are off: the bar is the header's only action.
     expect(screen.queryByRole('button', { name: /^share$/ })).not.toBeInTheDocument();
@@ -250,7 +255,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
     const popup = expected.popup;
     await waitFor(() => {
       const heading = document.getElementById(dialog().getAttribute('aria-labelledby') ?? '');
-      expect(heading?.textContent).toBe(popup.heading);
+      expect(heading?.textContent).toBe(popup.heading.replace('{title}', TITLE));
       for (const text of popup.texts) expect(dialog().textContent).toContain(text);
       const primary = primaryButton();
       if (popup.primary === null) {
@@ -260,7 +265,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
         if (popup.primary.enabled) expect(primary).toBeEnabled();
         else expect(primary).toBeDisabled();
       }
-    });
+    }, WAIT);
     const pushBody = expectedPushBody(fixture, entry, SESSION_ID);
     if (pushBody === null) expect(world.pushRequests).toEqual([]);
     else expect(world.pushRequests.at(-1)).toEqual(pushBody);
@@ -283,7 +288,7 @@ describe('the app-level scan cache under the transcript page', () => {
 
     const view = render(<Page />);
     await runStep('open', user);
-    expect(await within(dialog()).findByText('checking for sensitive content')).toBeInTheDocument();
+    expect(await within(dialog()).findByText('checking for sensitive content', {}, WAIT)).toBeInTheDocument();
     await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
 
     // Leave the transcript (the provider stays, as the app shell does) and come back.
@@ -291,11 +296,11 @@ describe('the app-level scan cache under the transcript page', () => {
     expect(screen.queryByRole('group', { name: 'publish' })).not.toBeInTheDocument();
     view.rerender(<Page />);
     await runStep('open', user);
-    expect(await within(dialog()).findByText('checking for sensitive content')).toBeInTheDocument();
+    expect(await within(dialog()).findByText('checking for sensitive content', {}, WAIT)).toBeInTheDocument();
     expect(world.scanRequests).toBe(1);
 
     await act(async () => { releaseScan(); });
-    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'));
+    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'), WAIT);
     expect(world.scanRequests).toBe(1);
   });
 
@@ -306,18 +311,18 @@ describe('the app-level scan cache under the transcript page', () => {
     render(<Page />);
 
     await runStep('open', user);
-    await waitFor(() => expect(dialog().textContent).toContain('the scan failed, so publish is off.'));
+    await waitFor(() => expect(dialog().textContent).toContain('the scan failed, so publish is off.'), WAIT);
     expect(primaryButton()).toBeDisabled();
     await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
 
     await runStep('open', user);
-    await waitFor(() => expect(dialog().textContent).toContain('the scan failed, so publish is off.'));
+    await waitFor(() => expect(dialog().textContent).toContain('the scan failed, so publish is off.'), WAIT);
     expect(primaryButton()).toBeDisabled();
     expect(world.scanRequests).toBe(1);
 
     await user.click(within(dialog()).getByRole('button', { name: /re-scan/ }));
-    await waitFor(() => expect(world.scanRequests).toBe(2));
-    await waitFor(() => expect(dialog().textContent).toContain('the scan failed, so publish is off.'));
+    await waitFor(() => expect(world.scanRequests).toBe(2), WAIT);
+    await waitFor(() => expect(dialog().textContent).toContain('the scan failed, so publish is off.'), WAIT);
     expect(primaryButton()).toBeDisabled();
   });
 });
@@ -336,7 +341,7 @@ describe('/share?sessionId opens the publish popup on that transcript', () => {
     search = `sessionId=${SESSION_ID}`;
     const share = render(<Page><SharePageClient /></Page>);
     const target = transcriptHref(PROJECT_HASH, SESSION_ID, { publish: true });
-    await waitFor(() => expect(replaced).toEqual([target]));
+    await waitFor(() => expect(replaced).toEqual([target]), WAIT);
     expect(target).toBe(`/projects/${PROJECT_HASH}/${SESSION_ID}?publish=open`);
     share.unmount();
 
@@ -344,7 +349,7 @@ describe('/share?sessionId opens the publish popup on that transcript', () => {
     search = 'publish=open';
     replaced.length = 0;
     render(<Page />);
-    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'));
+    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'), WAIT);
     await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
     expect(replaced).toEqual([`/projects/${PROJECT_HASH}/${SESSION_ID}`]);
   });

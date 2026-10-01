@@ -67,7 +67,8 @@ pullRequest: { owner: acme, name: ingest-api, number: 42 }
 #   steps        what the reader does: open (the bar's action), connect,
 #                add <collective>, remove <collective>, publish
 #   expect       bar: its state, its words and its action
-#                popup: null, or the heading, words it shows, and its primary
+#                popup: null, or the heading ({title} is the session's title),
+#                words it shows, and its primary
 #                button (label and whether it is enabled; null when none)
 #                request: the collective change the push asked for, when a
 #                push ran (an empty add and remove keeps the audience)
@@ -143,7 +144,7 @@ cases:
     expect:
       bar: { state: not-published, text: not published, action: publish }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: [connect this computer to village once to publish., continue with GitHub, nothing leaves your machine until you publish.]
         primary: null
       request: null
@@ -159,7 +160,7 @@ cases:
     expect:
       bar: { state: not-published, text: not published, action: publish }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: [waiting for github in your browser]
         primary: null
       request: null
@@ -175,7 +176,7 @@ cases:
     expect:
       bar: { state: not-published, text: not published, action: publish }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: [what leaves your machine, checking for sensitive content, who can read it]
         primary: { label: publish to 2 collectives, enabled: false }
       request: null
@@ -191,7 +192,7 @@ cases:
     expect:
       bar: { state: not-published, text: not published, action: publish }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: ['the scan failed, so publish is off.', re-scan]
         primary: { label: publish to 2 collectives, enabled: false }
       request: null
@@ -207,7 +208,7 @@ cases:
     expect:
       bar: { state: not-published, text: not published, action: publish }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: [you are not in a collective yet., create or join one on village]
         primary: { label: publish, enabled: false }
       request: null
@@ -223,7 +224,7 @@ cases:
     expect:
       bar: { state: not-published, text: not published, action: publish }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: [3 matches · all redacted, show matches, Acme Platform, suggested · repo acme/ingest-api is linked, Acme Company, suggested · github org acme, add a collective, nothing leaves your machine until you publish.]
         primary: { label: publish to 2 collectives, enabled: true }
       request: null
@@ -239,7 +240,7 @@ cases:
     expect:
       bar: { state: publishing, text: publishing to 2 collectives, action: publish }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: [publishing to 2 collectives]
         primary: { label: publish to 2 collectives, enabled: false }
       request: { add: [Acme Platform, Acme Company], remove: [] }
@@ -287,7 +288,7 @@ cases:
     expect:
       bar: { state: published, text: published · 1 collective · up to date, action: manage }
       popup:
-        heading: publish “Fix flaky ingest test”
+        heading: publish “{title}”
         texts: [stopped while sharing it with Acme Company. nothing changed on village.]
         primary: { label: retry, enabled: true }
       request: { add: [Acme Platform, Acme Company], remove: [] }
@@ -303,23 +304,23 @@ cases:
     expect:
       bar: { state: new-turns, text: published · 2 collectives · 6 new turns, action: update }
       popup:
-        heading: update “Fix flaky ingest test”
+        heading: update “{title}”
         texts: [what changed, 6 new turns since you published, ML Reading Group, adding · waits for approval, removing a collective takes the transcript back from it., adds ML Reading Group · removes nothing, nothing leaves your machine until you update.]
         primary: { label: update and add 1 collective, enabled: true }
       request: null
 
   - name: update-keeps-audience
     wireframe: Transcript-collectives.dc.html
-    publication: { state: published, newTurns: 6, audience: [Acme Platform, Acme Company] }
+    publication: { state: published, newTurns: 6, audience: [Acme Platform] }
     signIn: signed-in
     village: [Acme Platform, Acme Company, ML Reading Group]
     scan: matches
     push: published
     steps: [open, publish]
     expect:
-      bar: { state: published, text: published · 2 collectives · up to date, action: manage }
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
       popup:
-        heading: published to Acme Platform and Acme Company
+        heading: published to Acme Platform
         texts: [village.peasantlabs.org/transcripts/]
         primary: { label: done, enabled: true }
       request: { add: [], remove: [] }
