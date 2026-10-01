@@ -49,7 +49,7 @@ const PROJECT = 'fortuna'
 const SESSION = 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'
 /** Bytes only this change introduces, located in the binary and the served chunk. */
 const FEATURE_BYTES = ['reading your collectives on village']
-const DESKTOP = { width: 1440, height: 1000, deviceScaleFactor: 1 }
+const DESKTOP = { width: 1440, height: 1080, deviceScaleFactor: 1 }
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
 /** The cases also shot at phone width: the bar, a first publish, and an update. */
 const MOBILE_CASES = ['not-published', 'ready-to-publish', 'update-with-new-turns']
@@ -148,13 +148,16 @@ async function runStep(page, step) {
     if (!handle) throw fail(`step ${JSON.stringify(step)}`, `${what} (${selector}) never appeared`)
     await handle.click()
   }
+  if (step === 'arrive') return
   if (step === 'open') {
     await click('.pub-bar .pub-bar-action', 'the bar action')
     await page.waitForSelector('[role="dialog"]', { visible: true, timeout: 20000 })
     return
   }
   if (step === 'connect') return click('[role="dialog"] .si-split-primary', 'continue with GitHub')
-  if (step === 'publish') return click('[role="dialog"] .pub-primary:not([disabled])', 'an enabled publish button')
+  if (step === 'publish') return click('[role="dialog"] .pub-primary:not([disabled]):not([aria-disabled="true"])', 'an enabled publish button')
+  if (step === 'retry') return click('[role="dialog"] .pub-foot .btn-primary:not([disabled])', 'retry')
+  if (step === 'rescan') return click('[role="dialog"] .pub-rescan', 're-scan')
   const [verb, ...rest] = step.split(' ')
   return click(`[role="dialog"] button[aria-label="${verb} ${rest.join(' ')}"]`, `the ${verb} button`)
 }
@@ -165,10 +168,14 @@ async function assertExpected(page, entry) {
   const check = () => page.evaluate((expect) => {
     const label = document.querySelector('.pub-bar .pub-state')
     const problems = []
+    if ('alert' in expect.bar) {
+      if (!document.querySelector('[role="alert"]')?.textContent.includes(expect.bar.alert)) problems.push('missing publication alert')
+    } else {
     if (label?.getAttribute('data-state') !== expect.bar.state) problems.push(`bar state ${label?.getAttribute('data-state')}`)
     if (label?.textContent !== expect.bar.text) problems.push(`bar text ${JSON.stringify(label?.textContent)}`)
     const action = document.querySelector('.pub-bar .pub-bar-action')
     if (action?.textContent?.trim() !== expect.bar.action) problems.push(`bar action ${JSON.stringify(action?.textContent)}`)
+    }
     const dialog = document.querySelector('[role="dialog"]')
     if (expect.popup === null) {
       if (dialog) problems.push('a popup is open')
@@ -178,6 +185,7 @@ async function assertExpected(page, entry) {
     const heading = document.getElementById(dialog.getAttribute('aria-labelledby') ?? '')
     const title = document.querySelector('.txn-title')?.textContent ?? ''
     if (heading?.textContent !== expect.popup.heading.replace('{title}', title)) problems.push(`heading ${JSON.stringify(heading?.textContent)}`)
+    if (expect.popup.link && ![...dialog.querySelectorAll('a')].some((link) => link.textContent.trim() === expect.popup.link.text && link.href === expect.popup.link.href)) problems.push('wrong recovery link')
     for (const text of expect.popup.texts) if (!dialog.textContent.includes(text)) problems.push(`missing ${JSON.stringify(text)}`)
     const primaries = [...dialog.querySelectorAll('.pub-foot .btn-primary')]
     const primary = primaries[primaries.length - 1] ?? null
@@ -185,7 +193,7 @@ async function assertExpected(page, entry) {
       if (primary) problems.push(`unexpected primary ${JSON.stringify(primary.textContent)}`)
     } else {
       if (primary?.textContent?.trim() !== expect.popup.primary.label) problems.push(`primary ${JSON.stringify(primary?.textContent)}`)
-      if (primary && primary.disabled === expect.popup.primary.enabled) problems.push(`primary enabled=${!primary.disabled}`)
+      if (primary && (primary.disabled || primary.getAttribute('aria-disabled') === 'true') === expect.popup.primary.enabled) problems.push(`primary enabled=${!primary.disabled}`)
     }
     return problems
   }, expected)
@@ -219,8 +227,8 @@ async function probe(page, theme, entry) {
   if (!THEME_ATTRIBUTES.every((name) => found.themes[name] === theme)) throw fail(`probing ${entry.name}`, `theme attributes ${JSON.stringify(found.themes)} are not ${theme}`)
   // next/font self-hosts the faces under their own family names (atkinsonHyperlegible, …Mono).
   if (!found.atkinson || !/atkinson/i.test(found.body) || /mono/i.test(found.body.split(',')[0])) throw fail(`probing ${entry.name}`, `the body font is ${JSON.stringify(found.body)}`)
-  if (!/atkinson.*mono/i.test((found.barLabel ?? '').split(',')[0])) throw fail(`probing ${entry.name}`, `the bar status font is ${JSON.stringify(found.barLabel)}, not the mono chrome`)
-  if (found.actionRadius !== '0px') throw fail(`probing ${entry.name}`, `the bar action has radius ${found.actionRadius}`)
+  if (!('alert' in entry.expect.bar) && !/atkinson.*mono/i.test((found.barLabel ?? '').split(',')[0])) throw fail(`probing ${entry.name}`, `the bar status font is ${JSON.stringify(found.barLabel)}, not the mono chrome`)
+  if (!('alert' in entry.expect.bar) && found.actionRadius !== '0px') throw fail(`probing ${entry.name}`, `the bar action has radius ${found.actionRadius}`)
   if (found.dialogRadius !== null && found.dialogRadius !== '0px') throw fail(`probing ${entry.name}`, `the popup has radius ${found.dialogRadius}`)
   if (found.dialogBody !== null && parseFloat(found.dialogBody) < 16) throw fail(`probing ${entry.name}`, `the popup body text is ${found.dialogBody}, under the 16px floor`)
   return found
@@ -238,10 +246,10 @@ async function shoot(browser, gate, fixture, entry, theme, viewport, turns, evid
     const errors = []
     page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
     await serveWorld(page, world)
-    const response = await page.goto(`${ORIGIN}/projects/${PROJECT}/${SESSION}/`, { waitUntil: 'domcontentloaded' })
+    const response = await page.goto(`${ORIGIN}/projects/${PROJECT}/${SESSION}/${entry.steps.includes('arrive') ? '?publish=open' : ''}`, { waitUntil: 'domcontentloaded' })
     if (response?.status() !== 200) throw fail(`opening ${entry.name}`, `HTTP status ${response?.status() ?? 0}`)
     await page.waitForSelector('.txn-app', { visible: true, timeout: 30000 }).catch(() => { throw fail(`opening ${entry.name}`, 'the transcript never mounted') })
-    await page.waitForSelector('.pub-bar', { visible: true, timeout: 20000 }).catch(() => { throw fail(`opening ${entry.name}`, 'the publish bar never mounted') })
+    await page.waitForSelector('[role="group"][aria-label="publish"]', { visible: true, timeout: 20000 }).catch(() => { throw fail(`opening ${entry.name}`, 'the publish bar never mounted') })
     await page.evaluate(async () => { await document.fonts.ready })
     for (const step of entry.steps) await runStep(page, step)
     try {

@@ -458,3 +458,24 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
 - **font `@import` drop → whole-app mono** (§Font guard) — use `<link>`, not `@import`; the guard test catches it.
 - **DIM in fidelity composites** (§4) — a sticky-shell reflow added trailing whitespace; hide the shell only where it overlaps content.
 - **dist-empty stale `tsc`** (§0) — re-run FAIRTRADE `build:lib`, then `tsc`.
+
+### Transcript publish states
+
+Run `CHROME_PATH=<chrome> pnpm visual:publish-states` after `make build`.
+`publish-states-shoot.mjs` boots this worktree's embedded binary, verifies the
+branch marker in both the binary and served chunk, and mounts the transcript
+route with the synthetic Local API fixture. Every required bar and popup state
+is captured in dark and light; the normal bar, publish popup, and update popup
+also run at phone width. Captures and computed font, radius, and theme evidence
+go to `/tmp/peasant-publish-states` (override with
+`PEASANT_PUBLISH_STATES_CAPTURE_DIR`). Upload inspected evidence to the
+`peasant-498--screenshots` side branch; capture PNGs are never tracked here.
+
+The fixture replaces remote publication boundaries so no capture publishes a
+real transcript. The mounted body, WebSocket transcript path, app shell and
+served build remain real. Its query and authentication refusals follow the
+Local API; outcome and cache algebra use direct YAML-driven unit tests rather
+than more browser scenarios. The capture process owns its server and browser,
+tears them down on success and ordinary failure, and uses a dedicated port
+(default 8847). Concurrent captures must set distinct ports and output roots.
+A forced kill may require closing the child browser/server before rerunning.

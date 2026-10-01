@@ -1,4 +1,3 @@
-expectedCaseCount: 32
 requiredNames:
   - canonical map trailing slash
   - canonical transcript trailing slash

@@ -96,8 +96,6 @@ function installFetch(options: FetchOptions = {}) {
         return response(options.syncList ? options.syncList() : buildGroupedSyncResponse(ownerSpecs(), contextSpecs()));
       case '/api/v1/web/discovery':
         return response({ items: discoveryItems() });
-      case '/api/v1/annotations':
-        return response({ annotations: [] });
       case '/api/v1/sync/redactions':
         return response({ categories: [] });
       case '/api/v1/sync/push':

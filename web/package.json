@@ -35,7 +35,8 @@
     "sxs": "node scripts/visual/stitch-sxs.mjs",
     "sxs:changes": "SURFACE_SET=changes REF_DIR=changes APP_DIR=peasant node scripts/visual/stitch-sxs.mjs",
     "sxs:smoke": "SURFACE_SET=smoke REF_DIR=smoke-baseline APP_DIR=smoke node scripts/visual/stitch-sxs.mjs scripts/visual",
-    "shell:gate": "pnpm boot:shell && pnpm shell:offline"
+    "shell:gate": "pnpm boot:shell && pnpm shell:offline",
+    "visual:publish-states": "node scripts/visual/publish-states-shoot.mjs"
   },
   "dependencies": {
     "@peasant-labs/fairtrade": "0.0.24",

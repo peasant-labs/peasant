@@ -30,7 +30,11 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/lib/share/redactions', async (importOriginal) => {
   const actual = await importOriginal<typeof redactionsApi>();
-  return { ...actual, fetchRedactionPreview: vi.fn() };
+  const fetchRedactionPreview = vi.fn();
+  return { ...actual, fetchRedactionPreview, fetchRedactionScan: async (id: string, level: redactionsApi.RedactionLevel) => {
+    const redactions = await fetchRedactionPreview(id, level);
+    return { redactions, matchCount: redactions.length };
+  } };
 });
 
 const fetchPreview = vi.mocked(redactionsApi.fetchRedactionPreview);

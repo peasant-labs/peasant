@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { fetchMockRedactionPreview } from '@/lib/share/mock-data';
 import type { MockRedaction } from '@/lib/session-detail/mock-redactions';
-import { fetchRedactionPreview, type RedactionLevel } from '@/lib/share/redactions';
+import { fetchRedactionScan, type RedactionLevel } from '@/lib/share/redactions';
 import type { Redaction } from '@/types/messages';
 
 // ---------------------------------------------------------------------------
@@ -41,14 +40,15 @@ export function redactionCacheKey(level: RedactionLevel, sessionId: string): str
 
 /**
  * One cached scan. `version` names the content the scan read, when the caller
- * knows it (the transcript page passes its turn count): a successful scan of an
- * older version is re-run on the next automatic scan, because the session grew
- * after it. A failure is kept whatever the version, so only an explicit re-scan
- * retries it.
+ * knows it (the transcript page passes its turn count; the wizard passes none).
+ * A successful scan stands only for the same version: a scan of an older count,
+ * or one made by a caller that named no version, is re-run on the next
+ * automatic scan, so a preview never stands for turns it did not read. A
+ * failure is kept whatever the version, so only an explicit re-scan retries it.
  */
 export type RedactionCacheEntry =
   | { status: 'scanning'; version?: string }
-  | { status: 'success'; redactions: Redaction[]; version?: string }
+  | { status: 'success'; redactions: Redaction[]; matchCount?: number; version?: string }
   | { status: 'failure'; error: string; version?: string };
 
 export type RedactionCache = Map<string, RedactionCacheEntry>;
@@ -65,7 +65,7 @@ export interface RedactionScanTarget {
 function entryIsCurrent(entry: RedactionCacheEntry | undefined, target: RedactionScanTarget): boolean {
   if (!entry) return false;
   if (entry.status !== 'success') return true;
-  return entry.version === undefined || target.version === undefined || entry.version === target.version;
+  return entry.version === target.version;
 }
 
 export interface RedactionPipeline {
@@ -75,6 +75,8 @@ export interface RedactionPipeline {
   failureCount: number;
   /** Successful results for the current level, by session id. */
   sessionRedactions: Map<string, Redaction[]>;
+  /** Server occurrence totals; sample length is used by older cache entries. */
+  sessionMatchCounts: Map<string, number>;
   /** The first failure's message, or null when no session failed. */
   scanError: string | null;
   /** Scan the targets; `force` replaces kept entries (the explicit re-scan). */
@@ -114,7 +116,16 @@ export function useRedactionPipeline(
     const map = new Map<string, Redaction[]>();
     for (const target of targets) {
       const cached = cache.get(redactionCacheKey(redactionLevel, target.id));
-      if (cached?.status === 'success') map.set(target.id, cached.redactions);
+      if (cached?.status === 'success' && entryIsCurrent(cached, target)) map.set(target.id, cached.redactions);
+    }
+    return map;
+  }, [targets, redactionLevel, cache]);
+
+  const sessionMatchCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const target of targets) {
+      const cached = cache.get(redactionCacheKey(redactionLevel, target.id));
+      if (cached?.status === 'success' && entryIsCurrent(cached, target)) map.set(target.id, cached.matchCount ?? cached.redactions.length);
     }
     return map;
   }, [targets, redactionLevel, cache]);
@@ -162,14 +173,16 @@ export function useRedactionPipeline(
         for (const target of pending) {
           const key = redactionCacheKey(redactionLevel, target.id);
           try {
-            const items = useMock
-              ? filterMockByLevel(
-                  fetchMockRedactionPreview(target.id).map((r) => ({ ...r, status: 'pending' as const })),
-                  redactionLevel,
-                )
-              : await fetchRedactionPreview(target.id, redactionLevel);
+            let result;
+            if (useMock) {
+              const redactions = filterMockByLevel(
+                (await import('@/lib/share/mock-data')).fetchMockRedactionPreview(target.id).map((r) => ({ ...r, status: 'pending' as const })),
+                redactionLevel,
+              );
+              result = { redactions, matchCount: redactions.length };
+            } else result = await fetchRedactionScan(target.id, redactionLevel);
             onCacheChange((prev) =>
-              new Map(prev).set(key, { status: 'success', redactions: items, version: target.version }),
+              new Map(prev).set(key, { status: 'success', ...result, version: target.version }),
             );
           } catch (e: unknown) {
             const error = e instanceof Error ? e.message : String(e);
@@ -199,6 +212,7 @@ export function useRedactionPipeline(
     scannedCount,
     failureCount,
     sessionRedactions,
+    sessionMatchCounts,
     scanError,
     runScan,
   };

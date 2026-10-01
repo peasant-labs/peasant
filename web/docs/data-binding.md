@@ -91,8 +91,7 @@ write paths, both POSTs, both surfacing the server's real result/error:
   *optimistically* into a local map; **no WS echo** for the entry axis, so REST
   is the source of truth (`web/src/lib/api/annotations.ts:190`,
   `web/src/components/session-detail/v2/lib/useEntryLabels.ts:112`).
-- **Contribute / share** (the wizard): a 4-step machine (Choose → Labels →
-  Redact → Submit) whose final step calls `runPush` →
+- **Contribute / share** (the wizard): a retained 3-step machine (Choose → Redact → Publish) whose final step calls `runPush` →
   `POST /api/v1/sync/push` with the typed request (sessions and redaction
   level, no visibility or license). The server runs the push pipeline with a
   private first publish and no license, then any collective steps
@@ -182,12 +181,11 @@ flowchart TD
 
   subgraph SHARE["Contribute wizard (write)"]
     W1["Choose (SessionPicker)"]
-    W2["Labels (LabelsStep)\nGET /annotations → ShareLabel[]"]
     W3["Redact (RedactionStep)\nGET /sync/redactions → ReviewMatch[]"]
     W4["Submit (PushStep)"]
     PUSH["runPush(ids, level)\nPOST /api/v1/sync/push"]
-    RES["PushResult (per-session new/updated/skipped/error)"]
-    W1 --> W2 --> W3 --> W4 --> PUSH --> RES
+    RES["SyncPushResponse (per-session new/updated/skipped/held/error)"]
+    W1 --> W3 --> W4 --> PUSH --> RES
   end
   ERR["401 'run peasant village login first'\nsurfaced verbatim (no fake success)"]
   PUSH -.-> ERR
@@ -211,7 +209,6 @@ flowchart LR
     SV["SessionDetailV2\n(scope/focus turns, phases, annotations,\nlinkBuilder, capabilities, callbacks)"]
     PI["MetadataChips (fairtrade /ui)\nharness → ProviderIcon + providerLabel chip"]
     RS["RedactionStep\nRedaction → ReviewMatch (confidence/100, ns id)"]
-    LS["LabelsStep\nAnnotationSummary → ShareLabel"]
     UEL["useEntryLabels\nAnnotationSummary → SavedTurnLabel (entry only)"]
     SW["ShareWizardClient\nBackendSessionSummary → ShareSession"]
     PP["ProjectPicker\nProjectSummary | SessionSummary → PickerRow"]
@@ -224,7 +221,6 @@ flowchart LR
   M --> PP
   MAPT --> PP
   ANT --> RS
-  ANT --> LS
   ANT --> UEL
   AT --> TBV["fairtrade /ui dumb components"]
 ```
@@ -311,14 +307,6 @@ inside a `<Chip>`:
   surface (`RedactionStep.tsx:104`, `:165`).
 - Why: every selected session's findings collapse into one safe-by-default review
   list; `kept` (opt-out) is local UI state (`:146`).
-
-**Session annotation → share label** (`web/src/components/share/LabelsStep.tsx:50`).
-- Input: `AnnotationSummary` from `GET /annotations`, filtered to
-  `targetKind === 'session'` (`:110`).
-- Output: `ShareLabel` distilled to push-bound fields; `annotatorKind` mapped to
-  an `auto`/`manual` origin via `originForAnnotatorKind`
-  (`web/src/lib/share/types.ts:112`). Only the **included** annotation ids flow
-  into the push.
 
 **Backend annotation → saved turn label** (`useEntryLabels.ts:26`).
 - Input: `AnnotationSummary`; **only** entry-targeted ones (`targetKind ===
@@ -462,7 +450,6 @@ because redaction is safe-by-default (`ShareWizardClient.tsx:126`).
 - `web/src/components/ProviderIcon.tsx` — peasant's own (apparently unused)
   harness→glyph map.
 - `web/src/components/share/RedactionStep.tsx` — `Redaction → ReviewMatch`.
-- `web/src/components/share/LabelsStep.tsx` — `AnnotationSummary → ShareLabel`.
 - `web/src/app/share/ShareWizardClient.tsx` — `BackendSessionSummary →
   ShareSession`; wizard state machine.
 - `web/src/lib/share/types.ts` — `ShareSession`/`ShareLabel`/`LabelSelection`
@@ -493,3 +480,16 @@ because redaction is safe-by-default (`ShareWizardClient.tsx:126`).
   "no WS echo on entry axis" claim are from the client code comments
   (`annotations.ts:73`, `useEntryLabels.ts:55`); not cross-checked against the Go
   handler here.
+
+### Transcript publication
+
+`SessionDetailV2` mounts the fairtrade publish bar and controlled popup through
+`useTranscriptPublish`. `GET /publications?sessionIds=…&include=audience` supplies
+the state and audience; new turns are a comparison of received timestamps with
+`publishedAt`. `GET /village/collectives?sessionId=…` supplies server suggestions.
+Both publication surfaces use the typed `publishSessions` transport and schema
+decoding. An update omits collective changes unless the reader explicitly adds
+or removes one. The app shell's `PublishProvider` owns the shared scan cache
+and in-flight publication state; unknown state, unknown audience, and failed
+scans keep publication disabled. `/share?sessionId=…` redirects to this popup,
+while wizard step and multi-session links retain the wizard.
