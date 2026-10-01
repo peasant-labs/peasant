@@ -30,5 +30,6 @@ partition:
   - internal/ingest|TestLargeRecordsAreHandledUniformlyAcrossHarnesses
   - internal/ingest|TestPiCapturedAdmission
   - internal/ingest|TestPublicationCaptureNormalIngestRecovery
+  - internal/ingest|TestNormalIngestStoresAuthoritativeContent
 protected:
   - internal/ingest|TestOpenCodeNativeCLI

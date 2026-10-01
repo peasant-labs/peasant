@@ -346,6 +346,35 @@ partition:
       state still fails the test in the no-race pass.
     cost: { wall_ms: 5620, cpu_ms: 4280 }
 
+  - package: internal/ingest
+    test: TestNormalIngestStoresAuthoritativeContent
+    class: single-threaded-bytes
+    evidence: '#TestNormalIngestStoresAuthoritativeContent'
+    justification: >-
+      Subject. Authoritative full-content ingest and its durability: after the
+      run the stored entries carry the exact full text, a close and reopen still
+      reads it, a forced reindex whose tail changed under a shared prefix is not
+      skipped, and a later plain reindex does not touch the settled session.
+      Concurrency actually exercised. The case runs a real pipeline over a
+      golden-copy SQLite store, so the DIFF pool, EXTRACT+WRITE workers, the
+      StagingBuffer, drainLoop and indexLoop overlap; the test then closes and
+      reopens the store and reads through a fresh pool. Why the detector is not
+      this test's oracle. The oracle is stored bytes and digests after
+      close/reopen; a race would surface as lost or altered content, not a
+      detector report the assertions read. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race across the close/reopen boundary in this workload
+      is no longer observed; the retained store tests race activation-versus-
+      reads and close-versus-readers directly. Detector-independent guarantees
+      kept. The full-content and digest assertions stay exact; no weakening.
+    cost: { wall_ms: 2970, cpu_ms: 2790 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
