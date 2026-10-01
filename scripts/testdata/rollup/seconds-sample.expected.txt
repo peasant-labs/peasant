@@ -1,0 +1,9 @@
+== testdata/rollup/seconds-sample.txt
+detector          0 rows      0.00 s   0.00%
+adjacent          0 rows      0.00 s   0.00%
+runtime-other     0 rows      0.00 s   0.00%
+engine            1 rows      0.75 s  75.00%
+driver            1 rows      0.05 s   5.00%
+application       1 rows      0.20 s  20.00%
+other             0 rows      0.00 s   0.00%
+accounted         3 rows      1.00 s 100.00%  (total sampled 1.00s)

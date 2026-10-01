@@ -1,17 +1,13 @@
 package testgate
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 // The registry is the admission record for the partition, so its correctness is
@@ -41,14 +37,8 @@ type registryCaseFile struct {
 func loadRegistryCases(t *testing.T) registryCaseFile {
 	t.Helper()
 	var file registryCaseFile
-	decoder := yaml.NewDecoder(bytes.NewReader(registryCasesYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&file); err != nil {
+	if err := testutil.DecodeFixtureYAML(registryCasesYAML, &file); err != nil {
 		t.Fatalf("decode registry cases fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("registry cases fixture must be a single document, got %v", err)
 	}
 	if len(file.RequiredNames) == 0 {
 		t.Fatal("registry cases fixture has an empty required_names manifest")

@@ -1,0 +1,7 @@
+File: seconds.test
+Type: cpu
+Duration: 1.00s, Total samples = 1.00s (100.00%)
+      flat  flat%   sum%        cum   cum%
+    0.75s 75.00% 75.00%      0.75s 75.00%  modernc.org/libc.Xmemcpy
+    0.20s 20.00% 95.00%      0.20s 20.00%  github.com/peasant-labs/peasant/internal/ingest.(*Pipeline).drain
+    0.05s  5.00% 100.00%     0.05s  5.00%  zombiezen.com/go/sqlite.(*Stmt).Step

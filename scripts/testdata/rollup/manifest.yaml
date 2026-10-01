@@ -1,0 +1,6 @@
+requiredNames:
+  - seconds-sample
+  - milliseconds-sample
+  - kilo-sample
+  - mega-giga-sample
+  - unknown-unit
