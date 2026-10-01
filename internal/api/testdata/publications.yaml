@@ -28,6 +28,7 @@ requiredNames:
   - signed-out-reads-unpublished
   - failed-attempt-is-reported
   - audience-lists-live-shares-only
+  - audience-is-an-empty-list
   - audience-needs-village
   - session-ids-required
   - unknown-include-refused
@@ -86,6 +87,15 @@ cases:
       rows:
         - {session: inside, state: published, outsideSelection: false, transcript: true, audience: {platform: approved, review: pending}}
         - {session: outside, state: unpublished, outsideSelection: true}
+
+  - name: audience-is-an-empty-list
+    published: [inside]
+    villageShares: {platform: retracted}
+    query: {sessionIds: "inside", include: audience}
+    expect:
+      status: 200
+      rows:
+        - {session: inside, state: published, outsideSelection: false, transcript: true, audience: {}}
 
   - name: audience-needs-village
     published: [inside]

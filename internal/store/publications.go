@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -258,7 +257,7 @@ func (s *Store) SessionPublications(ctx context.Context, origin, owner string, s
 		batch := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
 		args := append([]any{origin, owner}, sessionIDArgs(batch)...)
 		query := `SELECT session_id, project_hash, receipt_json FROM session_publications
-WHERE village_origin=? AND owner_user_id=? AND session_id IN (` + placeholders(len(batch)) + `)
+WHERE village_origin=? AND owner_user_id=? AND session_id IN (` + sqlPlaceholders(len(batch)) + `)
 ORDER BY session_id, remote_updated_at DESC, project_hash`
 		err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
 			sessionID := stmt.ColumnText(0)
@@ -302,7 +301,7 @@ func (s *Store) SessionPublicationAttempts(ctx context.Context, origin, owner st
 		batch := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
 		args := append([]any{origin, owner}, sessionIDArgs(batch)...)
 		query := `SELECT session_id, project_hash, attempted_at, stage, message FROM publication_attempt_diagnostics
-WHERE village_origin=? AND owner_user_id=? AND session_id IN (` + placeholders(len(batch)) + `)
+WHERE village_origin=? AND owner_user_id=? AND session_id IN (` + sqlPlaceholders(len(batch)) + `)
 ORDER BY session_id, attempted_at DESC, id DESC`
 		err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
 			sessionID := stmt.ColumnText(0)
@@ -333,8 +332,4 @@ func sessionIDArgs(sessionIDs []string) []any {
 		args[i] = id
 	}
 	return args
-}
-
-func placeholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }

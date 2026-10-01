@@ -93,8 +93,10 @@ write paths, both POSTs, both surfacing the server's real result/error:
   `web/src/components/session-detail/v2/lib/useEntryLabels.ts:112`).
 - **Contribute / share** (the wizard): a 4-step machine (Choose → Labels →
   Redact → Submit) whose final step calls `runPush` →
-  `POST /api/v1/sync/push`, running the same pipeline as `peasant village push`
-  (`web/src/lib/share/push.ts:37`). The Redact step previews real findings via
+  `POST /api/v1/sync/push` with the typed request (sessions and redaction
+  level, no visibility or license). The server runs the push pipeline with a
+  private first publish and no license, then any collective steps
+  (`web/src/lib/share/push.ts`, `internal/push/share_publish.go`). The Redact step previews real findings via
   `GET /api/v1/sync/redactions` (`web/src/lib/share/redactions.ts:58`).
 
 There is **no optimistic-cache invalidation framework** (no query client). The
