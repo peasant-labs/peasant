@@ -1,54 +1,37 @@
-[
-  {
-    "theme": "dark",
-    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
-    "heading": "updated · no collective can read it",
-    "active": "done",
-    "focusInside": true,
-    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
-    "radius": "0px",
-    "shell": true
-  },
-  {
-    "theme": "dark",
-    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
-    "before": {
-      "x": 60,
-      "y": 287.21875,
-      "width": 154.1875,
-      "height": 28
+{
+  "reference": "official Fairtrade main demo",
+  "servedProof": "canonical-main-served-provenance.json",
+  "referenceEvidence": "canonical-reference-evidence.json",
+  "referenceSourceHead": "708c858face29261b41faa0a91f0e9167b30dc45",
+  "stages": [
+    "ready",
+    "stopped",
+    "private-result"
+  ],
+  "comparisons": [
+    {
+      "path": "compare-private-result-dark.png",
+      "sha256": "f6e72d432825cddb57a205d0742e86da90ce68ab863a165944034cc65b74fcdd"
     },
-    "during": {
-      "x": 60,
-      "y": 287.21875,
-      "width": 154.1875,
-      "height": 28
-    }
-  },
-  {
-    "theme": "light",
-    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
-    "heading": "updated · no collective can read it",
-    "active": "done",
-    "focusInside": true,
-    "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
-    "radius": "0px",
-    "shell": true
-  },
-  {
-    "theme": "light",
-    "head": "bef7a6acc5869064faa2e1db09e1d29ae1064d12",
-    "before": {
-      "x": 60,
-      "y": 287.21875,
-      "width": 154.1875,
-      "height": 28
+    {
+      "path": "compare-private-result-light.png",
+      "sha256": "48067d397a4741decb47f641fe6cfa60ce0f69344f0a99a27ad8a354ef6c9e73"
     },
-    "during": {
-      "x": 60,
-      "y": 287.21875,
-      "width": 154.1875,
-      "height": 28
+    {
+      "path": "compare-ready-dark.png",
+      "sha256": "fd45513eb69dd87fb21a87b591f1956cc921f6134371e3aa23ea8785a4dcd50c"
+    },
+    {
+      "path": "compare-ready-light.png",
+      "sha256": "48949d9c278641082e93df462423b8b3347a8f5db1cb0c1c5e5681953feadd20"
+    },
+    {
+      "path": "compare-stopped-dark.png",
+      "sha256": "31f287dd5fbd961e62d512b6dffd1fb67f7da132af1043a19e5e159746a82f81"
+    },
+    {
+      "path": "compare-stopped-light.png",
+      "sha256": "5b24e69c021584820cadec824b760a986ae3b6a3763b152dd59bd3a37785860f"
     }
-  }
-]
+  ]
+}

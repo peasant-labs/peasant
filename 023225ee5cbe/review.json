@@ -5,7 +5,7 @@
   "captureCount": 80,
   "inspectedDesktopContactSheets": 4,
   "inspectedMobileScreenshots": 6,
-  "inspectedCanonicalComparisons": 4,
+  "inspectedCanonicalComparisons": 6,
   "audienceReadinessRegression": "held collective read, actual control at DOM readiness commit, real POST and final reader assertion",
   "originalInitializerMutation": "fails the named regression because collectives.remove is absent",
   "frontendTests": 1363,
@@ -13,5 +13,11 @@
   "typecheck": "passed",
   "productionBuild": "passed",
   "normalProductionCapture": "passed",
-  "review": "No new visual regression found. Canonical narrow breadcrumb remains tracked in Fairtrade issue132; automatic consent checkbox is supplied by the next stack layer."
+  "review": "No new visual regression found. Canonical narrow breadcrumb remains tracked in Fairtrade issue132; automatic consent checkbox is supplied by the next stack layer.",
+  "canonicalServedProof": "canonical-main-served-provenance.json",
+  "canonicalComparisonStages": [
+    "ready",
+    "stopped",
+    "private-result"
+  ]
 }
