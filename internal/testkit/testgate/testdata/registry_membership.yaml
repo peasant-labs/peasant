@@ -34,5 +34,6 @@ partition:
   - internal/ingest|TestPiUnknownPersistence
   - internal/ingest|TestOrdinaryHarvestSettlesStaleIndexSessions
   - internal/ingest|TestRetainedContentBackfill
+  - internal/ingest|TestNativeUnknownSourceToPublication
 protected:
   - internal/ingest|TestOpenCodeNativeCLI

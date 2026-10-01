@@ -464,6 +464,37 @@ partition:
       readiness assertion stays.
     cost: { wall_ms: 1980, cpu_ms: 2590 }
 
+  - package: internal/ingest
+    test: TestNativeUnknownSourceToPublication
+    class: single-threaded-bytes
+    evidence: '#TestNativeUnknownSourceToPublication'
+    justification: >-
+      Subject. Native unknown source flows to publication: capture is certified
+      or refused exactly per the fixture, the native generation is stored and
+      exported, and the real artifact transaction's missing-blob failure is
+      exercised rather than a prepared success. Concurrency actually exercised.
+      Two real pipeline runs over a store opened with the native generation
+      artifact store and file session locks, overlapping DIFF, EXTRACT+WRITE,
+      the StagingBuffer, drainLoop and indexLoop, followed by close/reopen and
+      export and publication assembly. Why the detector is not this test's
+      oracle. The assertions read capture status, stored generations, exported
+      bytes and publication results; a race surfaces as wrong stored data, not
+      as a detector assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic,
+      internal/export/generation_detail_barrier_test.go#TestGenerationDetailBarrier.
+      Residual risk. A race specific to the native artifact store plus the
+      publication assembly is not observed here; the retained store and export
+      tests bound the shared primitives. Detector-independent guarantees kept.
+      The capture certification, artifact-transaction failure and publication
+      assertions all stay.
+    cost: { wall_ms: 9120, cpu_ms: 6980 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
