@@ -583,7 +583,7 @@ partition:
       uncovered here; the retained tests bound the machinery.
       Detector-independent guarantees kept. The maintenance-once and
       projection assertions stay.
-    cost: { wall_ms: 31800, cpu_ms: 33400 }
+    cost: { wall_ms: 1610, cpu_ms: 2110 }
 
   - package: internal/ingest
     test: TestConcreteParserFailurePreservesOtherSessions
@@ -611,7 +611,7 @@ partition:
       here; the retained tests bound the shared primitives.
       Detector-independent guarantees kept. The isolation and retry assertions
       stay exact.
-    cost: { wall_ms: 31801, cpu_ms: 33401 }
+    cost: { wall_ms: 1520, cpu_ms: 2150 }
 
   - package: internal/ingest
     test: TestUnknownLocalRetentionBeyondTransferBudget
@@ -641,7 +641,7 @@ partition:
       and the retained tests bound the primitives rather than that workload.
       Detector-independent guarantees kept. The full-evidence certification and
       byte-preservation assertions stay.
-    cost: { wall_ms: 31802, cpu_ms: 33402 }
+    cost: { wall_ms: 17440, cpu_ms: 34140 }
 
 protected:
   - package: internal/ingest
