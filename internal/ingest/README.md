@@ -213,6 +213,32 @@ mixed summary/snapshot artifacts never reach kickstart, ingest, or the local sto
 fails open for unreadable, empty, or malformed files: a future Claude transcript format must not
 be silently discarded merely because Peasant cannot classify it yet.
 
+A subagent transcript sits in its parent session's `subagents/` directory, either directly or in
+one workflow run directory:
+
+```text
+<project>/<session>.jsonl                                       root session
+<project>/<session>/subagents/agent-<id>.jsonl                  subagent
+<project>/<session>/subagents/workflows/<run>/agent-<id>.jsonl  workflow subagent
+```
+
+Both kinds become children of `<session>` in the same way. `<run>` is a directory whose name starts
+with `wf_`; the whole name is the run id. A workflow child keeps its run directory in its recorded
+source path, which is where the run id is kept; the run's `journal.jsonl` is not a transcript.
+
+One session id holds one transcript. Claude Code has been seen to write the last turns of a
+workflow agent to the plain location under the same agent id, after the run transcript. Discovery
+admits workflow transcripts first, so the run transcript keeps the id on every harvest, whichever
+file a harvest saw first; the plain file is left out and logged at debug level. Two run directories holding the
+same agent id keep the lexically first one. A child stored from the plain file by a build
+that did not read workflow runs is switched to the run transcript once. Joining the two files into
+one transcript is not done yet.
+
+An ordinary harvest does not extract a parent whose own transcript is unchanged. A parent stored
+before its workflow children appeared therefore keeps its earlier child list in its saved
+metadata, and in what it publishes, although the new children are stored under it.
+`peasant harvest --force --session <parent-id>` extracts that parent again and refreshes the list.
+
 ---
 
 ## Execution Timeline
