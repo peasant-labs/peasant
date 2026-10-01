@@ -1,0 +1,140 @@
+# Case family for the fresh-install baseline schema. Each row names one
+# observable the fresh path must satisfy; requiredNames guards the set in both
+# directions. decoded by the local strict loader in baseline_open_test.go
+# (testutil.DecodeNamedFixtureYAML cannot be used here: internal/testutil
+# imports internal/store).
+requiredNames:
+  - fresh-open-applies-baseline
+  - fresh-timestamps-in-open-interval
+  - foreign-application-id-refused
+  - version-zero-with-user-objects
+  - predecessor-upgrades-with-data
+  - stale-probe-recheck
+  - concurrent-fresh-open
+
+cases:
+  - name: fresh-open-applies-baseline
+    kind: fresh-open
+  - name: fresh-timestamps-in-open-interval
+    kind: clock-interval
+  - name: foreign-application-id-refused
+    kind: foreign-app-id
+    applicationID: 287454020
+  - name: version-zero-with-user-objects
+    kind: v0-objects
+  - name: predecessor-upgrades-with-data
+    kind: predecessor
+    predecessorSlot: 60
+  - name: stale-probe-recheck
+    kind: stale-probe
+  - name: concurrent-fresh-open
+    kind: concurrent-open
+
+# The seeded rows whose clock column is written at install time. Each cell is
+# named and required; TestBaselineClockCells asserts this set matches the
+# serializer's own enumeration, and asserts the cells themselves.
+clockCells:
+  requiredNames:
+    - annotation-types-session-approval-created
+    - annotation-types-session-outcome-created
+    - annotation-types-user-frustration-created
+    - annotation-types-session-scope-created
+    - annotation-types-frustration-signal-created
+    - annotation-types-resolution-evidence-created
+    - annotation-types-annotation-approval-created
+    - annotation-types-friction-episode-created
+    - annotation-types-custom-label-created
+    - annotation-types-turn-outcome-created
+    - annotation-types-turn-flag-created
+    - annotators-outcome-classifier-created
+    - annotators-frustration-classifier-created
+    - annotators-scope-classifier-created
+    - annotators-human-web-created
+    - annotators-frustration-signal-classifier-created
+    - annotators-resolution-evidence-classifier-created
+  cells:
+    - name: annotation-types-session-approval-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.session_approval
+      clockColumn: created_at
+    - name: annotation-types-session-outcome-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.session_outcome
+      clockColumn: created_at
+    - name: annotation-types-user-frustration-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.user_frustration
+      clockColumn: created_at
+    - name: annotation-types-session-scope-created
+      table: annotation_types
+      keyColumn: type_id
+      key: metadata.session_scope
+      clockColumn: created_at
+    - name: annotation-types-frustration-signal-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.frustration_signal
+      clockColumn: created_at
+    - name: annotation-types-resolution-evidence-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.resolution_evidence
+      clockColumn: created_at
+    - name: annotation-types-annotation-approval-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.annotation_approval
+      clockColumn: created_at
+    - name: annotation-types-friction-episode-created
+      table: annotation_types
+      keyColumn: type_id
+      key: research.friction_episode
+      clockColumn: created_at
+    - name: annotation-types-custom-label-created
+      table: annotation_types
+      keyColumn: type_id
+      key: user.custom_label
+      clockColumn: created_at
+    - name: annotation-types-turn-outcome-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.turn_outcome
+      clockColumn: created_at
+    - name: annotation-types-turn-flag-created
+      table: annotation_types
+      keyColumn: type_id
+      key: quality.turn_flag
+      clockColumn: created_at
+    - name: annotators-outcome-classifier-created
+      table: annotators
+      keyColumn: name
+      key: outcome-classifier
+      clockColumn: created_at
+    - name: annotators-frustration-classifier-created
+      table: annotators
+      keyColumn: name
+      key: frustration-classifier
+      clockColumn: created_at
+    - name: annotators-scope-classifier-created
+      table: annotators
+      keyColumn: name
+      key: scope-classifier
+      clockColumn: created_at
+    - name: annotators-human-web-created
+      table: annotators
+      keyColumn: name
+      key: human-web
+      clockColumn: created_at
+    - name: annotators-frustration-signal-classifier-created
+      table: annotators
+      keyColumn: name
+      key: frustration-signal-classifier
+      clockColumn: created_at
+    - name: annotators-resolution-evidence-classifier-created
+      table: annotators
+      keyColumn: name
+      key: resolution-evidence-classifier
+      clockColumn: created_at

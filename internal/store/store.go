@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -356,6 +357,33 @@ func WithMigrationConsent(consent MigrationConsent) OpenOption {
 	return func(o *openOptions) { o.migrationConsent = consent }
 }
 
+// newSQLitePool opens the connection pool, retrying briefly when two first
+// opens of the same brand-new file race the write-ahead-log conversion. SQLite
+// returns SQLITE_BUSY when one connection tries to switch a database to WAL
+// while another is still converting it; the loser retries until the winner's
+// conversion is durable. Every other error, and the exhausted retry budget,
+// return unchanged.
+func newSQLitePool(dbPath string, opts sqlitex.PoolOptions) (*sqlitex.Pool, error) {
+	const maxAttempts = 40
+	for attempt := 0; ; attempt++ {
+		pool, err := sqlitex.NewPool(dbPath, opts)
+		if err == nil {
+			return pool, nil
+		}
+		if attempt == maxAttempts-1 || !isTransientOpenContention(err) {
+			return nil, err
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// isTransientOpenContention reports whether an open error is a lock that a
+// brief retry can clear.
+func isTransientOpenContention(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "database is locked") || strings.Contains(message, "SQLITE_BUSY")
+}
+
 // Open creates or opens the SQLite database at dbPath, applies migrations,
 // and configures PRAGMAs. The caller must call Close when done.
 func Open(dbPath string, opts ...OpenOption) (*Store, error) {
@@ -388,7 +416,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			return sqlitex.ExecuteTransient(conn, "PRAGMA wal_autocheckpoint = 0;", nil)
 		}
 	}
-	pool, err := sqlitex.NewPool(dbPath, sqlitex.PoolOptions{
+	pool, err := newSQLitePool(dbPath, sqlitex.PoolOptions{
 		PoolSize:    resolvePoolSize(o.poolSize),
 		PrepareConn: prepare,
 	})
@@ -410,6 +438,25 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			pool.Put(conn)
 			_ = pool.Close()
 			return nil, err
+		}
+		// A brand-new database is created at head from the committed baseline
+		// snapshot instead of replaying the 61-migration chain. The read-only
+		// probe is only an optimization: applyBaselineIfStillFresh re-checks the
+		// full predicate inside its immediate transaction and rolls back when the
+		// database stopped being fresh, so an existing (or foreign-identity)
+		// database falls through to the chain, which stays the only upgrade path.
+		fresh, err := databaseIsFresh(conn)
+		if err != nil {
+			pool.Put(conn)
+			_ = pool.Close()
+			return nil, fmt.Errorf("store: probe whether the database is fresh: %w", err)
+		}
+		if fresh {
+			if _, err := applyBaselineIfStillFresh(conn); err != nil {
+				pool.Put(conn)
+				_ = pool.Close()
+				return nil, err
+			}
 		}
 		if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
 			pool.Put(conn)
