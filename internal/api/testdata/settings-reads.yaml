@@ -19,7 +19,21 @@ requiredNames:
   - a refused level fails the read with its remedy
   - a push method no push applies fails the read with its remedy
   - an invalid file fails the read
+  - a start-only setting reports the running value after a file edit
 cases:
+  - name: a start-only setting reports the running value after a file edit
+    runningFile: |
+      version: 1
+      output:
+        basePath: /running/output
+    file: |
+      version: 1
+      output:
+        basePath: /edited/output
+    status: 200
+    key: output.basePath
+    value: '"/edited/output"'
+    effective: '"/running/output"'
   - name: a missing file reads every key unset with the defaults applied
     setup: missing
     status: 200

@@ -119,6 +119,11 @@ func (h *settingsHandler) handleGetSettings(w http.ResponseWriter, r *http.Reque
 		// The dashboard applies what the page is about to show, including a
 		// change made outside the page, such as with `peasant config`.
 		h.live.apply(h.catalog, cfg)
+		if applied := h.live.load(); applied != nil {
+			// Start-only keys still use the running snapshot. Their Value
+			// comes from document, while Effective describes this server.
+			cfg = applied
+		}
 	}
 	h.mu.Unlock()
 	if err != nil {
