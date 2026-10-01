@@ -16,6 +16,8 @@ requiredNames:
   - saved-rule-id-must-match-this-consent
   - saved-rule-events-must-match-this-consent
   - saved-rule-audience-must-match-this-consent
+  - paused-saved-rule-cannot-enable-automatic-publishing
+  - duplicate-saved-audience-cannot-replace-requested-members
 repository: '/repos/project[one]'
 cases:
   - {name: manual-publish-does-not-create-a-rule, intent: false, value: null, action: none, base: ready-to-publish, setup: installed, leave: false, expect: manual}
@@ -35,3 +37,5 @@ cases:
   - {name: saved-rule-id-must-match-this-consent, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-id, leave: false, expect: 'different rule, event, or collective audience'}
   - {name: saved-rule-events-must-match-this-consent, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-event, leave: false, expect: 'different rule, event, or collective audience'}
   - {name: saved-rule-audience-must-match-this-consent, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-audience, leave: false, expect: 'different rule, event, or collective audience'}
+  - {name: paused-saved-rule-cannot-enable-automatic-publishing, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-paused, leave: false, expect: 'different rule, event, or collective audience'}
+  - {name: duplicate-saved-audience-cannot-replace-requested-members, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-duplicate, leave: false, expect: 'different rule, event, or collective audience'}

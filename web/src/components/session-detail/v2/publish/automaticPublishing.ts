@@ -23,8 +23,10 @@ export async function enableAutomaticPublishing(ruleId: string, sessionId: strin
     throw new AutomaticPublishingError(`saving the automatic publishing rule: ${error instanceof Error ? error.message : String(error)}. the transcript was published; check the rule in settings before retrying`);
   }
   const audience = new Set(collectives);
+  const savedAudience = new Set(rule.collectives);
   if (rule.id !== ruleId || rule.events.length !== 1 || rule.events[0] !== 'pre-push'
-    || rule.collectives.length !== audience.size || rule.collectives.some((id) => !audience.has(id))) {
+    || rule.collectives.length !== savedAudience.size || savedAudience.size !== audience.size
+    || rule.collectives.some((id) => !audience.has(id))) {
     throw new AutomaticPublishingError('confirming automatic publishing consent: peasant returned a different rule, event, or collective audience. the transcript was published; review the saved rule in settings');
   }
   if (rule.kind !== 'folder' || rule.repositories.length !== 1) {
