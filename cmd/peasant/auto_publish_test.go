@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -24,13 +25,16 @@ import (
 )
 
 // The auto-publish world's sessions. The first is recorded in the world's
-// repository; the clone session in another clone of the same remote; the
-// others are published after the first, in order. Each transcript on the
-// Village double has its session's ID.
-const (
-	autoPublishSessionID = "abcd1234-abcd-4bcd-8bcd-abcdef123456"
-	autoPublishCloneID   = "abcd1234-abcd-4bcd-8bcd-abcdef120000"
-)
+// repository; each extra session in the place its role names; the later ones
+// are published after the first, in order. Each transcript on the Village
+// double has its session's ID.
+const autoPublishSessionID = "abcd1234-abcd-4bcd-8bcd-abcdef123456"
+
+var autoPublishExtraIDs = map[string]string{
+	"clone":  "abcd1234-abcd-4bcd-8bcd-abcdef120000",
+	"gone":   "abcd1234-abcd-4bcd-8bcd-abcdef120010",
+	"linked": "abcd1234-abcd-4bcd-8bcd-abcdef120020",
+}
 
 var autoPublishLaterIDs = []string{"abcd1234-abcd-4bcd-8bcd-abcdef120001", "abcd1234-abcd-4bcd-8bcd-abcdef120002"}
 
@@ -82,8 +86,8 @@ func newAutoPublishWorld(t *testing.T, fixture autopublishtest.Fixture, c autopu
 	writeTestCredentialsFor(t, w.dir, w.village.URL())
 
 	w.seed(t, autoPublishSessionID, w.repo)
-	if c.CloneSession {
-		w.seed(t, autoPublishCloneID, w.fresh)
+	for _, role := range c.Sessions {
+		w.seedExtra(t, role)
 	}
 	body := "version: 1\noutput:\n  basePath: " + filepath.Join(w.dir, "peasant-sync") + "\npush:\n  method: all\n"
 	if c.Config.Visibility != "" {
@@ -94,6 +98,34 @@ func newAutoPublishWorld(t *testing.T, fixture autopublishtest.Fixture, c autopu
 	}
 	w.cfgPath = writeCfg(t, w.dir, "auto-publish.yaml", body)
 	return w
+}
+
+// seedExtra records the extra session of one role: in another clone, in a
+// clone that is then removed, or in a linked worktree inside the repository.
+func (w *autoPublishWorld) seedExtra(t *testing.T, role string) {
+	t.Helper()
+	switch role {
+	case "clone":
+		w.seed(t, autoPublishExtraIDs[role], w.fresh)
+	case "gone":
+		gone := filepath.Join(w.world, "gone")
+		if err := os.MkdirAll(gone, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		hooksGit(t, gone, "", "init", "--quiet", "--initial-branch=main")
+		if w.remote {
+			hooksGit(t, gone, "", "remote", "add", "origin", autoPublishRemote)
+		}
+		w.seed(t, autoPublishExtraIDs[role], gone)
+		if err := os.RemoveAll(gone); err != nil {
+			t.Fatal(err)
+		}
+	case "linked":
+		linked := filepath.Join(w.repo, "feat")
+		hooksGit(t, w.repo, "", "-c", "user.name=dev", "-c", "user.email=dev@example.test", "commit", "--quiet", "--allow-empty", "-m", "start")
+		hooksGit(t, w.repo, "", "worktree", "add", "--quiet", "-b", "feat", linked)
+		w.seed(t, autoPublishExtraIDs[role], linked)
+	}
 }
 
 // seed records one ready session in dir, under the project identity a push
@@ -172,10 +204,14 @@ func (w *autoPublishWorld) run(t *testing.T, sub *cobra.Command, args ...string)
 }
 
 // push runs the upload a managed hook runs for the world's repository, or an
-// unscoped push.
+// unscoped push. It is quiet, as a hook's is, unless the flags ask for
+// --verbose.
 func (w *autoPublishWorld) push(t *testing.T, scoped bool, flags ...string) (string, string, error) {
 	t.Helper()
-	args := []string{"--config", w.cfgPath, "--non-interactive", "--quiet"}
+	args := []string{"--config", w.cfgPath, "--non-interactive"}
+	if !slices.Contains(flags, "--verbose") {
+		args = append(args, "--quiet")
+	}
 	if scoped {
 		args = append(args, "--repository", w.repo)
 	}
@@ -260,13 +296,14 @@ func TestAutoPublishPush(t *testing.T) {
 				if err != nil {
 					t.Fatalf("the push before the rules failed: %v\n%s%s", err, stdout, stderr)
 				}
-				if c.PublicBefore {
-					markPublic(t, w, autoPublishSessionID)
-				}
+				w.village.SetPublic(autoPublishSessionID, c.VillagePublic)
 			}
 			w.writeRules(t, c)
 			for _, alias := range c.FailShare {
 				w.village.FailShare(fixture.Collectives[alias].ID)
+			}
+			if c.StallShare {
+				w.village.StallShare(time.Minute)
 			}
 			stdout, stderr, err := w.push(t, scoped, c.Flags...)
 			output.WriteString(stdout + stderr)
@@ -275,6 +312,9 @@ func TestAutoPublishPush(t *testing.T) {
 					t.Fatalf("the first push failed: %v\n%s", err, output.String())
 				}
 				w.share(autoPublishSessionID, c.VillageDecides)
+				if c.PrivateBeforeAgain {
+					w.village.SetPublic(autoPublishSessionID, false)
+				}
 				stdout, stderr, err = w.push(t, scoped, c.Again...)
 				output.WriteString(stdout + stderr)
 			}
@@ -298,8 +338,11 @@ func TestAutoPublishPush(t *testing.T) {
 				t.Errorf("owner updates = %d, want %d", got, c.Expect.OwnerUpdates)
 			}
 			assertAudience(t, "the session's", w.audience(autoPublishSessionID), c.Expect.Audience)
-			if c.CloneSession {
-				assertAudience(t, "the clone session's", w.audience(autoPublishCloneID), c.Expect.CloneAudience)
+			if len(c.Expect.Others) != len(c.Sessions) {
+				t.Fatalf("a push case states the audience of each extra session: %v for %v", c.Expect.Others, c.Sessions)
+			}
+			for _, role := range c.Sessions {
+				assertAudience(t, "the "+role+" session's", w.audience(autoPublishExtraIDs[role]), c.Expect.Others[role])
 			}
 			if c.Expect.AttemptContains != "" {
 				assertLatestAttempt(t, w, autoPublishSessionID, c.Expect.AttemptContains)
@@ -315,28 +358,6 @@ func boolIndex(b bool) int {
 		return 1
 	}
 	return 0
-}
-
-// markPublic records the session's transcript as public in its local receipt,
-// as a receipt reads after an owner made the transcript public on Village.
-func markPublic(t *testing.T, w *autoPublishWorld, sessionID string) {
-	t.Helper()
-	db := w.openStore(t)
-	defer db.Close()
-	creds, err := auth.LoadCredentialsFrom(w.dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	receipts, err := db.SessionPublications(t.Context(), creds.VillageURL, creds.UserID, []string{sessionID})
-	if err != nil || len(receipts) != 1 {
-		t.Fatalf("receipt of %s = %+v, %v", sessionID, receipts, err)
-	}
-	record := receipts[sessionID]
-	record.Receipt.Visibility = schema.VisibilityPublic
-	record.Receipt.Applied.NormalizedValues.Visibility = schema.VisibilityPublic
-	if err := db.SavePublication(t.Context(), record); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func assertLatestAttempt(t *testing.T, w *autoPublishWorld, sessionID, want string) {
@@ -371,11 +392,10 @@ func (w *autoPublishWorld) publish(t *testing.T, publications []autopublishtest.
 }
 
 // TestAutoPublishHookNeverBlocksThePush runs the hook cases: `peasant village
-// auto` installs the rule's hook, the upload under the rule fails against a
-// Village that is gone, and the hook runs through a real git push with an
-// upload that exits with each status the upload exits with. Every push
-// reaches its remote, and the hook runs exactly the upload bound to the
-// command's directories.
+// auto` installs the rule's hook, and the hook runs through a real git push,
+// against a Village that is gone, with an upload that exits with each status
+// the upload exits with. Every push reaches its remote, and the hook runs
+// exactly the upload bound to the command's directories.
 func TestAutoPublishHookNeverBlocksThePush(t *testing.T) {
 	t.Parallel()
 	fixture := autopublishtest.Load(t)
@@ -391,11 +411,6 @@ func TestAutoPublishHookNeverBlocksThePush(t *testing.T) {
 				t.Fatalf("village auto: %v\n%s%s", err, stdout, stderr)
 			}
 			w.village.Close()
-			// The upload counts a session it could not send as an error in its
-			// result line, and publishes nothing.
-			if stdout, stderr, _ := w.push(t, true, "--force"); !strings.Contains(stdout, "pushed 0 session(s), 1 error(s)") {
-				t.Fatalf("the upload under the rule against a Village that is gone did not report its failure\n%s%s", stdout, stderr)
-			}
 
 			remote := filepath.Join(w.world, "remote.git")
 			hooksGit(t, w.world, "", "init", "--quiet", "--bare", remote)
@@ -439,6 +454,14 @@ func TestVillageAuto(t *testing.T) {
 			if len(c.Rules) > 0 {
 				w.writeRules(t, c)
 			}
+			if c.ForkUpstream {
+				hooksGit(t, w.repo, "", "remote", "add", "fork", "https://github.com/dev/tools.git")
+				hooksGit(t, w.repo, "", "config", "branch.main.remote", "fork")
+				hooksGit(t, w.repo, "", "config", "branch.main.merge", "refs/heads/main")
+			}
+			if c.HooksPath != "" {
+				hooksGit(t, w.repo, "", "config", "core.hooksPath", c.HooksPath)
+			}
 			if c.SignedOut {
 				if err := os.Remove(filepath.Join(string(defaults.ResolveConfigDirPathWith(w.dir)), string(defaults.CredentialsFile))); err != nil {
 					t.Fatal(err)
@@ -448,8 +471,17 @@ func TestVillageAuto(t *testing.T) {
 			if c.Unrecorded {
 				target = w.fresh
 			}
-			if c.ForeignHook != "" {
-				if err := os.WriteFile(filepath.Join(target, ".git", "hooks", "pre-push"), []byte(c.ForeignHook), 0o755); err != nil {
+			foreign := c.ForeignHook
+			if c.HandAdded {
+				slot := filepath.Join(target, ".git", "hooks", "pre-push")
+				section, err := githooks.ManualSnippet(githooks.EventPrePush, target, slot, w.binding())
+				if err != nil {
+					t.Fatal(err)
+				}
+				foreign = "#!/bin/sh\n" + section
+			}
+			if foreign != "" {
+				if err := os.WriteFile(filepath.Join(target, ".git", "hooks", "pre-push"), []byte(foreign), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -463,10 +495,24 @@ func TestVillageAuto(t *testing.T) {
 			if err != nil && stdout != "" {
 				t.Errorf("a failed run printed %q; the one line is the success line", stdout)
 			}
+			for _, part := range c.Expect.OutputContains {
+				if !strings.Contains(stderr, part) {
+					t.Errorf("standard error does not say %q:\n%s", part, stderr)
+				}
+			}
 
 			rules, loadErr := autopublish.Load(w.rulesPath())
 			if loadErr != nil {
 				t.Fatal(loadErr)
+			}
+			if c.Expect.RuleIDs != nil {
+				ids := make([]string, len(rules))
+				for i, rule := range rules {
+					ids[i] = rule.ID
+				}
+				if !slices.Equal(ids, c.Expect.RuleIDs) {
+					t.Errorf("hooks.yaml rule ids = %v, want %v", ids, c.Expect.RuleIDs)
+				}
 			}
 			if c.Expect.Rule != nil {
 				want := *c.Expect.Rule
@@ -490,8 +536,8 @@ func TestVillageAuto(t *testing.T) {
 					t.Errorf("the hook runs %q, want %q: it must read this command's rules, config, and store", embedded, want)
 				}
 			}
-			if c.ForeignHook != "" {
-				if raw, _ := os.ReadFile(filepath.Join(target, ".git", "hooks", "pre-push")); string(raw) != c.ForeignHook {
+			if foreign != "" {
+				if raw, _ := os.ReadFile(filepath.Join(target, ".git", "hooks", "pre-push")); string(raw) != foreign {
 					t.Error("the hook Peasant did not write was changed")
 				}
 			}

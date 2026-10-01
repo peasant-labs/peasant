@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -18,6 +19,15 @@ import (
 // reports and its remotes.
 type Repository struct {
 	Root string
+	// MainRoot is the main worktree's root when Root is a linked worktree of
+	// it, and "" otherwise. A folder rule that covers a repository covers its
+	// linked worktrees, wherever they are: they are the same repository and
+	// run its hooks.
+	MainRoot string
+	// Gone is the directory a session was recorded in when that directory no
+	// longer exists, so Git can name no root. A folder rule covers it when the
+	// glob names the directory or a folder above it.
+	Gone string
 	// Remote is the remote a repository-scoped push derives its identity
 	// from: the checkout's upstream remote, else origin, else "".
 	Remote string
@@ -38,18 +48,24 @@ type RepositoryGit interface {
 
 var _ RepositoryGit = (*ingest.ExecGitResolver)(nil)
 
-// Resolve reads the repository dir belongs to. A directory that no longer
-// exists names no repository: a parent it was inside is a different
-// repository, which Peasant has not recorded.
-func Resolve(ctx context.Context, git RepositoryGit, dir string) (Repository, error) {
-	root, err := resolveRoot(ctx, git, dir)
+// Resolve reads the repository dir belongs to, and its remotes when remotes
+// is set: only a remote rule reads them, and each read is a git process. A
+// directory that no longer exists names no repository: a parent it was inside
+// is a different repository, which Peasant has not recorded.
+func Resolve(ctx context.Context, git RepositoryGit, dir string, remotes bool) (Repository, error) {
+	root, err := ResolveRoot(ctx, git, dir)
 	if err != nil {
 		return Repository{}, err
 	}
-	return withRemotes(ctx, git, root), nil
+	repo := Repository{Root: root, MainRoot: mainRoot(root)}
+	if remotes {
+		repo.Remote, repo.Origin = readRemotes(ctx, git, root)
+	}
+	return repo, nil
 }
 
-func resolveRoot(ctx context.Context, git RepositoryGit, dir string) (string, error) {
+// ResolveRoot is the root Git reports for the existing directory dir.
+func ResolveRoot(ctx context.Context, git RepositoryGit, dir string) (string, error) {
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err
@@ -64,13 +80,36 @@ func resolveRoot(ctx context.Context, git RepositoryGit, dir string) (string, er
 	return root, nil
 }
 
-// withRemotes reads the remotes of the repository at root. A repository
+// readRemotes reads the remotes of the repository at root. A repository
 // without a remote is still one a folder rule can cover, so a failed read
 // leaves the remote empty.
-func withRemotes(ctx context.Context, git RepositoryGit, root string) Repository {
-	remote, _ := git.RemoteURL(ctx, root)
-	origin, _ := git.OriginRemoteURL(ctx, root)
-	return Repository{Root: root, Remote: remote, Origin: origin}
+func readRemotes(ctx context.Context, git RepositoryGit, root string) (remote, origin string) {
+	remote, _ = git.RemoteURL(ctx, root)
+	origin, _ = git.OriginRemoteURL(ctx, root)
+	return remote, origin
+}
+
+// mainRoot is the main worktree's root when root is a linked worktree, read
+// from the ".git" file Git writes there ("gitdir: <main>/.git/worktrees/<name>"),
+// and "" otherwise.
+func mainRoot(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, ".git"))
+	if err != nil {
+		return ""
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir:")
+	if !ok {
+		return ""
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(root, gitdir)
+	}
+	main, _, found := strings.Cut(filepath.ToSlash(filepath.Clean(gitdir)), "/.git/worktrees/")
+	if !found {
+		return ""
+	}
+	return filepath.FromSlash(main)
 }
 
 // RecordedDirectories lists every directory Peasant recorded a session in.
@@ -81,7 +120,8 @@ type RecordedDirectories interface {
 var _ RecordedDirectories = (*store.Store)(nil)
 
 // Recorded returns the repositories Peasant has recorded sessions in, each
-// once, by root. A recorded directory that is gone, or that is not inside a
+// once, by root. A linked worktree is listed as its main repository, whose
+// hooks it runs. A recorded directory that is gone, or that is not inside a
 // repository, names no repository. These are the only repositories a rule
 // installs a hook in.
 func Recorded(ctx context.Context, reader RecordedDirectories, git RepositoryGit) ([]Repository, error) {
@@ -95,13 +135,18 @@ func Recorded(ctx context.Context, reader RecordedDirectories, git RepositoryGit
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if root, err := resolveRoot(ctx, git, dir); err == nil {
+		if root, err := ResolveRoot(ctx, git, dir); err == nil {
+			if main := mainRoot(root); main != "" {
+				root = main
+			}
 			roots[root] = struct{}{}
 		}
 	}
 	repositories := make([]Repository, 0, len(roots))
 	for root := range roots {
-		repositories = append(repositories, withRemotes(ctx, git, root))
+		repo := Repository{Root: root}
+		repo.Remote, repo.Origin = readRemotes(ctx, git, root)
+		repositories = append(repositories, repo)
 	}
 	sort.Slice(repositories, func(i, j int) bool { return repositories[i].Root < repositories[j].Root })
 	return repositories, nil
@@ -182,18 +227,19 @@ func (h Hooks) States(ctx context.Context, rule Rule, recorded []Repository) ([]
 // covers, one per rule event. Events are independent: each reports its own
 // hook, and a hook Peasant does not manage is left as it is and carries the
 // remedy. A path that is not a recorded repository the rule covers installs
-// nothing and returns ErrNotCovered.
-func (h Hooks) Install(ctx context.Context, rule Rule, path string, recorded []Repository) (schema.AutoPublishRepository, error) {
+// nothing and returns ErrNotCovered. The githooks report is returned too, for
+// a caller that renders its warnings.
+func (h Hooks) Install(ctx context.Context, rule Rule, path string, recorded []Repository) (schema.AutoPublishRepository, githooks.ChangeReport, error) {
 	target, err := Target(rule, path, recorded)
 	if err != nil {
-		return schema.AutoPublishRepository{}, err
+		return schema.AutoPublishRepository{}, githooks.ChangeReport{}, err
 	}
 	events, err := rule.HookEvents()
 	if err != nil {
-		return schema.AutoPublishRepository{}, err
+		return schema.AutoPublishRepository{}, githooks.ChangeReport{}, err
 	}
 	if len(events) == 0 {
-		return schema.AutoPublishRepository{}, fmt.Errorf("rule %q names no hook event, so there is nothing to install; add pre-push or post-commit to the rule first", rule.ID)
+		return schema.AutoPublishRepository{}, githooks.ChangeReport{}, fmt.Errorf("rule %q names no hook event, so there is nothing to install; add pre-push or post-commit to the rule first", rule.ID)
 	}
 	report, err := h.Lifecycle.Install(ctx, githooks.Request{Dir: target.Root, Events: events, Binding: h.Binding})
 	if err != nil {
@@ -201,13 +247,13 @@ func (h Hooks) Install(ctx context.Context, rule Rule, path string, recorded []R
 		for _, event := range events {
 			hooks = append(hooks, schema.AutoPublishHook{Event: schema.AutoPublishEvent(event), Status: schema.AutoPublishHookFailed, Remedy: &schema.AutoPublishHookRemedy{Message: "Installing the hook failed before any file was written: " + err.Error()}})
 		}
-		return repositoryView(target, hooks), nil
+		return repositoryView(target, hooks), report, err
 	}
 	hooks := make([]schema.AutoPublishHook, 0, len(report.Results))
 	for _, result := range report.Results {
 		hooks = append(hooks, resultHook(result))
 	}
-	return repositoryView(target, hooks), nil
+	return repositoryView(target, hooks), report, nil
 }
 
 // planHook is one event's hook as it is now. A Peasant hook git would not run,

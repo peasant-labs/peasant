@@ -16,9 +16,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/filelock"
 )
 
-// FileName is the rules file in the Peasant config directory. It sits beside
-// config.yaml and the stored credential, so a hook bound to a config
-// directory reads the rules of that directory.
+// FileName is the rules file in the Peasant config directory, where the stored
+// credential is, so a hook bound to a config directory reads the rules of that
+// directory.
 const FileName = "hooks.yaml"
 
 // fileVersion is the only layout this version reads and writes.

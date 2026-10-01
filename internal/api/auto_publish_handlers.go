@@ -210,12 +210,12 @@ func (h *autoPublishHandler) handleInstall(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, http.StatusInternalServerError, "No hook was installed because the recorded repositories could not be listed: "+err.Error()+". Retry.", "")
 		return
 	}
-	repository, err := h.hooks().Install(r.Context(), rules[i], request.Path, recorded)
+	repository, _, err := h.hooks().Install(r.Context(), rules[i], request.Path, recorded)
 	if errors.Is(err, autopublish.ErrNotCovered) {
 		writeAPIError(w, http.StatusBadRequest, "No hook was installed: "+err.Error()+". Pick a repository from the rule's list.", autoPublishNotCoveredCode)
 		return
 	}
-	if err != nil {
+	if err != nil && repository.Path == "" {
 		writeAPIError(w, http.StatusBadRequest, "No hook was installed: "+err.Error()+".", autoPublishInvalidCode)
 		return
 	}

@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -108,7 +109,13 @@ func TestRecordedDirectoriesFallBackToTheProjectDirectory(t *testing.T) {
 	if err != nil || !slices.Equal(dirs, []string{"/testproj", worktree}) {
 		t.Fatalf("RecordedDirectories() = %v, %v; want the project directory once and the worktree", dirs, err)
 	}
-	byID, err := s.SessionDirectories(ctx, append(append([]string{}, withoutWorktree...), withWorktree, "30d59925-36bc-424c-a789-8be54d970299"))
+	// More identifiers than one batch reads, so the session in the second
+	// batch is found too.
+	ids := append([]string{}, withoutWorktree...)
+	for i := 0; i < 300; i++ {
+		ids = append(ids, fmt.Sprintf("40d59925-36bc-424c-a789-%012d", i))
+	}
+	byID, err := s.SessionDirectories(ctx, append(ids, withWorktree))
 	if err != nil {
 		t.Fatal(err)
 	}
