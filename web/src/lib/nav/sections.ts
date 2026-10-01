@@ -52,8 +52,10 @@ const ROUTES: Record<LocalSectionId, SectionRoute | null> = {
     href: '/',
     title: 'Your projects and the sessions recorded in them.',
   },
-  // The local settings page has not shipped; the header gains its link when it does.
-  settings: null,
+  settings: {
+    href: '/settings',
+    title: 'Manage recording, redaction, Village sign-in, and automatic publishing.',
+  },
   analytics: {
     href: '/analytics',
     title: 'Read project-level session volume, outcomes, duration, and contributor signals.',

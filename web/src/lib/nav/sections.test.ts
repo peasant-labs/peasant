@@ -39,17 +39,16 @@ afterEach(() => {
 describe('local app sections', () => {
   it('follow the fairtrade registry: order, labels and nav membership', () => {
     const registry = LOCAL_APP_SECTIONS.map(({ id, label, inNav }) => ({ id, label, inNav: inNav !== false }));
-    // Settings is the one registry section this app has no page for yet.
     expect(LOCAL_SECTIONS.map(({ id, label, inNav }) => ({ id, label, inNav }))).toEqual(
-      registry.filter((section) => section.id !== 'settings'),
+      registry,
     );
   });
 
-  it('link the header only to home until the settings page ships', () => {
-    expect(NAV_SECTIONS.map((section) => [section.id, section.href])).toEqual([['home', '/']]);
-    expect(visibleNavSections(new Set(['code_map_navigation_v1'])).map((section) => section.id)).toEqual(['home']);
-    // Home is the brand link, so the header carries no section link beside it yet.
-    expect(headerNavSections(new Set(['code_map_navigation_v1']))).toEqual([]);
+  it('link the header to the shipped home and settings pages', () => {
+    expect(NAV_SECTIONS.map((section) => [section.id, section.href])).toEqual([['home', '/'], ['settings', '/settings']]);
+    expect(visibleNavSections(new Set(['code_map_navigation_v1'])).map((section) => section.id)).toEqual(['home', 'settings']);
+    // Home is the brand link; settings is the other canonical nav section.
+    expect(headerNavSections(new Set(['code_map_navigation_v1'])).map((section) => section.id)).toEqual(['settings']);
   });
 
   it('keep analytics, changes and the code map on their routes, by URL only', () => {
