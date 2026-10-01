@@ -1,9 +1,13 @@
 # The receipts `peasant village auto` reads the last publication from, and
 # what each account on each Village reads. A receipt answers for its own
 # account on its own Village only, and "last" is the one Village updated last.
+# The account's last receipt is neither the first nor the last inserted and
+# neither the lowest nor the highest session ID, so neither insertion order
+# nor session order can stand in for the update time.
 receipts:
-  - {name: older-of-the-account, origin: "https://api.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970202, transcript: 20d59925-36bc-424c-a789-8be54d970202, updatedAt: 5}
-  - {name: last-of-the-account, origin: "https://api.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970201, transcript: 20d59925-36bc-424c-a789-8be54d970201, updatedAt: 9}
+  - {name: older-of-the-account, origin: "https://api.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970201, transcript: 20d59925-36bc-424c-a789-8be54d970201, updatedAt: 5}
+  - {name: last-of-the-account, origin: "https://api.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970202, transcript: 20d59925-36bc-424c-a789-8be54d970202, updatedAt: 9}
+  - {name: middle-of-the-account, origin: "https://api.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970205, transcript: 20d59925-36bc-424c-a789-8be54d970205, updatedAt: 7}
   - {name: another-account, origin: "https://api.village.example", owner: owner-2, session: 10d59925-36bc-424c-a789-8be54d970203, transcript: 20d59925-36bc-424c-a789-8be54d970203, updatedAt: 20}
   - {name: another-village, origin: "https://other.village.example", owner: owner-1, session: 10d59925-36bc-424c-a789-8be54d970204, transcript: 20d59925-36bc-424c-a789-8be54d970204, updatedAt: 30}
 requiredNames:

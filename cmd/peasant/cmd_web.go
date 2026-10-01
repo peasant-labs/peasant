@@ -212,7 +212,7 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		outputDir = filepath.Join(dataDir, "peasant-sync")
 	}
 
-	srv := api.NewServer(api.ServerConfig{
+	srv := api.NewServer(withCommandDirectories(cmd, api.ServerConfig{
 		Port:         port,
 		Provider:     provider,
 		Hub:          hub,
@@ -224,16 +224,20 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		Store:        analyticsStore,
 		Config:       cfg,
 		OutputDir:    outputDir,
-		// The directory overrides this command runs with, so the settings
-		// routes read this config directory's rules, and a hook the server
-		// installs runs against this configuration and store.
-		ConfigHome:  configDirOverride(cmd),
-		DataHome:    dataDirOverride(cmd),
-		StateHome:   stateDirOverride(cmd),
-		HookBinding: hookBinding(cmd),
-	})
+	}))
 
 	return srv.ListenAndServe(ctx)
+}
+
+// withCommandDirectories gives the server the directory overrides cmd runs
+// with, so the settings routes read this config directory's rules, and a hook
+// the server installs runs against this configuration and store.
+func withCommandDirectories(cmd *cobra.Command, cfg api.ServerConfig) api.ServerConfig {
+	cfg.ConfigHome = configDirOverride(cmd)
+	cfg.DataHome = dataDirOverride(cmd)
+	cfg.StateHome = stateDirOverride(cmd)
+	cfg.HookBinding = hookBinding(cmd)
+	return cfg
 }
 
 // webServerSpawn is everything the detached `web start --foreground` child

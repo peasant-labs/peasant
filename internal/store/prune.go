@@ -25,7 +25,7 @@ const (
     s.session_id, s.model_harness,
     COALESCE(p.canonical_cwd, p.project_hash, ''), COALESCE(h.git_remote, ''),
     s.start_ms, COALESCE(m.turn_count, 0), h.host_slug,
-    s.project_hash, COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, ''),
+    s.project_hash, ` + sqlRecordedDirectory + `,
     COALESCE(s.git_branch, '')
 FROM sessions s
 LEFT JOIN session_metrics m ON s.session_id = m.session_id

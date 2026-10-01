@@ -172,6 +172,28 @@ func (c *VillageClient) LatestShareStatus(ctx context.Context, id schema.Transcr
 	return latest.Status, nil
 }
 
+// TranscriptVisibility returns who can read one owned transcript on Village
+// now, from the transcript read (GET /api/v1/transcripts/{id}). A value
+// outside the closed set is refused, so a caller never acts on access it
+// cannot name.
+func (c *VillageClient) TranscriptVisibility(ctx context.Context, id schema.TranscriptID) (schema.VillageTranscriptVisibility, error) {
+	var response struct {
+		Transcript struct {
+			Visibility schema.VillageTranscriptVisibility `json:"visibility"`
+		} `json:"transcript"`
+	}
+	operation := "read who can read transcript " + id.String()
+	if err := c.readCollectiveJSON(ctx, operation, transcriptPath(id), &response); err != nil {
+		return "", err
+	}
+	switch visibility := response.Transcript.Visibility; visibility {
+	case schema.VillageTranscriptVisibilityPrivate, schema.VillageTranscriptVisibilityShared, schema.VillageTranscriptVisibilityPublic:
+		return visibility, nil
+	default:
+		return "", fmt.Errorf("%s: Village returned visibility %q, which is outside the closed set, so the access cannot be reported; update Peasant or check the Village version", operation, visibility)
+	}
+}
+
 // ShareTranscript offers one owned transcript to one collective
 // (POST /api/v1/transcripts/{id}/share). A 2xx answer means Village took the
 // request; it does not say whether the collective accepted the share, holds it

@@ -12,7 +12,8 @@ import (
 
 // sqlRecordedDirectory is the directory a session was recorded in: its git
 // worktree when ingest captured one, else its project's canonical working
-// directory. Every read below derives it the same way.
+// directory. Every read of it uses this one expression, over sessions s and
+// projects p, so the push, prune, and the auto-publish rules agree on it.
 const sqlRecordedDirectory = `COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, '')`
 
 // RecordedDirectories returns every directory a stored session was recorded in,

@@ -36,9 +36,10 @@ collectives that can read, or wait to read, the transcript this computer
 published last for your account. It saves an auto-publish rule for this
 repository in hooks.yaml in the config directory: a rule for its origin remote,
 or for exactly its folder when it has none. Then it installs the rule's hooks,
-the managed pre-push hook at first, in this repository. Peasant installs a hook
-only in a repository it has recorded sessions in, so run it in a repository
-you have opened a session of.
+the managed pre-push hook at first, in this repository. In a linked worktree,
+the rule and the hook are its main repository's, which covers every worktree.
+Peasant installs a hook only in a repository it has recorded sessions in, so
+run it in a repository you have opened a session of.
 
 From then on, every git push runs the upload for this repository. Its
 sessions are published redacted and private, with no license, and each
@@ -85,9 +86,14 @@ func runVillageAuto(cmd *cobra.Command, dir string) error {
 		return fmt.Errorf("village auto: this computer is not signed in to the village, so the collectives you published to last cannot be read; nothing was changed; run 'peasant village login', then retry")
 	}
 	git := &ingest.ExecGitResolver{}
-	repo, err := autopublish.Resolve(ctx, git, dir)
+	repo, err := autopublish.Resolve(ctx, git, dir, true)
 	if err != nil {
 		return fmt.Errorf("village auto: %w; nothing was changed; run it inside the repository, or pass --dir", err)
+	}
+	// A linked worktree runs its main repository's hooks, so the rule and the
+	// hook are the main repository's; the rule covers every worktree of it.
+	if repo.MainRoot != "" {
+		repo.Root, repo.MainRoot = repo.MainRoot, ""
 	}
 	db, cleanup, err := openDB(cmd)
 	if err != nil {
@@ -128,26 +134,17 @@ func runVillageAuto(cmd *cobra.Command, dir string) error {
 		return fmt.Errorf("village auto: %w", err)
 	}
 
-	if _, err := autopublish.Target(rule, repo.Root, recorded); err != nil {
-		return fmt.Errorf("village auto: the rule is saved in %s, but %w", rulesPath, err)
-	}
-	events, err := rule.HookEvents()
+	hooks := autopublish.Hooks{Lifecycle: githooks.New(githooks.NewExecGit()), Binding: hookBinding(cmd)}
+	_, report, err := hooks.Install(ctx, rule, repo.Root, recorded)
 	if err != nil {
-		return fmt.Errorf("village auto: the rule is saved in %s, but %w", rulesPath, err)
+		return fmt.Errorf("village auto: the rule is saved in %s, but its hooks were not installed: %w", rulesPath, err)
 	}
-	report, err := githooks.New(githooks.NewExecGit()).Install(ctx, githooks.Request{Dir: repo.Root, Events: events, Binding: hookBinding(cmd)})
-	if err != nil {
-		return fmt.Errorf("village auto: the rule is saved in %s, but its hooks could not be installed: %w", rulesPath, err)
-	}
-	var written, blocked []githooks.Event
+	var blocked []githooks.Event
 	for _, result := range report.Results {
-		switch {
-		case result.Outcome == githooks.OutcomeCreated || result.Outcome == githooks.OutcomeReplaced:
-			written = append(written, result.Event)
-			renderHookWarnings(cmd.ErrOrStderr(), result.Warnings)
-		case result.UploadsFromForeignFile():
-			// A section added by hand already uploads from this slot.
-		default:
+		written := result.Outcome == githooks.OutcomeCreated || result.Outcome == githooks.OutcomeReplaced
+		// A section added by hand to a hook Peasant does not manage already
+		// uploads from that slot.
+		if !written && !result.UploadsFromForeignFile() {
 			blocked = append(blocked, result.Event)
 		}
 	}
@@ -155,7 +152,10 @@ func runVillageAuto(cmd *cobra.Command, dir string) error {
 		renderChangeReport(cmd.ErrOrStderr(), report)
 		return fmt.Errorf("village auto: the rule is saved, but the %s hook was not installed in %s, so that event does not publish yet; follow the guidance printed above", joinEvents(blocked), repo.Root)
 	}
-	renderPeasantPathNotice(cmd, written)
+	for _, result := range report.Results {
+		renderHookWarnings(cmd.ErrOrStderr(), result.Warnings)
+	}
+	renderInstallEnvironmentNotices(cmd, report)
 
 	decision := autopublish.Decide(rules, repo)
 	fmt.Fprintf(cmd.OutOrStdout(), "peasant: this repo now publishes automatically on %s, to %s · change it in settings\n",

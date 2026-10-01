@@ -344,7 +344,7 @@ func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Con
 	if err = s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
 		return bundle, err
 	}
-	if err = sqlitex.ExecuteTransient(conn, `SELECT COALESCE(NULLIF(s.git_worktree,''),p.canonical_cwd,'') FROM sessions s JOIN projects p ON p.project_hash=s.project_hash WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { bundle.ProjectPath = stmt.ColumnText(0); return nil }}); err != nil {
+	if err = sqlitex.ExecuteTransient(conn, `SELECT `+sqlRecordedDirectory+` FROM sessions s JOIN projects p ON p.project_hash=s.project_hash WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { bundle.ProjectPath = stmt.ColumnText(0); return nil }}); err != nil {
 		return bundle, err
 	}
 	bundle.Entries, bundle.ContentCapture, err = loadFullSessionEntriesOnConn(ctx, conn, id, 0)

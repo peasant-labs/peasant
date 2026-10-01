@@ -329,18 +329,23 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 		t.Fatalf("autoPublish before any install = %v", got)
 	}
 
-	// Replacing a rule keeps one rule; removing another leaves it as it was.
+	// Replacing a rule keeps one rule; removing the middle one of three leaves
+	// the others as they were.
 	rule.Collectives = []schema.VillageUUID{research}
 	world.save(t, "work", rule)
 	other := schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleRemote, Match: "github.com/acme/*", Events: []schema.AutoPublishEvent{}, Collectives: []schema.VillageUUID{platform}}
 	world.save(t, "other", other)
+	late := schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.dir + "/second", Events: []schema.AutoPublishEvent{schema.AutoPublishPostCommit}, Collectives: []schema.VillageUUID{research}}
+	world.save(t, "late", late)
 	var removedOther schema.AutoPublishRemovalResponse
 	status, body := world.request(t, http.MethodDelete, ruleRoute("other"), nil)
 	decodeContract(t, status, body, &removedOther)
 	rules, err := autopublish.Load(world.rulesPath())
-	if err != nil || len(rules) != 1 || rules[0].ID != "work" || !slices.Equal(rules[0].Collectives, []schema.VillageUUID{research}) || rules[0].Match != rule.Match {
-		t.Fatalf("hooks.yaml = %+v, %v; want the replaced rule alone", rules, err)
+	if err != nil || len(rules) != 2 || rules[0].ID != "work" || !slices.Equal(rules[0].Collectives, []schema.VillageUUID{research}) || rules[0].Match != rule.Match || rules[1].ID != "late" || rules[1].Match != late.Match {
+		t.Fatalf("hooks.yaml = %+v, %v; want the replaced rule and the late one", rules, err)
 	}
+	status, body = world.request(t, http.MethodDelete, ruleRoute("late"), nil)
+	decodeContract(t, status, body, &removedOther)
 
 	var installed schema.AutoPublishRepository
 	status, body = world.request(t, http.MethodPost, installRoute("work"), schema.AutoPublishInstallRequest{Path: world.recorded})
@@ -368,6 +373,38 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 	}
 	if err := os.Chmod(hookPath, 0o755); err != nil {
 		t.Fatal(err)
+	}
+
+	// A hook that names a repository that has moved fails on every event, so
+	// it publishes nothing either.
+	written, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := strings.Replace(string(written), "peasant_hook_repository="+githooks.ShellQuote(world.recorded), "peasant_hook_repository="+githooks.ShellQuote(world.dir+"/moved"), 1)
+	if moved == string(written) || !githooks.IsManaged([]byte(moved)) {
+		t.Fatal("the hook could not be pointed at a moved repository")
+	}
+	if err := os.WriteFile(hookPath, []byte(moved), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := autoPublish(); got[recordedInsideSessionID] {
+		t.Fatalf("autoPublish with a hook for a moved repository = %v", got)
+	}
+	if err := os.WriteFile(hookPath, written, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A paused rule over the repository makes a hook push publish nothing.
+	paused := rule
+	paused.Events = []schema.AutoPublishEvent{}
+	world.save(t, "work", paused)
+	if got := autoPublish(); got[recordedInsideSessionID] {
+		t.Fatalf("autoPublish under a paused rule = %v", got)
+	}
+	world.save(t, "work", rule)
+	if got := autoPublish(); !got[recordedInsideSessionID] {
+		t.Fatalf("autoPublish after the rule is resumed = %v", got)
 	}
 
 	var removed schema.AutoPublishRemovalResponse

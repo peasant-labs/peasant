@@ -80,7 +80,15 @@ func RuleFromRequest(id string, request schema.AutoPublishRuleRequest) Rule {
 func (r Rule) Covers(repo Repository) bool {
 	switch r.Kind {
 	case schema.AutoPublishRuleFolder:
-		return folderMatches(r.Match, repo.Root)
+		if folderMatches(r.Match, repo.Root) || (repo.MainRoot != "" && folderMatches(r.Match, repo.MainRoot)) {
+			return true
+		}
+		for dir := repo.Gone; dir != "" && dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+			if folderMatches(r.Match, dir) {
+				return true
+			}
+		}
+		return false
 	case schema.AutoPublishRuleRemote:
 		return remoteMatches(r.Match, repo.Remote) || remoteMatches(r.Match, repo.Origin)
 	default:

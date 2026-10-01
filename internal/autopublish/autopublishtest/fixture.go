@@ -58,9 +58,9 @@ var fieldsOf = map[Driver][]string{
 	DriverValidate:    {"rules", "rulesFile", "invalid"},
 	DriverInstall:     {"rules", "install", "foreignHook", "remoteRecorded", "status", "code", "hooks", "remedyContains", "snippetContains", "label", "installed"},
 	DriverRuleBody:    {"method", "body", "status", "code"},
-	DriverPush:        {"rules", "rulesFile", "config", "flags", "unscoped", "noRemote", "cloneSession", "before", "publicBefore", "failShare", "villageDecides", "again", "errorContains", "outputContains", "publishes", "license", "audience", "cloneAudience", "ownerUpdates", "attemptContains"},
-	DriverHook:        {"rules", "uploadExits"},
-	DriverVillageAuto: {"rules", "foreignHook", "publications", "unrecorded", "signedOut", "errorContains", "output", "rule", "installed", "binding"},
+	DriverPush:        {"rules", "rulesFile", "config", "flags", "unscoped", "noRemote", "sessions", "before", "villagePublic", "failShare", "stallShare", "villageDecides", "privateBeforeAgain", "again", "errorContains", "outputContains", "publishes", "license", "audience", "others", "ownerUpdates", "attemptContains"},
+	DriverHook:        {"uploadExits"},
+	DriverVillageAuto: {"rules", "foreignHook", "handAdded", "forkUpstream", "hooksPath", "publications", "unrecorded", "signedOut", "errorContains", "outputContains", "output", "rule", "ruleIds", "installed", "binding"},
 }
 
 // Collective is one collective the Village double knows, by alias.
@@ -120,25 +120,37 @@ type Case struct {
 	// Flags are extra flags of the push; Unscoped drops --repository.
 	Flags    []string `yaml:"flags"`
 	Unscoped bool     `yaml:"unscoped"`
-	// NoRemote gives the world's repositories no remote. CloneSession records
-	// a second session in another clone of the same remote.
-	NoRemote     bool `yaml:"noRemote"`
-	CloneSession bool `yaml:"cloneSession"`
+	// NoRemote gives the world's repositories no remote. Sessions records one
+	// more session each: "clone" in another clone of the same remote, "gone"
+	// in a clone removed after the session was recorded, and "linked" in a
+	// linked worktree inside the repository.
+	NoRemote bool     `yaml:"noRemote"`
+	Sessions []string `yaml:"sessions"`
 	// Before publishes the sessions once, with no rule, before the case's
-	// rules are written; PublicBefore then records the transcript as public.
-	Before       bool `yaml:"before"`
-	PublicBefore bool `yaml:"publicBefore"`
-	// FailShare names collectives the Village double refuses to share with.
-	FailShare []string `yaml:"failShare"`
+	// rules are written; VillagePublic then makes the transcript public on
+	// Village, as its owner could.
+	Before        bool `yaml:"before"`
+	VillagePublic bool `yaml:"villagePublic"`
+	// FailShare names collectives the Village double refuses to share with;
+	// StallShare makes every share answer only after the push's budget.
+	FailShare  []string `yaml:"failShare"`
+	StallShare bool     `yaml:"stallShare"`
 	// VillageDecides sets shares on Village after the push, as a collective
-	// owner or the developer would; Again then pushes once more with these
-	// flags.
-	VillageDecides map[string]schema.VillageShareStatus `yaml:"villageDecides"`
-	Again          []string                             `yaml:"again"`
+	// owner or the developer would, and PrivateBeforeAgain makes the
+	// transcript private there; Again then pushes once more with these flags.
+	VillageDecides     map[string]schema.VillageShareStatus `yaml:"villageDecides"`
+	PrivateBeforeAgain bool                                 `yaml:"privateBeforeAgain"`
+	Again              []string                             `yaml:"again"`
 	// UploadExits are the exit statuses of the failing uploads the hook runs.
 	UploadExits []int `yaml:"uploadExits"`
 	// Publications are published in order before the command runs.
 	Publications []Publication `yaml:"publications"`
+	// HandAdded makes the foreign hook carry the by-hand upload section;
+	// ForkUpstream makes the checked-out branch track a fork; HooksPath sets
+	// core.hooksPath in the repository.
+	HandAdded    bool   `yaml:"handAdded"`
+	ForkUpstream bool   `yaml:"forkUpstream"`
+	HooksPath    string `yaml:"hooksPath"`
 	// Unrecorded runs the command in a repository with no recorded session;
 	// SignedOut runs it with no stored credential.
 	Unrecorded bool   `yaml:"unrecorded"`
@@ -174,16 +186,16 @@ type Expect struct {
 	ErrorContains  []string `yaml:"errorContains"`
 	OutputContains []string `yaml:"outputContains"`
 	// Publishes counts the uploads Village received; License is the license
-	// every upload carried; Audience and CloneAudience the collectives of the
-	// recorded and the clone session's transcripts afterwards, by alias;
-	// OwnerUpdates the owner visibility updates; AttemptContains part of the
-	// session's latest failed attempt.
-	Publishes       *int                                 `yaml:"publishes"`
-	License         schema.License                       `yaml:"license"`
-	Audience        map[string]schema.VillageShareStatus `yaml:"audience"`
-	CloneAudience   map[string]schema.VillageShareStatus `yaml:"cloneAudience"`
-	OwnerUpdates    int                                  `yaml:"ownerUpdates"`
-	AttemptContains string                               `yaml:"attemptContains"`
+	// every upload after Before carried; Audience the collectives of the
+	// recorded session's transcript afterwards, and Others those of each
+	// extra session's, by alias; OwnerUpdates the owner visibility updates;
+	// AttemptContains part of the session's latest failed attempt.
+	Publishes       *int                                            `yaml:"publishes"`
+	License         schema.License                                  `yaml:"license"`
+	Audience        map[string]schema.VillageShareStatus            `yaml:"audience"`
+	Others          map[string]map[string]schema.VillageShareStatus `yaml:"others"`
+	OwnerUpdates    int                                             `yaml:"ownerUpdates"`
+	AttemptContains string                                          `yaml:"attemptContains"`
 	// Output is the exact standard output.
 	Output string `yaml:"output"`
 	// Rule is the one rule hooks.yaml holds afterwards; "{remote}" in its
@@ -194,6 +206,8 @@ type Expect struct {
 		Events      []schema.AutoPublishEvent  `yaml:"events"`
 		Collectives []string                   `yaml:"collectives"`
 	} `yaml:"rule"`
+	// RuleIDs are the identifiers hooks.yaml holds afterwards, in order.
+	RuleIDs []string `yaml:"ruleIds"`
 	// Binding says the installed hook binds the command's config, data, and
 	// state directories.
 	Binding bool `yaml:"binding"`
@@ -226,8 +240,22 @@ func Load(t *testing.T) Fixture {
 				c.Rules[j].Collectives[k] = fixture.collective(t, c.Name, string(alias)).ID
 			}
 		}
+		if (len(c.VillageDecides) > 0 || c.PrivateBeforeAgain) && c.Again == nil {
+			t.Fatalf("%s: case %q changes Village between pushes but names no second push (again)", Path, c.Name)
+		}
+		if c.VillagePublic && !c.Before {
+			t.Fatalf("%s: case %q makes a transcript public but publishes none before (before)", Path, c.Name)
+		}
+		for _, session := range c.Sessions {
+			if !slices.Contains([]string{"clone", "gone", "linked"}, session) {
+				t.Fatalf("%s: case %q names session %q; use clone, gone, or linked", Path, c.Name, session)
+			}
+		}
 		aliases := append(append(mapKeys(c.VillageDecides), mapKeys(c.Expect.Audience)...), c.FailShare...)
-		aliases = append(append(aliases, mapKeys(c.Expect.CloneAudience)...), c.Expect.Collectives...)
+		for _, audience := range c.Expect.Others {
+			aliases = append(aliases, mapKeys(audience)...)
+		}
+		aliases = append(aliases, c.Expect.Collectives...)
 		for _, publication := range c.Publications {
 			aliases = append(aliases, mapKeys(publication.Shared)...)
 		}

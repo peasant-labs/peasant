@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -441,19 +442,16 @@ func BuildPushCommand() *cobra.Command {
 				// no license, and shares each transcript it sends with its rule's
 				// collectives. The sessions this push would send are matched
 				// here, after every narrowing, so the rules see what is sent.
-				autoPublish, planErr := planAutoPublish(ctx, cmd, db, cfg, runCfg, run, creds)
+				autoPublish, planErr := planAutoPublish(ctx, cmd, db, cfg, runCfg, creds)
 				if planErr != nil {
 					return planErr
 				}
+				runCfg.PinnedSessionIDs = autoPublish.pinned
 				if autoPublish.bound() {
 					if flagErr := refuseAudienceFlagsUnderRules(cmd, autoPublish); flagErr != nil {
 						return flagErr
 					}
 					cfg, runCfg = push.CollectiveAudience(cfg, runCfg)
-					runCfg.HeldSessionIDs = make(map[string]bool, len(autoPublish.held))
-					for id := range autoPublish.held {
-						runCfg.HeldSessionIDs[id] = true
-					}
 					reportAutoPublishPlan(cmd.ErrOrStderr(), level == outputQuiet, autoPublish)
 				}
 
@@ -489,6 +487,9 @@ func BuildPushCommand() *cobra.Command {
 						// same shared helpers, so the record describes what will be
 						// published rather than everything that might have been.
 						reportSessions = filterToSelectedSessions(reportSessions, runCfg.FilterSessionIDs)
+						if runCfg.PinnedSessionIDs != nil {
+							reportSessions = slices.DeleteFunc(reportSessions, func(row ingest.PushSessionRow) bool { return !runCfg.PinnedSessionIDs[row.SessionID] })
+						}
 						reportSessions, _ = push.ApplySelection(reportSessions, runCfg.Selection)
 						reportSessions = push.ApplyRepositoryScope(reportSessions, runCfg.Repository)
 						// Nothing to publish is not a publication to keep a record
@@ -755,7 +756,13 @@ func BuildPushCommand() *cobra.Command {
 						return printPushJSON(cmd.OutOrStdout(), result, annSummary, annErr)
 					}
 					// EmptyReason is the final result line — kept even under --quiet.
-					fmt.Fprintln(cmd.OutOrStdout(), result.EmptyReason)
+					// When the rules held every session, the reasons were printed
+					// and --force would not change them, so the line says so.
+					if len(autoPublish.held) > 0 && len(autoPublish.pinned) == 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "auto-publish: nothing was published; the auto-publish rules held %d session(s) for the reasons printed above\n", len(autoPublish.held))
+					} else {
+						fmt.Fprintln(cmd.OutOrStdout(), result.EmptyReason)
+					}
 					if level != outputQuiet && (annSummary != nil || annErr != nil) {
 						printAnnotationSummary(cmd.OutOrStdout(), annSummary, annErr, dryRun)
 					} else if level == outputQuiet {

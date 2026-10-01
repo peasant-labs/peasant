@@ -1,7 +1,9 @@
 package autopublish_test
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/autopublish/autopublishtest"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -188,4 +191,74 @@ func TestEveryDriverHasOneTest(t *testing.T) {
 
 func sameList[T comparable](got, want []T) bool {
 	return len(got) == len(want) && (len(got) == 0 || slices.Equal(got, want))
+}
+
+// recordedDirectories is a store that recorded sessions in dirs.
+type recordedDirectories []string
+
+func (d recordedDirectories) RecordedDirectories(context.Context) ([]string, error) { return d, nil }
+
+// TestRecordedRepositoriesAreTheOnesThatExist pins where a rule may install:
+// a recorded directory names the repository Git reports for it, a linked
+// worktree names its main repository, and a directory that is gone names
+// none, not even the repository that held it.
+func TestRecordedRepositoriesAreTheOnesThatExist(t *testing.T) {
+	t.Parallel()
+	world, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, other := filepath.Join(world, "tools"), filepath.Join(world, "notes")
+	for _, dir := range []string{filepath.Join(repo, "services"), other} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, repo, "init", "--quiet", "--initial-branch=main")
+	git(t, repo, "-c", "user.name=dev", "-c", "user.email=dev@example.test", "commit", "--quiet", "--allow-empty", "-m", "start")
+	git(t, repo, "worktree", "add", "--quiet", "-b", "feat", filepath.Join(repo, "feat"))
+	recorded, err := autopublish.Recorded(t.Context(), recordedDirectories{
+		filepath.Join(repo, "services"), filepath.Join(repo, "feat"), filepath.Join(repo, "gone"), other,
+	}, &ingest.ExecGitResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recorded) != 1 || recorded[0].Root != repo {
+		t.Fatalf("Recorded() = %+v; want only %s, once", recorded, repo)
+	}
+	linked, err := autopublish.Resolve(t.Context(), &ingest.ExecGitResolver{}, filepath.Join(repo, "feat"), false)
+	if err != nil || linked.MainRoot != repo {
+		t.Fatalf("the linked worktree resolves to %+v, %v; want its main repository %s", linked, err, repo)
+	}
+	if _, err := autopublish.Resolve(t.Context(), &ingest.ExecGitResolver{}, filepath.Join(repo, "gone"), false); err == nil {
+		t.Fatal("a directory that is gone resolved to a repository")
+	}
+}
+
+// TestFolderGlobNamesAFolderThroughASymlink pins that a glob written through
+// a symlinked folder covers a repository Git reports by its real path.
+func TestFolderGlobNamesAFolderThroughASymlink(t *testing.T) {
+	t.Parallel()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	real, link := filepath.Join(base, "real"), filepath.Join(base, "link")
+	if err := os.MkdirAll(filepath.Join(real, "work", "tools"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	rule := autopublish.Rule{ID: "work", Kind: schema.AutoPublishRuleFolder, Match: link + "/work/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{}}
+	if !rule.Covers(autopublish.Repository{Root: filepath.Join(real, "work", "tools")}) {
+		t.Fatalf("%q does not cover the repository it names through the symlink", rule.Match)
+	}
+}
+
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
 }

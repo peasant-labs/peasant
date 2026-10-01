@@ -127,7 +127,7 @@ func (s SharePublish) Run(ctx context.Context, sessionIDs []string, changes Coll
 	if runErr != nil && pushed == nil {
 		return SharePublishResult{}, runErr
 	}
-	contents, rows, err := s.contentOutcomes(ctx, sessionIDs, pushed, runErr)
+	contents, rows, err := contentOutcomes(ctx, s.Store, s.Creds, sessionIDs, pushed, runErr)
 	if err != nil {
 		return SharePublishResult{Pushed: pushed}, err
 	}
@@ -135,7 +135,7 @@ func (s SharePublish) Run(ctx context.Context, sessionIDs []string, changes Coll
 
 	response := schema.SyncPushResponse{Sessions: make([]schema.SyncPushSessionResult, 0, len(sessionIDs))}
 	for _, id := range sessionIDs {
-		result := runSessionSteps(ctx, s.Village, contents[id], changes)
+		result := runSessionSteps(ctx, s.Village, contents[id], changes, "Publish again to retry.")
 		if row, ok := rows[id]; ok && row.CanonicalRemote != nil {
 			result.WaitingPullRequests = village.WaitingPromptRequestsFor(requests, village.GitHubRepositoryFullName(*row.CanonicalRemote))
 		}
@@ -203,7 +203,12 @@ func (s RuleShare) Run(ctx context.Context, pushed *PushResult, collectives map[
 	if len(sent) == 0 {
 		return nil, nil
 	}
-	contents, _, err := SharePublish{Store: s.Store, Creds: s.Creds}.contentOutcomes(ctx, sent, pushed, nil)
+	// The local reads run on a context of their own: the upload budget may be
+	// spent, and a sent transcript that cannot be read back is never shared
+	// or recorded.
+	readCtx, cancelRead := persistenceContext(ctx)
+	defer cancelRead()
+	contents, _, err := contentOutcomes(readCtx, s.Store, s.Creds, sent, pushed, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -216,18 +221,16 @@ func (s RuleShare) Run(ctx context.Context, pushed *PushResult, collectives map[
 			if err != nil {
 				result := schema.SyncPushSessionResult{SessionID: id, Status: schema.SyncPushSessionError, Title: outcome.title, TranscriptURL: outcome.transcript.Receipt.TranscriptURL,
 					Error: "the content was published, but reading who can read the transcript failed, so it was not shared again: " + err.Error()}
+				result.Error += "; retry with: " + s.Retry
 				result.Steps = []schema.SyncPushStepResult{*outcome.content}
 				results = append(results, s.recorded(ctx, outcome, result))
 				continue
 			}
 		}
-		result := runSessionSteps(ctx, s.Village, outcome, CollectiveChanges{Add: add})
+		// The next push does not send an unchanged session again, so it does
+		// not retry the share either: the reason names the command that does.
+		result := runSessionSteps(ctx, s.Village, outcome, CollectiveChanges{Add: add}, "Retry with: "+s.Retry)
 		result.Steps = append(result.Steps, decided...)
-		if result.Status == schema.SyncPushSessionError {
-			// The next push does not send an unchanged session again, so it
-			// does not retry the share either: name the command that does.
-			result.Error = strings.TrimSuffix(result.Error, " Publish again to retry.")
-		}
 		results = append(results, s.recorded(ctx, outcome, result))
 	}
 	return results, nil
@@ -270,9 +273,6 @@ func (s RuleShare) recorded(ctx context.Context, outcome contentOutcome, result 
 	if result.Status != schema.SyncPushSessionError || outcome.transcript == nil {
 		return result
 	}
-	if s.Retry != "" {
-		result.Error += " Retry with: " + s.Retry
-	}
 	diagnosticCtx, cancel := persistenceContext(ctx)
 	defer cancel()
 	_ = s.Store.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{
@@ -299,12 +299,12 @@ type contentOutcome struct {
 	runStopped bool
 }
 
-func (s SharePublish) contentOutcomes(ctx context.Context, sessionIDs []string, pushed *PushResult, runErr error) (map[string]contentOutcome, map[string]store.SessionRow, error) {
+func contentOutcomes(ctx context.Context, sessions SharePublishStore, creds *auth.Credentials, sessionIDs []string, pushed *PushResult, runErr error) (map[string]contentOutcome, map[string]store.SessionRow, error) {
 	results := make(map[string]SessionPushResult, len(pushed.Sessions))
 	for _, result := range pushed.Sessions {
 		results[result.SessionID] = result
 	}
-	storedRows, err := s.Store.SessionsByIDs(ctx, sessionIDs)
+	storedRows, err := sessions.SessionsByIDs(ctx, sessionIDs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read the published sessions after the push: %w; the push ran, so open the transcripts on Village to see what they hold", err)
 	}
@@ -312,7 +312,7 @@ func (s SharePublish) contentOutcomes(ctx context.Context, sessionIDs []string, 
 	for _, row := range storedRows {
 		rows[row.SessionID] = row
 	}
-	heldRows, err := s.Store.SessionsWithoutMetrics(ctx)
+	heldRows, err := sessions.SessionsWithoutMetrics(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read the held sessions after the push: %w; the push ran, so open the transcripts on Village to see what they hold", err)
 	}
@@ -320,7 +320,7 @@ func (s SharePublish) contentOutcomes(ctx context.Context, sessionIDs []string, 
 	for _, row := range heldRows {
 		held[row.SessionID] = true
 	}
-	receipts, err := s.Store.SessionPublications(ctx, s.Creds.VillageURL, s.Creds.UserID, sessionIDs)
+	receipts, err := sessions.SessionPublications(ctx, creds.VillageURL, creds.UserID, sessionIDs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read the publication receipts after the push: %w; the push ran, so open the transcripts on Village to see what they hold", err)
 	}
@@ -414,7 +414,7 @@ func (s SharePublish) waitingPromptRequests(ctx context.Context, rows map[string
 
 // runSessionSteps runs the collective steps of one session after its content
 // step and assembles its result.
-func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome contentOutcome, changes CollectiveChanges) schema.SyncPushSessionResult {
+func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome contentOutcome, changes CollectiveChanges, retry string) schema.SyncPushSessionResult {
 	result := schema.SyncPushSessionResult{SessionID: outcome.sessionID, Status: outcome.status, Title: outcome.title}
 	if outcome.content == nil {
 		result.Error = "no session with this ID is recorded on this computer; nothing was published; open the session from the local list and publish it again"
@@ -482,7 +482,7 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 	result.Steps = steps
 	if stopped >= 0 {
 		result.Status = schema.SyncPushSessionError
-		result.Error = stoppedMessage(steps[stopped], outcome, steps)
+		result.Error = stoppedMessage(steps[stopped], outcome, steps, retry)
 	}
 	return result
 }
@@ -543,7 +543,7 @@ func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcrip
 }
 
 // stoppedMessage says where a session's steps stopped and what Village kept.
-func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, steps []schema.SyncPushStepResult) string {
+func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, steps []schema.SyncPushStepResult, retry string) string {
 	var b strings.Builder
 	switch stopped.Step {
 	case schema.SyncPushStepContent:
@@ -592,7 +592,7 @@ func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, s
 	if len(skippedLater) > 0 {
 		b.WriteString("; not attempted: " + strings.Join(skippedLater, ", "))
 	}
-	b.WriteString(". Publish again to retry.")
+	b.WriteString(". " + retry)
 	return b.String()
 }
 

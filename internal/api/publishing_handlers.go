@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,26 +131,32 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 	// A hook push applies the saved selection, so a session the selection
 	// leaves out is never published by a hook, whatever is installed.
 	// Many sessions share a repository, so each directory is resolved to its
-	// repository once, and each repository's hooks are read once.
+	// repository once, and each repository's hooks are read once. A hook push
+	// publishes nothing for a session a paused rule covers, and nothing at all
+	// while the rules cannot be read.
+	rules, rulesErr := autopublish.Load(autopublish.Path(defaults.ResolveConfigDirPathWith(h.configHome)))
+	remotes := slices.ContainsFunc(rules, func(rule autopublish.Rule) bool { return rule.Kind == schema.AutoPublishRuleRemote })
 	lifecycle := githooks.New(githooks.NewExecGit())
 	git := &ingest.ExecGitResolver{}
-	roots := map[string]string{}
-	publishing := map[string]bool{}
+	byDir := map[string]bool{}
+	uploads := map[string]bool{}
 	autoPublishes := func(dir string) bool {
-		root, known := roots[dir]
-		if !known {
-			if repo, err := autopublish.Resolve(r.Context(), git, dir); err == nil {
-				root = repo.Root
-			}
-			roots[dir] = root
-		}
-		if root == "" {
+		if rulesErr != nil || dir == "" {
 			return false
 		}
-		if _, known := publishing[root]; !known {
-			publishing[root] = autopublish.Publishing(r.Context(), lifecycle, root)
+		if known, ok := byDir[dir]; ok {
+			return known
 		}
-		return publishing[root]
+		publishes := false
+		if repo, err := autopublish.Resolve(r.Context(), git, dir, remotes); err == nil {
+			if _, known := uploads[repo.Root]; !known {
+				uploads[repo.Root] = autopublish.Publishing(r.Context(), lifecycle, repo.Root)
+			}
+			decision := autopublish.Decide(rules, repo)
+			publishes = uploads[repo.Root] && (!decision.Covered() || len(decision.Rules) > 0)
+		}
+		byDir[dir] = publishes
+		return publishes
 	}
 
 	var client *village.VillageClient
