@@ -223,6 +223,9 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 				for _, hook := range installed.Hooks {
 					got[hook.Event] = hook.Status
 					if hook.Remedy == nil {
+						if len(c.Expect.RemedyContains) > 0 || len(c.Expect.SnippetContains) > 0 {
+							t.Fatalf("%s hook has no remedy, but the fixture requires remedy text", hook.Event)
+						}
 						continue
 					}
 					for _, want := range c.Expect.RemedyContains {

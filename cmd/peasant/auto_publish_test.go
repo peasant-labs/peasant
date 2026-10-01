@@ -306,8 +306,8 @@ func TestAutoPublishPush(t *testing.T) {
 	for _, c := range fixture.For(t, autopublishtest.DriverPush) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
-			if c.Expect.Publishes == nil || c.Expect.Audience == nil {
-				t.Fatal("a push case states its publishes and its audience ({} for none)")
+			if c.Expect.Publishes == nil || c.Expect.Audience == nil || c.Expect.Public == nil || c.Expect.VisibilityIntent == "" {
+				t.Fatal("a push case states its publishes, visibility and audience ({} for none)")
 			}
 			w := newAutoPublishWorld(t, fixture, c)
 			scoped := !c.Unscoped
@@ -368,9 +368,18 @@ func TestAutoPublishPush(t *testing.T) {
 				t.Fatalf("Village received %d uploads, want %d\n%s", len(publishes), *c.Expect.Publishes, output.String())
 			}
 			for _, publish := range publishes[boolIndex(c.Before):] {
+				if publish.VisibilityIntent != c.Expect.VisibilityIntent {
+					t.Errorf("an upload carried visibility %q, want %q", publish.VisibilityIntent, c.Expect.VisibilityIntent)
+				}
 				if publish.License != c.Expect.License {
 					t.Errorf("an upload carried license %q, want %q", publish.License, c.Expect.License)
 				}
+			}
+			if got := w.village.Public(autoPublishSessionID); got != *c.Expect.Public {
+				t.Errorf("Village public audience = %t, want %t", got, *c.Expect.Public)
+			}
+			if got := w.village.OwnerVisibilities(); !slices.Equal(got, c.Expect.OwnerVisibilities) {
+				t.Errorf("requested owner visibilities = %v, want %v", got, c.Expect.OwnerVisibilities)
 			}
 			if got := w.village.OwnerUpdates(); got != c.Expect.OwnerUpdates {
 				t.Errorf("owner updates = %d, want %d", got, c.Expect.OwnerUpdates)

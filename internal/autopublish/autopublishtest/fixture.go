@@ -58,7 +58,7 @@ var fieldsOf = map[Driver][]string{
 	DriverValidate:    {"rules", "rulesFile", "invalid"},
 	DriverInstall:     {"rules", "install", "foreignHook", "remoteRecorded", "status", "code", "hooks", "remedyContains", "snippetContains", "label", "installed"},
 	DriverRuleBody:    {"method", "body", "rulesFile", "unavailable", "status", "code"},
-	DriverPush:        {"rules", "rulesFile", "config", "flags", "unscoped", "noRemote", "sessions", "before", "villagePublic", "failShare", "stallShare", "failTranscriptRead", "failShareRead", "selected", "historical", "deleteRule", "reads", "outputOmits", "villageDecides", "privateBeforeAgain", "again", "errorContains", "outputContains", "publishes", "license", "audience", "others", "ownerUpdates", "attemptContains"},
+	DriverPush:        {"rules", "rulesFile", "config", "flags", "unscoped", "noRemote", "sessions", "before", "villagePublic", "failShare", "stallShare", "failTranscriptRead", "failShareRead", "selected", "historical", "deleteRule", "reads", "outputOmits", "villageDecides", "privateBeforeAgain", "again", "errorContains", "outputContains", "publishes", "visibilityIntent", "public", "license", "audience", "others", "ownerUpdates", "ownerVisibilities", "attemptContains"},
 	DriverHook:        {"uploadExits"},
 	DriverVillageAuto: {"failTranscriptRead", "rules", "foreignHook", "handAdded", "forkUpstream", "hooksPath", "publications", "unrecorded", "signedOut", "errorContains", "outputContains", "output", "rule", "ruleIds", "installed", "binding"},
 }
@@ -224,12 +224,15 @@ type Expect struct {
 	// read the recorded session's transcript afterwards (approved or pending),
 	// and Others those of each extra session's, by alias; OwnerUpdates the owner visibility updates;
 	// AttemptContains part of the session's latest failed attempt.
-	Publishes       *int                                                 `yaml:"publishes"`
-	License         schema.License                                       `yaml:"license"`
-	Audience        map[string]schema.VillageShareStatus                 `yaml:"audience"`
-	Others          map[SessionRole]map[string]schema.VillageShareStatus `yaml:"others"`
-	OwnerUpdates    int                                                  `yaml:"ownerUpdates"`
-	AttemptContains string                                               `yaml:"attemptContains"`
+	Publishes         *int                                                 `yaml:"publishes"`
+	VisibilityIntent  schema.VisibilityIntent                              `yaml:"visibilityIntent"`
+	Public            *bool                                                `yaml:"public"`
+	License           schema.License                                       `yaml:"license"`
+	Audience          map[string]schema.VillageShareStatus                 `yaml:"audience"`
+	Others            map[SessionRole]map[string]schema.VillageShareStatus `yaml:"others"`
+	OwnerVisibilities []schema.TranscriptUpdateVisibility                  `yaml:"ownerVisibilities"`
+	OwnerUpdates      int                                                  `yaml:"ownerUpdates"`
+	AttemptContains   string                                               `yaml:"attemptContains"`
 	// Output is the exact standard output.
 	Output string `yaml:"output"`
 	// Rule is the one rule hooks.yaml holds afterwards; "{remote}" in its
