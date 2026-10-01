@@ -326,8 +326,7 @@ func TestAutoPublishRoutesRefuseBodies(t *testing.T) {
 // saving installs nothing and lists every covered recorded repository,
 // replacing and removing a rule touches only that rule, installing is the one
 // act that writes a hook, publications then report autoPublish for the
-// session the saved selection lists, a hook git would not run reports absent,
-// and removing the rule leaves the hook as it is.
+// session the saved selection lists, and removing the rule retains hook files.
 func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 	t.Parallel()
 	world := newAutoPublishWorld(t, autoPublishWorldOptions{})

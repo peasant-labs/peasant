@@ -60,6 +60,10 @@ func parse(path string, raw []byte) ([]Rule, error) {
 	if err := decoder.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("read the auto-publish rules in %s: %w; correct the file or remove it, and retry", path, err)
 	}
+	var trailing yaml.Node
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("read the auto-publish rules in %s: the file must contain exactly one YAML document; nothing was applied; remove the additional document or repair its syntax, and retry", path)
+	}
 	// A file written by hand may leave the version out; it is the only one.
 	if doc.Version != fileVersion && doc.Version != 0 {
 		return nil, fmt.Errorf("read the auto-publish rules in %s: version %d is not the version %d this Peasant reads; nothing was applied; upgrade Peasant, or rewrite the file", path, doc.Version, fileVersion)

@@ -1,6 +1,7 @@
 package autopublish_test
 
 import (
+	"bytes"
 	"context"
 	"go/ast"
 	"go/parser"
@@ -91,6 +92,17 @@ func TestInvalidRulesAreRefused(t *testing.T) {
 			}
 			if _, err := autopublish.Load(path); err == nil || !strings.Contains(err.Error(), c.Expect.Invalid) {
 				t.Fatalf("Load() = %v, want an error saying %q", err, c.Expect.Invalid)
+			}
+			changed := false
+			err := autopublish.Update(path, func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
+				changed = true
+				return rules, nil
+			})
+			if err == nil || !strings.Contains(err.Error(), c.Expect.Invalid) || changed {
+				t.Fatalf("Update() = %v, change called = %t; an unreadable file must refuse before applying a change", err, changed)
+			}
+			if after, err := os.ReadFile(path); err != nil || !bytes.Equal(after, raw) {
+				t.Fatalf("Update changed invalid file bytes: %v", err)
 			}
 		})
 	}
