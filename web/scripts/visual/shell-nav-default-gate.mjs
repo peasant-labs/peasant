@@ -177,7 +177,7 @@ const noticeState = async (page) => ({
       shown: !!section,
       status: (status?.textContent || '').replace(/\s+/g, ' ').trim(),
       command: (section?.querySelector('.cx-cmd-text')?.textContent || '').trim(),
-      retry: (document.querySelector(retry)?.textContent || '').replace(/\s+/g, ' ').trim(),
+      retry: (document.querySelector(retry)?.innerText || '').replace(/\s+/g, ' ').trim(),
       live: (document.querySelector(live)?.textContent || '').trim(),
       noticeHeight: document.documentElement.style.getPropertyValue('--app-notice-height'),
       tour: !!document.querySelector('[role="dialog"][aria-label^="Product tour"]'),
