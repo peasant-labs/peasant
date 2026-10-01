@@ -38,5 +38,6 @@ partition:
   - cmd/peasant|TestPiHarvestCommonModes
   - internal/ingest|TestContentRecoveryScope
   - internal/ingest|TestPipelineRetainedAdapterMaintenance
+  - internal/ingest|TestConcreteParserFailurePreservesOtherSessions
 protected:
   - internal/ingest|TestOpenCodeNativeCLI

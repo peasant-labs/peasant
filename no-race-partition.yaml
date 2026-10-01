@@ -585,6 +585,34 @@ partition:
       projection assertions stay.
     cost: { wall_ms: 31800, cpu_ms: 33400 }
 
+  - package: internal/ingest
+    test: TestConcreteParserFailurePreservesOtherSessions
+    class: single-threaded-bytes
+    evidence: '#TestConcreteParserFailurePreservesOtherSessions'
+    justification: >-
+      Subject. A concrete parser failure preserves the malformed session's
+      last-good entries and producer state, does not block its healthy sibling
+      in the same run, and the retry re-indexes only the incomplete session.
+      Concurrency actually exercised. Two pipeline runs over a pool-size-1
+      store, each overlapping the DIFF pool, EXTRACT+WRITE workers,
+      StagingBuffer, drainLoop and indexLoop; the two sessions are processed
+      concurrently through that machinery. Why the detector is not this test's
+      oracle. The assertions read stored entries, index state and diagnostics
+      after each run; a race corrupts those products rather than producing a
+      distinct assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the intersession isolation path is uncovered
+      here; the retained tests bound the shared primitives.
+      Detector-independent guarantees kept. The isolation and retry assertions
+      stay exact.
+    cost: { wall_ms: 31801, cpu_ms: 33401 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
