@@ -556,6 +556,35 @@ partition:
       counts stay asserted.
     cost: { wall_ms: 1520, cpu_ms: 2040 }
 
+  - package: internal/ingest
+    test: TestPipelineRetainedAdapterMaintenance
+    class: single-threaded-bytes
+    evidence: '#TestPipelineRetainedAdapterMaintenance'
+    justification: >-
+      Subject. Retained adapter maintenance: a baseline reindex establishes the
+      projection, an adapter-version bump then refreshes from the retained
+      transcript without re-extracting content, and a second maintenance run
+      does nothing; missing metadata and native-appended cases are handled.
+      Concurrency actually exercised. A baseline pipeline run and a maintenance
+      run over the same store, each overlapping the DIFF pool, EXTRACT+WRITE
+      workers, StagingBuffer, drainLoop and indexLoop, with an
+      adapterMaintenanceFS decorator under them. Why the detector is not this
+      test's oracle. The assertions read stored index state, projections and
+      diagnostics after the runs; a race corrupts those products rather than
+      producing its own assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the baseline-then-maintenance handoff is
+      uncovered here; the retained tests bound the machinery.
+      Detector-independent guarantees kept. The maintenance-once and
+      projection assertions stay.
+    cost: { wall_ms: 31800, cpu_ms: 33400 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
