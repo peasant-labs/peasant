@@ -97,7 +97,7 @@ function installFetch(options: FetchOptions = {}) {
       case '/api/v1/web/discovery':
         return response({ items: discoveryItems() });
       case '/api/v1/sync/redactions':
-        return response({ categories: [] });
+        return response({ total: 0, categories: [] });
       case '/api/v1/sync/push':
         return response({ new: 1, updated: 0, skipped: 0, errors: 0, sessions: [] });
       default:

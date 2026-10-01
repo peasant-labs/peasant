@@ -27,6 +27,8 @@ import {
 const FIXTURE_PATH = 'src/app/share/testdata/publish-popup-states.yaml';
 const fixtureSource = readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8');
 const fixture = loadPublishStates(fixtureSource);
+const readyScanSummary = fixture.cases.find((entry) => entry.name === 'ready-to-publish')?.expect.popup?.texts.find((text) => text.includes('matches · all redacted'));
+if (!readyScanSummary) throw new Error('ready-to-publish must pin the scan occurrence summary');
 
 const PROJECT_HASH = 'b'.repeat(64) as ProjectHash;
 const SESSION_ID = 'sess_publishstates';
@@ -307,7 +309,7 @@ describe('the app-level scan cache under the transcript page', () => {
     expect(world.scanRequests).toBe(0);
     sessionDetail = detail;
     view.rerender(<Page />);
-    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'), WAIT);
+    await waitFor(() => expect(dialog().textContent).toContain(readyScanSummary), WAIT);
     expect(world.scanRequests).toBe(1);
   });
 
@@ -332,7 +334,7 @@ describe('the app-level scan cache under the transcript page', () => {
     expect(world.scanRequests).toBe(1);
 
     await act(async () => { releaseScan(); });
-    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'), WAIT);
+    await waitFor(() => expect(dialog().textContent).toContain(readyScanSummary), WAIT);
     expect(world.scanRequests).toBe(1);
   });
 
@@ -381,7 +383,7 @@ describe('/share?sessionId opens the publish popup on that transcript', () => {
     search = 'publish=open';
     replaced.length = 0;
     render(<Page />);
-    await waitFor(() => expect(dialog().textContent).toContain('3 matches · all redacted'), WAIT);
+    await waitFor(() => expect(dialog().textContent).toContain(readyScanSummary), WAIT);
     await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
     expect(replaced).toEqual([`/projects/${PROJECT_HASH}/${SESSION_ID}`]);
   });
