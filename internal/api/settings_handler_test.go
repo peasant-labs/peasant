@@ -259,6 +259,7 @@ type settingReadCase struct {
 	Name          string             `yaml:"name"`
 	Setup         settingUpdateSetup `yaml:"setup"`
 	File          string             `yaml:"file"`
+	RunningFile   string             `yaml:"runningFile"`
 	Status        int                `yaml:"status"`
 	Key           string             `yaml:"key"`
 	Value         string             `yaml:"value"`
@@ -288,6 +289,13 @@ func TestSettingsReadFixtures(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			arrangeConfigPath(t, c.Setup, c.File, path)
 			handler := newTestSettingsHandler(t, path)
+			if c.RunningFile != "" {
+				running := config.BaseConfig()
+				if err := yaml.Unmarshal([]byte(c.RunningFile), running); err != nil {
+					t.Fatal(err)
+				}
+				handler.live = newLiveConfig(running)
+			}
 			if c.Status != http.StatusOK {
 				recorder := httptest.NewRecorder()
 				handler.handleGetSettings(recorder, httptest.NewRequest(http.MethodGet, defaults.RouteSettings.String(), nil))
