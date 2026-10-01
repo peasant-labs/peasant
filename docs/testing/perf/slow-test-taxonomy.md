@@ -72,25 +72,25 @@ the inventory stands at 31 rows with no promotion.
 
 | # | lens P (s) | lens F (s) | pkg | test (file) | class | elig | fix | mark |
 |---|---|---|---|---|---|---|---|---|
-| 0 | 0.0 (parent) | 229.9 | ingest | `TestUnknownLocalRetentionBeyondTransferBudget` (`unknown_local_budget_test.go:31`) | T1 (see note) | A | one-line skip; focused 229.9 → 210.1 s (see evidence) | measured |
-| 1 | 346.9 | 78.0 | ingest | `TestPiCapturedAdmission` (`pi_capture_test.go:77`) | T3 | A | ingest golden+skip | measured |
-| 2 | 343.4 | 75.7 | ingest | `TestPublicationCaptureNormalIngestRecovery` (`publication_capture_test.go:105`) | T3 | A | ingest golden+skip | measured |
-| 3 | 318.5 | 43.5 | ingest | `TestNormalIngestStoresAuthoritativeContent` (`content_capture_test.go:197`) | T3 | A | ingest golden+skip | measured |
+| 0 | 0.0 (parent) | 229.9 | ingest | `TestUnknownLocalRetentionBeyondTransferBudget` (`unknown_local_budget_test.go:31`) | T1 (see note) | A | one-line skip + partition entry; focused 229.9 → 210.1 s (see evidence) | measured |
+| 1 | 346.9 | 78.0 | ingest | `TestPiCapturedAdmission` (`pi_capture_test.go:77`) | T3 | A | ingest golden+skip + partition entry | measured |
+| 2 | 343.4 | 75.7 | ingest | `TestPublicationCaptureNormalIngestRecovery` (`publication_capture_test.go:105`) | T3 | A | ingest golden+skip + partition entry | measured |
+| 3 | 318.5 | 43.5 | ingest | `TestNormalIngestStoresAuthoritativeContent` (`content_capture_test.go:197`) | T3 | A | ingest golden+skip + partition entry | measured |
 | 4 | 313.9 | 41.1 | ingest | `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (`origin_backfill_test.go:481`) | T3 | S | ingest golden+skip + partition entry | measured |
-| 5 | 294.0 | 31.0 | ingest | `TestOrdinaryHarvestSettlesStaleIndexSessions` (`stale_index_settling_test.go:86`) | T3 | A | ingest golden+skip | measured |
-| 6 | 282.3 | 43.1 | ingest | `TestPiUnknownPersistence` (`pi_unknown_test.go:193`) | T3+T4 | A | ingest golden+skip + payload share | measured |
-| 7 | 277.1 | 28.3 | ingest | `TestRetainedContentBackfill` (`content_backfill_test.go:25`) | T3 | A | ingest golden+skip (+ seed batching) | measured |
+| 5 | 294.0 | 31.0 | ingest | `TestOrdinaryHarvestSettlesStaleIndexSessions` (`stale_index_settling_test.go:86`) | T3 | A | ingest golden+skip + partition entry | measured |
+| 6 | 282.3 | 43.1 | ingest | `TestPiUnknownPersistence` (`pi_unknown_test.go:193`) | T3+T4 | A | ingest golden+skip + payload share + partition entry | measured |
+| 7 | 277.1 | 28.3 | ingest | `TestRetainedContentBackfill` (`content_backfill_test.go:25`) | T3 | A | ingest golden+skip (+ seed batching) + partition entry | measured |
 | 8 | 273.6 | 53.2 | cmd | `TestPiNativeRegistryProjection` (`pi_native_integration_test.go:187`) | T3+T4 | A | cmd golden+skip + payload share | measured |
-| 9 | 269.5 | 106.6 | ingest | `TestNativeUnknownSourceToPublication` (`native_unknown_public_test.go:110`) | T3 | A | ingest golden+skip | measured |
-| 10 | 262.4 | 22.3 | cmd | `TestPiHarvestCommonModes` (`pi_ingestion_test.go:85`) | T3+T4 | A | cmd golden+skip + payload share | measured |
+| 9 | 269.5 | 106.6 | ingest | `TestNativeUnknownSourceToPublication` (`native_unknown_public_test.go:110`) | T3 | A | ingest golden+skip + partition entry | measured |
+| 10 | 262.4 | 22.3 | cmd | `TestPiHarvestCommonModes` (`pi_ingestion_test.go:85`) | T3+T4 | A | cmd golden+skip + payload share + partition entry | measured |
 | 11 | 249.4 | 17.1 | cmd | `TestMountedKickstartStoredGateAlignsViewerAndPush` (`cmd_kickstart_stored_gate_alignment_test.go:587`) | T3 | S | cmd golden+skip + partition entry | measured |
-| 12 | 241.8 | 17.8 | ingest | `TestContentRecoveryScope` (`content_recovery_scope_test.go:148`) | T3 | A | ingest golden+skip | measured |
-| 13 | 233.4 | 18.0 | ingest | `TestPipelineRetainedAdapterMaintenance` (`adapter_maintenance_test.go:108`) | T3 | A | ingest golden+skip | measured |
+| 12 | 241.8 | 17.8 | ingest | `TestContentRecoveryScope` (`content_recovery_scope_test.go:148`) | T3 | A | ingest golden+skip + partition entry | measured |
+| 13 | 233.4 | 18.0 | ingest | `TestPipelineRetainedAdapterMaintenance` (`adapter_maintenance_test.go:108`) | T3 | A | ingest golden+skip + partition entry | measured |
 | 14 | 209.3 | 14.1 | cmd | `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection` (`index_format_queries_test.go:81`) | T3 | S | cmd golden+skip + partition entry | measured |
 | 15 | 194.2 | 14.0 | ingest | `TestUnknownPrivateEncoding` (`unknown_private_encoding_test.go:21`) | T3 | S | ingest golden+skip + partition entry | measured |
 | 16 | 182.3 | 13.6 | cmd | `TestMountedLegacySelectedConversion_ConsentCancellationAndRerun` (`cmd_kickstart_selected_conversion_mount_test.go:261`) | T3 | S | cmd golden+skip + partition entry | measured |
 | 17 | 174.4 | 14.7 | cmd | `TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope` (`opencode_legacy_sqlite_recovery_test.go:397`) | T3 | A | cmd golden+skip | measured |
-| 18 | 156.0 | 13.1 | ingest | `TestConcreteParserFailurePreservesOtherSessions` (`indexer_completion_pipeline_test.go:19`) | T3 | A | ingest golden+skip | measured |
+| 18 | 156.0 | 13.1 | ingest | `TestConcreteParserFailurePreservesOtherSessions` (`indexer_completion_pipeline_test.go:19`) | T3 | A | ingest golden+skip + partition entry | measured |
 | 19 | 132.8 | 35.4 | cmd | `TestPiDatabasePublicationThroughCLI` (`pi_database_publication_test.go:25`) | T4+T3 | A | cmd golden+skip + payload share | measured |
 | 20 | 123.7 | 9.8 | cmd | `TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary` (`cmd_kickstart_selection_runner_test.go:187`) | T3+T4 | A | cmd golden+skip | measured |
 | 21 | 119.8 | — (inferred light) | cmd | `TestPublicationWizardAndReportUseDatabaseReadiness` (`publication_readiness_test.go:22`) | T3 | S | partition entry only | inferred |
@@ -110,7 +110,9 @@ the inventory stands at 31 rows with no promotion.
 
 Elig: S = no goroutines on the exercised production path (admits the partition pass);
 A = production concurrency exercised but not the subject (keeps the detector
-tax). Rows 0–20 plus 23/25 are measured; the remaining survey tail is
+tax). The twelve ingest pipeline parents carry A and are nonetheless partitioned
+under the cost-shape class reading recorded in "Current state" below. Rows 0–20
+plus 23/25 are measured; the remaining survey tail is
 structural (code read + carried walls + existing profiles). Screening rows 29
 and 31–34 are measured (warm serial re-measure; row 31 additionally carries a
 quiet-box race/no-race pair quoted in the evidence record); row 22 carries a
@@ -438,8 +440,10 @@ accounted       204 rows      7.40 s  95.73%  (total sampled 7.73s)
   registry change — the large-record harness test (#31) and the two
   build-topology guards (#32/#33), summarized after the nine. Each
   justification is mirrored in substance into the entry's `justification` in
-  `no-race-partition.yaml`; wording may differ. No registry contract change; the bulk-byte parents
-  inside the ingest pipeline stay in the race pass (detector tax deferred). Arguments:
+  `no-race-partition.yaml`; wording may differ. No registry contract change; at this closure the
+  bulk-byte parents inside the ingest pipeline stayed in the race pass (detector tax deferred).
+  That closure is historical: the twelve ingest pipeline parents are now partitioned (see
+  "Current state: the ingest pipeline's bulk-byte parents are partitioned" below). Arguments:
   - **#4 `TestResolveStoredOriginsWritesAVerdictIntoEveryRow`** (`internal/ingest`; initial cost 41510 ms wall / 39750 ms CPU). Subject: the stored-origin backfill writes one verdict per row and a second pass rewrites nothing. Concurrency: none on the path; each fixture subtest builds its own golden-copy store and calls OriginResolver.ResolveStoredOrigins sequentially, with no goroutines, channels, or state shared across subtests (the pipeline worker pool is not reached). The detector is not the oracle: the invariant is row contents and pass counts, and the cost is store open plus SQL work taxed by instrumentation. Retained race coverage: TestConcurrentReadAcrossActivation, TestClose_ConcurrentReadersDoNotPanic (store). Residual risk: a future change that parallelises the backfill must add its own race-run test.
   - **#11 `TestMountedKickstartStoredGateAlignsViewerAndPush`** (`cmd/peasant`; initial cost 16550 ms wall / 15240 ms CPU). Subject: the kickstart stored-selection gate and the viewer/push surfaces agree on the same candidates. Concurrency: none; runModel is replaced so the model is driven synchronously and returned commands are drained in a serial queue, flowIngest is a counter stub, and each subtest owns its temp world. The detector is not the oracle: the assertions are gate state, config bytes, and candidate sets. Retained race coverage: n/a for the gate (no concurrent path); the real bubbletea runtime is not mounted here. Residual risk: races inside the live program loop are not observed by this test in either pass.
   - **#14 `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection`** (`cmd/peasant`; initial cost 14350 ms wall / 13510 ms CPU). Subject: index-format query commands refuse unsupported scoped candidates before emitting any projection. Concurrency: none; each subtest seeds a private golden-copy store with pool size 1, then runs the root cobra command in-process once. The detector is not the oracle: the invariant is the typed refusal and empty stdout. Retained race coverage: n/a (single-connection command path); store pool concurrency stays under TestClose_ConcurrentReadersDoNotPanic. Residual risk: a command that later fans reads out across goroutines would need its own race-run test.
@@ -452,6 +456,33 @@ accounted       204 rows      7.40 s  95.73%  (total sampled 7.73s)
   - **#31 `TestLargeRecordsAreHandledUniformlyAcrossHarnesses`** (`internal/ingest`; measured warm 5.22 s wall / 5.59 s CPU, race before-wall 46.6 s). Subject: over-limit JSONL records are filtered, indexed, and metadata-extracted for every harness synchronously, and the record sizes are the invariant. Concurrency: none on the exercised path — no goroutines, channels, atomics, store opens, or SQL; the `t.Parallel` present is suite scheduling. The detector is not the oracle: the moved assertions are deterministic byte outcomes (placeholder counts and marker presence) over bulk byte work. Retained race coverage: the filter, scanner, indexers, and adapters stay race-checked by the rest of the ingest suite. Residual risk: negligible; record sizes stay bounded by the 256 MiB production limit.
   - **#32 `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology`** (`internal/ingest`; measured no-race 31.4 s wall, warm race 42.7 s). Subject: the private-execution guard across build topologies — it copies production source into isolated packages, inventories each build configuration with `go list`, and parses/type-checks the files to assert which SQLite callables are reachable. Concurrency: the go tool only lists files and export data; the oracle is the AST and types, and no production goroutines run. The detector is not the oracle: this is a static-analysis check. Retained race coverage: the guard and the SQLite paths it inspects stay race-checked by the ingest suite. Residual risk: a race inside the checker helpers, which are sequential over private per-case directories.
   - **#33 `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses`** (`internal/ingest`; measured no-race 23.4 s wall, warm race 31.9 s). Subject: each build-tagged production configuration is resolved with `go list`, a fixture-owned bypass file is written and type-checked with the configuration's sources, and the guard is asserted to reject it. Concurrency: none — the oracle is the AST and type information, and no production goroutines run. The detector is not the oracle: static analysis. Retained race coverage: the guard and the tagged production sources stay race-checked by the ingest suite. Residual risk: a race inside the sequential checker helpers over private temp files.
+
+### Current state: the ingest pipeline's bulk-byte parents are partitioned
+
+The T1 closure above is historical — it records the state at its measurement
+point. The twelve detector-taxed ingest pipeline parents it names (the eleven
+verified parents plus the retention test, #0) are now admitted to the no-race
+partition. The authoritative per-test arguments are the six-part
+`justification` fields in
+[`no-race-partition.yaml`](../../../no-race-partition.yaml); the measured
+before/after pairs, the derived cost pairs, and the exactly-once screen quote
+live in the T1 section of [`evidence.md`](./evidence.md); the matching
+membership rows are in
+[`registry_membership.yaml`](../../../internal/testkit/testgate/testdata/registry_membership.yaml).
+The inventory `fix` cells for those twelve rows now name the partition entry.
+Neither this note nor those cells replace the historical closure or the
+per-entry arguments.
+
+The admitting class is `single-threaded-bytes`, read as the **cost shape the
+no-race pass accounts for** (byte and SQL work whose assertions are
+detector-independent) rather than as a claim that the test exercises no
+concurrency. All twelve exercise production pipeline concurrency and carry `A`
+in the inventory; under this reading they are admissible because a race on their
+path does not surface as a distinct assertion failure, so the detector is not
+their oracle. Each entry records the concurrency it really exercises and names
+its retained race coverage; that argument is not copied here. `A` keeps its
+original meaning for every other row and is not a refusal for these.
+
 - **T2 — SQL statement and seed volume.** `Store.SyncModels` prepared reuse;
   static-text transient → cached `sqlitex.Execute` at the named constant-text
   call sites; seed-loop batching in `content_backfill_test.go`. Dynamic-text
