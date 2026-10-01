@@ -1,0 +1,6 @@
+File: mega-giga.test
+Type: cpu
+Duration: 1.50Gs, Total samples = 1.50Gs (100.00%)
+      flat  flat%   sum%        cum   cum%
+  1.125Gs 75.00% 75.00%    1.125Gs 75.00%  github.com/peasant-labs/peasant/internal/ingest.(*Pipeline).run
+    375Ms 25.00% 100.00%    375Ms 25.00%  zombiezen.com/go/sqlite.(*Stmt).Step

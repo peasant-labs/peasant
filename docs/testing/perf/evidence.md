@@ -732,6 +732,61 @@ Unchanged within 10 %: the e2e seed-unset build, the capabilities matrix, both
 build-topology guards, and the large-record test. `TestOpenCodeNativeCLI` stays race-covered
 (protected); its pair was refreshed from its focused `-race` run.
 
+## T1 — ingest pipeline parents (single-threaded-bytes)
+
+Change: the twelve detector-taxed ingest pipeline parents below move to the
+gate's no-race pass as `single-threaded-bytes` registry entries. Each entry's
+six-part argument (subject; the concurrency actually exercised; why the detector
+is not this test's oracle; retained race coverage named per entry; residual
+risk; detector-independent guarantees kept) is authoritative in
+[`no-race-partition.yaml`](../../../no-race-partition.yaml), with the matching
+membership rows in
+[`registry_membership.yaml`](../../../internal/testkit/testgate/testdata/registry_membership.yaml);
+the arguments are not repeated here. No test code changed.
+
+Measurement: focused Class A, one discarded build-only warmup per package and
+mode (`go test [-race] -run '^$' ./<pkg>`), serial. `wall / user / sys` are
+seconds from an executable GNU time (`/run/current-system/sw/bin/time -v`, GNU
+Time 1.10; `command -v time` resolves to a shell keyword here). The before
+column ran with `-race` at the frozen base `a333cb54`; the after column ran
+without it at the change's tip. Every row's run pattern is `go test [-race]
+-count=1 -timeout=0 -run '^<Test>$' ./<pkg>`. `L` is the 1-minute load average
+(`/proc/loadavg`, field 1) at the start of each measured run. The box ran other
+work throughout, so `L` is recorded rather than held at a bar; every pair
+improved anyway. No profile wall is quoted.
+
+| test | package | before wall / user / sys (race, s) | after wall / user / sys (no-race, s) | L (before run → after run) |
+|---|---|---|---|---|
+| `TestPiCapturedAdmission` | `internal/ingest` | 19.60 / 17.30 / 1.75 | 3.18 / 2.26 / 1.08 | 13.86 → 8.79 |
+| `TestPublicationCaptureNormalIngestRecovery` | `internal/ingest` | 34.45 / 30.10 / 1.78 | 5.62 / 2.88 / 1.40 | 12.70 → 8.89 |
+| `TestNormalIngestStoresAuthoritativeContent` | `internal/ingest` | 16.97 / 14.61 / 1.21 | 2.97 / 1.94 / 0.85 | 11.47 → 10.90 |
+| `TestPiUnknownPersistence` | `internal/ingest` | 29.82 / 27.86 / 1.28 | 3.63 / 3.12 / 0.86 | 11.25 → 10.91 |
+| `TestOrdinaryHarvestSettlesStaleIndexSessions` | `internal/ingest` | 8.29 / 6.69 / 1.01 | 1.94 / 1.63 / 0.77 | 10.48 → 10.91 |
+| `TestRetainedContentBackfill` | `internal/ingest` | 12.93 / 12.15 / 0.98 | 1.98 / 1.83 / 0.76 | 10.36 → 10.83 |
+| `TestNativeUnknownSourceToPublication` | `internal/ingest` | 75.02 / 69.64 / 2.33 | 9.12 / 5.75 / 1.23 | 10.30 → 10.83 |
+| `TestPiHarvestCommonModes` | `cmd/peasant` | 6.45 / 4.86 / 1.15 | 2.15 / 1.66 / 0.96 | 10.19 → 10.55 |
+| `TestContentRecoveryScope` | `internal/ingest` | 5.25 / 3.91 / 0.83 | 1.52 / 1.38 / 0.66 | 10.09 → 10.55 |
+| `TestPipelineRetainedAdapterMaintenance` | `internal/ingest` | 6.64 / 4.82 / 1.04 | 1.61 / 1.42 / 0.69 | 10.25 → 10.43 |
+| `TestConcreteParserFailurePreservesOtherSessions` | `internal/ingest` | 4.63 / 3.16 / 0.94 | 1.52 / 1.47 / 0.68 | 14.13 → 10.43 |
+| `TestUnknownLocalRetentionBeyondTransferBudget` | `internal/ingest` | 263.15 / 445.09 / 30.73 | 17.44 / 31.51 / 2.63 | 14.52 → 10.43 |
+
+The registry `cost` pairs are the after (no-race) wall and CPU (user + system,
+in milliseconds) values above.
+
+The focused screen is the exactly-once proof for these packages. Canonical
+subset run: `go run ./cmd/testgate run -race=true -pkgs
+./internal/ingest,./cmd/peasant` (the gate's two-pass mode; `make check RACE=1`
+passes the same `-race=true`) planned the touched packages with the twelve new
+entries in the no-race pass and none of them in the race pass. Screen and
+result:
+
+    all four rules passed: every test ran exactly once across the passes
+    testgate: PASS
+
+pass A (race) wall 11m5.669s, pass B (no-race) wall 2m37.95s, combined
+13m43.808s, calibration `L` 1.018 (`-p` 32, `-parallel` 32; subset run: 2 of 70
+packages, budget not applicable).
+
 ## Epoch close — final gate, class aggregates, and collateral screen
 
 This section closes the record. It adds only sums over the rows above, the final
@@ -852,3 +907,41 @@ baseline. Five flags, each re-measured focused and resolved as load noise:
 No focused re-measure grew by 5 s or more. State it as a screen, not a proof:
 moving tests out of the race pass changes the packing of the tests that remain
 in the same package.
+
+## T2 (fresh-install baseline) — create new databases at head from a pinned snapshot
+
+Change: `store.Open` on a brand-new file now applies a committed head-schema
+snapshot (`internal/store/baseline_schema.sql`) instead of replaying the
+61-migration chain. Existing databases keep the chain as their only upgrade
+path, and the shipped migrations are unchanged. The snapshot is generated from
+the chain and pinned by byte equality over two independent chain builds.
+
+Vehicle: `BenchmarkFreshDatabaseOpen` in `internal/store` (committed
+benchmark-only at `5c9551ef`; the identical file sits at the final revision `116c2750`). Each
+iteration opens a distinct brand-new path and closes it, so every iteration
+pays a full fresh-install.
+
+Command (identical on both revisions; no `-race`, default `GOGC`, one discarded
+warmup at `-benchtime=5x`, then the measured run):
+
+```
+go test -run '^$' -bench '^BenchmarkFreshDatabaseOpen$' -benchtime=30x -count=1 ./internal/store
+```
+
+`GOMAXPROCS=32` (AMD Ryzen 9 7950X3D, 16 cores / 32 threads). GNU time resolved
+at measurement time: `/run/current-system/sw/bin/time` (GNU Time 1.10);
+`/usr/bin/time` is absent on this box. `L` is the 1-minute load average just
+before each measured run; the box ran other work concurrently.
+
+| revision | fresh-path | ns/op (30 iters) | allocs/op | bytes/op | wall (s) | user (s) | sys (s) | L |
+|---|---|---|---|---|---|---|---|---|
+| `5c9551ef` | chain replay (before) | 104395445 | 2085 | 257433 | 4.31 | 2.82 | 0.90 | 10.29 |
+| `116c2750` | baseline snapshot (after) | 51450151 | 604 | 44779 | 2.64 | 1.31 | 0.80 | 11.00 |
+
+Gain: 2.03x on the fresh-open microbenchmark (104.4 ms -> 51.5 ms per open);
+the identical command's wall fell 4.31 s -> 2.64 s and allocations 2085 -> 604.
+No threshold gate: this is one serial pair on a shared box.
+
+L companion: 10.29 (before) -> 11.00 (after). Both columns were measured in this
+change's own worktree against the same benchmark file, so the only change
+between them is the fresh path itself.

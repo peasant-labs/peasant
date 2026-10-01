@@ -1,0 +1,6 @@
+File: kilo.test
+Type: cpu
+Duration: 2.00ks, Total samples = 2.00ks (100.00%)
+      flat  flat%   sum%        cum   cum%
+   1.50ks 75.00% 75.00%     1.50ks 75.00%  modernc.org/libc.Xmemcpy
+     500s 25.00% 100.00%     500s 25.00%  github.com/peasant-labs/peasant/internal/ingest.(*Pipeline).run

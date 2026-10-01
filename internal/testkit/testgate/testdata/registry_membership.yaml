@@ -28,6 +28,17 @@ partition:
   - internal/ingest|TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology
   - internal/ingest|TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses
   - internal/ingest|TestLargeRecordsAreHandledUniformlyAcrossHarnesses
-
+  - internal/ingest|TestPiCapturedAdmission
+  - internal/ingest|TestPublicationCaptureNormalIngestRecovery
+  - internal/ingest|TestNormalIngestStoresAuthoritativeContent
+  - internal/ingest|TestPiUnknownPersistence
+  - internal/ingest|TestOrdinaryHarvestSettlesStaleIndexSessions
+  - internal/ingest|TestRetainedContentBackfill
+  - internal/ingest|TestNativeUnknownSourceToPublication
+  - cmd/peasant|TestPiHarvestCommonModes
+  - internal/ingest|TestContentRecoveryScope
+  - internal/ingest|TestPipelineRetainedAdapterMaintenance
+  - internal/ingest|TestConcreteParserFailurePreservesOtherSessions
+  - internal/ingest|TestUnknownLocalRetentionBeyondTransferBudget
 protected:
   - internal/ingest|TestOpenCodeNativeCLI
