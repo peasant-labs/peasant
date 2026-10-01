@@ -34,6 +34,7 @@ export const FALLBACK_GROUP: SettingsGroupId = 'advanced';
 export const SETTING_GROUP_OF: Readonly<Record<string, SettingsGroupId>> = {
   'village.connected': 'village',
   'push.sharePreference': 'village',
+  'push.autoPublishIntent': 'village',
 
   'redaction.level': 'redaction',
   'redaction.custom_patterns': 'redaction',
@@ -105,6 +106,10 @@ export const KEY_COPY: Readonly<Record<string, KeyCopy>> = {
     label: 'publishing plan',
     help: 'picked at setup. it never publishes on its own.',
     options: { '': 'keep local', 'share-later': 'publish later' },
+  },
+  'push.autoPublishIntent': {
+    label: 'offer automatic publishing',
+    help: 'on: select automatic publishing the next time you publish. choosing keep local turns this preference off. nothing publishes until you confirm.',
   },
   'redaction.level': {
     label: 'level',

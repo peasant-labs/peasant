@@ -189,6 +189,7 @@ export default function SettingsPageClient() {
       rows: [
         <VillageAccountRow key="account" auth={auth} readError={authError} onRetry={() => { void readAuth(); }} connected={take('village.connected')} onLoggedOut={onLoggedOut} />,
         row('push.sharePreference'),
+        row('push.autoPublishIntent'),
       ],
     }),
     'auto-publish': () => ({
