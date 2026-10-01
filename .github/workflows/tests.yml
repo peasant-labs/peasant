@@ -118,8 +118,9 @@ jobs:
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
       github.workflow == 'Release PR'
-    uses: peasant-labs/infra/.github/workflows/runner-router.yml@runner-router-v1
+    uses: peasant-labs/infra/.github/workflows/runner-router.yml@main
     with:
+      labels: '["self-hosted","linux","x64","microvm"]'
       fallback: '["blacksmith-2vcpu-ubuntu-2404"]'
     secrets:
       RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
