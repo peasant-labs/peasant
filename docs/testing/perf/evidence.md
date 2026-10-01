@@ -907,3 +907,42 @@ baseline. Five flags, each re-measured focused and resolved as load noise:
 No focused re-measure grew by 5 s or more. State it as a screen, not a proof:
 moving tests out of the race pass changes the packing of the tests that remain
 in the same package.
+
+## T2 (fresh-install baseline) — create new databases at head from a pinned snapshot
+
+Change: `store.Open` on a brand-new file now applies a committed head-schema
+snapshot (`internal/store/baseline_schema.sql`) instead of replaying the
+61-migration chain. Existing databases keep the chain as their only upgrade
+path, and the shipped migrations are unchanged. The snapshot is generated from
+the chain and pinned by byte equality over two independent chain builds.
+
+Vehicle: `BenchmarkFreshDatabaseOpen` in `internal/store` (committed
+benchmark-only at `5c9551ef`; the identical file sits at the slice tip). Each
+iteration opens a distinct brand-new path and closes it, so every iteration
+pays a full fresh-install.
+
+Command (identical on both revisions; no `-race`, default `GOGC`, one discarded
+warmup at `-benchtime=5x`, then the measured run):
+
+```
+go test -run '^$' -bench '^BenchmarkFreshDatabaseOpen$' -benchtime=30x -count=1 ./internal/store
+```
+
+`GOMAXPROCS=32` (AMD Ryzen 9 7950X3D, 16 cores / 32 threads). GNU time resolved
+at measurement time: `/run/current-system/sw/bin/time` (GNU Time 1.10);
+`/usr/bin/time` is absent on this box. `L` is the 1-minute load average just
+before each measured run; the box ran other work concurrently.
+
+| revision | fresh-path | ns/op (30 iters) | allocs/op | bytes/op | wall (s) | user (s) | sys (s) | L |
+|---|---|---|---|---|---|---|---|---|
+| `5c9551ef` | chain replay (before) | 104395445 | 2085 | 257433 | 4.31 | 2.82 | 0.90 | 10.29 |
+| `d05ee6bf` | baseline snapshot (after) | 57793838 | 594 | 44098 | 3.32 | 1.54 | 0.90 | 13.18 |
+
+Gain: 1.81x on the fresh-open microbenchmark (104.4 ms -> 57.8 ms per open);
+the identical command's wall fell 4.31 s -> 3.32 s and allocations 2085 -> 594.
+No threshold gate: this is one serial pair on a shared box.
+
+L companion: 10.29 (before) -> 13.18 (after); the after run met the busier box,
+so the recorded gain is a floor. Both columns were measured from this slice's
+own worktree against the same benchmark file, so the only change between them
+is the fresh path itself.
