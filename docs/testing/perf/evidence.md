@@ -917,7 +917,7 @@ path, and the shipped migrations are unchanged. The snapshot is generated from
 the chain and pinned by byte equality over two independent chain builds.
 
 Vehicle: `BenchmarkFreshDatabaseOpen` in `internal/store` (committed
-benchmark-only at `5c9551ef`; the identical file sits at the final revision). Each
+benchmark-only at `5c9551ef`; the identical file sits at the final revision `116c2750`). Each
 iteration opens a distinct brand-new path and closes it, so every iteration
 pays a full fresh-install.
 
@@ -936,13 +936,12 @@ before each measured run; the box ran other work concurrently.
 | revision | fresh-path | ns/op (30 iters) | allocs/op | bytes/op | wall (s) | user (s) | sys (s) | L |
 |---|---|---|---|---|---|---|---|---|
 | `5c9551ef` | chain replay (before) | 104395445 | 2085 | 257433 | 4.31 | 2.82 | 0.90 | 10.29 |
-| `d05ee6bf` | baseline snapshot (after) | 57793838 | 594 | 44098 | 3.32 | 1.54 | 0.90 | 13.18 |
+| `116c2750` | baseline snapshot (after) | 51450151 | 604 | 44779 | 2.64 | 1.31 | 0.80 | 11.00 |
 
-Gain: 1.81x on the fresh-open microbenchmark (104.4 ms -> 57.8 ms per open);
-the identical command's wall fell 4.31 s -> 3.32 s and allocations 2085 -> 594.
+Gain: 2.03x on the fresh-open microbenchmark (104.4 ms -> 51.5 ms per open);
+the identical command's wall fell 4.31 s -> 2.64 s and allocations 2085 -> 604.
 No threshold gate: this is one serial pair on a shared box.
 
-L companion: 10.29 (before) -> 13.18 (after); the after run met the busier box,
-so the recorded gain is a floor. Both columns were measured in this change's own
-worktree against the same benchmark file, so the only change between them is
-the fresh path itself.
+L companion: 10.29 (before) -> 11.00 (after). Both columns were measured in this
+change's own worktree against the same benchmark file, so the only change
+between them is the fresh path itself.
