@@ -29,6 +29,11 @@
 # Every case is required by name. The first eight are the acceptance cases
 # of auto-publish rules; the rest guard the behavior around them.
 requiredNames:
+  - multiple-documents-refuse-a-save
+  - active-document-followed-by-paused-document
+  - paused-document-followed-by-active-document
+  - rules-followed-by-empty-document
+  - rules-followed-by-malformed-document
   - rule-required-push-stops-with-only-a-commit-binding
   - rule-required-commit-keeps-a-commit-binding
   - paused-session-is-absent-from-redaction-record
@@ -964,3 +969,64 @@ cases:
     again: [--force, --require-auto-publish-rule, --auto-publish-event, post-commit]
     config: {visibility: public, license: CC-BY-4.0}
     expect: {publishes: 2, audience: {review: pending}, others: {}}
+
+  - name: active-document-followed-by-paused-document
+    driver: validate
+    rulesFile: |
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: []}
+      ---
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [], collectives: []}
+    expect:
+      invalid: exactly one YAML document
+
+  - name: paused-document-followed-by-active-document
+    driver: validate
+    rulesFile: |
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [], collectives: []}
+      ---
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: []}
+    expect:
+      invalid: exactly one YAML document
+
+  - name: rules-followed-by-empty-document
+    driver: validate
+    rulesFile: |
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: []}
+      ---
+    expect:
+      invalid: exactly one YAML document
+
+  - name: rules-followed-by-malformed-document
+    driver: validate
+    rulesFile: |
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: []}
+      ---
+      autoPublish: [unfinished
+    expect:
+      invalid: exactly one YAML document
+
+  - name: multiple-documents-refuse-a-save
+    driver: rule-body
+    method: PUT
+    body: '{"kind":"remote","match":"github.com/acme/tools","events":["pre-push"],"collectives":["11111111-1111-4111-8111-111111111111"]}'
+    rulesFile: |
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: []}
+      ---
+      version: 1
+      autoPublish:
+        - {id: work, kind: remote, match: github.com/acme/tools, events: [], collectives: []}
+    expect: {status: 500}
