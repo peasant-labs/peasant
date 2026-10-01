@@ -238,13 +238,14 @@ func decodeRefusal(t *testing.T, status int, body []byte, wantStatus int, wantCo
 var publicationsYAML []byte
 
 type publicationsCase struct {
-	Name          string                               `yaml:"name"`
-	Published     []string                             `yaml:"published"`
-	VillageShares map[string]schema.VillageShareStatus `yaml:"villageShares"`
-	FailedAttempt []string                             `yaml:"failedAttempt"`
-	SignedOut     bool                                 `yaml:"signedOut"`
-	VillageDown   bool                                 `yaml:"villageDown"`
-	Query         struct {
+	Name           string                               `yaml:"name"`
+	Published      []string                             `yaml:"published"`
+	VillageShares  map[string]schema.VillageShareStatus `yaml:"villageShares"`
+	FailedAttempt  []string                             `yaml:"failedAttempt"`
+	SignedOut      bool                                 `yaml:"signedOut"`
+	VillageDown    bool                                 `yaml:"villageDown"`
+	TranscriptGone bool                                 `yaml:"transcriptGone"`
+	Query          struct {
 		SessionIDs string `yaml:"sessionIds"`
 		Include    string `yaml:"include"`
 	} `yaml:"query"`
@@ -304,6 +305,9 @@ func runPublicationsCase(t *testing.T, c publicationsCase) {
 		if err := os.Remove(filepath.Join(string(defaults.ResolveConfigDirPathWith(world.hs.Config)), string(defaults.CredentialsFile))); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if c.TranscriptGone {
+		world.village.DeleteTranscript(schema.TranscriptID(insideSessionID))
 	}
 	if c.VillageDown {
 		world.village.Close()

@@ -16,6 +16,7 @@
 #                   publish
 #   signedOut       the computer holds no Village credential when it reads
 #   villageDown     Village does not answer when it reads
+#   transcriptGone  the published transcript was deleted on Village
 #   query           sessionIds (aliases, comma-separated as sent) and include
 #   expect          the status and error code, or each returned row in order:
 #                   its state, outsideSelection, whether it names its
@@ -29,6 +30,7 @@ requiredNames:
   - failed-attempt-is-reported
   - audience-lists-live-shares-only
   - audience-is-an-empty-list
+  - audience-of-a-deleted-transcript
   - audience-needs-village
   - session-ids-required
   - unknown-include-refused
@@ -96,6 +98,14 @@ cases:
       status: 200
       rows:
         - {session: inside, state: published, outsideSelection: false, transcript: true, audience: {}}
+
+  - name: audience-of-a-deleted-transcript
+    published: [inside]
+    transcriptGone: true
+    query: {sessionIds: "inside", include: audience}
+    expect:
+      status: 502
+      code: village_transcript_missing
 
   - name: audience-needs-village
     published: [inside]

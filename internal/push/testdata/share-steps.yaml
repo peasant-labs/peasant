@@ -22,6 +22,9 @@
 #             the share at the same moment), failShareRead (the share history
 #             read), and waitingPullRequest (a pull request waiting on the
 #             session's repository).
+#   transcriptGone (under village) deletes the transcript on Village after
+#             the earlier publish, so the receipt names a transcript Village
+#             no longer holds.
 #   expect    the session status and counts, each step in run order with its
 #             collective alias and outcome (reason: true when the step must say
 #             why), what the session error must contain, how many publish
@@ -43,6 +46,8 @@ requiredNames:
   - removal-runs-after-a-failed-content-update
   - share-that-loses-a-race-fails
   - already-pending-is-skipped
+  - share-to-a-deleted-transcript-names-the-recovery
+  - removal-from-a-deleted-transcript-names-the-recovery
 
 collectives:
   platform: {id: 11111111-1111-4111-8111-111111111111, acceptance: open, member: true}
@@ -243,6 +248,7 @@ cases:
         - "stopped at sending the content: the push stopped before it sent this session"
         - "Village kept the transcript at https://village.example/transcripts/"
         - "not attempted: take back from 11111111-1111-4111-8111-111111111111, share with 22222222-2222-4222-8222-222222222222"
+        - "with the content it had before and the same readers"
       publishes: 0
       audience: {platform: approved}
 
@@ -307,3 +313,45 @@ cases:
       transcriptUrl: true
       publishes: 0
       audience: {review: pending, platform: approved}
+
+  # The transcript was deleted on Village; the receipt still names it and the
+  # content is unchanged, so publishing again alone would skip it.
+  - name: share-to-a-deleted-transcript-names-the-recovery
+    session: ready
+    before: [platform]
+    request: {add: [research]}
+    village: {transcriptGone: true}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: skipped, reason: true}
+        - {step: add_collective, collective: research, outcome: failed, reason: true}
+      errorContains:
+        - "Village no longer holds the transcript"
+        - "push --force' choosing only this session"
+      errorOmits:
+        - "Village kept the transcript"
+        - "Publish again to retry"
+      transcriptUrl: true
+      publishes: 0
+      audience: {}
+
+  - name: removal-from-a-deleted-transcript-names-the-recovery
+    session: ready
+    before: [platform]
+    request: {remove: [platform]}
+    village: {transcriptGone: true}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: skipped, reason: true}
+        - {step: remove_collective, collective: platform, outcome: failed, reason: true}
+      errorContains:
+        - "Village no longer holds the transcript"
+      errorOmits:
+        - "Village kept the transcript"
+      transcriptUrl: true
+      publishes: 0
+      audience: {}

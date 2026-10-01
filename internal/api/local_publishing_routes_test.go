@@ -144,8 +144,21 @@ func TestVillageCollectivesRouteSuggestsForTheSession(t *testing.T) {
 		}
 	}
 
+	// A collective whose repositories cannot be read gets no suggestion, and
+	// the list is still served; a refused credential fails it.
+	world.village.AnswerRepositories(http.StatusInternalServerError)
+	for name, s := range read(insideSessionID) {
+		if s != nil && s.Reason == schema.LocalCollectiveSuggestionLinkedRepository {
+			t.Errorf("%s is suggested by a repository Village could not list: %+v", name, s)
+		}
+	}
+	world.village.AnswerRepositories(http.StatusUnauthorized)
+	status, body := world.request(t, http.MethodGet, defaults.RouteVillageCollectives.String()+"?sessionId="+insideSessionID, nil)
+	decodeRefusal(t, status, body, http.StatusUnauthorized, villageSignedOutCode)
+	world.village.AnswerRepositories(0)
+
 	world.village.AnswerCollectives(http.StatusUnauthorized)
-	status, body := world.request(t, http.MethodGet, defaults.RouteVillageCollectives.String(), nil)
+	status, body = world.request(t, http.MethodGet, defaults.RouteVillageCollectives.String(), nil)
 	decodeRefusal(t, status, body, http.StatusUnauthorized, villageSignedOutCode)
 	world.village.AnswerCollectives(0)
 
