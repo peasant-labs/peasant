@@ -63,6 +63,7 @@ interface SessionSpec {
   state: 'unpublished' | 'published';
   autoPublish?: boolean;
   audience?: number;
+  audienceStatuses?: ('approved' | 'pending')[];
   outsideSelection?: boolean;
   publication?: boolean;
 }
@@ -84,6 +85,7 @@ const REQUIRED_NAMES = [
   'auto-counts',
   'outside-selection-hidden',
   'load-more',
+  'pending-collectives-cannot-read',
 ] as const;
 
 function loadFilterCases(): FilterCase[] {
@@ -108,7 +110,7 @@ function loadFilterCases(): FilterCase[] {
     testCase.sessions.forEach((session, sessionIndex) => {
       const at = `${where}.sessions[${sessionIndex}]`;
       const spec = requireRecord(session, at);
-      requireExactFields(spec, ['id', 'count', 'project', 'syncStatus', 'state', 'autoPublish', 'audience', 'outsideSelection', 'publication'], at);
+      requireExactFields(spec, ['id', 'count', 'project', 'syncStatus', 'state', 'autoPublish', 'audience', 'audienceStatuses', 'outsideSelection', 'publication'], at);
       if (!(String(spec.project) in PROJECTS)) throw new Error(`${at}.project must be alpha or beta`);
       if (!['new', 'updated', 'synced'].includes(String(spec.syncStatus))) throw new Error(`${at}.syncStatus is invalid`);
       if (!['unpublished', 'published'].includes(String(spec.state))) throw new Error(`${at}.state is invalid`);
@@ -173,7 +175,7 @@ function publicationRow(spec: SessionSpec, index: number, withAudience: boolean)
           audience: Array.from({ length: spec.audience ?? 0 }, (_, member) => ({
             collectiveId: uuid('10000000', member),
             name: `collective ${member + 1}`,
-            status: 'approved',
+            status: spec.audienceStatuses?.[member] ?? 'approved',
           })),
         }
       : {}),
