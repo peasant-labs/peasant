@@ -2,7 +2,9 @@
 # parent session directory:
 #
 #   {slug}/{uuid}/subagents/agent-{hex}.jsonl
-#   {slug}/{uuid}/subagents/workflows/wf_{run}/agent-{hex}.jsonl
+#   {slug}/{uuid}/subagents/workflows/{run}/agent-{hex}.jsonl
+#
+# {run} is a directory whose name starts with wf_; the whole name is the run id.
 #
 # Each case is a source tree rooted at the Claude source path, built up over
 # one or more runs. Before each run its `files` are written (a path written
@@ -151,8 +153,8 @@ cases:
           - id: 11111111-1111-4111-8111-111111111111
             source: -home-user-project/11111111-1111-4111-8111-111111111111.jsonl
 
-  # Claude Code can write the last turns of a workflow agent to the plain
-  # location under the same agent id, after the run transcript. One session id
+  # Claude Code has been seen to write the last turns of a workflow agent to
+  # the plain location under the same agent id, after the run transcript. One session id
   # holds one transcript, so the run transcript keeps the id and the plain tail
   # is left out.
   - name: workflow agent sharing a plain subagent id keeps the workflow transcript

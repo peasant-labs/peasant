@@ -26,16 +26,16 @@ type DirName string
 func (d DirName) String() string { return string(d) }
 
 const (
-	DirSubagents DirName = "subagents"
-	// DirClaudeWorkflows is the directory under a Claude session's subagents
-	// directory where the workflow runtime keeps one directory per run.
-	DirClaudeWorkflows DirName = "workflows"
+	DirSubagents       DirName = "subagents"
 	DirDebug           DirName = "debug"
 	OpenCodeDirStorage DirName = "storage"
 	OpenCodeDirSession DirName = "session"
 	OpenCodeDirMessage DirName = "message"
 	OpenCodeDirPart    DirName = "part"
 	OpenCodeDirProject DirName = "project"
+	// ClaudeDirWorkflows is the directory under a Claude session's subagents
+	// directory where the workflow runtime keeps one directory per run.
+	ClaudeDirWorkflows DirName = "workflows"
 )
 
 // DebugArtifactSuffixes is the CLOSED set of extensions a debug output Peasant

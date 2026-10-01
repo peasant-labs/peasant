@@ -229,15 +229,15 @@ source path, which is where the run id is kept; the run's `journal.jsonl` is not
 One session id holds one transcript. Claude Code has been seen to write the last turns of a
 workflow agent to the plain location under the same agent id, after the run transcript. Discovery
 admits workflow transcripts first, so the run transcript keeps the id on every harvest, whichever
-file a harvest saw first; the plain file is left out and logged. Two run directories holding the
+file a harvest saw first; the plain file is left out and logged at debug level. Two run directories holding the
 same agent id keep the lexically first one. A child stored from the plain file by a build
 that did not read workflow runs is switched to the run transcript once. Joining the two files into
 one transcript is not done yet.
 
-A parent is extracted again only when its own transcript changes. A parent stored before its
-workflow children appeared therefore keeps its earlier child list in its saved metadata, and in
-what it publishes, although the new children are stored under it. `peasant harvest --force`
-refreshes the list.
+An ordinary harvest does not extract a parent whose own transcript is unchanged. A parent stored
+before its workflow children appeared therefore keeps its earlier child list in its saved
+metadata, and in what it publishes, although the new children are stored under it.
+`peasant harvest --force --session <parent-id>` extracts that parent again and refreshes the list.
 
 ---
 

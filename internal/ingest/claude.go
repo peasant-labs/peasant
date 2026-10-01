@@ -132,7 +132,7 @@ type claudeFileOpener interface {
 //
 // One session id holds one transcript, so under one source path the first
 // transcript admitted for an agent id keeps it and a later one is left out and
-// logged. Workflow transcripts are admitted before plain ones, in lexical path
+// logged at debug level. Workflow transcripts are admitted before plain ones, in lexical path
 // order: Claude Code has been seen to write the last turns of a workflow agent
 // to the plain location under the same id after its run transcript, and
 // admitting the run transcript first keeps the fuller transcript and makes the
@@ -285,7 +285,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		admitted := make(map[SessionID]ResolvedPath)
 		for _, entry := range append(workflowEntries, subagentEntries...) {
 			if kept, taken := admitted[entry.subagentID]; taken {
-				slog.Info("claude discovery: transcript left out, another transcript holds its agent id",
+				slog.Debug("claude discovery: transcript left out, another transcript holds its agent id",
 					"session_id", entry.subagentID.String(), "left_out", entry.path, "kept", kept.String())
 				continue
 			}
@@ -346,8 +346,9 @@ func (a *ClaudeAdapter) ReminedCount() int { return a.reminedCount }
 // or inside one workflow run directory:
 //
 //	{project-slug}/{uuid}/subagents/agent-{hex}.jsonl
-//	{project-slug}/{uuid}/subagents/workflows/wf_{run}/agent-{hex}.jsonl
+//	{project-slug}/{uuid}/subagents/workflows/{run}/agent-{hex}.jsonl
 //
+// {run} is a directory whose name starts with wf_; the whole name is the run id.
 // workflow reports the second layout. Any other path is not a subagent path.
 func claudeSubagentLocation(parts []string) (parent, file string, workflow, ok bool) {
 	if len(parts) < 4 || parts[2] != defaults.DirSubagents.String() {
@@ -356,7 +357,7 @@ func claudeSubagentLocation(parts []string) (parent, file string, workflow, ok b
 	switch {
 	case len(parts) == 4:
 		return parts[1], parts[3], false, true
-	case len(parts) == 6 && parts[3] == defaults.DirClaudeWorkflows.String() && isClaudeWorkflowRun(parts[4]):
+	case len(parts) == 6 && parts[3] == defaults.ClaudeDirWorkflows.String() && isClaudeWorkflowRun(parts[4]):
 		return parts[1], parts[5], true, true
 	default:
 		return "", "", false, false
