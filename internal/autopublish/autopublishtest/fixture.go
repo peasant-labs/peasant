@@ -63,6 +63,32 @@ var fieldsOf = map[Driver][]string{
 	DriverVillageAuto: {"failTranscriptRead", "rules", "foreignHook", "handAdded", "forkUpstream", "hooksPath", "publications", "unrecorded", "signedOut", "errorContains", "outputContains", "output", "rule", "ruleIds", "installed", "binding"},
 }
 
+// SessionRole identifies one recorded session arrangement in the fixture.
+type SessionRole string
+
+const (
+	SessionClone         SessionRole = "clone"
+	SessionGone          SessionRole = "gone"
+	SessionLinked        SessionRole = "linked"
+	SessionUnrelated     SessionRole = "unrelated"
+	SessionGoneSubfolder SessionRole = "gone-subfolder"
+)
+
+// AllSessionRoles is the closed session arrangement set.
+var AllSessionRoles = []SessionRole{SessionClone, SessionGone, SessionLinked, SessionUnrelated, SessionGoneSubfolder}
+
+// RepositoryRole identifies a repository in a mounted installation world.
+type RepositoryRole string
+
+const (
+	RepositoryRecorded   RepositoryRole = "recorded"
+	RepositorySecond     RepositoryRole = "second"
+	RepositoryUnrecorded RepositoryRole = "unrecorded"
+)
+
+// AllRepositoryRoles is the closed installation repository set.
+var AllRepositoryRoles = []RepositoryRole{RepositoryRecorded, RepositorySecond, RepositoryUnrecorded}
+
 // Collective is one collective the Village double knows, by alias.
 type Collective struct {
 	ID         schema.VillageUUID                `yaml:"id"`
@@ -103,8 +129,8 @@ type Case struct {
 	} `yaml:"repository"`
 	// Install names the repository the install call names: recorded or
 	// unrecorded. RemoteRecorded gives the recorded repository an origin.
-	Install        string `yaml:"install"`
-	RemoteRecorded bool   `yaml:"remoteRecorded"`
+	Install        RepositoryRole `yaml:"install"`
+	RemoteRecorded bool           `yaml:"remoteRecorded"`
 	// ForeignHook is the content of a pre-push hook Peasant did not write,
 	// placed in the target repository first.
 	ForeignHook string `yaml:"foreignHook"`
@@ -125,8 +151,8 @@ type Case struct {
 	// more session each: "clone" in another clone of the same remote, "gone"
 	// in a clone removed after the session was recorded, and "linked" in a
 	// linked worktree inside the repository.
-	NoRemote bool     `yaml:"noRemote"`
-	Sessions []string `yaml:"sessions"`
+	NoRemote bool          `yaml:"noRemote"`
+	Sessions []SessionRole `yaml:"sessions"`
 	// Before publishes the sessions once, with no rule, before the case's
 	// rules are written; VillagePublic then makes the transcript public on
 	// Village, as its owner could.
@@ -186,7 +212,7 @@ type Expect struct {
 	Label           string                                                   `yaml:"label"`
 	// Installed names the repositories that hold a Peasant-managed pre-push
 	// hook afterwards.
-	Installed []string `yaml:"installed"`
+	Installed []RepositoryRole `yaml:"installed"`
 	// ErrorContains are parts of the command's error, none meaning it
 	// succeeds; OutputContains parts of its standard error.
 	ErrorContains  []string `yaml:"errorContains"`
@@ -198,12 +224,12 @@ type Expect struct {
 	// read the recorded session's transcript afterwards (approved or pending),
 	// and Others those of each extra session's, by alias; OwnerUpdates the owner visibility updates;
 	// AttemptContains part of the session's latest failed attempt.
-	Publishes       *int                                            `yaml:"publishes"`
-	License         schema.License                                  `yaml:"license"`
-	Audience        map[string]schema.VillageShareStatus            `yaml:"audience"`
-	Others          map[string]map[string]schema.VillageShareStatus `yaml:"others"`
-	OwnerUpdates    int                                             `yaml:"ownerUpdates"`
-	AttemptContains string                                          `yaml:"attemptContains"`
+	Publishes       *int                                                 `yaml:"publishes"`
+	License         schema.License                                       `yaml:"license"`
+	Audience        map[string]schema.VillageShareStatus                 `yaml:"audience"`
+	Others          map[SessionRole]map[string]schema.VillageShareStatus `yaml:"others"`
+	OwnerUpdates    int                                                  `yaml:"ownerUpdates"`
+	AttemptContains string                                               `yaml:"attemptContains"`
 	// Output is the exact standard output.
 	Output string `yaml:"output"`
 	// Rule is the one rule hooks.yaml holds afterwards; "{remote}" in its
@@ -255,8 +281,21 @@ func Load(t *testing.T) Fixture {
 			t.Fatalf("%s: case %q makes a transcript public but publishes none before (before)", Path, c.Name)
 		}
 		for _, session := range c.Sessions {
-			if !slices.Contains([]string{"clone", "gone", "linked", "unrelated", "gone-subfolder"}, session) {
-				t.Fatalf("%s: case %q names session %q; use clone, gone, or linked", Path, c.Name, session)
+			if !slices.Contains(AllSessionRoles, session) {
+				t.Fatalf("%s: case %q names session %q; use one of %v", Path, c.Name, session, AllSessionRoles)
+			}
+		}
+		if c.Install != "" && !slices.Contains(AllRepositoryRoles, c.Install) {
+			t.Fatalf("%s: case %q names unknown install repository %q", Path, c.Name, c.Install)
+		}
+		for session := range c.Expect.Others {
+			if !slices.Contains(AllSessionRoles, session) {
+				t.Fatalf("%s: case %q names unknown expected session %q", Path, c.Name, session)
+			}
+		}
+		for _, repository := range c.Expect.Installed {
+			if !slices.Contains(AllRepositoryRoles, repository) {
+				t.Fatalf("%s: case %q names unknown installed repository %q", Path, c.Name, repository)
 			}
 		}
 		aliases := append(append(mapKeys(c.VillageDecides), mapKeys(c.Expect.Audience)...), c.FailShare...)

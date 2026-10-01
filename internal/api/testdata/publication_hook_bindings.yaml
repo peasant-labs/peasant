@@ -1,4 +1,7 @@
 requiredNames:
+  - a nonexecutable guarded hook is dormant
+  - a moved guarded repository is dormant
+  - a resumed guarded binding publishes again
   - terminal-hook-with-no-rule
   - guarded-hook-with-no-rule
   - guarded-hook-after-binding-deleted
@@ -9,6 +12,21 @@ requiredNames:
   - guarded-push-keeps-an-overlapping-push-binding
   - guarded-push-stops-with-only-a-commit-binding
 cases:
+  - name: a nonexecutable guarded hook is dormant
+    guarded: true
+    events: [pre-push]
+    nonexecutable: true
+    expect: false
+  - name: a moved guarded repository is dormant
+    guarded: true
+    events: [pre-push]
+    moved: true
+    expect: false
+  - name: a resumed guarded binding publishes again
+    guarded: true
+    events: []
+    resume: true
+    expect: true
   - name: terminal-hook-with-no-rule
     expect: true
   - name: guarded-hook-with-no-rule

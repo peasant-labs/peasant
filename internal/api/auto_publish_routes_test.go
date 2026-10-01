@@ -53,8 +53,8 @@ type autoPublishWorldOptions struct {
 	level redact.RedactionLevel
 }
 
-func (w *autoPublishWorld) repository(name string) string {
-	return map[string]string{"recorded": w.recorded, "second": w.second, "unrecorded": w.unrecorded}[name]
+func (w *autoPublishWorld) repository(name autopublishtest.RepositoryRole) string {
+	return map[autopublishtest.RepositoryRole]string{"recorded": w.recorded, "second": w.second, "unrecorded": w.unrecorded}[name]
 }
 
 func (w *autoPublishWorld) rulesPath() string {
@@ -249,8 +249,8 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 			}
 
 			for _, name := range []string{"recorded", "second", "unrecorded"} {
-				hook := prePushHook(t, world.repository(name))
-				if managed := githooks.IsManaged(hook); managed != slices.Contains(c.Expect.Installed, name) {
+				hook := prePushHook(t, world.repository(autopublishtest.RepositoryRole(name)))
+				if managed := githooks.IsManaged(hook); managed != slices.Contains(c.Expect.Installed, autopublishtest.RepositoryRole(name)) {
 					t.Errorf("%s repository holds a managed pre-push hook = %v, want %v", name, managed, !managed)
 				}
 			}
@@ -390,53 +390,6 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 		t.Fatalf("autoPublish after the install = %v; the listed session publishes and the one the selection leaves out does not", got)
 	}
 
-	// A hook git does not run publishes nothing, and installing is offered.
-	hookPath := filepath.Join(world.recorded, ".git", "hooks", "pre-push")
-	if err := os.Chmod(hookPath, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := autoPublish(); got[recordedInsideSessionID] {
-		t.Fatalf("autoPublish with a hook git does not run = %v", got)
-	}
-	if again := world.save(t, "work", rule); again.Repositories[0].Hooks[0].Status != schema.AutoPublishHookAbsent {
-		t.Fatalf("a hook git does not run is reported %q; installing repairs it, so it is absent", again.Repositories[0].Hooks[0].Status)
-	}
-	if err := os.Chmod(hookPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// A hook that names a repository that has moved fails on every event, so
-	// it publishes nothing either.
-	written, err := os.ReadFile(hookPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	moved := strings.Replace(string(written), "peasant_hook_repository="+githooks.ShellQuote(world.recorded), "peasant_hook_repository="+githooks.ShellQuote(world.dir+"/moved"), 1)
-	if moved == string(written) || !githooks.IsManaged([]byte(moved)) {
-		t.Fatal("the hook could not be pointed at a moved repository")
-	}
-	if err := os.WriteFile(hookPath, []byte(moved), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got := autoPublish(); got[recordedInsideSessionID] {
-		t.Fatalf("autoPublish with a hook for a moved repository = %v", got)
-	}
-	if err := os.WriteFile(hookPath, written, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// A paused rule over the repository makes a hook push publish nothing.
-	paused := rule
-	paused.Events = []schema.AutoPublishEvent{}
-	world.save(t, "work", paused)
-	if got := autoPublish(); got[recordedInsideSessionID] {
-		t.Fatalf("autoPublish under a paused rule = %v", got)
-	}
-	world.save(t, "work", rule)
-	if got := autoPublish(); !got[recordedInsideSessionID] {
-		t.Fatalf("autoPublish after the rule is resumed = %v", got)
-	}
-
 	var removed schema.AutoPublishRemovalResponse
 	status, body = world.request(t, http.MethodDelete, ruleRoute("work"), nil)
 	decodeContract(t, status, body, &removed)
@@ -476,6 +429,9 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 			Name           string                    `yaml:"name"`
 			Guarded        bool                      `yaml:"guarded"`
 			Manual         bool                      `yaml:"manual"`
+			Nonexecutable  bool                      `yaml:"nonexecutable"`
+			Moved          bool                      `yaml:"moved"`
+			Resume         bool                      `yaml:"resume"`
 			Corrupt        bool                      `yaml:"corrupt"`
 			Events         []schema.AutoPublishEvent `yaml:"events"`
 			RetainedEvents []schema.AutoPublishEvent `yaml:"retainedEvents"`
@@ -508,6 +464,24 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 				if err != nil || report.Blocked() {
 					t.Fatalf("install: %+v, %v", report, err)
 				}
+			}
+			if c.Nonexecutable {
+				if err := os.Chmod(hookPath, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.Moved {
+				written := prePushHook(t, world.recorded)
+				moved := strings.Replace(string(written), "peasant_hook_repository="+githooks.ShellQuote(world.recorded), "peasant_hook_repository="+githooks.ShellQuote(world.dir+"/moved"), 1)
+				if moved == string(written) || !githooks.IsManaged([]byte(moved)) {
+					t.Fatal("the hook could not be pointed at a moved repository")
+				}
+				if err := os.WriteFile(hookPath, []byte(moved), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.Resume {
+				world.save(t, "work", schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.recorded, Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}})
 			}
 			if c.RetainedEvents != nil {
 				world.save(t, "retained", schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: world.recorded, Events: c.RetainedEvents, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}})

@@ -31,7 +31,7 @@ import (
 // double has its session's ID.
 const autoPublishSessionID = "abcd1234-abcd-4bcd-8bcd-abcdef123456"
 
-var autoPublishExtraIDs = map[string]string{
+var autoPublishExtraIDs = map[autopublishtest.SessionRole]string{
 	"clone":          "abcd1234-abcd-4bcd-8bcd-abcdef120000",
 	"gone":           "abcd1234-abcd-4bcd-8bcd-abcdef120010",
 	"linked":         "abcd1234-abcd-4bcd-8bcd-abcdef120020",
@@ -111,7 +111,7 @@ func newAutoPublishWorld(t *testing.T, fixture autopublishtest.Fixture, c autopu
 
 // seedExtra records the extra session of one role: in another clone, in a
 // clone that is then removed, or in a linked worktree inside the repository.
-func (w *autoPublishWorld) seedExtra(t *testing.T, role string) {
+func (w *autoPublishWorld) seedExtra(t *testing.T, role autopublishtest.SessionRole) {
 	t.Helper()
 	switch role {
 	case "gone-subfolder":
@@ -380,7 +380,7 @@ func TestAutoPublishPush(t *testing.T) {
 				t.Fatalf("a push case states the audience of each extra session: %v for %v", c.Expect.Others, c.Sessions)
 			}
 			for _, role := range c.Sessions {
-				assertAudience(t, "the "+role+" session's", w.audience(autoPublishExtraIDs[role]), c.Expect.Others[role])
+				assertAudience(t, "the "+string(role)+" session's", w.audience(autoPublishExtraIDs[role]), c.Expect.Others[role])
 			}
 			if c.Expect.AttemptContains != "" {
 				assertLatestAttempt(t, w, autoPublishSessionID, c.Expect.AttemptContains)
@@ -569,7 +569,7 @@ func TestVillageAuto(t *testing.T) {
 				}
 			}
 			for name, repo := range map[string]string{"recorded": w.repo, "unrecorded": w.fresh} {
-				if got := w.managedPrePush(t, repo) != nil; got != slices.Contains(c.Expect.Installed, name) {
+				if got := w.managedPrePush(t, repo) != nil; got != slices.Contains(c.Expect.Installed, autopublishtest.RepositoryRole(name)) {
 					t.Errorf("%s repository holds a managed pre-push hook = %v", name, got)
 				}
 			}
