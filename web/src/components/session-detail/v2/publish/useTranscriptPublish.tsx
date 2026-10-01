@@ -419,6 +419,8 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       const response = await publish(sessionId, request, readerCount, enableAutomatic ? async (response) => {
         const result = response.sessions.find((item) => item.sessionId === sessionId);
         if (!result || result.status === 'error' || result.status === 'held') return;
+        const accepted = publishOutcome({ response, sessionId, names, audienceBefore, requestedAdds: request.collectives?.add ?? [], fallbackUrl: publication?.transcriptUrl });
+        if (accepted.kind === 'stopped') return;
         let ruleId = automaticRuleIds.current.get(sessionId);
         if (!ruleId) {
           ruleId = crypto.randomUUID();
