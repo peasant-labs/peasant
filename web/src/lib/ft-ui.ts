@@ -81,11 +81,9 @@ import {
   SettingRow,
   SettingGroup,
   SETTING_ROW_STATES,
-  StatsStrip,
   Menu,
   CopyIconButton,
   CommandBlock,
-  Select,
 } from '@peasant-labs/fairtrade/ui';
 
 /**
@@ -226,7 +224,7 @@ export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
 
 // The settings page parts. Their declared props cover these call-sites; a row's
 // `data-*` attributes pass through to its element at runtime.
-export { SettingRow, SettingGroup, SETTING_ROW_STATES, StatsStrip, Menu, CopyIconButton, CommandBlock, Select };
+export { SettingRow, SettingGroup, SETTING_ROW_STATES, Menu, CopyIconButton, CommandBlock };
 
 /**
  * A single-color real brand mark for a harness (never a generic glyph);
