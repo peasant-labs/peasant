@@ -87,7 +87,10 @@ export default function SettingsPageClient() {
   }, []);
 
   const readAuth = useCallback(async () => {
+    setAuth(null);
     setAuthError(null);
+    setCollectives(null);
+    setCollectivesError(null);
     let signIn: SyncAuthResponse;
     try {
       signIn = await fetchVillageAuth();
@@ -148,7 +151,7 @@ export default function SettingsPageClient() {
           <FeedbackPanel variant="loading" title="reading your settings" />
         ) : (
           <FeedbackPanel variant="error" title="the settings could not be read">
-            <p className="stg-load-error">{load.error}</p>
+            <span className="stg-load-error">{load.error}</span>
             <Button variant="secondary" size="sm" onClick={() => { setLoad({ state: 'loading' }); void readSettings(); }}>try again</Button>
           </FeedbackPanel>
         )}
