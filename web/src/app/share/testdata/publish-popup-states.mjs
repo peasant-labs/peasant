@@ -12,7 +12,7 @@
 import { parseDocument } from 'yaml'
 
 const CASE_FIELDS = ['name', 'publication', 'signIn', 'village', 'scan', 'push', 'steps', 'expect']
-const ROOT_FIELDS = ['requiredNames', 'mobileCases', 'wizardLinks', 'collectives', 'matches', 'pullRequest', 'cases']
+const ROOT_FIELDS = ['requiredNames', 'mobileCases', 'visualEquivalentCases', 'wizardLinks', 'collectives', 'matches', 'pullRequest', 'cases']
 const SIGN_IN = ['signed-in', 'signed-out', 'waits', 'login-failed', 'already-authenticated']
 const SCAN = ['matches', 'failure', 'pending', 'matches-then-failure']
 const PUSH = /^(published|pending|approval|unauthorized|held|content-failed|(stopped|stopped-once|skipped):.+)$/
@@ -199,7 +199,21 @@ export function loadPublishStates(source) {
 
   const mobileCases = list(root.mobileCases, 'mobileCases').map((name, index) => text(name, `mobileCases[${index}]`))
   if (new Set(mobileCases).size !== mobileCases.length || mobileCases.some((name) => !caseNames.includes(name))) fail('mobileCases', 'expected unique existing case names')
-  return { requiredNames, mobileCases, wizardLinks, collectives, matches, pullRequest, cases }
+  const equivalentNames = new Set()
+  const visualEquivalentCases = list(root.visualEquivalentCases, 'visualEquivalentCases').map((group, index) => {
+    const where = `visualEquivalentCases[${index}]`
+    const names = list(group, where).map((name) => text(name, where))
+    if (names.length < 2 || new Set(names).size !== names.length) fail(where, 'expected at least two distinct case names')
+    const states = names.map((name) => {
+      if (!caseNames.includes(name) || equivalentNames.has(name)) fail(where, 'expected existing cases belonging to exactly one equivalent group')
+      equivalentNames.add(name)
+      const { bar, popup } = cases.find((entry) => entry.name === name).expect
+      return JSON.stringify({ bar, heading: popup?.heading, primary: popup?.primary })
+    })
+    if (!states.every((state) => state === states[0])) fail(where, 'equivalent cases must pin the same bar, dialog heading and primary action')
+    return names
+  })
+  return { requiredNames, mobileCases, visualEquivalentCases, wizardLinks, collectives, matches, pullRequest, cases }
 }
 
 /** The fixture's collective identifier at a catalog position: a valid v4 UUID. */

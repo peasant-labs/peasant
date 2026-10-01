@@ -11,6 +11,14 @@
 # popup must reach; a case leaves only by removing its name here too, and a case
 # without a name here is refused.
 mobileCases: [not-published, ready-to-publish, update-with-new-turns]
+# Different request paths can finish on the same canonical result. Only these
+# named pairs/groups may share a screenshot; every case still asserts its own
+# rendered copy and exact request body before the non-empty image gate runs.
+visualEquivalentCases:
+  - [ready-to-publish, connect-completes, already-authenticated]
+  - [published-done, update-adds-collective]
+  - [update-removes-collective, manage-removes-collective, partial-publish-removes-reader]
+  - [connect-to-village, signed-out-on-push]
 requiredNames:
   - only-curated-collective-waits
   - removes-final-collective

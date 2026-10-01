@@ -51,6 +51,7 @@ export interface PublishStatesCase {
 export interface PublishStatesFixture {
   requiredNames: string[];
   mobileCases: string[];
+  visualEquivalentCases: string[][];
   wizardLinks: string[];
   collectives: PublishStatesCollective[];
   matches: PublishStatesMatch[];

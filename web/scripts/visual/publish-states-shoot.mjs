@@ -277,8 +277,13 @@ async function shoot(browser, gate, fixture, entry, theme, viewport, turns, evid
     mkdirSync(directory, { recursive: true })
     const file = join(directory, `${entry.name}.png`)
     await page.screenshot({ path: file })
-    await gate.assert(`${theme}/${size}/${entry.name}`, file, { where: 'publish-states-shoot.mjs' })
-    evidence.captures.push({ case: entry.name, theme, size, file, url: page.url(), probes, pushes: world.pushRequests.length, scans: world.scanRequests })
+    // Distinct interactions can finish on the same canonical visual state.
+    // The fixture names those equivalents; all copy and request assertions
+    // above still run, and every unexpected duplicate remains an error.
+    const equivalentSurfaces = (fixture.visualEquivalentCases.find((names) => names.includes(entry.name)) ?? [])
+      .filter((name) => name !== entry.name).map((name) => `${theme}/${size}/${name}`)
+    const measurements = await gate.assert(`${theme}/${size}/${entry.name}`, file, { where: 'publish-states-shoot.mjs', equivalentSurfaces })
+    evidence.captures.push({ case: entry.name, theme, size, file, url: page.url(), probes, measurements, equivalentSurfaces, pushes: world.pushRequests.length, scans: world.scanRequests })
     console.log(`  ${theme} ${size} ${entry.name} -> ${file}`)
   } finally {
     await page.close()
