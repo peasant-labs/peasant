@@ -351,7 +351,7 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 // missingTranscriptReason explains a share change Village refused because the
 // transcript this computer's receipt names is gone from Village, for example
 // deleted there. An unchanged session is not uploaded again on its own.
-const missingTranscriptReason = "Village no longer holds the transcript this computer's receipt names, for example because it was deleted on Village; publish the session again with 'peasant village push --force' to recreate it, then change its collectives"
+const missingTranscriptReason = "Village no longer holds the transcript this computer's receipt names, for example because it was deleted on Village; run 'peasant village push --force' choosing only this session to publish it again, then change its collectives"
 
 // shareWithCollective offers the transcript to the step's collective and
 // reports what the collective did with it. Village's answer to a share does not
@@ -364,8 +364,9 @@ func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcrip
 	collective := *step.CollectiveID
 	err := sharer.ShareTranscript(ctx, transcript, collective)
 	var refusal *village.StatusError
-	duplicate := errors.As(err, &refusal) && refusal.StatusCode == http.StatusConflict
-	if errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
+	refused := errors.As(err, &refusal)
+	duplicate := refused && refusal.StatusCode == http.StatusConflict
+	if refused && refusal.StatusCode == http.StatusNotFound {
 		step.Outcome = schema.SyncPushStepFailed
 		step.Reason = missingTranscriptReason
 		return step
@@ -414,6 +415,13 @@ func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, s
 		fmt.Fprintf(&b, "stopped at sharing with collective %s: ", *stopped.CollectiveID)
 	}
 	b.WriteString(stopped.Reason)
+	if stopped.Reason == missingTranscriptReason {
+		// The receipt names a transcript Village no longer holds, so what the
+		// receipt says Village kept is not true, and the reason names the
+		// recovery.
+		b.WriteString(".")
+		return b.String()
+	}
 	var applied, skippedLater []string
 	for _, step := range steps {
 		if step.CollectiveID == nil {

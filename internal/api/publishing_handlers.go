@@ -143,7 +143,7 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 				var refusal *village.StatusError
 				if errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
 					writeAPIError(w, http.StatusBadGateway,
-						"Village no longer holds transcript "+transcriptID.String()+", which this computer's receipt names for session "+id+", for example because it was deleted on Village. Nothing was returned. Publish the session again with 'peasant village push --force' to recreate it, or omit include=audience, then retry.",
+						"Village no longer holds transcript "+transcriptID.String()+", which this computer's receipt names for session "+id+", for example because it was deleted on Village. Nothing was returned. Run 'peasant village push --force' choosing only this session to publish it again, or omit include=audience, then retry.",
 						villageTranscriptMissingCode)
 					return
 				}

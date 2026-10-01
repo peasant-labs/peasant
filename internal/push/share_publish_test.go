@@ -49,13 +49,16 @@ type shareStepsCase struct {
 		Remove []string `yaml:"remove"`
 	} `yaml:"request"`
 	Village struct {
-		Unreachable          bool     `yaml:"unreachable"`
-		RequiresNewerPeasant bool     `yaml:"requiresNewerPeasant"`
-		FailPublish          bool     `yaml:"failPublish"`
-		ConflictShare        []string `yaml:"conflictShare"`
-		FailShare            []string `yaml:"failShare"`
-		FailShareRead        bool     `yaml:"failShareRead"`
-		WaitingPullRequest   bool     `yaml:"waitingPullRequest"`
+		Unreachable          bool `yaml:"unreachable"`
+		RequiresNewerPeasant bool `yaml:"requiresNewerPeasant"`
+		FailPublish          bool `yaml:"failPublish"`
+		// TranscriptGone deletes the transcript on Village after the earlier
+		// publish, so the receipt names a transcript Village no longer holds.
+		TranscriptGone     bool     `yaml:"transcriptGone"`
+		ConflictShare      []string `yaml:"conflictShare"`
+		FailShare          []string `yaml:"failShare"`
+		FailShareRead      bool     `yaml:"failShareRead"`
+		WaitingPullRequest bool     `yaml:"waitingPullRequest"`
 	} `yaml:"village"`
 	Expect struct {
 		Status schema.SyncPushSessionStatus `yaml:"status"`
@@ -72,6 +75,7 @@ type shareStepsCase struct {
 			Reason     bool                       `yaml:"reason"`
 		} `yaml:"steps"`
 		ErrorContains       []string                             `yaml:"errorContains"`
+		ErrorOmits          []string                             `yaml:"errorOmits"`
 		TranscriptURL       bool                                 `yaml:"transcriptUrl"`
 		WaitingPullRequests int                                  `yaml:"waitingPullRequests"`
 		Publishes           *int                                 `yaml:"publishes"`
@@ -197,6 +201,9 @@ func runShareStepsCase(t *testing.T, fixture shareStepsFixture, c shareStepsCase
 	}
 	remote.RequireNewerPeasant(c.Village.RequiresNewerPeasant)
 	remote.FailPublish(c.Village.FailPublish)
+	if c.Village.TranscriptGone {
+		remote.DeleteTranscript(testutil.TestSessionUUID)
+	}
 	publishesBefore := len(remote.Publishes())
 	published, err := publish(push.CollectiveChanges{Add: ids(c.Request.Add), Remove: ids(c.Request.Remove)})
 	if err != nil {
@@ -235,6 +242,11 @@ func runShareStepsCase(t *testing.T, fixture shareStepsFixture, c shareStepsCase
 	for _, needle := range c.Expect.ErrorContains {
 		if !strings.Contains(result.Error, needle) {
 			t.Errorf("error %q does not say %q", result.Error, needle)
+		}
+	}
+	for _, needle := range c.Expect.ErrorOmits {
+		if strings.Contains(result.Error, needle) {
+			t.Errorf("error %q says %q, which is not true here", result.Error, needle)
 		}
 	}
 	if (result.TranscriptURL != "") != c.Expect.TranscriptURL {

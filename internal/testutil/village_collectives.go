@@ -67,6 +67,7 @@ type CollectiveVillage struct {
 	failShareRead        bool
 	requiresNewerPeasant bool
 	collectivesStatus    int
+	repositoriesStatus   int
 	promptRequests       []schema.VillagePromptRequest
 }
 
@@ -134,6 +135,23 @@ func (v *CollectiveVillage) RequireNewerPeasant(required bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.requiresNewerPeasant = required
+}
+
+// DeleteTranscript removes a transcript and its shares, as its owner can on
+// Village, so every later read or share change of it answers 404.
+func (v *CollectiveVillage) DeleteTranscript(transcript schema.TranscriptID) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.transcripts, transcript)
+	delete(v.events, transcript)
+}
+
+// AnswerRepositories makes every collective's linked repositories read
+// answer with the status instead of the list; 0 restores the lists.
+func (v *CollectiveVillage) AnswerRepositories(status int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.repositoriesStatus = status
 }
 
 // AnswerCollectives makes the collectives list answer with the status instead
@@ -262,6 +280,11 @@ func (v *CollectiveVillage) transcript(w http.ResponseWriter, r *http.Request, r
 		// one was live.
 		id := schema.VillageUUID(strings.TrimPrefix(share, "share/"))
 		v.mu.Lock()
+		if _, exists := v.transcripts[transcript]; !exists {
+			v.mu.Unlock()
+			http.Error(w, `{"error":"Transcript not found"}`, http.StatusNotFound)
+			return
+		}
 		if status, live := v.transcripts[transcript][id]; live && (status == schema.VillageShareStatusPending || status == schema.VillageShareStatusApproved) {
 			v.recordLocked(transcript, id, schema.VillageShareStatusRetracted)
 		}
@@ -433,6 +456,14 @@ func (v *CollectiveVillage) listCollectives(w http.ResponseWriter) {
 }
 
 func (v *CollectiveVillage) listRepositories(w http.ResponseWriter, id schema.VillageUUID) {
+	v.mu.Lock()
+	status := v.repositoriesStatus
+	v.mu.Unlock()
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(schema.VillageErrorResponse{Error: http.StatusText(status)})
+		return
+	}
 	collective, known := v.collectives[id]
 	if !known || !collective.Member {
 		w.WriteHeader(http.StatusForbidden)
