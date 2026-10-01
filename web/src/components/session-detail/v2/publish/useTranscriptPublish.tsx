@@ -53,7 +53,7 @@ function messageOf(error: unknown): string {
 type PublicationRead =
   | { status: 'loading' }
   | { status: 'ready'; publication: LocalPublication | null; audienceKnown: boolean }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string; transcriptMissing: boolean };
 
 /** Whether this computer is signed in to village, as far as the popup knows. */
 type SignIn = 'unknown' | 'signed-in' | 'signed-out' | 'waiting';
@@ -109,7 +109,13 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
         if (live) setRead({ status: 'ready', publication, audienceKnown });
       })
       .catch((error: unknown) => {
-        if (live) setRead({ status: 'error', message: messageOf(error) });
+        if (live) {
+          setRead({
+            status: 'error',
+            message: messageOf(error),
+            transcriptMissing: isPublishingError(error, PublishingErrorCode.VillageTranscriptMissing),
+          });
+        }
       });
     return () => {
       live = false;
@@ -348,7 +354,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
         {read.status === 'error' && (
           <>
             <span role="alert" className="font-mono text-[14px] text-ink-2" title={read.message}>
-              the publish state could not be read
+              {read.transcriptMissing ? 'village no longer holds this transcript' : 'the publish state could not be read'}
             </span>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReadNonce((nonce) => nonce + 1)}>
               <RotateCw size={14} aria-hidden="true" /> retry
