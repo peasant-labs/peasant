@@ -227,6 +227,12 @@ settings:
       - share-later
     editable: true
     inPeasantConfig: true
+  - key: push.autoPublishIntent
+    kind: boolean
+    value: null
+    effective: false
+    editable: true
+    inPeasantConfig: true
   - key: push.license
     kind: choice
     value: null
