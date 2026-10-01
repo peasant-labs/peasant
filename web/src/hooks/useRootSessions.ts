@@ -87,7 +87,7 @@ export function usePublicationAudience(sessionIds: readonly string[]): ReadonlyM
         setCounts((previous) => {
           const next = new Map(previous);
           for (const publication of publications) {
-            if (publication.audience) next.set(publication.sessionId, publication.audience.length);
+            if (publication.audience) next.set(publication.sessionId, publication.audience.filter((member) => member.status === 'approved').length);
           }
           return next;
         });

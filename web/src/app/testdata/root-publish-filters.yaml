@@ -21,6 +21,7 @@ requiredNames:
   - auto-counts
   - outside-selection-hidden
   - load-more
+  - pending-collectives-cannot-read
 cases:
   - name: all-counts
     sessions:
@@ -86,3 +87,14 @@ cases:
     expectedCounts: { all: 31, notPublished: 30, published: 1, auto: 0 }
     expectedPages: [25, 31]
     expectedRows: [bulk-00, bulk-01, bulk-02, bulk-03, bulk-04, bulk-05, bulk-06, bulk-07, bulk-08, bulk-09, bulk-10, bulk-11, bulk-12, bulk-13, bulk-14, bulk-15, bulk-16, bulk-17, bulk-18, bulk-19, bulk-20, bulk-21, bulk-22, bulk-23, bulk-24, bulk-25, bulk-26, bulk-27, bulk-28, bulk-29, s-last]
+
+  - name: pending-collectives-cannot-read
+    sessions:
+      - { id: s-approved, project: alpha, syncStatus: synced, state: published, audience: 3, audienceStatuses: [approved, pending, pending] }
+      - { id: s-pending, project: beta, syncStatus: synced, state: published, audience: 2, audienceStatuses: [pending, pending] }
+    filter: published
+    expectedCounts: { all: 2, notPublished: 0, published: 2, auto: 0 }
+    expectedRows: [s-approved, s-pending]
+    expectedLabels:
+      s-approved: published · 1 collective · up to date
+      s-pending: published · 0 collectives · up to date
