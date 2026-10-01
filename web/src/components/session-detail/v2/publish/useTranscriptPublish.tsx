@@ -305,7 +305,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   useEffect(() => {
     if (!open || draft !== null || signIn !== 'signed-in' || collectivesRead.status !== 'ready' || read.status !== 'ready') return;
     setOpenedAs(publishedNow);
-    setDraft(initialDraft(publishedNow, collectivesRead.collectives));
+    setDraft((current) => current ?? initialDraft(publishedNow, collectivesRead.collectives));
   }, [collectivesRead, draft, open, publishedNow, read.status, signIn]);
 
   // ── what leaves the machine: the cached local scan ───────────────────────
