@@ -175,7 +175,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike, pi; cleared by --all)")
 	} else {
 		// Native source overrides are relevant only for logs and all modes.
-		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike, pi)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Limit discovery to one harness, using its configured or default path (claude-code, opencode, codex, cursor, strike, pi)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
@@ -245,8 +245,20 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	fs := filesystem
 	git := &ingest.ExecGitResolver{}
 
+	// Resolve a harness-only selector before loading so its documented default
+	// can satisfy enabled-source path validation. Explicit path overrides still
+	// apply after loading and index mode never discovers native source paths.
+	var nativeHarness *defaults.Harness
+	if mode != harvestIndexOnly && flags.sourceHarness != "" && flags.sourcePath == "" {
+		provider, err := resolveHarnessFlag(flags.sourceHarness)
+		if err != nil {
+			return err
+		}
+		nativeHarness = &provider
+	}
+
 	// 2. Load config.
-	cfg, err := loadRunConfig(configPath, flags.dryRun)
+	cfg, err := loadRunConfigForHarnessOnly(configPath, flags.dryRun, nativeHarness)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -282,27 +294,30 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			}
 		}
 	} else {
-		if flags.sourceHarness != "" || flags.sourcePath != "" {
-			if flags.sourceHarness == "" {
-				return fmt.Errorf("--source-path requires --source-harness")
+		if flags.sourcePath != "" && flags.sourceHarness == "" {
+			return fmt.Errorf("--source-path requires --source-harness")
+		}
+		if flags.sourceHarness != "" {
+			var provider defaults.Harness
+			if nativeHarness != nil {
+				provider = *nativeHarness
+			} else {
+				var err error
+				provider, err = resolveHarnessFlag(flags.sourceHarness)
+				if err != nil {
+					return err
+				}
 			}
-			if flags.sourcePath == "" {
-				return fmt.Errorf("--source-harness requires --source-path")
+			if flags.sourcePath != "" {
+				resolved, err := ingest.NewResolvedPath(flags.sourcePath)
+				if err != nil {
+					return fmt.Errorf("resolve source path: %w", err)
+				}
+				applySourceOverride(cfg, provider, resolved)
 			}
-			provider, err := resolveHarnessFlag(flags.sourceHarness)
-			if err != nil {
-				return err
-			}
-			resolved, err := ingest.NewResolvedPath(flags.sourcePath)
-			if err != nil {
-				return fmt.Errorf("resolve source path: %w", err)
-			}
-			applySourceOverride(cfg, provider, resolved)
-			// --source-path (which requires --source-harness) scopes the run to
-			// the NAMED provider as the SOLE active source: disable default
-			// discovery of the OTHER providers so "ingest from THIS path" does not
-			// also read their real default dirs (~/.claude, opencode, codex) — the
-			// isolation leak exposed by the source-scoped integration path.
+			// --source-harness scopes the run to the named provider as the sole
+			// active source, whether its path comes from config, the default, or
+			// an explicit --source-path override.
 			isolateSourceHarness(cfg, provider)
 		}
 	}
