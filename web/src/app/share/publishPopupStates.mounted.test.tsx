@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parseDocument } from 'yaml';
 import type { ReactNode } from 'react';
 import { parseDocument } from 'yaml';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -40,13 +41,14 @@ const WAIT = { timeout: 3500 };
 let pathname = `/projects/${PROJECT_HASH}/${SESSION_ID}`;
 let search = '';
 const replaced: string[] = [];
+const pushed: string[] = [];
 const fetchProjectResolution = vi.fn();
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathname,
   useSearchParams: () => new URLSearchParams(search),
   useRouter: () => ({
-    push: vi.fn(),
+    push: (href: string) => { pushed.push(href); },
     replace: (href: string) => { replaced.push(href); },
   }),
 }));
@@ -217,6 +219,7 @@ beforeEach(() => {
   pathname = `/projects/${PROJECT_HASH}/${SESSION_ID}`;
   search = '';
   replaced.length = 0;
+  pushed.length = 0;
   fetchProjectResolution.mockReset();
   fetchProjectResolution.mockResolvedValue({ project: 'ingest-api', projectHash: PROJECT_HASH });
   if (typeof HTMLElement.prototype.scrollIntoView !== 'function') {
@@ -464,3 +467,180 @@ for (const row of audienceReadinessCases()) {
     }
   });
 }
+
+// These cases reuse the mounted production route and its contract-decoded API.
+// The app-level provider is essential: a unit call cannot observe navigation
+// while hook installation is pending or the checkbox's explicit confirmation.
+interface AutomaticConsentCase {
+  name: string;
+  intent: boolean | 'error';
+  value: boolean | null;
+  action: 'none' | 'toggle';
+  base: string;
+  setup: 'installed' | 'blocked' | 'failed' | 'save-error' | 'malformed' | 'install-error' | 'wrong-id' | 'wrong-event' | 'wrong-audience';
+  leave: boolean;
+  expect: string;
+}
+const REQUIRED_AUTOMATIC_NAMES = [
+  'manual-publish-does-not-create-a-rule',
+  'server-effective-keep-local-overrides-saved-intent',
+  'preselected-intent-can-be-declined',
+  'checked-confirmation-uses-stored-session-and-confirmed-root',
+  'blocked-hook-keeps-publication-and-offers-settings',
+  'failed-hook-keeps-publication-and-offers-settings',
+  'save-failure-installs-nothing',
+  'malformed-save-response-installs-nothing',
+  'install-request-failure-does-not-claim-automatic-publishing',
+  'held-publication-does-not-save-consent',
+  'content-failure-does-not-save-consent',
+  'existing-active-rule-is-managed-in-settings',
+  'pending-install-outlives-navigation-without-duplicate-publish',
+  'failed-preference-read-recovers-before-confirmation',
+  'saved-rule-id-must-match-this-consent',
+  'saved-rule-events-must-match-this-consent',
+  'saved-rule-audience-must-match-this-consent',
+];
+function loadAutomaticConsent(source: string): { repository: string; cases: AutomaticConsentCase[] } {
+  const document = parseDocument(source, { strict: true, uniqueKeys: true });
+  if (document.errors.length || /^---\s*$/m.test(source)) throw new Error('automatic consent fixture requires one valid YAML document');
+  const root = document.toJS();
+  function fields(value: unknown, names: string[]): asserts value is Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join() !== [...names].sort().join()) throw new Error('automatic consent fixture fields differ');
+  }
+  fields(root, ['requiredNames', 'repository', 'cases']);
+  if (!Array.isArray(root.requiredNames) || [...root.requiredNames].sort().join() !== [...REQUIRED_AUTOMATIC_NAMES].sort().join() || typeof root.repository !== 'string' || !root.repository || !Array.isArray(root.cases)) throw new Error('automatic consent fixture requires every named case and its repository');
+  const names = new Set<string>();
+  for (const entry of root.cases) {
+    fields(entry, ['name', 'intent', 'value', 'action', 'base', 'setup', 'leave', 'expect']);
+    if (typeof entry.name !== 'string' || names.has(entry.name) || !REQUIRED_AUTOMATIC_NAMES.includes(entry.name)
+      || ![true, false, 'error'].includes(entry.intent as never) || ![true, false, null].includes(entry.value as never)
+      || !['none', 'toggle'].includes(String(entry.action)) || !['installed', 'blocked', 'failed', 'save-error', 'malformed', 'install-error', 'wrong-id', 'wrong-event', 'wrong-audience'].includes(String(entry.setup))
+      || typeof entry.leave !== 'boolean' || typeof entry.expect !== 'string' || !entry.expect
+      || !fixture.cases.some((base) => base.name === entry.base)) throw new Error(`invalid automatic consent case ${entry.name}`);
+    names.add(entry.name);
+  }
+  if ([...names].sort().join() !== [...REQUIRED_AUTOMATIC_NAMES].sort().join()) throw new Error('automatic consent fixture is missing a required case');
+  return root as unknown as { repository: string; cases: AutomaticConsentCase[] };
+}
+const automaticSource = readFileSync(resolve(process.cwd(), 'src/app/share/testdata/publish-automatic-consent.yaml'), 'utf8');
+const automaticFixture = loadAutomaticConsent(automaticSource);
+
+describe.each(automaticFixture.cases)('automatic publishing consent: $name', (entry) => {
+  it('uses the actual checkbox, confirmed publish, and server repository', async () => {
+    const base = fixture.cases.find((candidate) => candidate.name === entry.base)!;
+    const world = createPublishWorld(fixture, base, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+    const respond = world.respond;
+    const mutations: { method: string; path: string; body: unknown }[] = [];
+    const order: string[] = [];
+    let settingsReads = 0;
+    let installed = false;
+    let releaseInstall!: () => void;
+    const installation = new Promise<void>((release) => { releaseInstall = release; });
+    world.respond = (request) => {
+      const path = new URL(request.url, 'http://peasant.local').pathname;
+      if (path === '/api/v1/settings' && request.method === 'GET') {
+        settingsReads += 1;
+        if (entry.intent === 'error' && settingsReads === 1) return { status: 503, json: { error: 'settings read unavailable' } };
+        return { status: 200, json: { settings: [{ key: 'push.autoPublishIntent', kind: 'boolean', value: entry.value, effective: entry.intent === true, editable: true, inPeasantConfig: true, description: 'offer automatic publishing' }], autoPublish: [] } };
+      }
+      if (path.startsWith('/api/v1/settings/auto-publish/')) {
+        mutations.push({ method: request.method, path, body: request.body });
+        order.push(request.method);
+        if (request.method === 'PUT') {
+          if (entry.setup === 'save-error') return { status: 503, json: { error: 'rule save unavailable' } };
+          if (entry.setup === 'malformed') return { status: 200, json: { id: path.split('/').at(-1) } };
+          return { status: 200, json: {
+            id: entry.setup === 'wrong-id' ? 'another-manual-rule' : path.split('/').at(-1), kind: 'folder', match: automaticFixture.repository,
+            events: [entry.setup === 'wrong-event' ? 'post-commit' : 'pre-push'], collectives: fixture.collectives.slice(0, entry.setup === 'wrong-audience' ? 3 : 2).map((item) => item.id),
+            repositories: [{ path: automaticFixture.repository, hooks: [{ event: entry.setup === 'wrong-event' ? 'post-commit' : 'pre-push', status: 'absent' }] }],
+          } };
+        }
+        if (request.method === 'POST') {
+          if (entry.setup === 'install-error') return { status: 503, json: { error: 'install request unavailable' } };
+          installed = entry.setup === 'installed';
+          const hook = entry.setup === 'blocked' || entry.setup === 'failed'
+            ? { event: 'pre-push', status: entry.setup, remedy: { message: entry.expect } }
+            : { event: 'pre-push', status: 'installed' };
+          return { status: 200, json: { path: automaticFixture.repository, hooks: [hook] } };
+        }
+        throw new Error(`unexpected rule mutation ${request.method}`);
+      }
+      if (path === '/api/v1/sync/push') order.push('push');
+      const answer = respond(request);
+      if (path === '/api/v1/publications' && answer && 'json' in answer) {
+        const value = answer.json as { publications: { autoPublish: boolean }[] };
+        value.publications.forEach((row) => { row.autoPublish ||= installed; });
+      }
+      return answer;
+    };
+    installWorld(world, { hold: (url) => entry.leave && url.endsWith('/install') ? installation : undefined });
+    const user = userEvent.setup();
+    const view = render(<Page />);
+    await runStep('open', user);
+    if (entry.intent === 'error') {
+      await waitFor(() => expect(within(dialog()).getByRole('alert')).toHaveTextContent('settings read unavailable'), WAIT);
+      expect(world.pushRequests).toEqual([]);
+      expect(mutations).toEqual([]);
+      await runStep('retry', user);
+    }
+    if (entry.expect === 'existing') {
+      await waitFor(() => expect(primaryButton()).toBeEnabled(), WAIT);
+      expect(within(dialog()).queryByRole('checkbox')).not.toBeInTheDocument();
+      await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
+      await user.click(within(bar()).getByRole('button', { name: 'more' }));
+      await user.click(screen.getByRole('menuitem', { name: 'automatic publishing settings' }));
+      expect(pushed).toEqual(['/settings']);
+      expect(mutations).toEqual([]);
+      expect(world.pushRequests).toEqual([]);
+      return;
+    }
+    const checkbox = await within(dialog()).findByRole('checkbox', { name: 'publish this repo automatically on git push' }, WAIT);
+    expect((checkbox as HTMLInputElement).checked).toBe(entry.intent === true);
+    if (entry.action === 'toggle') await user.click(checkbox);
+    expect(mutations).toEqual([]);
+    expect(world.pushRequests).toEqual([]);
+    await runStep('publish', user);
+    if (entry.leave) {
+      await waitFor(() => expect(mutations.filter((item) => item.method === 'POST')).toHaveLength(1), WAIT);
+      view.rerender(<Page><p>another page</p></Page>);
+      view.rerender(<Page />);
+      await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveAttribute('data-state', 'publishing'), WAIT);
+      const busyAction = within(bar()).getByRole('button', { name: 'publish' });
+      expect(busyAction).toHaveAttribute('aria-disabled', 'true');
+      await user.click(busyAction);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(world.pushRequests).toHaveLength(1);
+      expect(mutations).toHaveLength(2);
+      await act(async () => { releaseInstall(); });
+    }
+    if (entry.expect === 'manual' || entry.expect === 'automatic') {
+      await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveAttribute('data-state', entry.expect === 'automatic' ? 'auto-publish' : 'published'), WAIT);
+    } else if (entry.expect === 'refused') {
+      await waitFor(() => expect(within(dialog()).getByRole('alert')).toHaveTextContent(base.expect.popup!.texts[0]), WAIT);
+      expect(mutations).toEqual([]);
+    } else {
+      await waitFor(() => expect(within(dialog()).getByRole('alert')).toHaveTextContent(entry.expect), WAIT);
+      expect(within(dialog()).getByRole('alert')).toHaveTextContent('the transcript was published');
+      expect(within(dialog()).queryByRole('button', { name: 'retry' })).not.toBeInTheDocument();
+      await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveAttribute('data-state', 'published'), WAIT);
+      await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
+      await user.click(within(bar()).getByRole('button', { name: 'more' }));
+      await user.click(screen.getByRole('menuitem', { name: 'automatic publishing settings' }));
+      expect(pushed).toEqual(['/settings']);
+    }
+    expect(world.pushRequests).toHaveLength(1);
+    if (entry.expect === 'manual') expect(mutations).toEqual([]);
+    else if (entry.expect !== 'refused') {
+      expect(mutations[0]?.method).toBe('PUT');
+      expect(mutations[0]?.body).toEqual({ sessionId: SESSION_ID, events: ['pre-push'], collectives: fixture.collectives.slice(0, 2).map((item) => item.id) });
+      expect(mutations[0]?.path.split('/').at(-1)).toMatch(/^[0-9a-f-]{36}$/);
+      const failedSave = entry.setup === 'save-error' || entry.setup === 'malformed' || entry.setup.startsWith('wrong-');
+      expect(mutations.map((item) => item.method)).toEqual(failedSave ? ['PUT'] : ['PUT', 'POST']);
+      expect(order).toEqual(failedSave ? ['push', 'PUT'] : ['push', 'PUT', 'POST']);
+      if (!failedSave) {
+        expect(mutations[1].path).toBe(`${mutations[0].path}/install`);
+        expect(mutations[1].body).toEqual({ path: automaticFixture.repository });
+      }
+    }
+  }, 15000);
+});

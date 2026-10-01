@@ -1,0 +1,37 @@
+requiredNames:
+  - manual-publish-does-not-create-a-rule
+  - server-effective-keep-local-overrides-saved-intent
+  - preselected-intent-can-be-declined
+  - checked-confirmation-uses-stored-session-and-confirmed-root
+  - blocked-hook-keeps-publication-and-offers-settings
+  - failed-hook-keeps-publication-and-offers-settings
+  - save-failure-installs-nothing
+  - malformed-save-response-installs-nothing
+  - install-request-failure-does-not-claim-automatic-publishing
+  - held-publication-does-not-save-consent
+  - content-failure-does-not-save-consent
+  - existing-active-rule-is-managed-in-settings
+  - pending-install-outlives-navigation-without-duplicate-publish
+  - failed-preference-read-recovers-before-confirmation
+  - saved-rule-id-must-match-this-consent
+  - saved-rule-events-must-match-this-consent
+  - saved-rule-audience-must-match-this-consent
+repository: '/repos/project[one]'
+cases:
+  - {name: manual-publish-does-not-create-a-rule, intent: false, value: null, action: none, base: ready-to-publish, setup: installed, leave: false, expect: manual}
+  - {name: server-effective-keep-local-overrides-saved-intent, intent: false, value: true, action: none, base: ready-to-publish, setup: installed, leave: false, expect: manual}
+  - {name: preselected-intent-can-be-declined, intent: true, value: true, action: toggle, base: ready-to-publish, setup: installed, leave: false, expect: manual}
+  - {name: checked-confirmation-uses-stored-session-and-confirmed-root, intent: false, value: null, action: toggle, base: ready-to-publish, setup: installed, leave: false, expect: automatic}
+  - {name: blocked-hook-keeps-publication-and-offers-settings, intent: true, value: true, action: none, base: ready-to-publish, setup: blocked, leave: false, expect: 'preserve the foreign hook'}
+  - {name: failed-hook-keeps-publication-and-offers-settings, intent: true, value: true, action: none, base: ready-to-publish, setup: failed, leave: false, expect: 'inspect hook permissions'}
+  - {name: save-failure-installs-nothing, intent: true, value: true, action: none, base: ready-to-publish, setup: save-error, leave: false, expect: 'check the rule in settings'}
+  - {name: malformed-save-response-installs-nothing, intent: true, value: true, action: none, base: ready-to-publish, setup: malformed, leave: false, expect: 'check the rule in settings'}
+  - {name: install-request-failure-does-not-claim-automatic-publishing, intent: true, value: true, action: none, base: ready-to-publish, setup: install-error, leave: false, expect: 'check its hook in settings'}
+  - {name: held-publication-does-not-save-consent, intent: true, value: true, action: none, base: held-until-ingest, setup: installed, leave: false, expect: refused}
+  - {name: content-failure-does-not-save-consent, intent: true, value: true, action: none, base: content-step-failed, setup: installed, leave: false, expect: refused}
+  - {name: existing-active-rule-is-managed-in-settings, intent: true, value: true, action: none, base: auto-publish-on, setup: installed, leave: false, expect: existing}
+  - {name: pending-install-outlives-navigation-without-duplicate-publish, intent: true, value: true, action: none, base: ready-to-publish, setup: installed, leave: true, expect: automatic}
+  - {name: failed-preference-read-recovers-before-confirmation, intent: error, value: null, action: toggle, base: ready-to-publish, setup: installed, leave: false, expect: automatic}
+  - {name: saved-rule-id-must-match-this-consent, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-id, leave: false, expect: 'different rule, event, or collective audience'}
+  - {name: saved-rule-events-must-match-this-consent, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-event, leave: false, expect: 'different rule, event, or collective audience'}
+  - {name: saved-rule-audience-must-match-this-consent, intent: true, value: true, action: none, base: ready-to-publish, setup: wrong-audience, leave: false, expect: 'different rule, event, or collective audience'}
