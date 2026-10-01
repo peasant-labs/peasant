@@ -276,6 +276,44 @@ partition:
       outcomes (placeholder counts and marker presence).
     cost: { wall_ms: 5220, cpu_ms: 6420 }
 
+  - package: internal/ingest
+    test: TestPiCapturedAdmission
+    class: single-threaded-bytes
+    evidence: '#TestPiCapturedAdmission'
+    justification: >-
+      Subject. The Pi capture-admission contract: a refused capture of a new
+      session is that session's error, a refused capture of a stored session
+      keeps its last-good artifact, index and export, is reported unchanged, and
+      carries one actionable preserved-state warning; the other session still
+      continues; a valid append advances the source fingerprint to the exact
+      consumed prefix and installs the matching managed transcript; a re-run
+      over the unchanged source reindexes nothing. Concurrency actually
+      exercised. Each run builds a real pipeline over a real SQLite store with
+      the real Pi adapter, so the bounded DIFF classifier pool, the
+      EXTRACT+WRITE worker pool, the lock-free StagingBuffer (arena CAS and
+      committed set), the drainLoop goroutine (batched store insert plus index
+      streaming), and the indexLoop goroutine with its serial SQLite writer all
+      overlap; Parallelism 1 bounds the worker count, not the goroutine
+      overlap. Why the detector is not this test's oracle. Every assertion reads
+      final stored rows, managed bytes, fingerprints, export bytes or summary
+      counts after the run; a race on this path surfaces as a wrong or missing
+      row or a panic, never as a distinct assertion, and the test was not built
+      to drive interleavings. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic
+      stay in the race pass over the same primitives. Residual risk. A race
+      reachable only under this test's adapter-and-store workload is no longer
+      observed by the detector; the retained tests bound it by racing the same
+      staging, drain, index and store primitives directly. Detector-independent
+      guarantees kept. No assertion was weakened; the test still fails on wrong
+      output in the no-race pass.
+    cost: { wall_ms: 3180, cpu_ms: 3340 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI

@@ -28,6 +28,6 @@ partition:
   - internal/ingest|TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology
   - internal/ingest|TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses
   - internal/ingest|TestLargeRecordsAreHandledUniformlyAcrossHarnesses
-
+  - internal/ingest|TestPiCapturedAdmission
 protected:
   - internal/ingest|TestOpenCodeNativeCLI
