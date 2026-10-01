@@ -29,5 +29,6 @@ partition:
   - internal/ingest|TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses
   - internal/ingest|TestLargeRecordsAreHandledUniformlyAcrossHarnesses
   - internal/ingest|TestPiCapturedAdmission
+  - internal/ingest|TestPublicationCaptureNormalIngestRecovery
 protected:
   - internal/ingest|TestOpenCodeNativeCLI

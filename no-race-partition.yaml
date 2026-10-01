@@ -314,6 +314,38 @@ partition:
       output in the no-race pass.
     cost: { wall_ms: 3180, cpu_ms: 3340 }
 
+  - package: internal/ingest
+    test: TestPublicationCaptureNormalIngestRecovery
+    class: single-threaded-bytes
+    evidence: '#TestPublicationCaptureNormalIngestRecovery'
+    justification: >-
+      Subject. A legacy publication-capture row seeded through the unproven
+      InsertSessions writer is repaired by a normal ingest run over the real
+      adapters, SQLite store, index writers and metrics engine: publication
+      readiness is rederived, and the per-case consequences (removed source,
+      mismatched identity, source disappearing during extraction, failed
+      sidecar, mutated index file) match the fixture. Concurrency actually
+      exercised. Each case runs the real pipeline with its concurrent DIFF,
+      EXTRACT+WRITE, StagingBuffer, drainLoop and indexLoop machinery, and a
+      publicationCaptureFS decorator injects per-case file faults under those
+      goroutines; Parallelism 1 bounds the workers, not the overlap. Why the
+      detector is not this test's oracle. The assertions read stored readiness,
+      rows, files and summary counts after the run; a race would corrupt those
+      products rather than produce its own assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the fault-injection interaction between the
+      filesystem decorator and the pipeline goroutines is uncovered here; the
+      retained primitive tests bound the machinery, not that interaction.
+      Detector-independent guarantees kept. All assertions remain; wrong stored
+      state still fails the test in the no-race pass.
+    cost: { wall_ms: 5620, cpu_ms: 4280 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
