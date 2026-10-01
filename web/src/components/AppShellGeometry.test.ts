@@ -60,7 +60,7 @@ describe('app shell geometry', () => {
   });
 
   it('keeps <main> out of the tab order at rest', () => {
-    const main = /<main\b[^>]*>/.exec(source(fixture.restingMain.path));
+    const main = /<main\s[^>]*className=[^>]*>/.exec(source(fixture.restingMain.path));
     expect(main, `${fixture.restingMain.path} must render <main>`).not.toBeNull();
     expect(main![0], '<main> must carry no tabIndex at rest').not.toMatch(/tabIndex/i);
   });

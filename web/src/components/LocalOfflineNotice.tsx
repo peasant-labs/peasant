@@ -90,23 +90,27 @@ export function LocalOfflineNotice() {
     if (!offline || !element) return;
     const root = document.documentElement;
     // Instant, even where the page scrolls smoothly: keeping a place must not visibly move it.
-    const keepPlace = (delta: number, pinned: boolean) => {
-      if (delta !== 0 && !pinned && window.scrollY > 0) window.scrollBy({ top: delta, behavior: 'instant' });
+    const keepPlace = (y: number, delta: number, pinned: boolean) => {
+      if (delta !== 0 && !pinned && y > 0) window.scrollTo({ top: Math.max(0, y + delta), behavior: 'instant' });
     };
     const publish = () => {
       const height = element.getBoundingClientRect().height;
       const pinned = getComputedStyle(element).position === 'fixed';
+      const y = window.scrollY;
       root.style.setProperty('--app-notice-height', `${height}px`);
-      keepPlace(height - published.current.height, pinned);
+      keepPlace(y, height - published.current.height, pinned);
       published.current = { height, pinned };
     };
     publish();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
     observer?.observe(element);
+    window.addEventListener('resize', publish);
     return () => {
       observer?.disconnect();
+      window.removeEventListener('resize', publish);
+      const y = window.scrollY;
       root.style.removeProperty('--app-notice-height');
-      keepPlace(-published.current.height, published.current.pinned);
+      keepPlace(y, -published.current.height, published.current.pinned);
       published.current = { height: 0, pinned: false };
     };
   }, [offline]);

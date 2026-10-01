@@ -3,7 +3,7 @@
 
    A stale server, a server from another worktree, or a binary that embeds an earlier `web/out`
    silently invalidates every screenshot and computed-style probe. `assertServedBuild` fails first:
-   `web/out` must not be older than the newest file under `web/src` (so a build that predates a
+   `web/out` must not be older than the newest source, directory, public asset, dependency manifest, lockfile or Next config input (so a build that predates a
    later source change fails even though the markers exist), the served page must reference exactly
    the chunks `web/out/index.html` does, those chunks must carry every marker the caller names
    (strings only the change under test brings into the bundle), and, when a binary is given, the
@@ -17,9 +17,9 @@ const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 /** The newest modification time of any file under `dir`, with the file that has it. */
 const newestFile = (dir) => {
-  let newest = { mtimeMs: 0, file: null }
+  let newest = { mtimeMs: statSync(dir).mtimeMs, file: dir }
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue
+    if (!entry.isFile() && !entry.isDirectory()) continue
     const file = join(entry.parentPath ?? entry.path, entry.name)
     const { mtimeMs } = statSync(file)
     if (mtimeMs > newest.mtimeMs) newest = { mtimeMs, file }
@@ -50,7 +50,11 @@ export function shellProvenanceMarkers(manifest) {
 export async function assertServedBuild({ origin, markers, bin, webRoot = WEB_ROOT }) {
   const outIndex = join(webRoot, 'out', 'index.html')
   if (!existsSync(outIndex)) throw new Error(`${outIndex} is missing; run make build`)
-  const source = newestFile(join(webRoot, 'src'))
+  const inputs = ['src', 'public', 'package.json', 'pnpm-lock.yaml', ...readdirSync(webRoot).filter((name) => /^next\.config\./.test(name))]
+  const source = inputs.filter((name) => existsSync(join(webRoot, name))).map((name) => {
+    const file = join(webRoot, name)
+    return statSync(file).isDirectory() ? newestFile(file) : { mtimeMs: statSync(file).mtimeMs, file }
+  }).reduce((latest, input) => input.mtimeMs > latest.mtimeMs ? input : latest, { mtimeMs: 0, file: null })
   if (source.mtimeMs > statSync(outIndex).mtimeMs) throw new Error(`${outIndex} is older than ${source.file}: web/out predates a source change; run make build`)
   if (bin) {
     if (!existsSync(bin)) throw new Error(`${bin} does not exist; run make build`)

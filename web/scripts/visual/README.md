@@ -371,7 +371,7 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   peasant-labs/fairtrade-design-system#139 (the demo carries this header, or fairtrade exports it) is
   what brings a demo-left / app-right arm back, for the header and the offline notice.
 - **outputs:** `scripts/visual/shell/<theme>/shell-{home,home-mobile,route-analytics,route-review,route-map}.png`
-  and `scripts/visual/shell-offline/<theme>/{home,transcript,home-mobile,home-short,transcript-short,share-mobile,home-scrolled,analytics-keep-place}.png`
+  and `scripts/visual/shell-offline/<theme>/{home,transcript,home-mobile,home-short,transcript-short,share-mobile,home-scrolled,analytics-keep-place,analytics-end-keeps-place}.png`
   — review artifacts, never committed.
 - **mock limitation:** the mock data store cannot serve the grouped sessions route (`GET
   /api/v1/sessions?view=grouped` answers 500), so the home body shows that error panel in mock captures;
@@ -399,7 +399,7 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   - *CI parity:* neither runs in CI; both need `make build` and a Chrome binary, and run from a clean
     checkout.
   - *Evidence:* full-frame captures of the mounted shell in both themes: desktop, 390px, 320×256 (home and
-    transcript), 320×568 (`/share`), a scrolled 1440×700 page and a scrolled 1440×500 `/analytics`; the keyboard
+    transcript), 320×568 (`/share`), a scrolled 1440×700 page and a scrolled 1440×500 `/analytics` and its 390×844 page end; the keyboard
     recovery (focus to `<main>`, then Tab) is asserted on the real browser.
   - *Mutation:* a re-added pill or share link, any link to a route-only section outside `<main>` (and
     fairtrade's section sub-nav anywhere), a dead settings link, a notice fixed on a small screen or
@@ -407,7 +407,7 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
     the fixed header or pinned notice), a resting tabindex on `<main>` (a click would steer Tab and
     keyboard scrolling to it — caught by the click-then-Tab and click-then-PageDown checks themselves, not
     only the attribute check), a crushed full-height page or a floor that no longer binds, a scrolled
-    reader losing their place, a keyboard recovery that leaves focus on `<body>` or `<main>` focusable, a
+    reader losing their place (the stable content reference must return to its original viewport top ±1px after recovery, including at the page end), a keyboard recovery that leaves focus on `<body>` or `<main>` focusable, a
     missing live-region announcement, an unreachable `try again`, a stale `web/out`, or a deleted offline
     case each fail a named check.
   - *Exit condition:* when the visual harness is consolidated into one toolkit, or the shell header gets

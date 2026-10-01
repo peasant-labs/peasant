@@ -25,7 +25,7 @@
    app-shell-geometry.yaml (the one declaration globals.css makes) and also checks the root's
    scroll-padding-top against the fixed header.
 
-   Before any capture it proves the server serves THIS checkout's build (served-build.mjs: the served
+   Before any capture it checks source/dependency/config/public freshness and proves the server serves THIS checkout's build (served-build.mjs: the served
    page references exactly web/out's chunks, and they carry the shell's markers; with PEASANT_BIN
    set it also checks that binary is not older than web/out), so a stale server or another worktree
    cannot produce mislabelled evidence. It writes a full-frame capture of home and of each

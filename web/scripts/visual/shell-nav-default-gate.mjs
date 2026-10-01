@@ -1,49 +1,8 @@
-/* Local shell offline gate (the server-stopped arm), on a default server this script boots itself.
+/* Local shell offline gate on the mounted production app.
 
-   Companion to shell-nav-gate.mjs, which holds the connected header to testdata/shell-header.yaml
-   against a server the caller runs. This gate needs to STOP the server, so it spawns its own
-   default-mode (no --experimental) `bin/peasant web start` with the mock store and drives the real
-   production path of "the peasant app on this computer stopped":
-
-     1. provenance (served-build.mjs): bin/peasant is not older than web/out, the served page
-        references exactly the chunks web/out/index.html does, and those chunks carry markers only
-        this shell introduces (the notice's height variable and the live region's own
-        announcements from the manifest) — so a stale server or another checkout fails before any
-        capture;
-     2. for each page case in testdata/shell-offline-cases.yaml (loaded strictly, every name
-        required), in both themes, one at a time (the page under test is always the active tab):
-        a. connected: the header manifest holds and no notice shows, past the socket grace period;
-        b. stopped: the server process is killed with the page open. Within a few seconds the page
-           shows fairtrade's LocalOfflineBanner directly under the fixed header — pinned there where
-           the screen has room, at the top of the page and scrolling with it elsewhere
-           (shell-header-manifest.mjs chromeClearance decides which from the notice-pinned query
-           that app-shell-geometry.yaml records, and checks that <main> clears the header plus the
-           notice, that the root's scroll padding covers what stays fixed, and that <main> carries
-           no tabindex at rest): it says the peasant app isn't running on THIS computer and that
-           the internet is fine, offers `peasant web start --port <this page's port>` and
-           `try again`; the always-mounted live region says the manifest's `stopped` text; the
-           header manifest still holds. Case-specific checks follow (below), then the frame is
-           captured;
-        c. still down: `try again` is pressed with the server still stopped; the live region says
-           the manifest's `stillStopped` text followed by the check time (hh:mm:ss.);
-        d. back: the server restarts on the same port, `try again` is pressed, the notice goes away
-           with --app-notice-height cleared, and the live region says the manifest's `back` text.
-
-   The cases (the fixture's `check` field): home and a transcript at 1440×900 (plain; the transcript
-   must not scroll the document: its own stream is the scroller); home at 390×844 (plain); home at
-   320×256 (retry-reach: 400% zoom on 1280×1024, the notice is taller than the screen, and the
-   document must scroll `try again` into reach below the header); the transcript at 320×256 and
-   /share at 320×568 (floor: scrolled to the bottom, the full-height page keeps
-   min(24rem, screen height − header) fully in view below the header, so an already-loaded
-   transcript stays readable); and home at 1440×700 (scrolled: scrolled down before the server
-   stops, the pinned notice must appear inside the screen, under the header).
-
-   The tour: the gate can only see a tour overlay (`[role=dialog][aria-label^="Product tour"]`),
-   and the tour never starts on its own, so this check cannot tell a mounted tour provider from an
-   unmounted one. The unmount itself is guarded by LocalOfflineNotice.test.tsx.
-
-   The spawned server is killed on exit, failure, SIGINT or SIGTERM; the temp config dir it made is
-   removed then too (a SIGKILL of the gate leaks both); server.log is rewritten per run.
+   See README.md §4c for the header, provenance, offline, keyboard, geometry and lifecycle
+   checks, their fixture cases, and the test promotion rationale. This script owns its server
+   because it exercises stopping and restarting the app. Captures are review evidence only.
 
    Run:
      CHROME_PATH=$(command -v google-chrome) node scripts/visual/shell-nav-default-gate.mjs
@@ -94,8 +53,8 @@ const BODY_FLOOR_REM = (() => {
   return Number(match[1])
 })()
 const CASES_FIXTURE = join(HERE, 'testdata', 'shell-offline-cases.yaml')
-const REQUIRED_CASES = ['home', 'transcript', 'home-mobile', 'home-short', 'transcript-short', 'share-mobile', 'home-scrolled', 'analytics-keep-place']
-const CHECKS = ['plain', 'retry-reach', 'floor', 'scrolled', 'keep-place']
+const REQUIRED_CASES = ['home', 'transcript', 'home-mobile', 'home-short', 'transcript-short', 'share-mobile', 'home-scrolled', 'analytics-keep-place', 'analytics-end-keeps-place']
+const CHECKS = ['plain', 'retry-reach', 'floor', 'scrolled', 'keep-place', 'keep-place-end']
 const RECOVERIES = ['pointer', 'keyboard']
 
 // The page cases: strict YAML, known fields only, one check each, and every required name.
@@ -105,7 +64,7 @@ const loadCases = () => {
   if (document.errors.length) fail(`invalid YAML: ${document.errors.map((error) => error.message).join('; ')}`)
   const root = document.toJS()
   if (!root || typeof root !== 'object' || Array.isArray(root) || Object.keys(root).join() !== 'cases' || !Array.isArray(root.cases)) fail('the root must be a mapping with exactly one `cases` list')
-  const allowed = ['name', 'path', 'body', 'width', 'height', 'check', 'floor', 'singleScroller', 'recover']
+  const allowed = ['name', 'path', 'body', 'width', 'height', 'check', 'floor', 'singleScroller', 'recover', 'reference']
   const names = new Set()
   const cases = root.cases.map((row, index) => {
     if (!row || typeof row !== 'object' || Array.isArray(row)) fail(`cases[${index}] must be a mapping`)
@@ -118,6 +77,7 @@ const loadCases = () => {
     if (!CHECKS.includes(row.check)) fail(`case ${row.name}: check must be one of ${CHECKS.join(', ')}, got ${JSON.stringify(row.check)}`)
     if ((row.check === 'floor') !== ('floor' in row)) fail(`case ${row.name}: \`floor\` is required with check: floor and allowed only there`)
     if ('floor' in row && (typeof row.floor !== 'string' || row.floor.trim() === '')) fail(`case ${row.name}: floor must be a selector`)
+    if (row.check.startsWith('keep-place') && (typeof row.reference !== 'string' || !row.reference.trim())) fail(`case ${row.name}: place keeping requires a stable content reference selector`)
     if ('singleScroller' in row && typeof row.singleScroller !== 'boolean') fail(`case ${row.name}: singleScroller must be a boolean`)
     if ('recover' in row && !RECOVERIES.includes(row.recover)) fail(`case ${row.name}: recover must be one of ${RECOVERIES.join(', ')}, got ${JSON.stringify(row.recover)}`)
     return { ...row, path: row.path.replaceAll('$TRANSCRIPT', TRANSCRIPT_PATH) }
@@ -305,11 +265,11 @@ const assertFloorKept = async (page, selector) => {
 }
 
 // Scroll a page down before the app stops; returns how far it went (it must actually scroll).
-const scrollDown = (page) => page.evaluate(() => {
-  const target = Math.min(400, document.documentElement.scrollHeight - window.innerHeight)
+const scrollDown = (page, end = false) => page.evaluate((end) => {
+  const target = end ? document.documentElement.scrollHeight : Math.min(400, document.documentElement.scrollHeight - window.innerHeight)
   window.scrollTo({ top: target, behavior: 'instant' })
   return window.scrollY
-})
+}, end)
 
 // Sample every frame whether the notice shows, its height, and the scroll position, so the notice's
 // own effect is read at the frame it appears or goes — apart from the page's own connection states,
@@ -369,13 +329,16 @@ const drivePage = async (theme, spec, seen) => {
   await pause(PAST_GRACE_MS)
   const connected = await noticeState(page)
   if (connected.shown || connected.noticeHeight || connected.live !== '') throw new Error(`the ${where} page shows or announces the offline notice while the app is running: ${JSON.stringify(connected)}`)
+  const keepsPlace = spec.check.startsWith('keep-place')
+  let referenceTop = null
   let scrolledTo = 0
-  if (spec.check === 'scrolled' || spec.check === 'keep-place') {
-    scrolledTo = await scrollDown(page)
+  if (spec.check === 'scrolled' || keepsPlace) {
+    scrolledTo = await scrollDown(page, spec.check === 'keep-place-end')
     if (scrolledTo < 100) throw new Error(`the ${where} page does not scroll (reached ${scrolledTo}px), so it cannot show a notice arriving on a scrolled page`)
   }
-  if (spec.check === 'keep-place') {
+  if (keepsPlace) {
     await pause(150)
+    referenceTop = await page.$eval(spec.reference, (element) => element.getBoundingClientRect().top)
     await startFrameSampler(page)
   }
 
@@ -401,7 +364,7 @@ const drivePage = async (theme, spec, seen) => {
     if (state.scrollY < 100) failures.push(`the page is no longer scrolled (${state.scrollY}px), so the case proves nothing`)
   }
   let appeared = null
-  if (spec.check === 'keep-place') {
+  if (keepsPlace) {
     if (state.clearance.noticeFixed) failures.push(`the notice is pinned on the ${spec.width}×${spec.height} screen, so the case does not exercise a notice in the page flow`)
     appeared = await frameTransition(page, true)
     if (!appeared) failures.push('no frame caught the notice appearing')
@@ -433,6 +396,7 @@ const drivePage = async (theme, spec, seen) => {
       captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
       break
     case 'keep-place':
+    case 'keep-place-end':
       note = `, the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px in the frame the ${appeared.after.height}px notice appeared`
       captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
       break
@@ -449,29 +413,30 @@ const drivePage = async (theme, spec, seen) => {
 
   // back: restart, press try again (in the page, so a notice that already cleared is not an error;
   // or, for a keyboard case, focus it and press Enter, as a keyboard user would)
-  await startServer()
   const keyboard = spec.recover === 'keyboard'
   let pressed
   let beforeRecovery = null
   if (keyboard) {
     await page.focus(RETRY)
     beforeRecovery = await page.evaluate(() => window.scrollY)
-    await page.keyboard.press('Enter')
-    pressed = true
+  }
+  await startServer()
+  if (keyboard) {
+    pressed = !!await page.$(RETRY)
+    if (pressed) await page.keyboard.press('Enter')
   } else {
     pressed = await pressRetry(page)
   }
   await waitFor(page, (s) => !s.shown && s.noticeHeight === '' && s.clearance.failures.length === 0, RECOVER_WITHIN_MS, `the ${where} notice clearing after the restart (with <main> back under the header)`)
   const back = await waitFor(page, (s) => s.live === ANNOUNCE.back, 2000, `the ${where} live region announcing the return`)
-  if (spec.check === 'keep-place') {
+  if (keepsPlace) {
     const went = await frameTransition(page, false)
     if (!went) throw new Error(`on ${where} no frame caught the notice going`)
     if (went.before.scrollY <= went.before.height) throw new Error(`on ${where} the page was at ${Math.round(went.before.scrollY)}px when the notice went, too high to show whether the reader keeps their place`)
-    // The page's own connection strip goes in the same commit as the notice (both follow the socket
-    // coming back), and the browser may anchor-scroll for it too, so the return is read as "scrolled
-    // back by at least the notice's height"; the appearance above is read exactly.
-    if (went.before.scrollY - went.after.scrollY < went.before.height - 1) {
-      throw new Error(`on ${where} in the frame the ${went.before.height}px notice went the page scrolled only ${Math.round(went.before.scrollY)} → ${Math.round(went.after.scrollY)}px, so the reader lost their place`)
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const returnedTop = await page.$eval(spec.reference, (element) => element.getBoundingClientRect().top)
+    if (Math.abs(returnedTop - referenceTop) > 1) {
+      throw new Error(`on ${where} the content reference moved ${referenceTop} → ${returnedTop}px after recovery, so the reader lost their place`)
     }
   }
   let keyNote = ''
