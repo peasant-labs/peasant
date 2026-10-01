@@ -381,17 +381,33 @@ func loadSchemaObjects(conn *sqlite.Conn) ([]schemaObject, error) {
 	return objects, nil
 }
 
-// dataTables returns the tables whose rows the dump reads, in name order.
+// dataTables returns the tables the artifact serializer reads rows from, in
+// name order. SQLite-owned tables are excluded: sqlite_sequence's rows arise
+// from the replayed AUTOINCREMENT inserts, and sqlite_schema is the catalog
+// compared through its objects.
 func dataTables(meta map[string]tableMeta) []string {
 	var tables []string
 	for name, m := range meta {
 		if m.Type != "table" && m.Type != "virtual" {
 			continue
 		}
-		if name == "sqlite_sequence" || strings.HasPrefix(name, "sqlite_") {
-			continue // SQLite-owned; sqlite_sequence's rows arise from the replayed inserts
+		if strings.HasPrefix(name, "sqlite_") {
+			continue
 		}
 		tables = append(tables, name)
+	}
+	sort.Strings(tables)
+	return tables
+}
+
+// dumpTables returns the tables the comparison dump reads rows from, in name
+// order. Unlike the serializer it includes sqlite_sequence, whose single row
+// is part of the compared state; the catalog table itself stays excluded
+// because its objects are compared directly.
+func dumpTables(meta map[string]tableMeta) []string {
+	tables := dataTables(meta)
+	if _, ok := meta["sqlite_sequence"]; ok {
+		tables = append(tables, "sqlite_sequence")
 	}
 	sort.Strings(tables)
 	return tables
@@ -646,7 +662,7 @@ func canonicalSchemaDump(conn *sqlite.Conn) ([]byte, error) {
 	for _, object := range objects {
 		fmt.Fprintf(&b, "object %s %s %s\n", object.Type, strconv.Quote(object.Name), strconv.Quote(object.SQL))
 	}
-	for _, table := range dataTables(meta) {
+	for _, table := range dumpTables(meta) {
 		columns, err := loadTableColumns(conn, table)
 		if err != nil {
 			return nil, err
