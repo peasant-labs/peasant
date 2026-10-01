@@ -138,3 +138,19 @@ clockCells:
       keyColumn: name
       key: resolution-evidence-classifier
       clockColumn: created_at
+
+# Valid FTS5 shadow-row mutations. The canonical equivalence dump compares
+# shadow rows, so applying one of these statements to an otherwise identical
+# baseline database must change its canonical dump. Each row is named and
+# required; TestBaselineShadowRowSensitivity drives them.
+shadowMutations:
+  requiredNames:
+    - shadow-config-version
+    - shadow-data-block
+  mutations:
+    - name: shadow-config-version
+      table: session_entries_fts_config
+      statement: "UPDATE session_entries_fts_config SET v = v + 1 WHERE k = 'version'"
+    - name: shadow-data-block
+      table: session_entries_fts_data
+      statement: "UPDATE session_entries_fts_data SET block = X'0000000000000001' WHERE id = 1"

@@ -414,12 +414,27 @@ func shadowTables(meta map[string]tableMeta) []string {
 
 // dumpTables returns the tables the comparison dump reads rows from, in name
 // order. Unlike the serializer it includes sqlite_sequence, whose single row
-// is part of the compared state; the catalog table itself stays excluded
-// because its objects are compared directly.
+// is part of the compared state, and every FTS5 shadow table, whose rows are
+// part of the promised raw-state equality. The catalog table itself stays
+// excluded because its objects are compared directly.
 func dumpTables(meta map[string]tableMeta) []string {
-	tables := dataTables(meta)
+	seen := make(map[string]struct{}, len(meta))
+	tables := make([]string, 0, len(meta))
+	add := func(table string) {
+		if _, duplicate := seen[table]; duplicate {
+			return
+		}
+		seen[table] = struct{}{}
+		tables = append(tables, table)
+	}
+	for _, table := range dataTables(meta) {
+		add(table)
+	}
+	for _, table := range shadowTables(meta) {
+		add(table)
+	}
 	if _, ok := meta["sqlite_sequence"]; ok {
-		tables = append(tables, "sqlite_sequence")
+		add("sqlite_sequence")
 	}
 	sort.Strings(tables)
 	return tables

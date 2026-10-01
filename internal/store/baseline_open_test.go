@@ -53,10 +53,25 @@ type baselineClockCellsFixture struct {
 	Cells         []baselineClockCellFixture `yaml:"cells"`
 }
 
+// baselineShadowMutationFixture names one mutation of a valid FTS5 shadow row.
+// The comparison dump must read shadow rows, so applying the statement to one
+// otherwise identical database must change its canonical dump.
+type baselineShadowMutationFixture struct {
+	Name      string `yaml:"name"`
+	Table     string `yaml:"table"`
+	Statement string `yaml:"statement"`
+}
+
+type baselineShadowMutationsFixture struct {
+	RequiredNames []string                        `yaml:"requiredNames"`
+	Mutations     []baselineShadowMutationFixture `yaml:"mutations"`
+}
+
 type baselineOpenCaseFixtures struct {
-	RequiredNames []string                  `yaml:"requiredNames"`
-	Cases         []baselineOpenCaseFixture `yaml:"cases"`
-	ClockCells    baselineClockCellsFixture `yaml:"clockCells"`
+	RequiredNames   []string                       `yaml:"requiredNames"`
+	Cases           []baselineOpenCaseFixture      `yaml:"cases"`
+	ClockCells      baselineClockCellsFixture      `yaml:"clockCells"`
+	ShadowMutations baselineShadowMutationsFixture `yaml:"shadowMutations"`
 }
 
 // LoadBaselineOpenCaseFixtures decodes the committed case family.
@@ -156,6 +171,17 @@ func validateBaselineOpenCaseFixtures(fixtures baselineOpenCaseFixtures) error {
 		cellIndex[cell.Name] = cell
 	}
 	if err := validateOpenCaseNames(fixtures.ClockCells.RequiredNames, cellNames, "baseline clock cell"); err != nil {
+		return err
+	}
+
+	mutationNames := make([]string, 0, len(fixtures.ShadowMutations.Mutations))
+	for _, mutation := range fixtures.ShadowMutations.Mutations {
+		mutationNames = append(mutationNames, mutation.Name)
+		if strings.TrimSpace(mutation.Table) == "" || strings.TrimSpace(mutation.Statement) == "" {
+			return fmt.Errorf("internal/store/testdata/baseline_open_cases.yaml: shadow mutation %q has a blank field; name the shadow table and the mutation statement", mutation.Name)
+		}
+	}
+	if err := validateOpenCaseNames(fixtures.ShadowMutations.RequiredNames, mutationNames, "baseline shadow mutation"); err != nil {
 		return err
 	}
 	return nil
