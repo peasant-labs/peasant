@@ -727,7 +727,7 @@ sequenceDiagram
 | `internal/village` | Village HTTP client. | push, pull, api |
 | `internal/auth` | Loopback OAuth login, `credentials.json`. | `village login`, api sync handler |
 | `internal/githooks` | Installs, checks, and removes the upload hooks. | `village hooks` |
-| `internal/autopublish` | Auto-publish rules in `hooks.yaml`, and the one matcher that decides which rules bind a repository. | `village push`, `village auto`, api settings routes |
+| `internal/autopublish` | Auto-publish rules in `hooks.yaml`, and the one matcher that decides which rules bind a repository. | `village push`, `village auto`, api settings routes, `GET /publications` |
 | `internal/gitops` | Read-only git for the code map and review. | codemap |
 | `internal/codemap`, `internal/codegraph` | Code map and change review graphs. | api map and review routes |
 | `internal/config` | Settings, selection, redaction policy. | CLI, api, push |
