@@ -161,7 +161,7 @@ async function runStep(page, step) {
   if (step === 'connect') return click('[role="dialog"] .si-split-primary', 'continue with GitHub')
   if (step === 'publish') return click('[role="dialog"] .pub-primary:not([disabled]):not([aria-disabled="true"])', 'an enabled publish button')
   if (step === 'retry') return click('[role="dialog"] .pub-foot .btn-primary:not([disabled])', 'retry')
-  if (step === 'rescan') return click('[role="dialog"] .pub-rescan', 're-scan')
+  if (step === 'rescan') return click('[role="dialog"] .pub-rescan:not([disabled]):not([aria-disabled="true"])', 'an enabled re-scan button')
   const [verb, ...rest] = step.split(' ')
   return click(`[role="dialog"] button[aria-label="${verb} ${rest.join(' ')}"]`, `the ${verb} button`)
 }
