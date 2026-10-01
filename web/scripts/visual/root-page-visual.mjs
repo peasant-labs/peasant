@@ -59,6 +59,7 @@ const FILTERS = [
 // name live in the app chunk, the strip and publish-state classes in fairtrade's.
 const FEATURE_GROUPS = [
   { label: 'root page', signatures: ['data-root-session-list', 'your sessions in numbers'] },
+  { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', 'tick the auto-publish box the next time you publish'] },
   { label: 'fairtrade stats strip and publish state', signatures: ['sst-pair', 'pub-state-text'] },
 ]
 const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
@@ -343,6 +344,19 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     await page.waitForSelector('[data-root-session-list] tbody tr', { visible: true, timeout: 20000 }).catch(() => fail(`${where}: the session list never mounted`))
     await page.waitForSelector('.sst-pair', { visible: true, timeout: 10000 }).catch(() => fail(`${where}: the stats strip never mounted`))
     await waitForStats(page, where)
+    const tip = await page.evaluate(() => {
+      const aside = document.querySelector('aside[aria-label="auto-publish tip"]')
+      const text = aside?.querySelector('p')
+      if (!aside || !text) return null
+      const box = aside.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(text)
+      const lines = [...range.getClientRects()]
+      return { copy: text.textContent, brand: !!aside.querySelector('[data-brand="claude"]'), dismiss: !!aside.querySelector('button[aria-label="dismiss auto-publish tip"]'), font: getComputedStyle(text).fontFamily, size: getComputedStyle(text).fontSize, left: box.left, right: box.right, width: innerWidth, textRight: Math.max(...lines.map((line) => line.right)), textLeft: Math.min(...lines.map((line) => line.left)) }
+    })
+    if (!tip || !tip.copy.includes('tick the auto-publish box the next time you publish') || !tip.copy.includes('/peasant auto') || !tip.brand || !tip.dismiss) fail(`${where}: the actual automatic publishing tip or its exit is missing`)
+    if (tip.left < 0 || tip.right > tip.width + 1 || tip.textRight > tip.right + 1 || tip.textLeft < tip.left - 1) fail(`${where}: the mounted tip overflows its phone or desktop bounds ${JSON.stringify(tip)}`)
+    if (!/atkinson/i.test(tip.font) || parseFloat(tip.size) < 16) fail(`${where}: the tip body violates the canonical font or 16px floor ${JSON.stringify(tip)}`)
     const probe = await probeStyles(page, where)
     if (probe.theme !== theme) fail(`${where}: data-theme is ${probe.theme}`)
 

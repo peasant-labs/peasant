@@ -23,6 +23,8 @@
  * Env:  PEASANT_PUBLISH_STATES_PORT         server port (default 8847)
  *       PEASANT_PUBLISH_STATES_CAPTURE_DIR  output root (default /tmp/peasant-publish-states)
  *       PEASANT_PUBLISH_STATES_ONLY         comma-separated case names to shoot
+ *       PEASANT_AUTOMATIC_CONSENT_ONLY      named checkbox/setup cases from the consent fixture
+ *       PEASANT_AUTOMATIC_CONSENT_STAGE     review or result (default review)
  *       PUPPETEER_CORE                      explicit puppeteer-core module path
  */
 import { execFileSync, spawn } from 'node:child_process'
@@ -34,6 +36,7 @@ import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { createPublishWorld, expectedPushBody, loadPublishStates } from '../../src/app/share/testdata/publish-popup-states.mjs'
+import { createAutomaticConsentWorld, loadAutomaticConsent } from '../../src/app/share/testdata/publish-automatic-consent.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -43,20 +46,23 @@ const OUT = process.env.PEASANT_PUBLISH_STATES_CAPTURE_DIR || '/tmp/peasant-publ
 const PORT = process.env.PEASANT_PUBLISH_STATES_PORT || '8847'
 const ORIGIN = `http://localhost:${PORT}`
 const CHROME = process.env.CHROME_PATH
+const AUTOMATIC_ONLY = (process.env.PEASANT_AUTOMATIC_CONSENT_ONLY || '').split(',').map((name) => name.trim()).filter(Boolean)
+const AUTOMATIC_STAGE = process.env.PEASANT_AUTOMATIC_CONSENT_STAGE || 'review'
+if (!['review', 'result'].includes(AUTOMATIC_STAGE)) throw new Error('PEASANT_AUTOMATIC_CONSENT_STAGE must be review or result')
 const ONLY = (process.env.PEASANT_PUBLISH_STATES_ONLY || '').split(',').map((name) => name.trim()).filter(Boolean)
 
 /** The stored mock session the states are shown on, and its project label. */
 const PROJECT = 'fortuna'
 const SESSION = 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'
 /** Bytes only this change introduces, located in the binary and the served chunk. */
-const FEATURE_BYTES = ['reading your collectives on village', 'village no longer holds this transcript: run peasant village push --force for this session']
+const FEATURE_BYTES = ['reading your collectives on village', 'village no longer holds this transcript: run peasant village push --force for this session', 'confirming automatic publishing consent']
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const DESKTOP = { width: 1440, height: 1080, deviceScaleFactor: 1 }
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
 /** The cases also shot at phone width: the bar, a first publish, and an update. */
 
 const THEME_ATTRIBUTES = ['data-theme', 'data-tb-theme']
-const PUBLISHING_ROUTES = /\/api\/v1\/(sync\/auth|sync\/login|publications|village\/collectives|sync\/redactions|sync\/push)(\/|\?|$)/
+const PUBLISHING_ROUTES = /\/api\/v1\/(settings|sync\/auth|sync\/login|publications|village\/collectives|sync\/redactions|sync\/push)(\/|\?|$)/
 const pause = (ms) => new Promise((done) => setTimeout(done, ms))
 
 if (!CHROME) {
@@ -249,7 +255,8 @@ async function shoot(browser, gate, fixture, entry, theme, viewport, turns, evid
     await applyDeterminism(page)
     await page.setViewport(viewport)
     await page.evaluateOnNewDocument((value) => { try { localStorage.setItem('peasant-theme', value) } catch { /* storage disabled */ } }, theme)
-    const world = createPublishWorld(fixture, entry, { sessionId: SESSION, turns })
+    const automatic = entry.automatic ? createAutomaticConsentWorld(fixture, automaticFixture, entry.automatic, { sessionId: SESSION, turns }) : null
+    const world = automatic?.world ?? createPublishWorld(fixture, entry, { sessionId: SESSION, turns })
     const requests = []
     page.on('request', (request) => { if (PUBLISHING_ROUTES.test(request.url())) requests.push(`${request.method()} ${request.url().replace(ORIGIN, '')}`) })
     const errors = []
@@ -261,11 +268,26 @@ async function shoot(browser, gate, fixture, entry, theme, viewport, turns, evid
     await page.waitForSelector('[role="group"][aria-label="publish"]', { visible: true, timeout: 20000 }).catch(() => { throw fail(`opening ${entry.name}`, 'the publish bar never mounted') })
     await page.evaluate(async () => { await document.fonts.ready })
     for (const step of entry.steps) await runStep(page, step)
+    if (automatic) {
+      const checkbox = await page.waitForSelector('[role="dialog"] .pub-auto input[type="checkbox"]', { visible: true, timeout: 20000 })
+      if (entry.automatic.action === 'toggle') await checkbox.click()
+      if (automatic.mutations.length || world.pushRequests.length) throw fail('checking explicit consent', 'opening or selecting the offer wrote a rule or published')
+      if (AUTOMATIC_STAGE === 'review') {
+        const checked = await checkbox.evaluate((input) => input.checked)
+        if (checked !== (entry.automatic.action === 'toggle' ? entry.automatic.intent !== true : entry.automatic.intent === true)) throw fail('checking consent preference', 'the actual checkbox differs from the fixture')
+      } else await runStep(page, 'publish')
+    }
     try {
       await assertExpected(page, entry)
       const expected = expectedPushBody(fixture, entry, SESSION)
       const actual = world.pushRequests.at(-1) ?? null
       if (JSON.stringify(expected) !== JSON.stringify(actual)) throw fail(`checking ${entry.name}`, 'the mounted push request differs from the fixture')
+      if (automatic && AUTOMATIC_STAGE === 'result') {
+        const writes = automatic.mutations
+        if (writes.length !== 2 || writes[0].method !== 'PUT' || writes[1].method !== 'POST' || writes[1].path !== `${writes[0].path}/install`) throw fail('checking consent writes', 'the rule save/install order differs')
+        const audience = expected.collectives.add
+        if (JSON.stringify(writes[0].body) !== JSON.stringify({ sessionId: SESSION, events: ['pre-push'], collectives: audience }) || JSON.stringify(writes[1].body) !== JSON.stringify({ path: automaticFixture.repository })) throw fail('checking consent writes', 'the request did not use the session-only target or server-confirmed root')
+      }
     } catch (error) {
       const failed = join(OUT, 'failed', `${theme}-${viewport.isMobile ? 'mobile' : 'desktop'}-${entry.name}.png`)
       mkdirSync(dirname(failed), { recursive: true })
@@ -295,7 +317,24 @@ async function shoot(browser, gate, fixture, entry, theme, viewport, turns, evid
 
 if (!existsSync(BIN)) { console.error(`ERROR [publish-states-shoot] ${BIN} not found — run \`make build\` first.`); process.exit(1) }
 const fixture = loadPublishStates(readFileSync(join(WEB, 'src/app/share/testdata/publish-popup-states.yaml'), 'utf8'))
-const cases = ONLY.length ? fixture.cases.filter((entry) => ONLY.includes(entry.name)) : fixture.cases
+const automaticFixture = loadAutomaticConsent(readFileSync(join(WEB, 'src/app/share/testdata/publish-automatic-consent.yaml'), 'utf8'), fixture)
+function automaticVisualCase(automatic) {
+  if (automatic.leave || automatic.intent === 'error' || automatic.expect === 'existing' || automatic.expect === 'refused' || automatic.setup.startsWith('wrong-') || ['save-error', 'malformed', 'install-error'].includes(automatic.setup)) throw fail('selecting automatic consent captures', 'this scenario is covered by mounted tests; choose the checkbox review or installed/blocked/failed result capture')
+  if (AUTOMATIC_STAGE === 'result' && automatic.expect === 'manual') throw fail('selecting automatic consent captures', 'manual decisions are captured before confirmation')
+  const base = fixture.cases.find((entry) => entry.name === automatic.base)
+  const entry = { ...base, name: `${automatic.name}-${AUTOMATIC_STAGE}`, automatic, steps: ['open'], expect: structuredClone(base.expect) }
+  if (AUTOMATIC_STAGE === 'result') {
+    const published = fixture.cases.find((entry) => entry.name === 'published-done')
+    entry.expect.request = structuredClone(published.expect.request)
+    entry.expect.bar = automatic.expect === 'automatic' ? { state: 'auto-publish', text: `auto-publish on · ${published.expect.request.add.join(', ')}`, action: 'manage' } : structuredClone(published.expect.bar)
+    entry.expect.popup = automatic.expect === 'automatic' ? structuredClone(published.expect.popup) : { heading: base.expect.popup.heading, texts: ['the transcript was published', automatic.expect], primary: null }
+  }
+  return entry
+}
+const cases = AUTOMATIC_ONLY.length
+  ? automaticFixture.cases.filter((entry) => AUTOMATIC_ONLY.includes(entry.name)).map(automaticVisualCase)
+  : ONLY.length ? fixture.cases.filter((entry) => ONLY.includes(entry.name)) : fixture.cases
+if (AUTOMATIC_ONLY.length && cases.length !== AUTOMATIC_ONLY.length) throw fail('selecting automatic consent captures', 'a requested named fixture does not exist')
 if (ONLY.length && cases.length !== ONLY.length) { console.error(`ERROR [publish-states-shoot] unknown case in PEASANT_PUBLISH_STATES_ONLY=${ONLY.join(',')}`); process.exit(1) }
 
 const chunkPath = assertBuildProvenance()
@@ -323,7 +362,7 @@ await pause(500)
 if (serverDown) healthy = false
 if (!healthy) { console.error(`ERROR [publish-states-shoot] the real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`); await teardown(); process.exit(2) }
 
-const evidence = { sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim(), binarySha256: hash(readFileSync(BIN)), packagePins: JSON.parse(readFileSync(join(WEB, 'package.json'), 'utf8')).dependencies, fixture: 'web/src/app/share/testdata/publish-popup-states.yaml', chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunk: null, captures: [] }
+const evidence = { sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim(), binarySha256: hash(readFileSync(BIN)), packagePins: JSON.parse(readFileSync(join(WEB, 'package.json'), 'utf8')).dependencies, fixture: AUTOMATIC_ONLY.length ? 'web/src/app/share/testdata/publish-automatic-consent.yaml' : 'web/src/app/share/testdata/publish-popup-states.yaml', automaticStage: AUTOMATIC_ONLY.length ? AUTOMATIC_STAGE : null, chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunk: null, captures: [] }
 try {
   evidence.servedChunk = await assertServedChunk(chunkPath)
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new' })
@@ -333,7 +372,7 @@ try {
   for (const theme of SMOKE_THEMES) {
     for (const entry of cases) {
       await shoot(browser, gate, fixture, entry, theme, DESKTOP, turns, evidence)
-      if (fixture.mobileCases.includes(entry.name)) await shoot(browser, gate, fixture, entry, theme, MOBILE, turns, evidence)
+      if (entry.automatic || fixture.mobileCases.includes(entry.name)) await shoot(browser, gate, fixture, entry, theme, MOBILE, turns, evidence)
     }
   }
   mkdirSync(OUT, { recursive: true })
