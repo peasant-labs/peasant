@@ -638,7 +638,7 @@ export function ShareWizardClient() {
 
       {/* Wizard shell: steps register their actions; the shell renders those tools
           with back and progress in the persistent footer. */}
-        <section className="swz share-wizard" aria-label="contribute to the commons" data-tour="share-nav">
+        <section className="swz share-wizard" aria-label="publish to village" data-tour="share-nav">
 
         {/* Step rail — completed = olive+check, current = amber, locked = dim/disabled. */}
         <div className="swz-head">
