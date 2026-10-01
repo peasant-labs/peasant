@@ -54,9 +54,10 @@ type clockCellSpec struct {
 }
 
 // enumeratedGeneratedIdentities is the complete set of chain-generated seed
-// identities. Every entry must resolve to exactly one live row in the chain
-// database; the identity fixture in testdata/baseline_open_cases.yaml mirrors
-// this list and is cross-checked against it by TestBaselineClockCells.
+// identities. resolveGeneratedIdentities asserts every entry resolves to
+// exactly one live row carrying either the deterministic baseline UUID or a
+// canonical chain-generated UUID, and TestBaselineSchemaIsCurrent proves two
+// independently chain-built artifacts serialize byte-identically.
 func enumeratedGeneratedIdentities() []generatedIdentitySpec {
 	return []generatedIdentitySpec{
 		{Table: "annotation_classes", IDColumn: "id", KeyColumn: "class", Keys: []string{"research"}},
