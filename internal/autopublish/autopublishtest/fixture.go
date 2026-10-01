@@ -186,9 +186,9 @@ type Expect struct {
 	ErrorContains  []string `yaml:"errorContains"`
 	OutputContains []string `yaml:"outputContains"`
 	// Publishes counts the uploads Village received; License is the license
-	// every upload after Before carried; Audience the collectives of the
-	// recorded session's transcript afterwards, and Others those of each
-	// extra session's, by alias; OwnerUpdates the owner visibility updates;
+	// every upload after Before carried; Audience the collectives that can
+	// read the recorded session's transcript afterwards (approved or pending),
+	// and Others those of each extra session's, by alias; OwnerUpdates the owner visibility updates;
 	// AttemptContains part of the session's latest failed attempt.
 	Publishes       *int                                            `yaml:"publishes"`
 	License         schema.License                                  `yaml:"license"`

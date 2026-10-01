@@ -446,7 +446,7 @@ cases:
     again: [--force]
     expect:
       publishes: 2
-      audience: {platform: retracted, review: rejected}
+      audience: {}
 
   - name: unchanged-session-is-not-shared-again
     driver: push
@@ -455,7 +455,7 @@ cases:
     config: {visibility: private}
     villageDecides: {platform: retracted}
     again: []
-    expect: {publishes: 1, audience: {platform: retracted}}
+    expect: {publishes: 1, audience: {}}
 
   - name: folder-rule-covers-the-push
     driver: push
