@@ -399,7 +399,7 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   - *CI parity:* neither runs in CI; both need `make build` and a Chrome binary, and run from a clean
     checkout.
   - *Evidence:* full-frame captures of the mounted shell in both themes: desktop, 390px, 320×256 (home and
-    transcript), 320×568 (`/share`), a scrolled 1440×700 page and a scrolled 1440×500 `/analytics` and its 390×844 page end; the keyboard
+    transcript), 320×568 (`/share`), a scrolled 1440×700 page and a scrolled 1440×500 `/analytics` and its 390×844 page end while stopped; the keyboard
     recovery (focus to `<main>`, then Tab) is asserted on the real browser.
   - *Mutation:* a re-added pill or share link, any link to a route-only section outside `<main>` (and
     fairtrade's section sub-nav anywhere), a dead settings link, a notice fixed on a small screen or
