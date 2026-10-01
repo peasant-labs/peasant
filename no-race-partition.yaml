@@ -495,6 +495,39 @@ partition:
       assertions all stay.
     cost: { wall_ms: 9120, cpu_ms: 6980 }
 
+  - package: cmd/peasant
+    test: TestPiHarvestCommonModes
+    class: single-threaded-bytes
+    evidence: '#TestPiHarvestCommonModes'
+    justification: >-
+      Subject. The in-process harvest and index commands over the Pi harness:
+      dry-run, logs-only, stored, redact and two-command modes; the source file
+      is never modified, a database appears only when rows are stored, and a
+      forecast leaves a seeded database byte-unchanged. Concurrency actually
+      exercised. Each case runs one or two in-process cobra commands, each
+      driving a real pipeline on the caller goroutine while its DIFF pool,
+      EXTRACT+WRITE workers, StagingBuffer, drainLoop and indexLoop run
+      concurrently underneath; no child process is built and no race-
+      instrumented child exists on this path. Why the detector is not this
+      test's oracle. The assertions read command output, filesystem state and
+      database digests after the command returns; a race corrupts those
+      products rather than producing its own assertion. Retained race coverage.
+      The cmd/peasant tests that drive the real pipeline and stay in the race
+      pass: cmd/peasant/pi_native_integration_test.go#TestPiNativeRegistryProjection,
+      cmd/peasant/pi_database_publication_test.go#TestPiDatabasePublicationThroughCLI,
+      cmd/peasant/cmd_kickstart_selection_runner_test.go#TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary,
+      plus the internal/ingest primitives raced by
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered and
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed.
+      Residual risk. Terminal-UI goroutines of the live command are not mounted
+      here, so a race inside them is uncovered in either pass; the retained
+      cmd/peasant tests bound the pipeline-driving paths.
+      Detector-independent guarantees kept. Source-unchanged and database-
+      presence assertions remain exact.
+    cost: { wall_ms: 2150, cpu_ms: 2620 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
