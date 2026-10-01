@@ -54,7 +54,7 @@ describe('PushStep transparency panel', () => {
 
     // fairtrade WhereDoesThisGo composite — chrome is lowercased.
     expect(screen.getByText('where does this go?')).toBeInTheDocument();
-    // Destination is the commons URL.
+    // Destination is the village URL.
     expect(screen.getByText('https://village.peasantlabs.org')).toBeInTheDocument();
     // What gets sent / stays private headings.
     expect(screen.getByText('what gets sent')).toBeInTheDocument();
@@ -101,7 +101,7 @@ describe('PushStep transparency panel', () => {
     ).toBeInTheDocument();
   });
 
-  it('uses the configured commons destination after a successful submission', async () => {
+  it('uses the configured village destination after a successful submission, and never calls it the commons', async () => {
     vi.stubEnv('NEXT_PUBLIC_COMMONS_URL', 'https://configured.example.test');
     vi.mocked(pushApi.runPush).mockResolvedValue({
       new: 1,
@@ -113,9 +113,11 @@ describe('PushStep transparency panel', () => {
     render(<PushHarness />);
     await userEvent.click(await screen.findByRole('button', { name: 'Submit' }));
 
-    expect(await screen.findByRole('link', { name: /View in the commons/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /open village/i })).toHaveAttribute(
       'href',
       'https://configured.example.test',
     );
+    expect(screen.getByText('1 published to village')).toBeInTheDocument();
+    expect(screen.queryByText(/commons/i)).not.toBeInTheDocument();
   });
 });

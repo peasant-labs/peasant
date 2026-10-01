@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
-function commonsUrl(): string {
+/** The village transcripts are published to. */
+function villageUrl(): string {
   return process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://village.peasantlabs.org';
 }
 
@@ -95,7 +96,7 @@ function usePush(sessionIds: string[], redactionLevel: SelectableRedactionLevel,
       setStates((prev) => prev.map((s) => ({ ...s, state: 'skipped' })));
       setSummary({ done: 0, skipped: sessionIds.length, errors: 0, total: sessionIds.length });
       setTopError(
-        'mock mode · the push is not run. Disable mock data to contribute for real.',
+        'mock mode · the push is not run. Disable mock data to publish for real.',
       );
       setPhase('done');
       return;
@@ -248,7 +249,7 @@ export function PushStep({
   );
 
   const { states, phase, topError, start, summary } = usePush(sessionIds, redactionLevel, useMock);
-  const destination = commonsUrl();
+  const destination = villageUrl();
 
   useEffect(() => {
     onFooterActionsChange(
@@ -304,11 +305,11 @@ export function PushStep({
       {(phase === 'pushing' || phase === 'done') && <div className="px-5 py-3 bg-surface border border-rule-strong">
         {phase === 'pushing' ? (
           <span className="inline-flex items-center gap-2 text-sm text-ink-3">
-            <LoaderIcon className="size-4 animate-spin" /> Contributing…
+            <LoaderIcon className="size-4 animate-spin" /> publishing…
           </span>
         ) : (
           <span className="text-sm text-ink-3 tabular-nums">
-            {summary.done} shared
+            {summary.done} published
             {summary.skipped > 0 ? `, ${summary.skipped} skipped` : ''}
             {summary.errors > 0 ? `, ${summary.errors} failed` : ''}
           </span>
@@ -331,7 +332,7 @@ export function PushStep({
           <div className="flex flex-col items-center text-center px-6 py-8">
             <CheckCircle2Icon className="size-10 text-success mb-3" />
             <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink">
-              {summary.done} contributed to the commons
+              {summary.done} published to village
               {summary.errors > 0 ? ` · ${summary.errors} failed` : ''}
             </h3>
             <Button
@@ -344,7 +345,7 @@ export function PushStep({
               rel="noopener noreferrer"
               iconRight={ExternalLinkIcon}
             >
-              View in the commons
+              open village
             </Button>
           </div>
         </div>
