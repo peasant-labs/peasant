@@ -11,7 +11,7 @@
 #                         then 4 s …)
 #   wait: <ms>            advance the clock; also settles pending checks
 #   retry: true           press `try again` on the notice
-#   focus: retry | away   put keyboard focus on `try again`, or take it off
+#   focus: retry | away | page   put keyboard focus on `try again`, or take it off
 #                         whatever holds it (to <body>)
 #   click: page           press the pointer on the page body (plain text), which
 #                         moves focus to <body> without a focus event
@@ -24,7 +24,7 @@
 #                         what the always-mounted live region says now (the
 #                         shell manifest's announcements; `still` is followed
 #                         by the time of the failed check)
-#   focused: main | elsewhere
+#   focused: main | elsewhere | page
 #                         keyboard focus is on the page body, or is not
 #   mainFocusable: true | false
 #                         <main> carries a tabindex (only while the notice's
@@ -365,6 +365,8 @@ cases:
       - socket: close
       - wait: 0
       - expect: shown
+      - wait: 1000
+      - sockets: 2
       - retry: true
       - wait: 0
       - announce: none
@@ -395,4 +397,23 @@ cases:
       - wait: 0
       - expect: hidden
       - focused: elsewhere
+      - mainFocusable: false
+
+  - name: page-control-keeps-focus-when-app-returns
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - focus: retry
+      - focus: page
+      - health: up
+      - wait: 1000
+      - sockets: 2
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - focused: page
       - mainFocusable: false

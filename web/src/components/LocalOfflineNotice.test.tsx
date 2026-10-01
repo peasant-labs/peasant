@@ -32,14 +32,14 @@ type Step =
   | { socket: 'open' | 'close' }
   | { wait: number }
   | { retry: true }
-  | { focus: 'retry' | 'away' }
+  | { focus: 'retry' | 'away' | 'page' }
   | { click: 'page' }
   | { expect: 'shown' | 'hidden' }
   | { checkedAt: number }
   | { sockets: number }
   | { healthChecks: number }
   | { announce: 'stopped' | 'still' | 'back' | 'none' }
-  | { focused: 'main' | 'elsewhere' }
+  | { focused: 'main' | 'elsewhere' | 'page' }
   | { mainFocusable: boolean };
 
 const STEP_KEYS = ['health', 'socket', 'wait', 'retry', 'focus', 'click', 'expect', 'checkedAt', 'sockets', 'healthChecks', 'announce', 'focused', 'mainFocusable'] as const;
@@ -64,6 +64,7 @@ const REQUIRED_CASES = [
   'try-again-superseded-by-an-answer-stays-quiet',
   'return-during-the-repeat-clear-stays-back',
   'click-after-try-again-leaves-focus-alone',
+  'page-control-keeps-focus-when-app-returns',
 ];
 /** The ports the start-command rows must cover: none, the default, and at least one other. */
 const REQUIRED_PORTS = ['', '8690'];
@@ -234,7 +235,7 @@ describe('LocalOfflineNotice', () => {
     render(
       <LayoutShell>
         {/* As app/layout.tsx mounts it: not focusable at rest. */}
-        <main>body</main>
+        <main>body<button type="button">page control</button></main>
       </LayoutShell>,
     );
     await advance(0);
@@ -244,6 +245,7 @@ describe('LocalOfflineNotice', () => {
         const socket = newestSocket();
         await act(async () => {
           if (step.socket === 'open') {
+            if (socket.readyState === MockWebSocket.CLOSED) throw new Error('a closed WebSocket cannot reopen');
             socket.readyState = MockWebSocket.OPEN;
             socket.onopen?.(new Event('open'));
           } else {
@@ -255,6 +257,7 @@ describe('LocalOfflineNotice', () => {
       else if ('retry' in step) fireEvent.click(screen.getByRole('button', { name: 'try again' }));
       else if ('focus' in step) {
         if (step.focus === 'retry') act(() => screen.getByRole('button', { name: 'try again' }).focus());
+        else if (step.focus === 'page') act(() => screen.getByRole('button', { name: 'page control' }).focus());
         else act(() => (document.activeElement as HTMLElement | null)?.blur());
       } else if ('click' in step) {
         const main = document.querySelector('main');
@@ -274,6 +277,7 @@ describe('LocalOfflineNotice', () => {
         else expect(text).toBe(OFFLINE_ANNOUNCEMENTS[step.announce]);
       } else if ('focused' in step) {
         if (step.focused === 'main') expect(document.activeElement?.tagName).toBe('MAIN');
+        else if (step.focused === 'page') expect(screen.getByRole('button', { name: 'page control' })).toHaveFocus();
         else expect(document.activeElement?.tagName).not.toBe('MAIN');
       }
       else if (step.expect === 'shown') expectShown();

@@ -22,13 +22,11 @@
 #                     scrolled     the page is scrolled down before the stop, and
 #                                  the pinned notice must appear on screen under
 #                                  the header
-#                     keep-place   a screen where the notice is not pinned,
-#                                  scrolled down: in the frame the notice appears
-#                                  the page scrolls by exactly its height, and in
-#                                  the frame it goes it scrolls back by at least
-#                                  that (the page's own connection strip may go in
-#                                  the same frame), so the reader keeps their
-#                                  place
+#                     keep-place / keep-place-end: a non-pinned notice on a page
+#                                  scrolled midway / to its end. Appearance scrolls
+#                                  by its height; after recovery the stable content
+#                                  reference returns to the same viewport top ±1px.
+#   reference       stable content selector required for place-keeping cases
 #   floor           the full-height element a `floor` case measures
 #   singleScroller  the page's own content scrolls; the document must not
 #   recover         pointer (default) or keyboard: how `try again` is pressed after
@@ -93,3 +91,11 @@ cases:
     width: 1440
     height: 500
     check: keep-place
+    reference: .gan-root
+  - name: analytics-end-keeps-place
+    path: /analytics/
+    body: .gan-root
+    reference: .gan-root
+    width: 390
+    height: 844
+    check: keep-place-end
