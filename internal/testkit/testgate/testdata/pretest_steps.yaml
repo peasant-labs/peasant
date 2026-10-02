@@ -31,10 +31,10 @@ steps:
     target: fmt
     fragment: "go fmt ./..."
   - step: lint
-    program: go
-    args: ["vet", "./..."]
+    program: ./scripts/vet-go.sh
+    args: []
     target: lint
-    fragment: "go vet ./..."
+    fragment: "./scripts/vet-go.sh"
   - step: ast-grep-scan
     program: ast-grep
     args: ["scan", "--error=unused-suppression", "--config", "sgconfig.yml", "."]
