@@ -118,7 +118,7 @@ HEADER
   printf 'File:   LICENSE\n'
   printf '%s\n\n' "================================================================================"
   cat "${repo_root}/third_party/zombiezen-sqlite/LICENSE"
-  printf '\n' 
+  printf '\n'
 } > "${buf_tmp}"
 
 mv "${buf_tmp}" "${out_file}"

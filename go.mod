@@ -97,7 +97,7 @@ require (
 	gopkg.in/ini.v1 v1.67.2 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	zombiezen.com/go/sqlite v1.4.0 // indirect
+	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
 
 tool github.com/peasant-labs/schema/cmd/release-guard
