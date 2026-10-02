@@ -112,3 +112,15 @@ compatibility error rather than silently changing the historical implementation.
 Named filesystem fixtures cover absent support, existing preservation, refusal
 and an original module-based builder. The real two-revision guard still compares
 both corpora through the actual original production parsers and version checks.
+
+## Scoped static analysis
+
+Moving the driver into the main module exposes upstream's unchanged modernc
+native-memory uintptr conversions to full `go vet`; dependencies were previously
+outside that command's package targets. The unsafeptr analyzer cannot model those
+native allocations as Go heap pointers. Every Peasant package and driver
+subpackage still gets all analyzers. Only the native driver root package omits
+unsafeptr; all its other analyzers run. The source audit additionally requires
+its exact original unsafe.Pointer source lines (including multiplicity) from the
+official v1.4.2 distribution and rejects any new conversions in added fork files.
+No upstream pointer operation is rewritten or new operation exempted.

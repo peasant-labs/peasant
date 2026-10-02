@@ -117,5 +117,107 @@
     "go.work": "UPSTREAM.go.work.txt",
     "go.work.sum": "UPSTREAM.go.work.sum.txt"
   },
-  "patch_sha256": "f52d3795b560fa3c2bc8a359318ee7ae0b1d3eafaf891e2a93c9348a77dd5424"
+  "patch_sha256": "f52d3795b560fa3c2bc8a359318ee7ae0b1d3eafaf891e2a93c9348a77dd5424",
+  "native_pointer_lines": {
+    "blob.go": [
+      "blobPtr := *(*uintptr)(unsafe.Pointer(blobPtrPtr))"
+    ],
+    "blocking_step.go": [
+      "un := (*unlockNote)(unsafe.Pointer(ptr))",
+      "un := (*unlockNote)(unsafe.Pointer(ptr))",
+      "fireUnlockNote(tls, *(*uintptr)(unsafe.Pointer(apArg)))",
+      "un := (*unlockNote)(unsafe.Pointer(unPtr))"
+    ],
+    "func.go": [
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(valarray)),",
+      "aggCtx := (*uintptr)(unsafe.Pointer(lib.Xsqlite3_aggregate_context(tls, ctx, int32(ptrSize))))",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(valarray)),",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(valarray)),"
+    ],
+    "func_test.go": [
+      "want := *(*uintptr)(unsafe.Pointer(&struct{ f func(*libc.TLS, uintptr) }{libc.Xfree}))"
+    ],
+    "index_constraint.go": [
+      "info := (*lib.Sqlite3_index_info)(unsafe.Pointer(infoPtr))",
+      "src := (*lib.Sqlite3_index_constraint)(unsafe.Pointer(info.FaConstraint + uintptr(i)*unsafe.Sizeof(lib.Sqlite3_index_constraint{})))",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(ppVal)),",
+      "cc := *(*byte)(unsafe.Pointer(c))"
+    ],
+    "internal_test.go": [
+      "*(*byte)(unsafe.Pointer(ptr + uintptr(i))) = want[i]"
+    ],
+    "session.go": [
+      "ptr: *(*uintptr)(unsafe.Pointer(doublePtr)),",
+      "cerrMsg := *(*uintptr)(unsafe.Pointer(errMsgPtr))",
+      "ptr:    *(*uintptr)(unsafe.Pointer(pp)),",
+      "Type:       OpType(*(*int32)(unsafe.Pointer(pOp))),",
+      "TableName:  libc.GoString(*(*uintptr)(unsafe.Pointer(pzTab))),",
+      "NumColumns: int(*(*int32)(unsafe.Pointer(pnCol))),",
+      "Indirect:   *(*int32)(unsafe.Pointer(pbIndirect)) != 0,",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(ppValue)),",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(ppValue)),",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(ppValue)),",
+      "return int(*(*int32)(unsafe.Pointer(pnOut))), nil",
+      "c := libc.GoBytes(*(*uintptr)(unsafe.Pointer(pabPK)), int(*(*int32)(unsafe.Pointer(pnCol))))",
+      "cg.ptr = *(*uintptr)(unsafe.Pointer(pp))",
+      "n := int(*(*int32)(unsafe.Pointer(pnData)))",
+      "*(*int32)(unsafe.Pointer(pnData)) = int32(n)"
+    ],
+    "sqlite.go": [
+      "conn:       *(*uintptr)(unsafe.Pointer(connPtr)),",
+      "ctrailing := *(*uintptr)(unsafe.Pointer(ctrailingPtr))",
+      "stmt:  *(*uintptr)(unsafe.Pointer(stmtPtr)),",
+      "n := *(*int64)(unsafe.Pointer(piSize))",
+      "*(*byte)(unsafe.Pointer(v + uintptr(i))) = b",
+      "*(*byte)(unsafe.Pointer(v + uintptr(i))) = value[i]",
+      "b := unsafe.Slice((*byte)(unsafe.Pointer(s)), n)",
+      "return *(*uintptr)(unsafe.Pointer(&struct{ f T }{f}))"
+    ],
+    "vtable.go": [
+      "info := (*lib.Sqlite3_index_info)(unsafe.Pointer(infoPtr))",
+      "o := (*lib.Sqlite3_index_orderby)(unsafe.Pointer(aOrderBy))",
+      "info := (*lib.Sqlite3_index_info)(unsafe.Pointer(infoPtr))",
+      "ptr := (*lib.Sqlite3_index_constraint_usage)(unsafe.Pointer(aConstraintUsage))",
+      "cmodPtr := (*lib.Sqlite3_module)(unsafe.Pointer(cmod))",
+      "options.ModuleName = libc.GoString(*(*uintptr)(unsafe.Pointer(argv)))",
+      "options.DatabaseName = libc.GoString(*(*uintptr)(unsafe.Pointer(argv)))",
+      "options.VTableName = libc.GoString(*(*uintptr)(unsafe.Pointer(argv)))",
+      "options.Args[i] = libc.GoString(*(*uintptr)(unsafe.Pointer(argv)))",
+      "*(*uintptr)(unsafe.Pointer(pzErr)) = zerr",
+      "*(*uintptr)(unsafe.Pointer(ppVTab)) = pvtab",
+      "(*vtabWrapper)(unsafe.Pointer(pvtab)).id = id",
+      "id := (*vtabWrapper)(unsafe.Pointer(pVTab)).id",
+      "id := (*vtabWrapper)(unsafe.Pointer(pVTab)).id",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "info := (*lib.Sqlite3_index_info)(unsafe.Pointer(infoPtr))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "*(*uintptr)(unsafe.Pointer(ppCursor)) = pcursor",
+      "(*cursorWrapper)(unsafe.Pointer(pcursor)).id = cursorID",
+      "id := (*cursorWrapper)(unsafe.Pointer(pCursor)).id",
+      "pVTab := (*cursorWrapper)(unsafe.Pointer(pCursor)).base.FpVtab",
+      "(*vtabWrapper)(unsafe.Pointer(pVTab)).setErrorMessage(tls, err.Error())",
+      "cw := (*cursorWrapper)(unsafe.Pointer(pCursor))",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(argv)),",
+      "cw := (*cursorWrapper)(unsafe.Pointer(pCursor))",
+      "id := (*cursorWrapper)(unsafe.Pointer(pCursor)).id",
+      "id := (*cursorWrapper)(unsafe.Pointer(pCursor)).id",
+      "cw := (*cursorWrapper)(unsafe.Pointer(pCursor))",
+      "*(*int64)(unsafe.Pointer(pRowid)) = rowID",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(argv)),",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(argv)),",
+      "ptrOrType: *(*uintptr)(unsafe.Pointer(argv)),",
+      "*(*int64)(unsafe.Pointer(pRowid)) = insertRowID",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(pVTab))",
+      "vw := (*vtabWrapper)(unsafe.Pointer(cw.base.FpVtab))",
+      "cslice := unsafe.Slice((*byte)(unsafe.Pointer(c)), csize)"
+    ]
+  }
 }

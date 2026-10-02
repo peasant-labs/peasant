@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify that the audited local SQLite copy has only documented changes."""
 
+from collections import Counter
 import hashlib
 import json
 import re
@@ -34,6 +35,17 @@ for name, upstream_digest in manifest["files"].items():
     actual_digest = hashlib.sha256((root / renamed.get(name, name)).read_bytes()).hexdigest()
     if actual_digest != expected_digest:
         raise SystemExit(f"undocumented SQLite source change: {name}")
+# The only vet exception is the native package's unsafeptr analyzer. Its
+# original modernc address conversions must remain exactly the upstream set;
+# no added source (including our regression test) can introduce another one.
+actual_pointer_lines = {}
+for path in root.rglob("*.go"):
+    lines = [line.strip() for line in path.read_text().splitlines() if "unsafe.Pointer(" in line]
+    if lines:
+        actual_pointer_lines[str(path.relative_to(root))] = Counter(lines)
+expected_pointer_lines = {name: Counter(lines) for name, lines in manifest["native_pointer_lines"].items()}
+if actual_pointer_lines != expected_pointer_lines:
+    raise SystemExit("SQLite native pointer expressions differ from audited upstream source")
 print("SQLite origin and documented source hashes match")
 
 # All Peasant-owned connection/statement types must use the same audited driver.

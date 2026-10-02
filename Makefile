@@ -90,7 +90,7 @@ lint: web-stub
 	# Running golangci-lint is deferred until its existing findings are resolved.
 	# Use go vet for now
 	# golangci-lint run ./...
-	go vet ./...
+	./scripts/vet-go.sh
 
 check: fmt lint sqlite-source-audit
 	@set -e; \
