@@ -1,0 +1,26 @@
+{
+  "files_in_context": [
+    {
+      "path": "src/router.ts",
+      "record_state": "active",
+      "record_source": "read_tool",
+      "cline_read_date": 1767225606000,
+      "cline_edit_date": null
+    }
+  ],
+  "model_usage": [
+    {"ts": 1767225601000, "model_id": "claude-sonnet-4-5", "model_provider_id": "anthropic", "mode": "act"},
+    {"ts": 1767225701000, "model_id": "gpt-5", "model_provider_id": "openai", "mode": "act"}
+  ],
+  "environment_history": [
+    {
+      "ts": 1767225600000,
+      "os_name": "linux",
+      "os_version": "6.0.0",
+      "os_arch": "x64",
+      "host_name": "Visual Studio Code",
+      "host_version": "1.100.0",
+      "cline_version": "3.89.2"
+    }
+  ]
+}

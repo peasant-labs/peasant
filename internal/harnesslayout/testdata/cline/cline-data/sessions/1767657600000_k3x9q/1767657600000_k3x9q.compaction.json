@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updated_at": "2026-01-06T00:04:00.000Z",
+  "source_message_count": 4,
+  "source_prefix_hash": "0000000000000000",
+  "source_last_message_key": "m4",
+  "messages": [
+    {"role": "user", "content": [{"type": "text", "text": "SYNTHETIC-COMPACTION-SUMMARY"}]}
+  ]
+}

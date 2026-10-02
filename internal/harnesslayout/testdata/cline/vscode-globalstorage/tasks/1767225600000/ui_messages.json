@@ -1,0 +1,13 @@
+[
+  {"ts":1767225600000,"type":"say","say":"task","text":"Add a health check endpoint to the sample service"},
+  {"ts":1767225601000,"type":"say","say":"api_req_started","text":"{\"request\":\"SYNTHETIC-REQUEST\",\"tokensIn\":1200,\"tokensOut\":80,\"cacheWrites\":0,\"cacheReads\":0,\"cost\":0.004}","conversationHistoryIndex":0,"modelInfo":{"modelId":"claude-sonnet-4-5","providerId":"anthropic","mode":"act"}},
+  {"ts":1767225602000,"type":"say","say":"reasoning","text":"SYNTHETIC-THINKING-TEXT","partial":false},
+  {"ts":1767225603000,"type":"say","say":"text","text":"SYNTHETIC-ASSISTANT-TEXT","partial":false},
+  {"ts":1767225604000,"type":"say","say":"tool","text":"{\"tool\":\"readFile\",\"path\":\"src/router.ts\",\"content\":\"SYNTHETIC-TOOL-OUTPUT\"}","conversationHistoryIndex":1},
+  {"ts":1767225607000,"type":"say","say":"checkpoint_created","lastCheckpointHash":"0000000000000000000000000000000000000000","isCheckpointCheckedOut":false},
+  {"ts":1767225620000,"type":"say","say":"completion_result","text":"Added the endpoint."},
+  {"ts":1767225621000,"type":"ask","ask":"completion_result","text":""},
+  {"ts":1767225700000,"type":"say","say":"user_feedback","text":"Also add a test"},
+  {"ts":1767225701000,"type":"say","say":"api_req_started","text":"{\"request\":\"SYNTHETIC-REQUEST\",\"tokensIn\":800,\"tokensOut\":40}","modelInfo":{"modelId":"gpt-5","providerId":"openai","mode":"act"}},
+  {"ts":1767225710000,"type":"say","say":"text","text":"Test added.","partial":false}
+]

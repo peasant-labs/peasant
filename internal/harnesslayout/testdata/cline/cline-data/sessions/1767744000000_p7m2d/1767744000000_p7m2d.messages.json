@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "updated_at": "2026-01-07T00:01:00.000Z",
+  "agent": "lead",
+  "sessionId": "1767744000000_p7m2d",
+  "origin": {"source": "cli", "mode": "user", "sessionId": "1767744000000_p7m2d"},
+  "messages": [
+    {"id": "n1", "role": "user", "content": [{"type": "text", "text": "SYNTHETIC-USER-PROMPT"}, {"type": "file", "path": "/projects/sample-api/README.md", "content": "SYNTHETIC-FILE-CONTENT"}], "ts": 1767744000000},
+    {"id": "n2", "role": "assistant", "content": [{"type": "text", "text": "SYNTHETIC-ASSISTANT-TEXT"}], "modelInfo": {"id": "gpt-5", "provider": "openai"}, "metrics": {"inputTokens": 100, "outputTokens": 20}, "ts": 1767744060000}
+  ]
+}
