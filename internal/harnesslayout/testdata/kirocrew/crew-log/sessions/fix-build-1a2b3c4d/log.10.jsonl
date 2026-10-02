@@ -1,0 +1,8 @@
+{"type":"session","version":1,"id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","owner":"default","task":null,"pack":null,"agent":"kirocrew","slot":"fix-build","thread":null,"cwd":"/work/example-app","remote":null,"createdAt":1789899600000}
+{"type":"model/selected","seq":10,"time":1789901940000,"src":"gateway","data":{"model":"claude-haiku-4.5","source":"fallback","turn":2}}
+{"type":"message/received","seq":11,"time":1789902000000,"src":"gateway","data":{"turn":2,"role":"user","source":"dashboard","text":"Clear it before each run."}}
+{"type":"turn/started","seq":12,"time":1789902000010,"src":"gateway","data":{"turn":2,"actor":"user","depth":0,"message_seq":11}}
+{"type":"tool/called","seq":13,"time":1789902005000,"src":"acp","data":{"turn":2,"call_id":"c-03","name":"write","server":"","kind":"edit","call_index":1,"step":1,"args_hash":"8a9b0c1d","args_bytes":64}}
+{"type":"tool/completed","seq":14,"time":1789902006000,"src":"acp","data":{"turn":2,"call_id":"c-03","name":"write","server":"","status":"unknown","call_index":1,"step":1,"result_bytes":0}}
+{"type":"message/sent","seq":15,"time":1789902020000,"src":"acp","data":{"turn":2,"step":2,"text":"Done."}}
+{"type":"turn/completed","seq":16,"time":1789902020100,"src":"acp","data":{"turn":2,"depth":0,"stop_reason":"end_turn","duration_ms":20090,"credits":0.0004,"model":"claude-haiku-4.5","provider":"kiro","tokens":{"input":402,"output":12,"cache_read":300,"cache_write":0}}}
