@@ -95,3 +95,20 @@ this callback race. This patch makes no claim to resolve that failure.
    rather than succeed through a workspace or dependency fallback.
 10. Exit condition: keep the focused installation gate while this distribution
     is supported; simplify only if versioned Go installation is retired.
+
+## Historical harvester comparison
+
+The harvester guard keeps one shared native-fixture builder across both exact
+production snapshots and both original input corpora. For snapshots predating
+this ordinary package, it supplies the candidate's non-test Go driver support
+and LICENSE at the otherwise-absent package path. The builder returns database
+paths; no Conn or Stmt crosses into either production reader. The older module's
+existing modernc dependencies already satisfy this v1.4.2 support; its go.mod,
+production imports, parser code and version registry are untouched.
+
+An existing historical driver is never rewritten. Identical runtime support is
+left intact; a different or additional runtime file fails closed with an explicit
+compatibility error rather than silently changing the historical implementation.
+Named filesystem fixtures cover absent support, existing preservation, refusal
+and an original module-based builder. The real two-revision guard still compares
+both corpora through the actual original production parsers and version checks.
