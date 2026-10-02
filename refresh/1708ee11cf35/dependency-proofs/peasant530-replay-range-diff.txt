@@ -1,0 +1,37 @@
+ 1:  de78883b =  1:  b7ac3cc0 feat(autopublish): read auto-publish rules and match them to repositories
+ 2:  fee6c968 =  2:  2744ced9 feat(api): save, remove, and install auto-publish rules and report autoPublish
+ 3:  7bb0129e =  3:  53a8d2b4 feat(push): publish a push a rule covers to its collectives and add village auto
+ 4:  7817306c =  4:  eefed6dd docs: describe auto-publish rules and the consent a binding gives
+ 5:  0d1b8fc5 =  5:  a706139b fix(push): keep the audience when a rule's push updates a transcript
+ 6:  52c8d61b =  6:  739057c1 fix(api): refuse a rule body whose events or collectives are null
+ 7:  6aa1e2e0 =  7:  e729cab6 feat(githooks): report whether git runs an upload from a slot
+ 8:  e922a2c8 =  8:  ff750b68 fix(push): bind auto-publish rules per session and never publish a bound session more widely
+ 9:  5df9f7b2 =  9:  ccc31949 docs: describe per-session rules, paused rules, and held public transcripts
+10:  e2e96784 = 10:  be8f593c fix(push): pin a bound push to the sessions its rules matched and ask Village before updating
+11:  897fd23f = 11:  03ae0880 docs: say where the rules apply and how a held public transcript is released
+12:  69f292e2 = 12:  45b8b4ae test(push): assert decided shares stay out of the audience on the history-based double
+13:  301148c1 = 13:  6d052641 fix(auto-publish): enforce current hook consent and scoped updates
+14:  433f2948 = 14:  4d29aa2d style(tui): apply current Go formatting
+15:  6252fad0 = 15:  3f28f88e test(auto-publish): isolate hook lifecycle and naming cases
+16:  294038ce = 16:  3f670b66 fix(auto-publish): reject trailing YAML documents
+17:  62cf219d = 17:  27c3435f test(auto-publish): assert visibility intent and actual owner changes
+18:  dbfa814a ! 18:  1ea3625b fix(contract): pin the corrected binding consent release
+    @@ THIRD_PARTY_NOTICES: File:   LICENSE
+      ================================================================================
+      
+     
+    - ## flake.nix ##
+    -@@
+    -       # Vendor hash for buildGoModule. Recompute when go.mod/go.sum changes:
+    -       # set this to nixpkgs.lib.fakeHash, run `nix build`, copy the reported `got:`
+    -       # hash back here.
+    --      vendorHash = "sha256-k2XSvindDNI+0+ruRolLEnxN7J0p7DX65qBrlU7A74s=";
+    -+      vendorHash = "sha256-mhf40p0te3QjGzYrrK62o8W/VOawgc2SgZ9RVOLaJb0=";
+    - 
+    -       # Extra CLI tools available in the dev shell
+    -       devTools = pkgs: with pkgs; [
+    -
+      ## go.mod ##
+     @@ go.mod: require (
+      	github.com/jackc/pgx/v5 v5.10.0
+ -:  -------- > 19:  146ca207 build: use the audited SQLite package for publishing rules

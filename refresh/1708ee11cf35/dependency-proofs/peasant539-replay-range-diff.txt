@@ -1,0 +1,32 @@
+ 1:  37353656 =  1:  004b5403 feat(config): record the auto-publish intent as push.autoPublishIntent
+ 2:  2e3ff0d8 =  2:  9a17747d feat(tui): ask "publish automatically?" in kickstart
+ 3:  aa39e610 =  3:  4586d989 docs: describe the publication and auto-publish steps of kickstart
+ 4:  28251d02 =  4:  e26e7b15 fix(settings): expose automatic publishing intent consistently
+ 5:  2ac9f1fa =  5:  6bc00941 feat: expose the setup automatic publishing preference
+ 6:  d1f8cdd6 =  6:  47fac3b4 feat: target automatic publishing at a stored session repository
+ 7:  450e9dd0 =  7:  1a99f1de feat: restore the automatic publishing reminder on home
+ 8:  b4563169 !  8:  90d4c7e6 chore: pin released schema for session-targeted publishing
+    @@ THIRD_PARTY_NOTICES: File:   LICENSE
+      ================================================================================
+      
+     
+    - ## flake.nix ##
+    -@@
+    -       # Vendor hash for buildGoModule. Recompute when go.mod/go.sum changes:
+    -       # set this to nixpkgs.lib.fakeHash, run `nix build`, copy the reported `got:`
+    -       # hash back here.
+    --      vendorHash = "sha256-mhf40p0te3QjGzYrrK62o8W/VOawgc2SgZ9RVOLaJb0=";
+    -+      vendorHash = "sha256-nJ+Zjc99C/kbATwa/vGU4UhVARLtQHMYTJylPMsDwxY=";
+    - 
+    -       # Extra CLI tools available in the dev shell
+    -       devTools = pkgs: with pkgs; [
+    -
+      ## go.mod ##
+     @@ go.mod: require (
+      	github.com/jackc/pgx/v5 v5.10.0
+ 9:  be26d64a =  9:  0ede6840 feat: confirm automatic repository publishing from the transcript popup
+10:  65d950b3 = 10:  04f585ee fix: verify the complete saved publishing audience
+11:  46a6f5cd = 11:  a9a43729 test: capture automatic publishing consent and home guidance
+12:  e3fa3276 = 12:  65c30ba3 fix: stop automatic consent when a requested share is declined
+13:  863e86d5 = 13:  294879be test: align config fixtures with auto-publish settings
+ -:  -------- > 14:  1708ee11 build: preserve the audited session publishing dependency graph

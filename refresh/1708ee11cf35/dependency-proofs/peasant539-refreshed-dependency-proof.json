@@ -1,0 +1,13 @@
+{
+  "pullRequest": 539,
+  "stagedTree": "41532dee1cabdc0c4f3c506b7ad3a0e9164ac24e",
+  "schema": "v0.27.0",
+  "goModSHA256": "bd55a66e497c2b556d8cfc468019090fa1d004ecc4cd6a38874f8833aa371079",
+  "goSumSHA256": "29d8fcc98327c3c3f4981ef04cc7e1dcc82571f918b159f064c32c54c0bb356e",
+  "moduleGraphSHA256": "f13369d27e5fceba1fad5394fd1b66c06763f0edada46387308d1ec8e5c1eae7",
+  "actualFreshVendorSHA256": "9d43ff0eb06e082f11ac259b67256b783a92583b1954cad5b7882005bb8fc1a0",
+  "verifiedPrewarmedNixHash": "sha256-Ff1h18VZ2pNuPTDE3zjWNsoYbwUh/JZW0pKEatiCpqk=",
+  "actualPrewarmLog": "/tmp/codex-overhaul/peasant541-schema-v027-actual-nix.log",
+  "temporarySourceAndVendorRemoved": true,
+  "runtimeTestClaim": false
+}

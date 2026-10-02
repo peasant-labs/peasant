@@ -1,0 +1,10 @@
+ 1:  11369e56 =  1:  4cb448d3 feat(web): root page lists sessions with their publish state
+ 2:  564af67f =  2:  c646a522 test(web): assert the root list's filter counts and stats on the mounted page
+ 3:  64d3c29a =  3:  cc312cd4 test(web): capture the root page from the real binary in both themes
+ 4:  6904f564 =  4:  bcb26e1b fix(web): reread the root list only when the session set changes
+ 5:  baa305a5 =  5:  29f0db05 fix(web): count only approved collectives as transcript readers
+ 6:  53268899 =  6:  a582e711 fix(web): refresh visible publication audiences with the session list
+ 7:  51c35de6 =  7:  ec38fa99 test(web): verify the complete recovery frame and mounted panel bounds
+ 8:  a466c1f5 =  8:  3c9417df test(web): check the shell against its mounted grid width
+ 9:  4de02c1f =  9:  1201a9f9 test: capture complete home statistics
+10:  2f6d299a = 10:  234ab460 test: verify representative weekly statistics in home captures

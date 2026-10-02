@@ -1,0 +1,11 @@
+ 1:  e7837d3e =  1:  d7fde004 feat(config): save an edited configuration document atomically
+ 2:  7b339961 =  2:  99dde510 feat(tui): report which configuration each settings field writes
+ 3:  ac4b1b37 =  3:  e2a521a4 feat(api): read and write every setting through the local API
+ 4:  ecf112e7 =  4:  7ceab6f2 docs: describe the settings routes in the serve path
+ 5:  3953ab0b =  5:  73afe727 feat(api): list the saved auto-publish rules in the settings read
+ 6:  cf7e84c6 =  6:  db454476 feat(config): export the closed sets behind four setting types
+ 7:  fdba7edc =  7:  c5d9c011 fix(api): apply a saved setting to every handler and check the settings answers
+ 8:  48ac2efa =  8:  8636c155 fix(api): keep the running configuration in step with every settings read
+ 9:  488c69f2 =  9:  e1ba65ef test(web): preserve the resolved settings configuration path
+10:  9768a84a = 10:  5bed97d8 fix(settings): report running values for start-only keys
+11:  b433bfdd = 11:  8455ae26 test(settings): preserve unreadable file bytes and permissions

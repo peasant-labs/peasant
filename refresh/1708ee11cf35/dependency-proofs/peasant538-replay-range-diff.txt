@@ -1,0 +1,5 @@
+1:  72bacc22 = 1:  29afaca4 feat(web): add the local settings page
+2:  ca1bdd4f = 2:  ab443920 fix(web): recover settings sign-in reads and explain revoked hook consent
+3:  e45e39d8 = 3:  062bd731 fix(web): share primitive type exports across home and settings
+4:  6499c415 = 4:  9142fb8b fix(web): mount the settings link in the canonical section navigation
+5:  afc2f34d = 5:  cc4d2383 fix(web): serialize settings decisions and clear stale sign-in state

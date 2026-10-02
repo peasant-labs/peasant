@@ -1,0 +1,216 @@
+{
+  "verifiedAt": "2026-10-02T03:23:29.175Z",
+  "sourceHead": "1708ee11cf356d1ea8991828be625c545f0356ef",
+  "sourceTree": "957293490d11e2d946806605d937a0c953157e22",
+  "webTree": "cb60a29d5358b9ed23a11c3986b5581c3480dab1",
+  "binarySHA256": "5bdde4c3f6f50d6920ea7fe37e770eb0ca956090abe3216756c50bf25a5b49d9",
+  "binaryVersion": "peasant v0.7.1-dev.135+1708ee11c",
+  "buildInfo": "/Users/vitorhugo/Documents/Projects/polyrepo/peasant/peasant-9--feat--kickstart-auto-publish/bin/peasant: go1.27.0\n\tpath\tgithub.com/peasant-labs/peasant/cmd/peasant\n\tmod\tgithub.com/peasant-labs/peasant\tv0.7.1-0.20261002031335-1708ee11cf35\t\n\tdep\tcharm.land/bubbles/v2\tv2.1.1\th1:7r55WzBxpo/R3z98hGmY7KKPd3ET6vsf0Fb9sDHOV60=\n\tdep\tcharm.land/bubbletea/v2\tv2.0.8\th1:SxTJMhCAI3lbPmy4SgX5LWZ24AdINr4I6UEqzZvYJuY=\n\tdep\tcharm.land/glamour/v2\tv2.0.0\th1:IDBoqLEy7Hdpb9VOXN+khLP/XSxtJy1VsHuW/yF87+U=\n\tdep\tcharm.land/lipgloss/v2\tv2.0.5\th1:kbNxgeeUOYv5J0YdpxFjfvf3dFvqH8Aci4zB6xqFtrY=\n\tdep\tgithub.com/BurntSushi/toml\tv1.6.0\th1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=\n\tdep\tgithub.com/alecthomas/chroma/v2\tv2.24.1\th1:m5ffpfZbIb++k8AqFEKy9uVgY12xIQtBsQlc6DfZJQM=\n\tdep\tgithub.com/atotto/clipboard\tv0.1.4\th1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=\n\tdep\tgithub.com/aymerick/douceur\tv0.2.0\th1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=\n\tdep\tgithub.com/charmbracelet/colorprofile\tv0.4.3\th1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex9t5KX76i20Q=\n\tdep\tgithub.com/charmbracelet/harmonica\tv0.2.0\th1:8NxJWRWg/bzKqqEaaeFNipOu77YR5t8aSwG4pgaUBiQ=\n\tdep\tgithub.com/charmbracelet/ultraviolet\tv0.0.0-20260703014108-f5a850f9c2b7\th1:3FmWoGNWK4STvqg0O0Aeav2T7rodWJAPeF0QpH+8gFw=\n\tdep\tgithub.com/charmbracelet/x/ansi\tv0.11.7\th1:kzv1kJvjg2S3r9KHo8hDdHFQLEqn4RBCb39dAYC84jI=\n\tdep\tgithub.com/charmbracelet/x/exp/slice\tv0.0.0-20250327172914-2fdc97757edf\th1:rLG0Yb6MQSDKdB52aGX55JT1oi0P0Kuaj7wi1bLUpnI=\n\tdep\tgithub.com/charmbracelet/x/term\tv0.2.2\th1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=\n\tdep\tgithub.com/charmbracelet/x/termios\tv0.1.1\th1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=\n\tdep\tgithub.com/charmbracelet/x/windows\tv0.2.2\th1:IofanmuvaxnKHuV04sC0eBy/smG6kIKrWG2/jYn2GuM=\n\tdep\tgithub.com/clipperhouse/displaywidth\tv0.11.0\th1:lBc6kY44VFw+TDx4I8opi/EtL9m20WSEFgwIwO+UVM8=\n\tdep\tgithub.com/clipperhouse/uax29/v2\tv2.7.0\th1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=\n\tdep\tgithub.com/coder/websocket\tv1.8.14\th1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=\n\tdep\tgithub.com/cpuguy83/go-md2man/v2\tv2.0.6\th1:XJtiaUW6dEEqVuZiMTn1ldk455QWwEIsMIJlo5vtkx0=\n\tdep\tgithub.com/dayvidpham/bestiary\tv0.2.11\th1:DT3A5QK5VOW6c0bhrLXz/inB4oHO2hDKqa5sQc5+h6A=\n\tdep\tgithub.com/dlclark/regexp2\tv1.12.0\th1:0j4c5qQmnC6XOWNjP3PIXURXN2gWx76rd3KvgdPkCz8=\n\tdep\tgithub.com/dustin/go-humanize\tv1.0.1\th1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=\n\tdep\tgithub.com/google/uuid\tv1.6.0\th1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=\n\tdep\tgithub.com/gorilla/css\tv1.0.1\th1:ntNaBIghp6JmvWnxbZKANoLyuXTPZ4cAMlo6RyhlbO8=\n\tdep\tgithub.com/lucasb-eyer/go-colorful\tv1.4.0\th1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW4TvVgFr4=\n\tdep\tgithub.com/mattn/go-isatty\tv0.0.20\th1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=\n\tdep\tgithub.com/mattn/go-pointer\tv0.0.1\th1:n+XhsuGeVO6MEAp7xyEukFINEa+Quek5psIR/ylA6o0=\n\tdep\tgithub.com/mattn/go-runewidth\tv0.0.24\th1:cpokDiIn0MGnhdHwuWnJBITySJ20QyNGnY2kR/ay2DU=\n\tdep\tgithub.com/microcosm-cc/bluemonday\tv1.0.27\th1:MpEUotklkwCSLeH+Qdx1VJgNqLlpY2KXwXFM08ygZfk=\n\tdep\tgithub.com/muesli/cancelreader\tv0.2.2\th1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=\n\tdep\tgithub.com/ncruces/go-strftime\tv0.1.9\th1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdhx/f4=\n\tdep\tgithub.com/peasant-labs/redact\tv0.1.6\th1:Kk03w/5aGmagtuKrV2NLeRVeclA90UBghSXKjTbU4ls=\n\tdep\tgithub.com/peasant-labs/schema\tv0.27.0\th1:/a8GiBe2oTgbjGTLYAiHDQjbzb+OYQTNT/Z5JWs9V14=\n\tdep\tgithub.com/remyoudompheng/bigfft\tv0.0.0-20230129092748-24d4a6f8daec\th1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=\n\tdep\tgithub.com/rivo/uniseg\tv0.4.7\th1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=\n\tdep\tgithub.com/russross/blackfriday/v2\tv2.1.0\th1:JIOH55/0cWyOuilr9/qlrm0BSXldqnqwMsf35Ld67mk=\n\tdep\tgithub.com/santhosh-tekuri/jsonschema/v5\tv5.3.1\th1:lZUw3E0/J3roVtGQ+SCrUrg3ON6NgVqpn3+iol9aGu4=\n\tdep\tgithub.com/spf13/cobra\tv1.10.2\th1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=\n\tdep\tgithub.com/spf13/pflag\tv1.0.10\th1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=\n\tdep\tgithub.com/swaggest/jsonschema-go\tv0.3.79\th1:0TOShCbAJ9Xjt1e2W83l+QtMQSG2pbun2EkiYTyafCs=\n\tdep\tgithub.com/swaggest/refl\tv1.4.0\th1:CftOSdTqRqs100xpFOT/Rifss5xBV/CT0S/FN60Xe9k=\n\tdep\tgithub.com/tree-sitter/go-tree-sitter\tv0.25.0\th1:sx6kcg8raRFCvc9BnXglke6axya12krCJF5xJ2sftRU=\n\tdep\tgithub.com/tree-sitter/tree-sitter-bash\tv0.25.1\th1:ZD3MK4oDB5lAsFztqbdcyYEd24pxDtx3g9UOWA062rE=\n\tdep\tgithub.com/tree-sitter/tree-sitter-go\tv0.25.0\th1:cEB0Q3LHgZtS+ECHx9wcP7AwzoOddJFQCVmytX42cVU=\n\tdep\tgithub.com/tree-sitter/tree-sitter-javascript\tv0.25.0\th1:ZkWETb66/w8cc13yhfnNuHOLDQWl3BnKlH6f9AdR88c=\n\tdep\tgithub.com/tree-sitter/tree-sitter-python\tv0.25.0\th1:O6XD9v8U1LOcRc3cNj9nM7XufrtEBezE6VrpRrHZDf0=\n\tdep\tgithub.com/tree-sitter/tree-sitter-typescript\tv0.23.2\th1:/Odvphn18PniVixb9e97X0DbNVsU6Qocv9mfkyzdXwU=\n\tdep\tgithub.com/xo/terminfo\tv0.0.0-20220910002029-abceb7e1c41e\th1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=\n\tdep\tgithub.com/yuin/goldmark\tv1.7.8\th1:iERMLn0/QJeHFhxSt3p6PeN9mGnvIKSpG9YYorDMnic=\n\tdep\tgithub.com/yuin/goldmark-emoji\tv1.0.5\th1:EMVWyCGPlXJfUXBXpuMu+ii3TIaxbVBnEX9uaDC4cIk=\n\tdep\tgo.yaml.in/yaml/v3\tv3.0.4\th1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=\n\tdep\tgolang.org/x/crypto\tv0.51.0\th1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=\n\tdep\tgolang.org/x/exp\tv0.0.0-20250408133849-7e4ce0ab07d0\th1:R84qjqJb5nVJMxqWYb3np9L5ZsaDtB+a39EqjV0JSUM=\n\tdep\tgolang.org/x/net\tv0.53.0\th1:d+qAbo5L0orcWAr0a9JweQpjXF19LMXJE8Ey7hwOdUA=\n\tdep\tgolang.org/x/sync\tv0.21.0\th1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=\n\tdep\tgolang.org/x/sys\tv0.46.0\th1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=\n\tdep\tgolang.org/x/term\tv0.43.0\th1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=\n\tdep\tgolang.org/x/text\tv0.37.0\th1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=\n\tdep\tgopkg.in/yaml.v3\tv3.0.1\th1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=\n\tdep\tmodernc.org/libc\tv1.65.7\th1:Ia9Z4yzZtWNtUIuiPuQ7Qf7kxYrxP1/jeHZzG8bFu00=\n\tdep\tmodernc.org/mathutil\tv1.7.1\th1:GCZVGXdaN8gTqB1Mf/usp1Y/hSqgI2vAGGP4jZMCxOU=\n\tdep\tmodernc.org/memory\tv1.11.0\th1:o4QC8aMQzmcwCK3t3Ux/ZHmwFPzE6hf2Y5LbkRs+hbI=\n\tdep\tmodernc.org/sqlite\tv1.37.1\th1:EgHJK/FPoqC+q2YBXg7fUmES37pCHFc97sI7zSayBEs=\n\tdep\tzombiezen.com/go/sqlite\tv1.4.2\th1:KZXLrBuJ7tKNEm+VJcApLMeQbhmAUOKA5VWS93DfFRo=\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\t-ldflags=\"-X github.com/peasant-labs/peasant/internal/defaults.version=v0.7.1-dev.135+1708ee11c\"\n\tbuild\tDefaultGODEBUG=cryptocustomrand=1,tlssecpmlkem=0,tracebacklabels=0,urlstrictcolons=0,x509sslcertoverrideplatform=0\n\tbuild\tCGO_ENABLED=1\n\tbuild\tCGO_CFLAGS=\n\tbuild\tCGO_CPPFLAGS=\n\tbuild\tCGO_CXXFLAGS=\n\tbuild\tCGO_LDFLAGS=\n\tbuild\tGOARCH=arm64\n\tbuild\tGOOS=darwin\n\tbuild\tGOARM64=v8.0\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=1708ee11cf356d1ea8991828be625c545f0356ef\n\tbuild\tvcs.time=2026-10-02T03:13:35Z\n\tbuild\tvcs.modified=false\n",
+  "ownedServerPID": 66537,
+  "ownedServerPort": 8895,
+  "allServedAssetsByteIdenticalToNewExport": true,
+  "assets": [
+    {
+      "path": "/_next/static/chunks/0cb07a38-fa98c32073af1076.js",
+      "sha256": "dacf1340c3a16bc7b10b8f26cbca40d2d381126a454d8fc51e9211fede6308da",
+      "bytes": 173023
+    },
+    {
+      "path": "/_next/static/chunks/239-4ea647046ee6fe58.js",
+      "sha256": "27d57d5c13657a30dbeb1dbfb8bbcfaff0bd3d8b73e3a5d569254b6a45e04fd6",
+      "bytes": 5604
+    },
+    {
+      "path": "/_next/static/chunks/312-4d4eb3bf57b9cc50.js",
+      "sha256": "08c697516ca7331c01a385e470e4a4d43b3141da07d8095ad906398792cce38c",
+      "bytes": 26313
+    },
+    {
+      "path": "/_next/static/chunks/331-18dca954eef9ff5f.js",
+      "sha256": "a972d2aeb6285f16aeee302338ac31a90c9fa5ec3ef2dcfecf0f9c63790f9926",
+      "bytes": 20660
+    },
+    {
+      "path": "/_next/static/chunks/364-31e2f602a2e67f18.js",
+      "sha256": "78312e4369ea47c39b32fda1631b39394461b401f4c73d46f34d8591db46c476",
+      "bytes": 18173
+    },
+    {
+      "path": "/_next/static/chunks/439-ba229e4c4e9eb728.js",
+      "sha256": "ece113b6f58ec8aff90494a4c5b3a14060edba60be05052a8aa9fa32558d3628",
+      "bytes": 8190
+    },
+    {
+      "path": "/_next/static/chunks/450-1e71848b3413b834.js",
+      "sha256": "521790f7dedff04c07b1ef2d5db00d13f5817b885c8d43766cfe676ed6f2a17e",
+      "bytes": 16882
+    },
+    {
+      "path": "/_next/static/chunks/51-4ac2e9277f2184e1.js",
+      "sha256": "82a7057ac140a96e1c8f1aac50af486fc9babfd76e96bb8198502f8321e3f7e7",
+      "bytes": 9846
+    },
+    {
+      "path": "/_next/static/chunks/58-5a75d42e7bd9e3c6.js",
+      "sha256": "c49b3eed914e10eb29bf0c6970218b1e5079e748f71c512f7ecf05cf98b73a54",
+      "bytes": 120410
+    },
+    {
+      "path": "/_next/static/chunks/590-a6f8091d538236f6.js",
+      "sha256": "ae3f47ca46fa53e7f825831f1cdd95789dd59452ea60e0a691fd6ab83fdece33",
+      "bytes": 13873
+    },
+    {
+      "path": "/_next/static/chunks/616-99595364da9bd271.js",
+      "sha256": "2d2f32ed51ebcc972649377c7aa0e807c076e78b832e4b8f8c030bf10445698e",
+      "bytes": 22835
+    },
+    {
+      "path": "/_next/static/chunks/674-dc75418015a5c677.js",
+      "sha256": "739199e3e3b550d93f52dc8ad1be71e8e28ece2ea47e6a4fad3a472ba67f2285",
+      "bytes": 9090
+    },
+    {
+      "path": "/_next/static/chunks/723-67e50be0949c7944.js",
+      "sha256": "4a93b9dfab8967cf389a816c4b81c7c0cfed3993e8c26e26e2ec09576c7548c0",
+      "bytes": 76325
+    },
+    {
+      "path": "/_next/static/chunks/78-2dde293b5bc99145.js",
+      "sha256": "6b3dd7b2104c7bf3819ef25661cc404baf699fd0c1e72c1e17222a6168d04b2c",
+      "bytes": 174158
+    },
+    {
+      "path": "/_next/static/chunks/785-2119f780845a1b72.js",
+      "sha256": "1296a9e224407c0d9846de167a360331a9363ebb4452720e73d9dc08e2ac1a70",
+      "bytes": 7440
+    },
+    {
+      "path": "/_next/static/chunks/847-684f1ca12ba2cc50.js",
+      "sha256": "a2c820a2960f5dccabc2109e453cd0397635d4f52a4fc4da82b55180466b28f5",
+      "bytes": 253475
+    },
+    {
+      "path": "/_next/static/chunks/8c8a7c9b-19c495700bf45196.js",
+      "sha256": "cd5f795994ceed6fb2277bcf35ae17de8ce41e17cf3ebaf776802c8bedaae8cf",
+      "bytes": 77668
+    },
+    {
+      "path": "/_next/static/chunks/91-33a3bdcfdce3c539.js",
+      "sha256": "477d5b57d23ace856be25bd3ebee2269c88837af350b2bf29308b83d3c8d1e01",
+      "bytes": 26991
+    },
+    {
+      "path": "/_next/static/chunks/990-d025c23e684a62d3.js",
+      "sha256": "710a23a9844c075acbe00e8110afe3fdb4a469f5d75faa0c753b73f7311604f2",
+      "bytes": 464316
+    },
+    {
+      "path": "/_next/static/chunks/app/analytics/page-5e7a46b4d42308c1.js",
+      "sha256": "8f8f9c539fa775d045b910a5cda259c69e5f97c210c161af400f3e6121df5aa4",
+      "bytes": 3755
+    },
+    {
+      "path": "/_next/static/chunks/app/dev/changes-harness/page-1309c6e00789cd3a.js",
+      "sha256": "ca4dab215d922e26c45d14ba9b0d4f2803e128c218b209ee7e4aed3e472d7e7c",
+      "bytes": 5916
+    },
+    {
+      "path": "/_next/static/chunks/app/dev/visual-harness/page-1b5c3e007a3a02ac.js",
+      "sha256": "1731ef66fc0bdf39fe3537e92bafd23034bb594802b4643d796e3b0b68223f5c",
+      "bytes": 15026
+    },
+    {
+      "path": "/_next/static/chunks/app/layout-c409f2207cc44c35.js",
+      "sha256": "903dd3a72bb394593ee9aa129e765a3416c5f60e24f2f5d64987777edd88c7ea",
+      "bytes": 25632
+    },
+    {
+      "path": "/_next/static/chunks/app/map/%5B%5B...segments%5D%5D/page-135dcf0743a504bd.js",
+      "sha256": "45a212cc87d0e50a7b265c2a6eda5ca343c0da11018f3093c2ee9850724812b1",
+      "bytes": 41302
+    },
+    {
+      "path": "/_next/static/chunks/app/page-e8bd70aeba61be9e.js",
+      "sha256": "48ed2f5ea82189e4c060e8b73f6ecacd80227ff9ab070f389969928a9bc7b562",
+      "bytes": 24194
+    },
+    {
+      "path": "/_next/static/chunks/app/projects/%5B%5B...segments%5D%5D/page-036578ea04e9e6eb.js",
+      "sha256": "cdaee120e7b02e47eda51529721cc25b5dbe121f5b2318c3d2a857d13e54253e",
+      "bytes": 41394
+    },
+    {
+      "path": "/_next/static/chunks/app/review/%5B%5B...segments%5D%5D/page-f1f5ff5ffcdaa1cf.js",
+      "sha256": "66185c7b0a168b764c7c077369b66363263e49f04660dfd209e00e7efb651aae",
+      "bytes": 9821
+    },
+    {
+      "path": "/_next/static/chunks/app/sessions/%5B%5B...segments%5D%5D/page-04b06e7279619eec.js",
+      "sha256": "a40b1728bd59546c4f26751e904f099eb67ed24afbf5cfb246ace5a0e86a1455",
+      "bytes": 4916
+    },
+    {
+      "path": "/_next/static/chunks/app/settings/page-affcfe1775933c64.js",
+      "sha256": "c63b652584968ca96d7bee5b93ef20ccb511766e77e19beda56568b0c89a7606",
+      "bytes": 40825
+    },
+    {
+      "path": "/_next/static/chunks/app/share/page-8c68e665f3407fb6.js",
+      "sha256": "9660e0e829dd67da18282ed9cd17ed5af52d01a90edc4c1b28be842dffe39fe0",
+      "bytes": 60831
+    },
+    {
+      "path": "/_next/static/chunks/df8e723d-c9b0dad1fd97a064.js",
+      "sha256": "227dc77d53a6c362cbd5f66d02f5a86a39ee082dac463ddd539e034d9a848f55",
+      "bytes": 345863
+    },
+    {
+      "path": "/_next/static/chunks/main-app-23cb987d3f5f369b.js",
+      "sha256": "0d13daa5c46b52d2481c6ae548af9dc47a52e5e9778c7f416aff2901f4b83fb4",
+      "bytes": 569
+    },
+    {
+      "path": "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+      "sha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683",
+      "bytes": 112594
+    },
+    {
+      "path": "/_next/static/chunks/webpack-db3ce2bd613eb13f.js",
+      "sha256": "5fc3eafd23e5f133ec91ac67d930bc4ed47d9482c0e6eca7d5620e11b8d061db",
+      "bytes": 3498
+    },
+    {
+      "path": "/_next/static/css/008a05b0ad6b854a.css",
+      "sha256": "51bc386b72d70be3f37056838e1fea59889d488c114d4e38a46be696a069bcab",
+      "bytes": 15790
+    },
+    {
+      "path": "/_next/static/css/67a3d9a6012f5eaa.css",
+      "sha256": "ce6acc6755e6c63f8eb5e6898aae9cf1331764f35948bead72d72f40876ea129",
+      "bytes": 1742
+    },
+    {
+      "path": "/_next/static/css/7cc7889636171400.css",
+      "sha256": "9632ae1090056495ee47ee73291c8ec8ebc71cc41d08f4224368d55cbf6160da",
+      "bytes": 451556
+    },
+    {
+      "path": "/_next/static/css/b2be129e7d6323fc.css",
+      "sha256": "82b5e0e63df21ca2d8f93149dfa803e0432ea640cd796fe176988e8166baa59f",
+      "bytes": 20745
+    },
+    {
+      "path": "/_next/static/css/c21a63865843aca0.css",
+      "sha256": "69516389163b7e0fa20219be793d155a8ba7f497ca78d4b911a71765786a5f8f",
+      "bytes": 6544
+    }
+  ],
+  "markerChunks": {
+    "confirming automatic publishing consent": [
+      "/_next/static/chunks/app/projects/%5B%5B...segments%5D%5D/page-036578ea04e9e6eb.js"
+    ]
+  },
+  "imagesRecaptured": false,
+  "note": "This verifies the refreshed artifact. Original images retain their original captured HEAD, binary and capture time."
+}

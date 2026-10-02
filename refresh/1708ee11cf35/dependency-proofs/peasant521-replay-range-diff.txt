@@ -1,0 +1,37 @@
+ 1:  53502c8e =  1:  93c34ff4 build(deps): pin schema at the local publishing contract and type the sync status
+ 2:  ef1717ca !  2:  31801f04 feat(store): read a session's receipt and last failed attempt for one account
+    @@ internal/store/publications.go: import (
+     +	"strings"
+      	"time"
+      
+    - 	"github.com/peasant-labs/schema"
+    + 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+     @@ internal/store/publications.go: func (s *Store) LatestPublicationAttempt(ctx context.Context, origin, owner stri
+      	}
+      	return out, nil
+ 3:  a5c37dfb =  3:  663d5e3c feat(village): read collectives and share or take back a transcript
+ 4:  97b382f3 =  4:  c8b8cebe feat(push): publish to collectives with one result per step
+ 5:  aa5a0440 =  5:  b1926e44 feat(api): serve the publication state, the typed push, and the Village collectives
+ 6:  ca7a48f4 =  6:  edb9010d fix(web): send the share wizard's push without a visibility
+ 7:  a0ecb886 =  7:  98567dd0 test(api): refuse a sign-out from another origin
+ 8:  2f63a91a =  8:  03d3daa5 docs: show the collective steps of a publish from the local web
+ 9:  dd9cb282 =  9:  14b1889c test(cli): send the registered Share push as the typed request
+10:  8e8d3bcf = 10:  ec62b8f7 build: regenerate the third-party notices for the schema pin
+11:  c970c372 = 11:  7b1ff1aa test(push): drive the audience cases' web door with the typed push
+12:  8bf7a4b7 = 12:  b25ea0c7 build(deps): re-pin schema to v0.25.0
+13:  76ef0e60 = 13:  5bd9a4df test(push): acknowledge Village API 0.24.0 in the v0.25.0 module
+14:  1c84a7a7 = 14:  ca5138d2 fix(api): serve the publication read through the provider the web server runs
+15:  45a87422 = 15:  dc68df2c fix(push): read what a collective did with a share from its share history
+16:  54c683c6 = 16:  6e84d6a2 fix(api): refuse a null collectives list on the typed push
+17:  ff0d44fe = 17:  a1b7a0b2 test: cover removal on the mounted push, hold reasons, the latest receipt, and a public update
+18:  7eee413a ! 18:  23fe480a fix: say what Village kept, name a missing transcript, and keep the collective list on a repository read failure
+    @@ internal/store/publications.go: import (
+     -	"strings"
+      	"time"
+      
+    - 	"github.com/peasant-labs/schema"
+    + 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+     @@ internal/store/publications.go: func (s *Store) SessionPublications(ctx context.Context, origin, owner string, s
+      		batch := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+      		args := append([]any{origin, owner}, sessionIDArgs(batch)...)
+19:  c3123fbd = 19:  446c2666 fix(push): stop at a deleted transcript with only its recovery, and test it
