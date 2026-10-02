@@ -1,0 +1,3 @@
+go version go1.25.8 linux/arm64
+cc4d238399a8ef923c7503bc395993a7e2768a3f
+ok  	github.com/peasant-labs/peasant/cmd/peasant	9.632s

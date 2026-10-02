@@ -1,0 +1,104 @@
+{
+  "pr": 538,
+  "originalCapturedSource": "afc2f34d17c93225203f1f1cbbeeeae92ad52ba8",
+  "originalBinarySHA256": "cbce9ad1969430fa4cd92e20ec0e7e5371de5f8f4b9928aabf52ec109105a44c",
+  "refreshedSource": "cc4d238399a8ef923c7503bc395993a7e2768a3f",
+  "fullTrackedWebTreeUnchanged": true,
+  "webTree": "d6d304c5a9bac2a2083730955efc3cdc6d21eec7",
+  "preservedArtifactParent": "6b0e6f58a17bd7abf0bce102120bca91c16bde78",
+  "preservedImages": [
+    {
+      "path": "afc2f34d17c9/canonical-settings-dark.png",
+      "sha256": "9c0e41628c3a46d0118a264413e8f3177bfc6bb33263bf455059191d1c198be1"
+    },
+    {
+      "path": "afc2f34d17c9/canonical-settings-light.png",
+      "sha256": "1090ade88437ebaff98182c53ae7aa8b8e2b58f621dbaab42be47d553e9935d2"
+    },
+    {
+      "path": "afc2f34d17c9/canonical/canonical-dark.png",
+      "sha256": "9c0e41628c3a46d0118a264413e8f3177bfc6bb33263bf455059191d1c198be1"
+    },
+    {
+      "path": "afc2f34d17c9/canonical/canonical-light.png",
+      "sha256": "1090ade88437ebaff98182c53ae7aa8b8e2b58f621dbaab42be47d553e9935d2"
+    },
+    {
+      "path": "afc2f34d17c9/canonical/compare-dark.png",
+      "sha256": "c285f72b2ac119ba53d09fd1d35369004260b94259c23760f1bc92c1c9af41a9"
+    },
+    {
+      "path": "afc2f34d17c9/canonical/compare-light.png",
+      "sha256": "254cae2a8be5572e87ee6407da2d0b1016cb0de8b8720d3dfbcf73b38aef0039"
+    },
+    {
+      "path": "afc2f34d17c9/compare-settings-dark.png",
+      "sha256": "c285f72b2ac119ba53d09fd1d35369004260b94259c23760f1bc92c1c9af41a9"
+    },
+    {
+      "path": "afc2f34d17c9/compare-settings-light.png",
+      "sha256": "254cae2a8be5572e87ee6407da2d0b1016cb0de8b8720d3dfbcf73b38aef0039"
+    },
+    {
+      "path": "afc2f34d17c9/dark/default-390.png",
+      "sha256": "b21ce0544646625c946d5866236fed74ea60c77ae0d0668c27b1a0af7489a516"
+    },
+    {
+      "path": "afc2f34d17c9/dark/default.png",
+      "sha256": "c4817c8db9b349cba98f597a8360f32ec39cdd3429df3b4908210b7e6b83e1e7"
+    },
+    {
+      "path": "afc2f34d17c9/dark/failed.png",
+      "sha256": "3169f004e2044c6d6021f3bd07f50aefca830a41f1ae6a35f212ef5e003ac3d0"
+    },
+    {
+      "path": "afc2f34d17c9/dark/install-refusal.png",
+      "sha256": "c36a908b70a4af488194ab6172e9866a664b9342a65dd52252d738e1096b1596"
+    },
+    {
+      "path": "afc2f34d17c9/dark/install.png",
+      "sha256": "f44aa3cb4989a3c6d69c4879cca67fd30c1b0de16fcc78986c3b7e5ddc906b1c"
+    },
+    {
+      "path": "afc2f34d17c9/dark/pending.png",
+      "sha256": "dd345f05ece6f678fb80eb43996b97bb0c3e70be2fc9b679d0b49520d1b35974"
+    },
+    {
+      "path": "afc2f34d17c9/dark/tagged.png",
+      "sha256": "39c7adf0cd187d1dbaa325303b82fc3d40b052b23d0b673dc67a06c03f56f96a"
+    },
+    {
+      "path": "afc2f34d17c9/light/default-390.png",
+      "sha256": "c479b18be648d7a2b6163a4ac9bc7e2d4d3f133712d9f0d4f00ec580a8c8acd1"
+    },
+    {
+      "path": "afc2f34d17c9/light/default.png",
+      "sha256": "18a4acd737ae84d509ba6909db290aacbf0c57cf9ed8177af6defa48bca1d6f4"
+    },
+    {
+      "path": "afc2f34d17c9/light/failed.png",
+      "sha256": "6a8854bb8371be43a6e231d10053c1d94433e002d18f9b8d30f37d227c93c622"
+    },
+    {
+      "path": "afc2f34d17c9/light/install-refusal.png",
+      "sha256": "96771815bfef945e1d07c93b08ad9e2f3e96846d72614cc80f3df79818b8d2d5"
+    },
+    {
+      "path": "afc2f34d17c9/light/install.png",
+      "sha256": "9b49a63cfe1cc2f7a7ae1f838bb51b4c52e80fa88131543a97f9ecfb969b7242"
+    },
+    {
+      "path": "afc2f34d17c9/light/pending.png",
+      "sha256": "5641872c8c078281a03cc16fc185da794704b795e52dd4aa3b30747b459349d9"
+    },
+    {
+      "path": "afc2f34d17c9/light/tagged.png",
+      "sha256": "a6ca2a9d16664703621f6416dea76faa6e4f847f2e4ca439742177535e3a083b"
+    }
+  ],
+  "imagesRecaptured": false,
+  "sourceAuditRef": "peasant-25--captured-source",
+  "sourceAuditHead": "863e86d5b79b66754b26ebc5d6355eb9cfd585b4",
+  "foundationMergedCommit": "3217f21e86b8df2084995d02cc0cc7713dc8670c",
+  "finalFullIntegrationGate": "passed all68 packages, no-race, exactly-once; pinned-Go whitespace-only formatting in isolated clone documented"
+}
