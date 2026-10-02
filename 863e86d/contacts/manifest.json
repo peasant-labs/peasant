@@ -1,0 +1,1144 @@
+{
+  "sourceHead": "863e86d5b79b66754b26ebc5d6355eb9cfd585b4",
+  "originalFrameCount": 48,
+  "fullFrameContacts": true,
+  "roiPurpose": "Additional magnified top-region inspection only; originals and full-frame contacts retained and must be reviewed.",
+  "jobs": [
+    {
+      "name": "home-dark-desktop-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/home-dark-desktop-full.png",
+      "sha256": "f1adb19d91e893eb5ccf02d6b2d077f0676a61ab4381ebe0c9a147c2a039943a",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-all.png",
+          "sha256": "f6570a1003779ca1c30eb5dde35af245f657d99cea654b43ef17180b7dd3ca50",
+          "width": 1440,
+          "height": 2267,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 2267
+          },
+          "scale": 0.31936479929422146
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-not-published.png",
+          "sha256": "3b52d311ad99e27a38ec51e97e345ef4c8ac21e9f80f3f90fba19db88e2d2fdb",
+          "width": 1440,
+          "height": 1697,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1697
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-published.png",
+          "sha256": "4c02546401614dad2e16c7f4e55bbf1b3786ccca67a7c7f0d8a46f7357aa60db",
+          "width": 1440,
+          "height": 1344,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1344
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-auto.png",
+          "sha256": "6bccc3f7f137c547dd57c12596d5c44abb3eb2bc68049693b483d191d5294aa4",
+          "width": 1440,
+          "height": 1142,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1142
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/search.png",
+          "sha256": "75a76ee51361a03aff0d1042c7390b696a1998977837e475de44e49de44e32e8",
+          "width": 1440,
+          "height": 1935,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1935
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/selection-notice.png",
+          "sha256": "f39ab752760e9f8f58079bc82fbc8cd8b6def06f3b686f48ba1f226ca09ffbb6",
+          "width": 1440,
+          "height": 2357,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 2357
+          },
+          "scale": 0.3071701315231226
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/selection-recovery.png",
+          "sha256": "c72b8833970b976b80fe99d105f0d592cbf08589d103d2715dfb5e15f355361d",
+          "width": 1440,
+          "height": 1100,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1100
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/empty.png",
+          "sha256": "ddabf1ed044d33bf34d2e07376e157104780af842f9bc3ac585d0491761de6ba",
+          "width": 1440,
+          "height": 560,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 560
+          },
+          "scale": 0.325
+        }
+      ]
+    },
+    {
+      "name": "home-dark-desktop-top-roi",
+      "kind": "roi",
+      "output": "/tmp/peasant9-contacts-863e/home-dark-desktop-top-roi.png",
+      "sha256": "38bca000ca3e10a2148c552d2159a77e0ab61bc74a6c2a156d27620e51065630",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-all.png",
+          "sha256": "f6570a1003779ca1c30eb5dde35af245f657d99cea654b43ef17180b7dd3ca50",
+          "width": 1440,
+          "height": 2267,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-not-published.png",
+          "sha256": "3b52d311ad99e27a38ec51e97e345ef4c8ac21e9f80f3f90fba19db88e2d2fdb",
+          "width": 1440,
+          "height": 1697,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-published.png",
+          "sha256": "4c02546401614dad2e16c7f4e55bbf1b3786ccca67a7c7f0d8a46f7357aa60db",
+          "width": 1440,
+          "height": 1344,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/filter-auto.png",
+          "sha256": "6bccc3f7f137c547dd57c12596d5c44abb3eb2bc68049693b483d191d5294aa4",
+          "width": 1440,
+          "height": 1142,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/search.png",
+          "sha256": "75a76ee51361a03aff0d1042c7390b696a1998977837e475de44e49de44e32e8",
+          "width": 1440,
+          "height": 1935,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/selection-notice.png",
+          "sha256": "f39ab752760e9f8f58079bc82fbc8cd8b6def06f3b686f48ba1f226ca09ffbb6",
+          "width": 1440,
+          "height": 2357,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/selection-recovery.png",
+          "sha256": "c72b8833970b976b80fe99d105f0d592cbf08589d103d2715dfb5e15f355361d",
+          "width": 1440,
+          "height": 1100,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/desktop/empty.png",
+          "sha256": "ddabf1ed044d33bf34d2e07376e157104780af842f9bc3ac585d0491761de6ba",
+          "width": 1440,
+          "height": 560,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 560
+          },
+          "scale": 0.325
+        }
+      ]
+    },
+    {
+      "name": "home-dark-phone-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/home-dark-phone-full.png",
+      "sha256": "385b4881fadf0d18f702bf5fd88ca6fb114a8f9bc00a344a523ef5435f29ac8c",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-all.png",
+          "sha256": "44ee9a3200ef8bf9a7c2c9caaea753177c5caa93459f1f173580d961766c8007",
+          "width": 390,
+          "height": 2763,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2763
+          },
+          "scale": 0.2620340209916757
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-not-published.png",
+          "sha256": "9fbea4906814a5c9996979953c7b75a9bb3ff0be09e59015345f6a94aa85b2f6",
+          "width": 390,
+          "height": 2125,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2125
+          },
+          "scale": 0.3407058823529412
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-published.png",
+          "sha256": "ccf99b2943a4aebf59f2920bf4ec3fc8f9d6ea6eaa2b4058c1f7d5237213279e",
+          "width": 390,
+          "height": 1728,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1728
+          },
+          "scale": 0.41898148148148145
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-auto.png",
+          "sha256": "28b170366eec4a98dec409f3f801ff363beaa7c711519ddcd9b7a721d2e07994",
+          "width": 390,
+          "height": 1546,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1546
+          },
+          "scale": 0.4683053040103493
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/search.png",
+          "sha256": "dadbe20e76433883558b96ed9d1ca93fed1fe1f236d85df67817d91716c3dbde",
+          "width": 390,
+          "height": 2819,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2819
+          },
+          "scale": 0.2568286626463285
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/selection-notice.png",
+          "sha256": "ea1b1d09dd9f342bd861a9a0b1a50d55ba47b37e7d79ac7fbebf2ca59d9480d4",
+          "width": 390,
+          "height": 2897,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2897
+          },
+          "scale": 0.24991370383154987
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/selection-recovery.png",
+          "sha256": "8ef8102558507ea7573d786e44b2885321116ee60ad281e277eb9abf290eaa4e",
+          "width": 390,
+          "height": 844,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 844
+          },
+          "scale": 0.8578199052132701
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/empty.png",
+          "sha256": "e1c424ecbc99bb81bfc610a745ec01800199db94e860efff3098e29f77697085",
+          "width": 390,
+          "height": 760,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 760
+          },
+          "scale": 0.9526315789473684
+        }
+      ]
+    },
+    {
+      "name": "home-dark-phone-top-roi",
+      "kind": "roi",
+      "output": "/tmp/peasant9-contacts-863e/home-dark-phone-top-roi.png",
+      "sha256": "09286465d6df44fe9a62eeaf85fbb7b9a3daa13eb452d5bcc42195bc1c903400",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-all.png",
+          "sha256": "44ee9a3200ef8bf9a7c2c9caaea753177c5caa93459f1f173580d961766c8007",
+          "width": 390,
+          "height": 2763,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-not-published.png",
+          "sha256": "9fbea4906814a5c9996979953c7b75a9bb3ff0be09e59015345f6a94aa85b2f6",
+          "width": 390,
+          "height": 2125,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-published.png",
+          "sha256": "ccf99b2943a4aebf59f2920bf4ec3fc8f9d6ea6eaa2b4058c1f7d5237213279e",
+          "width": 390,
+          "height": 1728,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/filter-auto.png",
+          "sha256": "28b170366eec4a98dec409f3f801ff363beaa7c711519ddcd9b7a721d2e07994",
+          "width": 390,
+          "height": 1546,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/search.png",
+          "sha256": "dadbe20e76433883558b96ed9d1ca93fed1fe1f236d85df67817d91716c3dbde",
+          "width": 390,
+          "height": 2819,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/selection-notice.png",
+          "sha256": "ea1b1d09dd9f342bd861a9a0b1a50d55ba47b37e7d79ac7fbebf2ca59d9480d4",
+          "width": 390,
+          "height": 2897,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/selection-recovery.png",
+          "sha256": "8ef8102558507ea7573d786e44b2885321116ee60ad281e277eb9abf290eaa4e",
+          "width": 390,
+          "height": 844,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 844
+          },
+          "scale": 0.8578199052132701
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/dark/phone/empty.png",
+          "sha256": "e1c424ecbc99bb81bfc610a745ec01800199db94e860efff3098e29f77697085",
+          "width": 390,
+          "height": 760,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 760
+          },
+          "scale": 0.9526315789473684
+        }
+      ]
+    },
+    {
+      "name": "home-light-desktop-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/home-light-desktop-full.png",
+      "sha256": "3fb3241f5a1b0bc63569a59168b20fff034b62bd97dd57e6c6b25a129ac790b2",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-all.png",
+          "sha256": "24cb401229f70bd29fec930f26fa7e5db0b0edf0855de72f25e1c5f2e75ff3cd",
+          "width": 1440,
+          "height": 2267,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 2267
+          },
+          "scale": 0.31936479929422146
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-not-published.png",
+          "sha256": "184807d13119dd0efc94ebf4a03a2cf5ff39b8ac75c73df2982a8a763bfefeb4",
+          "width": 1440,
+          "height": 1697,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1697
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-published.png",
+          "sha256": "58146c56b819ceb307bc123faf39ef81b842989e0293f69e4abbd7097d2d7888",
+          "width": 1440,
+          "height": 1344,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1344
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-auto.png",
+          "sha256": "13639d8d84e363fb8f0004ed26f08f8a9b8cc614e76f54f01f929c6da77778cd",
+          "width": 1440,
+          "height": 1142,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1142
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/search.png",
+          "sha256": "e7f878d0716d7bdcf2df173023d784e044f1839a759a31cbd730909b67c35bc1",
+          "width": 1440,
+          "height": 1935,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1935
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/selection-notice.png",
+          "sha256": "e197a8a75c908dbb736ebb93993eed53118ce94dd6b44413d0f9742de168e9ac",
+          "width": 1440,
+          "height": 2357,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 2357
+          },
+          "scale": 0.3071701315231226
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/selection-recovery.png",
+          "sha256": "33b79ecbb0b7e579f654418092d3ca34a28c7badd0d52746d5a33766628c522b",
+          "width": 1440,
+          "height": 1100,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1100
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/empty.png",
+          "sha256": "f3b5f169156734548eb3839aae34a61155308828bc2d6e4633836391e3aefbcf",
+          "width": 1440,
+          "height": 560,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 560
+          },
+          "scale": 0.325
+        }
+      ]
+    },
+    {
+      "name": "home-light-desktop-top-roi",
+      "kind": "roi",
+      "output": "/tmp/peasant9-contacts-863e/home-light-desktop-top-roi.png",
+      "sha256": "17c293a1260f71cffc2bccaf446ba6dbd5d12f7a4aa7366a77cd9327cc7c5556",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-all.png",
+          "sha256": "24cb401229f70bd29fec930f26fa7e5db0b0edf0855de72f25e1c5f2e75ff3cd",
+          "width": 1440,
+          "height": 2267,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-not-published.png",
+          "sha256": "184807d13119dd0efc94ebf4a03a2cf5ff39b8ac75c73df2982a8a763bfefeb4",
+          "width": 1440,
+          "height": 1697,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-published.png",
+          "sha256": "58146c56b819ceb307bc123faf39ef81b842989e0293f69e4abbd7097d2d7888",
+          "width": 1440,
+          "height": 1344,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/filter-auto.png",
+          "sha256": "13639d8d84e363fb8f0004ed26f08f8a9b8cc614e76f54f01f929c6da77778cd",
+          "width": 1440,
+          "height": 1142,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/search.png",
+          "sha256": "e7f878d0716d7bdcf2df173023d784e044f1839a759a31cbd730909b67c35bc1",
+          "width": 1440,
+          "height": 1935,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/selection-notice.png",
+          "sha256": "e197a8a75c908dbb736ebb93993eed53118ce94dd6b44413d0f9742de168e9ac",
+          "width": 1440,
+          "height": 2357,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/selection-recovery.png",
+          "sha256": "33b79ecbb0b7e579f654418092d3ca34a28c7badd0d52746d5a33766628c522b",
+          "width": 1440,
+          "height": 1100,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/desktop/empty.png",
+          "sha256": "f3b5f169156734548eb3839aae34a61155308828bc2d6e4633836391e3aefbcf",
+          "width": 1440,
+          "height": 560,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 560
+          },
+          "scale": 0.325
+        }
+      ]
+    },
+    {
+      "name": "home-light-phone-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/home-light-phone-full.png",
+      "sha256": "ae0d1ff5d54cfb6850e361c4d1854993bacc235f4d999537d42a0f8e453afc79",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-all.png",
+          "sha256": "9c0368fbe6dc527630e323d0b32cb9347c08336d6eb4d885f0684befbdcafd0b",
+          "width": 390,
+          "height": 2763,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2763
+          },
+          "scale": 0.2620340209916757
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-not-published.png",
+          "sha256": "d3ca2b37346a697fdfc5377febd56dca863336285c82439351793b5bf38cb6b1",
+          "width": 390,
+          "height": 2125,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2125
+          },
+          "scale": 0.3407058823529412
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-published.png",
+          "sha256": "5e03bb45c5b889fb9dc4b5b7243ac3b80d86dfdcd36dc4c8fda785e237ef0b14",
+          "width": 390,
+          "height": 1728,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1728
+          },
+          "scale": 0.41898148148148145
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-auto.png",
+          "sha256": "dab44594377aebd8679bf3fee3a8d5ae405aa1516de0f341afea670ed827942d",
+          "width": 390,
+          "height": 1546,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1546
+          },
+          "scale": 0.4683053040103493
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/search.png",
+          "sha256": "c6a18b05c7cd5bf6e3ac6dcd63662c5e5c1b94b3689506dd7958153b84f34f45",
+          "width": 390,
+          "height": 2819,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2819
+          },
+          "scale": 0.2568286626463285
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/selection-notice.png",
+          "sha256": "21750eabcad10c5569d788309d1ef36df095ed13c287be3b4c797550d06cc1b0",
+          "width": 390,
+          "height": 2897,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 2897
+          },
+          "scale": 0.24991370383154987
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/selection-recovery.png",
+          "sha256": "3c43df0aa42c96832ede417636ccc096a9723150bd938d40ab75948d226ed1ea",
+          "width": 390,
+          "height": 844,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 844
+          },
+          "scale": 0.8578199052132701
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/empty.png",
+          "sha256": "b791b583499fe50e42ae7467d50545bdfacfa0ca35ef62214f6e99ac62a3533c",
+          "width": 390,
+          "height": 760,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 760
+          },
+          "scale": 0.9526315789473684
+        }
+      ]
+    },
+    {
+      "name": "home-light-phone-top-roi",
+      "kind": "roi",
+      "output": "/tmp/peasant9-contacts-863e/home-light-phone-top-roi.png",
+      "sha256": "1571e1472ec67c7f6c31fc7cbff85a3d5dbca97a96bb1ecba0d81e5adab6d024",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-all.png",
+          "sha256": "9c0368fbe6dc527630e323d0b32cb9347c08336d6eb4d885f0684befbdcafd0b",
+          "width": 390,
+          "height": 2763,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-not-published.png",
+          "sha256": "d3ca2b37346a697fdfc5377febd56dca863336285c82439351793b5bf38cb6b1",
+          "width": 390,
+          "height": 2125,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-published.png",
+          "sha256": "5e03bb45c5b889fb9dc4b5b7243ac3b80d86dfdcd36dc4c8fda785e237ef0b14",
+          "width": 390,
+          "height": 1728,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/filter-auto.png",
+          "sha256": "dab44594377aebd8679bf3fee3a8d5ae405aa1516de0f341afea670ed827942d",
+          "width": 390,
+          "height": 1546,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/search.png",
+          "sha256": "c6a18b05c7cd5bf6e3ac6dcd63662c5e5c1b94b3689506dd7958153b84f34f45",
+          "width": 390,
+          "height": 2819,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/selection-notice.png",
+          "sha256": "21750eabcad10c5569d788309d1ef36df095ed13c287be3b4c797550d06cc1b0",
+          "width": 390,
+          "height": 2897,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 1280
+          },
+          "scale": 0.565625
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/selection-recovery.png",
+          "sha256": "3c43df0aa42c96832ede417636ccc096a9723150bd938d40ab75948d226ed1ea",
+          "width": 390,
+          "height": 844,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 844
+          },
+          "scale": 0.8578199052132701
+        },
+        {
+          "path": "/tmp/peasant9-home-863e86d/light/phone/empty.png",
+          "sha256": "b791b583499fe50e42ae7467d50545bdfacfa0ca35ef62214f6e99ac62a3533c",
+          "width": 390,
+          "height": 760,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 760
+          },
+          "scale": 0.9526315789473684
+        }
+      ]
+    },
+    {
+      "name": "consent-review-dark-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/consent-review-dark-full.png",
+      "sha256": "aeb8d44eb4552e786816e7f5a1ea900f94930ac60de8753596bae3409cb0f28c",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/dark/desktop/manual-publish-does-not-create-a-rule-review.png",
+          "sha256": "0e56c68a962f2524a6197d96acc8c02a9c9155e79260a260b060e3b92868be44",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/dark/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-review.png",
+          "sha256": "d493df9d051c8a89a5ec2d3824257b29350db24e3d0e791e301210f0e3fae311",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/dark/mobile/manual-publish-does-not-create-a-rule-review.png",
+          "sha256": "c554d0283797a77f87baa1bd8a89fd56963eace6a74d7950d3937513bf942d02",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        },
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/dark/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-review.png",
+          "sha256": "34b6befbeb6fac6a5b38312f3ccfe5544534a6d244b63c89053a767b54d767da",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        }
+      ]
+    },
+    {
+      "name": "consent-review-light-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/consent-review-light-full.png",
+      "sha256": "ede0bd24d9d91afd1e5e51aadb37ef2bd3358562e093163687a218c09fa0a051",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/light/desktop/manual-publish-does-not-create-a-rule-review.png",
+          "sha256": "c1409328079f595fb339e5a68cd3ed72dc39d1bbdb6cd0a4328001706484773c",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/light/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-review.png",
+          "sha256": "c465c59036c63cbeb911f64b68ed6a5042ce05c3aaf55fc8fd464bca03b40144",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/light/mobile/manual-publish-does-not-create-a-rule-review.png",
+          "sha256": "ca6e59b547d95f31c2f76ba8c38c1b0d96d8767dba9872e56294dfc964460f73",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        },
+        {
+          "path": "/tmp/peasant9-consent-review-863e86d/light/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-review.png",
+          "sha256": "5695895038b957ffbe19a1426476d8456cea6e120fe0f651f18517ef39b65b31",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        }
+      ]
+    },
+    {
+      "name": "consent-result-dark-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/consent-result-dark-full.png",
+      "sha256": "8ded9f29c5c629b76fd68cab23f832f3c63654ca18b0d7963af082ee2249aae7",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/dark/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-result.png",
+          "sha256": "4038af1ef87b851dd90e034ecc2071b192ada60265a6a1ec906b3a06c565ece2",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/dark/desktop/blocked-hook-keeps-publication-and-offers-settings-result.png",
+          "sha256": "9a1ad8be77c80363526166ec43610173c809a16d3b96d990ea82f18a59ddff20",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/dark/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-result.png",
+          "sha256": "56bdacf93ddafdfd36ee2d8d01ac502f52dad5778025201ade97a26ad6a72492",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        },
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/dark/mobile/blocked-hook-keeps-publication-and-offers-settings-result.png",
+          "sha256": "bb18ab7d8637758b42af13220db4875a83418dc88314dabe32b6e1203e539880",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        }
+      ]
+    },
+    {
+      "name": "consent-result-light-full",
+      "kind": "full",
+      "output": "/tmp/peasant9-contacts-863e/consent-result-light-full.png",
+      "sha256": "95c410ee20969b34c55617048329fe54854622af93c6c9d5b4db0a670001744f",
+      "originals": [
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/light/desktop/checked-confirmation-uses-stored-session-and-confirmed-root-result.png",
+          "sha256": "05fefda2301dfb38b91329f899789a273fed646ddfc1ec499bb37e0089581e17",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/light/desktop/blocked-hook-keeps-publication-and-offers-settings-result.png",
+          "sha256": "ad0eb65367f0a37a7b939f3253fb8353f9be87931b2b6cec4648a69afd76d4b9",
+          "width": 1440,
+          "height": 1080,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "scale": 0.325
+        },
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/light/mobile/checked-confirmation-uses-stored-session-and-confirmed-root-result.png",
+          "sha256": "3e953cb52ecb477da9ce7aed44b02222e3a8056d172a8efb14f82ad3c4fd6059",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        },
+        {
+          "path": "/tmp/peasant9-consent-result-863e86d/light/mobile/blocked-hook-keeps-publication-and-offers-settings-result.png",
+          "sha256": "67d9e35df1652a53fdcca84fbbd6c4aa7f7c5d6f4eb09de08668771f41039ee4",
+          "width": 780,
+          "height": 1688,
+          "inspectionRegion": {
+            "x": 0,
+            "y": 0,
+            "width": 780,
+            "height": 1688
+          },
+          "scale": 0.42890995260663506
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "base": "e3fa32760491dd306006c5c94e586245fa09cbb4",
+  "head": "863e86d5b79b66754b26ebc5d6355eb9cfd585b4",
+  "changedFiles": [
+    "cmd/peasant/cmd_config_settings_api_test.go",
+    "cmd/peasant/cmd_config_test.go",
+    "cmd/peasant/cmd_kickstart_selection_command_test.go",
+    "cmd/peasant/testdata/TestSelectionCommands_RenderGolden/config-dark-narrow.golden",
+    "cmd/peasant/testdata/TestSelectionCommands_RenderGolden/config-dark-wide.golden",
+    "cmd/peasant/testdata/TestSelectionCommands_RenderGolden/config-light-narrow.golden",
+    "cmd/peasant/testdata/TestSelectionCommands_RenderGolden/config-light-wide.golden",
+    "cmd/peasant/testdata/TestSelectionCommands_RenderGolden/kickstart-dark-wide.golden",
+    "cmd/peasant/testdata/TestSelectionCommands_RenderGolden/kickstart-light-wide.golden"
+  ],
+  "productionTreeUnchanged": true,
+  "focusedRaceLog": "/tmp/codex-overhaul/peasant539-cmd-focused-fixture-verify.log",
+  "focusedRaceResult": "PASS 2.742s",
+  "localApiTest": "root real local API and original failing focused cases PASS 3.135s",
+  "changes": [
+    "drive actual selected settings section instead of stale positional steps",
+    "resolve fixture clone directory with production physical-path resolver",
+    "refresh six goldens for existing auto-publish section only"
+  ],
+  "testDeletions": false,
+  "skippedTestsAdded": false
+}

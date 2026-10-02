@@ -1,0 +1,65 @@
+{
+  "sourceHead": "863e86d5b79b66754b26ebc5d6355eb9cfd585b4",
+  "sourceWorktree": "/Users/vitorhugo/Documents/Projects/polyrepo/peasant/peasant-9--feat--kickstart-auto-publish",
+  "sourceClean": true,
+  "command": [
+    "go",
+    "run",
+    "-tags=guided_screenshots",
+    "./cmd/peasant-guided-screenshots"
+  ],
+  "freezeExecutable": "/tmp/peasant-tui-tools/freeze",
+  "freezeSha256": "1850c45c7a5835d1c8578ff5f623aa7897a840a7fd2bc715096f615c3482ec75",
+  "freezeVersion": "freeze version v0.2.2",
+  "fixtureSha256": "f919e75d8323d92adcab3e7eb85dfc9285eead64ec604dd51d3f01f833010342",
+  "goVersion": "go version go1.27.0 darwin/arm64",
+  "elapsedSeconds": 24.609,
+  "log": "/tmp/codex-overhaul/peasant9-tui-863e86d-root.log",
+  "officialHarness": true,
+  "alternateRenderer": false,
+  "images": {
+    "guided-dark.png": {
+      "sha256": "fbe5c5562b037594ee2065e89d4db19ade1bb0b872835e5b243b6d5ed24a0aea",
+      "width": 1800,
+      "height": 3980
+    },
+    "guided-light.png": {
+      "sha256": "350b1eb96fb004e50ea7b0929d5ba3a207c0b04f2c6f1f8fc69131fefa7fe38e",
+      "width": 1800,
+      "height": 3980
+    },
+    "selection.png": {
+      "sha256": "95d8853e65cbe9725bff87e84b0d52480051ef29e3039715cfed8d237e09bda2",
+      "width": 1800,
+      "height": 11170
+    },
+    "push.png": {
+      "sha256": "0f6d1bbd2e0badc4642381c9b4abf36e069632446aec99df4b6603bada871ade",
+      "width": 1800,
+      "height": 7200
+    },
+    "ingest-progress.png": {
+      "sha256": "bcd13672a6ab6cd08194a55d817ac7806bc3ad7361aaf73c23eab67d6235e0eb",
+      "width": 1800,
+      "height": 4590
+    },
+    "ingest-completion.png": {
+      "sha256": "a36c32aa4d0a95fbe4680cc435f73298e31d3f0bd4ff7e4afd0e4b6d4492ebd0",
+      "width": 1800,
+      "height": 3420
+    }
+  },
+  "inspection": {
+    "accepted": true,
+    "sheetsViewed": [
+      "guided-dark.png",
+      "guided-light.png",
+      "selection.png",
+      "push.png",
+      "ingest-progress.png",
+      "ingest-completion.png"
+    ],
+    "result": "All six clean monospaced sheets, no overlapping terminal columns, required sections and complete content visible; each PNG byte-identical to prior valid official e3fa sheet. Fresh exact863e official run verified; rejected child fallback outputs not used.",
+    "priorValidSource": "e3fa32760491dd306006c5c94e586245fa09cbb4"
+  }
+}
