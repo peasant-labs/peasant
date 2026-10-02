@@ -13,7 +13,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
 )
 
-const layoutTestTool harnesslayout.Tool = "cmd-layout-test-tool"
+const (
+	layoutTestTool harnesslayout.Tool = "cmd-layout-test-tool"
+	layoutFailTool harnesslayout.Tool = "cmd-layout-fail-tool"
+)
 
 var layoutTestArtifact = harnesslayout.Artifact{
 	Name:    "transcript",
@@ -49,6 +52,12 @@ func (layoutTestProbe) Capture(_ context.Context, src harnesslayout.Source, ref 
 	return harnesslayout.Capture{Metadata: meta, Shapes: []harnesslayout.ArtifactShape{rec.Shape()}}, err
 }
 
+type layoutFailProbe struct{ layoutTestProbe }
+
+func (layoutFailProbe) Capture(context.Context, harnesslayout.Source, harnesslayout.SessionRef) (harnesslayout.Capture, error) {
+	return harnesslayout.Capture{}, &fs.PathError{Op: "open", Path: "secret-session", Err: fs.ErrPermission}
+}
+
 func init() {
 	harnesslayout.Register(harnesslayout.Layout{
 		Tool:        layoutTestTool,
@@ -58,6 +67,15 @@ func init() {
 		Artifacts:   []harnesslayout.Artifact{layoutTestArtifact},
 		Sources:     []string{"synthetic test layout"},
 		Probe:       layoutTestProbe{},
+	})
+	harnesslayout.Register(harnesslayout.Layout{
+		Tool:        layoutFailTool,
+		DisplayName: "Layout Fail Tool",
+		Sessions:    "One JSONL file per session.",
+		Roots:       []harnesslayout.Root{{Path: "{home}/.layout-fail-tool"}},
+		Artifacts:   []harnesslayout.Artifact{layoutTestArtifact},
+		Sources:     []string{"synthetic test layout"},
+		Probe:       layoutFailProbe{},
 	})
 }
 
@@ -123,6 +141,86 @@ func TestLayoutCaptureReportsEmptyExplicitPath(t *testing.T) {
 	if !strings.Contains(stdout, `"present": false`) || !strings.Contains(stderr, "no Layout Test Tool sessions found") {
 		t.Fatalf("stdout=%s stderr=%s", stdout, stderr)
 	}
+}
+
+func TestLayoutCaptureStderrDistinguishesEmptyFromFailed(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	empty := filepath.Join(home, ".layout-test-tool")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err := runLayoutCommand(t, home, "capture", string(layoutTestTool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, `"present": true`) || !strings.Contains(stderr, "no Layout Test Tool sessions found") || strings.Contains(stderr, "every capture failed") {
+		t.Fatalf("empty store stdout=%s stderr=%s", stdout, stderr)
+	}
+
+	failed := filepath.Join(home, ".layout-fail-tool")
+	if err := os.MkdirAll(failed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(failed, "s1.jsonl"), []byte("{\"type\":\"user\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err = runLayoutCommand(t, home, "capture", string(layoutFailTool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr, "found 1 Layout Fail Tool session in:") || !strings.Contains(stderr, "every capture failed") || strings.Contains(stderr, "no Layout Fail Tool sessions found") {
+		t.Fatalf("all-failed stderr=%s\nstdout=%s", stderr, stdout)
+	}
+	if strings.Contains(stdout, "s1") || !strings.Contains(stdout, `"errorClass": "permission"`) {
+		t.Fatalf("shape-only failure report = %s", stdout)
+	}
+}
+
+func TestLayoutCaptureRejectsNegativeLimit(t *testing.T) {
+	t.Parallel()
+	_, stderr, err := runLayoutCommand(t, t.TempDir(), "capture", string(layoutTestTool), "--limit", "-1")
+	if err == nil || !strings.Contains(err.Error(), "zero or greater") {
+		t.Fatalf("error = %v, stderr = %s", err, stderr)
+	}
+	stdout, _, err := runLayoutCommand(t, t.TempDir(), "capture", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "Maximum successful captures") {
+		t.Fatalf("help = %s", stdout)
+	}
+}
+
+func TestLayoutListMarksPermissionErrors(t *testing.T) {
+	t.Parallel()
+	env := func() (harnesslayout.Env, error) {
+		return harnesslayout.Env{GOOS: harnesslayout.OSLinux, Home: "/home", ConfigDir: "/home/.config"}, nil
+	}
+	open := func(string) harnesslayout.Source {
+		return harnesslayout.Source{FS: statErrFS{err: fs.ErrPermission}}
+	}
+	cmd := buildLayoutCommand(env, open)
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"list"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "[absent]") || !strings.Contains(stdout.String(), "[permission]") {
+		t.Fatalf("list = %s", stdout.String())
+	}
+}
+
+type statErrFS struct{ err error }
+
+func (s statErrFS) Open(string) (fs.File, error) {
+	return nil, &fs.PathError{Op: "open", Path: ".", Err: s.err}
+}
+
+func (s statErrFS) Stat(string) (fs.FileInfo, error) {
+	return nil, &fs.PathError{Op: "stat", Path: ".", Err: s.err}
 }
 
 func TestLayoutListShowsResolvedRoots(t *testing.T) {

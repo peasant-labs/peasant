@@ -1,0 +1,56 @@
+# Run cases for limit, cancellation, ordering, and discovery errors.
+# requiredNames is the deletion manifest for this file.
+requiredNames:
+  - limit-counts-success-after-failure
+  - negative-limit-rejected
+  - already-canceled
+  - unsorted-sessions-are-ordered
+  - discovery-permission-stripped
+  - discovery-not-found-class
+  - discovery-canceled-class
+  - discovery-other-class
+  - capture-permission-stripped
+cases:
+  - name: limit-counts-success-after-failure
+    sessions: ["b", "a-fail", "c"]
+    fail: ["a-fail"]
+    limit: 1
+    wantSessions: 3
+    wantCaptures: ["b"]
+    wantFailures: ["a-fail"]
+  - name: negative-limit-rejected
+    sessions: ["a"]
+    limit: -1
+    wantError: negative
+  - name: already-canceled
+    sessions: ["b", "a"]
+    cancel: true
+    wantError: canceled
+    wantSessions: 2
+    wantCaptures: []
+  - name: unsorted-sessions-are-ordered
+    sessions: ["c", "a", "b"]
+    wantSessions: 3
+    wantCaptures: ["a", "b", "c"]
+  - name: discovery-permission-stripped
+    discoverError: permission
+    wantRootClass: permission
+    wantSecretStripped: true
+  - name: discovery-not-found-class
+    discoverError: not_found
+    wantRootClass: not_found
+    wantSecretStripped: true
+  - name: discovery-canceled-class
+    discoverError: canceled
+    wantRootClass: canceled
+    wantSecretStripped: true
+  - name: discovery-other-class
+    discoverError: other
+    wantRootClass: other
+    wantSecretStripped: true
+  - name: capture-permission-stripped
+    sessions: ["s"]
+    fail: ["s"]
+    wantFailures: ["s"]
+    wantFailureClass: permission
+    wantSecretStripped: true

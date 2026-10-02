@@ -1,0 +1,20 @@
+{
+  "tool": "fixture-tool",
+  "roots": [
+    {
+      "present": true,
+      "sessions": 0,
+      "errorClass": "permission"
+    },
+    {
+      "present": true,
+      "sessions": 1
+    }
+  ],
+  "captures": [],
+  "failures": [
+    {
+      "errorClass": "permission"
+    }
+  ]
+}
