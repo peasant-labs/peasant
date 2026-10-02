@@ -25,14 +25,17 @@ and to prove that every test still runs exactly once across the passes.
   record. Its `partition` entries run in the **no-race pass** and are excluded
   from the race pass; its `protected` entries are pinned into the race pass and
   must never be registered as partition members.
-- Under `RACE=1` the gate runs a **race pass** (every listed test minus the
+- With the race pass on (`-race`; `make check` passes the flag explicitly,
+  deriving it from its `RACE` make variable, which CI sets to `0`) the gate
+  runs a
+  **race pass** (every listed test minus the
   partition members) and a **no-race pass** (exactly the partition members).
   The no-race pass runs one invocation at a time, so each partition test's
   CPU is attributable.
-  Under `RACE=0` it runs a **single no-race pass** over every test, with
-  packages invoked concurrently, but still computes the plan and applies the
-  screen. The gate computes the plan from `go test -list`, so `cmd/testgate
-  plan` prints the plan and runs nothing.
+  With the flag off (the default) it runs a **single no-race pass** over every
+  test, with packages invoked concurrently, but still computes the plan and
+  applies the screen. The gate computes the plan from `go test -list`, so
+  `cmd/testgate plan` prints the plan and runs nothing.
 
 ### Subset runs (`-pkgs`)
 
@@ -56,8 +59,9 @@ run is **not** a full-suite gate result and says so:
   `budget: not applicable (subset run: N of M packages)` and never compares a
   subset wall against the committed 120s bar.
 
-A full run (`-pkgs ./...`, the default) behaves exactly as before: the whole
-registry is in force and the budget verdict is enforced. `profile`'s existing
+A full run (`-pkgs ./...`, the default) plans the whole
+registry; the budget verdict follows the committed `enforcement` mode (warn
+demotes a miss, blocking fails on it — see below). `profile`'s existing
 single-package `-pkg` is separate and unchanged.
 
 ### Timing mode
@@ -101,7 +105,8 @@ counter-example into `partition` fails the test.
 
 ### The four-rule exactly-once screen
 
-The screen merges the passes and checks, in both `RACE` modes:
+The screen merges the passes and checks, in both race modes (`-race` on and
+`-race=false`):
 
 1. **exactly-once** — a test that ran in more than one pass is a double-run (FAIL);
 2. **partition containment** — a partition member must not run in the race pass (FAIL);
@@ -117,7 +122,7 @@ screen FAIL, or invocation error makes the gate exit non-zero.
 
 Each `go test` invocation is a recordable unit with a `{unit, class, wall, user,
 system}` record. The race pass records one unit per package (class `race`); the
-`RACE=1` no-race pass records one unit per partition test, carrying that entry's
+race-mode no-race pass records one unit per partition test, carrying that entry's
 class. `user`/`system` come from `getrusage(RUSAGE_CHILDREN)`; under concurrency
 the counter is process-global, so per-unit CPU is best-effort while **wall is
 always exact**.
@@ -128,7 +133,10 @@ Run classes (keep them separate):
   -outputdir <d>`. This is the only quotable wall.
 - **attribution (profiles ON; wall not quotable):** add `-blockprofile`,
   `-mutexprofile`, `-cpuprofile`, `-trace`. `-cpuprofile` does not profile child
-  processes, so it is for intra-binary attribution only.
+  processes, so it is for intra-binary attribution only. `testgate profile`
+  additionally re-profiles the 10 slowest top-level tests with a per-test
+  `-cpuprofile` by default (`-cpuprofile-top N`, `0` disables); the re-runs are
+  semaphore-limited to the batch count and do not observe one another.
 - **interactive debug:** `-v -fullpath -run <target>`.
 
 Do not pin `-parallel`: it defaults to `GOMAXPROCS` (cgroup-aware) and pinning
@@ -138,35 +146,69 @@ changes the packing ceiling being measured. The gate prints the effective `-p`,
 ### Budget and calibration surface
 
 `budget.yaml` at the repository root carries the committed budget for the whole
-suite: the gate normalises the combined test wall by the calibration factor `L` and
-**fails closed** when the normalised wall exceeds it — there is no warning-only mode
-and no ratchet. `CHECK_START_NS` is stamped by `make check` and the gate reports the
+suite: the gate normalises the combined test wall by the calibration factor `L`
+and compares it to the bar. What a miss *does* is decided by the committed
+`enforcement` field, a closed set of `blocking` (miss fails the gate) and
+`warn` (miss prints an unmissable `WARN (non-blocking)` line and leaves the
+exit code green). An absent field defaults to `blocking`; any other value fails
+closed. `CHECK_START_NS` is stamped by `make check` and the gate reports the
 pre-test wall (`test-start - CHECK_START_NS`) separately from the test wall. The
 calibration factor `L` is the gate's fixed CPU probe over the committed reference;
 `L > 4` is reported INCONCLUSIVE and does not fail the gate. When no fixture is
-present the gate reads `TEST_BUDGET` (seconds) from the environment and otherwise
-prints raw walls only.
+present the gate reads `TEST_BUDGET` (seconds, always blocking) from the
+environment and otherwise prints raw walls only. `report.json` records the mode
+(`budget_enforcement`) and whether a miss was demoted (`budget_warn`).
+
+Use `warn` while the suite is known-over-budget and the bar is a target being
+worked toward: the miss stays visible on every run without red-denied landings.
+Use `blocking` once the suite sustainably meets the bar, so a regression fails
+the gate. The switch is a one-line `enforcement` change in `budget.yaml`.
 
 ### Current status
 
-The committed budget is **120s** and the suite does **not** meet it, so `make check`
-fails at the budget line **by construction**. Measured on the consolidated tree
-(2026-09-27): race pass 12m44s–14m52s, combined 13m39s–15m51s, L-normalised
-822s–941s at `L` 0.996–1.011. The per-family report, the CPU numerator
-(5842.8s; 32-core floor 182.6s) and the full lever analysis are on peasant#389.
+The committed budget is **120s** under **`enforcement: warn`**, and the suite
+does **not** meet it, so `make check` prints a `WARN (non-blocking)` budget
+line **by construction** and stays green. Final consolidated measurement over
+the substantive tree (2026-09-29, head `fc7d9c95`): race pass **13m43s**
+(823.1s), no-race pass
+**2m10s** (129.6s), combined **15m53s** (952.9s), L-normalised **16m42s** at
+`L` 0.951. Against the pre-epoch base `da7abd7f` (race 19m53s, no-race 1m00s,
+combined 20m53s, L-normalised 21m49s at `L` 0.957) the combined wall fell
+**24%** and the race pass **31%**; the no-race pass grew from 7 to 19 tests as
+twelve detector-taxed tests moved into it. The branch head `c6789de7` was
+re-gated after the two follow-up commits, which touch documentation and comment
+text only: `make check RACE=1` exited 0, the four-rule screen printed the same
+`all four rules passed`, and the gate printed `testgate: PASS`. The head run
+measured combined **16m8s** (968.9s) at `L` 0.953, L-normalised **16m56.987s**
+(capture `.agents.local/testgate/20260929T233304Z/`).
+Per-class (focused, Class A): T3 DB-setup
+conversion 946.7s → 563.9s over 22 tests; T1 no-race partition 171.2s race →
+78.7s no-race over 12 moved entries; T2 SQL/seed 79.6s → 74.0s; T4 payload
+shares reduce no fixture invariant; T6 packing `internal/api` 102.2s → 96.3s
+(the helper-group listing 14.4s → 8.0s). The combined CPU numerator is 3353.0s
+(race 2999.9s), a 32-core floor of 104.8s. The per-test before/after pairs, the
+gate captures, and every L companion are in
+[`docs/testing/perf/`](docs/testing/perf/) — `slow-test-taxonomy.md` (cost
+drivers and fix classes) and `evidence.md` (before/after evidence).
 
 The binding constraint and the remaining levers, measured rather than assumed:
 
 - the largest single test — `TestUnknownLocalRetentionBeyondTransferBudget` in
-  `internal/ingest` — costs **243.6s** focused and alone, so no batching or sharding
-  can put the suite below it until that test's cost falls;
-- no cost class has a positive `wall − CPU` gap, so there is no blocked time left to
-  reclaim; the remaining work is *fewer CPU seconds under instrumentation*;
-- achieved packing still leaves headroom: `internal/api` 2.02×, `internal/store`
-  1.40×, `internal/ingest` 2.90× of 32 hardware threads.
+  `internal/ingest` — costs **210.1s** focused and alone after its store-open
+  conversion (229.9s measured at the base; 243.6s carried prior reference), so no
+  batching or sharding can put the suite below it until that test's cost falls
+  further;
+- no cost class carries a material positive `wall − CPU` gap (the largest is
+  +0.27s on the toolchain class), so there is no blocked time left to reclaim;
+  the remaining work is *fewer CPU seconds under instrumentation*;
+- achieved packing still leaves headroom: per-package CPU/wall in the final race
+  pass is ~7.0× (`internal/api`), ~6.4× (`internal/store`), ~3.6×
+  (`internal/ingest`) of the 32 hardware threads.
 
-Do not close a budget miss by raising the value or adding a warning-only mode. The
-bar is a target and the miss is the measurement.
+Do not close a budget miss by raising the value. The
+bar is a target and the miss is the measurement; while the suite is over it the
+committed `enforcement: warn` keeps the miss visible without blocking landings,
+and the return to `blocking` waits until the suite sustainably meets the bar.
 
 ### Counting-method rule
 
@@ -225,10 +267,142 @@ decorator type, its capability, owner, and declaring file:line, so each
 migration's owner is explicit before any code moves; a test asserts every entry
 resolves to a real declaration and the required-name manifest matches both ways.
 
+## Waiting in tests
+
+A test wait has to end for a reason: **a test wait names its wake source or carries a deadline.** A
+fixed wait instead assumes an idle machine — it sleeps for a guessed window that a loaded machine
+can outlast, and the race detector widens every window. Prefer an explicit signal, or a bound taken
+from the test's own deadline.
+
+### Decision tree
+
+```
+       does the test start all of its goroutines and
+       touch no file, process, or network?
+                         |
+          +--------------+---------------+
+          | yes                          | no
+          v                              v
+   run it in a synctest bubble     can a channel signal
+   (fake clock, durable block)     report the condition?
+          |                              |
+          |                       +------+------+
+          |                       | yes         | no
+          |                       v             v
+          |                 wait on the    wait with the
+          |                 signal         test deadline
+          |                       |             |
+          +-----------------------+-------------+
+                                  |
+                                  v
+                        the wait has a wake
+                        source or a bound
+```
+
+### The three tools
+
+- **A channel signal from a double.** Use it when the test owns the code that produces the
+  condition. Close a channel once to report "reached" (`blockingParallelIndexer.entered`), or send
+  a buffered value per item to report each event (`serialIndexStore.wrote`). The double owns the
+  signal; the test reads it.
+- **`internal/testkit/testwait`.** Use it to bound a wait on something the test cannot signal, such
+  as a real child process. `testwait.Context(t)` returns a context that ends at the bound;
+  `testwait.Receive(t, ch, what)` returns the next value or fails; `testwait.Until(t, what, cond)`
+  returns once the condition holds. The bound is the test's deadline less a margin of
+  `min(5 s, remaining/2)`, so a stuck wait reports itself before the timeout panic; a deadline
+  already in the past clamps the bound to now, and with no deadline (`go test -timeout=0`) it is a
+  one-minute fallback. These helpers take a `*testing.T` only (`*testing.B` and `*testing.F` have
+  no `Deadline`), they call `t.Deadline()` so they are never used inside a bubble, and
+  `testwait.Context` is created once per wait scope, not once per loop iteration (its cancel is
+  registered with `t.Cleanup`).
+- **`testing/synctest`.** Use it when the test starts all of its own goroutines and touches no
+  file, process, or network. `synctest.Test(t, func(t *testing.T) { … })` runs the body in a bubble
+  whose fake clock advances only when every goroutine in the bubble is durably blocked;
+  `synctest.Wait()` blocks until that point. Waits on channels, timers, and tickers created inside
+  the bubble are durable, and a goroutine still blocked when the bubble returns fails the test with
+  a deadlock report instead of a timeout arm. The gated-filesystem bubble is the worked example.
+
+### Negative assertions
+
+To assert that something did *not* happen, reach a positive barrier first — a signal, a parked
+queue, or `synctest.Wait()` — then make the check without blocking. The write-lane test
+(`TestStreamingIndex_StoreWriteLaneSerializesDownstreamWrites`) is the reference case: it waits
+until the competing write is parked in the lane queue, and only then reads the concurrency counter.
+A negative check with no barrier before it can pass by accident.
+
+### Proving an event wake
+
+Inside a bubble, act, call `synctest.Wait()`, and assert the outcome with `time.Since(start) == 0`.
+Fake time does not advance while the root goroutine is inside `synctest.Wait()`, so a zero elapsed
+time proves the wake came from an event, not a timer or a poll. The staging-buffer backpressure
+bubbles (`TestStagingBuffer_BoundedBackoff` and its neighbours in `internal/ingest/parallel_test.go`)
+use this shape.
+
+### Pull-only state
+
+Some state is a pull model with no push signal, such as `ProgressState`. Wait for it with
+`testwait.Until`, and name at the call site why there is no signal to wait on. Do not add
+production hooks just so a test can wait.
+
+### Keep list
+
+These waits stay real, each for a stated reason:
+
+- `internal/filelock` (`flock_*.go`, `filelock_test.go`) — the holder is another process, so only a
+  real lock poll observes it; the wait is deadline-bounded (`DefaultWait`).
+- `internal/store/session_lock_test.go` — cross-process lock contention.
+- `internal/githooks/script_test.go` — the kernel reports `ETXTBSY` on a freshly written
+  executable, and only a later retry observes it cleared; the pacing is kept, the bound is the
+  test deadline.
+- `internal/village/client_timing_test.go`, `internal/perf/perf_test.go` — simulated server latency
+  is the subject under test.
+- `internal/api/server.go` — a deliberate response flush delay in production.
+- `cmd/peasant/cmd_play.go` — the hidden demo command; its pacing is the user-visible behavior.
+- `cmd/peasant/ingest_progress_test.go` `TestHarvestInterruptMounted` — the subject is a real child
+  process (its readiness text and its OS-level exit); the 10 ms poll pacing is kept, and the wait
+  bounds come from the test deadline. It is not deleted or made cancellable; the harvest-interrupt
+  entry keeps its pacing and takes the test-deadline bound.
+
+### Real waits outside this policy
+
+Two real waits are named here and otherwise untouched:
+
+- `cmd/peasant/web_capabilities_matrix_test.go` `pollCapabilities` — waits on a real, detached
+  `peasant web` child's HTTP route (30 s bound, 50 ms interval).
+- `internal/e2e/village_procdeath_linux_test.go` — polls until the kernel reports the grandchild
+  reaped (10 s bound, 50 ms interval).
+
+### Simulated latency inside doubles
+
+A sleep inside a double (for example a 10 ms write body) models duration; it is part of the
+behavior the test exercises, not an event wait. Keep it.
+
+### Fake-clock traps
+
+1. Inside a bubble `time.Now()` starts at 2000-01-01 00:00 UTC. `MemFS` modification times use it,
+   while OS files carry real mtimes, so a freshness or mtime test stays out of a bubble.
+2. The fake clock advances only when *every* bubble goroutine is durably blocked. A spinning
+   goroutine never blocks durably, so `synctest.Wait()` never returns — under `-timeout=0` an
+   unbounded hang bounded only by the CI job budget. Put code in a bubble only when its waits block
+   on channels or timers.
+3. Only channels, timers, and tickers created inside the bubble block durably. Create buffers,
+   gates, and contexts inside, and pass the inner `t.Context()`. A `select` that also watches a
+   channel from outside the bubble is not durable.
+4. Waiting on a `sync.Mutex`, a syscall, file I/O, or network I/O is not durable. A bubble has no
+   network and no external process.
+5. A package-level `sync.WaitGroup` cannot join a bubble.
+6. Do not call `t.Run`, `t.Parallel`, or `t.Deadline` inside the bubble. Call `t.Parallel()` on the
+   outer test first. `testwait` calls `t.Deadline()`, so it is not used in bubbles.
+7. A goroutine still blocked when the bubble returns makes `synctest.Test` fail with a deadlock
+   report; use that in place of a timeout arm.
+8. While the root goroutine is inside `synctest.Wait()`, fake time does not advance, so
+   `time.Since(start) == 0` after `Wait` proves the wake was an event, not a timer.
+
 ## Coverage map for the consolidation
 
 The consolidation records every moved, deleted, retained, or deferred name in a
-coverage map, closed against an inventory generated at the slice branch point:
+coverage map, closed against an inventory generated when the consolidation's
+branch was cut:
 
 - `internal/testkit/coveragemap` declares `Inventory` and `CoverageMap`, the destination
   closed set (`retained-in-place`, `moved:<file>`, `deleted:<rationale-ref>`,
@@ -238,7 +412,7 @@ coverage map, closed against an inventory generated at the slice branch point:
   admissible.
 - Every inventory name appears in the map exactly once, a `moved` target must
   exist, and a `deleted` or `followup` entry must name its rationale or task. An
-  entry is written by the slice that performs the move, in the same commit.
+  entry is written by the change that performs the move, in the same commit.
 
 ## Test performance: keeping `cmd/peasant` fast (and parallel)
 
@@ -292,7 +466,8 @@ Other packages for reference (uncached `-race`): `internal/store` ~20–26s,
    slow, non-deterministic, and often not testing what the case claims.
 4. **Real sleeps/backoff** — e.g. an HTTP client's retry backoff against a 500.
    Inject a zero/short backoff (the models test uses `bestiary.WithRetries(0)`:
-   4.17s → 0.22s).
+   4.17s → 0.22s). When the subject instead waits for a concurrent condition, name
+   a wake source or carry a deadline; see [Waiting in tests](#waiting-in-tests).
 
 ### The parallel-safe pattern (use this for new `cmd/peasant` tests)
 
@@ -407,6 +582,7 @@ test non-parallel).
 |---------|----------|--------------------|------------|-----|
 | `PEASANT_DB_POOL_SIZE` | `store.EnvPoolSize` | `10` (`store.DefaultPoolSize`) | `1` cmd/peasant · `2` store | Avoid the default 10-connection pool (each re-parsing the schema) per `store.Open`. `internal/store` uses **2**, not 1 — pool=1 deadlocks its tests that take a 2nd connection while holding the 1st. |
 | `PEASANT_INGEST_ARENA_BYTES` | `ingest.EnvArenaSizeBytes` | 2 GiB (`ingest.DefaultArenaSizeBytes`) | 64 MiB (`64*1024*1024`) | Avoid allocating the 2 GiB staging arena per pipeline run (the `-race` OOM). |
+| `PEASANT_STORETEST_TMPDIR` | `storetest.EnvStoretestTmpDir` | (unset → `t.TempDir()` copies) | (unset) | Opt-in: route golden copies through a managed root (e.g. a macOS hdiutil RAM disk) with per-process shelves and dead-owner sweeping. `TMPDIR` already routes the default copies — `t.TempDir()` and `os.MkdirTemp("")` resolve through `os.TempDir()`, so `TMPDIR` alone moves every default copy. This override **additionally** scopes cleanup to storetest-owned `pid-*` shelves: they sit under a per-user, scheme-versioned managed root and a dead-owner sweep reclaims them on first use. The default `t.TempDir()` showed no measured copy-speed difference (the copy micro-measurement: 100 copies 36.6 ms vs 44.8 ms tmpfs — noise). |
 
 Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
 `internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`),
@@ -414,6 +590,12 @@ Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
 `internal/e2e/main_test.go` (arena default). The resolvers (`store.resolvePoolSize`,
 `ingest.resolveArenaSizeBytes`) take the env override only when it parses as a
 positive integer, else the default.
+
+The golden-template cache stamp keys on the schema version and a fingerprint of
+the migration SQL. Connection pragmas, the salt-table DDL, and the Go-driven
+migration phase (`schema_v23.go`) are outside that fingerprint, so after editing
+one of them on a branch, delete `.testcache/` (or bump `cacheScheme` in the
+helper) to keep a stale template from being reused.
 
 ## Go WebSocket E2E (verified)
 

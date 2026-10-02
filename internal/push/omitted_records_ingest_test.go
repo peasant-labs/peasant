@@ -18,6 +18,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -181,11 +182,7 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			db, err := store.Open(filepath.Join(root, "peasant.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
+			db := storetest.Open(t)
 
 			fs := &ingest.OSFileSystem{}
 			cfg := ingest.PipelineConfig{

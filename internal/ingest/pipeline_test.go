@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -6595,5 +6596,131 @@ func TestPipeline_SchemaV8_V7MetadataParses(t *testing.T) {
 	// Ingested should still parse correctly.
 	if meta.Timestamp.Ingested == nil {
 		t.Error("Ingested is nil, want non-nil")
+	}
+}
+
+// TestPipelineFullArenaCompletesAndRecordsEverySession runs the ingest
+// orchestrator with an arena exactly one transcript long, so every session
+// after the first waits for the INDEX ack to free its bytes. It is the only
+// whole-pipeline coverage of the drain loop's INDEX-completion wake and its
+// final drain: without that arm the run deadlocks at the wait bound, and the
+// normal run must still record every session with INDEX progress complete.
+func TestPipelineFullArenaCompletesAndRecordsEverySession(t *testing.T) {
+	t.Parallel()
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+
+	sessionIDs := []string{
+		"11111111-1111-4111-8111-111111111111",
+		"22222222-2222-4222-8222-222222222222",
+		"33333333-3333-4333-8333-333333333333",
+	}
+
+	// Equal-length bodies: one record per session whose session ID is a
+	// 36-character UUID, so every seeded payload is exactly L bytes.
+	bodyFor := func(sessionID string) []byte {
+		return []byte(fmt.Sprintf(
+			`{"sessionId":%q,"type":"user","message":{"role":"user","content":"full-arena fixture"},"timestamp":"2024-02-19T00:00:00Z"}`+"\n",
+			sessionID,
+		))
+	}
+
+	modTime := time.Now().Add(-2 * time.Hour)
+	metadata := make(map[ingest.SessionID]*ingest.UnifiedMetadata, len(sessionIDs))
+	seeded := make([]ingest.DiscoveredSession, 0, len(sessionIDs))
+	transcriptLen := 0
+	for i, sessionID := range sessionIDs {
+		sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, sessionID)
+		body := bodyFor(sessionID)
+		if i == 0 {
+			transcriptLen = len(body)
+		}
+		if len(body) != transcriptLen {
+			t.Fatalf("seeded transcript %d is %d bytes, want %d: the arena is one transcript long", i, len(body), transcriptLen)
+		}
+		if err := mfs.WriteFile(sourcePath, body, 0644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", sourcePath, err)
+		}
+		session := makeDiscoveredSession(t, sessionID, sourcePath, modTime)
+		seeded = append(seeded, session)
+		metadata[session.SessionID] = makeMinimalMeta(t, sessionID)
+	}
+
+	// Fail-closed precondition: the read-back bytes must be exactly the arena
+	// length, or the test would measure a different (or no) backpressure wait.
+	for _, session := range seeded {
+		data, err := mfs.ReadFile(session.SourcePath.String())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", session.SourcePath, err)
+		}
+		if len(data) != transcriptLen {
+			t.Fatalf("seeded transcript %s is %d bytes, want %d", session.SessionID, len(data), transcriptLen)
+		}
+	}
+
+	progState := ingest.NewProgressState()
+	cfg := makePipelineConfig(testOutputDir)
+	cfg.Progress = progState
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(seeded, metadata),
+	}
+	// A real indexer and store are what make an indexed session observable:
+	// the INDEX stage's final Done counts sessions actually written, so with no
+	// store the count stays zero whatever the drain loop streamed.
+	entries := make(map[ingest.SessionID][]schema.SessionEntry, len(seeded))
+	for _, session := range seeded {
+		entries[session.SessionID] = []schema.SessionEntry{{
+			SessionID:  session.SessionID,
+			EntryIndex: 0,
+			Harness:    schema.HarnessClaudeCode,
+			Role:       ingest.RoleUser,
+			EntryType:  ingest.EntryTypeText,
+		}}
+	}
+	metricsStore := testutil.NewStubMetricsStore()
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
+		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
+			ingest.HarnessClaudeCode: &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile, Entries: entries},
+		}),
+		ingest.WithMetricsStore(fixtureStore),
+		ingest.WithArenaSizeBytes(int64(transcriptLen)),
+	)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+
+	type runOutcome struct {
+		result *ingest.PipelineResult
+		err    error
+	}
+	ctx := t.Context()
+	done := make(chan runOutcome, 1)
+	go func() {
+		result, err := pipeline.Run(ctx)
+		done <- runOutcome{result: result, err: err}
+	}()
+
+	out := testwait.Receive(t, done, "the full-arena ingest run to finish")
+	if out.err != nil {
+		t.Fatalf("Run: %v", out.err)
+	}
+	if got := len(out.result.Sessions); got != len(sessionIDs) {
+		t.Fatalf("run recorded %d sessions, want %d", got, len(sessionIDs))
+	}
+	seen := make(map[ingest.SessionID]bool, len(sessionIDs))
+	for _, sr := range out.result.Sessions {
+		if sr.Error != nil {
+			t.Fatalf("session %s failed: %v", sr.SessionID, sr.Error)
+		}
+		seen[sr.SessionID] = true
+	}
+	for _, session := range seeded {
+		if !seen[session.SessionID] {
+			t.Fatalf("session %s is missing from the run results", session.SessionID)
+		}
+	}
+	if got := progState.Snapshot()[ingest.StageIndex].Done; got != len(sessionIDs) {
+		t.Fatalf("INDEX progress done = %d, want %d", got, len(sessionIDs))
 	}
 }

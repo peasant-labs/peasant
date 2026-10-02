@@ -266,7 +266,7 @@ func seedRescanStore(t *testing.T, dbPath string, fixtures rescanFixtures, inges
 	t.Helper()
 	var withoutMetrics []string
 	func() {
-		db, err := store.Open(dbPath, store.WithPoolSize(1))
+		db, err := openPreparedStore(t, dbPath, store.WithPoolSize(1))
 		if err != nil {
 			t.Fatalf("open seed store: %v", err)
 		}

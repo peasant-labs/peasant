@@ -11,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
 
@@ -49,7 +48,7 @@ func TestStrikeIngestCommandPersistsSessionDetail(t *testing.T) {
 		t.Fatalf("source-scoped Strike harvest did not report both fixture sessions: %s", result)
 	}
 
-	db, err := store.Open(defaults.ResolveDBFilePathWith(testRoot).String())
+	db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(testRoot).String())
 	if err != nil {
 		t.Fatalf("open ingested Strike store: %v", err)
 	}
@@ -171,7 +170,7 @@ func TestStrikeIngestCommandAddsChildAfterParentSourceDisappears(t *testing.T) {
 		t.Fatalf("second Strike harvest did not report child session: %s", second)
 	}
 
-	db, err := store.Open(defaults.ResolveDBFilePathWith(testRoot).String())
+	db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(testRoot).String())
 	if err != nil {
 		t.Fatalf("open two-run Strike store: %v", err)
 	}
@@ -260,7 +259,7 @@ func TestStrikeIngestKeepsARecordOverTheRetiredPerLineLimit(t *testing.T) {
 		}
 	}
 
-	db, err := store.Open(defaults.ResolveDBFilePathWith(testRoot).String())
+	db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(testRoot).String())
 	if err != nil {
 		t.Fatalf("open large-record test store: %v", err)
 	}

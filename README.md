@@ -84,6 +84,7 @@ privacy boundaries, and recovery behavior.
 | `peasant metrics compute` | Compute session metrics from stored transcripts |
 | `peasant web start` | Start the web dashboard server (default port 8690) |
 | `peasant web stop` | Stop the web dashboard server |
+| `peasant open --session <id>` | Record one session with its commits and open its transcript in the web dashboard (see [output](#peasant-open-output)) |
 | `peasant tui` | Launch the terminal UI (deprecated; use `peasant web` and `peasant annotate`) |
 | `peasant kickstart` | Run the first-time setup wizard |
 | `peasant export sessions` | Export session transcripts as JSON |
@@ -105,7 +106,7 @@ For Village authentication (`peasant village login`, push, and pull), see
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Show what would be pushed (mirrors the real run exactly) without pushing |
-| `--visibility <v>` | Set visibility (`private` or `public`) |
+| `--visibility <v>` | Set visibility (`private` or `public`). Also changes every already-published session the run selects, including ones shared with collectives; without it an update keeps the visibility a transcript has on the Village |
 | `--timing` | Report per-phase timing (handshake/server split, redaction, annotation batches) to stderr + a per-upload JSONL under the state dir. Off by default. |
 | `--concurrency <n>` | Parallel uploads + HTTP connection-pool size (default `max(1, NumCPU/2)`; raise toward `~2×NumCPU` for a large cold push). |
 | `--annotation-id <ids>` / `--annotation-hash <hashes>` | Restrict the annotation push to specific annotations |
@@ -185,6 +186,52 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--no-browser` | Do not auto-open browser |
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
+
+The server listens on the loopback interface only: `127.0.0.1`, and `::1` when the host has an
+IPv6 loopback. Other machines cannot reach it. `peasant web start` exits with an error while
+another process already accepts connections on the port, including a dashboard that is already
+running, whether from this version or an earlier one. Open the running dashboard, or run
+`peasant web stop` and start it again, or choose another port with `--port`.
+
+Every request must name the server by a loopback `Host` (`localhost`, `127.0.0.1`, or `[::1]`),
+so a proxy or port forward that passes its own hostname as `Host` gets `403`.
+A state-changing request (any method other than `GET`, `HEAD`, or `OPTIONS`) and a WebSocket
+connection that carry an `Origin` header must come from the dashboard's own origin. Other
+requests get `403`. Local clients that send no `Origin` header are accepted, such as `curl`,
+`peasant web stop`, and the TUI. A browser request without an `Origin` whose `Sec-Fetch-Site`
+header says it came from another origin is still refused.
+
+### `peasant open` output
+
+`peasant open --session <id>` harvests that one session with commit detection, starts the web
+dashboard when it is not running, checks that the dashboard serves the session, opens the
+transcript in the browser, and prints two lines on stdout:
+
+```
+peasant: opened "<title>" · not published
+http://localhost:8690/projects/<project-hash>/<session-id>
+```
+
+The state reads `published` when the local store holds a Village publication receipt for the
+session. A session with no generated title prints `peasant: opened an untitled session`. The
+command opens the browser itself, so a caller must not open the address again.
+
+When a step fails, the command prints one line on stderr and exits 1:
+
+```
+peasant: <step> failed: <reason>; fix: <action>
+```
+
+The step is one of `session check`, `harvest`, `session lookup`, `dashboard start`, or
+`dashboard check`. A command in the fix carries whichever of `--config`, `--config-dir`,
+`--data-dir`, and `--state-dir` the run was given. The command never opens the dashboard root in place of the
+session.
+
+| Flag | Description |
+|------|-------------|
+| `--session <id>` | The session to record and open (required) |
+| `--port <n>` | Port of the web dashboard (default 8690, as for `peasant web start`) |
+| `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
 
 ### `peasant tui` flags (deprecated)
 
@@ -329,7 +376,9 @@ next harvest reads it from its source.
 
 See [docs/pipeline.md](docs/pipeline.md) for the ingest write flow, staging
 directory behavior, and the distinction between on-disk transcripts and the
-canonical `SessionDetailPayload` representation.
+canonical `SessionDetailPayload` representation. See
+[docs/architecture.md](docs/architecture.md) for C4 diagrams and call sequences of the
+whole system.
 
 ## Analytics schema
 

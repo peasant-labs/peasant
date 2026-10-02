@@ -50,6 +50,9 @@ func BuildWebCommand() *cobra.Command {
 		Use:   "start",
 		Short: "Start the web dashboard server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Flags are parsed; an error from here on is a runtime error, and
+			// its message is the actionable output, not the usage text.
+			cmd.SilenceUsage = true
 			if webVerbose {
 				configureVerboseLogging()
 			}
@@ -57,8 +60,25 @@ func BuildWebCommand() *cobra.Command {
 				cfgPath := resolveConfigPath(cmd)
 				return runWebForeground(cmd, cfgPath, webPort, webDev, mockDataStore, webExperimental)
 			}
-			cfgPath := resolveConfigPath(cmd)
-			return runWebBackground(cfgPath, webPort, webNoBrowser, webVerbose, mockDataStore, webExperimental)
+			spawn := webServerSpawnFor(cmd, webPort)
+			spawn.verbose = webVerbose
+			spawn.mockDataStore = mockDataStore
+			spawn.experimental = webExperimental
+			// The readiness probe accepts any answer on the port, so check the
+			// port first. Otherwise an earlier server that still holds it would
+			// answer the probe and be reported as the new one.
+			if addr, served := api.ServedLoopbackAddr(spawn.port); served {
+				return fmt.Errorf("web start: port %d already answers at %s, so no server was started. %s", spawn.port, addr, api.PortServedHint(spawn.port))
+			}
+			// A cancelled start is not a usage error: the readiness probe stops
+			// on the signal context, prints what it already knows, and exits
+			// non-zero with the cancellation.
+			ctx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer stopSignals()
+			return runWebBackground(ctx, webStartDependencies{
+				startServer: spawnWebServer,
+				openBrowser: browser.Open,
+			}, spawn, webNoBrowser)
 		},
 	}
 	webStartCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port to listen on")
@@ -209,24 +229,68 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	return srv.ListenAndServe(ctx)
 }
 
-// runWebBackground forks the server as a background process.
-func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mockDataStore string, experimental bool) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("cannot find executable: %w", err)
-	}
+// webServerSpawn is everything the detached `web start --foreground` child
+// needs to serve the same configuration and data as the command that forked it.
+type webServerSpawn struct {
+	port          int
+	configPath    string
+	dataDir       string
+	configDir     string
+	stateDir      string
+	mockDataStore string
+	verbose       bool
+	experimental  bool
+}
 
-	args := []string{"web", "start", "--foreground", "--port", strconv.Itoa(port), "--config", cfgPath}
-	if mockDataStore != "" {
-		args = append(args, "--mock-data-store", mockDataStore)
+// webServerSpawnFor resolves the configuration and directory overrides of cmd,
+// so a forked server reads the database the forking command wrote.
+func webServerSpawnFor(cmd *cobra.Command, port int) webServerSpawn {
+	return webServerSpawn{
+		port:       port,
+		configPath: resolveConfigPath(cmd),
+		dataDir:    dataDirOverride(cmd),
+		configDir:  configDirOverride(cmd),
+		stateDir:   stateDirOverride(cmd),
 	}
-	if verbose {
+}
+
+func (s webServerSpawn) args() []string {
+	args := []string{"web", "start", "--foreground", "--port", strconv.Itoa(s.port), "--config", s.configPath}
+	for _, override := range []struct{ flag, value string }{
+		{"--data-dir", s.dataDir},
+		{"--config-dir", s.configDir},
+		{"--state-dir", s.stateDir},
+	} {
+		if override.value != "" {
+			args = append(args, override.flag, override.value)
+		}
+	}
+	if s.mockDataStore != "" {
+		args = append(args, "--mock-data-store", s.mockDataStore)
+	}
+	if s.verbose {
 		args = append(args, "--verbose")
 	}
-	if experimental {
+	if s.experimental {
 		args = append(args, "--experimental")
 	}
-	cmd := exec.Command(exe, args...)
+	return args
+}
+
+// dashboardBaseURL is the address the local web dashboard serves on port.
+func dashboardBaseURL(port int) string {
+	return fmt.Sprintf("http://localhost:%d", port)
+}
+
+// spawnWebServer forks the server as a detached background process and writes
+// its PID file. It prints nothing and does not wait for the server to answer.
+func spawnWebServer(spawn webServerSpawn) (pid int, pidFile string, err error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, "", fmt.Errorf("cannot find executable: %w", err)
+	}
+
+	cmd := exec.Command(exe, spawn.args()...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -234,37 +298,87 @@ func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mo
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start background server: %w", err)
+		return 0, "", fmt.Errorf("failed to start background server: %w", err)
 	}
 
-	pid := cmd.Process.Pid
+	pid = cmd.Process.Pid
 
 	// Write PID file
-	pidFile := pidFilePath(port)
+	pidFile = pidFilePath(spawn.port)
 	if err := os.MkdirAll(filepath.Dir(pidFile), defaults.PublicDirPerm); err != nil {
-		return fmt.Errorf("failed to create state dir: %w", err)
+		return pid, "", fmt.Errorf("failed to create state dir: %w", err)
 	}
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), defaults.PublicFilePerm); err != nil {
-		return fmt.Errorf("failed to write PID file: %w", err)
+		return pid, "", fmt.Errorf("failed to write PID file: %w", err)
+	}
+
+	// Detach: parent exits, child continues
+	_ = cmd.Process.Release()
+	return pid, pidFile, nil
+}
+
+// webStartDependencies are the process side effects of the background
+// `web start` path. Production wires the real spawn and browser; tests
+// substitute both.
+type webStartDependencies struct {
+	// startServer forks the server the spawn describes and returns its PID and
+	// PID file. It does not wait for the server to answer.
+	startServer func(spawn webServerSpawn) (pid int, pidFile string, err error)
+	// openBrowser opens the dashboard address. A failure is not fatal to the
+	// start; it is reported and the address stays printed.
+	openBrowser func(url string) error
+}
+
+// webServerReadyWait is how long a freshly forked server has to answer the
+// health route.
+const webServerReadyWait = time.Duration(defaults.HealthCheckAttempts) * defaults.HealthCheckInterval
+
+// webServerHealthy reports whether a Peasant server answers the health route
+// under baseURL before ctx ends.
+func webServerHealthy(ctx context.Context, client *http.Client, baseURL string) bool {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+defaults.RouteHealth.String(), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// waitForWebServer polls the health route every interval until the server
+// answers, wait has passed, or ctx ends. No probe outlives either bound, so a
+// listener that accepts connections and never answers cannot stretch it, and a
+// cancelled start does not wait out its budget; the derived context also
+// cancels a health request that is already in flight.
+func waitForWebServer(ctx context.Context, client *http.Client, baseURL string, wait, interval time.Duration) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	for {
+		select {
+		case <-probeCtx.Done():
+			return false
+		case <-time.After(interval):
+		}
+		if webServerHealthy(probeCtx, client, baseURL) {
+			return true
+		}
+	}
+}
+
+// runWebBackground forks the server as a background process.
+func runWebBackground(ctx context.Context, deps webStartDependencies, spawn webServerSpawn, noBrowser bool) error {
+	pid, pidFile, err := deps.startServer(spawn)
+	if err != nil {
+		return err
 	}
 
 	// Readiness probe: poll health endpoint
-	serverURL := fmt.Sprintf("http://localhost:%d", port)
-	healthURL := serverURL + defaults.RouteHealth.String()
-	ready := false
-	for range defaults.HealthCheckAttempts {
-		time.Sleep(defaults.HealthCheckInterval)
-		resp, err := http.Get(healthURL)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				ready = true
-				break
-			}
-		}
-	}
-
-	if !ready {
+	serverURL := dashboardBaseURL(spawn.port)
+	client := &http.Client{Timeout: defaults.ServerClientTimeout}
+	if !waitForWebServer(ctx, client, serverURL, webServerReadyWait, defaults.HealthCheckInterval) {
 		fmt.Fprintf(os.Stderr, "Warning: server may not be ready (health check timed out)\n")
 	}
 
@@ -274,18 +388,27 @@ func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mo
 	fmt.Printf("\nIf the server becomes unresponsive, the process ID (%d)\n", pid)
 	fmt.Printf("is saved at %s\n", pidFile)
 
+	// A cancelled start stops the probe and leaves the server it forked
+	// running: report where it is, skip the browser, and fail non-zero.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return webStartCancellationError(serverURL, ctxErr)
+	}
+
 	// Auto-open browser. Failure is non-fatal (the server is already running),
 	// but it MUST be surfaced so the user knows to open the URL themselves.
 	if !noBrowser {
-		if err := browser.Open(serverURL); err != nil {
+		if err := deps.openBrowser(serverURL); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not open browser automatically: %v\n", err)
 			fmt.Fprintf(os.Stderr, "Open this URL manually: %s\n", serverURL)
 		}
 	}
-
-	// Detach: parent exits, child continues
-	_ = cmd.Process.Release()
 	return nil
+}
+
+// webStartCancellationError reports a cancelled start. It wraps the command
+// context error, so exitCodeFor maps it to a non-zero exit.
+func webStartCancellationError(url string, err error) error {
+	return fmt.Errorf("web start canceled while waiting for the server at %s to answer its health check: %w; the server keeps running in the background - stop it with 'peasant web stop' or open %s when it is ready", url, err, url)
 }
 
 // stopWeb sends a shutdown request to the running server.
@@ -295,7 +418,7 @@ func stopWeb(port int) error {
 
 	// Try HTTP shutdown first
 	client := &http.Client{Timeout: defaults.ServerClientTimeout}
-	shutdownURL := fmt.Sprintf("http://localhost:%d%s", port, defaults.RouteShutdown)
+	shutdownURL := dashboardBaseURL(port) + defaults.RouteShutdown.String()
 	resp, err := client.Post(shutdownURL, defaults.ContentJSON.String(), nil)
 	if err == nil {
 		defer resp.Body.Close()

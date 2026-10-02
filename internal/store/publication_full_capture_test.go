@@ -58,7 +58,7 @@ func loadPublicationFullCaptureFixtures(t *testing.T) []publicationFullCaptureCa
 func TestPublicationFullCaptureEligibilityAndBundle(t *testing.T) {
 	for _, tc := range loadPublicationFullCaptureFixtures(t) {
 		t.Run(tc.Name, func(t *testing.T) {
-			s, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
+			s, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -5,14 +5,15 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"gopkg.in/yaml.v3"
 )
@@ -354,24 +355,21 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 		done <- err
 	}()
 
+	waitCtx := testwait.Context(t)
 	select {
 	case <-secondReadStarted:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("DIFF did not reach the controlled second-session metadata lookup")
 	}
 
 	// The pool classifies sessions concurrently, so the first session may not
 	// have finished yet when the second blocks. Wait for it: progress advances
-	// as each session finishes, not only when the slice ends.
-	waitForDiffProgress(t, progress, 1)
+	// as each session finishes, not only when the batch ends.
+	waitForStageProgress(t, progress, StageDiff, 1)
 	close(releaseSecondRead)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("pipeline run: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("DIFF did not finish after releasing the blocked metadata lookup")
+	err := testwait.Receive(t, done, "DIFF to finish after releasing the blocked metadata lookup")
+	if err != nil {
+		t.Fatalf("pipeline run: %v", err)
 	}
 	diffProgress := progress.Snapshot()[StageDiff]
 	if diffProgress.Done != 2 || diffProgress.Total != 2 || !diffProgress.Ended {
@@ -379,19 +377,17 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	}
 }
 
-// waitForDiffProgress waits until DIFF reports at least want classified
-// sessions, so a test that blocks one session can still observe the others
-// landing rather than sampling the count once and racing the pool.
-func waitForDiffProgress(t *testing.T, progress *ProgressState, want int) {
+// waitForStageProgress waits until the named stage reports at least want
+// completed items, so a test that blocks one session can still observe the
+// others landing rather than sampling the count once and racing the pool.
+// ProgressState is a pull model with no production hook for per-stage
+// completion, so there is no signal to wait on; the bound comes from the test
+// deadline.
+func waitForStageProgress(t *testing.T, progress *ProgressState, stage Stage, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if progress.Snapshot()[StageDiff].Done >= want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("DIFF progress = %+v, want at least %d classified", progress.Snapshot()[StageDiff], want)
+	testwait.Until(t, fmt.Sprintf("%s progress to reach %d", stage, want), func() bool {
+		return progress.Snapshot()[stage].Done >= want
+	})
 }
 
 func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
@@ -434,9 +430,10 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 		done <- err
 	}()
 
+	waitCtx := testwait.Context(t)
 	select {
 	case <-secondFilterStarted:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("FILTER did not reach the controlled second-session callback")
 	}
 
@@ -448,13 +445,8 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 		t.Fatal("FILTER progress ended before the blocked filter callback returned")
 	}
 	close(releaseSecondFilter)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("pipeline run: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("pipeline did not finish after releasing the blocked filter callback")
+	if err := testwait.Receive(t, done, "the pipeline to finish after releasing the blocked filter callback"); err != nil {
+		t.Fatalf("pipeline run: %v", err)
 	}
 	filterProgress = progress.Snapshot()[StageFilter]
 	if filterProgress.Done != 2 || filterProgress.Total != 2 || !filterProgress.Ended {

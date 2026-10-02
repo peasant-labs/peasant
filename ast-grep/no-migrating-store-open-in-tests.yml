@@ -1,0 +1,28 @@
+id: no-migrating-store-open-in-tests
+language: Go
+severity: error
+message: >
+  Test files must not call store.Open without store.WithSkipMigrations(): every
+  such open replays the migration-state check (and any pending migrations).
+  Use storetest.Open/OpenWith (golden copy + skip) or CopyGoldenDB/CopyGoldenTo
+  plus store.WithSkipMigrations. If the open IS the subject (fresh-open,
+  creation, idempotence, open-time refusal), suppress with
+  // ast-grep-ignore: no-migrating-store-open-in-tests -- <reason>.
+note: >
+  Migration replay is the migration suite's subject
+  (internal/store/migrations_test.go, migration*_test.go); the golden template
+  build in internal/store/storetest is the other sanctioned migrating open.
+rule:
+  pattern:
+    context: 'func _() { _ = store.Open($$$ARGS) }'
+    selector: call_expression
+  not:
+    has:
+      pattern: store.WithSkipMigrations()
+      stopBy: end
+files:
+  - "**/*_test.go"
+ignores:
+  - "internal/store/migrations_test.go"
+  - "internal/store/migration*_test.go"
+  - "internal/store/storetest/**"

@@ -33,7 +33,7 @@ func (s *Store) BulkLookupOpenCodeSeqCursors(ctx context.Context, sessionIDs []i
 	}
 	defer s.pool.Put(conn)
 	for _, sessionID := range sessionIDs {
-		err := sqlitex.ExecuteTransient(conn, sqlSelectOpenCodeSeqCursor, &sqlitex.ExecOptions{
+		err := sqlitex.Execute(conn, sqlSelectOpenCodeSeqCursor, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID)},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				cursors[ingest.SessionID(stmt.ColumnText(0))] = stmt.ColumnInt64(1)

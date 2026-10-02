@@ -59,7 +59,7 @@ func Load(pool *sqlitex.Pool) (Salt, bool, error) {
 	defer pool.Put(conn)
 
 	// Ensure the table exists.
-	if err := sqlitex.ExecuteTransient(conn, sqlCreateTable, nil); err != nil {
+	if err := sqlitex.Execute(conn, sqlCreateTable, nil); err != nil {
 		return Salt{}, false, fmt.Errorf(
 			"salt.Load: create _install_salt table: %w — "+
 				"check that the DB was opened with write permissions",
@@ -69,7 +69,7 @@ func Load(pool *sqlitex.Pool) (Salt, bool, error) {
 
 	// Try to read an existing salt.
 	var rawBlob []byte
-	err = sqlitex.ExecuteTransient(conn, sqlSelectSalt, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, sqlSelectSalt, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			n := stmt.ColumnLen(0)
 			rawBlob = make([]byte, n)
@@ -96,7 +96,7 @@ func Load(pool *sqlitex.Pool) (Salt, bool, error) {
 	// (corrupt). In both cases we delete any stale row and regenerate.
 	if len(rawBlob) != 0 {
 		// Corrupt: delete the offending row so we can insert a fresh one.
-		if err := sqlitex.ExecuteTransient(conn, sqlDeleteSalt, nil); err != nil {
+		if err := sqlitex.Execute(conn, sqlDeleteSalt, nil); err != nil {
 			return Salt{}, false, fmt.Errorf(
 				"salt.Load: delete corrupt _install_salt row (got %d bytes, want 32): %w",
 				len(rawBlob), err,
@@ -115,7 +115,7 @@ func Load(pool *sqlitex.Pool) (Salt, bool, error) {
 	// INSERT is silently dropped. Both will then agree on the first writer's value
 	// (the concurrent reader will see it on its next Load call). For our use case
 	// (single pipeline process) this is sufficient.
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertSalt, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, sqlInsertSalt, &sqlitex.ExecOptions{
 		Args: []any{newSalt[:]},
 	}); err != nil {
 		return Salt{}, false, fmt.Errorf(

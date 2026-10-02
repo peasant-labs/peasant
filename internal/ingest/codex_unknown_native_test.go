@@ -1,6 +1,8 @@
 package ingest_test
 
 import (
+	"github.com/peasant-labs/peasant/internal/store/storetest"
+
 	"bytes"
 	_ "embed"
 	"encoding/json"
@@ -114,7 +116,7 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dbPath := filepath.Join(dir, "store.db")
+			dbPath := storetest.CopyGoldenDB(t)
 			root := filepath.Join(dir, "artifacts")
 			db := nativeRepairStore(t, dbPath, root)
 			seedOpenCodeRepairSession(t, db, string(sid), sid)

@@ -418,11 +418,14 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 
 // TestProjectRetainedUnknownPrecedence documents which refusals outrank the
 // transfer refusal after the early decision, and that the outcome does not
-// depend on member or entry order. Every integrity row carries an over-limit
-// payload whose decoded text is itself a valid JSON document, so the
-// authoritative path reaches the named shape refusal rather than stopping at
-// payload content: a passing row proves the probe declined and the
-// authoritative error surfaced, not merely that some integrity error appeared.
+// depend on member or entry order. Every integrity row that can carry a
+// payload carries an over-limit payload whose decoded text is itself a valid
+// JSON document, so the authoritative path reaches the named shape refusal
+// rather than stopping at payload content: a passing row proves the probe
+// declined and the authoritative error surfaced, not merely that some
+// integrity error appeared. The missing-payload-encoding and lone-surrogate
+// rows cannot carry an over-limit payload, so they pin the refusal type and
+// the authoritative outcome only.
 //
 // Missing traversal coordinates and every envelope the in-place probe declines
 // keep their existing errors, including corrupt coordinates, document-level

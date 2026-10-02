@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -131,7 +132,7 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			if !reflect.DeepEqual(legacyMeta, materialized.Metadata) || !bytes.Equal(legacyTranscript, materialized.Transcript) {
 				t.Fatal("cursor acquisition changed frozen materialization output")
 			}
-			database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

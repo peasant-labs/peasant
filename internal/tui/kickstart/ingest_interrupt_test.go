@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
@@ -41,13 +42,7 @@ func runIngestChildren(cmd tea.Cmd) {
 // startIngest derived for the attempt.
 func awaitIngestStart(t *testing.T, ch <-chan context.Context) context.Context {
 	t.Helper()
-	select {
-	case ctx := <-ch:
-		return ctx
-	case <-time.After(2 * time.Second):
-		t.Fatal("local ingest runner never started")
-		return nil
-	}
+	return testwait.Receive(t, ch, "local ingest runner started")
 }
 
 // startCommittedIngest drives a program with a blocking ingest runner through

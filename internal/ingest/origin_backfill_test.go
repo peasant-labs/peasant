@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -211,10 +211,7 @@ func newStoredBackfillWorld(t *testing.T, tc storedBackfillCase) storedBackfillW
 	t.Helper()
 	ctx := context.Background()
 
-	database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
-	if err != nil {
-		t.Fatalf("open the local store: %v", err)
-	}
+	database := storetest.OpenWith(t)
 	t.Cleanup(func() {
 		if err := database.Close(); err != nil {
 			t.Errorf("close the local store: %v", err)

@@ -111,7 +111,8 @@ jobs:
   # Blacksmith amd64 fallback when no pool runner is online. Routing comes from
   # the shared runner-router reusable workflow; every routed job reads the label
   # array from its output. `check` and `cgo0` build and test the Go suite on
-  # arm64 and stay on their arm64 runner.
+  # arm64 and stay on their arm64 runner. `check-arm64` is release-only and runs
+  # on the arm64 Blacksmith runner directly.
   determine-runner:
     if: >-
       github.event_name != 'pull_request' ||
@@ -192,8 +193,9 @@ jobs:
     #   (startsWith(github.event.pull_request.title, 'release(') ||
     #    startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
     #    && '1' || '0'
-    # -- once the test-performance work in #389 lands. Local `make check` keeps
-    # RACE=1 (the Makefile default); see CONTRIBUTING.md.
+    # -- once the test-performance work in #389 lands. The Makefile default is
+    # RACE=0 everywhere now too; race is opt-in (`make check RACE=1`); see
+    # CONTRIBUTING.md.
     # TMPDIR=/tmp is load-bearing on the pool, not a workaround. The pool
     # exports its work dir as TMPDIR and that dir lives under the desktop user's
     # home (~/.local/share/github-runner-containers/work/...), so every test temp
@@ -229,6 +231,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       # `make check` shells out to `ast-grep scan`. The devShell supplied it;
       # the pool image does not, and it ships no unzip or python3 for the GitHub
@@ -273,6 +279,14 @@ jobs:
         run: |
           set -euo pipefail
           start=$(date +%s)
+          # The gate's out dir follows its local convention — UTC-stamped
+          # $TESTGATE_OUT — redirected into $RUNNER_TEMP so the streams never
+          # touch the pool runner's persistent workspace; the GITHUB_ENV stamp
+          # is the artifact step's pointer to it. make check passes it through
+          # to `cmd/testgate run` unmodified.
+          TESTGATE_OUT="$RUNNER_TEMP/testgate/$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "TESTGATE_DIR=$TESTGATE_OUT" >> "$GITHUB_ENV"
+          export TESTGATE_OUT
           make check RACE=${{ env.RACE }}
           end=$(date +%s)
           {
@@ -295,6 +309,22 @@ jobs:
             ~/go/pkg/mod
           key: ${{ steps.cache-go.outputs.cache-primary-key }}
 
+      # Durable gate evidence, matching the arm64 lane: report.json + the
+      # per-package go test -json streams (and stderr captures) from the out
+      # dir, inspectable offline (`testgate timing` reads a stream from stdin).
+      # The run_attempt suffix keeps a rerun from clashing with the prior
+      # attempt's artifact. A failure before the plan completes (registry,
+      # go list) leaves no out-dir at all — ignore keeps the upload from
+      # failing the already-failed job.
+      - name: Upload testgate streams
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: testgate-amd64-${{ github.run_attempt }}
+          path: ${{ env.TESTGATE_DIR }}
+          retention-days: 7
+          if-no-files-found: ignore
+
   # arm64 lane. `check` moved to the x86_64 pool, so arm64 signal would otherwise
   # disappear from CI entirely. This keeps it on a subset rather than the whole
   # suite: the full suite on both architectures doubles the Blacksmith bill the
@@ -306,15 +336,22 @@ jobs:
   #                     guard and the CGO=0 job
   #
   # Widen this list deliberately: a package added here is an arm64 gate on every
-  # PR. Narrowing it trades arm64 coverage for cost, so the tradeoff belongs in
-  # the PR description, not silently in this list.
+  # release. Narrowing it trades arm64 coverage for cost, so the tradeoff belongs
+  # in the PR description, not silently in this list.
+  #
+  # Release only, same policy as the cgo0 job: a release PR (title starts with
+  # "release(", reached through release-pr.yml's call — the standalone copy
+  # skips), a release tag, or an on-demand dispatch. Ordinary feature PRs and
+  # post-merge pushes to develop/main skip this lane. The x86_64 `make check`
+  # gate above still runs on every PR; only this arm64 coverage is release-gated.
   check-arm64:
     name: make check (arm64 subset)
     needs: determine-runner
     if: >-
-      !cancelled() &&
-      (github.event_name != 'pull_request' ||
-       !startsWith(github.event.pull_request.title, 'release(') ||
+      (startsWith(github.event.pull_request.title, 'release(') ||
+       startsWith(github.ref, 'refs/tags/') ||
+       github.event_name == 'workflow_dispatch') &&
+      (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     # 20 minutes = the measured arm64 subset job wall (9m54s-10m31s on a 2-vCPU
@@ -323,8 +360,9 @@ jobs:
     # testable); the cap is wedging protection only. It is NOT gated on the
     # 5-minute aggregate, which is assessed on the amd64 pool gate.
     timeout-minutes: 20
-    env:
-      RACE: '0'
+    # The lane's no-race posture is pinned explicitly by -race=false in the
+    # test step below: the gate's -race flag defaults ON, so the flag is the
+    # single driver. No RACE env is set here — the gate reads no environment.
     steps:
       # Job-start clock for the phase report (covers checkout, the Nix install,
       # cache restore, and the web stub).
@@ -365,7 +403,22 @@ jobs:
         run: |
           set -euo pipefail
           start=$(date +%s)
-          nix develop -c go test -timeout=30m ./cmd/peasant/... ./internal/ingest/...
+          # The gate machinery in subset mode: the plan comes from
+          # `go test -list`, the exactly-once screen is scoped to the plan (a
+          # planned package that emits no events fails), and the whole-suite
+          # budget is not applicable (TESTING.md, "Subset runs"). The gate's
+          # -race flag defaults ON, so -race=false pins the lane's no-race
+          # posture explicitly. The gate runs each package with -timeout=0, so
+          # this job's 20-minute cap is the wall.
+          # The out dir follows the gate's local convention — UTC-stamped
+          # $TESTGATE_OUT — and lands in $RUNNER_TEMP, not the workspace; the
+          # GITHUB_ENV stamp is the artifact step's pointer to it.
+          TESTGATE_OUT="$RUNNER_TEMP/testgate/$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "TESTGATE_DIR=$TESTGATE_OUT" >> "$GITHUB_ENV"
+          export TESTGATE_OUT
+          nix develop -c go run ./cmd/testgate run \
+            -pkgs ./cmd/peasant/...,./internal/ingest/... \
+            -race=false
           end=$(date +%s)
           {
             echo "### arm64 lane — phase wall"
@@ -374,7 +427,7 @@ jobs:
             echo "| --- | --- |"
             echo "| pre-test (job start -> test start) | $(( start - ${PHASE_START_S:-$start} )) |"
             echo "| — of which web stub | ${WEB_STUB_S:-n/a} |"
-            echo "| go test (arm64 subset) | $(( end - start )) |"
+            echo "| testgate subset | $(( end - start )) |"
             echo ""
             echo "Cache phases are the two \`cache (arm64)\` step durations (restore, then save)."
             echo "Reported, not budget-gated: the aggregate is assessed on the amd64 pool gate."
@@ -388,6 +441,24 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
           key: ${{ steps.cache-go.outputs.cache-primary-key }}
+
+      # Durable gate evidence: report.json + the per-package go test -json
+      # streams (and stderr captures) from the out dir, so a failed or hung
+      # lane can be inspected offline (testgate timing reads a stream from
+      # stdin). GitHub takes nothing structural from these; the artifact is
+      # the inspection surface, the step summary and exit code stay the gate.
+      # The run_attempt suffix keeps a rerun from clashing with the prior
+      # attempt's artifact. A failure before the plan completes (registry,
+      # go list) leaves no out-dir at all — ignore keeps the upload from
+      # failing the already-failed job.
+      - name: Upload testgate streams
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: testgate-arm64-${{ github.run_attempt }}
+          path: ${{ env.TESTGATE_DIR }}
+          retention-days: 7
+          if-no-files-found: ignore
 
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
@@ -419,6 +490,10 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       # The guard's probes compile and run under -race, so it keeps its own race
       # lane rather than sharing the plain `make check` artifacts. The key and its
@@ -477,6 +552,10 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       # Already namespaced `-go-cgo0-` on both the key and the restore-key, so
       # this release-only lane never collided with the shared prefix; kept as the
@@ -554,6 +633,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       - name: Notices are fresh + no copyleft dependency
         run: make third-party-notices-check

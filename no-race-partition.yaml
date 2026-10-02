@@ -27,7 +27,7 @@ partition:
       Reads the module graph through `go mod edit`/`go list -m` and walks the
       source tree for forbidden imports; the production path is the go tool and
       the AST, with no shared-memory concurrency subject of its own.
-    cost: { wall_ms: 634, cpu_ms: 1014 }
+    cost: { wall_ms: 860, cpu_ms: 1290 }
 
   - package: internal/moduleboundary
     test: TestRedactionBoundaryFixtureStrictDecoding
@@ -36,7 +36,7 @@ partition:
     justification: >-
       Strict-decodes the embedded boundary fixture in-process; pure byte work,
       no goroutines or shared state.
-    cost: { wall_ms: 583, cpu_ms: 934 }
+    cost: { wall_ms: 810, cpu_ms: 1240 }
 
   - package: internal/moduleboundary
     test: TestRedactionScannerHoldsALineAtTheRecordLimit
@@ -45,7 +45,7 @@ partition:
     justification: >-
       Redacts one at-limit record through the pinned engine; single-threaded
       byte work on a private input.
-    cost: { wall_ms: 895, cpu_ms: 1240 }
+    cost: { wall_ms: 1110, cpu_ms: 1500 }
 
   - package: internal/moduleboundary
     test: TestRedactionEngineHandlesRecordOverTheOldLimit
@@ -55,7 +55,7 @@ partition:
       Redacts a record over the retired 10 MiB limit through the real engine.
       The size is the invariant, so it stays; the work is single-threaded bytes
       with no concurrency subject, and the race detector only inflates it.
-    cost: { wall_ms: 25700, cpu_ms: 26013 }
+    cost: { wall_ms: 22870, cpu_ms: 23290 }
 
   - package: internal/e2e
     test: TestPeasantBinSeamUnsetBuildsGoBinary
@@ -91,7 +91,557 @@ partition:
       The deterministic source oracle for the snapshot-lock boundary: it parses
       production source and asserts where serialization lives. It reads bytes
       and the AST; it runs no production goroutines.
-    cost: { wall_ms: 773, cpu_ms: 1331 }
+    cost: { wall_ms: 900, cpu_ms: 1370 }
+
+  - package: internal/ingest
+    test: TestResolveStoredOriginsWritesAVerdictIntoEveryRow
+    class: single-threaded-bytes
+    evidence: '#TestResolveStoredOriginsWritesAVerdictIntoEveryRow'
+    justification: >-
+      Subject: the stored-origin backfill writes one verdict per row and a second
+      pass rewrites nothing. Concurrency: none on the path; each fixture subtest
+      builds its own golden-copy store and calls
+      OriginResolver.ResolveStoredOrigins sequentially, with no goroutines,
+      channels, or state shared across subtests (the pipeline worker pool is not
+      reached). The detector is not the oracle: the invariant is row contents and
+      pass counts, and the cost is store open plus SQL work taxed by
+      instrumentation. Retained race coverage: TestConcurrentReadAcrossActivation,
+      TestClose_ConcurrentReadersDoNotPanic (store). Residual risk: a future
+      change that parallelises the backfill must add its own race-run test.
+    cost: { wall_ms: 2750, cpu_ms: 2090 }
+
+  - package: cmd/peasant
+    test: TestMountedKickstartStoredGateAlignsViewerAndPush
+    class: single-threaded-bytes
+    evidence: '#TestMountedKickstartStoredGateAlignsViewerAndPush'
+    justification: >-
+      Subject: the kickstart stored-selection gate and the viewer/push surfaces
+      agree on the same candidates. Concurrency: none; runModel is replaced so the
+      model is driven synchronously and returned commands are drained in a serial
+      queue, flowIngest is a counter stub, and each subtest owns its temp world.
+      The detector is not the oracle: the assertions are gate state, config bytes,
+      and candidate sets. Retained race coverage: n/a for the gate (no concurrent
+      path); the real bubbletea runtime is not mounted here. Residual risk: races
+      inside the live program loop are not observed by this test in either pass.
+    cost: { wall_ms: 2040, cpu_ms: 2020 }
+
+  - package: cmd/peasant
+    test: TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection
+    class: single-threaded-bytes
+    evidence: '#TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection'
+    justification: >-
+      Subject: index-format query commands refuse unsupported scoped candidates
+      before emitting any projection. Concurrency: none; each subtest seeds a
+      private golden-copy store with pool size 1, then runs the root cobra command
+      in-process once. The detector is not the oracle: the invariant is the typed
+      refusal and empty stdout. Retained race coverage: n/a (single-connection
+      command path); store pool concurrency stays under
+      TestClose_ConcurrentReadersDoNotPanic. Residual risk: a command that later
+      fans reads out across goroutines would need its own race-run test.
+    cost: { wall_ms: 1660, cpu_ms: 2060 }
+
+  - package: internal/ingest
+    test: TestUnknownPrivateEncoding
+    class: single-threaded-bytes
+    evidence: '#TestUnknownPrivateEncoding'
+    justification: >-
+      Subject: the private retained-unknown encoding decodes, round-trips, and
+      refuses corruption with a typed integrity error. Concurrency: none;
+      RetainedUnknownOf, AttachRetainedUnknown, and ProjectRetainedUnknown are
+      pure functions over one in-memory entry per subtest. The detector is not the
+      oracle: this is byte and JSON work with no shared state. Retained race
+      coverage: n/a. Residual risk: negligible; the functions hold no package-
+      level mutable state.
+    cost: { wall_ms: 1590, cpu_ms: 1930 }
+
+  - package: cmd/peasant
+    test: TestMountedLegacySelectedConversion_ConsentCancellationAndRerun
+    class: single-threaded-bytes
+    evidence: '#TestMountedLegacySelectedConversion_ConsentCancellationAndRerun'
+    justification: >-
+      Subject: the legacy selected-conversion journey commits only on consent,
+      leaves config bytes untouched on cancel, and reruns exactly. Concurrency:
+      none; the journey helper drives the kickstart model synchronously with a
+      stubbed ingest counter, over a private golden-copy store and temp config per
+      subtest. The detector is not the oracle: the invariant is committed
+      selection and config bytes. Retained race coverage: n/a (no concurrent
+      path). Residual risk: as for the stored-gate journey, the live program loop
+      is not exercised.
+    cost: { wall_ms: 2450, cpu_ms: 2050 }
+
+  - package: cmd/peasant
+    test: TestPublicationWizardAndReportUseDatabaseReadiness
+    class: single-threaded-bytes
+    evidence: '#TestPublicationWizardAndReportUseDatabaseReadiness'
+    justification: >-
+      Subject: the push wizard, preview, and redaction report all read readiness
+      from the database. Concurrency: none; each subtest opens a private prepared
+      store and calls buildPushWizardSessions, NewPushWizard,
+      storedSessionEntries, and buildRedactionRecord in sequence (the push
+      animation goroutine is not started on this path). The detector is not the
+      oracle: the invariant is readiness flags and missing-metadata counts.
+      Retained race coverage: n/a. Residual risk: the wizard is constructed, not
+      run, so program-loop races are out of scope here.
+    cost: { wall_ms: 1530, cpu_ms: 1880 }
+
+  - package: cmd/peasant
+    test: TestModelsSync_500_StaticFallback
+    class: single-threaded-bytes
+    evidence: '#TestModelsSync_500_StaticFallback'
+    justification: >-
+      Subject: a 500 from the model catalogue falls back to the static snapshot,
+      names its vintage, and preserves last_synced. Concurrency: only the httptest
+      server goroutine answering one request with retries disabled; the sync
+      command runs in-process on the caller goroutine and shares no memory with
+      the handler. The detector is not the oracle: the invariant is output text
+      and stored rows. Retained race coverage: TestModelsSync_200_RoundTrip,
+      TestModelsSync_CanceledContext_Propagates,
+      TestModelsSync_500_StaticFallback_ProviderFilter stay in the race pass over
+      the same client/server shape. Residual risk: low; the same HTTP interaction
+      remains race-checked by its siblings.
+    cost: { wall_ms: 1340, cpu_ms: 1990 }
+
+  - package: internal/ingest
+    test: TestNativeCoverageMatrix
+    class: single-threaded-bytes
+    evidence: '#TestNativeCoverageMatrix'
+    justification: >-
+      Subject: native generation activation certifies coverage correctly and
+      refuses duplicate or incomplete evidence without serving entries.
+      Concurrency: none; each subtest opens a private golden-copy store and calls
+      AssessCapture, ActivateNativeGeneration, and ExportSession sequentially
+      under a file session lock it alone holds. The detector is not the oracle:
+      the invariant is disposition, active generation, and served entries.
+      Retained race coverage: TestConcurrentReadAcrossActivation (store),
+      TestConcurrentPairReadsFailClosed (ingest). Residual risk: concurrent
+      activation versus reads is covered only by the retained tests.
+    cost: { wall_ms: 3870, cpu_ms: 1950 }
+
+  - package: cmd/peasant
+    test: TestKickstartRescan_FallsBackWithoutCompatibleDatabase
+    class: single-threaded-bytes
+    evidence: '#TestKickstartRescan_FallsBackWithoutCompatibleDatabase'
+    justification: >-
+      Subject: a missing or version-mismatched database yields no reusable
+      sessions, and discovery then resolves every session. Concurrency: none;
+      loadKnownSessions opens at most one pool-size-1 store, and ftueDiscoverWith
+      runs adapters in a loop over an in-memory filesystem with a nil spinner, so
+      the spinner goroutine never starts. The detector is not the oracle: the
+      invariant is nil reuse plus resolved git fields and lookup counts. Retained
+      race coverage: TestKickstartRescan_ReusesRecordedSessions stays in the race
+      pass. Residual risk: negligible.
+    cost: { wall_ms: 1460, cpu_ms: 1840 }
+
+  - package: internal/ingest
+    test: TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology
+    class: static-analysis
+    evidence: '#TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology'
+    justification: >-
+      The source oracle for the private-execution guard across build topologies:
+      it copies production source into isolated packages, inventories each build
+      configuration with `go list`, and parses and type-checks the files to assert
+      which SQLite callables are reachable. The go tool only lists files and export
+      data; the assertion is over the AST and types, and no production goroutines
+      run, so the detector has no shared-memory subject here. The guard itself and
+      the SQLite paths it inspects stay race-covered by the rest of the ingest
+      suite; the residual risk is a race inside the checker helpers, which are
+      sequential over private per-case directories.
+    cost: { wall_ms: 31410, cpu_ms: 94540 }
+
+  - package: internal/ingest
+    test: TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses
+    class: static-analysis
+    evidence: '#TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses'
+    justification: >-
+      Resolves each build-tagged production configuration with `go list`, writes a
+      fixture-owned bypass file, type-checks it with the configuration's sources,
+      and asserts the guard rejects it. The oracle is the AST and type information;
+      no production goroutines run, so the detector has no shared-memory subject.
+      The guard and the tagged production sources stay race-covered by the rest of
+      the ingest suite; the residual risk is a race inside the sequential checker
+      helpers over private temp files.
+    cost: { wall_ms: 23410, cpu_ms: 68970 }
+
+  - package: internal/ingest
+    test: TestLargeRecordsAreHandledUniformlyAcrossHarnesses
+    class: single-threaded-bytes
+    evidence: '#TestLargeRecordsAreHandledUniformlyAcrossHarnesses'
+    justification: >-
+      Filters, indexes, and extracts metadata from over-limit JSONL records for
+      every harness synchronously in-process: no goroutines, channels, atomics,
+      store opens, or SQL on the path. The record sizes are the invariant, so they
+      stay; the race detector only instruments bulk byte touches it cannot observe
+      as sharing. The filter, scanner, indexers, and adapters stay race-covered by
+      the rest of the ingest suite; the moved assertions are deterministic byte
+      outcomes (placeholder counts and marker presence).
+    cost: { wall_ms: 5220, cpu_ms: 6420 }
+
+  - package: internal/ingest
+    test: TestPiCapturedAdmission
+    class: single-threaded-bytes
+    evidence: '#TestPiCapturedAdmission'
+    justification: >-
+      Subject. The Pi capture-admission contract: a refused capture of a new
+      session is that session's error, a refused capture of a stored session
+      keeps its last-good artifact, index and export, is reported unchanged, and
+      carries one actionable preserved-state warning; the other session still
+      continues; a valid append advances the source fingerprint to the exact
+      consumed prefix and installs the matching managed transcript; a re-run
+      over the unchanged source reindexes nothing. Concurrency actually
+      exercised. Each run builds a real pipeline over a real SQLite store with
+      the real Pi adapter, so the bounded DIFF classifier pool, the
+      EXTRACT+WRITE worker pool, the lock-free StagingBuffer (arena CAS and
+      committed set), the drainLoop goroutine (batched store insert plus index
+      streaming), and the indexLoop goroutine with its serial SQLite writer all
+      overlap; Parallelism 1 bounds the worker count, not the goroutine
+      overlap. Why the detector is not this test's oracle. Every assertion reads
+      final stored rows, managed bytes, fingerprints, export bytes or summary
+      counts after the run; a race on this path surfaces as a wrong or missing
+      row or a panic, never as a distinct assertion, and the test was not built
+      to drive interleavings. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic
+      stay in the race pass over the same primitives. Residual risk. A race
+      reachable only under this test's adapter-and-store workload is no longer
+      observed by the detector; the retained tests bound it by racing the same
+      staging, drain, index and store primitives directly. Detector-independent
+      guarantees kept. No assertion was weakened; the test still fails on wrong
+      output in the no-race pass.
+    cost: { wall_ms: 3180, cpu_ms: 3340 }
+
+  - package: internal/ingest
+    test: TestPublicationCaptureNormalIngestRecovery
+    class: single-threaded-bytes
+    evidence: '#TestPublicationCaptureNormalIngestRecovery'
+    justification: >-
+      Subject. A legacy publication-capture row seeded through the unproven
+      InsertSessions writer is repaired by a normal ingest run over the real
+      adapters, SQLite store, index writers and metrics engine: publication
+      readiness is rederived, and the per-case consequences (removed source,
+      mismatched identity, source disappearing during extraction, failed
+      sidecar, mutated index file) match the fixture. Concurrency actually
+      exercised. Each case runs the real pipeline with its concurrent DIFF,
+      EXTRACT+WRITE, StagingBuffer, drainLoop and indexLoop machinery, and a
+      publicationCaptureFS decorator injects per-case file faults under those
+      goroutines; Parallelism 1 bounds the workers, not the overlap. Why the
+      detector is not this test's oracle. The assertions read stored readiness,
+      rows, files and summary counts after the run; a race would corrupt those
+      products rather than produce its own assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the fault-injection interaction between the
+      filesystem decorator and the pipeline goroutines is uncovered here; the
+      retained primitive tests bound the machinery, not that interaction.
+      Detector-independent guarantees kept. All assertions remain; wrong stored
+      state still fails the test in the no-race pass.
+    cost: { wall_ms: 5620, cpu_ms: 4280 }
+
+  - package: internal/ingest
+    test: TestNormalIngestStoresAuthoritativeContent
+    class: single-threaded-bytes
+    evidence: '#TestNormalIngestStoresAuthoritativeContent'
+    justification: >-
+      Subject. Authoritative full-content ingest and its durability: after the
+      run the stored entries carry the exact full text, a close and reopen still
+      reads it, a forced reindex whose tail changed under a shared prefix is not
+      skipped, and a later plain reindex does not touch the settled session.
+      Concurrency actually exercised. The case runs a real pipeline over a
+      golden-copy SQLite store, so the DIFF pool, EXTRACT+WRITE workers, the
+      StagingBuffer, drainLoop and indexLoop overlap; the test then closes and
+      reopens the store and reads through a fresh pool. Why the detector is not
+      this test's oracle. The oracle is stored bytes and digests after
+      close/reopen; a race would surface as lost or altered content, not a
+      detector report the assertions read. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race across the close/reopen boundary in this workload
+      is no longer observed; the retained store tests race activation-versus-
+      reads and close-versus-readers directly. Detector-independent guarantees
+      kept. The full-content and digest assertions stay exact; no weakening.
+    cost: { wall_ms: 2970, cpu_ms: 2790 }
+
+  - package: internal/ingest
+    test: TestPiUnknownPersistence
+    class: single-threaded-bytes
+    evidence: '#TestPiUnknownPersistence'
+    justification: >-
+      Subject. Pi retained-unknown evidence survives the whole path: the capture
+      indexer records raw source bytes at the exact positions, the pipeline
+      persists them, and export and publication emit the baseline-redacted
+      egress form with the partial diagnostic; corrupt input is refused without
+      accepting a partial capture. Concurrency actually exercised. The pipeline
+      runs over an unknownFailingStore wrapper with the full concurrent DIFF,
+      EXTRACT+WRITE, StagingBuffer, drainLoop and indexLoop machinery, then the
+      test closes and reopens the store and exports; Parallelism 1 bounds the
+      workers. Why the detector is not this test's oracle. The assertions read
+      stored entries, exported records, positions and accounting counts after
+      the run; a race corrupts those products instead of producing its own
+      assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic,
+      internal/export/generation_detail_barrier_test.go#TestGenerationDetailBarrier
+      covers the export path. Residual risk. A race particular to the failing-
+      store wrapper plus the export assembly is not observed here; the named
+      tests bound the shared primitives and the export barrier.
+      Detector-independent guarantees kept. Raw-at-rest byte equality,
+      position ordering and the egress oracle all stay asserted.
+    cost: { wall_ms: 3630, cpu_ms: 3980 }
+
+  - package: internal/ingest
+    test: TestOrdinaryHarvestSettlesStaleIndexSessions
+    class: single-threaded-bytes
+    evidence: '#TestOrdinaryHarvestSettlesStaleIndexSessions'
+    justification: >-
+      Subject. Stale stored sessions settle across two ordinary harvests: the
+      first advances the producer revision, records the input proof and
+      establishes the missing artifact identity while storing the represented
+      entries; the second reads no transcript and reports nothing; refused input
+      leaves the stale state untouched and the refusal is reported. Concurrency
+      actually exercised. Two sequential pipeline runs over one store, each with
+      the concurrent DIFF classifier pool, EXTRACT+WRITE workers, StagingBuffer,
+      drainLoop and indexLoop; the test also drives a CountingFS under them. Why
+      the detector is not this test's oracle. The assertions read stored index
+      state, capture status and diagnostics after each run; a race would show as
+      a wrong state or a panic, not a detector assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race confined to the two-run settling interaction is
+      uncovered; the retained tests bound the underlying machinery.
+      Detector-independent guarantees kept. The two-run contract and the
+      untouched-refusal state stay asserted.
+    cost: { wall_ms: 1940, cpu_ms: 2400 }
+
+  - package: internal/ingest
+    test: TestRetainedContentBackfill
+    class: single-threaded-bytes
+    evidence: '#TestRetainedContentBackfill'
+    justification: >-
+      Subject. Retained content backfill recovers the full text for every
+      targeted session, including a 102-session case, reports each refused or
+      unavailable recovery once with the preservation phrase the user reads,
+      and never fabricates publication proof. Concurrency actually exercised.
+      Seed writes are batched into one metadata commit and one entry write set,
+      then one real pipeline run overlaps DIFF, EXTRACT+WRITE, the StagingBuffer,
+      drainLoop and indexLoop over the store. Why the detector is not this
+      test's oracle. The assertions read full text, capture rows, diagnostics
+      and publication readiness after the run; a race corrupts those products
+      rather than producing a distinct assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the bulk seed path or the 102-session backfill
+      workload is uncovered here; the retained tests bound the primitives.
+      Detector-independent guarantees kept. Every content, diagnostic and
+      readiness assertion stays.
+    cost: { wall_ms: 1980, cpu_ms: 2590 }
+
+  - package: internal/ingest
+    test: TestNativeUnknownSourceToPublication
+    class: single-threaded-bytes
+    evidence: '#TestNativeUnknownSourceToPublication'
+    justification: >-
+      Subject. Native unknown source flows to publication: capture is certified
+      or refused exactly per the fixture, the native generation is stored and
+      exported, and the real artifact transaction's missing-blob failure is
+      exercised rather than a prepared success. Concurrency actually exercised.
+      Two real pipeline runs over a store opened with the native generation
+      artifact store and file session locks, overlapping DIFF, EXTRACT+WRITE,
+      the StagingBuffer, drainLoop and indexLoop, followed by close/reopen and
+      export and publication assembly. Why the detector is not this test's
+      oracle. The assertions read capture status, stored generations, exported
+      bytes and publication results; a race surfaces as wrong stored data, not
+      as a detector assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic,
+      internal/export/generation_detail_barrier_test.go#TestGenerationDetailBarrier.
+      Residual risk. A race specific to the native artifact store plus the
+      publication assembly is not observed here; the retained store and export
+      tests bound the shared primitives. Detector-independent guarantees kept.
+      The capture certification, artifact-transaction failure and publication
+      assertions all stay.
+    cost: { wall_ms: 9120, cpu_ms: 6980 }
+
+  - package: cmd/peasant
+    test: TestPiHarvestCommonModes
+    class: single-threaded-bytes
+    evidence: '#TestPiHarvestCommonModes'
+    justification: >-
+      Subject. The in-process harvest and index commands over the Pi harness:
+      dry-run, logs-only, stored, redact and two-command modes; the source file
+      is never modified, a database appears only when rows are stored, and a
+      forecast leaves a seeded database byte-unchanged. Concurrency actually
+      exercised. Each case runs one or two in-process cobra commands, each
+      driving a real pipeline on the caller goroutine while its DIFF pool,
+      EXTRACT+WRITE workers, StagingBuffer, drainLoop and indexLoop run
+      concurrently underneath; no child process is built and no race-
+      instrumented child exists on this path. Why the detector is not this
+      test's oracle. The assertions read command output, filesystem state and
+      database digests after the command returns; a race corrupts those
+      products rather than producing its own assertion. Retained race coverage.
+      The cmd/peasant tests that drive the real pipeline and stay in the race
+      pass: cmd/peasant/pi_native_integration_test.go#TestPiNativeRegistryProjection,
+      cmd/peasant/pi_database_publication_test.go#TestPiDatabasePublicationThroughCLI,
+      cmd/peasant/cmd_kickstart_selection_runner_test.go#TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary,
+      plus the internal/ingest primitives raced by
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered and
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed.
+      Residual risk. Terminal-UI goroutines of the live command are not mounted
+      here, so a race inside them is uncovered in either pass; the retained
+      cmd/peasant tests bound the pipeline-driving paths.
+      Detector-independent guarantees kept. Source-unchanged and database-
+      presence assertions remain exact.
+    cost: { wall_ms: 2150, cpu_ms: 2620 }
+
+  - package: internal/ingest
+    test: TestContentRecoveryScope
+    class: single-threaded-bytes
+    evidence: '#TestContentRecoveryScope'
+    justification: >-
+      Subject. Content recovery is scoped: harness, since and allowed-session
+      filters select the right targets, future-schema and future-producer rows
+      are refused, unreadable rows are handled, and repeated harvests reach a
+      steady state with the same counts and diagnostics. Concurrency actually
+      exercised. One or more real pipeline runs over a store with an
+      unreadable-row wrapper, each overlapping the DIFF pool, EXTRACT+WRITE
+      workers, StagingBuffer, drainLoop and indexLoop. Why the detector is not
+      this test's oracle. The assertions read per-run counts, diagnostics and
+      stored state after the last run; a race corrupts those products rather
+      than producing a distinct assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the repeated-run steady-state interaction is
+      uncovered; the retained tests bound the underlying primitives.
+      Detector-independent guarantees kept. The scope filters and steady-state
+      counts stay asserted.
+    cost: { wall_ms: 1520, cpu_ms: 2040 }
+
+  - package: internal/ingest
+    test: TestPipelineRetainedAdapterMaintenance
+    class: single-threaded-bytes
+    evidence: '#TestPipelineRetainedAdapterMaintenance'
+    justification: >-
+      Subject. Retained adapter maintenance: a baseline reindex establishes the
+      projection, an adapter-version bump then refreshes from the retained
+      transcript without re-extracting content, and a second maintenance run
+      does nothing; missing metadata and native-appended cases are handled.
+      Concurrency actually exercised. A baseline pipeline run and a maintenance
+      run over the same store, each overlapping the DIFF pool, EXTRACT+WRITE
+      workers, StagingBuffer, drainLoop and indexLoop, with an
+      adapterMaintenanceFS decorator under them. Why the detector is not this
+      test's oracle. The assertions read stored index state, projections and
+      diagnostics after the runs; a race corrupts those products rather than
+      producing its own assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the baseline-then-maintenance handoff is
+      uncovered here; the retained tests bound the machinery.
+      Detector-independent guarantees kept. The maintenance-once and
+      projection assertions stay.
+    cost: { wall_ms: 1610, cpu_ms: 2110 }
+
+  - package: internal/ingest
+    test: TestConcreteParserFailurePreservesOtherSessions
+    class: single-threaded-bytes
+    evidence: '#TestConcreteParserFailurePreservesOtherSessions'
+    justification: >-
+      Subject. A concrete parser failure preserves the malformed session's
+      last-good entries and producer state, does not block its healthy sibling
+      in the same run, and the retry re-indexes only the incomplete session.
+      Concurrency actually exercised. Two pipeline runs over a pool-size-1
+      store, each overlapping the DIFF pool, EXTRACT+WRITE workers,
+      StagingBuffer, drainLoop and indexLoop; the two sessions are processed
+      concurrently through that machinery. Why the detector is not this test's
+      oracle. The assertions read stored entries, index state and diagnostics
+      after each run; a race corrupts those products rather than producing a
+      distinct assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race in the intersession isolation path is uncovered
+      here; the retained tests bound the shared primitives.
+      Detector-independent guarantees kept. The isolation and retry assertions
+      stay exact.
+    cost: { wall_ms: 1520, cpu_ms: 2150 }
+
+  - package: internal/ingest
+    test: TestUnknownLocalRetentionBeyondTransferBudget
+    class: single-threaded-bytes
+    evidence: '#TestUnknownLocalRetentionBeyondTransferBudget'
+    justification: >-
+      Subject. Local retention beyond the transfer budget: a multi-megabyte
+      unknown payload is certified as full local evidence, its bytes survive a
+      close and reopen, and native earlier partitions are retained. Concurrency
+      actually exercised. Each parallel subtest opens its own golden-copy store
+      and runs a real pipeline, overlapping the DIFF pool, EXTRACT+WRITE
+      workers, the StagingBuffer, drainLoop and indexLoop, then closes and
+      reopens the store and reads a generation snapshot. Why the detector is not
+      this test's oracle. The assertions read the certified capture, reopened
+      bytes, generation partitions and re-marshalled records; a race corrupts
+      those products instead of producing its own assertion. Retained race
+      coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/diff_parallel_internal_test.go#TestDiffParallelMatchesSequentialAndPreservesOrder,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. This was the suite's heaviest detector-taxed run; a race
+      reachable only under its large-payload workload is no longer observed,
+      and the retained tests bound the primitives rather than that workload.
+      Detector-independent guarantees kept. The full-evidence certification and
+      byte-preservation assertions stay.
+    cost: { wall_ms: 17440, cpu_ms: 34140 }
 
 protected:
   - package: internal/ingest
@@ -105,4 +655,4 @@ protected:
       the enclosing suite.
     build_flags: ["-race=true"]
     exec_command_site: 'internal/ingest/opencode_native_cli_test.go#TestOpenCodeNativeCLI#exec.CommandContext(ctx, "go", "build", nativeCLIRaceFlag'
-    cost: { wall_ms: 39216, cpu_ms: 53162 }
+    cost: { wall_ms: 17210, cpu_ms: 16300 }

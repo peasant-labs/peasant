@@ -1,6 +1,7 @@
 package githooks_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 )
 
 // uploadArgv is the argv every generated hook passes to the peasant binary,
@@ -537,9 +539,12 @@ func stubPeasant(t *testing.T, exitCode int) (binDir, logPath string) {
 }
 
 // awaitExecutable runs path until the kernel stops reporting it as busy, so the
-// caller hands the hook a binary that is known to start.
+// caller hands the hook a binary that is known to start. It paces its retry the
+// same way runHook does, and is bounded by the test deadline rather than a fixed
+// attempt count.
 func awaitExecutable(t *testing.T, path string) {
 	t.Helper()
+	ctx := testwait.Context(t)
 	for attempt := 1; ; attempt++ {
 		err := exec.Command(path).Run()
 		var exitErr *exec.ExitError
@@ -547,8 +552,11 @@ func awaitExecutable(t *testing.T, path string) {
 			// It started. A non-zero status is the stub doing its job.
 			return
 		}
-		if !errors.Is(err, syscall.ETXTBSY) || attempt >= hookExecAttempts {
+		if !errors.Is(err, syscall.ETXTBSY) {
 			t.Fatalf("the peasant stub at %s could not be started after %d attempt(s): %v", path, attempt, err)
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			t.Fatalf("the peasant stub at %s was still busy after %d attempt(s); last error: %v; %v", path, attempt, err, cause)
 		}
 		time.Sleep(time.Duration(attempt) * 5 * time.Millisecond)
 	}
@@ -558,12 +566,6 @@ func recordedArgs(t *testing.T, path string) []string {
 	t.Helper()
 	return strings.Split(strings.TrimSuffix(readFile(t, path), "\n"), "\n")
 }
-
-// hookExecAttempts bounds the ETXTBSY retry in runHook. Eight attempts with the
-// backoff below span roughly 180ms, which is far longer than the window a
-// concurrently-forking test can hold a just-written file open, while still
-// failing fast if something is genuinely wrong.
-const hookExecAttempts = 8
 
 // runHook executes the hook file exactly as git would: the executable itself,
 // with the repository as the working directory. PATH is supplied per invocation
@@ -577,8 +579,16 @@ const hookExecAttempts = 8
 // as an intermittent failure in `make check` on many-core machines and reads
 // exactly like a real regression. Stdin is taken by value so each attempt gets a
 // fresh reader.
+//
+// The retry pace is kept, but the wait is bounded by the test deadline instead
+// of a fixed attempt count. Without the cap the pause grows linearly, so the
+// final pause can pass the bound: after elapsed time E it is about
+// sqrt(10 ms * E), under 1 s at the one-minute fallback and about 2.4 s at a
+// ten-minute deadline. That is always less than the bound's grace of
+// min(5 s, remaining/2), so the overshoot still ends before the binary deadline.
 func runHook(t *testing.T, repo, hook, binDir, stdin string) (string, string, error) {
 	t.Helper()
+	ctx := testwait.Context(t)
 	for attempt := 1; ; attempt++ {
 		cmd := exec.Command(hook)
 		cmd.Dir = repo
@@ -591,7 +601,7 @@ func runHook(t *testing.T, repo, hook, binDir, stdin string) (string, string, er
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		err := cmd.Run()
-		if errors.Is(err, syscall.ETXTBSY) && attempt < hookExecAttempts {
+		if errors.Is(err, syscall.ETXTBSY) && ctx.Err() == nil {
 			time.Sleep(time.Duration(attempt) * 5 * time.Millisecond)
 			continue
 		}

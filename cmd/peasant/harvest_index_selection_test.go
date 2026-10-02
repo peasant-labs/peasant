@@ -108,7 +108,7 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
+			db, err := openPreparedStore(t, dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -106,6 +106,10 @@ func frozenEnums() map[string][]string {
 		"testgate.RegistryClasses": RegistryClassNames(),
 		"testgate.PreTestSteps":    preTest,
 		"testgate.PassModeValues":  {ModeRace.String(), ModeNoRace.String()},
+		"testgate.BudgetEnforcement": {
+			string(EnforcementBlocking),
+			string(EnforcementWarn),
+		},
 	}
 }
 

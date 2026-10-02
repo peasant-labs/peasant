@@ -883,9 +883,22 @@ func assertDisclosureMatchesDowngrade(t *testing.T, downgraded bool, full, brief
 	}
 }
 
-// TestVisibilityMenu_DerivesFromTheContract proves the flag's validation message
-// is derived from the closed set rather than restated, so it cannot drift from
-// what the contract accepts.
+// TestVisibilityMenu_DerivesFromTheContract proves the menu of visibilities a
+// configuration accepts is derived from the closed set rather than restated, so
+// it cannot drift from what the contract accepts.
+// TestImplementedVisibilityMenu_NamesOnlyWhatThisVersionApplies pins the menu
+// an explicit visibility request must choose from. It is the contract of this
+// version: group is refused rather than downgraded until it can be applied.
+func TestImplementedVisibilityMenu_NamesOnlyWhatThisVersionApplies(t *testing.T) {
+	t.Parallel()
+	if got := ImplementedVisibilityMenu(); got != "private, public" {
+		t.Fatalf("ImplementedVisibilityMenu() = %q, want %q", got, "private, public")
+	}
+	if VisibilityChangeRefusal(VisibilityGroup) == nil || VisibilityChangeRefusal(VisibilityPublic) != nil || VisibilityChangeRefusal("") != nil {
+		t.Fatal("only a visibility this version cannot apply is refused")
+	}
+}
+
 func TestVisibilityMenu_DerivesFromTheContract(t *testing.T) {
 	t.Parallel()
 	menu := VisibilityMenu()

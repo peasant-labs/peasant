@@ -33,6 +33,9 @@ const (
 	OpenCodeDirMessage DirName = "message"
 	OpenCodeDirPart    DirName = "part"
 	OpenCodeDirProject DirName = "project"
+	// ClaudeDirWorkflows is the directory under a Claude session's subagents
+	// directory where the workflow runtime keeps one directory per run.
+	ClaudeDirWorkflows DirName = "workflows"
 )
 
 // DebugArtifactSuffixes is the CLOSED set of extensions a debug output Peasant
@@ -49,8 +52,11 @@ func DebugArtifactSuffixes() []string { return []string{".json", ".log"} }
 
 // Provider-specific filename prefixes.
 const (
-	ClaudeSubagentPrefix  = "agent-"
-	OpenCodeSessionPrefix = "ses_"
+	ClaudeSubagentPrefix = "agent-"
+	// ClaudeWorkflowRunPrefix starts the name of a Claude workflow run
+	// directory; the whole directory name is the run id.
+	ClaudeWorkflowRunPrefix = "wf_"
+	OpenCodeSessionPrefix   = "ses_"
 )
 
 // ContentPreviewLimit is the maximum UTF-8 byte length for ContentPreview fields.

@@ -15,9 +15,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -43,7 +45,7 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	fixture := loadIndexParallelFixture(t)
 	releaseParses := make(chan struct{})
 	metas, entries := buildIndexParallelMetas(t, fixture)
-	indexer := &blockingParallelIndexer{entries: entries, release: releaseParses}
+	indexer := &blockingParallelIndexer{entries: entries, release: releaseParses, entered: make(chan SessionID, len(metas))}
 	store := &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}
 	pipeline := &Pipeline{config: PipelineConfig{Parallelism: 2}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer}, metricsStore: store}
 	prepareIndexParallelInputs(t, pipeline, metas)
@@ -51,15 +53,15 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
 	staging := NewStagingBuffer(len(metas)+1, 1024*1024)
 	for _, im := range metas {
-		staging.Add(indexWorkerResult(im))
+		staging.Add(t.Context(), indexWorkerResult(im))
 	}
-	workersDone := atomic.Bool{}
-	workersDone.Store(true)
+	workersDone := make(chan struct{})
+	close(workersDone)
 	indexCh := make(chan streamedIndexWork, len(metas))
 	indexDoneCh := make(chan DrainBatch, 1)
 	drainDone := make(chan []SessionResult, 1)
 	go func() {
-		drainDone <- pipeline.drainLoop(context.Background(), staging, &workersDone, indexCh, indexDoneCh, make(chan error, 1), progress, len(metas), nil)
+		drainDone <- pipeline.drainLoop(context.Background(), staging, workersDone, indexCh, indexDoneCh, make(chan error, 1), progress, len(metas), nil)
 		close(indexCh)
 	}()
 	indexDone := make(chan struct{})
@@ -68,7 +70,11 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 		close(indexDone)
 	}()
 
-	waitForActiveParses(t, indexer, int64(len(metas)))
+	// No parse returns before close(releaseParses), so one receipt per session
+	// means that many parses are concurrently active.
+	for range metas {
+		testwait.Receive(t, indexer.entered, "an INDEX parse worker to enter the arena wait")
+	}
 	if staging.ArenaUsed() == 0 {
 		t.Fatal("staging arena was acknowledged before parse workers released arena-backed data")
 	}
@@ -78,17 +84,14 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	default:
 	}
 	close(releaseParses)
-	select {
-	case results := <-drainDone:
-		if len(results) != len(metas) {
-			t.Fatalf("drain results = %d, want %d", len(results), len(metas))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("drainLoop did not finish")
+	results := testwait.Receive(t, drainDone, "drainLoop to finish once the parse workers are released")
+	if len(results) != len(metas) {
+		t.Fatalf("drain results = %d, want %d", len(results), len(metas))
 	}
+	waitCtx := testwait.Context(t)
 	select {
 	case <-indexDone:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("indexLoop did not finish")
 	}
 	if got := staging.ArenaUsed(); got != 0 {
@@ -108,6 +111,113 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	}
 }
 
+// TestDrainLoop_WakesOnPublishedSlot proves the drain loop wakes on the ready
+// signal: a published slot must reach INDEX without polling or a timer. The
+// synctest bubble makes a missing wake visible as elapsed fake-clock time.
+func TestDrainLoop_WakesOnPublishedSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sessionID := SessionID("11111111-1111-4111-8111-111111111111")
+		staging := NewStagingBuffer(4, 1024)
+		workersDone := make(chan struct{})
+		indexCh := make(chan streamedIndexWork, 1)
+		indexDoneCh := make(chan DrainBatch, 1)
+		pipeline := &Pipeline{}
+		drained := make(chan []SessionResult, 1)
+		go func() {
+			drained <- pipeline.drainLoop(t.Context(), staging, workersDone, indexCh, indexDoneCh, make(chan error, 1), nil, 1, nil)
+		}()
+		synctest.Wait() // the loop is idle, parked on its wake arms
+
+		im := indexedMeta{
+			session: DiscoveredSession{
+				SessionID:    sessionID,
+				Harness:      HarnessClaudeCode,
+				SourcePath:   ResolvedPath("/source/" + string(sessionID) + ".jsonl"),
+				SourceFormat: SourceFormatJSONL,
+			},
+			outputTranscriptPath: "/stored/" + string(sessionID) + ".jsonl",
+			transcriptData:       []byte("published-slot"),
+		}
+
+		start := time.Now()
+		staging.Add(t.Context(), indexWorkerResult(im))
+		synctest.Wait()
+
+		var work streamedIndexWork
+		select {
+		case work = <-indexCh:
+		default:
+			t.Fatal("the drain loop did not wake on the published slot")
+		}
+		if work.meta.session.SessionID != sessionID {
+			t.Fatalf("streamed session = %s, want %s", work.meta.session.SessionID, sessionID)
+		}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("the ready wake took %v of fake-clock time; it must not wait out a poll", elapsed)
+		}
+
+		// Cleanup: release the drain batch through the INDEX ack, then finish
+		// the producers so the loop exits.
+		indexDoneCh <- work.batch.batch
+		synctest.Wait()
+		close(workersDone)
+		synctest.Wait()
+		select {
+		case results := <-drained:
+			if len(results) != 1 || results[0].SessionID != sessionID {
+				t.Fatalf("drain results = %+v, want the published session", results)
+			}
+		default:
+			t.Fatal("the drain loop did not return after the producers finished")
+		}
+	})
+}
+
+// TestDrainLoop_StopsOnContext proves the decided stop outcome: cancellation
+// disables only the ctx arm, so the loop keeps draining published results and
+// returns once the producers return instead of exiting early. Ignoring ctx
+// entirely also passes the not-returned-early check; the ctx arm's observable
+// effect is exactly that the loop does not run ahead of the producers.
+func TestDrainLoop_StopsOnContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		staging := NewStagingBuffer(4, 1024)
+		workersDone := make(chan struct{})
+		indexCh := make(chan streamedIndexWork, 1)
+		indexDoneCh := make(chan DrainBatch, 1)
+		pipeline := &Pipeline{}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		drained := make(chan []SessionResult, 1)
+		go func() {
+			drained <- pipeline.drainLoop(ctx, staging, workersDone, indexCh, indexDoneCh, make(chan error, 1), nil, 0, nil)
+		}()
+		synctest.Wait() // the loop is idle
+
+		start := time.Now()
+		cancel()
+		synctest.Wait()
+		select {
+		case <-drained:
+			t.Fatal("drainLoop returned on cancellation; the stop must not drop published results")
+		default:
+		}
+
+		close(workersDone)
+		synctest.Wait()
+		select {
+		case results := <-drained:
+			if len(results) != 0 {
+				t.Fatalf("drain results = %d, want 0", len(results))
+			}
+		default:
+			t.Fatal("drainLoop did not return after the producers finished")
+		}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("drainLoop consumed %v of fake-clock time instead of waking on its signals", elapsed)
+		}
+	})
+}
+
 func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T) {
 	fixture := loadIndexParallelFixture(t)
 	metas, entries := buildIndexParallelMetas(t, fixture)
@@ -120,9 +230,13 @@ func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T)
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
 	indexCh := make(chan streamedIndexWork, len(metas))
 	indexDoneCh := make(chan DrainBatch, 1)
+	// The system under test gets a buffered downstream channel so its
+	// per-session progress signal is observable. This is a setup change only:
+	// the assertions below are unchanged.
+	downstreamCh := make(chan indexedMeta, len(metas))
 	done := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", nil, nil)
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", downstreamCh, nil)
 		close(done)
 	}()
 
@@ -131,27 +245,31 @@ func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T)
 		indexCh <- streamedIndexWork{meta: im, batch: completion}
 	}
 	close(indexCh)
-	select {
-	case got := <-store.wrote:
-		if got != metas[0].session.SessionID {
-			t.Fatalf("first indexed session = %s, want %s", got, metas[0].session.SessionID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("first streamed INDEX write did not complete")
+	first := testwait.Receive(t, store.wrote, "the first streamed INDEX write to complete")
+	if first != metas[0].session.SessionID {
+		t.Fatalf("first indexed session = %s, want %s", first, metas[0].session.SessionID)
 	}
-	waitForIndexProgress(t, progress, 1)
+	// indexLoop emits the INDEX advance and then streams that same session
+	// downstream in one goroutine, so a downstream receipt proves the advance.
+	testwait.Receive(t, downstreamCh, "the first indexed session to reach the downstream stage")
+	if got := progress.Snapshot()[StageIndex].Done; got < 1 {
+		t.Fatalf("INDEX progress done = %d, want at least 1", got)
+	}
 	select {
 	case <-indexDoneCh:
 		t.Fatal("streamed INDEX signalled drain-batch completion before all sessions parsed")
 	default:
 	}
 	close(releaseBlocked)
+	waitCtx := testwait.Context(t)
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("indexLoop did not finish")
 	}
-	waitForIndexProgress(t, progress, len(metas))
+	if got := progress.Snapshot()[StageIndex].Done; got != len(metas) {
+		t.Fatalf("INDEX progress done = %d, want %d", got, len(metas))
+	}
 }
 
 func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
@@ -173,9 +291,10 @@ func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
 		indexCh <- streamedIndexWork{meta: im, batch: completion}
 	}
 	close(indexCh)
+	waitCtx := testwait.Context(t)
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("indexLoop did not finish")
 	}
 	if len(store.writeOrder) != len(metas) {
@@ -273,26 +392,18 @@ func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
 	completion := newIndexBatchCompletion(DrainBatch{Metas: metas}, len(metas))
 	indexCh <- streamedIndexWork{meta: metas[0], batch: completion}
 
-	select {
-	case got := <-analyzer.computeStarted:
-		if got != metas[0].session.SessionID {
-			t.Fatalf("first streamed COMPUTE session = %s, want %s", got, metas[0].session.SessionID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("COMPUTE did not start after the first session finished INDEX")
+	startedSession := testwait.Receive(t, analyzer.computeStarted, "streamed COMPUTE to start after the first session finished INDEX")
+	if startedSession != metas[0].session.SessionID {
+		t.Fatalf("first streamed COMPUTE session = %s, want %s", startedSession, metas[0].session.SessionID)
 	}
 	select {
 	case <-indexDone:
 		t.Fatal("INDEX completed all sessions before streamed COMPUTE started")
 	default:
 	}
-	select {
-	case got := <-classifier.prepared:
-		if got != metas[0].session.SessionID {
-			t.Fatalf("first streamed ANNOTATE prepare session = %s, want %s", got, metas[0].session.SessionID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("ANNOTATE prepare did not start after COMPUTE finished for the first indexed session")
+	preparedSession := testwait.Receive(t, classifier.prepared, "streamed ANNOTATE prepare to start after COMPUTE finished for the first indexed session")
+	if preparedSession != metas[0].session.SessionID {
+		t.Fatalf("first streamed ANNOTATE prepare session = %s, want %s", preparedSession, metas[0].session.SessionID)
 	}
 
 	for _, im := range metas[1:] {
@@ -300,18 +411,15 @@ func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
 	}
 	close(indexCh)
 	close(releaseSecondWrite)
+	waitCtx := testwait.Context(t)
 	select {
 	case <-indexDone:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("indexLoop did not finish after blocked write released")
 	}
-	select {
-	case got := <-downstreamDone:
-		if got.ComputeDone != len(metas) || got.AnnotateDone != len(metas) || got.Computed != len(metas) {
-			t.Fatalf("downstream result = %+v, want all %d sessions computed and annotated", got, len(metas))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("streamed downstream worker did not finish")
+	downstream := testwait.Receive(t, downstreamDone, "the streamed downstream worker to finish")
+	if downstream.ComputeDone != len(metas) || downstream.AnnotateDone != len(metas) || downstream.Computed != len(metas) {
+		t.Fatalf("downstream result = %+v, want all %d sessions computed and annotated", downstream, len(metas))
 	}
 	if got := progress.Snapshot()[StageCompute].Done; got != len(metas) {
 		t.Fatalf("COMPUTE progress done = %d, want %d", got, len(metas))
@@ -365,18 +473,24 @@ func TestStreamingIndex_StoreWriteLaneSerializesDownstreamWrites(t *testing.T) {
 		close(indexDone)
 	}()
 
+	waitCtx := testwait.Context(t)
 	completion := newIndexBatchCompletion(DrainBatch{Metas: metas}, len(metas))
 	indexCh <- streamedIndexWork{meta: metas[0], batch: completion}
 	select {
 	case <-analyzer.entered:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("streamed COMPUTE did not enter the writer lane")
 	}
 	for _, im := range metas[1:] {
 		indexCh <- streamedIndexWork{meta: im, batch: completion}
 	}
 	close(indexCh)
-	time.Sleep(25 * time.Millisecond)
+	// Reach a positive barrier before the negative check: the competing INDEX
+	// write is parked in the lane queue, or maxActive already exceeded 1 (which
+	// the assertion below then reports).
+	testwait.Until(t, "INDEX write parked behind the held COMPUTE in the store write lane", func() bool {
+		return len(writeLane.jobs) > 0 || tracker.maxActive.Load() > 1
+	})
 	if got := tracker.maxActive.Load(); got != 1 {
 		t.Fatalf("concurrent store writes while COMPUTE was blocked = %d, want 1", got)
 	}
@@ -384,16 +498,12 @@ func TestStreamingIndex_StoreWriteLaneSerializesDownstreamWrites(t *testing.T) {
 
 	select {
 	case <-indexDone:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("indexLoop did not finish")
 	}
-	select {
-	case got := <-downstreamDone:
-		if got.ComputeDone != len(metas) || got.AnnotateDone != len(metas) {
-			t.Fatalf("downstream result = %+v, want all %d sessions processed", got, len(metas))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("streamed downstream worker did not finish")
+	downstream := testwait.Receive(t, downstreamDone, "the streamed downstream worker to finish")
+	if downstream.ComputeDone != len(metas) || downstream.AnnotateDone != len(metas) {
+		t.Fatalf("downstream result = %+v, want all %d sessions processed", downstream, len(metas))
 	}
 	writeLane.close()
 	if got := tracker.maxActive.Load(); got != 1 {
@@ -498,8 +608,12 @@ func TestStreamedDownstream_PrepareErrorAdvancesBestEffortProgress(t *testing.T)
 }
 
 type blockingParallelIndexer struct {
-	entries   map[SessionID][]schema.SessionEntry
-	release   <-chan struct{}
+	entries map[SessionID][]schema.SessionEntry
+	release <-chan struct{}
+	// entered receives one value per parse that is actively blocked on
+	// release. It is buffered with room for every session, so the signal never
+	// blocks the double.
+	entered   chan SessionID
 	active    atomic.Int64
 	maxActive atomic.Int64
 }
@@ -515,6 +629,7 @@ func (idx *blockingParallelIndexer) index(ctx context.Context, session Discovere
 	active := idx.active.Add(1)
 	defer idx.active.Add(-1)
 	recordMax(&idx.maxActive, active)
+	idx.entered <- session.SessionID
 	select {
 	case <-idx.release:
 	case <-ctx.Done():
@@ -586,6 +701,8 @@ type trackedIndexStore struct {
 func (store *trackedIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
 	done := store.tracker.enter()
 	defer done()
+	// The 10 ms delay is simulated write latency inside this double, not a
+	// wait on externally produced state, so it stays.
 	select {
 	case <-time.After(10 * time.Millisecond):
 	case <-ctx.Done():
@@ -639,6 +756,8 @@ func (*trackedBufferedClassifier) PrepareAnnotations(_ context.Context, sessionI
 func (c *trackedBufferedClassifier) FlushAnnotationBatches(ctx context.Context, batches []SessionAnnotationBatch, _ *IndexProfiler) []SessionAnnotationBatchResult {
 	done := c.tracker.enter()
 	defer done()
+	// The 10 ms delay is simulated write latency inside this double, not a
+	// wait on externally produced state, so it stays.
 	select {
 	case <-time.After(10 * time.Millisecond):
 	case <-ctx.Done():
@@ -920,30 +1039,6 @@ func recordMax(max *atomic.Int64, value int64) {
 			return
 		}
 	}
-}
-
-func waitForActiveParses(t *testing.T, indexer *blockingParallelIndexer, want int64) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if indexer.maxActive.Load() >= want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("max active parses = %d, want %d", indexer.maxActive.Load(), want)
-}
-
-func waitForIndexProgress(t *testing.T, progress *ProgressState, want int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if progress.Snapshot()[StageIndex].Done >= want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("INDEX progress done = %d, want at least %d", progress.Snapshot()[StageIndex].Done, want)
 }
 
 func buildIndexParallelMetas(t *testing.T, fixture indexParallelFixture) ([]indexedMeta, map[SessionID][]schema.SessionEntry) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,11 +123,20 @@ type claudeFileOpener interface {
 
 // Discover walks each configured source path looking for *.jsonl files.
 // It identifies root sessions (UUID.jsonl at the project slug level) and links
-// subagent sessions found under {uuid}/subagents/agent-*.jsonl.
+// the subagent sessions under {uuid}/subagents/, both agent-*.jsonl directly
+// there and agent-*.jsonl inside a workflow run, {uuid}/subagents/workflows/wf_*/.
 //
 // Uses a two-pass approach: first collects all file entries, then processes
 // roots before subagents. This ensures parent sessions are registered before
 // subagent linking, regardless of filesystem walk order.
+//
+// One session id holds one transcript, so under one source path the first
+// transcript admitted for an agent id keeps it and a later one is left out and
+// logged at debug level. Workflow transcripts are admitted before plain ones, in lexical path
+// order: Claude Code has been seen to write the last turns of a workflow agent
+// to the plain location under the same id after its run transcript, and
+// admitting the run transcript first keeps the fuller transcript and makes the
+// same choice on every harvest.
 //
 // Per RFC Section 6.4, symlinks are skipped silently.
 func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
@@ -151,13 +161,14 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			sessionID string
 		}
 		type subagentEntry struct {
-			path          string
-			subagentID    string
-			parentUUIDStr string
+			path       string
+			subagentID SessionID
+			parentID   SessionID
 		}
 
 		var rootEntries []rootEntry
 		var subagentEntries []subagentEntry
+		var workflowEntries []subagentEntry
 
 		// Pass 1: Collection — walk and categorize files.
 		walkErr := a.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -200,17 +211,17 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				return nil
 			}
 
-			// Subagent session: {project-slug}/{uuid}/subagents/agent-{hex}.jsonl (depth 4)
-			if len(parts) == 4 && parts[2] == defaults.DirSubagents.String() && strings.HasPrefix(parts[3], defaults.ClaudeSubagentPrefix) {
-				parentUUIDStr := parts[1]
-				subagentIDStr := strings.TrimSuffix(parts[3], defaults.ExtJSONL.String())
-				if _, err := NewSessionID(parentUUIDStr); err == nil {
-					if _, err := NewSessionID(subagentIDStr); err == nil {
-						subagentEntries = append(subagentEntries, subagentEntry{
-							path:          path,
-							subagentID:    subagentIDStr,
-							parentUUIDStr: parentUUIDStr,
-						})
+			// Subagent session, directly in the parent's subagents directory or
+			// inside one of its workflow runs.
+			if parentUUIDStr, file, workflow, ok := claudeSubagentLocation(parts); ok && strings.HasPrefix(file, defaults.ClaudeSubagentPrefix) {
+				parentID, parentErr := NewSessionID(parentUUIDStr)
+				subagentID, subagentErr := NewSessionID(strings.TrimSuffix(file, defaults.ExtJSONL.String()))
+				if parentErr == nil && subagentErr == nil {
+					entry := subagentEntry{path: path, subagentID: subagentID, parentID: parentID}
+					if workflow {
+						workflowEntries = append(workflowEntries, entry)
+					} else {
+						subagentEntries = append(subagentEntries, entry)
 					}
 				}
 				return nil
@@ -267,7 +278,17 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			sessions = append(sessions, ds)
 		}
 
-		for _, entry := range subagentEntries {
+		// admitted maps each subagent id admitted under this source path to
+		// its transcript. Workflow transcripts come first, and a workflow
+		// child keeps its run directory in its source path, which is where the
+		// run id is recorded.
+		admitted := make(map[SessionID]ResolvedPath)
+		for _, entry := range append(workflowEntries, subagentEntries...) {
+			if kept, taken := admitted[entry.subagentID]; taken {
+				slog.Debug("claude discovery: transcript left out, another transcript holds its agent id",
+					"session_id", entry.subagentID.String(), "left_out", entry.path, "kept", kept.String())
+				continue
+			}
 			info, err := a.fs.Stat(entry.path)
 			if err != nil {
 				continue
@@ -284,16 +305,15 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			if !evidence.HasConversationRecord {
 				continue
 			}
-			parentSID, _ := NewSessionID(entry.parentUUIDStr) // already validated
-			subSID, _ := NewSessionID(entry.subagentID)       // already validated
+			parentSID := entry.parentID
 
 			// Link to parent's SubagentPaths — guaranteed parent is already registered.
-			if idx, ok := rootIndex[entry.parentUUIDStr]; ok {
+			if idx, ok := rootIndex[parentSID.String()]; ok {
 				sessions[idx].SubagentPaths = append(sessions[idx].SubagentPaths, rp)
 			}
 
 			ds := DiscoveredSession{
-				SessionID:     subSID,
+				SessionID:     entry.subagentID,
 				Harness:       HarnessClaudeCode,
 				SourcePath:    rp,
 				SourceFormat:  SourceFormatJSONL,
@@ -305,6 +325,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				Origin:        evidence.Origin,
 				Signal:        evidence.Signal,
 			}
+			admitted[entry.subagentID] = rp
 			sessions = append(sessions, ds)
 		}
 	}
@@ -318,6 +339,35 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 // ReminedCount reports how many cached evidence records the most recent Discover
 // had to mine again. See DiscoveryStatistics for the scoping rule.
 func (a *ClaudeAdapter) ReminedCount() int { return a.reminedCount }
+
+// claudeSubagentLocation splits a root-relative Claude path into the parent
+// session directory and the file name of the subagent transcript it holds. A
+// subagent transcript sits in its parent's subagents directory, either directly
+// or inside one workflow run directory:
+//
+//	{project-slug}/{uuid}/subagents/agent-{hex}.jsonl
+//	{project-slug}/{uuid}/subagents/workflows/{run}/agent-{hex}.jsonl
+//
+// {run} is a directory whose name starts with wf_; the whole name is the run id.
+// workflow reports the second layout. Any other path is not a subagent path.
+func claudeSubagentLocation(parts []string) (parent, file string, workflow, ok bool) {
+	if len(parts) < 4 || parts[2] != defaults.DirSubagents.String() {
+		return "", "", false, false
+	}
+	switch {
+	case len(parts) == 4:
+		return parts[1], parts[3], false, true
+	case len(parts) == 6 && parts[3] == defaults.ClaudeDirWorkflows.String() && isClaudeWorkflowRun(parts[4]):
+		return parts[1], parts[5], true, true
+	default:
+		return "", "", false, false
+	}
+}
+
+// isClaudeWorkflowRun reports whether a directory name is a workflow run id.
+func isClaudeWorkflowRun(name string) bool {
+	return len(name) > len(defaults.ClaudeWorkflowRunPrefix) && strings.HasPrefix(name, defaults.ClaudeWorkflowRunPrefix)
+}
 
 // MineOriginEvidence re-reads one Claude transcript that is still on disk and
 // returns the origin its content decides, for the stored-row resolve pass.

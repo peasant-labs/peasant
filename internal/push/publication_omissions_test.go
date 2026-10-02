@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
@@ -128,8 +128,8 @@ func TestPublicationOmissions(t *testing.T) {
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			path := filepath.Join(t.TempDir(), "peasant.db")
-			db, err := store.Open(path)
+			path := storetest.CopyGoldenDB(t)
+			db, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

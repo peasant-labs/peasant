@@ -870,13 +870,15 @@ func canonicalJSONKey(s string, i int) (string, int, bool) {
 	return "", 0, false
 }
 
-// decodeOwnedJSONString decodes one small owned JSON string member in place.
-// The literal extent is bounded by the member itself, never by a retained
-// payload, so the allocation cannot scale with the payload the refusal must
-// not materialize. It accepts the canonical escaped spellings the capture
-// constructor stores (encoding/json escapes `&`, `<`, `>`, `"`, `\` and
-// controls), which canonicalJSONKey declines. A lone surrogate escape never
-// reaches here: the whole-document pre-scan declines it first.
+// decodeOwnedJSONString decodes one small owned JSON string member in place
+// with json.Unmarshal. The decode is bounded by the literal's own extent, not
+// by any retained payload: its callers pass only owned members, keys, and
+// coordinate strings, so the allocated copy cannot scale with the payload the
+// refusal must not materialize. It accepts the canonical escaped spellings the
+// capture constructor stores (encoding/json escapes `&`, `<`, `>`, `"`, `\`
+// and controls), which canonicalJSONKey cannot return as a direct slice and
+// therefore decodes through this helper. A lone surrogate escape never reaches
+// here: the whole-document pre-scan declines it first.
 func decodeOwnedJSONString(s string, i int) (string, int, bool) {
 	end, ok := skipJSONValue(s, i)
 	if !ok || i >= len(s) || s[i] != '"' {

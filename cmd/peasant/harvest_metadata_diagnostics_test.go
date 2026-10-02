@@ -179,7 +179,7 @@ func arrangeHarvestDiagnostics(t *testing.T, fixtures harvestDiagnosticsFixtures
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

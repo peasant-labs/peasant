@@ -10,6 +10,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -75,7 +76,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := t.Context()
 			memfs := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "pair-repair.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

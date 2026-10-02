@@ -1,0 +1,49 @@
+# Regression corpus for scripts/perf/rollup.sh. Every expectation is
+# hand-computed in the comments below and stored in the matching
+# <case>.expected.txt; the script's own stdout is never the oracle.
+#
+# Arithmetic (flat seconds, then share = 100 * family_flat / total):
+#
+# seconds-sample: total 1.00s.
+#   engine      0.75s -> 100*0.75/1.00 = 75.00%
+#   application 0.20s -> 100*0.20/1.00 = 20.00%
+#   driver      0.05s -> 100*0.05/1.00 = 5.00%
+#
+# milliseconds-sample: total 1.00s.
+#   detector      250ms = 0.25s -> 100*0.25/1.00 = 25.00%
+#   adjacent      250ms = 0.25s -> 25.00%
+#   runtime-other 250ms = 0.25s -> 25.00%
+#   other         250ms = 0.25s -> 25.00%
+#   A unit-dropping regression reads 250ms as 250s, so each share becomes
+#   100*250/1.00 = 25000.00% and the stdout no longer matches.
+#
+# kilo-sample: total 2.00ks = 2000s.
+#   engine      1.50ks = 1500s -> 100*1500/2000 = 75.00%
+#   application  500s  =  500s -> 100*500/2000 = 25.00%
+#
+# mega-giga-sample: total 1.50Gs = 1500000000s.
+#   application 1.125Gs = 1125000000s -> 100*1125000000/1500000000 = 75.00%
+#   driver        375Ms =  375000000s -> 100*375000000/1500000000 = 25.00%
+#
+# unknown-unit: a 1.00Ts flat value has no accepted unit; the run must exit 2
+# and name the unit on stderr instead of reading it as seconds.
+- name: seconds-sample
+  input: seconds-sample.txt
+  expected: seconds-sample.expected.txt
+  status: 0
+- name: milliseconds-sample
+  input: milliseconds-sample.txt
+  expected: milliseconds-sample.expected.txt
+  status: 0
+- name: kilo-sample
+  input: kilo-sample.txt
+  expected: kilo-sample.expected.txt
+  status: 0
+- name: mega-giga-sample
+  input: mega-giga-sample.txt
+  expected: mega-giga-sample.expected.txt
+  status: 0
+- name: unknown-unit
+  input: unknown-unit.txt
+  status: 2
+  stderr: unknown time unit

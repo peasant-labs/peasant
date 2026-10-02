@@ -1,12 +1,12 @@
 package store_test
 
 import (
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -19,7 +19,7 @@ import (
 func TestListUncachedChildrenOfParentsIsTargetScoped(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	db, err := store.Open(filepath.Join(t.TempDir(), "parent-reconcile.db"))
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

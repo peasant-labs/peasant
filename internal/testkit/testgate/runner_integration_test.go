@@ -92,8 +92,8 @@ func TestRunner_RACE0OverlapsAndAttributesPassLevel(t *testing.T) {
 		t.Fatalf("RACE=0 overlap run: %v\n%s", err, out)
 	}
 	text := string(out)
-	if !strings.Contains(text, "race:                   off (RACE=0") || !strings.Contains(text, wantBasis) {
-		t.Fatalf("RACE=0 output missing %q:\n%s", wantBasis, text)
+	if !strings.Contains(text, "race:                   off (") || !strings.Contains(text, wantBasis) {
+		t.Fatalf("single no-race run missing %q:\n%s", wantBasis, text)
 	}
 	if strings.Contains(text, BasisSerialized) {
 		t.Fatalf("RACE=0 labeled overlapping CPU as %s:\n%s", BasisSerialized, text)

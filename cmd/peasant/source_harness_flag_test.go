@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -140,7 +139,7 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 				}
 			}
 			if fixture.StoredSession != "" {
-				db, err := store.Open(defaults.ResolveDBFilePathWith(dir).String())
+				db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(dir).String())
 				if err != nil {
 					t.Fatalf("open harvested store: %v", err)
 				}

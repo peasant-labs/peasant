@@ -10,6 +10,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -88,7 +89,7 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 	t.Helper()
 	ctx := context.Background()
 	fs := testutil.NewCountingFS(testutil.NewMemFS())
-	database, err := store.Open(filepath.Join(t.TempDir(), "churn.db"))
+	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

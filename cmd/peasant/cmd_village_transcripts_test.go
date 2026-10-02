@@ -179,7 +179,7 @@ func commitDBRow(t *testing.T, dir string, row store.PulledTranscriptRow) {
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

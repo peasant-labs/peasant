@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
@@ -146,13 +146,13 @@ func TestIndexFormatReadersKeepBaseAndExtraInOneSnapshot(t *testing.T) {
 	for _, row := range loadIndexFormatSnapshotFixtures(t).Snapshots {
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
-			path := filepath.Join(t.TempDir(), "snapshot.db")
-			reader, err := store.Open(path, store.WithPoolSize(1))
+			path := storetest.CopyGoldenDB(t)
+			reader, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer reader.Close()
-			writer, err := store.Open(path, store.WithPoolSize(1))
+			writer, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

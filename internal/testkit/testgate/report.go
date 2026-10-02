@@ -30,6 +30,12 @@ type Report struct {
 	// pre-test measurement was fed into this run; empty when only the aggregate
 	// pre_test_wall_ms is known.
 	PreTestSteps []ReportRecord `json:"pre_test_steps,omitempty"`
+	// BudgetEnforcement records the budget mode the gate ran under
+	// ("blocking" or "warn"); empty when no budget was committed.
+	BudgetEnforcement BudgetEnforcement `json:"budget_enforcement,omitempty"`
+	// BudgetWarn is true only when the suite missed its budget and the miss
+	// was demoted to a warning under warn-only enforcement.
+	BudgetWarn bool `json:"budget_warn,omitempty"`
 }
 
 // PassReport summarizes one pass, including its whole-pass child CPU.

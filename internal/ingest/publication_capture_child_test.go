@@ -11,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -66,7 +67,7 @@ func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
 			if err := os.Chtimes(childSource, old, old); err != nil {
 				t.Fatal(err)
 			}
-			database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

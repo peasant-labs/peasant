@@ -213,6 +213,32 @@ mixed summary/snapshot artifacts never reach kickstart, ingest, or the local sto
 fails open for unreadable, empty, or malformed files: a future Claude transcript format must not
 be silently discarded merely because Peasant cannot classify it yet.
 
+A subagent transcript sits in its parent session's `subagents/` directory, either directly or in
+one workflow run directory:
+
+```text
+<project>/<session>.jsonl                                       root session
+<project>/<session>/subagents/agent-<id>.jsonl                  subagent
+<project>/<session>/subagents/workflows/<run>/agent-<id>.jsonl  workflow subagent
+```
+
+Both kinds become children of `<session>` in the same way. `<run>` is a directory whose name starts
+with `wf_`; the whole name is the run id. A workflow child keeps its run directory in its recorded
+source path, which is where the run id is kept; the run's `journal.jsonl` is not a transcript.
+
+One session id holds one transcript. Claude Code has been seen to write the last turns of a
+workflow agent to the plain location under the same agent id, after the run transcript. Discovery
+admits workflow transcripts first, so the run transcript keeps the id on every harvest, whichever
+file a harvest saw first; the plain file is left out and logged at debug level. Two run directories holding the
+same agent id keep the lexically first one. A child stored from the plain file by a build
+that did not read workflow runs is switched to the run transcript once. Joining the two files into
+one transcript is not done yet.
+
+An ordinary harvest does not extract a parent whose own transcript is unchanged. A parent stored
+before its workflow children appeared therefore keeps its earlier child list in its saved
+metadata, and in what it publishes, although the new children are stored under it.
+`peasant harvest --force --session <parent-id>` extracts that parent again and refreshes the list.
+
 ---
 
 ## Execution Timeline
@@ -335,37 +361,26 @@ while arena space is still held for parser workers that need it.
 
 ### Sequence Diagram: Arena Backpressure
 
-What happens when the 2 GiB arena fills — worker uses bounded exponential
-backoff (1ms→16ms cap) until the drainLoop's `AckBatch` frees arena space.
+What happens when the arena fills — a producer waits on the freed broadcast, the
+bounded backoff timer (1ms→16ms cap), or its context, until the drainLoop's
+`AckBatch` frees arena space.
 
 ```
-  Worker 3            StagingBuffer          drainLoop
-  ────────            ─────────────          ─────────
-     │                     │                     │
-     │ Add(large result)   │                     │
-     │────────────────────▶│                     │
-     │                     │ CAS arenaHead        │
-     │                     │ free < payload size! │
-     │                     │                     │
-     │              ┌────▶ │ sleep(1ms)           │
-     │              │      │ (backoff: 1→2→4→16ms)│
-     │              │      │                     │
-     │              │      │      Drain()         │
-     │              │      │◀────────────────────│
-     │              │      │   ... DB Insert ...  │
-     │              │      │      AckBatch()      │
-     │              │      │◀────────────────────│
-     │              │      │  arenaTail advanced  │
-     │              │      │  (space freed)        │
-     │              │      │                     │
-     │              └───── │ retry CAS arenaHead  │
-     │                     │ free >= payload → ok │
-     │                     │ copy transcript       │
-     │                     │ CAS count → slot N    │
-     │                     │ state[N].Store(ready) │
-     │                     │─────────────────────▶│
-     ▼                     ▼                     ▼
+  worker ─▶ StagingBuffer ─▶ drainLoop
+   Add: free < payload? wait on {arenaFreed, backoff 1→16 ms, ctx.Done}
+        else copy, mark ready ─▶ wake Drain (ready | workersDone | indexDone | ctx)
+   ctx.Done (Option B): keep the result outside the arena, arenaLen 0
+   AckBatch: arenaTail += freed; close arenaFreed ─▶ wake waiters
+   Drain() ─▶ DB Insert ─▶ AckBatch() ─▶ free arena
 ```
+
+`Add` snapshots the freed generation before reading the ring coordinates: a
+release that lands after the snapshot is delivered on that channel, and one that
+landed before it is already visible in the tail it then reads. `AckBatch`
+advances `arenaTail` first and then closes and replaces the generation, so a
+woken producer always observes the freed bytes. Option B keeps a cancelled run's
+accounting: the stopped result stays in its slot with `arenaLen` 0, so it is
+still drained and recorded, while nothing is copied into the arena.
 
 ### Producer Path (Add)
 
@@ -374,6 +389,11 @@ backoff (1ms→16ms cap) until the drainLoop's `AckBatch` frees arena space.
 3. CAS on `count` to claim a slot index
 4. Write `stagedEntry` to slot (sole owner after CAS)
 5. `state[idx].Store(1)` — publish to consumer (release semantics)
+6. A non-blocking send on `ready` wakes a parked drainLoop goroutine
+
+If the arena is full, step 1 waits on the freed broadcast, the backoff timer, or
+the caller's context; when the context ends first, the result is staged with no
+arena copy (`arenaLen` 0) and `Add` still reports success.
 
 ### Consumer Path (Drain → DrainBatch → AckBatch + Commit)
 
@@ -383,7 +403,7 @@ backoff (1ms→16ms cap) until the drainLoop's `AckBatch` frees arena space.
 4. `Commit(ids...)` unlocks children for the next `Drain` (before `AckBatch`)
 5. Attach a drain-batch completion token to each indexable session and send it to indexLoop via `indexCh`
 6. Keep draining later eligible work while parser workers read arena-backed transcript data
-7. When `indexDoneCh` returns a completed drain batch, call `AckBatch(batch)` to transition slots to `acked(3)` and advance `arenaTail`
+7. When `indexDoneCh` returns a completed drain batch, call `AckBatch(batch)` to transition slots to `acked(3)`, advance `arenaTail`, and broadcast the release to producers waiting for space
 
 The `DrainBatch` bundles results and claimed slot indices together — no shared
 mutable state between calls. Multiple `DrainBatch` values may be outstanding

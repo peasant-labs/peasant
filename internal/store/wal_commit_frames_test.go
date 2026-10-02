@@ -3,7 +3,6 @@ package store_test
 import (
 	_ "embed"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -91,8 +90,8 @@ func TestWALCommitFrameCounterBaseline(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dbPath := filepath.Join(t.TempDir(), "commits.db")
-			db, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled(), store.WithPoolSize(1))
+			dbPath := storetest.CopyGoldenDB(t)
+			db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
