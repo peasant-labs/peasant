@@ -1,0 +1,219 @@
+{
+  "verifiedAt": "2026-10-02T03:23:25.527Z",
+  "sourceHead": "b9c09c2f367f96334dc18e8e4f2a4e8ec5cddc58",
+  "sourceTree": "2ba98e07ee72e6a2ab6341af54ffd7831d6e2055",
+  "webTree": "75eeb48c4610595ca7347571640510771cef3f73",
+  "binarySHA256": "3ef50917dcf1df5211cf32e1ad3ffb4d97985fa669571b2e932611bbe5a814d6",
+  "binaryVersion": "peasant v0.7.1-dev.121+b9c09c2f3",
+  "buildInfo": "/Users/vitorhugo/Documents/Projects/polyrepo/peasant/peasant-498--feat--publish-bar-popup/bin/peasant: go1.27.0\n\tpath\tgithub.com/peasant-labs/peasant/cmd/peasant\n\tmod\tgithub.com/peasant-labs/peasant\tv0.7.1-0.20261002030925-b9c09c2f367f\t\n\tdep\tcharm.land/bubbles/v2\tv2.1.1\th1:7r55WzBxpo/R3z98hGmY7KKPd3ET6vsf0Fb9sDHOV60=\n\tdep\tcharm.land/bubbletea/v2\tv2.0.8\th1:SxTJMhCAI3lbPmy4SgX5LWZ24AdINr4I6UEqzZvYJuY=\n\tdep\tcharm.land/glamour/v2\tv2.0.0\th1:IDBoqLEy7Hdpb9VOXN+khLP/XSxtJy1VsHuW/yF87+U=\n\tdep\tcharm.land/lipgloss/v2\tv2.0.5\th1:kbNxgeeUOYv5J0YdpxFjfvf3dFvqH8Aci4zB6xqFtrY=\n\tdep\tgithub.com/BurntSushi/toml\tv1.6.0\th1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=\n\tdep\tgithub.com/alecthomas/chroma/v2\tv2.24.1\th1:m5ffpfZbIb++k8AqFEKy9uVgY12xIQtBsQlc6DfZJQM=\n\tdep\tgithub.com/atotto/clipboard\tv0.1.4\th1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=\n\tdep\tgithub.com/aymerick/douceur\tv0.2.0\th1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=\n\tdep\tgithub.com/charmbracelet/colorprofile\tv0.4.3\th1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex9t5KX76i20Q=\n\tdep\tgithub.com/charmbracelet/harmonica\tv0.2.0\th1:8NxJWRWg/bzKqqEaaeFNipOu77YR5t8aSwG4pgaUBiQ=\n\tdep\tgithub.com/charmbracelet/ultraviolet\tv0.0.0-20260703014108-f5a850f9c2b7\th1:3FmWoGNWK4STvqg0O0Aeav2T7rodWJAPeF0QpH+8gFw=\n\tdep\tgithub.com/charmbracelet/x/ansi\tv0.11.7\th1:kzv1kJvjg2S3r9KHo8hDdHFQLEqn4RBCb39dAYC84jI=\n\tdep\tgithub.com/charmbracelet/x/exp/slice\tv0.0.0-20250327172914-2fdc97757edf\th1:rLG0Yb6MQSDKdB52aGX55JT1oi0P0Kuaj7wi1bLUpnI=\n\tdep\tgithub.com/charmbracelet/x/term\tv0.2.2\th1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=\n\tdep\tgithub.com/charmbracelet/x/termios\tv0.1.1\th1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=\n\tdep\tgithub.com/charmbracelet/x/windows\tv0.2.2\th1:IofanmuvaxnKHuV04sC0eBy/smG6kIKrWG2/jYn2GuM=\n\tdep\tgithub.com/clipperhouse/displaywidth\tv0.11.0\th1:lBc6kY44VFw+TDx4I8opi/EtL9m20WSEFgwIwO+UVM8=\n\tdep\tgithub.com/clipperhouse/uax29/v2\tv2.7.0\th1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=\n\tdep\tgithub.com/coder/websocket\tv1.8.14\th1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=\n\tdep\tgithub.com/cpuguy83/go-md2man/v2\tv2.0.6\th1:XJtiaUW6dEEqVuZiMTn1ldk455QWwEIsMIJlo5vtkx0=\n\tdep\tgithub.com/dayvidpham/bestiary\tv0.2.11\th1:DT3A5QK5VOW6c0bhrLXz/inB4oHO2hDKqa5sQc5+h6A=\n\tdep\tgithub.com/dlclark/regexp2\tv1.12.0\th1:0j4c5qQmnC6XOWNjP3PIXURXN2gWx76rd3KvgdPkCz8=\n\tdep\tgithub.com/dustin/go-humanize\tv1.0.1\th1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=\n\tdep\tgithub.com/google/uuid\tv1.6.0\th1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=\n\tdep\tgithub.com/gorilla/css\tv1.0.1\th1:ntNaBIghp6JmvWnxbZKANoLyuXTPZ4cAMlo6RyhlbO8=\n\tdep\tgithub.com/lucasb-eyer/go-colorful\tv1.4.0\th1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW4TvVgFr4=\n\tdep\tgithub.com/mattn/go-isatty\tv0.0.20\th1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=\n\tdep\tgithub.com/mattn/go-pointer\tv0.0.1\th1:n+XhsuGeVO6MEAp7xyEukFINEa+Quek5psIR/ylA6o0=\n\tdep\tgithub.com/mattn/go-runewidth\tv0.0.24\th1:cpokDiIn0MGnhdHwuWnJBITySJ20QyNGnY2kR/ay2DU=\n\tdep\tgithub.com/microcosm-cc/bluemonday\tv1.0.27\th1:MpEUotklkwCSLeH+Qdx1VJgNqLlpY2KXwXFM08ygZfk=\n\tdep\tgithub.com/muesli/cancelreader\tv0.2.2\th1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=\n\tdep\tgithub.com/ncruces/go-strftime\tv0.1.9\th1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdhx/f4=\n\tdep\tgithub.com/peasant-labs/redact\tv0.1.6\th1:Kk03w/5aGmagtuKrV2NLeRVeclA90UBghSXKjTbU4ls=\n\tdep\tgithub.com/peasant-labs/schema\tv0.26.0\th1:SZs0u8lHzqxdXBRpvZAz80TPxQH4neqjztxGqpLEW14=\n\tdep\tgithub.com/remyoudompheng/bigfft\tv0.0.0-20230129092748-24d4a6f8daec\th1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=\n\tdep\tgithub.com/rivo/uniseg\tv0.4.7\th1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=\n\tdep\tgithub.com/russross/blackfriday/v2\tv2.1.0\th1:JIOH55/0cWyOuilr9/qlrm0BSXldqnqwMsf35Ld67mk=\n\tdep\tgithub.com/santhosh-tekuri/jsonschema/v5\tv5.3.1\th1:lZUw3E0/J3roVtGQ+SCrUrg3ON6NgVqpn3+iol9aGu4=\n\tdep\tgithub.com/spf13/cobra\tv1.10.2\th1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=\n\tdep\tgithub.com/spf13/pflag\tv1.0.10\th1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=\n\tdep\tgithub.com/swaggest/jsonschema-go\tv0.3.79\th1:0TOShCbAJ9Xjt1e2W83l+QtMQSG2pbun2EkiYTyafCs=\n\tdep\tgithub.com/swaggest/refl\tv1.4.0\th1:CftOSdTqRqs100xpFOT/Rifss5xBV/CT0S/FN60Xe9k=\n\tdep\tgithub.com/tree-sitter/go-tree-sitter\tv0.25.0\th1:sx6kcg8raRFCvc9BnXglke6axya12krCJF5xJ2sftRU=\n\tdep\tgithub.com/tree-sitter/tree-sitter-bash\tv0.25.1\th1:ZD3MK4oDB5lAsFztqbdcyYEd24pxDtx3g9UOWA062rE=\n\tdep\tgithub.com/tree-sitter/tree-sitter-go\tv0.25.0\th1:cEB0Q3LHgZtS+ECHx9wcP7AwzoOddJFQCVmytX42cVU=\n\tdep\tgithub.com/tree-sitter/tree-sitter-javascript\tv0.25.0\th1:ZkWETb66/w8cc13yhfnNuHOLDQWl3BnKlH6f9AdR88c=\n\tdep\tgithub.com/tree-sitter/tree-sitter-python\tv0.25.0\th1:O6XD9v8U1LOcRc3cNj9nM7XufrtEBezE6VrpRrHZDf0=\n\tdep\tgithub.com/tree-sitter/tree-sitter-typescript\tv0.23.2\th1:/Odvphn18PniVixb9e97X0DbNVsU6Qocv9mfkyzdXwU=\n\tdep\tgithub.com/xo/terminfo\tv0.0.0-20220910002029-abceb7e1c41e\th1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=\n\tdep\tgithub.com/yuin/goldmark\tv1.7.8\th1:iERMLn0/QJeHFhxSt3p6PeN9mGnvIKSpG9YYorDMnic=\n\tdep\tgithub.com/yuin/goldmark-emoji\tv1.0.5\th1:EMVWyCGPlXJfUXBXpuMu+ii3TIaxbVBnEX9uaDC4cIk=\n\tdep\tgo.yaml.in/yaml/v3\tv3.0.4\th1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=\n\tdep\tgolang.org/x/crypto\tv0.51.0\th1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=\n\tdep\tgolang.org/x/exp\tv0.0.0-20250408133849-7e4ce0ab07d0\th1:R84qjqJb5nVJMxqWYb3np9L5ZsaDtB+a39EqjV0JSUM=\n\tdep\tgolang.org/x/net\tv0.53.0\th1:d+qAbo5L0orcWAr0a9JweQpjXF19LMXJE8Ey7hwOdUA=\n\tdep\tgolang.org/x/sync\tv0.21.0\th1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=\n\tdep\tgolang.org/x/sys\tv0.46.0\th1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=\n\tdep\tgolang.org/x/term\tv0.43.0\th1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=\n\tdep\tgolang.org/x/text\tv0.37.0\th1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=\n\tdep\tgopkg.in/yaml.v3\tv3.0.1\th1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=\n\tdep\tmodernc.org/libc\tv1.65.7\th1:Ia9Z4yzZtWNtUIuiPuQ7Qf7kxYrxP1/jeHZzG8bFu00=\n\tdep\tmodernc.org/mathutil\tv1.7.1\th1:GCZVGXdaN8gTqB1Mf/usp1Y/hSqgI2vAGGP4jZMCxOU=\n\tdep\tmodernc.org/memory\tv1.11.0\th1:o4QC8aMQzmcwCK3t3Ux/ZHmwFPzE6hf2Y5LbkRs+hbI=\n\tdep\tmodernc.org/sqlite\tv1.37.1\th1:EgHJK/FPoqC+q2YBXg7fUmES37pCHFc97sI7zSayBEs=\n\tdep\tzombiezen.com/go/sqlite\tv1.4.2\th1:KZXLrBuJ7tKNEm+VJcApLMeQbhmAUOKA5VWS93DfFRo=\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\t-ldflags=\"-X github.com/peasant-labs/peasant/internal/defaults.version=v0.7.1-dev.121+b9c09c2f3\"\n\tbuild\tDefaultGODEBUG=cryptocustomrand=1,tlssecpmlkem=0,tracebacklabels=0,urlstrictcolons=0,x509sslcertoverrideplatform=0\n\tbuild\tCGO_ENABLED=1\n\tbuild\tCGO_CFLAGS=\n\tbuild\tCGO_CPPFLAGS=\n\tbuild\tCGO_CXXFLAGS=\n\tbuild\tCGO_LDFLAGS=\n\tbuild\tGOARCH=arm64\n\tbuild\tGOOS=darwin\n\tbuild\tGOARM64=v8.0\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=b9c09c2f367f96334dc18e8e4f2a4e8ec5cddc58\n\tbuild\tvcs.time=2026-10-02T03:09:25Z\n\tbuild\tvcs.modified=false\n",
+  "ownedServerPID": 66430,
+  "ownedServerPort": 8894,
+  "allServedAssetsByteIdenticalToNewExport": true,
+  "assets": [
+    {
+      "path": "/_next/static/chunks/0cb07a38-fa98c32073af1076.js",
+      "sha256": "dacf1340c3a16bc7b10b8f26cbca40d2d381126a454d8fc51e9211fede6308da",
+      "bytes": 173023
+    },
+    {
+      "path": "/_next/static/chunks/239-43b286f3189082ec.js",
+      "sha256": "45f027ad5331fd78a1aa3a608df5a68f553bfa7a3cc8150d6e0bae2af3f959e0",
+      "bytes": 5601
+    },
+    {
+      "path": "/_next/static/chunks/364-5dbd2b70b11ba762.js",
+      "sha256": "f56d091dfaa0c2356adc9cf650b54f0e8814b42c1c9cfa2885372d7cb9ee7085",
+      "bytes": 18170
+    },
+    {
+      "path": "/_next/static/chunks/439-dfbb67a31e1d0a9e.js",
+      "sha256": "a9307be88e1176d0d2a6d0760ac397f343734ee6d45588598df5e9a3c39d4b89",
+      "bytes": 8141
+    },
+    {
+      "path": "/_next/static/chunks/450-1e71848b3413b834.js",
+      "sha256": "521790f7dedff04c07b1ef2d5db00d13f5817b885c8d43766cfe676ed6f2a17e",
+      "bytes": 16882
+    },
+    {
+      "path": "/_next/static/chunks/51-4ac2e9277f2184e1.js",
+      "sha256": "82a7057ac140a96e1c8f1aac50af486fc9babfd76e96bb8198502f8321e3f7e7",
+      "bytes": 9846
+    },
+    {
+      "path": "/_next/static/chunks/58-5a75d42e7bd9e3c6.js",
+      "sha256": "c49b3eed914e10eb29bf0c6970218b1e5079e748f71c512f7ecf05cf98b73a54",
+      "bytes": 120410
+    },
+    {
+      "path": "/_next/static/chunks/590-5a15cc252ebc6029.js",
+      "sha256": "eabe5ef9fd5ea220515a62c73e63f246815fcccf2c85b449cd582c2811cf2c56",
+      "bytes": 13870
+    },
+    {
+      "path": "/_next/static/chunks/616-99595364da9bd271.js",
+      "sha256": "2d2f32ed51ebcc972649377c7aa0e807c076e78b832e4b8f8c030bf10445698e",
+      "bytes": 22835
+    },
+    {
+      "path": "/_next/static/chunks/674-d163d40b8b66751d.js",
+      "sha256": "54aa3ae40a12175e66efe4d2e87fbcff99e15b2d378642461dde6814f8ceff31",
+      "bytes": 9090
+    },
+    {
+      "path": "/_next/static/chunks/72-046760dab76225be.js",
+      "sha256": "e8590343a167ea405e490190e3a00d87c9c4edcf3238486fa156f519d7882bf1",
+      "bytes": 20656
+    },
+    {
+      "path": "/_next/static/chunks/78-2dde293b5bc99145.js",
+      "sha256": "6b3dd7b2104c7bf3819ef25661cc404baf699fd0c1e72c1e17222a6168d04b2c",
+      "bytes": 174158
+    },
+    {
+      "path": "/_next/static/chunks/785-5230d0af1dcacedd.js",
+      "sha256": "698035818811dd9824c1c79cb7f7554dcd00c5d09ecb1167e00b0be931e7d51c",
+      "bytes": 7437
+    },
+    {
+      "path": "/_next/static/chunks/847-684f1ca12ba2cc50.js",
+      "sha256": "a2c820a2960f5dccabc2109e453cd0397635d4f52a4fc4da82b55180466b28f5",
+      "bytes": 253475
+    },
+    {
+      "path": "/_next/static/chunks/890-3b31ee56c56bfcc0.js",
+      "sha256": "a531fc0cf6d6a9d98b1b09992c1bfd063d474e0ea9c79b4f6dbb08afad8dacd4",
+      "bytes": 76058
+    },
+    {
+      "path": "/_next/static/chunks/8c8a7c9b-19c495700bf45196.js",
+      "sha256": "cd5f795994ceed6fb2277bcf35ae17de8ce41e17cf3ebaf776802c8bedaae8cf",
+      "bytes": 77668
+    },
+    {
+      "path": "/_next/static/chunks/91-33a3bdcfdce3c539.js",
+      "sha256": "477d5b57d23ace856be25bd3ebee2269c88837af350b2bf29308b83d3c8d1e01",
+      "bytes": 26991
+    },
+    {
+      "path": "/_next/static/chunks/990-d025c23e684a62d3.js",
+      "sha256": "710a23a9844c075acbe00e8110afe3fdb4a469f5d75faa0c753b73f7311604f2",
+      "bytes": 464316
+    },
+    {
+      "path": "/_next/static/chunks/995-27089485350b6073.js",
+      "sha256": "49995c54441fbcef416cc19693013f55a230fbbdf452ea6866be0a1613cff69e",
+      "bytes": 26313
+    },
+    {
+      "path": "/_next/static/chunks/app/analytics/page-de3242acc0c2931b.js",
+      "sha256": "a936ec391b2ad957ba461127ed72adb5069a190fb142c9269f60feaf0e17d33b",
+      "bytes": 3751
+    },
+    {
+      "path": "/_next/static/chunks/app/dev/changes-harness/page-1bc7f56aa156ad86.js",
+      "sha256": "15f3620ffce24866517e5e0a238e3e3e998030f9a932d8ec7770538971470db8",
+      "bytes": 5918
+    },
+    {
+      "path": "/_next/static/chunks/app/dev/visual-harness/page-207840ab6a64ba35.js",
+      "sha256": "c3f714e89c35ce8bfa980ecae60cf8b42dfcf01057a17012511c36077039d574",
+      "bytes": 15024
+    },
+    {
+      "path": "/_next/static/chunks/app/layout-43580e6707cbad7f.js",
+      "sha256": "adc5d2bcf9ec6792b26cab491c61cbd86bdb35b482983ec5919bcc665c61735f",
+      "bytes": 25579
+    },
+    {
+      "path": "/_next/static/chunks/app/map/%5B%5B...segments%5D%5D/page-77ae8f5352ad94e2.js",
+      "sha256": "d8274a86223a44d841c2c1e9409c1e2261b7c8ac8911069a1c22b3342e99485c",
+      "bytes": 41301
+    },
+    {
+      "path": "/_next/static/chunks/app/page-ef2e33db6472f011.js",
+      "sha256": "e88b9029167a83ba4bf7748de21e74cf4b4ada34273e5997259879e37710b770",
+      "bytes": 23351
+    },
+    {
+      "path": "/_next/static/chunks/app/projects/%5B%5B...segments%5D%5D/page-45ed13837e70aacc.js",
+      "sha256": "9f2e2b189b939292151b53a18732f9e4e69fc1bd41953bbf3278dfe59c7bceab",
+      "bytes": 35964
+    },
+    {
+      "path": "/_next/static/chunks/app/review/%5B%5B...segments%5D%5D/page-d0be60222b7d606e.js",
+      "sha256": "eaf3dca4d2845d6482faf602dfa58549fce022b8cc959ab98425014887ade69b",
+      "bytes": 9822
+    },
+    {
+      "path": "/_next/static/chunks/app/sessions/%5B%5B...segments%5D%5D/page-8294d1312935bd32.js",
+      "sha256": "845da0156d587ddc4d7db72c3814587dce766ec39993fd5b4b0e941ed8ac203c",
+      "bytes": 4915
+    },
+    {
+      "path": "/_next/static/chunks/app/settings/page-3bbbbe70d1326e31.js",
+      "sha256": "107d0ef394bd313849b605c393cbc83912ba4cecbc44a42f117095f30e006093",
+      "bytes": 40232
+    },
+    {
+      "path": "/_next/static/chunks/app/share/page-ea76e68614ee8f6a.js",
+      "sha256": "d4ed57d7a7991f77ca19f39fb06b3e6a4491af312d8ca253de9f0437e0d62ffc",
+      "bytes": 60831
+    },
+    {
+      "path": "/_next/static/chunks/df8e723d-c9b0dad1fd97a064.js",
+      "sha256": "227dc77d53a6c362cbd5f66d02f5a86a39ee082dac463ddd539e034d9a848f55",
+      "bytes": 345863
+    },
+    {
+      "path": "/_next/static/chunks/main-app-aa00cf5cdb8c5047.js",
+      "sha256": "4cf04df6e5ebe08f80b543219f994ce10364bef3fcc5614299d99841402799de",
+      "bytes": 569
+    },
+    {
+      "path": "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+      "sha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683",
+      "bytes": 112594
+    },
+    {
+      "path": "/_next/static/chunks/webpack-ea294729da1ddc66.js",
+      "sha256": "adf91b90bc5c08ab75f86b01374ed2c6c59bff545cfaf1c9468dc97297f7d6c2",
+      "bytes": 3498
+    },
+    {
+      "path": "/_next/static/css/008a05b0ad6b854a.css",
+      "sha256": "51bc386b72d70be3f37056838e1fea59889d488c114d4e38a46be696a069bcab",
+      "bytes": 15790
+    },
+    {
+      "path": "/_next/static/css/67a3d9a6012f5eaa.css",
+      "sha256": "ce6acc6755e6c63f8eb5e6898aae9cf1331764f35948bead72d72f40876ea129",
+      "bytes": 1742
+    },
+    {
+      "path": "/_next/static/css/b2be129e7d6323fc.css",
+      "sha256": "82b5e0e63df21ca2d8f93149dfa803e0432ea640cd796fe176988e8166baa59f",
+      "bytes": 20745
+    },
+    {
+      "path": "/_next/static/css/c21a63865843aca0.css",
+      "sha256": "69516389163b7e0fa20219be793d155a8ba7f497ca78d4b911a71765786a5f8f",
+      "bytes": 6544
+    },
+    {
+      "path": "/_next/static/css/f145606b99559fdc.css",
+      "sha256": "9c2052a367d200d53245e7df57dbe951e567545d13a392189c1cb0cfc811cdce",
+      "bytes": 451414
+    }
+  ],
+  "markerChunks": {
+    "reading your collectives on village": [
+      "/_next/static/chunks/app/projects/%5B%5B...segments%5D%5D/page-45ed13837e70aacc.js"
+    ],
+    "village no longer holds this transcript: run peasant village push --force for this session": [
+      "/_next/static/chunks/app/projects/%5B%5B...segments%5D%5D/page-45ed13837e70aacc.js"
+    ]
+  },
+  "imagesRecaptured": false,
+  "note": "This verifies the refreshed artifact. Original images retain their original captured HEAD, binary and capture time."
+}

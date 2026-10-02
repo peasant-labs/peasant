@@ -1,0 +1,16 @@
+ 1:  a99c08a5 =  1:  3c26147e feat(web): hold the redaction scans and publishes in an app-level provider
+ 2:  1bf72d53 =  2:  53a469a3 feat(web): share the scan cache with the wizard and drop its labels step
+ 3:  91eb4406 =  3:  6bd51fce feat(web): let a transcript link open its publish popup
+ 4:  f7382d7c =  4:  2c506e0f feat(web): publish from the transcript page with a bar and one popup
+ 5:  4f699d45 =  5:  7923619d fix(web): keep the popup's collectives read and an early update working
+ 6:  c61cd088 =  6:  2258e6d2 test(web): shoot every publish state from the real binary
+ 7:  60a6f7f9 =  7:  dd6cf63c fix(web): say when village no longer holds the published transcript
+ 8:  e59df65c =  8:  1b496064 fix(web): call the wizard's destination village, not the commons
+ 9:  12bcb13e =  9:  85a34c62 fix(web): preserve publish recovery and authoritative audience state
+10:  8bf02a8e = 10:  fde96fb3 test(web): pin mounted publish capture provenance
+11:  69281a1a = 11:  b8b0cf53 fix(web): remove ineffective missing transcript retries
+12:  67b9d61b = 12:  9ed5ea44 test(web): use authoritative scan totals across publish journeys
+13:  89d9ca7c = 13:  0bd24559 test(web): identify equivalent publish result captures
+14:  80f7c973 = 14:  23e077dd test(web): wait for an enabled recovery scan action
+15:  fba12e2b = 15:  9c70d39a fix(web): load canonical typography after the application reset
+16:  023225ee = 16:  b9c09c2f fix(web): preserve audience edits during collective readiness

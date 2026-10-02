@@ -1,0 +1,1072 @@
+{
+  "pr": 536,
+  "originalCapturedSource": "023225ee5cbe58ed36c1c568678991a4f00c197a",
+  "originalBinarySHA256": "babb7ccd2024dffbee8e22838c33d1e407dcd1a9a9ad16e010f61fd47ae5f6c0",
+  "refreshedSource": "b9c09c2f367f96334dc18e8e4f2a4e8ec5cddc58",
+  "fullTrackedWebTreeUnchanged": true,
+  "webTree": "75eeb48c4610595ca7347571640510771cef3f73",
+  "preservedArtifactParent": "de7c446fa139c7ca78ec576c29a2a906664c37ba",
+  "preservedImages": [
+    {
+      "path": "023225ee5cbe/canonical/publish-private-result-dark.png",
+      "sha256": "c9e96818a6bc47419e244176c20a6e8ed9a33844732496285ae015a7b62e70cc"
+    },
+    {
+      "path": "023225ee5cbe/canonical/publish-private-result-light.png",
+      "sha256": "56f4065f1320692e84c7d0d60db08508accd07a04d78ad9573fccaf11849eee9"
+    },
+    {
+      "path": "023225ee5cbe/canonical/publish-ready-dark.png",
+      "sha256": "01d38a366b113b06e24f2131c107c52f2c66803b81a5e2a63de3d9c45467d7ac"
+    },
+    {
+      "path": "023225ee5cbe/canonical/publish-ready-light.png",
+      "sha256": "963d25af6ae4d8209a57198df167e1c302b2ecac7c28316c4dfb07b0911a8cb9"
+    },
+    {
+      "path": "023225ee5cbe/canonical/publish-stopped-dark.png",
+      "sha256": "fa78aa6e3ce62190bf290d066ba2b407e22433ac7321bcb2dac205ab15db7e40"
+    },
+    {
+      "path": "023225ee5cbe/canonical/publish-stopped-light.png",
+      "sha256": "5c2d5e81f4d261638555ca61c8ee306ac94fb6567e5e7d0d1cfeae3eb884e1f7"
+    },
+    {
+      "path": "023225ee5cbe/compare-private-result-dark.png",
+      "sha256": "f6e72d432825cddb57a205d0742e86da90ce68ab863a165944034cc65b74fcdd"
+    },
+    {
+      "path": "023225ee5cbe/compare-private-result-light.png",
+      "sha256": "48067d397a4741decb47f641fe6cfa60ce0f69344f0a99a27ad8a354ef6c9e73"
+    },
+    {
+      "path": "023225ee5cbe/compare-ready-dark.png",
+      "sha256": "fd45513eb69dd87fb21a87b591f1956cc921f6134371e3aa23ea8785a4dcd50c"
+    },
+    {
+      "path": "023225ee5cbe/compare-ready-light.png",
+      "sha256": "48949d9c278641082e93df462423b8b3347a8f5db1cb0c1c5e5681953feadd20"
+    },
+    {
+      "path": "023225ee5cbe/compare-stopped-dark.png",
+      "sha256": "31f287dd5fbd961e62d512b6dffd1fb67f7da132af1043a19e5e159746a82f81"
+    },
+    {
+      "path": "023225ee5cbe/compare-stopped-light.png",
+      "sha256": "5b24e69c021584820cadec824b760a986ae3b6a3763b152dd59bd3a37785860f"
+    },
+    {
+      "path": "023225ee5cbe/dark-contact-1.png",
+      "sha256": "6d2b6ef9ef4ecec9d5cfa60486d5b08ab878950352f4396c55f687c41bd9f447"
+    },
+    {
+      "path": "023225ee5cbe/dark-contact-2.png",
+      "sha256": "2d806d38d76bb90232aa4f4aa06b52b3f14cab8b9a21f1cb917b1ced617555fb"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/already-authenticated.png",
+      "sha256": "1bb8357209ebff77aa4f0f5300617118e710ee874f612192f2610bb83a792141"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/audience-unknown.png",
+      "sha256": "bcbe89ad1fc7d355901a09d7f1d6d8be8fc6ac38b7da02abeca1aed7bbeb2e00"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/auto-publish-on.png",
+      "sha256": "f79d2a46aba46a7e2bf542dc48126ad1df14d3f21346d9ad26c4fdfcf4879485"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/collectives-read-failed.png",
+      "sha256": "424a890950f5c46cd553b854767ed106d6fb9e015ddf3a34d1088620964a6642"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/connect-completes.png",
+      "sha256": "1bb8357209ebff77aa4f0f5300617118e710ee874f612192f2610bb83a792141"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/connect-to-village.png",
+      "sha256": "4c8a5d28decd70a6f736732af0c16bac5d167b4b434068098c08375d51993c86"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/content-step-failed.png",
+      "sha256": "e58f3324826ac927b0a14b5f3ec4d091a5428d3dddc2c2bc4a6f3af6e76e8381"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/held-until-ingest.png",
+      "sha256": "f611d24261616ec127cbc81451e3a84e3a84581e1c19b75b458d83d979b5321c"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/login-start-failed.png",
+      "sha256": "7a5ce3f5ea9b987e1cadc319c6ceb3bd0ac44ba4b3178fbe92486ff804206305"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/manage-opens.png",
+      "sha256": "f55abfdfadb010e13c3ad26d3ba8c3aa038a0092088684799fb24e5cc7f2ad28"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/manage-removes-collective.png",
+      "sha256": "0b4da65ceee619b499db3dabff21e0c4f697ab57a320e9bf311dd6f15aef71f9"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/new-turns.png",
+      "sha256": "f72195a5fa920df3ad53dab62da19add2be338cbb18b21282e4b5b5083d705d4"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/not-in-a-collective.png",
+      "sha256": "c09728086b9c415bac4305c1d7181295c6585a2f3136d68c034a9b5c09c79298"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/not-published.png",
+      "sha256": "7ef3520fc01eb3605e9f9ab9db42fe3eaf3357ba862300bb5cd0867e5c22c5cc"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/only-curated-collective-waits.png",
+      "sha256": "f6833bddc49d322de16d0584585255db616506674c7869a074310d125aa6d144"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/outside-saved-lists.png",
+      "sha256": "dfc8b0c47f5db259551252e7cd7c6e1e09c294a43eb22f0bb02c243fd2006c00"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/partial-publish-removes-reader.png",
+      "sha256": "0b4da65ceee619b499db3dabff21e0c4f697ab57a320e9bf311dd6f15aef71f9"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/publication-read-failed.png",
+      "sha256": "7cefd27f68c6ee097f69946709e280560ac8fbd436a32eeacdc3b9748ffe16f6"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/published-done.png",
+      "sha256": "7f20aceea535f30a9d13f97cc5c94d4fe4efc0ac73751c3ffab2fda23f5c4d7c"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/published-while-signed-out.png",
+      "sha256": "92eb071daddd22d955f8ab76e5393e86b1e8790b54959a9d33a38d9463612948"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/publishing.png",
+      "sha256": "47c5f80b9744f478555aafacc24a76c50871d90d2c7c6d44128042ab36796449"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/ready-to-publish.png",
+      "sha256": "1bb8357209ebff77aa4f0f5300617118e710ee874f612192f2610bb83a792141"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/removes-final-collective.png",
+      "sha256": "ac1c793a17c4e171357743796d926271ef574306978953d0514cc8d6cb8b0ec6"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/scan-failed.png",
+      "sha256": "1bb7979967548a881e3625aaac54a224ef48aa84ea50ab811d036dfbd7f26160"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/scanning.png",
+      "sha256": "df2d2cf960a427e0f3ba0378260aa19bdd53c9fdd361411abb427ee4b71921d4"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/signed-out-on-push.png",
+      "sha256": "4c8a5d28decd70a6f736732af0c16bac5d167b4b434068098c08375d51993c86"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/skipped-collective.png",
+      "sha256": "9aa208b6182a2511c0c5bf754f22f99ca117bc5a9330ca46f5310e9063e76593"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/stopped-at-a-step.png",
+      "sha256": "c1f10ac5db4fc3c98777a8fc45901abcae61e1605b4128ae71ae936d95478356"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/stopped-rescan-fails.png",
+      "sha256": "60192aedce2a4a28e30e5d275b11cc1df3cea1db92c8e0e32b43b13074b16aeb"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/transcript-missing.png",
+      "sha256": "0e9c0aceccdc5396ea41036f6ea9ebefc23444ece0eab2d503b5f5e4eb42fff2"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/up-to-date.png",
+      "sha256": "14e6a04fd16824d0e954e1774cd68d8493f74d9aca03e1da2d7572bc6440a8bd"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/update-adds-collective.png",
+      "sha256": "7f20aceea535f30a9d13f97cc5c94d4fe4efc0ac73751c3ffab2fda23f5c4d7c"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/update-keeps-audience.png",
+      "sha256": "d7fe26f0a7c8997072794ffd19c74d8cb35a1d60ebeff1895bb4ca9bc8f65b14"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/update-removes-collective.png",
+      "sha256": "4f2291618ba82501632b59cb1b65e4967b6179aaacc15f8d432243377ffe65a4"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/update-with-new-turns.png",
+      "sha256": "0486cddcd4a7a6f8f63a501ef4baf63f8734e809e57506ce0e6cff31c6f2bcb2"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/waiting-for-github.png",
+      "sha256": "6a419006ff3bf56fbf992eb5f1d5a02146b186d0afe3d84180f47b8b958e964a"
+    },
+    {
+      "path": "023225ee5cbe/dark/desktop/waits-for-approval.png",
+      "sha256": "2ae5f75158097d8db376569ce216f8bea3ab535311ee35adb50ee4fe0f3a4aef"
+    },
+    {
+      "path": "023225ee5cbe/dark/mobile/not-published.png",
+      "sha256": "79a9a19bcaf43050d96e7f410c477601a2c7e9d354b60d43b91a9b4db96c4b11"
+    },
+    {
+      "path": "023225ee5cbe/dark/mobile/ready-to-publish.png",
+      "sha256": "2a1eaf36b4d2f991e7a0c20eae68d06434b3bfb55f24d489ee2e9b41f0899266"
+    },
+    {
+      "path": "023225ee5cbe/dark/mobile/update-with-new-turns.png",
+      "sha256": "793fa0f7dd1d1c49e372d5e721d94ed698a6647237a7d227cacd48c25a5507d8"
+    },
+    {
+      "path": "023225ee5cbe/light-contact-1.png",
+      "sha256": "12423fa20e15f7b75ca1f88014212ba1c39b70e92874f25e29ad1229f7334401"
+    },
+    {
+      "path": "023225ee5cbe/light-contact-2.png",
+      "sha256": "0f98884eb1ddada3206d4b067284ffbbe4dc191ee49c92a875800d7cdc4d84d4"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/already-authenticated.png",
+      "sha256": "ec202c840e7cb80ab472cbf7da8070b28ca575e3aeceb95def33a8002f9534e3"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/audience-unknown.png",
+      "sha256": "1010e1c7c787e6d3844a8479fa8d8115a094bf1983a1fe5c96e71592ef127f1c"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/auto-publish-on.png",
+      "sha256": "89fd13be4352bd3af85e310cb2043d47de2bf1ba65579160d574ccc9c32a48ae"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/collectives-read-failed.png",
+      "sha256": "5a666b59f94c53f4eda3a4093f676f039db05d24f3163638e5b9e4455673760a"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/connect-completes.png",
+      "sha256": "ec202c840e7cb80ab472cbf7da8070b28ca575e3aeceb95def33a8002f9534e3"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/connect-to-village.png",
+      "sha256": "3a2fd32d54768bf1db88adb10677fca1b344917816b8023bbd404a6ca1b280cf"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/content-step-failed.png",
+      "sha256": "20889dacdd7eb21f2bbca782419feb41aa2aee2e0cb6a8f5172e78177d462d71"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/held-until-ingest.png",
+      "sha256": "b3694d045f36d7ebea0120a60e6d4a3d4279778769dd0550174ca8b14bc5a485"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/login-start-failed.png",
+      "sha256": "2c0a1e1c2a22dc4b94ad76b7d64183970fe2fbfc6162949f0c48c6140b87ec36"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/manage-opens.png",
+      "sha256": "7b27df389f46d23d2516314de87a78b53b2b4bd9516c317a2c4f502ae8c93a2c"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/manage-removes-collective.png",
+      "sha256": "bbe757409f0307e59f33376bbce931b022cb7e7bfa61bab25d8e58f7e83274b7"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/new-turns.png",
+      "sha256": "79ca64462ef622d9f737a709e087d57c532ae55d3d5944c69e673b34b7647b32"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/not-in-a-collective.png",
+      "sha256": "fca2317e99159dcc762f9dd30d090abd7ed850561576a25a596d3ad5605f99dd"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/not-published.png",
+      "sha256": "c9f20b0bb7b7c9b03ded94c8ed73ab02f443827713e091c92ad46628095aae38"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/only-curated-collective-waits.png",
+      "sha256": "d3a43b52a5d8831afc141cbe97766489f456c6968feb7d4dd0da3b6b0950e4c4"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/outside-saved-lists.png",
+      "sha256": "ff95dbb1c5642486a387937765056db8d562797e8224f06ed03db2afc4c721d9"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/partial-publish-removes-reader.png",
+      "sha256": "bbe757409f0307e59f33376bbce931b022cb7e7bfa61bab25d8e58f7e83274b7"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/publication-read-failed.png",
+      "sha256": "5dc3470d8ba37d972d418bdfc28493341a42cf7c53cd958b36eb1b3f5c1730e7"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/published-done.png",
+      "sha256": "64244208d5679b30ec05e2ace2e1d790d0f529a672660190ced2b2d9d2475557"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/published-while-signed-out.png",
+      "sha256": "b0cf06d48a5bcfa6b3ac60334d335a50c4045b70b1009bacbf47bc14f477b975"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/publishing.png",
+      "sha256": "fa355b284a99db40d43f8c9cdef67bff27d9e64a182a49f1862f47ebdb220ce1"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/ready-to-publish.png",
+      "sha256": "ec202c840e7cb80ab472cbf7da8070b28ca575e3aeceb95def33a8002f9534e3"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/removes-final-collective.png",
+      "sha256": "6bf6a70593f712afbfadc6c76c345d9f42ab47205f822ca90029d4f4d899c4c6"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/scan-failed.png",
+      "sha256": "a0a5b37633c06cefddfd6f26b58d79a1e43c05cf9c434aea5d4dcb79eaada85d"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/scanning.png",
+      "sha256": "1cf46fc25489b5b869fafa5c218cab3d7671a5faa8cfe01946b0280c23ce1888"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/signed-out-on-push.png",
+      "sha256": "3a2fd32d54768bf1db88adb10677fca1b344917816b8023bbd404a6ca1b280cf"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/skipped-collective.png",
+      "sha256": "e389a539c715d05ec394ffd664a6d906a244339696c45846f8563f1a873d489c"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/stopped-at-a-step.png",
+      "sha256": "c0ba0ab0737de114240caa5e17bb5fe6a6a34e41d3f6e2a60546437ce14a6944"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/stopped-rescan-fails.png",
+      "sha256": "a3b256e2f7ffac35b2249ab78dd45152295570f9fe45d92663c3c6854b3a98af"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/transcript-missing.png",
+      "sha256": "3d7a9d4ab15e342cd5c5ed75328b2c32ef66ff3a6784f7de8d3b14158456824b"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/up-to-date.png",
+      "sha256": "f6901acea8693c2be180d65084a216925925f363ac8e92220eedc3e4d1c42575"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/update-adds-collective.png",
+      "sha256": "64244208d5679b30ec05e2ace2e1d790d0f529a672660190ced2b2d9d2475557"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/update-keeps-audience.png",
+      "sha256": "89f8744f29cc5d779ca7fa4598c9ea81af18fb4d3394a3388f2978feff259709"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/update-removes-collective.png",
+      "sha256": "39c0c5f35bac15943f63bcfe37e1b421a0fdf9a3efffb23dc5a36a37fc726844"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/update-with-new-turns.png",
+      "sha256": "7c300147e7b7515d4aade944469d39874c051cdf8ca865d57f747f09c596739e"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/waiting-for-github.png",
+      "sha256": "04d2724042b729d67916a5b4d7f72d4d2cf68a571b9e50c27ebc296a00df0d08"
+    },
+    {
+      "path": "023225ee5cbe/light/desktop/waits-for-approval.png",
+      "sha256": "2819bd2a313c4e3b62cd20d4485c518a66d5b3578472b08d2471adbd5816de62"
+    },
+    {
+      "path": "023225ee5cbe/light/mobile/not-published.png",
+      "sha256": "7fc7cde70662ca8fd1ed5a4f28ae1dbfa6e0af078de9a6a18b3d5eb3a55ae2e6"
+    },
+    {
+      "path": "023225ee5cbe/light/mobile/ready-to-publish.png",
+      "sha256": "9f8fd9f39fca11bf7029977439abb137050c1f152a19c5832cb1fd0512f74aa5"
+    },
+    {
+      "path": "023225ee5cbe/light/mobile/update-with-new-turns.png",
+      "sha256": "d51a4348a71a34c96dce18333eb87ae2dd2b54c2545ec00e6566a1d187488fa1"
+    },
+    {
+      "path": "660d1ba005ef/compare-ready-dark.png",
+      "sha256": "fd45513eb69dd87fb21a87b591f1956cc921f6134371e3aa23ea8785a4dcd50c"
+    },
+    {
+      "path": "660d1ba005ef/compare-ready-light.png",
+      "sha256": "48949d9c278641082e93df462423b8b3347a8f5db1cb0c1c5e5681953feadd20"
+    },
+    {
+      "path": "660d1ba005ef/compare-stopped-dark.png",
+      "sha256": "31f287dd5fbd961e62d512b6dffd1fb67f7da132af1043a19e5e159746a82f81"
+    },
+    {
+      "path": "660d1ba005ef/compare-stopped-light.png",
+      "sha256": "5b24e69c021584820cadec824b760a986ae3b6a3763b152dd59bd3a37785860f"
+    },
+    {
+      "path": "660d1ba005ef/dark-contact-1.png",
+      "sha256": "6d2b6ef9ef4ecec9d5cfa60486d5b08ab878950352f4396c55f687c41bd9f447"
+    },
+    {
+      "path": "660d1ba005ef/dark-contact-2.png",
+      "sha256": "2d806d38d76bb90232aa4f4aa06b52b3f14cab8b9a21f1cb917b1ced617555fb"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/already-authenticated.png",
+      "sha256": "1bb8357209ebff77aa4f0f5300617118e710ee874f612192f2610bb83a792141"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/audience-unknown.png",
+      "sha256": "bcbe89ad1fc7d355901a09d7f1d6d8be8fc6ac38b7da02abeca1aed7bbeb2e00"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/auto-publish-on.png",
+      "sha256": "f79d2a46aba46a7e2bf542dc48126ad1df14d3f21346d9ad26c4fdfcf4879485"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/collectives-read-failed.png",
+      "sha256": "424a890950f5c46cd553b854767ed106d6fb9e015ddf3a34d1088620964a6642"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/connect-completes.png",
+      "sha256": "1bb8357209ebff77aa4f0f5300617118e710ee874f612192f2610bb83a792141"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/connect-to-village.png",
+      "sha256": "4c8a5d28decd70a6f736732af0c16bac5d167b4b434068098c08375d51993c86"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/content-step-failed.png",
+      "sha256": "e58f3324826ac927b0a14b5f3ec4d091a5428d3dddc2c2bc4a6f3af6e76e8381"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/held-until-ingest.png",
+      "sha256": "f611d24261616ec127cbc81451e3a84e3a84581e1c19b75b458d83d979b5321c"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/login-start-failed.png",
+      "sha256": "7a5ce3f5ea9b987e1cadc319c6ceb3bd0ac44ba4b3178fbe92486ff804206305"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/manage-opens.png",
+      "sha256": "f55abfdfadb010e13c3ad26d3ba8c3aa038a0092088684799fb24e5cc7f2ad28"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/manage-removes-collective.png",
+      "sha256": "0b4da65ceee619b499db3dabff21e0c4f697ab57a320e9bf311dd6f15aef71f9"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/new-turns.png",
+      "sha256": "f72195a5fa920df3ad53dab62da19add2be338cbb18b21282e4b5b5083d705d4"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/not-in-a-collective.png",
+      "sha256": "c09728086b9c415bac4305c1d7181295c6585a2f3136d68c034a9b5c09c79298"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/not-published.png",
+      "sha256": "7ef3520fc01eb3605e9f9ab9db42fe3eaf3357ba862300bb5cd0867e5c22c5cc"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/only-curated-collective-waits.png",
+      "sha256": "f6833bddc49d322de16d0584585255db616506674c7869a074310d125aa6d144"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/outside-saved-lists.png",
+      "sha256": "dfc8b0c47f5db259551252e7cd7c6e1e09c294a43eb22f0bb02c243fd2006c00"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/partial-publish-removes-reader.png",
+      "sha256": "0b4da65ceee619b499db3dabff21e0c4f697ab57a320e9bf311dd6f15aef71f9"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/publication-read-failed.png",
+      "sha256": "7cefd27f68c6ee097f69946709e280560ac8fbd436a32eeacdc3b9748ffe16f6"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/published-done.png",
+      "sha256": "7f20aceea535f30a9d13f97cc5c94d4fe4efc0ac73751c3ffab2fda23f5c4d7c"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/published-while-signed-out.png",
+      "sha256": "92eb071daddd22d955f8ab76e5393e86b1e8790b54959a9d33a38d9463612948"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/publishing.png",
+      "sha256": "47c5f80b9744f478555aafacc24a76c50871d90d2c7c6d44128042ab36796449"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/ready-to-publish.png",
+      "sha256": "1bb8357209ebff77aa4f0f5300617118e710ee874f612192f2610bb83a792141"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/removes-final-collective.png",
+      "sha256": "ac1c793a17c4e171357743796d926271ef574306978953d0514cc8d6cb8b0ec6"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/scan-failed.png",
+      "sha256": "1bb7979967548a881e3625aaac54a224ef48aa84ea50ab811d036dfbd7f26160"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/scanning.png",
+      "sha256": "6c531481e2dd81cf80acbd0e3dc7ee4a36f20512fbaf12693210996a4d411668"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/signed-out-on-push.png",
+      "sha256": "4c8a5d28decd70a6f736732af0c16bac5d167b4b434068098c08375d51993c86"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/skipped-collective.png",
+      "sha256": "9aa208b6182a2511c0c5bf754f22f99ca117bc5a9330ca46f5310e9063e76593"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/stopped-at-a-step.png",
+      "sha256": "c1f10ac5db4fc3c98777a8fc45901abcae61e1605b4128ae71ae936d95478356"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/stopped-rescan-fails.png",
+      "sha256": "60192aedce2a4a28e30e5d275b11cc1df3cea1db92c8e0e32b43b13074b16aeb"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/transcript-missing.png",
+      "sha256": "0e9c0aceccdc5396ea41036f6ea9ebefc23444ece0eab2d503b5f5e4eb42fff2"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/up-to-date.png",
+      "sha256": "14e6a04fd16824d0e954e1774cd68d8493f74d9aca03e1da2d7572bc6440a8bd"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/update-adds-collective.png",
+      "sha256": "7f20aceea535f30a9d13f97cc5c94d4fe4efc0ac73751c3ffab2fda23f5c4d7c"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/update-keeps-audience.png",
+      "sha256": "d7fe26f0a7c8997072794ffd19c74d8cb35a1d60ebeff1895bb4ca9bc8f65b14"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/update-removes-collective.png",
+      "sha256": "4f2291618ba82501632b59cb1b65e4967b6179aaacc15f8d432243377ffe65a4"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/update-with-new-turns.png",
+      "sha256": "0486cddcd4a7a6f8f63a501ef4baf63f8734e809e57506ce0e6cff31c6f2bcb2"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/waiting-for-github.png",
+      "sha256": "6a419006ff3bf56fbf992eb5f1d5a02146b186d0afe3d84180f47b8b958e964a"
+    },
+    {
+      "path": "660d1ba005ef/dark/desktop/waits-for-approval.png",
+      "sha256": "2ae5f75158097d8db376569ce216f8bea3ab535311ee35adb50ee4fe0f3a4aef"
+    },
+    {
+      "path": "660d1ba005ef/dark/mobile/not-published.png",
+      "sha256": "79a9a19bcaf43050d96e7f410c477601a2c7e9d354b60d43b91a9b4db96c4b11"
+    },
+    {
+      "path": "660d1ba005ef/dark/mobile/ready-to-publish.png",
+      "sha256": "2a1eaf36b4d2f991e7a0c20eae68d06434b3bfb55f24d489ee2e9b41f0899266"
+    },
+    {
+      "path": "660d1ba005ef/dark/mobile/update-with-new-turns.png",
+      "sha256": "793fa0f7dd1d1c49e372d5e721d94ed698a6647237a7d227cacd48c25a5507d8"
+    },
+    {
+      "path": "660d1ba005ef/light-contact-1.png",
+      "sha256": "12423fa20e15f7b75ca1f88014212ba1c39b70e92874f25e29ad1229f7334401"
+    },
+    {
+      "path": "660d1ba005ef/light-contact-2.png",
+      "sha256": "0f98884eb1ddada3206d4b067284ffbbe4dc191ee49c92a875800d7cdc4d84d4"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/already-authenticated.png",
+      "sha256": "ec202c840e7cb80ab472cbf7da8070b28ca575e3aeceb95def33a8002f9534e3"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/audience-unknown.png",
+      "sha256": "1010e1c7c787e6d3844a8479fa8d8115a094bf1983a1fe5c96e71592ef127f1c"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/auto-publish-on.png",
+      "sha256": "89fd13be4352bd3af85e310cb2043d47de2bf1ba65579160d574ccc9c32a48ae"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/collectives-read-failed.png",
+      "sha256": "5a666b59f94c53f4eda3a4093f676f039db05d24f3163638e5b9e4455673760a"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/connect-completes.png",
+      "sha256": "ec202c840e7cb80ab472cbf7da8070b28ca575e3aeceb95def33a8002f9534e3"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/connect-to-village.png",
+      "sha256": "3a2fd32d54768bf1db88adb10677fca1b344917816b8023bbd404a6ca1b280cf"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/content-step-failed.png",
+      "sha256": "20889dacdd7eb21f2bbca782419feb41aa2aee2e0cb6a8f5172e78177d462d71"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/held-until-ingest.png",
+      "sha256": "b3694d045f36d7ebea0120a60e6d4a3d4279778769dd0550174ca8b14bc5a485"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/login-start-failed.png",
+      "sha256": "2c0a1e1c2a22dc4b94ad76b7d64183970fe2fbfc6162949f0c48c6140b87ec36"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/manage-opens.png",
+      "sha256": "7b27df389f46d23d2516314de87a78b53b2b4bd9516c317a2c4f502ae8c93a2c"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/manage-removes-collective.png",
+      "sha256": "bbe757409f0307e59f33376bbce931b022cb7e7bfa61bab25d8e58f7e83274b7"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/new-turns.png",
+      "sha256": "79ca64462ef622d9f737a709e087d57c532ae55d3d5944c69e673b34b7647b32"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/not-in-a-collective.png",
+      "sha256": "fca2317e99159dcc762f9dd30d090abd7ed850561576a25a596d3ad5605f99dd"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/not-published.png",
+      "sha256": "c9f20b0bb7b7c9b03ded94c8ed73ab02f443827713e091c92ad46628095aae38"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/only-curated-collective-waits.png",
+      "sha256": "d3a43b52a5d8831afc141cbe97766489f456c6968feb7d4dd0da3b6b0950e4c4"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/outside-saved-lists.png",
+      "sha256": "ff95dbb1c5642486a387937765056db8d562797e8224f06ed03db2afc4c721d9"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/partial-publish-removes-reader.png",
+      "sha256": "bbe757409f0307e59f33376bbce931b022cb7e7bfa61bab25d8e58f7e83274b7"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/publication-read-failed.png",
+      "sha256": "5dc3470d8ba37d972d418bdfc28493341a42cf7c53cd958b36eb1b3f5c1730e7"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/published-done.png",
+      "sha256": "64244208d5679b30ec05e2ace2e1d790d0f529a672660190ced2b2d9d2475557"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/published-while-signed-out.png",
+      "sha256": "b0cf06d48a5bcfa6b3ac60334d335a50c4045b70b1009bacbf47bc14f477b975"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/publishing.png",
+      "sha256": "fa355b284a99db40d43f8c9cdef67bff27d9e64a182a49f1862f47ebdb220ce1"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/ready-to-publish.png",
+      "sha256": "ec202c840e7cb80ab472cbf7da8070b28ca575e3aeceb95def33a8002f9534e3"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/removes-final-collective.png",
+      "sha256": "6bf6a70593f712afbfadc6c76c345d9f42ab47205f822ca90029d4f4d899c4c6"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/scan-failed.png",
+      "sha256": "a0a5b37633c06cefddfd6f26b58d79a1e43c05cf9c434aea5d4dcb79eaada85d"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/scanning.png",
+      "sha256": "1cf46fc25489b5b869fafa5c218cab3d7671a5faa8cfe01946b0280c23ce1888"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/signed-out-on-push.png",
+      "sha256": "3a2fd32d54768bf1db88adb10677fca1b344917816b8023bbd404a6ca1b280cf"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/skipped-collective.png",
+      "sha256": "e389a539c715d05ec394ffd664a6d906a244339696c45846f8563f1a873d489c"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/stopped-at-a-step.png",
+      "sha256": "c0ba0ab0737de114240caa5e17bb5fe6a6a34e41d3f6e2a60546437ce14a6944"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/stopped-rescan-fails.png",
+      "sha256": "a3b256e2f7ffac35b2249ab78dd45152295570f9fe45d92663c3c6854b3a98af"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/transcript-missing.png",
+      "sha256": "3d7a9d4ab15e342cd5c5ed75328b2c32ef66ff3a6784f7de8d3b14158456824b"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/up-to-date.png",
+      "sha256": "f6901acea8693c2be180d65084a216925925f363ac8e92220eedc3e4d1c42575"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/update-adds-collective.png",
+      "sha256": "64244208d5679b30ec05e2ace2e1d790d0f529a672660190ced2b2d9d2475557"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/update-keeps-audience.png",
+      "sha256": "89f8744f29cc5d779ca7fa4598c9ea81af18fb4d3394a3388f2978feff259709"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/update-removes-collective.png",
+      "sha256": "39c0c5f35bac15943f63bcfe37e1b421a0fdf9a3efffb23dc5a36a37fc726844"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/update-with-new-turns.png",
+      "sha256": "7c300147e7b7515d4aade944469d39874c051cdf8ca865d57f747f09c596739e"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/waiting-for-github.png",
+      "sha256": "04d2724042b729d67916a5b4d7f72d4d2cf68a571b9e50c27ebc296a00df0d08"
+    },
+    {
+      "path": "660d1ba005ef/light/desktop/waits-for-approval.png",
+      "sha256": "2819bd2a313c4e3b62cd20d4485c518a66d5b3578472b08d2471adbd5816de62"
+    },
+    {
+      "path": "660d1ba005ef/light/mobile/not-published.png",
+      "sha256": "7fc7cde70662ca8fd1ed5a4f28ae1dbfa6e0af078de9a6a18b3d5eb3a55ae2e6"
+    },
+    {
+      "path": "660d1ba005ef/light/mobile/ready-to-publish.png",
+      "sha256": "9f8fd9f39fca11bf7029977439abb137050c1f152a19c5832cb1fd0512f74aa5"
+    },
+    {
+      "path": "660d1ba005ef/light/mobile/update-with-new-turns.png",
+      "sha256": "d51a4348a71a34c96dce18333eb87ae2dd2b54c2545ec00e6566a1d187488fa1"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/auto-publish-on.png",
+      "sha256": "bbb4bc23f6671d72e8ea5fe601d45879ba15ce36e726df126788bceb148bdf2a"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/connect-to-village.png",
+      "sha256": "e5c9e6dba916ab0a97b075275bc975047fcb6e44f0b417f08d9622e806aae235"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/new-turns.png",
+      "sha256": "3637d625427b5afbf6e5c01ad03561bb0cbc05db5ce4d3e91590fbbf1a6b3643"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/not-in-a-collective.png",
+      "sha256": "6dbf7851ecbff3ad895918fa240f107018b1c74b04ee03c9477fc789bc729c5e"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/not-published.png",
+      "sha256": "7faae25bc2b46a554dfd41f36da5bf13da733d15b878d562d4fe2755e410f2b9"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/outside-saved-lists.png",
+      "sha256": "0430db7ec07337f1f6e0d27a80f0daa5b5cbde73bfc1850465bf7e5e7c224fce"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/published-done.png",
+      "sha256": "4e18ca1c4a959d78999be88a8e4a9a8db10455736fdf96eaa84e9c66a2babe47"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/publishing.png",
+      "sha256": "2458e8034d7fec0dd6f6e625d3e318d118c9897a3a3f5f474f42a37aaa30e66e"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/ready-to-publish.png",
+      "sha256": "8b6846f25876c33928580a1369dc24f5b88e39a834923c610adf6cd5e1a9c566"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/scan-failed.png",
+      "sha256": "162413727893c2b80b7c7fde637bb11f41255a3a9300fab8d9af667b11128c8e"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/scanning.png",
+      "sha256": "14576cfd2ac7425eb5d943b01b76e9adfd6f7a52e29f194574cb0d804fb990c7"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/stopped-at-a-step.png",
+      "sha256": "46ec7397eb515f2ef14c586a1c440c361aac5bb1d3ea818207c004262ed1faaa"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/up-to-date.png",
+      "sha256": "3146deb2453f26edaa66a544d850e94f61435be30ee11c904247ab7b2a953ec3"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/update-keeps-audience.png",
+      "sha256": "4d61a440e72c064fbe4310210a10bcfe39f90db98dcb858d931e8f2b19deb777"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/update-with-new-turns.png",
+      "sha256": "c51da38b0585e94703d04b718f9e0d76bef3fca0b18acc1a57c93e7bb7b5c9ac"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/waiting-for-github.png",
+      "sha256": "5b7a49b0847675b501d7dd3886d6eda3b7c4cb1fad6cfd154ec2c752d6cfcd48"
+    },
+    {
+      "path": "b38c8b4/dark/desktop/waits-for-approval.png",
+      "sha256": "aafbb45998d454e94dc3941fc25ceb55c62b0967ad2e9356e6dced80f62f2f0b"
+    },
+    {
+      "path": "b38c8b4/dark/mobile/not-published.png",
+      "sha256": "ea395d224590bc2f421ad04c8b33beaf6d6bf4fb85a90db4d2e0e3bc5fe2fb8a"
+    },
+    {
+      "path": "b38c8b4/dark/mobile/ready-to-publish.png",
+      "sha256": "343521091293e909ff4f979f3045dd435b5d11a44ebb9b70e5c62ec9a046f51a"
+    },
+    {
+      "path": "b38c8b4/dark/mobile/update-with-new-turns.png",
+      "sha256": "a4587c83283dd0cd6b8cdc364043c9cfff7e4ac431915f538cdc08cc179a3d9e"
+    },
+    {
+      "path": "b38c8b4/light/desktop/auto-publish-on.png",
+      "sha256": "fefc2801b079ee456ff88f3085cc6a49935cfc69a9fa1a48d07ed164d520a1ee"
+    },
+    {
+      "path": "b38c8b4/light/desktop/connect-to-village.png",
+      "sha256": "f77aef42b33b187942e8983233d2139dedf3782b3da145e48287ea88c84d105b"
+    },
+    {
+      "path": "b38c8b4/light/desktop/new-turns.png",
+      "sha256": "08e49e77ed25f63be8f1f84eec040737c17f586c9f017c288341fc8ff88947d1"
+    },
+    {
+      "path": "b38c8b4/light/desktop/not-in-a-collective.png",
+      "sha256": "41dcfc7d9bc90fcad04b8baffdb1c26e426c2de3e252978368793d18afc838fd"
+    },
+    {
+      "path": "b38c8b4/light/desktop/not-published.png",
+      "sha256": "fb3f12408eabd60599e164f2479052baf761b0d4f90e92e615762db9c9323335"
+    },
+    {
+      "path": "b38c8b4/light/desktop/outside-saved-lists.png",
+      "sha256": "059f1e94d7400e26d3ebaa87a922e363814817d0c6135cc73792b8e3c7b9aa75"
+    },
+    {
+      "path": "b38c8b4/light/desktop/published-done.png",
+      "sha256": "bf98923b8a7c95187fd857c0f7452daf0587622b19898b5cac03df2020199989"
+    },
+    {
+      "path": "b38c8b4/light/desktop/publishing.png",
+      "sha256": "b1aa05c8bcaab1c926340095c6278e313230c0a4bda09262657946a24422cf85"
+    },
+    {
+      "path": "b38c8b4/light/desktop/ready-to-publish.png",
+      "sha256": "f43017cddcba4b0002aa0bca47c5e899ca147a569b56e51f865a691afce9d516"
+    },
+    {
+      "path": "b38c8b4/light/desktop/scan-failed.png",
+      "sha256": "46b2aa07a1b86d71b7618dc4e5ec6a4a21091411b90e82bed18d8703edb7a0d7"
+    },
+    {
+      "path": "b38c8b4/light/desktop/scanning.png",
+      "sha256": "fa9ff93fd449f068b2ec0b64a2038e944b73d475ff09cff696a9b42a913c3d0c"
+    },
+    {
+      "path": "b38c8b4/light/desktop/stopped-at-a-step.png",
+      "sha256": "c487cec62b8ae5ccfb4a57de9a444843916e4f01e41776cd7b5b9c2cb6afac4a"
+    },
+    {
+      "path": "b38c8b4/light/desktop/up-to-date.png",
+      "sha256": "966e631ce40326c169052fdd73c8ffb864a6f5ae002dc5e1ea307dfbad840f7d"
+    },
+    {
+      "path": "b38c8b4/light/desktop/update-keeps-audience.png",
+      "sha256": "67f13cee75c453bd350c65ec2d9c0fb2343b92fb7924647130787e1cafe91cbb"
+    },
+    {
+      "path": "b38c8b4/light/desktop/update-with-new-turns.png",
+      "sha256": "8169022abbc409fdd1ac95e12599c4d1f491bb93818ec1f825b03aca5e63a6a1"
+    },
+    {
+      "path": "b38c8b4/light/desktop/waiting-for-github.png",
+      "sha256": "54f4431a28fec8e1744080c56162701e586fea33c99bf36657e6e03d99f27c1f"
+    },
+    {
+      "path": "b38c8b4/light/desktop/waits-for-approval.png",
+      "sha256": "4ecbe7dd544f5780b463aa03868646b783d5e971fec6684fd7e28f7859531e6e"
+    },
+    {
+      "path": "b38c8b4/light/mobile/not-published.png",
+      "sha256": "ed025786818fda6c6dce5779391b2c4d572a6206063895a3ee5cabe9c5a544d2"
+    },
+    {
+      "path": "b38c8b4/light/mobile/ready-to-publish.png",
+      "sha256": "1a2dccc3fa35528668222d9ff45a3dcddef313311f27c840ec3d8615fb95cd12"
+    },
+    {
+      "path": "b38c8b4/light/mobile/update-with-new-turns.png",
+      "sha256": "02da7deb3aa471a99d9373c7ba2f3e6a3a2aba52d9bc498320740ab581240184"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/auto-publish-on.png",
+      "sha256": "bbb4bc23f6671d72e8ea5fe601d45879ba15ce36e726df126788bceb148bdf2a"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/connect-to-village.png",
+      "sha256": "e5c9e6dba916ab0a97b075275bc975047fcb6e44f0b417f08d9622e806aae235"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/new-turns.png",
+      "sha256": "3637d625427b5afbf6e5c01ad03561bb0cbc05db5ce4d3e91590fbbf1a6b3643"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/not-in-a-collective.png",
+      "sha256": "6dbf7851ecbff3ad895918fa240f107018b1c74b04ee03c9477fc789bc729c5e"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/not-published.png",
+      "sha256": "7faae25bc2b46a554dfd41f36da5bf13da733d15b878d562d4fe2755e410f2b9"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/outside-saved-lists.png",
+      "sha256": "0430db7ec07337f1f6e0d27a80f0daa5b5cbde73bfc1850465bf7e5e7c224fce"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/published-done.png",
+      "sha256": "4e18ca1c4a959d78999be88a8e4a9a8db10455736fdf96eaa84e9c66a2babe47"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/publishing.png",
+      "sha256": "2458e8034d7fec0dd6f6e625d3e318d118c9897a3a3f5f474f42a37aaa30e66e"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/ready-to-publish.png",
+      "sha256": "8b6846f25876c33928580a1369dc24f5b88e39a834923c610adf6cd5e1a9c566"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/scan-failed.png",
+      "sha256": "162413727893c2b80b7c7fde637bb11f41255a3a9300fab8d9af667b11128c8e"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/scanning.png",
+      "sha256": "14576cfd2ac7425eb5d943b01b76e9adfd6f7a52e29f194574cb0d804fb990c7"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/stopped-at-a-step.png",
+      "sha256": "46ec7397eb515f2ef14c586a1c440c361aac5bb1d3ea818207c004262ed1faaa"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/up-to-date.png",
+      "sha256": "3146deb2453f26edaa66a544d850e94f61435be30ee11c904247ab7b2a953ec3"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/update-keeps-audience.png",
+      "sha256": "4d61a440e72c064fbe4310210a10bcfe39f90db98dcb858d931e8f2b19deb777"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/update-with-new-turns.png",
+      "sha256": "c51da38b0585e94703d04b718f9e0d76bef3fca0b18acc1a57c93e7bb7b5c9ac"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/waiting-for-github.png",
+      "sha256": "59b1cb6abf9246c1230f0d68787d1367e3dbe5fea8e1ccc0b5d0106ab67a8b4b"
+    },
+    {
+      "path": "fe69e5a/dark/desktop/waits-for-approval.png",
+      "sha256": "aafbb45998d454e94dc3941fc25ceb55c62b0967ad2e9356e6dced80f62f2f0b"
+    },
+    {
+      "path": "fe69e5a/dark/mobile/not-published.png",
+      "sha256": "ea395d224590bc2f421ad04c8b33beaf6d6bf4fb85a90db4d2e0e3bc5fe2fb8a"
+    },
+    {
+      "path": "fe69e5a/dark/mobile/ready-to-publish.png",
+      "sha256": "343521091293e909ff4f979f3045dd435b5d11a44ebb9b70e5c62ec9a046f51a"
+    },
+    {
+      "path": "fe69e5a/dark/mobile/update-with-new-turns.png",
+      "sha256": "a4587c83283dd0cd6b8cdc364043c9cfff7e4ac431915f538cdc08cc179a3d9e"
+    },
+    {
+      "path": "fe69e5a/light/desktop/auto-publish-on.png",
+      "sha256": "fefc2801b079ee456ff88f3085cc6a49935cfc69a9fa1a48d07ed164d520a1ee"
+    },
+    {
+      "path": "fe69e5a/light/desktop/connect-to-village.png",
+      "sha256": "f77aef42b33b187942e8983233d2139dedf3782b3da145e48287ea88c84d105b"
+    },
+    {
+      "path": "fe69e5a/light/desktop/new-turns.png",
+      "sha256": "08e49e77ed25f63be8f1f84eec040737c17f586c9f017c288341fc8ff88947d1"
+    },
+    {
+      "path": "fe69e5a/light/desktop/not-in-a-collective.png",
+      "sha256": "5c557ad3529b32ab0a27949714c1b5ef2f9f1d316ad9acaf070159cab827c35d"
+    },
+    {
+      "path": "fe69e5a/light/desktop/not-published.png",
+      "sha256": "fb3f12408eabd60599e164f2479052baf761b0d4f90e92e615762db9c9323335"
+    },
+    {
+      "path": "fe69e5a/light/desktop/outside-saved-lists.png",
+      "sha256": "059f1e94d7400e26d3ebaa87a922e363814817d0c6135cc73792b8e3c7b9aa75"
+    },
+    {
+      "path": "fe69e5a/light/desktop/published-done.png",
+      "sha256": "bf98923b8a7c95187fd857c0f7452daf0587622b19898b5cac03df2020199989"
+    },
+    {
+      "path": "fe69e5a/light/desktop/publishing.png",
+      "sha256": "b1aa05c8bcaab1c926340095c6278e313230c0a4bda09262657946a24422cf85"
+    },
+    {
+      "path": "fe69e5a/light/desktop/ready-to-publish.png",
+      "sha256": "f43017cddcba4b0002aa0bca47c5e899ca147a569b56e51f865a691afce9d516"
+    },
+    {
+      "path": "fe69e5a/light/desktop/scan-failed.png",
+      "sha256": "46b2aa07a1b86d71b7618dc4e5ec6a4a21091411b90e82bed18d8703edb7a0d7"
+    },
+    {
+      "path": "fe69e5a/light/desktop/scanning.png",
+      "sha256": "fa9ff93fd449f068b2ec0b64a2038e944b73d475ff09cff696a9b42a913c3d0c"
+    },
+    {
+      "path": "fe69e5a/light/desktop/stopped-at-a-step.png",
+      "sha256": "c487cec62b8ae5ccfb4a57de9a444843916e4f01e41776cd7b5b9c2cb6afac4a"
+    },
+    {
+      "path": "fe69e5a/light/desktop/up-to-date.png",
+      "sha256": "966e631ce40326c169052fdd73c8ffb864a6f5ae002dc5e1ea307dfbad840f7d"
+    },
+    {
+      "path": "fe69e5a/light/desktop/update-keeps-audience.png",
+      "sha256": "67f13cee75c453bd350c65ec2d9c0fb2343b92fb7924647130787e1cafe91cbb"
+    },
+    {
+      "path": "fe69e5a/light/desktop/update-with-new-turns.png",
+      "sha256": "8169022abbc409fdd1ac95e12599c4d1f491bb93818ec1f825b03aca5e63a6a1"
+    },
+    {
+      "path": "fe69e5a/light/desktop/waiting-for-github.png",
+      "sha256": "54f4431a28fec8e1744080c56162701e586fea33c99bf36657e6e03d99f27c1f"
+    },
+    {
+      "path": "fe69e5a/light/desktop/waits-for-approval.png",
+      "sha256": "4ecbe7dd544f5780b463aa03868646b783d5e971fec6684fd7e28f7859531e6e"
+    },
+    {
+      "path": "fe69e5a/light/mobile/not-published.png",
+      "sha256": "ed025786818fda6c6dce5779391b2c4d572a6206063895a3ee5cabe9c5a544d2"
+    },
+    {
+      "path": "fe69e5a/light/mobile/ready-to-publish.png",
+      "sha256": "1a2dccc3fa35528668222d9ff45a3dcddef313311f27c840ec3d8615fb95cd12"
+    },
+    {
+      "path": "fe69e5a/light/mobile/update-with-new-turns.png",
+      "sha256": "02da7deb3aa471a99d9373c7ba2f3e6a3a2aba52d9bc498320740ab581240184"
+    }
+  ],
+  "imagesRecaptured": false,
+  "sourceAuditRef": "peasant-25--captured-source",
+  "sourceAuditHead": "863e86d5b79b66754b26ebc5d6355eb9cfd585b4",
+  "foundationMergedCommit": "3217f21e86b8df2084995d02cc0cc7713dc8670c",
+  "finalFullIntegrationGate": "passed all68 packages, no-race, exactly-once; pinned-Go whitespace-only formatting in isolated clone documented"
+}
