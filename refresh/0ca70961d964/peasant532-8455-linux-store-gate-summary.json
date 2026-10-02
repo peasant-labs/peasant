@@ -1,0 +1,23 @@
+{
+  "source": "8455ae2699482656896f660b26c76131730448ce",
+  "command": "go test -json -race -count=1 ./internal/store",
+  "platform": "linux/arm64",
+  "goVersion": "1.25.8",
+  "exitCode": 0,
+  "results": [
+    {
+      "Time": "2026-10-02T03:09:19.648733797Z",
+      "Action": "pass",
+      "Package": "github.com/peasant-labs/peasant/internal/store",
+      "Test": "TestPublicationBundleNeverReportsMixedRevisionsReady",
+      "Elapsed": 5.51
+    },
+    {
+      "Time": "2026-10-02T03:09:54.531054299Z",
+      "Action": "pass",
+      "Package": "github.com/peasant-labs/peasant/internal/store",
+      "Elapsed": 119.409
+    }
+  ],
+  "causalityClaim": false
+}

@@ -1,0 +1,53 @@
+Already up to date
+Done in 297ms using pnpm v11.24.0
+$ next build
+   ▲ Next.js 15.5.19
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 4.2s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/13) ...
+   Generating static pages (3/13) 
+   Generating static pages (6/13) 
+   Generating static pages (9/13) 
+ ✓ Generating static pages (13/13)
+   Finalizing page optimization ...
+   Collecting build traces ...
+   Exporting (0/2) ...
+ ✓ Exporting (2/2)
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    3.56 kB         335 kB
+├ ○ /_not-found                            994 B         103 kB
+├ ○ /analytics                            108 kB         423 kB
+├ ○ /dev/changes-harness                 2.41 kB         236 kB
+├ ○ /dev/visual-harness                  6.47 kB         378 kB
+├ ○ /icon.svg                                0 B            0 B
+├ ● /map/[[...segments]]                 12.6 kB         405 kB
+├   └ /map
+├ ● /projects/[[...segments]]            7.68 kB         399 kB
+├   └ /projects
+├ ● /review/[[...segments]]              3.63 kB         272 kB
+├   └ /review
+├ ● /sessions/[[...segments]]            4.98 kB         326 kB
+├   └ /sessions
+└ ○ /share                               19.5 kB         323 kB
++ First Load JS shared by all             102 kB
+  ├ chunks/0cb07a38-393d14575a7ccf05.js  54.2 kB
+  ├ chunks/78-6a16012ab5cdb67e.js        45.8 kB
+  └ other shared chunks (total)          1.96 kB
+
+
+○  (Static)  prerendered as static content
+●  (SSG)     prerendered as static HTML (uses generateStaticParams)
+
+# `next build` (output: export) CLEANS web/out/ and deletes the tracked
+# web/out/.gitkeep placeholder. Re-create it so the worktree stays clean
+# (goreleaser refuses a dirty tree) and the //go:embed all:web/out
+# tracked-file invariant holds (go install / nix). The real index.html +
+# _next/** the build wrote are gitignored.
+$ node scripts/provider-build-provenance-guidance.test.mjs && node scripts/provider-build-provenance.mjs
+provider build provenance guidance: exact final Schema release guidance is protected
+provider build provenance: projects=[/_next/static/chunks/988-acef5f5c7b8a0450.js] transcript=[/_next/static/chunks/988-acef5f5c7b8a0450.js] Map=[/_next/static/chunks/988-acef5f5c7b8a0450.js] Changes=[/_next/static/chunks/988-acef5f5c7b8a0450.js]
+provider build provenance: eight harnesses, official Strike SVG/policy, and fail-closed validation found in web/out and bin/peasant (f054b20c2398095dd01dcaae481b52aed8670c03fe3cd1bbeb0c0beaa6a7770e)

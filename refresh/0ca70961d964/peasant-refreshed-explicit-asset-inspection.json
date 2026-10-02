@@ -1,0 +1,1171 @@
+{
+  "layers": [
+    {
+      "pr": 523,
+      "identicalPaths": 40,
+      "cssBytesUnchanged": true,
+      "inspectedDeltaPairs": [
+        {
+          "oldPath": "/_next/static/RhiT8KgpSmntp7eJ2PAUb/_buildManifest.js",
+          "newPath": "/_next/static/JXa2OGDv1tNGt8X1UoGhi/_buildManifest.js",
+          "oldSHA256": "a805fb1344290683fc991d77e3d741d9be21770e548a34c18a3e95786aea935a",
+          "newSHA256": "a805fb1344290683fc991d77e3d741d9be21770e548a34c18a3e95786aea935a",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/RhiT8KgpSmntp7eJ2PAUb/_ssgManifest.js",
+          "newPath": "/_next/static/JXa2OGDv1tNGt8X1UoGhi/_ssgManifest.js",
+          "oldSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "newSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/chunks/551-e4e11f2022cbd2b8.js",
+          "newPath": "/_next/static/chunks/551-9cd6fba927c40040.js",
+          "oldSHA256": "8651939c78354b021bc648bcf8c1e508cd8925b287c18d282523f8e37a723a7d",
+          "newSHA256": "c9766c19755916682505572f65ca0166d6e2374a86718355ace3a0ccad384086",
+          "inspection": "Common module re-export ID 8206 becomes 5825 and its one reference changes; wrapper moves with sorted module position. Removing those exact wrappers leaves all other bytes equal."
+        },
+        {
+          "oldPath": "/_next/static/chunks/app/sessions/[[...segments]]/page-76f3923ac18d914c.js",
+          "newPath": "/_next/static/chunks/app/sessions/[[...segments]]/page-a221c0a79317770b.js",
+          "oldSHA256": "28cebdf3ee4dc063155556fc33720789c2b0ed6af671258544f4345591c826c0",
+          "newSHA256": "ce92c5e54e6964b18b1b352d3b2bd0eb4aa3bfc9e1fd2f3022d3d76a09f5e493",
+          "inspection": "Sessions page module ID and its entry reference 5825 become 8206; all other bytes equal."
+        },
+        {
+          "oldPath": "/_next/static/chunks/webpack-d68fd37fa0850019.js",
+          "newPath": "/_next/static/chunks/webpack-5e4be2207484ac61.js",
+          "oldSHA256": "801757c0661b664f2a7f40a17dd1d59e4b4ad6ee2359c6b6d6b35c577efd77d0",
+          "newSHA256": "2f42225e006b62b615e2df00275f79e0a30728cc826fd46f10d1a8b9fa4f06d8",
+          "inspection": "Only initialized-chunk map ordering differs; exact key/value multiset and all surrounding bytes equal."
+        },
+        {
+          "oldPath": "/404.html",
+          "newPath": "/404.html",
+          "oldSHA256": "e99b806ea6f66eca555cfe161e9db0b1c47c03b86a63c4ab804f0bd0403c4d80",
+          "newSHA256": "939c3c599acaa08747affe0bd1031c10660fa6d7c62e2eb10a9bcc984237dbf2",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/404/index.html",
+          "newPath": "/404/index.html",
+          "oldSHA256": "e99b806ea6f66eca555cfe161e9db0b1c47c03b86a63c4ab804f0bd0403c4d80",
+          "newSHA256": "939c3c599acaa08747affe0bd1031c10660fa6d7c62e2eb10a9bcc984237dbf2",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/analytics/index.html",
+          "newPath": "/analytics/index.html",
+          "oldSHA256": "ecd7955f24b5a634ca48b37e5febd2175055d6d4af0d882d43b1610dfcad6df6",
+          "newSHA256": "d05248c9d92ec5338aae7e3328327623d90b99a53e530c423186bb2197b83879",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "551-e4e11f2022cbd2b8.js",
+              "new": "551-9cd6fba927c40040.js",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/changes-harness/index.html",
+          "newPath": "/dev/changes-harness/index.html",
+          "oldSHA256": "9516e90ae2c3b71c552d38fd541c5e3ebe4548e9fec9d70ddfacc80dfc262cd2",
+          "newSHA256": "14080019175584a523006c642d0a26802cd55f9d89aeaa12c1bc2974589f1f26",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "551-e4e11f2022cbd2b8.js",
+              "new": "551-9cd6fba927c40040.js",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/visual-harness/index.html",
+          "newPath": "/dev/visual-harness/index.html",
+          "oldSHA256": "7aa32d45b5b865188bc596e44b4504ff5115f29596685d21326c5f505ceb240d",
+          "newSHA256": "757a4d8180ff7f2dba285454b0cf833d53ba338a57dd0f89d50e8fc2d40a6745",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "551-e4e11f2022cbd2b8.js",
+              "new": "551-9cd6fba927c40040.js",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/index.html",
+          "newPath": "/index.html",
+          "oldSHA256": "80ac47bc7edc2b450865da1652895bf4d91821408957a0a4ae738fdd8c60827e",
+          "newSHA256": "01e94f1fb0d6df8485f25bb3b32acb5e9c3d791bd9f3462181513a8f0710c8b9",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/map/index.html",
+          "newPath": "/map/index.html",
+          "oldSHA256": "737ab0ca366220b945765e6087b386affd364d37732d673a1f3815f05744a1fa",
+          "newSHA256": "b05b61efe8589db5141f1c150cf68fded42bbaf5f4ef0e34173e4be800a0ef98",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "551-e4e11f2022cbd2b8.js",
+              "new": "551-9cd6fba927c40040.js",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/projects/index.html",
+          "newPath": "/projects/index.html",
+          "oldSHA256": "6ac8e4661f93cc027bc99ddca3e4afa5d9f15a776d440968c968284f8f779d83",
+          "newSHA256": "3955dae80e1aadff866f49db45dc9bf724ab167b39c63f116b5b99509fbf4879",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "551-e4e11f2022cbd2b8.js",
+              "new": "551-9cd6fba927c40040.js",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/review/index.html",
+          "newPath": "/review/index.html",
+          "oldSHA256": "eb8a5d9381b4be7a7b1486546377db0f04e73e56edf852091579ec0f377d1f31",
+          "newSHA256": "672a8a50316c088da404682841a979a42a968d0681451f47213d23da7c0ab08b",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "551-e4e11f2022cbd2b8.js",
+              "new": "551-9cd6fba927c40040.js",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/sessions/index.html",
+          "newPath": "/sessions/index.html",
+          "oldSHA256": "3ecca89d8b9f1813dc5d25b4c0d22ee2ea855b34cda946e6c2ed25d71652d644",
+          "newSHA256": "ceb36afe7adc2461d7dd55eb12a2bc81009d4fdfdcae5bd09b21719887773fad",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "page-76f3923ac18d914c.js",
+              "new": "page-a221c0a79317770b.js",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/share/index.html",
+          "newPath": "/share/index.html",
+          "oldSHA256": "4844a1f5f5e6cfd36ebd61e9a031bb3f1cca0ec5af1d70ce80cd92c3c17cff71",
+          "newSHA256": "e24cb5436299ed51bee97d0ad0509bc465609fd8395a54e5f019a1f61c4f57e4",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "RhiT8KgpSmntp7eJ2PAUb",
+              "new": "JXa2OGDv1tNGt8X1UoGhi",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-d68fd37fa0850019.js",
+              "new": "webpack-5e4be2207484ac61.js",
+              "occurrences": 2
+            }
+          ]
+        }
+      ],
+      "claim": "Explicit per-asset inspection; no blanket metadata exclusion and no new screenshots."
+    },
+    {
+      "pr": 537,
+      "identicalPaths": 42,
+      "cssBytesUnchanged": true,
+      "inspectedDeltaPairs": [
+        {
+          "oldPath": "/_next/static/a_IUKMyE3rAgsuc8pgcTE/_buildManifest.js",
+          "newPath": "/_next/static/que2EPphNqYxL66T4e4OA/_buildManifest.js",
+          "oldSHA256": "81798b98b7621c0101c05ea53785b6077ab08f54ab8fed3b77ba8db9cf746580",
+          "newSHA256": "81798b98b7621c0101c05ea53785b6077ab08f54ab8fed3b77ba8db9cf746580",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/a_IUKMyE3rAgsuc8pgcTE/_ssgManifest.js",
+          "newPath": "/_next/static/que2EPphNqYxL66T4e4OA/_ssgManifest.js",
+          "oldSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "newSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/404.html",
+          "newPath": "/404.html",
+          "oldSHA256": "1930b26372022ef481f7cc6a924d040c0befbc73cf3207149ae891d1e29d1b5c",
+          "newSHA256": "e82baba6f58b7da9fa11317396d2b4e977a0ec284391fd2733f1b7685a4b8c0b",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/404/index.html",
+          "newPath": "/404/index.html",
+          "oldSHA256": "1930b26372022ef481f7cc6a924d040c0befbc73cf3207149ae891d1e29d1b5c",
+          "newSHA256": "e82baba6f58b7da9fa11317396d2b4e977a0ec284391fd2733f1b7685a4b8c0b",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/analytics/index.html",
+          "newPath": "/analytics/index.html",
+          "oldSHA256": "2cd9cf858fe715f8507eb1dff14573ac9c77be28218cc2172b9ef13c8fe26f75",
+          "newSHA256": "895f1dedf68e127aca0d6ddd63151f7e9660a7885c2a12cb0d4c830a03101b85",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/changes-harness/index.html",
+          "newPath": "/dev/changes-harness/index.html",
+          "oldSHA256": "4a306add48855a964cd1d51ff0599206d88a131d60a0e9a9e186adc4b9c98002",
+          "newSHA256": "9b9566a15ab775d1bf9ee9f8dad11dfd807f05fff85123ad63c24f1d5c42d995",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/visual-harness/index.html",
+          "newPath": "/dev/visual-harness/index.html",
+          "oldSHA256": "6d77544f66b0f012df2d4cbd83e0c3434468845d8c80f9f52472233a5dedb6ad",
+          "newSHA256": "75a6fca6b0347f756ddf1adfaad9233a6a31d50469f7a642030e6e1019cbde55",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/index.html",
+          "newPath": "/index.html",
+          "oldSHA256": "0de393dc6d0da5058e60f3a98b7d89dacb84dc585924cc79bc28aeb34e49a4e4",
+          "newSHA256": "37b07c79ccf7557b04251618788593f4f3bd4407594870c1f5539bc0b222e21c",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/map/index.html",
+          "newPath": "/map/index.html",
+          "oldSHA256": "e0d8c3f054cf1a4eee771ee23e703c57a2767b0479b89bb0e8d47795fd7d8ef6",
+          "newSHA256": "3c756136271282110af515f71a5682691b2285c9d646bce17cd95e56cfd618c8",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/projects/index.html",
+          "newPath": "/projects/index.html",
+          "oldSHA256": "b76f150492687211b1fae5e248fe2489e97069214c29a8ca7bc419cdaecc08fe",
+          "newSHA256": "513749c61590cf34e2cc49eff252284a311b28801ed7c9974b6e897f06eaf5b8",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/review/index.html",
+          "newPath": "/review/index.html",
+          "oldSHA256": "1ea31288f7b63b122221b8afbf96c670d10d7241321694ed45e3862599ca0ab2",
+          "newSHA256": "54e09620acf5207499e82b845dc9c28a2fbc28f81b2ea4461f7c86032331e53e",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/sessions/index.html",
+          "newPath": "/sessions/index.html",
+          "oldSHA256": "22c76cf7104310a847d93a3817afa93b8ead910f49966cbfad0f3cd587e82574",
+          "newSHA256": "19a3e0348b3ead5e0329290c326667c9fbd9632bd4b4bd3f336be45c469471f8",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/share/index.html",
+          "newPath": "/share/index.html",
+          "oldSHA256": "431968fb7003e1bae2a604154216768bfd6b0f84d9e0aeb83221277a8e863c41",
+          "newSHA256": "b451a7373e6c80ec828e1ca2c9f5361ae0b3f73da107e398812c8e94da9ee1df",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "a_IUKMyE3rAgsuc8pgcTE",
+              "new": "que2EPphNqYxL66T4e4OA",
+              "occurrences": 2
+            }
+          ]
+        }
+      ],
+      "claim": "Explicit per-asset inspection; no blanket metadata exclusion and no new screenshots."
+    },
+    {
+      "pr": 538,
+      "identicalPaths": 43,
+      "cssBytesUnchanged": true,
+      "inspectedDeltaPairs": [
+        {
+          "oldPath": "/_next/static/Grjj9I7x_RMkwUVPPcIFG/_buildManifest.js",
+          "newPath": "/_next/static/ym8N4nDOXKn2eBiqo0an4/_buildManifest.js",
+          "oldSHA256": "9142d19dbf259011f369a049c6aecd7d073740b26948400592926559c42a8907",
+          "newSHA256": "9142d19dbf259011f369a049c6aecd7d073740b26948400592926559c42a8907",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/Grjj9I7x_RMkwUVPPcIFG/_ssgManifest.js",
+          "newPath": "/_next/static/ym8N4nDOXKn2eBiqo0an4/_ssgManifest.js",
+          "oldSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "newSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/chunks/webpack-778213ef606c2cf0.js",
+          "newPath": "/_next/static/chunks/webpack-d3ead6136443800c.js",
+          "oldSHA256": "e3791c34c891e2708174b321077d279238dd492681fccd18cac5d4e0b579a142",
+          "newSHA256": "199f5d296bf263b72fad6b4b0f8155c7036496e07efc9702d3688481dbddf5f3",
+          "inspection": "Only initialized-chunk map ordering differs; exact key/value multiset and all surrounding bytes equal."
+        },
+        {
+          "oldPath": "/404.html",
+          "newPath": "/404.html",
+          "oldSHA256": "c4e572c5d9a1b0243829088ea44cea9284df2ec838cf5e1e16a0a74bb153d9c9",
+          "newSHA256": "07ae0101de612d7992753b0bcc7eadda5795c1fda8b551befad2b13101258211",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/404/index.html",
+          "newPath": "/404/index.html",
+          "oldSHA256": "c4e572c5d9a1b0243829088ea44cea9284df2ec838cf5e1e16a0a74bb153d9c9",
+          "newSHA256": "07ae0101de612d7992753b0bcc7eadda5795c1fda8b551befad2b13101258211",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/analytics/index.html",
+          "newPath": "/analytics/index.html",
+          "oldSHA256": "cae683c75517ab0401e9d591bd73167afdc0838efbf2caeb920e738d61dab5d7",
+          "newSHA256": "24df16f11b54efb1170ea6ff764ce4be3fbd4d8a3e1f119cccb0954257129323",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/changes-harness/index.html",
+          "newPath": "/dev/changes-harness/index.html",
+          "oldSHA256": "ab4f46241c8c43d997379f4a867651ba291ced7734ff4ef1095f5198879a94ba",
+          "newSHA256": "678d512f1e5055a4f2c18ce7a594bd6f8723f268cb991b8dbc149df030e34cf3",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/visual-harness/index.html",
+          "newPath": "/dev/visual-harness/index.html",
+          "oldSHA256": "e406a65b7c3cf18351b75b51f33bf34b1251dd1cdfce05ec3ca0c0207634d60a",
+          "newSHA256": "8e052076226c24f1afc1d3609ffd1d130db0b2198229dc02b3add84e8d94a100",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/index.html",
+          "newPath": "/index.html",
+          "oldSHA256": "cf6573f0fdc18774b277a5283e628e0d23055c6a6f06c3faced51c2232c80c0f",
+          "newSHA256": "0ff3a516997c195c339fdef9aa69af9a86ae9d7b5aea65a990b080540d99ec1f",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/map/index.html",
+          "newPath": "/map/index.html",
+          "oldSHA256": "9f7853071b20034248bbb94eb8a5b08a52eb4f6668d3272e230faf0bf424f8f0",
+          "newSHA256": "cfa4009e410fa51d26439188b516c6a564163f7b47d236ee6e481e5c4ea545e0",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/projects/index.html",
+          "newPath": "/projects/index.html",
+          "oldSHA256": "430ff4af55836964326234f7ae5cca09ec69f131f7b750190fb92d37a47df2b6",
+          "newSHA256": "156b446afb3b56c1bbe9e9308b1f9dac2804c39406a63c949e369392178dda32",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/review/index.html",
+          "newPath": "/review/index.html",
+          "oldSHA256": "a6f256b38d3abf36b376681731a80cf9b6af33934f1584b1681b794c6ea9e04f",
+          "newSHA256": "cc44bed3eb550ad3b2033e178700c38bec0fd5e9d4130ad74fe395eb5be7343f",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/sessions/index.html",
+          "newPath": "/sessions/index.html",
+          "oldSHA256": "54fe5bdf589b97d3f899fcfc3199dc1db0c86ff0e3d0583eba077bffd98d6ff2",
+          "newSHA256": "5353086dec6718f50df818f0523a3b072b3a509656243a48af33c7a2f6cd0d61",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/settings/index.html",
+          "newPath": "/settings/index.html",
+          "oldSHA256": "cc5213d5ac389f6d6faa643f3f366f6f3b7aa001fa59c0bc4864bf6fb2d23065",
+          "newSHA256": "ce9c06b75c6945a857bc6e5051fc4d94b75a14f0a8ba77fae81ca390aee001f9",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/share/index.html",
+          "newPath": "/share/index.html",
+          "oldSHA256": "a467f5e8a71250fdd4b93b4813d30b7b65c9c23f4b411dea34a83a156dc23910",
+          "newSHA256": "5a5e76ed8b9fc18791276cf56b443274569a02d81324390f3485ecb223e493c5",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Grjj9I7x_RMkwUVPPcIFG",
+              "new": "ym8N4nDOXKn2eBiqo0an4",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-778213ef606c2cf0.js",
+              "new": "webpack-d3ead6136443800c.js",
+              "occurrences": 2
+            }
+          ]
+        }
+      ],
+      "claim": "Explicit per-asset inspection; no blanket metadata exclusion and no new screenshots."
+    },
+    {
+      "pr": 536,
+      "identicalPaths": 46,
+      "cssBytesUnchanged": true,
+      "inspectedDeltaPairs": [
+        {
+          "oldPath": "/_next/static/Oxjt0Tq9kfeLVDgfEiISy/_buildManifest.js",
+          "newPath": "/_next/static/BBMH_ZYS3qZFstLucHA8Z/_buildManifest.js",
+          "oldSHA256": "9142d19dbf259011f369a049c6aecd7d073740b26948400592926559c42a8907",
+          "newSHA256": "9142d19dbf259011f369a049c6aecd7d073740b26948400592926559c42a8907",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/Oxjt0Tq9kfeLVDgfEiISy/_ssgManifest.js",
+          "newPath": "/_next/static/BBMH_ZYS3qZFstLucHA8Z/_ssgManifest.js",
+          "oldSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "newSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/404.html",
+          "newPath": "/404.html",
+          "oldSHA256": "5a491f2f136cd8a2e4fbfa04484408ed46bf114a7a14d43993c3a670743c70bc",
+          "newSHA256": "b792deb4a4a15a2991cecf8def38fcc694f41a29726da22e033ed6d7e534e8dc",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/404/index.html",
+          "newPath": "/404/index.html",
+          "oldSHA256": "5a491f2f136cd8a2e4fbfa04484408ed46bf114a7a14d43993c3a670743c70bc",
+          "newSHA256": "b792deb4a4a15a2991cecf8def38fcc694f41a29726da22e033ed6d7e534e8dc",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/analytics/index.html",
+          "newPath": "/analytics/index.html",
+          "oldSHA256": "33e1d5eb2f8c60bfdf39feb2d3a72ac09b4afddbcec1835316691bdf03a13a16",
+          "newSHA256": "27b5c31857c405079f2d5c1c16844804cabc8d521fb2a829e050750d066b865e",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/changes-harness/index.html",
+          "newPath": "/dev/changes-harness/index.html",
+          "oldSHA256": "2780495f2435c78f521d3b423c15e6fcc0ecfde14eb5797e41c0efd77b434cdb",
+          "newSHA256": "239ede24e8227511977fe7ba2a680fe937d82936b7acfa075abd93217aa0a966",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/visual-harness/index.html",
+          "newPath": "/dev/visual-harness/index.html",
+          "oldSHA256": "c77a6586658e9b7dc0a1521ae8044240896768e9ac8f671274d62bb378dc48bd",
+          "newSHA256": "a2f21f658ae3a7cbe307f543aaa58f0de245a7161a4f0ae582ce3dbbe339ce6d",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/index.html",
+          "newPath": "/index.html",
+          "oldSHA256": "d24a1bbb3b7808b4e13064ea3701d136c3b5bf0c39b1ae2a7223a83abc277b1c",
+          "newSHA256": "3bdbc4f26db77d0479d04fa4818650410e1ece5dea28bd1cf5a37139c935a529",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/map/index.html",
+          "newPath": "/map/index.html",
+          "oldSHA256": "471111f05bc1583bac935e716b4fe2dcf3337a92d32873c2cf47ec4b7ae02d55",
+          "newSHA256": "7ffb90398706bb5dbc46695edd16dca4f79414a41972f70137fc2e1a34a285fa",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/projects/index.html",
+          "newPath": "/projects/index.html",
+          "oldSHA256": "806d61ab725efc4d93941d01d4808d99f4903c4580ebd9af7fbd4e0a6bbd2c98",
+          "newSHA256": "d69248bda3680f144cd3d12cf03f7c95ec8e902d23979859fda23401fccdd90f",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/review/index.html",
+          "newPath": "/review/index.html",
+          "oldSHA256": "525ab646e3cdff0c02c6f476df28ccc3e17dd85a157eabbc0c993f72e7e4c6b5",
+          "newSHA256": "d0dac64860d56ddf6af566d7c3de1d9c7eea2eb290fcdec53a3919c8131aafd4",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/sessions/index.html",
+          "newPath": "/sessions/index.html",
+          "oldSHA256": "49aceda893ec0a8df1d3bb736fde715aa4310a7e1e8bcb96a4ff6342fb096e5d",
+          "newSHA256": "7c58a0ff67a01fafa5ab88546bacc194810a6c1bdd0b46cbe904c2b8b45ba103",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/settings/index.html",
+          "newPath": "/settings/index.html",
+          "oldSHA256": "6d08caaac464a842d7618b494a459b164c66d06b52dd0388f885ab38becd5cfa",
+          "newSHA256": "7897203eb83ca395cfd466cf94f76464da6f8e8ad0d6537b5b1de787671ba634",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/share/index.html",
+          "newPath": "/share/index.html",
+          "oldSHA256": "95fdcaa7982595b71737d51281fe97af2a08005724df448b50e9480d7516e9d9",
+          "newSHA256": "1963b6214708fe5e85590063731a74233e256e9c8a9546774b6ddb2b413d13b2",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "Oxjt0Tq9kfeLVDgfEiISy",
+              "new": "BBMH_ZYS3qZFstLucHA8Z",
+              "occurrences": 2
+            }
+          ]
+        }
+      ],
+      "claim": "Explicit per-asset inspection; no blanket metadata exclusion and no new screenshots."
+    },
+    {
+      "pr": 539,
+      "identicalPaths": 45,
+      "cssBytesUnchanged": true,
+      "inspectedDeltaPairs": [
+        {
+          "oldPath": "/_next/static/JY75zN5UlcGLuJr_41G2k/_buildManifest.js",
+          "newPath": "/_next/static/g02K3DjNz0aVwPcOPPpE1/_buildManifest.js",
+          "oldSHA256": "9142d19dbf259011f369a049c6aecd7d073740b26948400592926559c42a8907",
+          "newSHA256": "9142d19dbf259011f369a049c6aecd7d073740b26948400592926559c42a8907",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/JY75zN5UlcGLuJr_41G2k/_ssgManifest.js",
+          "newPath": "/_next/static/g02K3DjNz0aVwPcOPPpE1/_ssgManifest.js",
+          "oldSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "newSHA256": "bc26f9a6c2169ef236a5d0379bc4736238b4b1c6b311d0c07392ebd4825c66da",
+          "inspection": "Bytes identical; only build directory changed."
+        },
+        {
+          "oldPath": "/_next/static/chunks/webpack-083b7c02d7ed5fe0.js",
+          "newPath": "/_next/static/chunks/webpack-db3ce2bd613eb13f.js",
+          "oldSHA256": "5fcb04876819db6f870f8ebffbd6243990b9c271aea8511e9d52d9ae1e219416",
+          "newSHA256": "5fc3eafd23e5f133ec91ac67d930bc4ed47d9482c0e6eca7d5620e11b8d061db",
+          "inspection": "Only initialized-chunk map ordering differs; exact key/value multiset and all surrounding bytes equal."
+        },
+        {
+          "oldPath": "/404.html",
+          "newPath": "/404.html",
+          "oldSHA256": "161cb692c85f8a35b256d4e7c2cd6ddba0399ccd9918504d85de859315699680",
+          "newSHA256": "ebe9af5c80b9aa06fd4f839cf94c969721072d884184cde8b14b59efd3dc9de3",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/404/index.html",
+          "newPath": "/404/index.html",
+          "oldSHA256": "161cb692c85f8a35b256d4e7c2cd6ddba0399ccd9918504d85de859315699680",
+          "newSHA256": "ebe9af5c80b9aa06fd4f839cf94c969721072d884184cde8b14b59efd3dc9de3",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/analytics/index.html",
+          "newPath": "/analytics/index.html",
+          "oldSHA256": "7766c46d17112a7e7580fc739b2649e524d74fa61ec398927a9bf10246b7e361",
+          "newSHA256": "4b32250412c86a5cd73c7b33152e40fc041538a9c9473cc65ad610ecbf17e0c7",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/changes-harness/index.html",
+          "newPath": "/dev/changes-harness/index.html",
+          "oldSHA256": "1dcb17b0811d92ae7544a4dd5cbfa47b6f7310d341aed0f9387d22030c21f761",
+          "newSHA256": "5fea4844805b991d07b6ebad890272673f806bfdf9ab8e46d8df164a86a58f9a",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/dev/visual-harness/index.html",
+          "newPath": "/dev/visual-harness/index.html",
+          "oldSHA256": "77a75fee930e455d6bbcdfb7501844fccf77bcc177a12447d9ecd2422339208a",
+          "newSHA256": "2eb2093eead981316c9fb2ddd7c0f8d26ab602614a8d1d53f1291e9607a3fba1",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/index.html",
+          "newPath": "/index.html",
+          "oldSHA256": "b6b3cacd38be4b26cae7eb46ce015a54ec7067c6686a1dd021d12b8d5df4e40f",
+          "newSHA256": "35a00f2bae6b90cd553cd016df8d6d16959ff56ae7ceb288c80913d63c184bcc",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/map/index.html",
+          "newPath": "/map/index.html",
+          "oldSHA256": "c3b4a131722e81cb038895b33aefb112d3f3b772271134db4c6300ade3c15bdb",
+          "newSHA256": "322e129faeddd8cf000119e8e596807351c4968634f452dcf80a8d2bb9d7d19e",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/projects/index.html",
+          "newPath": "/projects/index.html",
+          "oldSHA256": "59e5e8a5771ac074098f4fddf6f747872d86b564551b40329effc2cbcf1acaf5",
+          "newSHA256": "4233f986cb43e43f20384eea2e0c5e22ae8011231211bf8c5bafb5d94ab157c6",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/review/index.html",
+          "newPath": "/review/index.html",
+          "oldSHA256": "da16bd9dc01820a454e3e38a9b1d088bf631ee076980181436c7cadfec4b8a78",
+          "newSHA256": "224d1823c473dd4caa8f5cf6d44071a5e7348f32181b1d9810216620b2a789a9",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/sessions/index.html",
+          "newPath": "/sessions/index.html",
+          "oldSHA256": "28687108b740dd4cc3a3db4195191f15e9f7d8902a6d94677625bebf705f9af3",
+          "newSHA256": "e584e32d4533f4b1766622c71146f8754cfa03406e006cc4341262c017c52d0e",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/settings/index.html",
+          "newPath": "/settings/index.html",
+          "oldSHA256": "d50cf7e17e445399ae3efdc71de08a7232790fe52c3964c435b018c2e5b0b563",
+          "newSHA256": "d9e9060fd47b1a4d395323c6fc9e6c754a9ec82fa775e40a60ab4e03916be89e",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        },
+        {
+          "oldPath": "/share/index.html",
+          "newPath": "/share/index.html",
+          "oldSHA256": "aea053d8cdd1f66c02e5f2eee984a355935af025b8d981e3f7393bf26c71d525",
+          "newSHA256": "588f89caf388c0dda8136c7304fbf05fb66bb78fe96dc40949353fcd06bc8740",
+          "inspection": "Only the following concrete replacements; every other byte equal.",
+          "replacements": [
+            {
+              "old": "JY75zN5UlcGLuJr_41G2k",
+              "new": "g02K3DjNz0aVwPcOPPpE1",
+              "occurrences": 2
+            },
+            {
+              "old": "webpack-083b7c02d7ed5fe0.js",
+              "new": "webpack-db3ce2bd613eb13f.js",
+              "occurrences": 2
+            }
+          ]
+        }
+      ],
+      "claim": "Explicit per-asset inspection; no blanket metadata exclusion and no new screenshots."
+    }
+  ]
+}
