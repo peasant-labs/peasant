@@ -30,10 +30,12 @@ and to prove that every test still runs exactly once across the passes.
   runs a
   **race pass** (every listed test minus the
   partition members) and a **no-race pass** (exactly the partition members).
+  The no-race pass runs one invocation at a time, so each partition test's
+  CPU is attributable.
   With the flag off (the default) it runs a **single no-race pass** over every
-  test, but still
-  computes the plan and applies the screen. The gate computes the plan from
-  `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
+  test, with packages invoked concurrently, but still computes the plan and
+  applies the screen. The gate computes the plan from `go test -list`, so
+  `cmd/testgate plan` prints the plan and runs nothing.
 
 ### Subset runs (`-pkgs`)
 

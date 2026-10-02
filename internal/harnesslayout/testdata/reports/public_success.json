@@ -1,0 +1,78 @@
+{
+  "tool": "example-tool",
+  "roots": [
+    {
+      "present": true,
+      "sessions": 1
+    }
+  ],
+  "captures": [
+    {
+      "tool": "example-tool",
+      "session": "",
+      "metadata": {
+        "models": [
+          "m-1"
+        ],
+        "userTurns": 1,
+        "assistantMessages": 0,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "transcript",
+          "format": "jsonl",
+          "role": "transcript",
+          "records": 1,
+          "kinds": {
+            "user": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.model",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.title",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.ts",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

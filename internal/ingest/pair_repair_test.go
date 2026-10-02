@@ -70,6 +70,7 @@ func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 // pair is repaired by native re-ingestion without --force, or that the
 // unavailable source is reported when no repair is possible.
 func TestPairRepairReingestsFromNative(t *testing.T) {
+	t.Parallel()
 	document := loadPairRepairFixtures(t)
 	for _, fixture := range document.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 var codexUnknownNativeYAML []byte
 
 func TestCodexUnknownNativePersistence(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {

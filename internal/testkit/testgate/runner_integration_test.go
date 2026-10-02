@@ -2,6 +2,9 @@ package testgate
 
 import (
 	"context"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/testkit/teststream"
@@ -57,4 +60,42 @@ func TestRunner_TwoPassRecordsAndScreen(t *testing.T) {
 	}
 	t.Logf("race record: %+v", resA.Records[ModeRace][0])
 	t.Logf("no-race record: %+v", resB.Records[ModeNoRace][0])
+}
+
+// TestRunner_RACE0OverlapsAndAttributesPassLevel runs the gate command on two
+// cheap packages. The child tests rendezvous, so a serialized RACE=0 pass
+// fails, and the printed class table must call that concurrent CPU pass-level.
+func TestRunner_RACE0OverlapsAndAttributesPassLevel(t *testing.T) {
+	var overlap []string
+	var wantBasis string
+	for _, tc := range loadAttributionModes(t).Cases {
+		if len(tc.OverlapPackages) > 0 {
+			overlap = tc.OverlapPackages
+			wantBasis = tc.WantNoRaceBasis
+		}
+	}
+	if len(overlap) != 2 || wantBasis == "" {
+		t.Fatal("attribution fixture has no two-package RACE=0 overlap case")
+	}
+	root := testRepoRoot(t)
+	dir := t.TempDir()
+	t.Setenv("PEASANT_TESTGATE_OVERLAP_DIR", dir)
+	cmd := exec.Command("go", "run", "./cmd/testgate", "run",
+		"-race=false",
+		"-p=2",
+		"-pkgs", strings.Join(overlap, ","),
+		"-out", filepath.Join(t.TempDir(), "out"),
+	)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("RACE=0 overlap run: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "race:                   off (") || !strings.Contains(text, wantBasis) {
+		t.Fatalf("single no-race run missing %q:\n%s", wantBasis, text)
+	}
+	if strings.Contains(text, BasisSerialized) {
+		t.Fatalf("RACE=0 labeled overlapping CPU as %s:\n%s", BasisSerialized, text)
+	}
 }

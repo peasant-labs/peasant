@@ -70,6 +70,7 @@ func loadNativeCLIFixtures(t *testing.T) []nativeCLICase {
 // created by testfixture. Neither the OpenCode executable nor a user's source
 // database is involved. The child process receives only test-owned directories.
 func TestOpenCodeNativeCLI(t *testing.T) {
+	t.Parallel()
 	cases := loadNativeCLIFixtures(t)
 	bin := filepath.Join(t.TempDir(), "peasant")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
