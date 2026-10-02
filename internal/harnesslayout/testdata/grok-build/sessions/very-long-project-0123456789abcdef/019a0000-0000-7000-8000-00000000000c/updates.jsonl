@@ -1,0 +1,5 @@
+{"timestamp":1777636800,"method":"session/update","params":{"sessionId":"019a0000-0000-7000-8000-00000000000c","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"write a "}}}}
+{"timestamp":1777636800,"method":"session/update","params":{"sessionId":"019a0000-0000-7000-8000-00000000000c","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"test"}}}}
+{"timestamp":1777636860,"method":"session/update","params":{"sessionId":"019a0000-0000-7000-8000-00000000000c","update":{"sessionUpdate":"tool_call","toolCallId":"call-9","title":"Write test","kind":"edit","status":"pending"}}}
+{"timestamp":1777636920,"method":"session/update","params":{"sessionId":"019a0000-0000-7000-8000-00000000000c","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Done."}}}}
+{"timestamp":

@@ -1,0 +1,10 @@
+{
+  "turnCount": 2,
+  "userMessageCount": 2,
+  "assistantMessageCount": 3,
+  "errorCount": 0,
+  "toolFailureCount": 0,
+  "cancellationCount": 0,
+  "hasReverted": false,
+  "compactionCount": 0
+}
