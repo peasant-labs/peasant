@@ -1,0 +1,9 @@
+1708ee11cf356d1ea8991828be625c545f0356ef
+go version go1.25.8 darwin/arm64
+python3 scripts/check-sqlite-fork.py
+SQLite origin and documented source hashes match
+All Peasant-owned SQLite imports use the audited package
+go run ./scripts/check-module-install
+the audited driver is installed from the real module zip: passed
+an omitted audited driver cannot install: passed
+module-install exit: 0

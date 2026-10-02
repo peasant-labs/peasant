@@ -1,0 +1,11 @@
+# Correctness and source preservation review
+
+CLEAR for the frozen eight-layer source chain ending at 1708ee11cf356d1ea8991828be625c545f0356ef.
+
+The foundation is the actual verified merge 3217f21e86b8df2084995d02cc0cc7713dc8670c. Every layer contains that ancestor. Root independently checked clean exact heads and byte-identical audited SQLite subtree, source auditor, scoped vet implementation, test workflow and pinned flake lock against the merged foundation, then ran the actual source auditor in all eight worktrees. No source was edited by this review.
+
+The recorded original boundaries and range diffs account for all113 original commits, in order, plus three mechanical import/vendor adaptations. The final nine-file fixture and ANSI correction is retained. B/C independently checked both per-layer preservation and all nine original correction files, complete tracked frontend trees and fresh per-layer generated dependency fingerprints. The only newly introduced upstream import pair, in the automatic publishing read helper, was normalized to the single canonical package. Consumer types cannot silently diverge. Schema0.25/0.26/0.27 pins retain the released contracts and their independently generated real vendor hashes.
+
+The actual final settings API Linuxarm64 Go1.25.8 full store race gate passed119.409s, including the original mixed-revision bundle test5.51s. This does not establish the cause of the earlier SQLITE_BUSY report. The actual final settings-page Pi native namespace race regression passed9.632s. All five normal production builds and fresh exact-source binary/HTTP asset checks passed; rendered equivalence requires the separately explicit changed-byte review.
+
+Final top full Linux integration passed all 68 packages with the exactly-once screen (7m46.005s no-race wall). The pinned Go formatter changed only composite-literal indentation in the isolated clone; ignore-all-space diff is empty and the exact patch is retained. Both actual final real-ZIP versioned install obligations passed under Go1.25.8 on darwin/arm64, with no new owned temporary directory remaining. Old source/image/runtime proofs retain their own source identities. Required remote final-head checks remain a publication/merge gate. Feature, UI and migration merges remain reserved for owner review; this review authorizes no feature merge.

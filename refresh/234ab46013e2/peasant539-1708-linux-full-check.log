@@ -1,0 +1,139 @@
+go version go1.25.8 linux/arm64
+1708ee11cf356d1ea8991828be625c545f0356ef
+Files formatted:
+internal/tui/ftue/page.go
+# Running golangci-lint is deferred until its existing findings are resolved.
+# Use go vet for now
+# golangci-lint run ./...
+./scripts/vet-go.sh
+SQLite origin and documented source hashes match
+All Peasant-owned SQLite imports use the audited package
+go: writing stat cache: open /gomodcache/cache/download/github.com/peasant-labs/peasant/@v/v0.0.0-20261002031335-1708ee11cf35.info179069075.tmp: read-only file system
+python3 scripts/check-sqlite-fork.py
+SQLite origin and documented source hashes match
+All Peasant-owned SQLite imports use the audited package
+ok  	github.com/peasant-labs/peasant/internal/tui/gates	0.808s
+release workflow gates are valid: .github/workflows/release.yml satisfies the release-guard policy in .github/release-guard.policy.yml
+testgate: plan 68 packages, list-wall 24.672s (recorded separately from the test wall)
+testgate: pre-test wall 1m12.972s (from CHECK_START_NS)
+testgate: calibration L=1.248 (probe 46ms, reference 37ms)
+
+=== per-invocation records (no-race (single pass)) ===
+UNIT                                                     CLASS                       WALL      USER    SYSTEM
+github.com/peasant-labs/peasant/internal/ingest          race                   4m29.526s 4m42.909s 3m18.317s
+github.com/peasant-labs/peasant/cmd/peasant              race                     42.106s 2m23.243s   50.572s
+github.com/peasant-labs/peasant/internal/moduleboundary  race                     21.399s   20.705s     990ms
+github.com/peasant-labs/peasant/internal/store           race                     15.906s   19.517s   12.195s
+github.com/peasant-labs/peasant/internal/api             race                     14.591s   32.532s    15.86s
+github.com/peasant-labs/peasant/internal/testkit/testgate race                     10.085s    6.537s     3.13s
+github.com/peasant-labs/peasant/internal/e2e             race                      6.024s    8.066s   19.531s
+github.com/peasant-labs/peasant/third_party/zombiezen-sqlite race                      5.927s     675ms     574ms
+github.com/peasant-labs/peasant/internal/tui/kickstart   race                      5.691s    7.353s    3.567s
+github.com/peasant-labs/peasant/cmd/testgate             race                      4.832s    2.851s    1.505s
+github.com/peasant-labs/peasant/internal/push            race                      4.741s    8.266s     3.46s
+github.com/peasant-labs/peasant/internal/transcript      race                      3.803s    4.174s    1.385s
+github.com/peasant-labs/peasant/internal/autopublish     race                      2.293s    1.172s    1.233s
+github.com/peasant-labs/peasant/internal/tui/ftue        race                      2.269s    2.209s     3.37s
+github.com/peasant-labs/peasant/internal/codemap         race                       2.18s    2.598s    1.827s
+github.com/peasant-labs/peasant/internal/ingest/testfixture race                      2.151s     647ms     703ms
+github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitefile race                      2.111s    1.511s    1.018s
+github.com/peasant-labs/peasant/internal/export          race                      2.019s    2.334s    1.914s
+github.com/peasant-labs/peasant/internal/tui/transcriptview race                      1.978s    2.031s    2.765s
+github.com/peasant-labs/peasant/internal/annotations     race                       1.89s    1.482s    1.497s
+github.com/peasant-labs/peasant/internal/tui/settings    race                       1.86s    1.214s     990ms
+github.com/peasant-labs/peasant/internal/metrics         race                      1.724s    1.591s    1.216s
+github.com/peasant-labs/peasant/internal/testkit/coveragemap race                      1.362s     827ms     945ms
+github.com/peasant-labs/peasant/internal/store/storetest race                      1.358s     971ms    1.192s
+github.com/peasant-labs/peasant/scripts                  race                      1.354s     821ms     876ms
+github.com/peasant-labs/peasant/internal/testutil        race                       1.35s     986ms     905ms
+github.com/peasant-labs/peasant/internal/tui             race                      1.321s     966ms     995ms
+github.com/peasant-labs/peasant/internal/tui/theme/gen   race                      1.286s     735ms     783ms
+github.com/peasant-labs/peasant/internal/config          race                      1.283s     780ms     824ms
+github.com/peasant-labs/peasant/internal/mock            race                      1.254s    1.004s     978ms
+github.com/peasant-labs/peasant/internal/tui/mdrender    race                      1.226s     974ms     919ms
+github.com/peasant-labs/peasant/internal/tui/theme       race                       1.22s     672ms     778ms
+github.com/peasant-labs/peasant/internal/tui/kit         race                      1.214s     888ms     831ms
+github.com/peasant-labs/peasant/internal/githooks        race                      1.211s    1.277s    2.505s
+github.com/peasant-labs/peasant/internal/tui/gates       race                      1.206s     829ms     764ms
+github.com/peasant-labs/peasant/internal/projectlabel    race                       1.19s     702ms     800ms
+github.com/peasant-labs/peasant/internal/perf            race                      1.186s     773ms     886ms
+github.com/peasant-labs/peasant/internal/auth            race                      1.156s     739ms     611ms
+github.com/peasant-labs/peasant/internal/village         race                       1.11s     788ms     787ms
+github.com/peasant-labs/peasant/internal/tui/keymap      race                      1.092s     722ms     774ms
+github.com/peasant-labs/peasant/internal/sessionvisibility race                      1.058s     644ms     799ms
+github.com/peasant-labs/peasant/internal/testkit/fsdecorator race                      1.055s     740ms     837ms
+github.com/peasant-labs/peasant/scripts/record-kinds-docgen race                      1.055s     685ms     708ms
+github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration race                       1.05s     333ms     334ms
+github.com/peasant-labs/peasant/internal/selectionprojection race                      1.039s     685ms     786ms
+github.com/peasant-labs/peasant/internal/pull            race                      1.003s     753ms     757ms
+github.com/peasant-labs/peasant/internal/sessionorigin   race                       981ms     698ms     790ms
+github.com/peasant-labs/peasant/internal/redactionpolicygen race                       971ms     661ms     744ms
+github.com/peasant-labs/peasant/internal/indexformat     race                       968ms     678ms     705ms
+github.com/peasant-labs/peasant/internal/salt            race                       822ms     541ms     556ms
+github.com/peasant-labs/peasant/internal/filelock        race                       795ms     215ms     252ms
+github.com/peasant-labs/peasant/internal/redactmock      race                       784ms     571ms     626ms
+github.com/peasant-labs/peasant/internal/defaults        race                       669ms     466ms     489ms
+github.com/peasant-labs/peasant                          race                       640ms     339ms     325ms
+github.com/peasant-labs/peasant/internal/codegraph       race                       634ms     473ms     294ms
+github.com/peasant-labs/peasant/scripts/release-pr-delta race                       617ms     358ms     476ms
+github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex race                       475ms     334ms     310ms
+github.com/peasant-labs/peasant/scripts/post-merge-evidence race                       444ms     348ms     381ms
+github.com/peasant-labs/peasant/internal/codexstate      race                       394ms     268ms     296ms
+github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/ext/refunc race                       364ms     261ms     275ms
+github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/ext/generateseries race                       355ms     290ms     246ms
+github.com/peasant-labs/peasant/internal/testkit/teststream race                       339ms     189ms     227ms
+github.com/peasant-labs/peasant/internal/browser         race                       336ms     170ms     203ms
+github.com/peasant-labs/peasant/internal/tui/settings/scannerfix race                       335ms     236ms     280ms
+github.com/peasant-labs/peasant/internal/gitops          race                       333ms     380ms    1.109s
+github.com/peasant-labs/peasant/internal/testkit/testwait race                       235ms     130ms     174ms
+github.com/peasant-labs/peasant/scripts/harvester-version-guard race                       235ms     165ms     186ms
+github.com/peasant-labs/peasant/internal/tui/search      race                       223ms     134ms     165ms
+
+=== per-class decision table (wall − CPU = work cores cannot compress) ===
+CLASS                    UNITS      WALL      USER    SYSTEM       GAP  BASIS
+race                        68 7m45.695s 9m40.815s 5m58.101s -7m53.221s  serialized-per-invocation
+
+=== capacity check (CPU seconds; the bar is HELD at 120s — this measurement does not decide it) ===
+measured CPU today (user+system, all passes): 15m38.917s
+Y  post-optimization CPU numerator: PENDING (the parallelism/faking work has not run)
+check CPU_seconds(Y)/120: PENDING — no impossibility claim is asserted in either direction
+
+=== summary ===
+single no-race wall:    7m46.005s
+combined test wall:     7m46.249s
+pre-test wall:          1m12.972s
+calibration L:          1.248
+effective -p:           18 (package invocations concurrent)
+effective -parallel:    18 per package (default: GOMAXPROCS; not pinned)
+-count:                 1 (result cache bypassed)
+cache:                  GOCACHE=/root/.cache/go-build (results not cached; -count=1)
+race:                   off (single no-race pass; plan + screen still run)
+budget:                 120s reference (reference-box wall, 32-thread Linux amd64, Go 1.26.5 (L-normalized)); normalized test wall 6m13.581s (7m46.249s / L) -> WARN (non-blocking): over budget; gate stays green
+
+=== screen ===
+all four rules passed: every test ran exactly once across the passes
+
+testgate: streams under /workspace/.agents.local/testgate/20261002T032358Z
+testgate: report /workspace/.agents.local/testgate/20261002T032358Z/report.json
+testgate: PASS
+# The gate above replaces the single `go test` pass. It computes the run
+# plan from `go test -list`, runs a race pass and a no-race pass (or one
+# no-race pass when RACE=0), merges the streams, and applies the
+# exactly-once screen. The key grep gate (internal/tui/gates/astrules/,
+# enforced by keys_astgrep_test.go) runs as a pre-test step above because it
+# is gated behind the "astgrep" build tag, so a plain `go test` never depends
+# on the ast-grep binary; ast-grep is already a hard `make check` dependency
+# via the untagged scan.
+#
+# That untagged scan runs with --error=unused-suppression: its config loads
+# every ast-grep/ rule, so a suppression that no longer suppresses the code
+# it names is an error there and fails this step. The key gate scans with
+# only its own rules, so it cannot make that judgement - hence the flag is
+# on the repo-wide scan, not on the key gate.
+#
+# The race detector is off by default everywhere (see the RACE variable
+# above; RACE=1 opts in). The gate is driven by its
+# -race flag, which the invocation passes explicitly; with RACE=0 it runs
+# a single no-race pass but still plans and screens. cmd/peasant and
+# internal/api exceed Go's 10m default under race, so the gate sets
+# -timeout=0 and lets the job's own budget apply.

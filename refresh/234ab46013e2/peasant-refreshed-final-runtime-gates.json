@@ -1,0 +1,99 @@
+{
+  "fullLinuxCheck": {
+    "source": "1708ee11cf356d1ea8991828be625c545f0356ef",
+    "command": "make check RACE=0",
+    "goVersion": "1.25.8",
+    "platform": "linux/arm64",
+    "exitCode": 0,
+    "packages": 68,
+    "exactlyOnceScreen": "passed",
+    "singleNoRaceWall": "7m46.005s",
+    "log": "/tmp/codex-overhaul/peasant539-1708-linux-full-check.log",
+    "sourceDisposition": "Pinned Go fmt normalized only composite-literal indentation in internal/tui/ftue/page.go in the isolated gate clone. git diff --ignore-all-space is empty. Feature source remains clean and unchanged; patch retained."
+  },
+  "moduleInstall": {
+    "source": "1708ee11cf356d1ea8991828be625c545f0356ef",
+    "command": "make module-install-check",
+    "goVersion": "1.25.8",
+    "platform": "darwin/arm64",
+    "exitCode": 0,
+    "completeRealZip": "passed",
+    "omittedDriver": "refused as required",
+    "ownedTemporaryCleanup": "passed",
+    "log": "/tmp/codex-overhaul/peasant539-final-module-install.log"
+  },
+  "settingsStoreRace": {
+    "source": "8455ae2699482656896f660b26c76131730448ce",
+    "command": "go test -json -race -count=1 ./internal/store",
+    "platform": "linux/arm64",
+    "goVersion": "1.25.8",
+    "exitCode": 0,
+    "results": [
+      {
+        "Time": "2026-10-02T03:09:19.648733797Z",
+        "Action": "pass",
+        "Package": "github.com/peasant-labs/peasant/internal/store",
+        "Test": "TestPublicationBundleNeverReportsMixedRevisionsReady",
+        "Elapsed": 5.51
+      },
+      {
+        "Time": "2026-10-02T03:09:54.531054299Z",
+        "Action": "pass",
+        "Package": "github.com/peasant-labs/peasant/internal/store",
+        "Elapsed": 119.409
+      }
+    ],
+    "causalityClaim": false
+  },
+  "settingsPiRace": {
+    "source": "cc4d238399a8ef923c7503bc395993a7e2768a3f",
+    "command": "go test -race -count=1 -run '^TestPiNativeRegistryProjection$' ./cmd/peasant",
+    "goVersion": "1.25.8",
+    "platform": "linux/arm64",
+    "exitCode": 0,
+    "seconds": 9.632
+  },
+  "normalBuildAndServedProofs": [
+    {
+      "pr": 523,
+      "source": "0ca70961d964302aab2b6d457a916c9e460ab9ec",
+      "binarySHA256": "f054b20c2398095dd01dcaae481b52aed8670c03fe3cd1bbeb0c0beaa6a7770e",
+      "assets": 37,
+      "proof": "/tmp/codex-overhaul/peasant-refreshed-pr523-served-0ca70961d964/refreshed-served-provenance.json",
+      "imagesRecaptured": false
+    },
+    {
+      "pr": 537,
+      "source": "234ab46013e24ea33e2a2916120a529ed81c972b",
+      "binarySHA256": "73e270c803c8b8d8cc62ff56c8eab021efadd6566af734c3b397208b81a58226",
+      "assets": 36,
+      "proof": "/tmp/codex-overhaul/peasant-refreshed-pr537-served-234ab46013e2/refreshed-served-provenance.json",
+      "imagesRecaptured": false
+    },
+    {
+      "pr": 538,
+      "source": "cc4d238399a8ef923c7503bc395993a7e2768a3f",
+      "binarySHA256": "3053f1a23ac69ad81fc4e30c8fa0a72c7f37ca48240ebd0a1178cd96f2d88c2d",
+      "assets": 38,
+      "proof": "/tmp/codex-overhaul/peasant-refreshed-pr538-served-cc4d238399a8/refreshed-served-provenance.json",
+      "imagesRecaptured": false
+    },
+    {
+      "pr": 536,
+      "source": "b9c09c2f367f96334dc18e8e4f2a4e8ec5cddc58",
+      "binarySHA256": "3ef50917dcf1df5211cf32e1ad3ffb4d97985fa669571b2e932611bbe5a814d6",
+      "assets": 39,
+      "proof": "/tmp/codex-overhaul/peasant-refreshed-pr536-served-b9c09c2f367f/refreshed-served-provenance.json",
+      "imagesRecaptured": false
+    },
+    {
+      "pr": 539,
+      "source": "1708ee11cf356d1ea8991828be625c545f0356ef",
+      "binarySHA256": "5bdde4c3f6f50d6920ea7fe37e770eb0ca956090abe3216756c50bf25a5b49d9",
+      "assets": 39,
+      "proof": "/tmp/codex-overhaul/peasant-refreshed-pr539-served-1708ee11cf35/refreshed-served-provenance.json",
+      "imagesRecaptured": false
+    }
+  ],
+  "requiredRemoteFinalSourceCI": "pending publication"
+}
