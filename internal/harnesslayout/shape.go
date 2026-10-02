@@ -26,11 +26,21 @@ const (
 // map keyed by identifiers cannot grow a shape without limit.
 const MaxFieldPaths = 1024
 
-// maxJSONLLine bounds one JSONL record read by ShapeJSONL.
-const maxJSONLLine = 64 << 20
+// maxJSONLLine bounds one JSONL record read by ShapeJSONL. Tests lower it
+// to prove an over-long line is a read error.
+var maxJSONLLine = 64 << 20
 
-// FieldShape is one field path with the JSON types seen at it. Path uses
-// "$" for the record, ".name" for an object key, and "[]" for array elements.
+// FieldShape is one field path with the JSON types seen at it.
+//
+// Paths use this grammar, which is the saved-report contract:
+//
+//	$                         the record
+//	.identifier               object key matching [A-Za-z_][A-Za-z0-9_]*
+//	["json-string"]           every other object key, JSON-quoted
+//	[]                        one array element
+//
+// A literal key "a.b" is $["a.b"] and a nested a→b is $.a.b. A literal key
+// "x[]" is $["x[]"] and an array element under x is $.x[].
 type FieldShape struct {
 	Path  string     `json:"path"`
 	Types []JSONType `json:"types"`
@@ -136,8 +146,13 @@ func (r *ShapeRecorder) walk(path string, value any) {
 	switch v := value.(type) {
 	case map[string]any:
 		r.observe(path, JSONObject)
-		for key, child := range v {
-			r.walk(path+"."+key, child)
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			r.walk(fieldPath(path, key), v[key])
 		}
 	case []any:
 		r.observe(path, JSONArray)
@@ -169,6 +184,36 @@ func (r *ShapeRecorder) observe(path string, typ JSONType) {
 	acc.count++
 }
 
+// fieldPath appends one object key. Identifier keys use dot notation. Every
+// other key is a JSON string in brackets, so a key cannot collide with a
+// nested path or with the array marker.
+func fieldPath(parent, key string) string {
+	if pathIdent(key) {
+		return parent + "." + key
+	}
+	// A Go string always marshals as a JSON string.
+	quoted, err := json.Marshal(key)
+	if err != nil {
+		return parent + ".invalid"
+	}
+	return parent + "[" + string(quoted) + "]"
+}
+
+func pathIdent(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i, r := range key {
+		switch {
+		case r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func decodeValue(raw []byte) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -176,8 +221,15 @@ func decodeValue(raw []byte) (any, error) {
 	if err := dec.Decode(&value); err != nil {
 		return nil, err
 	}
-	if dec.More() {
-		return nil, errors.New("trailing data after JSON value")
+	// Decode once more. Only io.EOF means the value ended at the buffer.
+	// dec.More is not that check: a trailing } or ] is not another value,
+	// so More is false while the buffer is still not a single JSON value.
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, errors.New("trailing data after JSON value")
+		}
+		return nil, fmt.Errorf("trailing data after JSON value: %w", err)
 	}
 	return value, nil
 }

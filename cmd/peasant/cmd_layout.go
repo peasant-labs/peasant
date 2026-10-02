@@ -45,11 +45,8 @@ a public issue.`,
 			for _, layout := range harnesslayout.Layouts() {
 				fmt.Fprintf(out, "%s (%s)\n  %s\n", layout.DisplayName, layout.Tool, layout.Sessions)
 				for _, root := range env.Resolve(layout) {
-					state := "absent"
-					if _, err := fs.Stat(open(root).FS, "."); err == nil {
-						state = "present"
-					}
-					fmt.Fprintf(out, "  root %s [%s]\n", root, state)
+					_, statErr := fs.Stat(open(root).FS, ".")
+					fmt.Fprintf(out, "  root %s [%s]\n", root, harnesslayout.PresenceLabel(statErr))
 				}
 				for _, artifact := range layout.Artifacts {
 					fmt.Fprintf(out, "  %-10s %-8s %s\n", artifact.Role, artifact.Format, artifact.Pattern)
@@ -82,6 +79,9 @@ a public issue.`,
 				}
 				roots = env.Resolve(layout)
 			}
+			if limit < 0 {
+				return fmt.Errorf("--limit must be zero or greater")
+			}
 			report, err := harnesslayout.Run(cmd.Context(), layout, roots, open, limit)
 			if err != nil {
 				return err
@@ -95,15 +95,33 @@ a public issue.`,
 				return err
 			}
 			if len(report.Captures) == 0 {
-				fmt.Fprintf(cmd.ErrOrStderr(), "no %s sessions found in: %s\n", layout.DisplayName, strings.Join(roots, string(os.PathListSeparator)))
+				fmt.Fprint(cmd.ErrOrStderr(), emptyCaptureMessage(layout.DisplayName, roots, report))
 			}
 			return nil
 		},
 	}
 	captureCmd.Flags().StringSliceVar(&paths, "path", nil, "Session store root to read instead of the default roots (repeatable)")
-	captureCmd.Flags().IntVar(&limit, "limit", defaultLayoutCaptureLimit, "Maximum sessions to capture; 0 captures every session")
+	captureCmd.Flags().IntVar(&limit, "limit", defaultLayoutCaptureLimit, "Maximum successful captures; 0 captures every session; a negative value is rejected")
 	captureCmd.Flags().BoolVar(&includeMetadata, "include-metadata", false, "Keep paths, session identifiers, titles, and timestamps in the report")
 
 	layoutCmd.AddCommand(listCmd, captureCmd)
 	return layoutCmd
+}
+
+// emptyCaptureMessage distinguishes a store with nothing to capture from one
+// whose sessions were found and then every capture failed.
+func emptyCaptureMessage(display string, roots []string, report harnesslayout.Report) string {
+	discovered := 0
+	for _, root := range report.Roots {
+		discovered += root.Sessions
+	}
+	where := strings.Join(roots, string(os.PathListSeparator))
+	if discovered == 0 && len(report.Failures) == 0 {
+		return fmt.Sprintf("no %s sessions found in: %s\n", display, where)
+	}
+	noun := "sessions"
+	if discovered == 1 {
+		noun = "session"
+	}
+	return fmt.Sprintf("found %d %s %s in: %s; every capture failed\n", discovered, display, noun, where)
 }

@@ -29,6 +29,47 @@ identifiers, titles, project paths, timestamps, and error text, keeping only a c
 class for each failure, so it can be attached to a public issue.
 `--include-metadata` keeps those values for local inspection. Do not post such a report.
 
+`list` marks each root `present`, `absent` when the path does not exist, or an error class
+(`permission`, `canceled`, `other`) when stating the path fails for another reason.
+
+`--limit` is the maximum number of successful captures. A capture that fails does not consume
+it, so a later session is still captured. `0` captures every session. A negative value is
+rejected. When the report has no captures, stderr says that no sessions were found, or that
+sessions were found and every capture failed.
+
+### Report fields
+
+A saved report is JSON. These fields are the contract:
+
+- `records` counts decoded records. A record that does not decode is not one of them.
+- `malformed` counts records that did not decode. A trailing `}`, `]`, or second value is
+  malformed. Whitespace after a single value is not.
+- `fields[].count` is how many values were seen at that path. It can be lower than `records`
+  when a record omits the field, and higher when an array repeats it.
+- `fields[].types` is the sorted set of JSON types seen at the path.
+- `truncated` means the artifact had more than 1024 distinct paths. Paths are kept in a fixed
+  order — the record, then object keys in lexicographic order, depth-first — so the same file
+  always keeps the same subset.
+- The shape-only report omits root paths, session identifiers, titles, project paths,
+  timestamps, artifact paths, and error text. It keeps error classes, model identifiers,
+  counts, record kinds, and field paths, including object keys.
+
+Field paths use this grammar:
+
+```text
+$                  the record
+.identifier        an object key matching [A-Za-z_][A-Za-z0-9_]*
+["json-string"]    any other object key, as a JSON string
+[]                 one array element
+```
+
+A key `a.b` is `$["a.b"]`. A nested object `a` then `b` is `$.a.b`. A key `x[]` is `$["x[]"]`.
+An array element under `x` is `$.x[]`. An empty key is `$[""]`.
+
+Adding an optional JSON field is compatible with reports already saved. Changing the path
+grammar, the meaning of a count, or which values the shape-only report removes is a breaking
+change for those reports.
+
 ## Declaring a layout
 
 One Go file per tool, `internal/harnesslayout/<tool>.go`, declares:
