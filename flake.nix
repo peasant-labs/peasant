@@ -60,6 +60,7 @@
         sqlite # CLI for inspecting analytics store
         goreleaser # validate .goreleaser.yml (`goreleaser check`) + local --snapshot builds
         actionlint # lint GitHub Actions workflow YAML (.github/workflows/*.yml)
+        python3 # audit the SQLite source and owned import boundary
         charm-freeze # Go-native ANSI terminal screenshot renderer (binary: freeze)
         nodejs_26 # Node.js runtime for the web build and validation scripts
         pnpm # required package manager for the web dependency graph
