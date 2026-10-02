@@ -1,0 +1,10 @@
+{
+  "tool": "example-tool",
+  "roots": [
+    {
+      "present": false,
+      "sessions": 0
+    }
+  ],
+  "captures": []
+}

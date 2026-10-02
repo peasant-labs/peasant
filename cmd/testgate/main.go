@@ -474,23 +474,16 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 
 	// The per-class decision table: registry classes and the race pass from the
 	// test records, plus measured pre-test steps when a pre-test doc is present
-	// in the same output directory.
-	passes := []testgate.PassSummary{}
-	if race {
-		passes = append(passes, testgate.PassSummary{
-			Pass: testgate.ModeRace, Wall: walls[testgate.ModeRace],
-			User: passCPU[testgate.ModeRace][0], System: passCPU[testgate.ModeRace][1],
-			Serialized: false, Units: len(raceRecords),
-		})
-	}
-	passes = append(passes, testgate.PassSummary{
-		Pass: testgate.ModeNoRace, Wall: walls[testgate.ModeNoRace],
-		User: passCPU[testgate.ModeNoRace][0], System: passCPU[testgate.ModeNoRace][1],
-		// The partition pass (RACE=1) is serialized for per-test CPU
-		// attribution. The RACE=0 single pass runs packages concurrently, so
-		// its per-unit CPU is best-effort and its wall is the overlapped one.
-		Serialized: race, Units: len(noRaceRecords),
-	})
+	// in the same output directory. AttributionPasses chooses serialized
+	// per-invocation CPU for the RACE=1 partition pass and pass-level CPU for
+	// every concurrent pass, including the RACE=0 single pass.
+	passes := testgate.AttributionPasses(
+		race,
+		walls[testgate.ModeRace], walls[testgate.ModeNoRace],
+		passCPU[testgate.ModeRace][0], passCPU[testgate.ModeRace][1],
+		passCPU[testgate.ModeNoRace][0], passCPU[testgate.ModeNoRace][1],
+		len(raceRecords), len(noRaceRecords),
+	)
 	classTable := testgate.BuildClassTable(passes, append(append([]testgate.Record{}, raceRecords...), noRaceRecords...))
 
 	var preTestRecords []testgate.ReportRecord

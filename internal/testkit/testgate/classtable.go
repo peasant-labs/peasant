@@ -73,6 +73,37 @@ type classAccum struct {
 	basis string
 }
 
+// AttributionPasses is the gate's pass-summary wiring.
+//
+// The race pass is concurrent, so its CPU is pass-level. The RACE=1 no-race
+// pass is the serialized partition pass, so its CPU is per-invocation. The
+// RACE=0 single pass is concurrent even though it reuses the no-race mode:
+// race is false and that pass is not serialized.
+func AttributionPasses(race bool, raceWall, noRaceWall, raceUser, raceSystem, noRaceUser, noRaceSystem time.Duration, raceUnits, noRaceUnits int) []PassSummary {
+	noRace := PassSummary{
+		Pass:       ModeNoRace,
+		Wall:       noRaceWall,
+		User:       noRaceUser,
+		System:     noRaceSystem,
+		Serialized: race,
+		Units:      noRaceUnits,
+	}
+	if !race {
+		return []PassSummary{noRace}
+	}
+	return []PassSummary{
+		{
+			Pass:       ModeRace,
+			Wall:       raceWall,
+			User:       raceUser,
+			System:     raceSystem,
+			Serialized: false,
+			Units:      raceUnits,
+		},
+		noRace,
+	}
+}
+
 // BuildClassTable groups per-invocation records by cost class and reports wall,
 // user, system, and the derived gap per class.
 //

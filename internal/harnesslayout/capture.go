@@ -3,6 +3,7 @@ package harnesslayout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"sort"
@@ -84,11 +85,29 @@ func OSSource(dir string) Source {
 	return Source{FS: os.DirFS(dir), Dir: dir}
 }
 
-// Run discovers the sessions of every path and captures up to limit of them,
-// ordered by root and then by session identifier. A limit of zero or less
-// captures every session. A missing root is reported, not an error; a failed
-// session is recorded in Failures and the run continues.
+// PresenceLabel is the marker list prints for one root. A nil error is
+// "present" and a missing path is "absent". Any other error is its class, so
+// an unreadable root is not described as a missing directory.
+func PresenceLabel(err error) string {
+	switch {
+	case err == nil:
+		return "present"
+	case errors.Is(err, fs.ErrNotExist):
+		return "absent"
+	default:
+		return string(classify(err))
+	}
+}
+
+// Run discovers the sessions of every path and captures up to limit successful
+// ones, ordered by root and then by session identifier. A failed capture does
+// not consume the limit. Zero captures every session. A negative limit is
+// rejected. A missing root is reported, not an error; a failed session is
+// recorded in Failures and the run continues.
 func Run(ctx context.Context, layout Layout, paths []string, open func(string) Source, limit int) (Report, error) {
+	if limit < 0 {
+		return Report{}, fmt.Errorf("capture limit must be zero or greater (got %d)", limit)
+	}
 	report := Report{Tool: layout.Tool, Captures: []Capture{}}
 	type pending struct {
 		src Source

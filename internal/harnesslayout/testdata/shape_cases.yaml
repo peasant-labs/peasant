@@ -1,0 +1,95 @@
+# Shape, decode, and timestamp cases. requiredNames is the deletion manifest:
+# a case added or removed here fails until this list names the same set.
+requiredNames:
+  - trailing-closing-brace
+  - trailing-closing-bracket
+  - extra-value
+  - trailing-garbage
+  - trailing-whitespace
+  - dotted-key-versus-nesting
+  - bracket-key-versus-array
+  - quoted-key
+  - empty-key
+  - add-field-accumulates
+  - parse-time-just-below-threshold
+  - parse-time-at-threshold
+  - parse-time-just-above-threshold
+  - parse-time-zero
+  - parse-time-negative
+cases:
+  - name: trailing-closing-brace
+    raw: '{"type":"user"}}'
+    wantError: true
+    wantRecords: 0
+    wantMalformed: 1
+  - name: trailing-closing-bracket
+    raw: '{"type":"user"}]'
+    wantError: true
+    wantRecords: 0
+    wantMalformed: 1
+  - name: extra-value
+    raw: '{"type":"user"}{"type":"assistant"}'
+    wantError: true
+    wantRecords: 0
+    wantMalformed: 1
+  - name: trailing-garbage
+    raw: '{"type":"user"}garbage'
+    wantError: true
+    wantRecords: 0
+    wantMalformed: 1
+  - name: trailing-whitespace
+    raw: "{\"type\":\"user\"}\t \n"
+    wantError: false
+    wantRecords: 1
+    wantMalformed: 0
+  - name: dotted-key-versus-nesting
+    document: '{"a.b":"literal","a":{"b":true}}'
+    wantRecords: 1
+    wantFields:
+      - { path: "$", types: [object], count: 1 }
+      - { path: "$.a", types: [object], count: 1 }
+      - { path: "$.a.b", types: [boolean], count: 1 }
+      - { path: '$["a.b"]', types: [string], count: 1 }
+  - name: bracket-key-versus-array
+    document: '{"x[]":true,"x":["element"]}'
+    wantRecords: 1
+    wantFields:
+      - { path: "$", types: [object], count: 1 }
+      - { path: "$.x", types: [array], count: 1 }
+      - { path: "$.x[]", types: [string], count: 1 }
+      - { path: '$["x[]"]', types: [boolean], count: 1 }
+  - name: quoted-key
+    document: '{"a\"b":1}'
+    wantRecords: 1
+    wantFields:
+      - { path: "$", types: [object], count: 1 }
+      - { path: '$["a\"b"]', types: [number], count: 1 }
+  - name: empty-key
+    document: '{"":1}'
+    wantRecords: 1
+    wantFields:
+      - { path: "$", types: [object], count: 1 }
+      - { path: '$[""]', types: [number], count: 1 }
+  - name: add-field-accumulates
+    fields:
+      - { path: "$.col", type: string }
+      - { path: "$.col", type: number }
+      - { path: "$.flag", type: boolean }
+    wantFields:
+      - { path: "$.col", types: [number, string], count: 2 }
+      - { path: "$.flag", types: [boolean], count: 1 }
+  - name: parse-time-just-below-threshold
+    timeValue: "99999999999"
+    wantUnix: 99999999999
+  - name: parse-time-at-threshold
+    timeValue: "100000000000"
+    wantUnixMilli: 100000000000
+  - name: parse-time-just-above-threshold
+    timeValue: "100000000001"
+    wantUnixMilli: 100000000001
+  - name: parse-time-zero
+    timeValue: "0"
+    wantZero: true
+  - name: parse-time-negative
+    timeValue: "-1"
+    wantZero: true

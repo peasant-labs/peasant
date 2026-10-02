@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -162,8 +163,8 @@ func TestRunCapturesShapeAndMetadataWithoutContent(t *testing.T) {
 	for _, field := range shape.Fields {
 		fields[field.Path] = field
 	}
-	if ts := fields["$.ts"]; len(ts.Types) != 2 || ts.Count != 3 {
-		t.Fatalf("$.ts = %+v, want string and number over 3 records", ts)
+	if ts := fields["$.ts"]; ts.Count != 3 || !slices.Equal(ts.Types, []harnesslayout.JSONType{harnesslayout.JSONNumber, harnesslayout.JSONString}) {
+		t.Fatalf("$.ts = %+v, want types [number string] over 3 records", ts)
 	}
 	if kind := fields["$.parts[].kind"]; kind.Count != 1 || kind.Types[0] != harnesslayout.JSONString {
 		t.Fatalf("$.parts[].kind = %+v", kind)
@@ -217,17 +218,49 @@ func TestRunHonorsLimitAndRecordsFailures(t *testing.T) {
 	}
 }
 
-func TestShapeRecorderBoundsFieldPaths(t *testing.T) {
-	rec := harnesslayout.NewShapeRecorder(exampleTranscript, "")
+func TestShapeRecorderTruncatesInKeyOrder(t *testing.T) {
+	const extra = 10
 	wide := map[string]any{}
-	for i := 0; i < harnesslayout.MaxFieldPaths+10; i++ {
-		wide["k"+strconv.Itoa(i)] = true
+	for i := 0; i < harnesslayout.MaxFieldPaths+extra; i++ {
+		wide[fmtKey(i)] = true
 	}
-	rec.AddRecord("", wide)
-	shape := rec.Shape()
-	if !shape.Truncated || len(shape.Fields) != harnesslayout.MaxFieldPaths {
-		t.Fatalf("truncated=%v fields=%d", shape.Truncated, len(shape.Fields))
+	shapeOf := func() []string {
+		t.Helper()
+		rec := harnesslayout.NewShapeRecorder(exampleTranscript, "")
+		rec.AddRecord("", wide)
+		shape := rec.Shape()
+		if !shape.Truncated || len(shape.Fields) != harnesslayout.MaxFieldPaths {
+			t.Fatalf("truncated=%v fields=%d", shape.Truncated, len(shape.Fields))
+		}
+		paths := make([]string, len(shape.Fields))
+		for i, field := range shape.Fields {
+			paths[i] = field.Path
+		}
+		return paths
 	}
+	first, second := shapeOf(), shapeOf()
+	if !slices.Equal(first, second) {
+		t.Fatalf("repeated captures retained different paths\n%v\n%v", first, second)
+	}
+	want := []string{"$"}
+	for i := 0; i < harnesslayout.MaxFieldPaths-1; i++ {
+		want = append(want, "$."+fmtKey(i))
+	}
+	if !slices.Equal(first, want) {
+		t.Fatalf("retained paths start %v, want the sorted prefix %v", first[:3], want[:3])
+	}
+}
+
+func fmtKey(i int) string {
+	return "k" + leftPad(i)
+}
+
+func leftPad(i int) string {
+	s := strconv.Itoa(i)
+	for len(s) < 4 {
+		s = "0" + s
+	}
+	return s
 }
 
 func TestShapeJSONSelectsRecordsAndKeepsDocumentFields(t *testing.T) {
@@ -250,6 +283,24 @@ func TestShapeJSONSelectsRecordsAndKeepsDocumentFields(t *testing.T) {
 	}
 	if strings.Join(paths, " ") != "$ $.id $.messages $.messages[] $.messages[].role" {
 		t.Fatalf("paths = %v", paths)
+	}
+}
+
+func TestPresenceLabelSeparatesMissingFromOtherErrors(t *testing.T) {
+	if got := harnesslayout.PresenceLabel(nil); got != "present" {
+		t.Fatalf("nil = %q", got)
+	}
+	if got := harnesslayout.PresenceLabel(fs.ErrNotExist); got != "absent" {
+		t.Fatalf("not exist = %q, want absent", got)
+	}
+	if got := harnesslayout.PresenceLabel(fs.ErrPermission); got != string(harnesslayout.ErrorPermission) {
+		t.Fatalf("permission = %q", got)
+	}
+	if got := harnesslayout.PresenceLabel(context.Canceled); got != string(harnesslayout.ErrorCanceled) {
+		t.Fatalf("canceled = %q", got)
+	}
+	if got := harnesslayout.PresenceLabel(fs.ErrInvalid); got != string(harnesslayout.ErrorOther) {
+		t.Fatalf("other = %q", got)
 	}
 }
 

@@ -1,0 +1,16 @@
+# How the gate attributes CPU for the two run modes. requiredNames is the
+# deletion manifest for this file.
+requiredNames:
+  - race-partition-serialized
+  - norace-whole-suite-concurrent
+cases:
+  - name: race-partition-serialized
+    race: true
+    wantNoRaceBasis: serialized-per-invocation
+    wantRaceBasis: pass-level-aggregate
+  - name: norace-whole-suite-concurrent
+    race: false
+    wantNoRaceBasis: pass-level-aggregate
+    overlapPackages:
+      - ./internal/testkit/testgate/overlapprobe/left
+      - ./internal/testkit/testgate/overlapprobe/right
