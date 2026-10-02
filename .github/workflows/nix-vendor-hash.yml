@@ -9,6 +9,7 @@ on:
     paths:
       - "go.mod"
       - "go.sum"
+      - "third_party/zombiezen-sqlite/**"
       - "web/package.json"
       - "web/pnpm-lock.yaml"
       - "flake.nix"

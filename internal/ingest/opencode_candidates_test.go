@@ -31,7 +31,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // These closed-set coverage counts are the contract itself: the fixture must
@@ -1414,8 +1414,8 @@ func openCodeBuildTopologySourceText(source openCodeBuildTopologySource) (string
 	case openCodeBuildTopologyExecution:
 		return prefix + `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	zx "zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	zx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func topologyConjunctionExecution(conn *sqlite.Conn) error {
 	return zx.Execute(conn, "SELECT data FROM event", nil)
@@ -1462,16 +1462,16 @@ func openCodeBuildTaggedMutationSource(mutation openCodeBuildTaggedMutation) (st
 	case openCodeBuildTaggedDirect:
 		body = `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	zx "zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	zx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func buildTaggedDirectBypass(conn *sqlite.Conn) error { return zx.Execute(conn, "SELECT data FROM event", nil) }
 `
 	case openCodeBuildTaggedAlias:
 		body = `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func buildTaggedAliasBypass(conn *sqlite.Conn) error {
 	execute := sqlitex.Execute
@@ -1481,8 +1481,8 @@ func buildTaggedAliasBypass(conn *sqlite.Conn) error {
 	case openCodeBuildTaggedHelper:
 		body = `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func buildTaggedInvoke(fn func(*sqlite.Conn, string, *sqlitex.ExecOptions) error, conn *sqlite.Conn) error {
 	return fn(conn, "SELECT data FROM event", nil)
@@ -1491,7 +1491,7 @@ func buildTaggedHelperBypass(conn *sqlite.Conn) error { return buildTaggedInvoke
 `
 	case openCodeBuildTaggedInterface:
 		body = `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 type buildTaggedPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
 func buildTaggedInterfaceBypass(conn *sqlite.Conn) error {
 	var preparer buildTaggedPreparer = conn
@@ -1502,8 +1502,8 @@ func buildTaggedInterfaceBypass(conn *sqlite.Conn) error {
 	case openCodeBuildTaggedField:
 		body = `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 type buildTaggedHolder struct { execute func(*sqlite.Conn, string, *sqlitex.ExecOptions) error }
 func buildTaggedFieldBypass(conn *sqlite.Conn) error {
@@ -1514,15 +1514,15 @@ func buildTaggedFieldBypass(conn *sqlite.Conn) error {
 	case openCodeBuildTaggedReturn:
 		body = `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func buildTaggedReturnedExecute() func(*sqlite.Conn, string, *sqlitex.ExecOptions) error { return sqlitex.Execute }
 func buildTaggedReturnBypass(conn *sqlite.Conn) error { return buildTaggedReturnedExecute()(conn, "SELECT data FROM event", nil) }
 `
 	case openCodeBuildTaggedDirectData:
 		body = `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func buildTaggedBlobAliases(conn *sqlite.Conn, buffer []byte) error {
 	open := conn.OpenBlob
 	blob, err := open("main", "event", "data", 1, false)
@@ -1742,8 +1742,8 @@ func TestOpenCodePrivateExecutionGuardRejectsUnresolvedSQL(t *testing.T) {
 	source := []byte(`package ingest
 import (
 	"context"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 type zombiezenOpenCodeSQLiteSource struct{ conn *sqlite.Conn }
 func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, statement string, args []any, result func(*sqlite.Stmt) error) error {
@@ -1790,53 +1790,53 @@ func openCodeEntryPathMutationSource(kind openCodeEntryPathKind) (string, error)
 	case openCodeEntrySQLitexExecute:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func bypass(conn *sqlite.Conn) error { return sqlitex.Execute(conn, "SELECT * FROM event", nil) }
 `, nil
 	case openCodeEntryPrepare:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(conn *sqlite.Conn) { _, _ = conn.Prepare("SELECT * FROM event") }
 `, nil
 	case openCodeEntryPrepareTransient:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(conn *sqlite.Conn) { _, _, _ = conn.PrepareTransient("SELECT * FROM event") }
 `, nil
 	case openCodeEntryExecuteScript:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func bypass(conn *sqlite.Conn) error { return sqlitex.ExecuteScript(conn, "SELECT * FROM event", nil) }
 `, nil
 	case openCodeEntryStatementStep:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(stmt *sqlite.Stmt) { _, _ = stmt.Step() }
 `, nil
 	case openCodeEntrySQLitexExec:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func bypass(conn *sqlite.Conn) error { return sqlitex.Exec(conn, "SELECT * FROM event", nil) }
 `, nil
 	case openCodeEntryConnPrep:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(conn *sqlite.Conn) { _ = conn.Prep("SELECT * FROM event") }
 `, nil
 	case openCodeEntryExecuteFS:
 		return `package ingest
 import (
 	"testing/fstest"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func bypass(conn *sqlite.Conn) error {
 	return sqlitex.ExecuteFS(conn, fstest.MapFS{"query.sql": {Data: []byte("SELECT * FROM event")}}, "query.sql", nil)
@@ -1845,16 +1845,16 @@ func bypass(conn *sqlite.Conn) error {
 	case openCodeEntryImportAlias:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	zx "zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	zx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func bypass(conn *sqlite.Conn) error { return zx.Execute(conn, "SELECT * FROM event", nil) }
 `, nil
 	case openCodeEntryCallableAlias:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func bypass(conn *sqlite.Conn) error {
 	execute := sqlitex.Execute
@@ -1863,7 +1863,7 @@ func bypass(conn *sqlite.Conn) error {
 `, nil
 	case openCodeEntryReceiverAlias:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(conn *sqlite.Conn) {
 	receiver := conn
 	_ = receiver.Prep("SELECT * FROM event")
@@ -1871,7 +1871,7 @@ func bypass(conn *sqlite.Conn) {
 `, nil
 	case openCodeEntryCapturedStep:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(stmt *sqlite.Stmt) {
 	step := stmt.Step
 	_, _ = step()
@@ -1880,8 +1880,8 @@ func bypass(stmt *sqlite.Stmt) {
 	case openCodeEntryHelperExecute:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func invokeExecute(fn func(*sqlite.Conn, string, *sqlitex.ExecOptions) error, conn *sqlite.Conn) error {
 	return fn(conn, "SELECT * FROM event", nil)
@@ -1890,15 +1890,15 @@ func bypass(conn *sqlite.Conn) error { return invokeExecute(sqlitex.Execute, con
 `, nil
 	case openCodeEntryHelperStep:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func invokeStep(fn func() (bool, error)) { _, _ = fn() }
 func bypass(stmt *sqlite.Stmt) { invokeStep(stmt.Step) }
 `, nil
 	case openCodeEntryReturnedExecute:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 func returnedExecute() func(*sqlite.Conn, string, *sqlitex.ExecOptions) error { return sqlitex.Execute }
 func bypass(conn *sqlite.Conn) error { return returnedExecute()(conn, "SELECT * FROM event", nil) }
@@ -1906,8 +1906,8 @@ func bypass(conn *sqlite.Conn) error { return returnedExecute()(conn, "SELECT * 
 	case openCodeEntryStructField:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 type executeHolder struct { execute func(*sqlite.Conn, string, *sqlitex.ExecOptions) error }
 func bypass(conn *sqlite.Conn) error {
@@ -1918,8 +1918,8 @@ func bypass(conn *sqlite.Conn) error {
 	case openCodeEntryInterfaceField:
 		return `package ingest
 import (
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 type interfaceExecuteHolder struct { execute any }
 func bypass(conn *sqlite.Conn) error {
@@ -1929,7 +1929,7 @@ func bypass(conn *sqlite.Conn) error {
 `, nil
 	case openCodeEntryInterfacePrepare:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 type transientPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
 func bypass(conn *sqlite.Conn) {
 	var preparer transientPreparer = conn
@@ -1938,7 +1938,7 @@ func bypass(conn *sqlite.Conn) {
 `, nil
 	case openCodeEntryInterfaceStep:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 type statementStepper interface { Step() (bool, error) }
 func bypass(stmt *sqlite.Stmt) {
 	var stepper statementStepper = stmt
@@ -1951,8 +1951,8 @@ func bypass(stmt *sqlite.Stmt) {
 		return `package ingest
 import (
 	"context"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
 func (s *zombiezenOpenCodeSQLiteSource) initialize(context.Context) error {
@@ -1963,7 +1963,7 @@ func (s *zombiezenOpenCodeSQLiteSource) initialize(context.Context) error {
 `, nil
 	case openCodeEntryPackageValue:
 		return `package ingest
-import "zombiezen.com/go/sqlite/sqlitex"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 var escapedOpenCodeExecute = sqlitex.Execute
 `, nil
 	case openCodeEntryCurrentOpenBlob:
@@ -1971,7 +1971,7 @@ var escapedOpenCodeExecute = sqlitex.Execute
 import (
 	"context"
 	"errors"
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
 type OpenCodeCurrentPageRequest struct{}
@@ -1986,7 +1986,7 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(context.Context, OpenCod
 `, nil
 	case openCodeEntryOpenBlobAlias:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(conn *sqlite.Conn) error {
 	openBlob := conn.OpenBlob
 	_, err := openBlob("main", "event", "data", 1, false)
@@ -1995,12 +1995,12 @@ func bypass(conn *sqlite.Conn) error {
 `, nil
 	case openCodeEntrySerialize:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(conn *sqlite.Conn) error { _, err := conn.Serialize("main"); return err }
 `, nil
 	case openCodeEntrySerializeInterface:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 type databaseSerializer interface { Serialize(string) ([]byte, error) }
 func bypass(conn *sqlite.Conn) error {
 	var serializer databaseSerializer = conn
@@ -2010,12 +2010,12 @@ func bypass(conn *sqlite.Conn) error {
 `, nil
 	case openCodeEntryDeserialize:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(conn *sqlite.Conn, data []byte) error { return conn.Deserialize("main", data) }
 `, nil
 	case openCodeEntryNewBackup:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(destination, source *sqlite.Conn) error {
 	_, err := sqlite.NewBackup(destination, "main", source, "main")
 	return err
@@ -2023,23 +2023,23 @@ func bypass(destination, source *sqlite.Conn) error {
 `, nil
 	case openCodeEntryBackupStep:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(backup *sqlite.Backup) error { _, err := backup.Step(-1); return err }
 `, nil
 	case openCodeEntryBackupStepAlias:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func invokeBackupStep(step func(int) (bool, error)) error { _, err := step(-1); return err }
 func bypass(backup *sqlite.Backup) error { return invokeBackupStep(backup.Step) }
 `, nil
 	case openCodeEntryBlobRead:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(blob *sqlite.Blob, buffer []byte) error { _, err := blob.Read(buffer); return err }
 `, nil
 	case openCodeEntryBlobReadAlias:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func invokeBlobRead(read func([]byte) (int, error), buffer []byte) error { _, err := read(buffer); return err }
 func bypass(blob *sqlite.Blob, buffer []byte) error { return invokeBlobRead(blob.Read, buffer) }
 `, nil
@@ -2047,20 +2047,20 @@ func bypass(blob *sqlite.Blob, buffer []byte) error { return invokeBlobRead(blob
 		return `package ingest
 import (
 	"bytes"
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 func bypass(blob *sqlite.Blob) error { var output bytes.Buffer; _, err := blob.WriteTo(&output); return err }
 `, nil
 	case openCodeEntrySessionDiff:
 		return `package ingest
-import "zombiezen.com/go/sqlite"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 func bypass(session *sqlite.Session) error { return session.Diff("main", "event") }
 `, nil
 	case openCodeEntrySessionChangeset:
 		return `package ingest
 import (
 	"bytes"
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 func bypass(session *sqlite.Session) error { var output bytes.Buffer; return session.WriteChangeset(&output) }
 `, nil
@@ -2068,8 +2068,8 @@ func bypass(session *sqlite.Session) error { var output bytes.Buffer; return ses
 		return `package ingest
 import (
 	"context"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 type transientExecutorPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
 type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
@@ -2121,8 +2121,8 @@ func dispatchOpenCodeExecutor(s *zombiezenOpenCodeSQLiteSource, ctx context.Cont
 	return fmt.Sprintf(`package ingest
 import (
 	"context"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
 func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, statement string%s, args []any, result func(*sqlite.Stmt) error) error {
@@ -2350,7 +2350,7 @@ func validateOpenCodeInitializerStatements(function *ast.FuncDecl, enclosing *ty
 			return true
 		}
 		target, ok := selection.Obj().(*types.Func)
-		if !ok || target.Pkg() == nil || target.Pkg().Path() != "zombiezen.com/go/sqlite" || openCodeReceiverIdentity(target) != "Conn" || target.Name() != "SetAuthorizer" {
+		if !ok || target.Pkg() == nil || target.Pkg().Path() != "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" || openCodeReceiverIdentity(target) != "Conn" || target.Name() != "SetAuthorizer" {
 			return true
 		}
 		valid := isReceiverField(selector.X, "conn") && len(call.Args) == 1
@@ -2359,7 +2359,7 @@ func validateOpenCodeInitializerStatements(function *ast.FuncDecl, enclosing *ty
 			valid = ok && len(conversion.Args) == 1
 			if valid {
 				conversionType, ok := info.TypeOf(conversion.Fun).(*types.Named)
-				valid = ok && conversionType.Obj().Pkg() != nil && conversionType.Obj().Pkg().Path() == "zombiezen.com/go/sqlite" && conversionType.Obj().Name() == "AuthorizeFunc"
+				valid = ok && conversionType.Obj().Pkg() != nil && conversionType.Obj().Pkg().Path() == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" && conversionType.Obj().Name() == "AuthorizeFunc"
 			}
 			if valid {
 				authorize, ok := conversion.Args[0].(*ast.SelectorExpr)
@@ -2546,35 +2546,35 @@ func identifyOpenCodeSQLiteCallable(target *types.Func, checked *types.Package) 
 	if targetPackage == "github.com/peasant-labs/peasant/internal/ingest" && targetReceiver == "zombiezenOpenCodeSQLiteSource" && target.Name() == "executeRowsLocked" {
 		return openCodeSQLiteCallableIdentity{family: openCodeCallableLocalExecutor, name: target.Name(), exact: true}
 	}
-	if targetPackage == "zombiezen.com/go/sqlite/sqlitex" {
+	if targetPackage == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex" {
 		if _, forbidden := forbiddenSQLitexCallables[target.Name()]; forbidden {
 			return openCodeSQLiteCallableIdentity{family: openCodeCallableSQLitex, name: target.Name(), exact: true}
 		}
 	}
-	if targetPackage == "zombiezen.com/go/sqlite" && targetReceiver == "" {
+	if targetPackage == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" && targetReceiver == "" {
 		if _, forbidden := forbiddenSQLitePackageCallables[target.Name()]; forbidden {
 			return openCodeSQLiteCallableIdentity{family: openCodeCallableSQLite, name: target.Name(), exact: true}
 		}
 	}
-	if targetPackage == "zombiezen.com/go/sqlite" && targetReceiver == "Conn" {
+	if targetPackage == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" && targetReceiver == "Conn" {
 		if _, forbidden := forbiddenSQLiteConnCallables[target.Name()]; forbidden {
 			return openCodeSQLiteCallableIdentity{family: openCodeCallableConn, name: target.Name(), exact: true}
 		}
 	}
-	if targetPackage == "zombiezen.com/go/sqlite" && targetReceiver == "Stmt" && target.Name() == "Step" {
+	if targetPackage == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" && targetReceiver == "Stmt" && target.Name() == "Step" {
 		return openCodeSQLiteCallableIdentity{family: openCodeCallableStmt, name: target.Name(), exact: true}
 	}
-	if targetPackage == "zombiezen.com/go/sqlite" && targetReceiver == "Blob" {
+	if targetPackage == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" && targetReceiver == "Blob" {
 		if _, forbidden := forbiddenSQLiteBlobCallables[target.Name()]; forbidden {
 			return openCodeSQLiteCallableIdentity{family: openCodeCallableBlob, name: target.Name(), exact: true}
 		}
 	}
-	if targetPackage == "zombiezen.com/go/sqlite" && targetReceiver == "Backup" {
+	if targetPackage == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" && targetReceiver == "Backup" {
 		if _, forbidden := forbiddenSQLiteBackupCallables[target.Name()]; forbidden {
 			return openCodeSQLiteCallableIdentity{family: openCodeCallableBackup, name: target.Name(), exact: true}
 		}
 	}
-	if targetPackage == "zombiezen.com/go/sqlite" && targetReceiver == "Session" {
+	if targetPackage == "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" && targetReceiver == "Session" {
 		if _, forbidden := forbiddenSQLiteSessionCallables[target.Name()]; forbidden {
 			return openCodeSQLiteCallableIdentity{family: openCodeCallableSession, name: target.Name(), exact: true}
 		}
@@ -2622,7 +2622,7 @@ func localOpenCodeExecutorMethod(checked *types.Package) *types.Func {
 
 func importedOpenCodeSQLiteMethod(checked *types.Package, typeName, methodName string) *types.Func {
 	for _, imported := range checked.Imports() {
-		if imported.Path() != "zombiezen.com/go/sqlite" {
+		if imported.Path() != "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite" {
 			continue
 		}
 		typeObject, _ := imported.Scope().Lookup(typeName).(*types.TypeName)

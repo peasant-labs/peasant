@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL, indexed_input_hash = NULL, indexed_publication_capture_revision = 0 WHERE session_id = ?`

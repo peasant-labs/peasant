@@ -1,0 +1,435 @@
+--- a/auth_test.go
++++ b/auth_test.go
+@@ -6,7 +6,7 @@
+ import (
+ 	"testing"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ func TestSetAuthorizer(t *testing.T) {
+--- a/backup_example_test.go
++++ b/backup_example_test.go
+@@ -5,7 +5,7 @@
+ 	"os"
+ 	"time"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // This example shows the basic use of a backup object.
+--- a/backup_test.go
++++ b/backup_test.go
+@@ -7,8 +7,8 @@
+ 	"testing"
+ 
+ 	"github.com/google/go-cmp/cmp"
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func TestBackup(t *testing.T) {
+--- a/blob_test.go
++++ b/blob_test.go
+@@ -27,7 +27,7 @@
+ 	"testing"
+ 	"time"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ var _ interface {
+--- a/example_test.go
++++ b/example_test.go
+@@ -11,10 +11,10 @@
+ 	"regexp"
+ 	"time"
+ 
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ 	"golang.org/x/text/collate"
+ 	"golang.org/x/text/language"
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
+ )
+ 
+ func Example() {
+--- a/ext/generateseries/example_test.go
++++ b/ext/generateseries/example_test.go
+@@ -7,9 +7,9 @@
+ 	"fmt"
+ 	"log"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/ext/generateseries"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/ext/generateseries"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func Example() {
+--- a/ext/generateseries/generateseries.go
++++ b/ext/generateseries/generateseries.go
+@@ -10,7 +10,7 @@
+ import (
+ 	"fmt"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // Module is a virtual table module that can be registered with [sqlite.Conn.SetModule].
+--- a/ext/refunc/refunc.go
++++ b/ext/refunc/refunc.go
+@@ -11,7 +11,7 @@
+ 	"fmt"
+ 	"regexp"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // Impl is the implementation of the REGEXP function.
+--- a/ext/refunc/refunc_test.go
++++ b/ext/refunc/refunc_test.go
+@@ -6,7 +6,7 @@
+ import (
+ 	"testing"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ func TestImpl(t *testing.T) {
+--- a/http_example_test.go
++++ b/http_example_test.go
+@@ -8,7 +8,7 @@
+ 	"log"
+ 	"net/http"
+ 
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ var dbpool *sqlitex.Pool
+--- a/session_test.go
++++ b/session_test.go
+@@ -19,8 +19,8 @@
+ 	"reflect"
+ 	"testing"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func initT(t *testing.T, conn *sqlite.Conn) {
+--- a/shell/example_test.go
++++ b/shell/example_test.go
+@@ -7,8 +7,8 @@
+ 	"fmt"
+ 	"os"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/shell"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/shell"
+ )
+ 
+ // This is a small program that emulates the behavior of the sqlite3 CLI.
+--- a/shell/shell.go
++++ b/shell/shell.go
+@@ -13,10 +13,10 @@
+ 	"unicode"
+ 
+ 	"github.com/chzyer/readline"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ 	"modernc.org/libc"
+ 	lib "modernc.org/sqlite/lib"
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
+ )
+ 
+ const (
+--- a/sqlite.go
++++ b/sqlite.go
+@@ -234,15 +234,24 @@
+ 	c.unlockNote = 0
+ 	c.tls.Close()
+ 	c.tls = nil
++	c.releaseConnectionRegistrations()
++	if !res.IsSuccess() {
++		return fmt.Errorf("sqlite: close: %w", res.ToError())
++	}
++	return nil
++}
++
++// releaseConnectionRegistrations runs after sqlite3_close. That call may free
++// the native address before a concurrent OpenConn registers a new owner there.
++func (c *Conn) releaseConnectionRegistrations() {
++	allConns.mu.Lock()
++	defer allConns.mu.Unlock()
++	if allConns.table[c.conn] != c {
++		return
++	}
+ 	c.releaseAuthorizer()
+ 	busyHandlers.Delete(c.conn)
+-	allConns.mu.Lock()
+ 	delete(allConns.table, c.conn)
+-	allConns.mu.Unlock()
+-	if !res.IsSuccess() {
+-		return fmt.Errorf("sqlite: close: %w", res.ToError())
+-	}
+-	return nil
+ }
+ 
+ // AutocommitEnabled reports whether conn is in autocommit mode.
+--- a/sqlite_test.go
++++ b/sqlite_test.go
+@@ -31,9 +31,9 @@
+ 
+ 	"io"
+ 
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ 	"modernc.org/libc"
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
+ )
+ 
+ func TestConn(t *testing.T) {
+--- a/sqlitefile/buffer.go
++++ b/sqlitefile/buffer.go
+@@ -21,7 +21,7 @@
+ 	"errors"
+ 	"io"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // A Buffer is a variable-sized bytes buffer backed by SQLite blobs.
+--- a/sqlitefile/buffer_test.go
++++ b/sqlitefile/buffer_test.go
+@@ -24,8 +24,8 @@
+ 	"testing"
+ 
+ 	"crawshaw.io/iox/ioxtest"
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ var _ interface {
+--- a/sqlitefile/file.go
++++ b/sqlitefile/file.go
+@@ -22,7 +22,7 @@
+ 	"fmt"
+ 	"io"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // File is a readable, writable, and seekable series of temporary SQLite blobs.
+--- a/sqlitefile/file_test.go
++++ b/sqlitefile/file_test.go
+@@ -23,7 +23,7 @@
+ 	"testing"
+ 
+ 	"crawshaw.io/iox/ioxtest"
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ var _ interface {
+--- a/sqlitemigration/example_test.go
++++ b/sqlitemigration/example_test.go
+@@ -11,9 +11,9 @@
+ 	"os"
+ 	"path/filepath"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitemigration"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func Example() {
+--- a/sqlitemigration/sqlitemigration.go
++++ b/sqlitemigration/sqlitemigration.go
+@@ -14,8 +14,8 @@
+ 	"sync"
+ 	"time"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ // Schema defines the migrations for the application.
+--- a/sqlitemigration/sqlitemigration_test.go
++++ b/sqlitemigration/sqlitemigration_test.go
+@@ -11,8 +11,8 @@
+ 	"testing"
+ 
+ 	"github.com/google/go-cmp/cmp"
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func TestPool(t *testing.T) {
+--- a/sqlitex/example_test.go
++++ b/sqlitex/example_test.go
+@@ -7,8 +7,8 @@
+ 	"context"
+ 	"fmt"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func ExampleExecute() {
+--- a/sqlitex/exec.go
++++ b/sqlitex/exec.go
+@@ -24,7 +24,7 @@
+ 	"reflect"
+ 	"strings"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // ExecOptions is the set of optional arguments executing a statement.
+--- a/sqlitex/exec_test.go
++++ b/sqlitex/exec_test.go
+@@ -22,7 +22,7 @@
+ 	"reflect"
+ 	"testing"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ func TestExec(t *testing.T) {
+--- a/sqlitex/pool.go
++++ b/sqlitex/pool.go
+@@ -22,7 +22,7 @@
+ 	"fmt"
+ 	"sync"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // PoolOptions is the set of optional arguments to [NewPool].
+--- a/sqlitex/pool_test.go
++++ b/sqlitex/pool_test.go
+@@ -27,8 +27,8 @@
+ 	"testing"
+ 	"time"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ const poolSize = 20
+--- a/sqlitex/query.go
++++ b/sqlitex/query.go
+@@ -6,7 +6,7 @@
+ import (
+ 	"errors"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ var (
+--- a/sqlitex/query_test.go
++++ b/sqlitex/query_test.go
+@@ -6,7 +6,7 @@
+ import (
+ 	"testing"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ func TestResultInt64(t *testing.T) {
+--- a/sqlitex/rand_id.go
++++ b/sqlitex/rand_id.go
+@@ -22,7 +22,7 @@
+ 	"fmt"
+ 	"math/big"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // InsertRandID executes stmt with a random value in the range [min, max) for $param.
+--- a/sqlitex/rand_id_test.go
++++ b/sqlitex/rand_id_test.go
+@@ -20,8 +20,8 @@
+ import (
+ 	"testing"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func TestRandID(t *testing.T) {
+--- a/sqlitex/savepoint.go
++++ b/sqlitex/savepoint.go
+@@ -22,7 +22,7 @@
+ 	"runtime"
+ 	"strings"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ // Save creates a named SQLite transaction using SAVEPOINT.
+--- a/sqlitex/savepoint_test.go
++++ b/sqlitex/savepoint_test.go
+@@ -27,7 +27,7 @@
+ 
+ 	"os"
+ 
+-	"zombiezen.com/go/sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+ )
+ 
+ func TestSavepointExec(t *testing.T) {
+--- a/vtable_example_test.go
++++ b/vtable_example_test.go
+@@ -7,8 +7,8 @@
+ 	"fmt"
+ 	"log"
+ 
+-	"zombiezen.com/go/sqlite"
+-	"zombiezen.com/go/sqlite/sqlitex"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
++	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+ )
+ 
+ func ExampleVTable() {

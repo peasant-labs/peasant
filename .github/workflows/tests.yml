@@ -28,6 +28,10 @@ on:
       - "**/testdata/**"
       - "go.mod"
       - "go.sum"
+      - "third_party/zombiezen-sqlite/**"
+      - "scripts/check-sqlite-fork.py"
+      - "scripts/vet-go.sh"
+      - "scripts/check-module-install/**"
       - "Makefile"
       - "sgconfig.yml"
       - "ast-grep/**"
@@ -60,6 +64,10 @@ on:
       - "**/testdata/**"
       - "go.mod"
       - "go.sum"
+      - "third_party/zombiezen-sqlite/**"
+      - "scripts/check-sqlite-fork.py"
+      - "scripts/vet-go.sh"
+      - "scripts/check-module-install/**"
       - "Makefile"
       - "sgconfig.yml"
       - "ast-grep/**"
@@ -180,8 +188,9 @@ jobs:
        !startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
     # Routed to the x86_64 pool. `make check` needs only the Go toolchain, a C
-    # compiler for `go vet`/cgo, and the ast-grep binary; it does not need the
-    # Nix devShell. The pool hands a lone job the whole 24-core pool budget
+    # compiler for `go vet`/cgo, Python for the SQLite source audit, and the
+    # ast-grep binary. It does not need the Nix devShell. The pool hands a lone
+    # job the whole 24-core pool budget
     # (hosts/desktop/configuration.nix: pool cpuQuota 2400%, per-runner
     # cpuWeight with no quota), against 2 vCPU on the arm64 Blacksmith runner.
     #
@@ -236,9 +245,16 @@ jobs:
           # the whole shared cache for an upload over the 10 GB limit.
           cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
-      # `make check` shells out to `ast-grep scan`. The devShell supplied it;
-      # the pool image does not, and it ships no unzip or python3 for the GitHub
-      # release zip, so install the prebuilt npm binary (glibc, linux-x64-gnu).
+      # The SQLite source audit uses Python's standard library. The minimal
+      # pool image has no interpreter, so provision it before the quality gate.
+      - name: Install Python for the SQLite source audit
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y python3
+
+      # `make check` shells out to `ast-grep scan`. The pool image does not
+      # provide ast-grep, so install the prebuilt npm binary (glibc, linux-x64-gnu).
       # Version pinned to the devShell's ast-grep so the rules keep their
       # semantics; the scan itself stays the Makefile's, unchanged.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -537,8 +553,8 @@ jobs:
        github.event_name == 'workflow_dispatch') &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
-    # Routed to the x86_64 pool: this job is pure Go (build, test, `git archive`)
-    # and needs no Nix devShell.
+    # Routed to the x86_64 pool: Go handles build/test/module ZIP installation;
+    # Python supplies the SQLite source audit. No Nix devShell is required.
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
@@ -556,6 +572,13 @@ jobs:
           # there only re-downloads that host's own snapshot, and a key miss tars
           # the whole shared cache for an upload over the 10 GB limit.
           cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
+
+      # The real module-install target also audits the SQLite source first.
+      - name: Install Python for the SQLite source audit
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y python3
 
       # Already namespaced `-go-cgo0-` on both the key and the restore-key, so
       # this release-only lane never collided with the shared prefix; kept as the
@@ -584,26 +607,10 @@ jobs:
           CGO_ENABLED=0 go build ./...
           CGO_ENABLED=0 go test ./internal/config/ ./internal/ingest/ ./internal/e2e/
 
-      # Module-zip proxy gate. A Go module
-      # zip (what `go install module@version` fetches) contains ONLY git-tracked
-      # files. `git archive HEAD` reproduces exactly that set, so building
-      # ./cmd/peasant from a clean extraction proves the binary does NOT depend
-      # on any gitignored file — specifically that the committed
-      # web/out/.gitkeep placeholder satisfies `//go:embed all:web/out` without
-      # a local `make web`. This is the honest pre-tag proxy: a live `go install`
-      # from the registry is covered separately after a release is published.
-      # It uses HEAD (committed tree), NOT the working dir, so the defensive
-      # web/out stub above does not leak into the test.
-      - name: Module-zip go-install proxy (git archive HEAD -> build)
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          git archive --format=tar HEAD | tar -x -C "$tmp"
-          cd "$tmp"
-          test -f web/out/.gitkeep || { echo "FAIL: web/out/.gitkeep not in HEAD (go:embed will break go install)"; exit 1; }
-          CGO_ENABLED=0 go build -buildvcs=false ./cmd/peasant
-          echo "module-zip proxy OK: ./cmd/peasant builds from tracked files only"
+      # Exercise the actual Go module ZIP semantics and go install @version.
+      # A second named fixture omits the driver and must fail installation.
+      - name: Install CLI from a real Go module zip
+        run: make module-install-check
 
   # Dependency-license gate. Two invariants on the third-party Go modules
   # compiled into the binary:

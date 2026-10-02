@@ -15,8 +15,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // testConfigYAML is a minimal config that disables all source providers.

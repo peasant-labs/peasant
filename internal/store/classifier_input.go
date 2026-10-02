@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 func (s *Store) applyCapturedClassifierBatch(conn *sqlite.Conn, batch ingest.SessionAnnotationBatch, stats *ingest.AnnotationProfileStats) (_ []ingest.ClassifierAnnotationWriteResult, retErr error) {

@@ -90,9 +90,9 @@ lint: web-stub
 	# Running golangci-lint is deferred until its existing findings are resolved.
 	# Use go vet for now
 	# golangci-lint run ./...
-	go vet ./...
+	./scripts/vet-go.sh
 
-check: fmt lint
+check: fmt lint sqlite-source-audit
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
@@ -125,6 +125,18 @@ check: fmt lint
 .PHONY: check-harvester-versions
 check-harvester-versions:
 	go run ./scripts/harvester-version-guard -base "$(BASE)" -candidate "$(or $(CANDIDATE),HEAD)"
+
+# The audited SQLite driver is part of the main module and its normal test plan.
+.PHONY: sqlite-source-audit sqlite-connection-test module-install-check
+sqlite-source-audit:
+	python3 scripts/check-sqlite-fork.py
+
+sqlite-connection-test: sqlite-source-audit
+	go test -race -count=1 ./third_party/zombiezen-sqlite/...
+
+# Real module ZIP distribution gate; deliberately separate from the unit plan.
+module-install-check: sqlite-source-audit
+	go run ./scripts/check-module-install
 
 # Local end-to-end skip-gate harness. Requires podman + a village
 # checkout (VILLAGE_REPO, default sibling) or VILLAGE_BIN+SETUP_DEMO_BIN.

@@ -1,0 +1,15 @@
+cases:
+  - name: retired cleanup preserves a newly registered connection
+    scenario: replacement-before-callbacks
+  - name: retired cleanup preserves current authorization and busy callbacks
+    scenario: replacement
+    deny_select: false
+  - name: retired cleanup cannot bypass the current authorization denial
+    scenario: replacement
+    deny_select: true
+  - name: successful close releases its own registrations
+    scenario: owner-close
+  - name: duplicate close cannot clean a replacement connection
+    scenario: duplicate-close
+  - name: nil close retains its explicit error
+    scenario: nil-close

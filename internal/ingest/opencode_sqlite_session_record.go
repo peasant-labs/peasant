@@ -3,7 +3,7 @@ package ingest
 import (
 	"fmt"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // decodeOpenCodeSessionRecord is shared by paged discovery and targeted
