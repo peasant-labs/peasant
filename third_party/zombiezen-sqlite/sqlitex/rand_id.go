@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // InsertRandID executes stmt with a random value in the range [min, max) for $param.

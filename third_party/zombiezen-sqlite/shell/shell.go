@@ -13,10 +13,10 @@ import (
 	"unicode"
 
 	"github.com/chzyer/readline"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"modernc.org/libc"
 	lib "modernc.org/sqlite/lib"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 const (

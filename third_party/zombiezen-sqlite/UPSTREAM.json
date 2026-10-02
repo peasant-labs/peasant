@@ -76,9 +76,46 @@
     "vtable_example_test.go": "0bcd0683412b0304a1a44df8ceea09e14ac80a51f730845ddf886f324e6f427f"
   },
   "modified_files": {
+    "auth_test.go": "f0914c256964c9ae00bd2eae213af115f2447d6a13469e2b15ee1243ff604ac9",
+    "backup_example_test.go": "3eef54f6b0d77cc4a840dc9f7ac9ec19cfcd1f03202a27854c656e83e02f6f65",
+    "backup_test.go": "ef4a66819a4222c4fe07bb204e53fd26105eb7086d6ae7940e0af779ce1ce6fb",
+    "blob_test.go": "ae3ba90c3ef2402a7c156896e430bacb92da718b70d63b27b47db578971a72f6",
+    "example_test.go": "6b179d99f5047e609fe83feb735532932daaca3d6500fe665bfbf1cfe36ab25a",
+    "ext/generateseries/example_test.go": "5a1a35e9dcb15db8f0aa7f877247bbee2d972d2e08d1ac9ac73863f07ce14c76",
+    "ext/generateseries/generateseries.go": "8a52f9fa3194db27837af25b342f76d1dfdd92f2023e59db6486dd4158be50d8",
+    "ext/refunc/refunc.go": "3e3316f896dffeb5e7699766d9cdcf7915dcee32865e0c1aaa6a1610d72d9e54",
+    "ext/refunc/refunc_test.go": "d10b3c858a278c88de641a45e88e4fabb97310af904cbc9656cd87411eec0f22",
+    "http_example_test.go": "db743a24e12a968972ff4591222f3c765b24beb70abd64b1d9e6918f1fb6cf13",
+    "session_test.go": "2f0d91aacb4943b425cd84ae6575e651e97e0dbf1e63751b8fa5f69ea1ccd27d",
+    "shell/example_test.go": "3a07fef3be676d6bca9290f42632e4158ce0835e2d9f5de8d4abc741942d8052",
+    "shell/shell.go": "1797b1eb73efa8936eac05f3177effdb5c4cbbb10c1158b1105c22372941621d",
     "sqlite.go": "95e5132bd6afcd23912e8e9ba9e60c3d9ec7fd4dc7d44a67648590eab908466c",
-    "go.mod": "9dbabd48a06acf69ab91b8db11a891b032ced9fc01dd6f92374a8a2241c8c0fc",
-    "go.sum": "5d9ef6c3118bb32abe49f4e440c26ffd737a8b85bf0861d554efc257d05c848f"
+    "sqlite_test.go": "0e312e63c65935f39a771649a87be88e8ea25ac547f1839b67b4135387c3fca9",
+    "sqlitefile/buffer.go": "0024aad0b9b8f28c1dbf77d53fc14dc1bf8f6ced1ce7d05e2192f7ac2736db18",
+    "sqlitefile/buffer_test.go": "3476d33d8817eedb2edaccda68856ce177ffbc16f99278f74374b1e98a5d8c13",
+    "sqlitefile/file.go": "c92b66ef3436efc2a6757bf87f8219d78a66eaffba0e23f9ab26429f163f0a2f",
+    "sqlitefile/file_test.go": "c1be03b73663492d690b13af5533c6dd79d5e1963eef2fd3e27a92711a70cfaf",
+    "sqlitemigration/example_test.go": "c299e6f8cb5d5680385d152cfdb1c54920fdd4583557be5a58d17267dcfd3e00",
+    "sqlitemigration/sqlitemigration.go": "e71f5037fd51f13255ce9b0ce0779831fbd683c16d1a558a138e099bdda8e721",
+    "sqlitemigration/sqlitemigration_test.go": "c4daf16c7dd9c269b79152175dd6492248a78b901219b82316101d7b5cad18fd",
+    "sqlitex/example_test.go": "502d38c60f7252046d3bbe07002ace31135ed2c693f719db5f980a5758ab42ae",
+    "sqlitex/exec.go": "aa754c86aa9bd9cf673b12f74a9fb666c891645edfb89be36febb9b1b3c40d7b",
+    "sqlitex/exec_test.go": "7fcd68a091001de2a9e893f3d50c2dc9f6b53fd94336064837f768d8ee9b46d5",
+    "sqlitex/pool.go": "c073039346c7df84935c05789e198057e743084a5b7b3b4b32defa9d0b181ad3",
+    "sqlitex/pool_test.go": "c1d1bb53a01bfa54375dcb47fd702b7e1c8ba3d8494840c0c3bac0188dece467",
+    "sqlitex/query.go": "0aec3e5b932ac58e147f209b5c91dbde6004ae1e352268299ffd547cdb2aa801",
+    "sqlitex/query_test.go": "03256839faf5944378811b7ad58bf436dad8547af0f26fff56ae0734e7d05c50",
+    "sqlitex/rand_id.go": "cdb111da8ba951a67d00d49c3ed51c15b10bd1daf615fce12db2d1d4d7d2abd0",
+    "sqlitex/rand_id_test.go": "627f03e738083ef590e0a91c87532ed94ba52d81ca54ed163431552486b5f3db",
+    "sqlitex/savepoint.go": "bc26daf3cf109f5636d2c31e2070d4747b0f7d75c81c8426e65782bcf3413416",
+    "sqlitex/savepoint_test.go": "2937787e6e709d8f24f0109ff88bd9c7136d2c3b5d7780bee84ac070c819f332",
+    "vtable_example_test.go": "cb57597c35b9c152b5ff46aed58d7e4f912bbb20a810c38de0ffd6fba37271f4"
   },
-  "patch_sha256": "046702ebd57a677b7c890f4eb4101e180aca884717d8a2136bf01a7665014212"
+  "renamed_files": {
+    "go.mod": "UPSTREAM.go.mod.txt",
+    "go.sum": "UPSTREAM.go.sum.txt",
+    "go.work": "UPSTREAM.go.work.txt",
+    "go.work.sum": "UPSTREAM.go.work.sum.txt"
+  },
+  "patch_sha256": "f52d3795b560fa3c2bc8a359318ee7ae0b1d3eafaf891e2a93c9348a77dd5424"
 }

@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/peasant-labs/peasant/internal/salt"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // OpenReadOnly opens an existing analytics database for dry-run inspection.

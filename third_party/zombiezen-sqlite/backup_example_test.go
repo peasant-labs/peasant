@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // This example shows the basic use of a backup object.

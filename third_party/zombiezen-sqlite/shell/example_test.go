@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/shell"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/shell"
 )
 
 // This is a small program that emulates the behavior of the sqlite3 CLI.

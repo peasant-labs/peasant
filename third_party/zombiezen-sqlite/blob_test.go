@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 var _ interface {

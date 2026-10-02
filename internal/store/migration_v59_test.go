@@ -14,8 +14,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitemigration"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 //go:embed testdata/migrations/v59_capture_format.yaml

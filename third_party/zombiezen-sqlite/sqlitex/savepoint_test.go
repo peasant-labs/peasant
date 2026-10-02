@@ -27,7 +27,7 @@ import (
 
 	"os"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 func TestSavepointExec(t *testing.T) {

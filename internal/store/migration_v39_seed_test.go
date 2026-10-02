@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 //go:embed testdata/migrations/v39_replay_seed.yaml

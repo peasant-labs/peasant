@@ -8,7 +8,7 @@ import (
 	"log"
 	"net/http"
 
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 var dbpool *sqlitex.Pool

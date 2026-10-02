@@ -4,11 +4,15 @@ This directory is the complete Go module distribution of
 `zombiezen.com/go/sqlite v1.4.2`, licensed under ISC. Its upstream origin is
 `https://github.com/zombiezen/go-sqlite.git`, tag commit
 `e5fb83745cf1640f27b86f6560ca32f50b2442e9`. `UPSTREAM.json` records the original
-file hashes and the three modified files; `connection-lifetime.patch` shows the
-complete changes to upstream files. All other upstream bytes are unchanged.
+file hashes, modified Go files, and metadata renames; `connection-lifetime.patch` shows the
+complete changes to upstream files. Go import literals are mechanically rewritten to the in-module package path.
+The original go.mod, go.sum, go.work and go.work.sum bytes are retained as
+UPSTREAM.*.txt, so they do not create an excluded nested module. All other
+upstream bytes are unchanged.
 
-The main module uses a local `replace`; releases therefore ship this audited
-source, without depending on an external fork. The original LICENSE travels
+This is an ordinary package in the Peasant module; no local replace or nested
+module is used. A real Go module ZIP therefore carries this source and supports
+the documented `go install ...@version` distribution. The original LICENSE travels
 with the source and its text remains in the generated THIRD_PARTY_NOTICES.
 
 ## Failure and fix
@@ -28,15 +32,14 @@ available during native close. Nil, duplicate, and native close error behavior
 is unchanged. Authorization denial remains enforced; no nil-authorizer fallback
 or permissive exception was introduced.
 
-The upstream module's workspace references a CLI module excluded from the Go
-module distribution. Tests explicitly use `GOWORK=off`. The only dependency
-addition in this nested module is the YAML loader used by the regression test.
-
 ## Verification and test scope
 
-`make sqlite-connection-test` runs the fork audit and the complete upstream Go
-test suite with the race detector. `make check` requires that target, because
-the main module's `go test ./...` does not traverse nested modules.
+`make sqlite-connection-test` runs the source audit and complete upstream Go
+suite with the race detector. The normal main-module test plan also includes
+these packages. `make module-install-check` uses the real Go module zipper and
+runs `go install ...@version` through an isolated local file proxy. CI's CGO=0
+job requires that installation check. No source directory build substitutes for
+versioned installation.
 
 The named fixture tests model the exact scheduling boundary after native close
 and after a replacement OpenConn registers. They invoke the production cleanup
@@ -57,8 +60,8 @@ in-process panic preventing useful assertion diagnostics.
    SQL engine, process, screenshot, or service.
 5. Lifetime: test-owned temporary databases and cleanup/deferred connection Close.
 6. Concurrency: each case owns its database; global maps use the driver's locks.
-7. CI parity: the normal Make target runs the nested module explicitly, without
-   checkout history, local module links, or undocumented environment variables.
+7. CI parity: the normal main-module plan includes the driver; the targeted Make
+   command also runs from a clean checkout without history or local module links.
 8. Evidence: actual authorization allow/deny and busy callbacks remain effective;
    actual Close removes registrations.
 9. Mutation: removing the ownership check must fail preservation; removing all
@@ -68,3 +71,26 @@ in-process panic preventing useful assertion diagnostics.
 
 The separate publication-bundle SQLITE_BUSY report has not been attributed to
 this callback race. This patch makes no claim to resolve that failure.
+
+### Module installation test promotion rationale
+
+1. Subject: a published Go module ZIP must include the audited driver and install
+   the CLI with `go install ...@version`.
+2. Necessity: direct package builds cannot detect nested-module exclusion or a
+   local replace rejected by versioned installation; both blocked the first fix.
+3. Production path: golang.org/x/mod/zip applies the real Go distribution rules;
+   the real Go installer consumes that ZIP through a file proxy.
+4. Cost: two named YAML obligations and two bounded installer processes, at most
+   three minutes each. No build matrix, copied compiler, or fake archive.
+5. Lifetime: one owned temporary directory contains source, proxy, module cache
+   and binaries; deferred removal cleans success and error returns. Process
+   timeouts kill the installer process group (including compiler children); SIGKILL may leave that OS temporary directory.
+6. Concurrency: unique directories and module versions; the user's module cache
+   is only read. Go's ordinary shared build cache handles its own locking.
+7. CI parity: tracked source and explicit CGO=0, GOWORK=off, dependency checksums;
+   no checkout history or prebuilt web dashboard. The real zipper omits symlinks.
+8. Evidence: actual installation produces a nonempty CLI executable.
+9. Mutation: a named ZIP omitting the driver must fail with its missing package,
+   rather than succeed through a workspace or dependency fallback.
+10. Exit condition: keep the focused installation gate while this distribution
+    is supported; simplify only if versioned Go installation is retired.

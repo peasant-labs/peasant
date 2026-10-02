@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // File is a readable, writable, and seekable series of temporary SQLite blobs.

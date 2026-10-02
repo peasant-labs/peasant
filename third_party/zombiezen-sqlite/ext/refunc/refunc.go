@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // Impl is the implementation of the REGEXP function.

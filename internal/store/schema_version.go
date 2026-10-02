@@ -3,8 +3,8 @@ package store
 import (
 	"fmt"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // CurrentSchemaVersion is the PRAGMA user_version an up-to-date database

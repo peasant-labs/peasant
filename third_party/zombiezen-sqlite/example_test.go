@@ -11,10 +11,10 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 func Example() {

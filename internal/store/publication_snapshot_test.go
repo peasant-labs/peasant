@@ -10,7 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 //go:embed testdata/publication_snapshot.yaml

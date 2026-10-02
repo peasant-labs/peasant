@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // OpenCodeCatalogScope identifies one bounded catalog projection.

@@ -22,7 +22,7 @@ import (
 	"runtime"
 	"strings"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // Save creates a named SQLite transaction using SAVEPOINT.

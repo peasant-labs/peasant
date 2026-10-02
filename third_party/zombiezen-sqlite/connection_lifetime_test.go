@@ -39,20 +39,24 @@ func loadConnectionLifetimeFixtures(t *testing.T) []connectionLifetimeCase {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		t.Fatalf("unexpected trailing fixture document: %v", err)
 	}
-	required := map[string]bool{
-		"retired cleanup preserves a newly registered connection":            false,
-		"retired cleanup preserves current authorization and busy callbacks": false,
-		authorizationDenialFixtureName:                                       false,
-		"successful close releases its own registrations":                    false,
-		"duplicate close cannot clean a replacement connection":              false,
-		"nil close retains its explicit error":                               false,
+	required := map[string]string{
+		"retired cleanup preserves a newly registered connection":            "replacement-before-callbacks",
+		"retired cleanup preserves current authorization and busy callbacks": "replacement",
+		authorizationDenialFixtureName:                                       "replacement",
+		"successful close releases its own registrations":                    "owner-close",
+		"duplicate close cannot clean a replacement connection":              "duplicate-close",
+		"nil close retains its explicit error":                               "nil-close",
 	}
+	seenNames := make(map[string]bool)
 	for _, c := range fixture.Cases {
-		seen, ok := required[c.Name]
-		if !ok || seen {
+		expectedScenario, ok := required[c.Name]
+		if !ok || seenNames[c.Name] {
 			t.Fatalf("unknown or duplicate connection lifetime fixture %q", c.Name)
 		}
-		required[c.Name] = true
+		seenNames[c.Name] = true
+		if c.Scenario != expectedScenario {
+			t.Fatalf("fixture %q must exercise its named scenario %q, got %q", c.Name, expectedScenario, c.Scenario)
+		}
 		if c.Name == authorizationDenialFixtureName {
 			if !c.DenySelect || c.Scenario != "replacement" {
 				t.Fatal("authorization denial fixture must deny SELECT on the replacement connection")
@@ -66,8 +70,8 @@ func loadConnectionLifetimeFixtures(t *testing.T) []connectionLifetimeCase {
 			t.Fatalf("unknown connection lifetime scenario %q", c.Scenario)
 		}
 	}
-	for name, seen := range required {
-		if !seen {
+	for name := range required {
+		if !seenNames[name] {
 			t.Fatalf("missing connection lifetime fixture %q", name)
 		}
 	}

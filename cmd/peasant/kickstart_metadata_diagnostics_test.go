@@ -17,7 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 //go:embed testdata/kickstart_metadata_diagnostics.yaml
