@@ -14,9 +14,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/store"
-	"gopkg.in/yaml.v3"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"gopkg.in/yaml.v3"
 )
 
 // openCodeSessionClockMutation names the freshness change a case applies before

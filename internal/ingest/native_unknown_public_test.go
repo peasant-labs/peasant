@@ -27,10 +27,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/redact"
-	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/redact"
+	"github.com/peasant-labs/schema"
 )
 
 //go:embed testdata/native_unknown_public.yaml

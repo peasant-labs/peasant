@@ -13,10 +13,10 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/schema"
-	"golang.org/x/crypto/sha3"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
+	"golang.org/x/crypto/sha3"
 )
 
 // SQL constants for session_entries write path.

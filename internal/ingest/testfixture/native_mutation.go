@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/opencode_native_mutations.yaml

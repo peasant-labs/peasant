@@ -12,8 +12,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
-	"gopkg.in/yaml.v3"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/publication_full_capture.yaml

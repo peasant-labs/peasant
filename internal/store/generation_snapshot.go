@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
-	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // Compile-time guards: the production Store is the concrete SnapshotReader and

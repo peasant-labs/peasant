@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // SQL constants for the metrics read path.

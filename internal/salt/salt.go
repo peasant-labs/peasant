@@ -17,9 +17,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // Salt is a 32-byte per-installation HMAC key.

@@ -23,10 +23,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/ingested_publication.yaml

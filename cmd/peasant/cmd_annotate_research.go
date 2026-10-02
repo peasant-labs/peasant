@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/spf13/cobra"
 )
 
 // BuildAnnotateResearchCommands adds research-specific subcommands to the annotate command.

@@ -11,10 +11,10 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 const v39FixtureRequestEnv = "PEASANT_E2E_V39_FIXTURE"

@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
-	"gopkg.in/yaml.v3"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"gopkg.in/yaml.v3"
 )
 
 // readAllSessionRecords drains every bounded session-record page of one source

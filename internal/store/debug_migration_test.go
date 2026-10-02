@@ -2,11 +2,11 @@ package store
 
 import (
 	"context"
-	"path/filepath"
-	"testing"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"path/filepath"
+	"testing"
 )
 
 func TestDebugLegacyAlterTable(t *testing.T) {

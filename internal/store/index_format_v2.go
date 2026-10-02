@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
-	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // generationIndexFormat persists the immutable V2 managed generation. It runs on
