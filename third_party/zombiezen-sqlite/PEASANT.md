@@ -83,7 +83,8 @@ this callback race. This patch makes no claim to resolve that failure.
 4. Cost: two named YAML obligations and two bounded installer processes, at most
    three minutes each. No build matrix, copied compiler, or fake archive.
 5. Lifetime: one owned temporary directory contains source, proxy, module cache
-   and binaries; deferred removal cleans success and error returns. Process
+   and binaries; its Go module cache is explicitly writable (`-modcacherw`),
+   and deferred removal reports cleanup failure on success and error returns. Process
    timeouts kill the installer process group (including compiler children); SIGKILL may leave that OS temporary directory.
 6. Concurrency: unique directories and module versions; the user's module cache
    is only read. Go's ordinary shared build cache handles its own locking.

@@ -79,7 +79,7 @@ func loadCases() ([]installCase, error) {
 	return fixture.Cases, nil
 }
 
-func run() error {
+func run() (result error) {
 	cases, err := loadCases()
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(work)
+	defer func() { result = errors.Join(result, os.RemoveAll(work)) }()
 	source := filepath.Join(work, "source")
 	if err := copyTrackedSource(repo, source); err != nil {
 		return err
@@ -286,7 +286,7 @@ func installOne(work, source, cache, originalCache, proxy string, c installCase)
 	if c.Mode == "complete" {
 		proxyValue += "," + oldProxy
 	}
-	command.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=0", "GOMODCACHE="+cache, "GOBIN="+bin, "GOPROXY="+proxyValue, "GONOSUMDB="+modulePath)
+	command.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=0", "GOFLAGS=-modcacherw", "GOMODCACHE="+cache, "GOBIN="+bin, "GOPROXY="+proxyValue, "GONOSUMDB="+modulePath)
 	result, installErr := command.CombinedOutput()
 	if ctx.Err() != nil {
 		return fmt.Errorf("installation budget exhausted: %w", ctx.Err())
