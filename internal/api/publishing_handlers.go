@@ -6,13 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
@@ -117,6 +121,48 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	dirs, err := h.store.SessionDirectories(r.Context(), ids)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			"The publication state could not be read from the local store: "+err.Error()+". Nothing was returned. Retry; if the failure repeats, inspect the Peasant store.",
+			"")
+		return
+	}
+	// A hook push applies the saved selection, so a session the selection
+	// leaves out is never published by a hook, whatever is installed.
+	// Many sessions share a repository, so each directory is resolved to its
+	// repository once, and each repository's hooks are read once. A hook push
+	// publishes nothing for a session a paused rule covers, and nothing at all
+	// while the rules cannot be read.
+	rules, rulesErr := autopublish.Load(autopublish.Path(defaults.ResolveConfigDirPathWith(h.configHome)))
+	remotes := slices.ContainsFunc(rules, func(rule autopublish.Rule) bool { return rule.Kind == schema.AutoPublishRuleRemote })
+	lifecycle := githooks.New(githooks.NewExecGit())
+	git := &ingest.ExecGitResolver{}
+	byDir := map[string]bool{}
+	uploads := map[string]bool{}
+	autoPublishes := func(dir string) bool {
+		if rulesErr != nil || dir == "" {
+			return false
+		}
+		if known, ok := byDir[dir]; ok {
+			return known
+		}
+		publishes := false
+		if repo, err := autopublish.Resolve(r.Context(), git, dir, remotes); err == nil {
+			decision := autopublish.Decide(rules, repo)
+			if _, known := uploads[repo.Root]; !known {
+				events := make([]githooks.Event, len(decision.Events))
+				for i, event := range decision.Events {
+					events[i] = githooks.Event(event)
+				}
+				uploads[repo.Root] = lifecycle.Uploads(r.Context(), repo.Root, events)
+			}
+			publishes = uploads[repo.Root] && decision.Outcome() != autopublish.Paused
+		}
+		byDir[dir] = publishes
+		return publishes
+	}
+
 	var client *village.VillageClient
 	publications := make([]schema.LocalPublication, 0, len(ids))
 	for _, id := range ids {
@@ -125,6 +171,7 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 			continue
 		}
 		row := schema.LocalPublication{SessionID: id, State: schema.LocalPublicationUnpublished, OutsideSelection: !inSelection}
+		row.AutoPublish = inSelection && autoPublishes(dirs[id])
 		if attempt, ok := attempts[id]; ok {
 			row.LastAttempt = &schema.LocalPublicationAttemptFailure{AttemptedAt: time.UnixMilli(attempt.AttemptedAt).UTC(), Message: attempt.Message}
 		}

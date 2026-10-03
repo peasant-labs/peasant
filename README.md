@@ -76,6 +76,7 @@ privacy boundaries, and recovery behavior.
 | `peasant ingest` | Run the data ingestion pipeline |
 | `peasant ingest verify` | Verify database schema integrity |
 | `peasant village push` | Push ingested transcripts + annotations to the Peasant village (incremental — server-manifest skip-gate + retraction; see [flags](#peasant-village-push-flags)) |
+| `peasant village auto` | Publish this repository's sessions on every `git push`, redacted and private, to the collectives you published to last: saves an auto-publish rule in `hooks.yaml` (see [the network reference](docs/NETWORK.md#6-hook-triggered-push)) and installs the pre-push hook here |
 | `peasant login` / `peasant logout` | Authenticate with / disconnect from the village |
 | `peasant models sync` | Fetch and sync model reference data from models.dev |
 | `peasant sessions context` | Print grep-C-style turns around a session turn (terminal-rendered) |

@@ -212,21 +212,20 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		outputDir = filepath.Join(dataDir, "peasant-sync")
 	}
 
-	srv := api.NewServer(api.ServerConfig{
-		Port:         port,
-		Provider:     provider,
-		Hub:          hub,
-		DevMode:      devMode,
-		DevProxyAddr: devProxy,
-		WebAssets:    webFS,
-		MockConfig:   toMockConfigResponse(&cfg.Sources.Mock),
-		Experimental: experimental,
-		Store:        analyticsStore,
-		Config:       cfg,
-		OutputDir:    outputDir,
-	})
+	srv := api.NewServer(webServerConfig(cmd, cfg, port, devMode, devProxy, experimental, outputDir, provider, hub, webFS, analyticsStore))
 
 	return srv.ListenAndServe(ctx)
+}
+
+// webServerConfig is the whole production server configuration, including the
+// directory and hook context shared by settings routes and installed hooks.
+func webServerConfig(cmd *cobra.Command, cfg *config.Config, port int, devMode bool, devProxy string, experimental bool, outputDir string, provider api.DataProvider, hub *api.Hub, assets fs.FS, db *store.Store) api.ServerConfig {
+	return api.ServerConfig{
+		Port: port, Provider: provider, Hub: hub, DevMode: devMode,
+		DevProxyAddr: devProxy, WebAssets: assets, MockConfig: toMockConfigResponse(&cfg.Sources.Mock),
+		Experimental: experimental, Store: db, Config: cfg, OutputDir: outputDir,
+		ConfigHome: configDirOverride(cmd), DataHome: dataDirOverride(cmd), StateHome: stateDirOverride(cmd), HookBinding: hookBinding(cmd),
+	}
 }
 
 // webServerSpawn is everything the detached `web start --foreground` child

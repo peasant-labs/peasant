@@ -31,5 +31,9 @@ func BuildVillageCommand() *cobra.Command {
 	// thing a managed hook does is a village upload.
 	cmd.AddCommand(BuildVillageHooksCommand())
 
+	// auto turns on auto-publish for one repository: a rule in hooks.yaml and
+	// the hook that applies it.
+	cmd.AddCommand(BuildVillageAutoCommand())
+
 	return cmd
 }

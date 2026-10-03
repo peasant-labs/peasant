@@ -70,6 +70,12 @@ const (
 	// RouteVillageCollectives lists the Village collectives the signed-in user
 	// belongs to, read with this computer's stored credential.
 	RouteVillageCollectives Route = "/api/v1/village/collectives"
+	// RouteAutoPublishRule saves (PUT) or removes (DELETE) one auto-publish
+	// rule of the settings page.
+	RouteAutoPublishRule Route = "/api/v1/settings/auto-publish/{id}"
+	// RouteAutoPublishInstall installs one rule's hooks in one recorded
+	// repository the rule covers.
+	RouteAutoPublishInstall Route = "/api/v1/settings/auto-publish/{id}/install"
 	RouteSyncIngest         Route = "/api/v1/sync/ingest"
 	RouteSyncIngestStatus   Route = "/api/v1/sync/ingest/status"
 

@@ -34,7 +34,8 @@ Peasant is local-first. It reads the session stores of AI coding harnesses on th
 machine, keeps its own copy and index, and shows the sessions in a local web app. It sends data
 off the machine only when the developer publishes, pulls, logs in, syncs model prices, or
 upgrades. There is no telemetry and no background upload. The git hook upload runs only after
-the developer installs the hook with `peasant village hooks install`.
+the developer installs the hook with `peasant village hooks install`, `peasant village auto`, or
+the settings install route of the local API.
 
 Elements:
 
@@ -430,7 +431,11 @@ sequenceDiagram
 ### Upload from a git hook
 
 The hook exists only after `peasant village hooks install --event post-commit` or
-`--event pre-push`. The hook always exits 0, so a Village failure never blocks git.
+`--event pre-push`, or after an auto-publish rule's hooks are installed with `peasant village
+auto` or the settings install route. The hook always exits 0, so a Village failure never blocks
+git. When an auto-publish rule in `hooks.yaml` binds a session the upload sends, the upload
+publishes collectives-only (private, no license) and then shares each bound transcript it sent
+with its rule's collectives.
 
 ```mermaid
 sequenceDiagram
@@ -631,7 +636,10 @@ sequenceDiagram
 
 ### Git hook upload
 
-`internal/githooks/script.go` renders the hook command. `cmd/peasant/cmd_push.go` runs it.
+`internal/githooks/script.go` renders the hook command. `cmd/peasant/cmd_push.go` runs it. Before
+the upload, `cmd/peasant/cmd_push_auto_publish.go` matches each session the run would send against
+the rules (`autopublish.Decide`); when a rule binds one, the run publishes collectives-only and
+`push.RuleShare` then shares each bound transcript it sent with its rule's collectives.
 
 ```mermaid
 sequenceDiagram
@@ -719,6 +727,7 @@ sequenceDiagram
 | `internal/village` | Village HTTP client. | push, pull, api |
 | `internal/auth` | Loopback OAuth login, `credentials.json`. | `village login`, api sync handler |
 | `internal/githooks` | Installs, checks, and removes the upload hooks. | `village hooks` |
+| `internal/autopublish` | Auto-publish rules in `hooks.yaml`, and the one matcher that decides which rules bind a repository. | `village push`, `village auto`, api settings routes, `GET /publications` |
 | `internal/gitops` | Read-only git for the code map and review. | codemap |
 | `internal/codemap`, `internal/codegraph` | Code map and change review graphs. | api map and review routes |
 | `internal/config` | Settings, selection, redaction policy. | CLI, api, push |
@@ -731,3 +740,8 @@ sequenceDiagram
 | `internal/tui` and subpackages | Kickstart, config editor, harvest progress, push wizard, layout kit. | `kickstart`, `config`, `harvest`, `village push` |
 | `internal/mock`, `internal/redactmock` | Mock data provider and generated mock redactions. | `web start`, `cmd/gen-mock-redactions` |
 | `cmd/gen-*`, `cmd/peasant-guided-screenshots`, `cmd/peasant-origin-audit` | Code generators and opt-in audit tools. | developers |
+
+Rule-installed upload hooks carry `--require-auto-publish-rule`: their run uses
+only sessions the canonical matcher binds to an active rule, including its
+annotation scope. Deleting the last binding leaves the hook dormant, while
+retained bindings and separately installed terminal hooks keep their consent.

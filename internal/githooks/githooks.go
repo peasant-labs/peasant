@@ -30,9 +30,11 @@
 package githooks
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -300,10 +302,15 @@ type Repository struct {
 // normal resolution in force; the peasant binary itself is always resolved from
 // PATH.
 type Binding struct {
-	ConfigPath string
-	ConfigDir  string
-	DataDir    string
-	StateDir   string
+	// RequireAutoPublishRule pins a rule-installed hook to the current binding.
+	// If the binding is removed or paused, the command sends nothing.
+	RequireAutoPublishRule bool
+	// AutoPublishEvent is the hook event whose active binding grants consent.
+	AutoPublishEvent Event
+	ConfigPath       string
+	ConfigDir        string
+	DataDir          string
+	StateDir         string
 	// Timeout is the overall budget bound into the generated hook's upload
 	// command. Zero means DefaultUploadBudget.
 	//
@@ -312,6 +319,13 @@ type Binding struct {
 	// who needed a longer budget and edited the file would break ownership and
 	// leave a hook that still uploads but can no longer be removed by Peasant.
 	Timeout time.Duration
+}
+
+func (b Binding) forEvent(event Event) Binding {
+	if b.RequireAutoPublishRule {
+		b.AutoPublishEvent = event
+	}
+	return b
 }
 
 // UploadBudget is the overall time budget a hook built from this binding pins
@@ -338,7 +352,9 @@ type Request struct {
 // Slot is the observed state of one event's hook file. Every field describes
 // what is on disk right now, never what Peasant intends to do.
 type Slot struct {
-	Event Event
+	// RequireAutoPublishRule is the guard the Peasant upload command carries.
+	RequireAutoPublishRule bool
+	Event                  Event
 	// Path is the absolute hook slot Git reports for Event, already accounting
 	// for any configured hooks directory. When it is a symlink, LinkTarget is the
 	// file Git executes.
@@ -460,6 +476,26 @@ func (s Slot) UploadsFromForeignFile() bool {
 	return s.CarriesUploadSection() && executableByGit(s.Mode)
 }
 
+// Uploads reports whether git runs a village upload from this slot now: an
+// intact Peasant hook that git can execute and that names the repository it is
+// in, or a file Peasant may not touch that carries an upload section git runs.
+// It is the one answer to "does a commit or push here publish", so every
+// surface that reports it agrees.
+func (p Plan) Uploads() bool {
+	if p.UploadsFromForeignFile() {
+		return true
+	}
+	if !p.Managed() {
+		return false
+	}
+	for _, warning := range p.Warnings {
+		if warning.Kind == WarningHookNotExecutable || warning.Kind == WarningRepositoryMoved {
+			return false
+		}
+	}
+	return true
+}
+
 // Plan is the read-only answer to "what would install do for this event".
 type Plan struct {
 	Slot
@@ -521,6 +557,20 @@ type ChangeReport struct {
 func (r ChangeReport) Blocked() bool {
 	for _, result := range r.Results {
 		if result.Outcome == OutcomeRefused || result.Outcome == OutcomeFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// Uploads reports whether git runs an upload from a hook in the repository.
+func (l *Lifecycle) Uploads(ctx context.Context, root string, activeEvents []Event) bool {
+	report, err := l.Status(ctx, Request{Dir: root})
+	if err != nil {
+		return false
+	}
+	for _, plan := range report.Plans {
+		if plan.Uploads() && (!plan.RequireAutoPublishRule || slices.Contains(activeEvents, plan.Event)) {
 			return true
 		}
 	}

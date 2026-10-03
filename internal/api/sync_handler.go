@@ -899,11 +899,6 @@ func isJSONNull(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
 }
 
-// villageUUIDPattern is the canonical lowercase form Village emits for a
-// collective, and the form the contract declares for collectives.add and
-// collectives.remove.
-var villageUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-
 // decodeSyncPushRequest reads the typed push request strictly: one JSON object
 // with only the declared fields, a valid session list, and collectives named by
 // their Village identifier, each in one list. It runs before any read or send.
@@ -922,17 +917,12 @@ func decodeSyncPushRequest(body io.Reader) (schema.SyncPushRequest, push.Collect
 	if why := nullCollectiveList(raw); why != "" {
 		return refuse(why)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
+	if err := decodeStrict(bytes.NewReader(raw), &req); err != nil {
 		why := fmt.Sprintf("the body could not be read as the typed request: %v", err)
 		if strings.Contains(err.Error(), "unknown field") {
 			why += "; the request names only sessions, a redaction level, and collectives, and carries no visibility or license, because publishing from the local web is for collectives"
 		}
 		return refuse(why)
-	}
-	if decoder.More() {
-		return refuse("the body holds more than one JSON value")
 	}
 	if err := req.Validate(); err != nil {
 		return refuse(err.Error())
@@ -944,7 +934,7 @@ func decodeSyncPushRequest(body io.Reader) (schema.SyncPushRequest, push.Collect
 			ids  []schema.VillageUUID
 		}{{"collectives.add", req.Collectives.Add}, {"collectives.remove", req.Collectives.Remove}} {
 			for _, id := range list.ids {
-				if !villageUUIDPattern.MatchString(id.String()) {
+				if !village.IsCollectiveID(id) {
 					return refuse(fmt.Sprintf("%s names %q, which is not a Village collective identifier; name each collective by its lowercase Village UUID", list.name, id))
 				}
 			}

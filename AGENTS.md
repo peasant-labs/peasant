@@ -216,15 +216,34 @@ the server serves the newly built assets before you trust a screenshot or a comp
   by itself.
 - Do not add a fail-closed gate on deep links. An earlier attempt was withdrawn as a misread of
   the user's intent. Do not reintroduce it without a new, explicit ratification.
-- Publishing is a separate, user-initiated action: the `/share` wizard. It never runs
-  automatically or in the background. It draws only from the sessions the user recorded. Pulled
-  transcripts are not re-pushable. Governance for re-sharing pulled sessions is a tracked
-  follow-up.
+- Publishing is a separate, user-initiated action: the `/share` wizard. Nothing is published
+  without an explicit act: a click, or a binding the developer set up. It draws only from the
+  sessions the user recorded. Pulled transcripts are not re-pushable. Governance for re-sharing
+  pulled sessions is a tracked follow-up.
 - The consented publication paths are the `/share` wizard, the upload hook installed by
-  `peasant village hooks install`, and attaching the prompts behind a pull request. Attaching is
-  a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
+  `peasant village hooks install`, the auto-publish hook, and attaching the prompts behind a pull
+  request. The auto-publish hook is the same managed hook, installed by `peasant village auto` or
+  by the settings install route, for a repository that an auto-publish rule in `hooks.yaml`
+  covers. The rule is the binding. `autopublish.Decide` is the one matcher of rules,
+  server-side; do not implement it again in React. `peasant village push`, which a managed hook
+  runs, applies it per session, to the repository the session was recorded in (a linked
+  worktree counts as its main repository). A gone directory is matched by its
+  recorded path and ancestors because its repository root is no longer known;
+  a deleted nested repository can inherit a containing folder rule. A push that sends a bound session publishes
+  collectives-only: private, no license, and each bound transcript is shared with its rule's
+  collectives, never with the public. A session a paused rule (no event) covers is not
+  published, a transcript that is public on Village is not updated, and a collective that
+  rejected or lost a transcript is not asked again. Kickstart's publication and the local web's
+  publish do not read the rules. A rule-installed hook requires an active matching binding; deleting or
+  pausing the last binding stops its publication while retaining its hook file.
+  Separately installed plain terminal hooks retain their independent consent.
+  A rule installs no hook by itself: `peasant village auto` and
+  the settings install route install one repository at a time, by an explicit act, and only in
+  a repository Peasant has recorded sessions in. Any managed hook applies the rules, including
+  one installed with `peasant village hooks install`, so saving a rule changes what an installed
+  hook publishes. Attaching is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
   transcripts already published. Do not add a path that publishes without one of these, and do
-  not make any of them automatic.
+  not create a binding for the developer.
 - One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
   user-facing lists show only the configured selection. An explicit session selection must not
   widen visibility to the sibling sessions of its project. Apply the boundary server-side.

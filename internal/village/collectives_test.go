@@ -139,3 +139,13 @@ func TestListCollectivesReadsAnEmptyMembershipAsNone(t *testing.T) {
 		t.Fatalf("list request = %+v", got)
 	}
 }
+
+func TestTranscriptVisibilityRefusesAnUnknownValue(t *testing.T) {
+	t.Parallel()
+	client, _ := collectiveVillage(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"transcript":{"visibility":"visible"}}`))
+	})
+	if visibility, err := client.TranscriptVisibility(t.Context(), testTranscript); err == nil || !strings.Contains(err.Error(), "outside the closed set") {
+		t.Fatalf("visibility = %q, err = %v; an unknown visibility must refuse the read", visibility, err)
+	}
+}

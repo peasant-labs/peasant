@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -30,6 +33,12 @@ already published to the village account keeps the visibility and license
 it has there, including a share with collectives. If visibility convergence or local receipt
 persistence fails, no terminal local receipt is recorded, so the next
 repository-scoped run retries that session.
+When an auto-publish rule in hooks.yaml in the config directory binds a session
+the push sends (see 'peasant village auto'), the rule decides the audience
+instead: the push publishes collectives-only, private with no license, an
+update keeps the audience the transcript has, and each bound transcript is
+shared with its rule's collectives, never with the public. Every managed hook
+applies the rules, so saving a rule changes what an installed hook publishes.
 --timeout caps the WHOLE upload, so a village that accepts a connection and then
 stops answering cannot hold git up: the per-request client timeout does not bound
 a push, which issues several requests in sequence. Giving up is a warning, not a
@@ -167,7 +176,8 @@ finds.`,
 			}
 			renderPlanReport(cmd.OutOrStdout(), binding, report)
 			renderStatusEnvironmentNotices(cmd, report)
-			return nil
+			return renderAutoPublishHookStatus(cmd, report)
+
 		},
 	}
 	addHookDirFlag(cmd, &dir)
@@ -365,10 +375,16 @@ func renderInstallEnvironmentNotices(cmd *cobra.Command, report githooks.ChangeR
 	if len(installed) == 0 {
 		return
 	}
-	stderr := cmd.ErrOrStderr()
+	renderPeasantPathNotice(cmd, installed)
+	renderSettingsNotices(cmd, installed, report.Repository.Root)
+}
+
+// renderPeasantPathNotice warns, for each installed event, when git will not
+// find the peasant binary the hook runs.
+func renderPeasantPathNotice(cmd *cobra.Command, installed []githooks.Event) {
 	if _, err := exec.LookPath("peasant"); err != nil {
 		for _, event := range installed {
-			fmt.Fprintf(stderr,
+			fmt.Fprintf(cmd.ErrOrStderr(),
 				"notice: the peasant binary is not on this shell's PATH (%v). "+
 					"The %s hook resolves it from the PATH git runs with, so until peasant is on that PATH every %s prints "+
 					"'the peasant command was not found' and uploads nothing. "+
@@ -376,7 +392,6 @@ func renderInstallEnvironmentNotices(cmd *cobra.Command, report githooks.ChangeR
 				err, event, event)
 		}
 	}
-	renderSettingsNotices(cmd, installed, report.Repository.Root)
 }
 
 // renderStatusEnvironmentNotices repeats the settings disclosures for the hooks
@@ -516,4 +531,43 @@ func writeIndented(w io.Writer, text, indent string) {
 		}
 		fmt.Fprintf(w, "%s%s\n", indent, line)
 	}
+}
+
+// renderAutoPublishHookStatus names the audience a saved rule makes an
+// installed hook publish to. Removing a rule leaves config-driven hooks.
+func renderAutoPublishHookStatus(cmd *cobra.Command, report githooks.PlanReport) error {
+	root := report.Repository.Root
+	rules, err := autopublish.Load(autoPublishRulesPath(cmd))
+	if err != nil {
+		return err
+	}
+	repo := autopublish.SessionRepository(cmd.Context(), &ingest.ExecGitResolver{}, root, "", true)
+	decision := autopublish.Decide(rules, repo)
+	switch decision.Outcome() {
+	case autopublish.Bound:
+		fmt.Fprintf(cmd.OutOrStdout(), "\nauto-publish: rules %s publish private to collectives %s\n", strings.Join(decision.Rules, ", "), strings.Join(villageUUIDStrings(decision.Collectives), ", "))
+	case autopublish.Paused:
+		fmt.Fprintf(cmd.OutOrStdout(), "\nauto-publish: rules %s are paused; the hook publishes no sessions from this repository\n", strings.Join(decision.Paused, ", "))
+	default:
+		plain := false
+		for _, plan := range report.Plans {
+			if plan.Uploads() && !plan.RequireAutoPublishRule {
+				plain = true
+			}
+		}
+		if plain {
+			fmt.Fprintln(cmd.OutOrStdout(), "\nauto-publish: no rule covers this repository; its separately installed upload hook publishes using push.visibility and push.license; use 'peasant village hooks uninstall' to stop it")
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "\nauto-publish: no active binding covers this repository; rule-installed hooks publish nothing")
+		}
+	}
+	return nil
+}
+
+func villageUUIDStrings(ids []schema.VillageUUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
 }
