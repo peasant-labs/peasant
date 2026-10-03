@@ -106,6 +106,11 @@ interface WebSocketContextValue {
   wsUnsubscribe: (channels: SubscriptionMessage[]) => void;
   /** Send an arbitrary client message. */
   sendMessage: (msg: ClientMessage) => void;
+  /**
+   * Connect again now instead of waiting out the reconnect backoff. A no-op
+   * while a socket is open or still connecting.
+   */
+  reconnect: () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
@@ -268,6 +273,18 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const reconnect = useCallback(() => {
+    if (!mountedRef.current) return;
+    const ws = wsRef.current;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    backoffRef.current = INITIAL_BACKOFF_MS;
+    connect();
+  }, [connect]);
+
   useEffect(() => {
     mountedRef.current = true;
     connect();
@@ -331,8 +348,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       wsSubscribe,
       wsUnsubscribe,
       sendMessage: sendRaw,
+      reconnect,
     }),
-    [connected, error, wsSubscribe, wsUnsubscribe, sendRaw],
+    [connected, error, wsSubscribe, wsUnsubscribe, sendRaw, reconnect],
   );
 
   return (
@@ -445,8 +463,11 @@ export function useChannel<T = unknown>(
   };
 }
 
-/** Access connection state without subscribing to any channel data. */
+/**
+ * Access connection state without subscribing to any channel data, plus the
+ * reconnect-now control the local offline notice's `try again` uses.
+ */
 export function useConnectionState() {
   const ctx = useWsContext();
-  return { connected: ctx.connected };
+  return { connected: ctx.connected, reconnect: ctx.reconnect };
 }

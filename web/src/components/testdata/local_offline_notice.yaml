@@ -1,0 +1,419 @@
+# When the local offline notice shows. Each case drives the real LayoutShell —
+# the real WebSocketProvider through a mock socket, GET /api/v1/health through a
+# mock fetch — step by step on fake timers (LocalOfflineNotice.test.tsx).
+#
+# Steps, in order:
+#   health: up | down | error | hang
+#                         how the health route answers from now on: 200, a
+#                         refused connection, a 503, or no answer at all
+#   socket: open | close  the newest socket opens, or closes (a closed socket
+#                         schedules the provider's own reconnect: 1 s, then 2 s,
+#                         then 4 s …)
+#   wait: <ms>            advance the clock; also settles pending checks
+#   retry: true           press `try again` on the notice
+#   focus: retry | away | page   put keyboard focus on `try again`, or take it off
+#                         whatever holds it (to <body>)
+#   click: page           press the pointer on the page body (plain text), which
+#                         moves focus to <body> without a focus event
+#   expect: shown | hidden
+#   checkedAt: <ms>       the notice's `last checked` time is this many ms after
+#                         the page mounted
+#   sockets: <n>          how many sockets the provider has opened so far
+#   healthChecks: <n>     how many health requests the page has made so far
+#   announce: stopped | still | back | none
+#                         what the always-mounted live region says now (the
+#                         shell manifest's announcements; `still` is followed
+#                         by the time of the failed check)
+#   focused: main | elsewhere | page
+#                         keyboard focus is on the page body, or is not
+#   mainFocusable: true | false
+#                         <main> carries a tabindex (only while the notice's
+#                         focus move holds it)
+#
+# startCommands: the command the notice offers for the port the page came
+# from. `peasant web start` listens on 8690 unless told otherwise.
+startCommands:
+  - port: ''
+    command: peasant web start
+  - port: '8690'
+    command: peasant web start
+  - port: '8691'
+    command: peasant web start --port 8691
+cases:
+  - name: reachable-app-shows-nothing
+    steps:
+      - health: up
+      - socket: open
+      - wait: 30000
+      - expect: hidden
+      - healthChecks: 1
+      - announce: none
+
+  - name: first-connect-within-grace-shows-nothing
+    steps:
+      - health: up
+      - wait: 1500
+      - expect: hidden
+      - socket: open
+      - wait: 30000
+      - expect: hidden
+
+  - name: stopped-app-shows-at-once
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - checkedAt: 0
+      - announce: stopped
+
+  - name: error-status-counts-as-stopped
+    steps:
+      - health: up
+      - socket: open
+      - health: error
+      - socket: close
+      - wait: 0
+      - expect: shown
+
+  - name: unanswered-check-times-out
+    steps:
+      - health: up
+      - socket: open
+      - health: hang
+      - socket: close
+      - wait: 2000
+      - expect: shown
+      - checkedAt: 0
+      - wait: 1000
+      - checkedAt: 3000
+
+  - name: socket-blip-reconnects-without-notice
+    steps:
+      - health: up
+      - socket: open
+      - socket: close
+      - wait: 0
+      - sockets: 1
+      - expect: hidden
+      - wait: 1000
+      - sockets: 2
+      - socket: open
+      - wait: 30000
+      - expect: hidden
+
+  - name: socket-down-past-grace-shows
+    steps:
+      - health: up
+      - socket: open
+      - socket: close
+      - wait: 1900
+      - expect: hidden
+      - wait: 100
+      - expect: shown
+
+  - name: recheck-reconnects-at-once
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - healthChecks: 2
+      - wait: 1000
+      - socket: close
+      - wait: 2000
+      - socket: close
+      - sockets: 3
+      - health: up
+      - wait: 2000
+      - healthChecks: 3
+      - sockets: 4
+      # Past the grace, an answer alone does not clear the notice: the socket
+      # is not back yet.
+      - expect: shown
+      - announce: stopped
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+      # Focus was never in the notice, so recovery must not move it.
+      - focused: elsewhere
+
+  - name: returning-socket-clears-a-failed-check
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      # The next drop starts clean: the old failure must not raise the notice
+      # while the new check is still out.
+      - health: hang
+      - socket: close
+      - wait: 0
+      - expect: hidden
+
+  - name: late-failure-loses-to-reconnected-socket
+    steps:
+      - health: up
+      - socket: open
+      - health: hang
+      - socket: close
+      - wait: 1000
+      - socket: open
+      - wait: 2500
+      - expect: hidden
+      # The late failure must leave nothing behind: the next blip, with the app
+      # running, shows and announces nothing.
+      - announce: none
+      - health: up
+      - socket: close
+      - wait: 0
+      - expect: hidden
+      - announce: none
+
+  - name: try-again-reconnects-at-once
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - socket: close
+      - wait: 1000
+      - health: up
+      - focus: retry
+      - retry: true
+      - wait: 0
+      # The retry reconnected now, ahead of the backoff (due at 3 s); the
+      # notice stays until that socket is back.
+      - sockets: 3
+      - expect: shown
+      - announce: stopped
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+      - focused: main
+      - mainFocusable: true
+      # <main> is focusable only while the move holds focus.
+      - focus: away
+      - mainFocusable: false
+
+  - name: failed-try-again-stays-usable
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - healthChecks: 2
+      - retry: true
+      - wait: 100
+      - announce: still
+      # A failed check does not reconnect: still the one closed socket.
+      - sockets: 1
+      - retry: true
+      # The repeat is cleared first, so it is read out again.
+      - wait: 0
+      - announce: none
+      - wait: 100
+      - announce: still
+      - healthChecks: 4
+      - sockets: 1
+      - expect: shown
+
+  - name: second-outage-keeps-grace
+    steps:
+      - health: up
+      - socket: open
+      - socket: close
+      - wait: 2000
+      - expect: shown
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - socket: close
+      - wait: 0
+      - expect: hidden
+
+  - name: unanswered-retry-does-not-reconnect
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - sockets: 2
+      - socket: close
+      - health: hang
+      - retry: true
+      - wait: 2000
+      - sockets: 3
+      - socket: close
+      # The hung `try again` times out at 4 s: a timeout is no answer, so it
+      # must not reconnect ahead of the backoff (due at 7 s).
+      - wait: 2000
+      - sockets: 3
+      - expect: shown
+
+  - name: stale-check-loses-to-newer-answer
+    steps:
+      - health: up
+      - socket: open
+      - health: hang
+      - socket: close
+      - wait: 1000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - health: up
+      - wait: 1000
+      - socket: close
+      - wait: 900
+      - expect: hidden
+      # The first check times out at 3 s, after the newer one answered: it
+      # must not raise the notice.
+      - wait: 200
+      - expect: hidden
+
+  - name: try-again-within-grace-trusts-the-answer
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - health: up
+      - retry: true
+      - wait: 0
+      # Inside the grace an answer clears the notice: the app is running and
+      # the socket is reconnecting.
+      - sockets: 2
+      - expect: hidden
+      - announce: back
+
+  - name: moot-try-again-stays-quiet
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - health: hang
+      - retry: true
+      - wait: 1000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+      # The hung retry times out at 3 s, after the app came back: it must say
+      # nothing.
+      - wait: 2500
+      - announce: back
+
+  - name: try-again-superseded-by-an-answer-stays-quiet
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - socket: close
+      - wait: 2000
+      - sockets: 3
+      - socket: close
+      - health: hang
+      - retry: true
+      - health: up
+      # The 5 s recheck answers while the retry still hangs, and reconnects.
+      - wait: 2000
+      - healthChecks: 4
+      - sockets: 4
+      # The retry then times out: superseded, it says nothing.
+      - wait: 1100
+      - expect: shown
+      - announce: stopped
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+
+  - name: return-during-the-repeat-clear-stays-back
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - wait: 1000
+      - sockets: 2
+      - retry: true
+      - wait: 0
+      - announce: none
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+      - wait: 100
+      - announce: back
+
+  - name: click-after-try-again-leaves-focus-alone
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - focus: retry
+      - retry: true
+      - wait: 100
+      - announce: still
+      # The reader clicks back into the page before the app returns.
+      - click: page
+      - health: up
+      - wait: 1000
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - focused: elsewhere
+      - mainFocusable: false
+
+  - name: page-control-keeps-focus-when-app-returns
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - focus: retry
+      - focus: page
+      - health: up
+      - wait: 1000
+      - sockets: 2
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - focused: page
+      - mainFocusable: false

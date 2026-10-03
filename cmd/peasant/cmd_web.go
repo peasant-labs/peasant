@@ -86,7 +86,7 @@ func BuildWebCommand() *cobra.Command {
 	webStartCmd.Flags().BoolVar(&webFg, "foreground", false, "Run in foreground (no background fork)")
 	webStartCmd.Flags().BoolVar(&webNoBrowser, "no-browser", false, "Don't auto-open browser")
 	webStartCmd.Flags().BoolVar(&webVerbose, "verbose", false, "Enable verbose logging (debug level)")
-	webStartCmd.Flags().BoolVar(&webExperimental, "experimental", false, "Advertise experimental web navigation (currently: code map discoverability); direct routes stay available either way")
+	webStartCmd.Flags().BoolVar(&webExperimental, "experimental", false, "Advertise the code-map navigation capability; the local app currently keeps the code map reachable by URL only, so the header and palette do not change")
 	webStartCmd.Flags().StringVar(&mockDataStore, "mock-data-store", "", "Use mock data store (comma-separated: web,tui,api or dashboard,sessions,trends,metrics,qualitySessions)")
 
 	webStopCmd := &cobra.Command{

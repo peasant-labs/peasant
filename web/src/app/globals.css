@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:is([data-theme="dark"] *));
+/* A screen with room to pin the local offline notice under the header: the one
+   declaration of this query (LocalOfflineNotice's `notice-pinned:fixed`, the
+   scroll padding below, and the mounted gates all follow it). */
+@custom-variant notice-pinned (@media (min-height: 40rem) and (min-width: 48rem));
 
 
 /* ============================================
@@ -8,7 +12,22 @@
    ============================================ */
 
 :root {
-  --app-header-height: 7rem;
+  /* Where page content starts: the fixed one-row header (fairtrade's --nav-h at
+     every width) plus the local offline notice, which sits under it at the top
+     of the page while it shows. The notice writes its own measured height to
+     --app-notice-height and clears it when it goes. */
+  --app-header-height: calc(var(--nav-h) + var(--app-notice-height, 0px));
+  /* The height a full-height page (the transcript, /share) fills below that.
+     While the notice shows on a small or zoomed screen the page keeps a floor
+     (24rem, or the whole screen under the header when that is less), so the
+     document scrolls the notice away instead of crushing the page. Where the
+     notice is pinned the floor does not bite: the smallest pinned screen
+     (48rem wide, 40rem tall) leaves more than 24rem under a notice of about
+     200px or less. */
+  --app-body-height: max(
+    calc(100dvh - var(--app-header-height)),
+    min(24rem, calc(100dvh - var(--nav-h)))
+  );
 
   /* ─── v2 semantic palette — app-supplementary tokens (dark default) ───── */
   /* Fairtrade owns: canvas, surface-*, ink-*, rule-*, danger-*, warning-*,
@@ -70,9 +89,12 @@
      nothing app-side overrides them anymore. */
 }
 
-@media (min-width: 1024px) {
-  :root {
-    --app-header-height: 4rem;
+/* Focused elements scroll clear of the header, and of the offline notice where
+   it is pinned (the notice-pinned variant). Elsewhere only the header is fixed,
+   which fairtrade's own scroll-padding-top (--nav-h) already clears. */
+html {
+  @variant notice-pinned {
+    scroll-padding-top: var(--app-header-height);
   }
 }
 
@@ -761,12 +783,12 @@ textarea::placeholder {
   }
 }
 
-/* Share owns the viewport below the responsive app header. The page and wizard
-   form one unbroken flex chain, so the body receives the actual remaining space
-   after breadcrumbs, title, rail, and footer without guessed offsets. */
+/* Share owns the viewport below the header (and the offline notice while it
+   shows). The page and wizard form one unbroken flex chain, so the body
+   receives the actual remaining space after breadcrumbs, title, rail, and
+   footer without guessed offsets. */
 .share-page {
-  height: calc(100vh - var(--app-header-height));
-  height: calc(100dvh - var(--app-header-height));
+  height: var(--app-body-height);
   min-height: 0;
 }
 .share-wizard {

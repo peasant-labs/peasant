@@ -1,0 +1,101 @@
+# The pages the offline gate (shell-nav-default-gate.mjs) stops the server on, one
+# at a time, in both themes. The gate loads this strictly: unknown fields fail,
+# and it requires the case names pinned in its REQUIRED_CASES (add a new name
+# there with a new row), so deleting a row fails loudly instead of dropping that
+# coverage.
+#
+# Fields:
+#   name            the case and its capture file name
+#   path            the page; $TRANSCRIPT is the gate's mock transcript route
+#   body            the selector the page's body mounts
+#   width, height   the viewport, in CSS pixels
+#   check           the case-specific check after the notice shows:
+#                     plain        capture at the top of the page
+#                     retry-reach  the notice is taller than the screen, and the
+#                                  document must scroll `try again` into reach
+#                                  below the header
+#                     floor        scrolled to the bottom, `floor` keeps exactly
+#                                  min(bodyFloor, screen height − header) fully
+#                                  in view below the header (bodyFloor from
+#                                  app-shell-geometry.yaml); the case must be
+#                                  one where the floor binds
+#                     scrolled     the page is scrolled down before the stop, and
+#                                  the pinned notice must appear on screen under
+#                                  the header
+#                     keep-place / keep-place-end: a non-pinned notice on a page
+#                                  scrolled midway / to its end while stopped. The
+#                                  midway case checks appearance too; after recovery the stable content
+#                                  reference returns to the same viewport top ±1px.
+#   reference       stable content selector required for place-keeping cases
+#   floor           the full-height element a `floor` case measures
+#   singleScroller  the page's own content scrolls; the document must not
+#   recover         pointer (default) or keyboard: how `try again` is pressed after
+#                   the restart; keyboard focuses it and presses Enter, and the
+#                   gate checks focus moves to <main> and on (one case must)
+cases:
+  - name: home
+    path: /
+    body: main
+    width: 1440
+    height: 900
+    check: plain
+    recover: keyboard
+  - name: transcript
+    path: $TRANSCRIPT
+    body: .txn-app
+    width: 1440
+    height: 900
+    check: plain
+    singleScroller: true
+  - name: home-mobile
+    path: /
+    body: main
+    width: 390
+    height: 844
+    check: plain
+  # 400% zoom on a 1280×1024 screen: the notice alone is taller than the viewport.
+  - name: home-short
+    path: /
+    body: main
+    width: 320
+    height: 256
+    check: retry-reach
+  # The same zoom on the transcript: the page scrolls the notice away and keeps its floor.
+  - name: transcript-short
+    path: $TRANSCRIPT
+    body: .txn-app
+    width: 320
+    height: 256
+    check: floor
+    floor: '[data-tour="transcript-view"]'
+  # A small phone on /share: the share page keeps its floor below the notice.
+  - name: share-mobile
+    path: /share/
+    body: .share-page
+    width: 320
+    height: 568
+    check: floor
+    floor: .share-page
+  # A roomy screen scrolled down before the app stops: the pinned notice must be on screen.
+  - name: home-scrolled
+    path: /
+    body: main
+    width: 1440
+    height: 700
+    check: scrolled
+  # A short desktop window (not pinned) scrolled down: the reader keeps their place.
+  # /analytics keeps its stale content while offline (home swaps its body for a card).
+  - name: analytics-keep-place
+    path: /analytics/
+    body: .gan-root
+    width: 1440
+    height: 500
+    check: keep-place
+    reference: .gan-root
+  - name: analytics-end-keeps-place
+    path: /analytics/
+    body: .gan-root
+    reference: .gan-root
+    width: 390
+    height: 844
+    check: keep-place-end

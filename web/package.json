@@ -29,15 +29,15 @@
     "shoot:changes": "node scripts/visual/changes-shoot.mjs",
     "boot:peasant": "node scripts/visual/boot-peasant.mjs",
     "boot:shell": "node scripts/visual/shell-nav-gate.mjs",
+    "shell:offline": "node scripts/visual/shell-nav-default-gate.mjs",
     "sxs": "node scripts/visual/stitch-sxs.mjs",
     "sxs:changes": "SURFACE_SET=changes REF_DIR=changes APP_DIR=peasant node scripts/visual/stitch-sxs.mjs",
     "sxs:smoke": "SURFACE_SET=smoke REF_DIR=smoke-baseline APP_DIR=smoke node scripts/visual/stitch-sxs.mjs scripts/visual",
-    "sxs:shell": "IMGDIFF_MODE=presence SURFACE_SET=shell REF_DIR=shell-demo APP_DIR=shell node scripts/visual/stitch-sxs.mjs scripts/visual",
-    "shell:gate": "pnpm boot:shell && pnpm sxs:shell"
+    "shell:gate": "pnpm boot:shell && pnpm shell:offline"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.20",
-    "@peasant-labs/schema": "0.20.0",
+    "@peasant-labs/fairtrade": "0.0.24",
+    "@peasant-labs/schema": "0.26.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",

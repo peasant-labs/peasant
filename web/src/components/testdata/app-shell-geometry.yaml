@@ -1,14 +1,35 @@
+# --app-header-height is where page content starts: the fixed one-row header
+# plus, while it shows, the local offline notice at the top of the page. It is
+# declared once, with no breakpoint override (the header is one row at every
+# width), and grown by the notice's measured height. The header row itself is
+# fairtrade's --nav-h and must not grow with the notice. --app-body-height is
+# what a full-height page fills below it, with a floor on short screens. The
+# test requires every consumer path below.
 variable: --app-header-height
-breakpoints:
-  mobile: 7rem
-  desktop: 4rem
+value: calc(var(--nav-h) + var(--app-notice-height, 0px))
+bodyVariable: --app-body-height
+# The floor a full-height page keeps under the notice on a short screen (the
+# offline gate checks it binds there).
+bodyFloor: 24rem
+# The one declaration of "a screen with room to pin the offline notice".
+noticePinnedVariant: '@custom-variant notice-pinned (@media (min-height: 40rem) and (min-width: 48rem));'
+noticePinnedClass: notice-pinned:fixed
+headerRow:
+  path: src/components/TopNavbar.tsx
+  token: h-[var(--nav-h)]
+noticeHeight:
+  path: src/components/LocalOfflineNotice.tsx
+  token: setProperty('--app-notice-height'
 consumers:
-  - path: src/components/TopNavbar.tsx
-    token: h-[var(--app-header-height)]
   - path: src/app/layout.tsx
     token: pt-[var(--app-header-height)]
   - path: src/components/session-detail/v2/SessionDetailV2.tsx
-    token: h-[calc(100dvh-var(--app-header-height))]
+    token: h-[var(--app-body-height)]
 forbidden:
   - calc(100vh - 64px)
   - calc(100dvh - 64px)
+# <main> must not be focusable at rest: a click in the page would focus it and
+# steer Tab and keyboard scrolling. The offline notice makes it focusable only
+# for its own focus move.
+restingMain:
+  path: src/app/layout.tsx

@@ -289,7 +289,7 @@ does not delete existing data.
 
 ## Viewer lists and stored data
 
-Home, Map, and the command palette show the same project list. If one available child session is
+Home and Map show the same project list. If one available child session is
 selected, its stored parent project appears in that list. Showing the parent does not select its
 sibling sessions. The normal push chooser still offers only sessions that the saved selection admits.
 

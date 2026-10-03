@@ -1,31 +1,29 @@
-import { GRAPH_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
+import { Settings, type LucideIcon } from 'lucide-react';
+import { LOCAL_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
 import { UI_CAPABILITY, type UICapabilityToken } from '@/lib/capabilities/tokens';
 
 /**
- * App navigation sections — the single source of truth for the top nav, and
- * the seam the breadcrumbs and the Cmd+K command palette read from, so
- * "what sections exist, where they live, and what capability they require" is
- * defined once. This is the only capability-visibility policy point: consumers
- * hold no raw section-visibility logic.
+ * App sections — the single source of truth for the header and the Cmd+K
+ * command palette, so "what sections exist, where they live, and which ones
+ * persistent chrome may link to" is defined once. This is the only
+ * section-visibility policy point: consumers hold no raw section-id logic.
  *
- * Graph shell IA: Home · Analytics · Code map. WHICH sections exist comes from
- * @peasant-labs/fairtrade/graph's GRAPH_APP_SECTIONS; the label and the lead
- * position are app-local overrides below. Home owns `/` — the project picker —
- * and stays active across /review/*. Code map owns /map plus
- * /projects/{name}/{id} viewer deep links. Share is a persistent top-nav action
- * outside this graph-section registry and routes to `/share`.
+ * WHICH sections exist, their order, their labels, and whether each one is
+ * listed in the navigation come from @peasant-labs/fairtrade/graph's
+ * LOCAL_APP_SECTIONS: `home` and `settings` are nav sections; `analytics`,
+ * `changes` and `code map` are reached by route only. This module adds only
+ * the local route each id owns. `/share` is not a section: it stays outside
+ * this registry.
  */
 
 export interface NavSection {
   id: string;
   href: string;
   label: string;
-  /** Extra pathname prefixes that keep this section active. */
-  activePrefixes: string[];
-  /** First-run tour anchor, when the section participates in the tour. */
-  tourId?: string;
   /** Hover description (also reusable as a palette hint). */
   title?: string;
+  /** The glyph the section's header link leads with. */
+  icon?: LucideIcon;
   /**
    * The server-advertised capability token required to expose this section in
    * persistent chrome. Absent means always visible; present means the section
@@ -35,75 +33,81 @@ export interface NavSection {
   requiredCapability?: UICapabilityToken;
 }
 
-type GraphSectionId = 'analytics' | 'map' | 'changes';
+/** A registry section as this app wires it. `inNav` comes from fairtrade. */
+export interface LocalSection extends NavSection {
+  inNav: boolean;
+}
 
-type GraphShellSection = { id: string; label: string };
+type LocalSectionId = 'home' | 'settings' | 'analytics' | 'changes' | 'map';
 
-const GRAPH_NAV = GRAPH_APP_SECTIONS as readonly GraphShellSection[];
+type SectionRoute = Omit<NavSection, 'id' | 'label' | 'icon'>;
 
-const ROUTES: Record<GraphSectionId, Omit<NavSection, 'id' | 'label'>> = {
-  changes: {
+/**
+ * The page each registry id owns in this app. `null` means the app has no page
+ * for the section yet: the registry lists it, but a link to it would be dead,
+ * so persistent chrome leaves it out until the page ships.
+ */
+const ROUTES: Record<LocalSectionId, SectionRoute | null> = {
+  home: {
     href: '/',
-    activePrefixes: ['/review'],
-    title: 'Your projects and the lines of work moving through them.',
+    title: 'Your projects and the sessions recorded in them.',
+  },
+  // The local settings page has not shipped; the header gains its link when it does.
+  settings: null,
+  analytics: {
+    href: '/analytics',
+    title: 'Read project-level session volume, outcomes, duration, and contributor signals.',
+  },
+  changes: {
+    href: '/review',
+    title: 'The lines of work moving through a project.',
   },
   map: {
     href: '/map',
-    activePrefixes: ['/map', '/projects'],
     title: 'See a project as a map of its code areas and how they connect.',
+    // Only takes effect if the registry ever lists the code map in the nav again.
     requiredCapability: UI_CAPABILITY.codeMapNavigationV1,
   },
-  analytics: {
-    href: '/analytics',
-    activePrefixes: ['/analytics'],
-    title: 'Read project-level session volume, outcomes, duration, and contributor signals.',
-  },
 };
 
 /**
- * App-local display labels that replace the ones fairtrade ships.
- *
- * The graph shell registry stays the source of truth for WHICH sections exist,
- * so the `assertKnownGraphSection` guard below still catches an unmapped section
- * arriving in a future fairtrade release. Only the rendered string is replaced.
- *
- * `changes` reads as "home" because the section owns `/` — the page the app
- * opens on. Lowercase, matching fairtrade's chrome convention and the rest of
- * the nav.
+ * The glyph a nav section's header link leads with. Recorded here, beside the
+ * route map, so the link carries it the moment its page ships.
  */
-const LABEL_OVERRIDES: Partial<Record<GraphSectionId, string>> = {
-  changes: 'home',
+const ICONS: Partial<Record<LocalSectionId, LucideIcon>> = {
+  settings: Settings,
 };
 
-/**
- * The section that leads the nav, ahead of fairtrade's own analytics-first
- * order. Home is where the app opens, so it reads first; every other section
- * keeps the design system's relative order behind it.
- */
-const LEAD_SECTION_ID: GraphSectionId = 'changes';
-
-function assertKnownGraphSection(section: GraphShellSection): asserts section is GraphShellSection & { id: GraphSectionId } {
-  if (!(section.id in ROUTES)) {
+function assertKnownSection(id: string): asserts id is LocalSectionId {
+  if (!Object.hasOwn(ROUTES, id)) {
     throw new Error(
-      `Unknown graph shell section "${section.id}" from @peasant-labs/fairtrade/graph in web/src/lib/nav/sections.ts. ` +
-      `Update the explicit route metadata for analytics, map, and changes before exposing a new section.`,
+      `Unknown local app section "${id}" from @peasant-labs/fairtrade/graph LOCAL_APP_SECTIONS in web/src/lib/nav/sections.ts. ` +
+      `Map its route (or record that its page has not shipped) before this app can render it.`,
     );
   }
 }
 
-export const NAV_SECTIONS: NavSection[] = GRAPH_NAV.map((section) => {
-  assertKnownGraphSection(section);
+/** Every registry section this app has a page for, in fairtrade's order. */
+export const LOCAL_SECTIONS: readonly LocalSection[] = LOCAL_APP_SECTIONS.flatMap((section) => {
+  assertKnownSection(section.id);
   const route = ROUTES[section.id];
-  return { ...route, id: section.id, label: LABEL_OVERRIDES[section.id] ?? section.label };
-  // Stable partition, not a full reorder: the lead section moves to the front
-  // and everything else keeps the order fairtrade shipped it in.
-}).sort((a, b) => Number(b.id === LEAD_SECTION_ID) - Number(a.id === LEAD_SECTION_ID));
+  if (route === null) return [];
+  return [{ ...route, icon: ICONS[section.id], id: section.id, label: section.label, inNav: section.inNav !== false }];
+});
+
+/** The sections persistent chrome may link to: listed in the nav and routed here. */
+export const NAV_SECTIONS: readonly NavSection[] = LOCAL_SECTIONS.filter((section) => section.inNav);
+
+/**
+ * The sections reached by URL only. Their routes stay mounted; nothing in the
+ * header or the palette links to them.
+ */
+export const ROUTE_ONLY_SECTIONS: readonly NavSection[] = LOCAL_SECTIONS.filter((section) => !section.inNav);
 
 /**
  * Whether a section's discoverability requirement is met by the advertised
  * capability set. A section with no `requiredCapability` is always visible; one
  * with a requirement is visible only when the set contains that exact token.
- * Gated routes stay reachable by URL — this governs persistent chrome only.
  */
 function sectionMeetsCapability(section: NavSection, capabilities: ReadonlySet<string>): boolean {
   return section.requiredCapability === undefined || capabilities.has(section.requiredCapability);
@@ -115,22 +119,19 @@ export function visibleNavSections(capabilities: ReadonlySet<string>): NavSectio
 }
 
 /**
- * Whether the section `id` is discoverable given the advertised capability set.
- * The single predicate consumers (e.g. the command palette's per-project "· map"
- * jumps) use for capability-gated visibility — no raw section-id visibility
- * booleans live outside this module and the capabilities provider.
+ * The links the header carries beside its brand: the visible nav sections
+ * other than the one that owns `/`, which the `peasant` brand link already is.
  */
-export function isSectionVisible(id: NavSection['id'], capabilities: ReadonlySet<string>): boolean {
-  const section = NAV_SECTIONS.find((s) => s.id === id);
-  return section !== undefined && sectionMeetsCapability(section, capabilities);
+export function headerNavSections(capabilities: ReadonlySet<string>): NavSection[] {
+  return visibleNavSections(capabilities).filter((section) => section.href !== '/');
 }
 
 /**
- * Whether `pathname` is within a section. Changes owns `/` exactly (plus its
- * activePrefixes); the others match their href prefix plus any extra prefixes.
+ * Whether `pathname` is within a section: the section's own page or anything
+ * under it. Home owns `/` exactly.
  */
 export function isSectionActive(section: NavSection, pathname: string): boolean {
-  const base =
-    section.href === '/' ? pathname === '/' : pathname.startsWith(section.href);
-  return base || section.activePrefixes.some((p) => pathname.startsWith(p));
+  const path = pathname.replace(/\/+$/, '') || '/';
+  if (section.href === '/') return path === '/';
+  return path === section.href || path.startsWith(`${section.href}/`);
 }

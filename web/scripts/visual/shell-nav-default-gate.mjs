@@ -1,423 +1,500 @@
-/* Default-mode graph shell gate (the discoverability-gate fail-closed arm).
+/* Local shell offline gate on the mounted production app.
 
-   Companion to shell-nav-gate.mjs. That gate boots the app WITH `--experimental`
-   and asserts all three graph sections (`analytics · changes · code map`) are
-   discoverable. This gate boots the app WITHOUT `--experimental` and asserts the
-   opposite discoverability contract on the SAME production build:
-
-     1. the persistent top nav shows EXACTLY `analytics · changes`, in that order,
-        with a mounted, non-blank body and the correct active-state amber pill;
-     2. the code map is absent from BOTH the nav AND the command palette — no
-        "go to code map" nav command and no per-project "· map" jump — while the
-        palette is genuinely populated (per-project "· changes" jumps present), so
-        the absence is a real gate, not an empty list;
-     3. the `/map/<project>` route is STILL directly mounted (`.gmp-root` renders a
-        non-blank body) — the gate hides discoverability, it never removes routes.
-
-   It fails closed when the nav, palette, or a mounted body is missing, blank,
-   reordered, or when a map entry point leaks into default mode.
-
-   Start a real app first, WITHOUT --experimental (mirror shell-nav-gate.mjs minus
-   the flag):
-     ./bin/peasant web start --port 8690 --foreground --no-browser \
-       --mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations
+   See README.md §4c for the header, provenance, offline, keyboard, geometry and lifecycle
+   checks, their fixture cases, and the test promotion rationale. This script owns its server
+   because it exercises stopping and restarting the app. Captures are review evidence only.
 
    Run:
      CHROME_PATH=$(command -v google-chrome) node scripts/visual/shell-nav-default-gate.mjs
 
    Env:
-     PEASANT_REAL_ORIGIN  origin of the running default-mode app (default http://localhost:8690)
-     SHELL_CAPTURE_DIR    output root for shell captures (default <base>/shell-default)
-     SHELL_PROJECT        mock ProjectHash used to drill changes/map past the picker
-                          into a representative, project-scoped surface (default the
-                          canonical SHELL_DEFAULT_PROJECT from smoke-surfaces.mjs)
-     CHROME_PATH          Chrome/Chromium binary (required)
-     PUPPETEER_CORE       explicit puppeteer-core module path (optional)
+     PEASANT_BIN               binary to boot (default <repo>/bin/peasant; build it with make build)
+     PEASANT_OFFLINE_PORT      port to boot it on (default 8698; must be free)
+     PEASANT_OFFLINE_CONFIG_DIR config dir for the booted server (default a fresh temp dir, removed
+                               afterwards; a supplied dir is kept)
+     SHELL_OFFLINE_CAPTURE_DIR output root for the offline frames (default <base>/shell-offline)
+     CHROME_PATH               Chrome/Chromium binary (required)
+     PUPPETEER_CORE            explicit puppeteer-core module path (optional)
  */
-import { mkdirSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import YAML from 'yaml'
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
-import { GRAPH_SHELL_NAV_DEFS, SHELL_DEFAULT_PROJECT, SMOKE_THEMES } from './smoke-surfaces.mjs'
+import { SHELL_DEFAULT_PROJECT, SHELL_DEFAULT_SESSION, SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
+import { assertServedBuild, shellProvenanceMarkers } from './served-build.mjs'
+import { chromeClearance, headerFailures, loadNoticePinnedQuery, loadShellHeaderManifest, shippedItems, WEB_ROOT } from './shell-header-manifest.mjs'
 
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BASE = process.argv[2] || HERE
-const APP_OUT = process.env.SHELL_CAPTURE_DIR || join(BASE, 'shell-default')
+const REPO = resolve(WEB_ROOT, '..')
+const BIN = process.env.PEASANT_BIN || join(REPO, 'bin', 'peasant')
+const PORT = Number(process.env.PEASANT_OFFLINE_PORT || 8698)
+const ORIGIN = `http://localhost:${PORT}`
+const OUT = process.env.SHELL_OFFLINE_CAPTURE_DIR || join(BASE, 'shell-offline')
 const CHROME = process.env.CHROME_PATH
-const ORIGIN = (process.env.PEASANT_REAL_ORIGIN || 'http://localhost:8690').replace(/\/$/, '')
-const SHELL_PROJECT = process.env.SHELL_PROJECT || SHELL_DEFAULT_PROJECT
+const NOTICE = 'section[aria-label="peasant is not running"]'
+// fairtrade's banner button (LocalOfflineBanner renders `.cx-offline-retry` for `try again`).
+const RETRY = `${NOTICE} .cx-offline-retry`
+const LIVE = 'p[role="status"].sr-only'
+const EXPECTED_COMMAND = PORT === 8690 ? 'peasant web start' : `peasant web start --port ${PORT}`
+const TRANSCRIPT_PATH = `/projects/${SHELL_DEFAULT_PROJECT}/${SHELL_DEFAULT_SESSION}/`
+/** The floor a full-height page keeps below the header while the notice shows, as the geometry fixture records it. */
+const BODY_FLOOR_REM = (() => {
+  const geometry = YAML.parse(readFileSync(join(WEB_ROOT, 'src', 'components', 'testdata', 'app-shell-geometry.yaml'), 'utf8'))
+  const match = /^(\d+(?:\.\d+)?)rem$/.exec(String(geometry?.bodyFloor ?? ''))
+  if (!match) throw new Error(`app-shell-geometry.yaml bodyFloor must be a rem length, got ${JSON.stringify(geometry?.bodyFloor)}`)
+  return Number(match[1])
+})()
+const CASES_FIXTURE = join(HERE, 'testdata', 'shell-offline-cases.yaml')
+const REQUIRED_CASES = ['home', 'transcript', 'home-mobile', 'home-short', 'transcript-short', 'share-mobile', 'home-scrolled', 'analytics-keep-place', 'analytics-end-keeps-place']
+const CHECKS = ['plain', 'retry-reach', 'floor', 'scrolled', 'keep-place', 'keep-place-end']
+const RECOVERIES = ['pointer', 'keyboard']
 
-// Default-mode discoverability contract: exactly the first two graph sections, in
-// canonical order. The map section (GRAPH_SHELL_NAV_DEFS[2]) must NOT be advertised.
-const DEFAULT_SECTIONS = GRAPH_SHELL_NAV_DEFS.filter((s) => s.id !== 'shell-map')
-const MAP_SECTION = GRAPH_SHELL_NAV_DEFS.find((s) => s.id === 'shell-map')
-const EXPECTED_NAV = DEFAULT_SECTIONS.map(({ label, href }) => ({ label, href }))
-if (EXPECTED_NAV.length !== 2 || !MAP_SECTION) {
-  console.error('ERROR [shell-nav-default-gate.mjs] GRAPH_SHELL_NAV_DEFS must define analytics, changes, and a gated code map section.')
-  process.exit(1)
+// The page cases: strict YAML, known fields only, one check each, and every required name.
+const loadCases = () => {
+  const fail = (what) => { throw new Error(`${CASES_FIXTURE}: ${what}`) }
+  const document = YAML.parseDocument(readFileSync(CASES_FIXTURE, 'utf8'), { strict: true, uniqueKeys: true })
+  if (document.errors.length) fail(`invalid YAML: ${document.errors.map((error) => error.message).join('; ')}`)
+  const root = document.toJS()
+  if (!root || typeof root !== 'object' || Array.isArray(root) || Object.keys(root).join() !== 'cases' || !Array.isArray(root.cases)) fail('the root must be a mapping with exactly one `cases` list')
+  const allowed = ['name', 'path', 'body', 'width', 'height', 'check', 'floor', 'singleScroller', 'recover', 'reference']
+  const names = new Set()
+  const cases = root.cases.map((row, index) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) fail(`cases[${index}] must be a mapping`)
+    const unknown = Object.keys(row).filter((key) => !allowed.includes(key))
+    if (unknown.length) fail(`cases[${index}] has unknown fields: ${unknown.join(', ')}`)
+    for (const key of ['name', 'path', 'body', 'check']) if (typeof row[key] !== 'string' || row[key].trim() === '') fail(`cases[${index}].${key} must be a non-empty string`)
+    for (const key of ['width', 'height']) if (!Number.isInteger(row[key]) || row[key] <= 0) fail(`cases[${index}].${key} must be a positive integer`)
+    if (names.has(row.name)) fail(`cases[${index}] duplicates name ${row.name}`)
+    names.add(row.name)
+    if (!CHECKS.includes(row.check)) fail(`case ${row.name}: check must be one of ${CHECKS.join(', ')}, got ${JSON.stringify(row.check)}`)
+    if ((row.check === 'floor') !== ('floor' in row)) fail(`case ${row.name}: \`floor\` is required with check: floor and allowed only there`)
+    if ('floor' in row && (typeof row.floor !== 'string' || row.floor.trim() === '')) fail(`case ${row.name}: floor must be a selector`)
+    if (row.check.startsWith('keep-place') && (typeof row.reference !== 'string' || !row.reference.trim())) fail(`case ${row.name}: place keeping requires a stable content reference selector`)
+    if ('singleScroller' in row && typeof row.singleScroller !== 'boolean') fail(`case ${row.name}: singleScroller must be a boolean`)
+    if ('recover' in row && !RECOVERIES.includes(row.recover)) fail(`case ${row.name}: recover must be one of ${RECOVERIES.join(', ')}, got ${JSON.stringify(row.recover)}`)
+    return { ...row, path: row.path.replaceAll('$TRANSCRIPT', TRANSCRIPT_PATH) }
+  })
+  const missing = REQUIRED_CASES.filter((name) => !names.has(name))
+  if (missing.length) fail(`required cases are missing: ${missing.join(', ')}`)
+  if (!cases.some((row) => row.recover === 'keyboard')) fail('one case must recover through the keyboard (recover: keyboard)')
+  return cases
 }
-
-const MIN_BODY_WIDTH = 240
-const MIN_BODY_HEIGHT = 120
-const MIN_SHELL_CAPTURE_HEIGHT = 520
-const THEME_ATTRIBUTES = ['data-theme', 'data-tb-theme']
-const FONTS = [
-  '400 16px "Atkinson Hyperlegible"', '700 16px "Atkinson Hyperlegible"',
-  '400 16px "Atkinson Hyperlegible Mono"', '500 16px "Atkinson Hyperlegible Mono"',
-  '600 16px "Atkinson Hyperlegible Mono"', '700 16px "Atkinson Hyperlegible Mono"',
-]
+const PAGES = Object.freeze(loadCases())
+// The socket grace in the page (useLocalAppHealth's SOCKET_GRACE_MS) plus margin: a connected page
+// must still show no notice after this long.
+const PAST_GRACE_MS = 3000
+const OFFLINE_WITHIN_MS = 8000
+const RECOVER_WITHIN_MS = 10000
 
 if (!CHROME) {
-  console.error('ERROR [shell-nav-default-gate.mjs] CHROME_PATH is unset. Set it to your Chrome/Chromium binary before running the default-mode shell navigation gate.')
+  console.error('ERROR [shell-nav-default-gate.mjs] CHROME_PATH is unset. Set it to your Chrome/Chromium binary before running the offline gate.')
   process.exit(1)
 }
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
-const consoleLocationUrl = (m) => {
-  const loc = typeof m.location === 'function' ? m.location() : null
-  return loc?.url || ''
-}
-const isKnownBenignConsoleMessage = (text, locationUrl) => /favicon/i.test(`${text} ${locationUrl}`)
-const shouldCaptureConsoleMessage = (m) => {
-  const text = m.text()
-  return m.type() === 'error' && !isKnownBenignConsoleMessage(text, consoleLocationUrl(m))
-}
-const formatConsoleDiagnostic = (m) => {
-  const loc = typeof m.location === 'function' ? m.location() : null
-  const where = loc?.url ? ` at ${loc.url}:${loc.lineNumber ?? 0}:${loc.columnNumber ?? 0}` : ''
-  return `console ${m.type()}${where}: ${m.text()}`
-}
+const manifest = loadShellHeaderManifest()
+const PINNED_QUERY = loadNoticePinnedQuery()
+const shipped = shippedItems(manifest)
+const ANNOUNCE = manifest.announcements
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const STILL_PATTERN = new RegExp(`^${escapeRegExp(ANNOUNCE.stillStopped)} \\d{2}:\\d{2}:\\d{2}\\.$`)
 
-const fail = async (browser, message, code = 1) => {
-  console.error(message)
-  try { await browser.close() } catch {}
-  process.exit(code)
-}
+// ── the server this gate owns ────────────────────────────────────────────────────────────────────
+const ownConfigDir = !process.env.PEASANT_OFFLINE_CONFIG_DIR
+const configDir = process.env.PEASANT_OFFLINE_CONFIG_DIR || mkdtempSync(join(tmpdir(), 'peasant-offline-gate-'))
+mkdirSync(OUT, { recursive: true })
+const serverLog = join(OUT, 'server.log')
+closeSync(openSync(serverLog, 'w')) // one run per log: earlier runs never mix into the one a failure points to
+let server = null
 
-// Waits for the persistent shell nav to settle on `section` with EXACTLY the
-// default-mode two-link nav. Reuses the same active-state invariants as
-// shell-nav-gate.mjs: one filled amber pill on the active link, no stray pill on
-// the others, mounted non-blank body, correct theme attributes. `expectedPath` /
-// `mountSelector` / `bodySelector` / `heading` overrides assert a representative,
-// project-scoped drill-down reached by an in-app navigation past the picker.
-const waitForSection = async (page, section, theme, {
-  timeoutMs = 15000,
-  expectedPath = section.href,
-  mountSelector = section.mount,
-  bodySelector = section.body || section.mount,
-  heading = section.heading,
-} = {}) => {
-  const start = Date.now()
-  let last = null
-  while (Date.now() - start < timeoutMs) {
-    last = await page.evaluate(({ section, expectedNav, theme, attrs, minBodyWidth, minBodyHeight, expectedPath, mountSelector, bodySelector, heading }) => {
-      const normalizePath = (path) => {
-        if (!path || path === '/') return '/'
-        return path.replace(/\/+$/, '') || '/'
-      }
-      const navSnapshot = (expected) => {
-        const navRoot = document.querySelector('nav[aria-label="Main navigation"]')
-        if (!navRoot) return { ok: false, reason: 'nav[aria-label="Main navigation"] did not mount', links: [] }
-        const links = [...navRoot.querySelectorAll('a')].map((a) => {
-          const classes = (a.className || '').split(/\s+/)
-          const isAmberPill =
-            classes.includes('bg-amber') && classes.includes('text-on-amber') && classes.includes('border-amber')
-          return {
-            label: (a.textContent || '').trim(),
-            href: normalizePath(new URL(a.href, window.location.origin).pathname),
-            current: a.getAttribute('aria-current') || '',
-            isAmberPill,
-          }
-        })
-        const expectedText = JSON.stringify(expected)
-        const actualText = JSON.stringify(links.map(({ label, href }) => ({ label, href })))
-        if (actualText !== expectedText) {
-          return { ok: false, reason: `expected links ${expectedText}, got ${actualText}`, links }
-        }
-        return { ok: true, reason: '', links }
-      }
-      const nav = navSnapshot(expectedNav)
-      const path = normalizePath(window.location.pathname)
-      const active = nav.links.filter((link) => link.current === 'page')
-      const activeOk = active.length === 1 && active[0].label === section.label && active[0].isAmberPill
-      const inactiveMarkersOk = nav.links.every((link) => link.label === section.label || !link.isAmberPill)
-      const mapLeak = nav.links.some((link) => link.label === 'code map' || link.href === '/map')
-      const mountOk = !!document.querySelector(mountSelector)
-      const body = document.querySelector(bodySelector)
-      const bodyRect = body?.getBoundingClientRect()
-      const bodyText = (body?.textContent || '').replace(/\s+/g, ' ').trim()
-      const bodyVisible = !!body && getComputedStyle(body).visibility !== 'hidden' && getComputedStyle(body).display !== 'none'
-      const bodyInViewport = !!bodyRect && bodyRect.bottom > 96 && bodyRect.top < window.innerHeight - 80
-      const bodySignals = body ? body.querySelectorAll('a, button, canvas, svg, img, [role], [aria-label]').length : 0
-      const bodyOk = !!bodyRect && bodyVisible && bodyInViewport && bodyRect.width >= minBodyWidth && bodyRect.height >= minBodyHeight && (bodyText.length >= 20 || bodySignals >= 3)
-      const headingOk = !heading || [...document.querySelectorAll('h1, h2')].some((h) => (h.textContent || '').trim().toLowerCase() === heading.toLowerCase())
-      const themeAttrs = Object.fromEntries(attrs.map((attr) => [attr, document.documentElement.getAttribute(attr)]))
-      const themeOk = attrs.every((attr) => themeAttrs[attr] === theme)
-      return {
-        ok: nav.ok && !mapLeak && path === normalizePath(expectedPath) && activeOk && inactiveMarkersOk && mountOk && bodyOk && headingOk && themeOk,
-        path,
-        nav,
-        mapLeak,
-        activeOk,
-        inactiveMarkersOk,
-        mountOk,
-        bodySelector,
-        bodyOk,
-        bodyRect: bodyRect ? { width: bodyRect.width, height: bodyRect.height, top: bodyRect.top, bottom: bodyRect.bottom } : null,
-        bodyTextLength: bodyText.length,
-        bodySignals,
-        headingOk,
-        themeAttrs,
-        themeOk,
-      }
-    }, { section, expectedNav: EXPECTED_NAV, theme, attrs: THEME_ATTRIBUTES, minBodyWidth: MIN_BODY_WIDTH, minBodyHeight: MIN_BODY_HEIGHT, expectedPath, mountSelector, bodySelector, heading })
-    if (last.ok) return last
-    await pause(150)
+const healthAnswers = async () => {
+  try {
+    const response = await fetch(`${ORIGIN}/api/v1/health`, { signal: AbortSignal.timeout(1000) })
+    return response.ok
+  } catch {
+    return false
   }
-  throw new Error(
-    `Timed out waiting for default-mode ${section.label} at ${expectedPath}. ` +
-    `Last state: ${JSON.stringify(last)}`
-  )
 }
 
-const clickNav = async (page, section) => {
-  const clicked = await page.evaluate((label) => {
-    const nav = document.querySelector('nav[aria-label="Main navigation"]')
-    const link = [...(nav?.querySelectorAll('a') || [])].find((a) => (a.textContent || '').trim() === label)
-    if (!link) return false
-    link.click()
-    return true
-  }, section.label)
-  if (!clicked) throw new Error(`Could not click the ${section.label} link in nav[aria-label="Main navigation"].`)
+const startServer = async () => {
+  if (await healthAnswers()) throw new Error(`something already answers on ${ORIGIN}; stop it or set PEASANT_OFFLINE_PORT to a free port`)
+  const log = openSync(serverLog, 'a')
+  server = spawn(BIN, ['web', 'start', '--port', String(PORT), '--foreground', '--no-browser', '--config-dir', configDir, `--mock-data-store=${SMOKE_MOCKS}`], { stdio: ['ignore', log, log] })
+  closeSync(log)
+  const started = Date.now()
+  while (Date.now() - started < 20000) {
+    if (server.exitCode !== null) throw new Error(`${BIN} exited with ${server.exitCode} before answering; see ${serverLog}`)
+    if (await healthAnswers()) return
+    await pause(200)
+  }
+  throw new Error(`${BIN} did not answer ${ORIGIN}/api/v1/health within 20s; see ${serverLog}`)
 }
 
-const waitForFonts = async (page) => {
-  await page.evaluate(async (faces) => {
-    try { await Promise.all(faces.map((f) => document.fonts.load(f))) } catch {}
-    await document.fonts.ready
-  }, FONTS)
+const stopServer = async () => {
+  if (!server || server.exitCode !== null) return
+  const exited = new Promise((r) => server.once('exit', r))
+  server.kill('SIGTERM')
+  await Promise.race([exited, pause(5000)])
+  if (server.exitCode === null) server.kill('SIGKILL')
+  const stopped = Date.now()
+  while (Date.now() - stopped < 5000 && await healthAnswers()) await pause(100)
+  if (await healthAnswers()) throw new Error(`${ORIGIN} still answers after the server was stopped`)
 }
 
-// Opens the command palette (the same OPEN_COMMAND_PALETTE_EVENT the header
-// button dispatches), waits until it is genuinely populated with per-project
-// "· changes" jumps, then asserts the code map is absent from every command:
-// no "go to code map" nav command and no per-project "· map" jump. Populated
-// per-project "· changes" jumps make the map absence a real gate, not an empty
-// or still-loading list.
-const assertPaletteHidesMap = async (page, theme, timeoutMs = 15000) => {
-  const opened = await page.evaluate(() => {
-    window.dispatchEvent(new Event('peasant:open-command-palette'))
-    return !!document.querySelector('[aria-label="Command palette"]')
+const removeOwnConfigDir = () => {
+  if (ownConfigDir) {
+    try { rmSync(configDir, { recursive: true, force: true }) } catch {}
+  }
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    try { server?.kill('SIGKILL') } catch {}
+    removeOwnConfigDir()
+    process.exit(130)
   })
-  if (!opened) {
-    // The dispatch is synchronous, but the portal render is not — poll briefly.
-    const appeared = await page.waitForSelector('[aria-label="Command palette"]', { visible: true, timeout: 5000 }).catch(() => null)
-    if (!appeared) throw new Error('The command palette did not open on peasant:open-command-palette in default mode.')
-  }
+}
+process.on('exit', () => {
+  try { if (server && server.exitCode === null) server.kill('SIGKILL') } catch {}
+})
 
+// ── page probes ──────────────────────────────────────────────────────────────────────────────────
+// What the notice says and offers. Its position and the page's clearance come from
+// chromeClearance, the same probe the header gate and the component contract share.
+const noticeState = async (page) => ({
+  ...await page.evaluate(({ notice, retry, live }) => {
+    const section = document.querySelector(notice)
+    const status = section?.querySelector('[role="status"]')
+    return {
+      shown: !!section,
+      status: (status?.textContent || '').replace(/\s+/g, ' ').trim(),
+      command: (section?.querySelector('.cx-cmd-text')?.textContent || '').trim(),
+      retry: (document.querySelector(retry)?.innerText || '').replace(/\s+/g, ' ').trim(),
+      live: (document.querySelector(live)?.textContent || '').trim(),
+      noticeHeight: document.documentElement.style.getPropertyValue('--app-notice-height'),
+      tour: !!document.querySelector('[role="dialog"][aria-label^="Product tour"]'),
+      documentOverflow: document.documentElement.scrollHeight - window.innerHeight,
+      scrollY: window.scrollY,
+    }
+  }, { notice: NOTICE, retry: RETRY, live: LIVE }),
+  clearance: await page.evaluate(chromeClearance, PINNED_QUERY),
+})
+
+const waitFor = async (page, predicate, timeoutMs, what) => {
   const start = Date.now()
   let last = null
   while (Date.now() - start < timeoutMs) {
-    last = await page.evaluate(() => {
-      const dialog = document.querySelector('[aria-label="Command palette"]')
-      if (!dialog) return { ok: false, reason: 'command palette dialog missing', labels: [] }
-      const list = dialog.querySelector('ul[role="listbox"]')
-      if (!list) return { ok: false, reason: 'command palette listbox missing', labels: [] }
-      const options = [...list.querySelectorAll('li[role="option"]')]
-      const labels = options.map((li) => (li.querySelector('span')?.textContent || li.textContent || '').replace(/\s+/g, ' ').trim())
-      const errorShown = !!dialog.querySelector('[role="alert"]')
-      const hasProjectChanges = labels.some((l) => /·\s*changes$/.test(l))
-      const hasNavGoTo = labels.some((l) => l.toLowerCase() === 'go to analytics' || l.toLowerCase() === 'go to changes')
-      return {
-        // Populated = at least one per-project "· changes" jump AND the base nav
-        // "go to" commands are present. Only then is map absence meaningful.
-        populated: hasProjectChanges && hasNavGoTo && !errorShown,
-        errorShown,
-        hasProjectChanges,
-        hasNavGoTo,
-        labels,
-      }
-    })
-    if (last.populated) break
-    await pause(150)
+    last = await noticeState(page)
+    if (predicate(last)) return last
+    await pause(200)
   }
-  if (!last || !last.populated) {
-    throw new Error(
-      `The default-mode command palette never populated with per-project "· changes" jumps and the base "go to" nav commands, ` +
-      `so a map-absence assertion would be vacuous. Last state: ${JSON.stringify(last)}`
-    )
-  }
-
-  const mapNavLeak = last.labels.filter((l) => l.toLowerCase() === 'go to code map')
-  const mapProjectLeak = last.labels.filter((l) => /·\s*map$/.test(l))
-  if (mapNavLeak.length || mapProjectLeak.length) {
-    throw new Error(
-      `Code map entry points leaked into the default-mode command palette. ` +
-      `"go to code map": ${JSON.stringify(mapNavLeak)}; per-project "· map": ${JSON.stringify(mapProjectLeak)}. ` +
-      `All labels: ${JSON.stringify(last.labels)}`
-    )
-  }
-
-  // Close the palette so it does not overlay the subsequent shell captures.
-  await page.keyboard.press('Escape')
-  await page.waitForFunction(() => !document.querySelector('[aria-label="Command palette"]'), { timeout: 5000 }).catch(() => {})
-  console.log(`OK default-mode ${theme} command palette populated (${last.labels.length} commands) with NO map entry points`)
+  throw new Error(`${what} did not happen within ${timeoutMs}ms; last state ${JSON.stringify(last)}`)
 }
 
-const assertBodyReady = async (page, section, bodySelector, where) => {
-  const body = await page.evaluate((selector, minBodyWidth, minBodyHeight) => {
-    const el = document.querySelector(selector)
-    if (!el) return { ok: false, reason: `${selector} did not mount`, selector }
-    const rect = el.getBoundingClientRect()
-    const text = (el.textContent || '').replace(/\s+/g, ' ').trim()
-    const style = getComputedStyle(el)
-    const signals = el.querySelectorAll('a, button, canvas, svg, img, [role], [aria-label]').length
-    const visible = style.visibility !== 'hidden' && style.display !== 'none'
-    const inViewport = rect.bottom > 96 && rect.top < window.innerHeight - 80
-    const ok = visible && inViewport && rect.width >= minBodyWidth && rect.height >= minBodyHeight && (text.length >= 20 || signals >= 3)
+const assertHeaderHolds = async (page, theme, where) => {
+  const failures = [...await page.evaluate(headerFailures, manifest, { theme, shipped }), ...(await page.evaluate(chromeClearance, PINNED_QUERY)).failures]
+  if (failures.length) throw new Error(`the ${theme} header at ${where} breaks the shell manifest: ${JSON.stringify(failures)}`)
+}
+
+const pressRetry = (page) => page.evaluate((selector) => {
+  const button = document.querySelector(selector)
+  button?.click()
+  return !!button
+}, RETRY)
+
+// Scroll `try again` into view and prove a pointer at its centre reaches it (the fixed header must
+// not cover it). The scroll is instant, so a smooth-scrolling root cannot leave the measurement
+// mid-animation.
+const assertRetryReachable = async (page) => {
+  const found = await page.evaluate((selector) => {
+    const retry = document.querySelector(selector)
+    retry?.scrollIntoView({ block: 'center', behavior: 'instant' })
+    return !!retry
+  }, RETRY)
+  if (!found) return { ok: false, reason: 'no try again button', scrollY: 0 }
+  await pause(150)
+  return page.evaluate((selector) => {
+    const retry = document.querySelector(selector)
+    if (!retry) return { ok: false, reason: 'no try again button', scrollY: window.scrollY }
+    const rect = retry.getBoundingClientRect()
+    const header = document.querySelector('header')?.getBoundingClientRect()
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    const inView = rect.top >= 0 && rect.bottom <= window.innerHeight
+    const belowHeader = !header || rect.top >= header.bottom - 0.5
+    const reached = !!hit && (hit === retry || retry.contains(hit))
     return {
-      ok,
-      reason: ok ? '' : `selector=${selector} visible=${visible} inViewport=${inViewport} size=${Math.round(rect.width)}x${Math.round(rect.height)} text=${text.length} signals=${signals}`,
-      selector,
-      width: rect.width,
-      height: rect.height,
-      bottom: rect.bottom,
+      ok: inView && belowHeader && reached,
+      reason: `inView=${inView} belowHeader=${belowHeader} reached=${reached} hit=${hit ? hit.tagName.toLowerCase() : 'none'} rect=${Math.round(rect.top)}..${Math.round(rect.bottom)} scrollY=${Math.round(window.scrollY)} viewport=${window.innerHeight}`,
+      scrollY: window.scrollY,
     }
-  }, bodySelector, MIN_BODY_WIDTH, MIN_BODY_HEIGHT)
-  if (!body.ok) {
-    throw new Error(`The ${where} shell body is missing or blank: ${body.reason}.`)
-  }
-  return body
+  }, RETRY)
 }
 
-const captureShellFrame = async (page, gate, theme, id, bodySelector, where) => {
-  const outDir = join(APP_OUT, theme)
+// Scroll the document to its bottom and prove the full-height page keeps its floor, fully in view
+// below the header.
+const assertFloorKept = async (page, selector) => {
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }))
+  await pause(150)
+  return page.evaluate((sel, floorRem) => {
+    const el = document.querySelector(sel)
+    if (!el) return { ok: false, reason: `${sel} did not mount` }
+    const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+    const header = document.querySelector('header').getBoundingClientRect()
+    const floor = Math.min(floorRem * rem, window.innerHeight - header.height)
+    const rect = el.getBoundingClientRect()
+    // The case must be one where the floor binds (the page would be shorter without it), and the
+    // page must keep exactly that floor in view.
+    const binds = Math.abs(rect.height - floor) <= 1
+    const inView = rect.top >= header.bottom - 1 && rect.bottom <= window.innerHeight + 1
+    return {
+      ok: binds && inView,
+      reason: `height=${Math.round(rect.height)} floor=${Math.round(floor)} top=${Math.round(rect.top)} bottom=${Math.round(rect.bottom)} header=${Math.round(header.bottom)} viewport=${window.innerHeight} scrollY=${Math.round(window.scrollY)}`,
+      height: rect.height,
+      floor,
+      scrollY: window.scrollY,
+    }
+  }, selector, BODY_FLOOR_REM)
+}
+
+// Scroll a page down before the app stops; returns how far it went (it must actually scroll).
+const scrollDown = (page, end = false) => page.evaluate((end) => {
+  const target = end ? document.documentElement.scrollHeight : Math.min(400, document.documentElement.scrollHeight - window.innerHeight)
+  window.scrollTo({ top: target, behavior: 'instant' })
+  return window.scrollY
+}, end)
+
+// Sample every frame whether the notice shows, its height, and the scroll position, so the notice's
+// own effect is read at the frame it appears or goes — apart from the page's own connection states,
+// which change in other frames (or, on the return, change the layout without moving the scroll).
+const startFrameSampler = (page) => page.evaluate((notice) => {
+  if (window.__offlineGateFrames) cancelAnimationFrame(window.__offlineGateFrames.handle)
+  const samples = []
+  const tick = () => {
+    const shown = !!document.querySelector(notice)
+    samples.push({ shown, height: Number.parseFloat(document.documentElement.style.getPropertyValue('--app-notice-height')) || 0, scrollY: window.scrollY })
+    window.__offlineGateFrames.handle = requestAnimationFrame(tick)
+  }
+  window.__offlineGateFrames = { samples, handle: 0 }
+  tick()
+}, NOTICE)
+// The frame the notice appeared (appearing) or went (!appearing): scroll and height either side.
+const frameTransition = (page, appearing) => page.evaluate((appearing) => {
+  const samples = window.__offlineGateFrames?.samples || []
+  const at = samples.findIndex((sample, index) => index > 0 && sample.shown === appearing && samples[index - 1].shown !== appearing)
+  if (at < 0) return null
+  return { before: samples[at - 1], after: samples[at] }
+}, appearing)
+
+const capture = async (page, gate, theme, id, { keepScroll = false } = {}) => {
+  const outDir = join(OUT, theme)
   mkdirSync(outDir, { recursive: true })
   const file = join(outDir, `${id}.png`)
-  await waitForFonts(page)
-  const body = await assertBodyReady(page, id, bodySelector, where)
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.evaluate(() => document.fonts.ready)
+  if (!keepScroll) await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }))
   await pause(100)
-  const viewport = page.viewport() || { width: 1460, height: 1000 }
-  const height = Math.min(viewport.height, Math.max(MIN_SHELL_CAPTURE_HEIGHT, Math.ceil(body.bottom + 48)))
-  await page.screenshot({ path: file, clip: { x: 0, y: 0, width: viewport.width, height } })
-  const measured = await gate.assert(id, file, { sel: bodySelector, where: 'shell-nav-default-gate.mjs' })
-  console.log(`OK ${where} ${theme}/${id} frame=${viewport.width}x${height} body=${bodySelector} ${Math.round(body.width)}x${Math.round(body.height)} nonbg=${(measured.nonbgRatio * 100).toFixed(1)}% colors=${measured.distinctColors}`)
+  await page.screenshot({ path: file, captureBeyondViewport: false })
+  const measured = await gate.assert(`offline-${id}-${theme}`, file, { sel: NOTICE, where: 'shell-nav-default-gate.mjs' })
+  console.log(`OK offline ${theme}/${id} nonbg=${(measured.nonbgRatio * 100).toFixed(1)}% colors=${measured.distinctColors}`)
   return file
 }
 
-const captureDefaultShell = async (browser) => {
-  const captured = []
-  for (const theme of SMOKE_THEMES) {
-    const page = await browser.newPage()
-    await applyDeterminism(page)
-    await page.evaluateOnNewDocument((t) => { try { localStorage.setItem('peasant-theme', t) } catch {} }, theme)
-    const gate = new SurfaceGate(page)
-    const diagnostics = []
-    page.on('console', (m) => { if (shouldCaptureConsoleMessage(m)) diagnostics.push(formatConsoleDiagnostic(m)) })
-    page.on('pageerror', (e) => diagnostics.push('pageerr: ' + (e.stack || e.message)))
+// ── the run ──────────────────────────────────────────────────────────────────────────────────────
+// One page at a time, each through its own stop/restart cycle, so the page under test is always the
+// browser's active tab (background tabs may be frozen and stop answering the protocol).
+const drivePage = async (theme, spec, seen) => {
+  const page = await browser.newPage()
+  await page.bringToFront()
+  await page.setViewport({ width: spec.width, height: spec.height, deviceScaleFactor: 1 })
+  await applyDeterminism(page)
+  await page.evaluateOnNewDocument((t) => { try { localStorage.setItem('peasant-theme', t) } catch {} }, theme)
+  const gate = new SurfaceGate(page)
+  gate.seen = seen
+  const diagnostics = []
+  page.on('pageerror', (e) => diagnostics.push('pageerr: ' + (e.stack || e.message)))
+  const where = `${theme}/${spec.name} (${spec.width}×${spec.height})`
 
-    // 1. analytics — land on the first default section, assert exactly-two nav.
-    const analytics = DEFAULT_SECTIONS[0]
-    const response = await page.goto(ORIGIN + analytics.href, { waitUntil: 'domcontentloaded' }).catch((e) => {
-      throw new Error(`Could not load ${ORIGIN + analytics.href}: ${e.message}`)
-    })
-    if (!response || response.status() >= 400) {
-      throw new Error(`The running app returned HTTP ${response ? response.status() : 0} for ${ORIGIN + analytics.href}.`)
-    }
-    await waitForSection(page, analytics, theme)
-    captured.push(await captureShellFrame(page, gate, theme, analytics.id, analytics.body || analytics.mount, 'peasant-app-default'))
-
-    // 2. command palette — code map absent from nav AND palette while populated.
-    await assertPaletteHidesMap(page, theme)
-
-    // 3. changes — click through, drill into a representative project surface.
-    const changes = DEFAULT_SECTIONS[1]
-    await clickNav(page, changes)
-    await waitForSection(page, changes, theme)
-    let changesBody = changes.body || changes.mount
-    if (changes.representativePath) {
-      const path = changes.representativePath(SHELL_PROJECT)
-      const drill = await page.goto(ORIGIN + path, { waitUntil: 'domcontentloaded' }).catch((e) => {
-        throw new Error(`Could not load representative ${changes.label} surface at ${ORIGIN + path}: ${e.message}`)
-      })
-      if (!drill || drill.status() >= 400) {
-        throw new Error(`The running app returned HTTP ${drill ? drill.status() : 0} for representative ${changes.label} surface ${ORIGIN + path}.`)
-      }
-      await waitForSection(page, changes, theme, {
-        expectedPath: path,
-        mountSelector: changes.representativeBody,
-        bodySelector: changes.representativeBody,
-        heading: null,
-      })
-      changesBody = changes.representativeBody
-    }
-    captured.push(await captureShellFrame(page, gate, theme, changes.id, changesBody, 'peasant-app-default'))
-
-    // 4. route preservation — /map/<project> STILL mounts its body directly even
-    // though the section is undiscoverable in the nav and palette.
-    const mapPath = MAP_SECTION.representativePath(SHELL_PROJECT)
-    const mapResponse = await page.goto(ORIGIN + mapPath, { waitUntil: 'domcontentloaded' }).catch((e) => {
-      throw new Error(`Could not load direct map route ${ORIGIN + mapPath}: ${e.message}`)
-    })
-    if (!mapResponse || mapResponse.status() >= 400) {
-      throw new Error(`The direct map route returned HTTP ${mapResponse ? mapResponse.status() : 0} for ${ORIGIN + mapPath} — the discoverability gate must never remove routes.`)
-    }
-    // Poll the mounted body directly (this route is intentionally NOT in the nav,
-    // so there is no active-pill invariant to assert here — only route survival).
-    const start = Date.now()
-    let mapBody = null
-    while (Date.now() - start < 15000) {
-      try {
-        mapBody = await assertBodyReady(page, MAP_SECTION, MAP_SECTION.representativeBody, 'peasant-app-default map route')
-        break
-      } catch {
-        await pause(200)
-      }
-    }
-    if (!mapBody) {
-      throw new Error(`The direct /map route body ${MAP_SECTION.representativeBody} never mounted in default mode at ${ORIGIN + mapPath}.`)
-    }
-    captured.push(await captureShellFrame(page, gate, theme, 'shell-map-route-preserved', MAP_SECTION.representativeBody, 'peasant-app-default'))
-
-    if (diagnostics.length) {
-      throw new Error(`Client diagnostics appeared while driving the ${theme} default-mode peasant shell: ${JSON.stringify(diagnostics.slice(0, 4))}`)
-    }
-    await page.close()
+  // connected: the manifest holds and no notice shows, past the socket grace period
+  const response = await page.goto(ORIGIN + spec.path, { waitUntil: 'networkidle0' })
+  if (!response || response.status() >= 400) throw new Error(`the app answered HTTP ${response ? response.status() : 0} for ${spec.path}`)
+  await page.waitForSelector(spec.body, { visible: true, timeout: 15000 })
+  await assertHeaderHolds(page, theme, `${spec.path} ${where}, connected`)
+  await pause(PAST_GRACE_MS)
+  const connected = await noticeState(page)
+  if (connected.shown || connected.noticeHeight || connected.live !== '') throw new Error(`the ${where} page shows or announces the offline notice while the app is running: ${JSON.stringify(connected)}`)
+  const keepsPlace = spec.check.startsWith('keep-place')
+  let referenceTop = null
+  let scrolledTo = 0
+  if (spec.check === 'scrolled' || keepsPlace) {
+    scrolledTo = await scrollDown(page)
+    if (scrolledTo < 100) throw new Error(`the ${where} page does not scroll (reached ${scrolledTo}px), so it cannot show a notice arriving on a scrolled page`)
   }
-  return captured
+  if (keepsPlace) {
+    await pause(150)
+    referenceTop = await page.$eval(spec.reference, (element) => element.getBoundingClientRect().top)
+    await startFrameSampler(page)
+  }
+
+  // stopped: the notice under the header, saying the right thing, the page clearing it
+  await stopServer()
+  await waitFor(page, (s) => s.shown && s.noticeHeight !== '' && s.clearance.failures.length === 0, OFFLINE_WITHIN_MS, `the ${where} offline notice (placed under the header, <main> clearing both)`)
+  // The live region is written by a passive effect after the notice paints; give it that render.
+  const state = await waitFor(page, (s) => s.live !== '', 2000, `the ${where} live region announcing the stop`)
+  const failures = []
+  if (!state.status.includes("peasant isn't running on this computer")) failures.push(`the message does not name this computer: ${JSON.stringify(state.status)}`)
+  if (!state.status.includes('your internet is fine')) failures.push(`the message could read as an internet outage: ${JSON.stringify(state.status)}`)
+  if (state.command !== EXPECTED_COMMAND) failures.push(`the start command reads ${JSON.stringify(state.command)}, expected ${JSON.stringify(EXPECTED_COMMAND)}`)
+  if (state.retry !== 'try again') failures.push(`the retry button reads ${JSON.stringify(state.retry)}, expected "try again"`)
+  if (state.live !== ANNOUNCE.stopped) failures.push(`the live region says ${JSON.stringify(state.live)}, expected ${JSON.stringify(ANNOUNCE.stopped)}`)
+  if (state.tour) failures.push('a tour overlay is showing')
+  if (!/^\d+(\.\d+)?px$/.test(state.noticeHeight)) failures.push(`--app-notice-height is ${JSON.stringify(state.noticeHeight)}`)
+  if (spec.singleScroller && state.documentOverflow > 0) failures.push(`the document scrolls ${state.documentOverflow}px under the transcript's own scroller`)
+  if (spec.check === 'retry-reach' && state.clearance.notice + state.clearance.header <= spec.height) failures.push(`the short-screen case does not exercise a notice taller than the viewport (${state.clearance.header}+${state.clearance.notice}px in ${spec.height}px)`)
+  if (spec.check === 'scrolled') {
+    const top = state.clearance.noticeTop
+    if (!state.clearance.pinnedViewport || !state.clearance.noticeFixed) failures.push(`the notice is not pinned on the roomy ${spec.width}×${spec.height} screen`)
+    if (top === null || top < state.clearance.header - 1 || top + state.clearance.notice > spec.height + 1) failures.push(`on a page scrolled to ${Math.round(state.scrollY)}px the notice sits at ${top}px, not on screen under the ${state.clearance.header}px header`)
+    if (state.scrollY < 100) failures.push(`the page is no longer scrolled (${state.scrollY}px), so the case proves nothing`)
+  }
+  let appeared = null
+  if (keepsPlace) {
+    if (state.clearance.noticeFixed) failures.push(`the notice is pinned on the ${spec.width}×${spec.height} screen, so the case does not exercise a notice in the page flow`)
+    appeared = await frameTransition(page, true)
+    if (!appeared) failures.push('no frame caught the notice appearing')
+    else if (spec.check === 'keep-place' && Math.abs(appeared.after.scrollY - appeared.before.scrollY - appeared.after.height) > 1) {
+      failures.push(`in the frame the ${appeared.after.height}px notice appeared the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px, so the reader lost their place`)
+    }
+  }
+  if (failures.length) throw new Error(`the ${where} page with the server stopped: ${failures.join('; ')}. State: ${JSON.stringify(state)}`)
+  if (spec.check === 'keep-place-end') {
+    await scrollDown(page, true)
+    await pause(150)
+    referenceTop = await page.$eval(spec.reference, (element) => element.getBoundingClientRect().top)
+  }
+  await assertHeaderHolds(page, theme, `${spec.path} ${where}, stopped`)
+
+  let note = ''
+  switch (spec.check) {
+    case 'retry-reach': {
+      const reach = await assertRetryReachable(page)
+      if (!reach.ok) throw new Error(`on the ${where} screen \`try again\` cannot be scrolled into reach: ${reach.reason}`)
+      note = `, try again reached after scrolling ${Math.round(reach.scrollY)}px`
+      captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
+      break
+    }
+    case 'floor': {
+      const floor = await assertFloorKept(page, spec.floor)
+      if (!floor.ok) throw new Error(`on the ${where} screen the full-height page ${spec.floor} does not keep its floor in view below the header: ${floor.reason}`)
+      note = `, ${spec.floor} keeps ${Math.round(floor.height)}px (floor ${Math.round(floor.floor)}px) after scrolling ${Math.round(floor.scrollY)}px`
+      captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
+      break
+    }
+    case 'scrolled':
+      note = `, pinned at ${Math.round(state.clearance.noticeTop)}px on a page scrolled to ${Math.round(state.scrollY)}px`
+      captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
+      break
+    case 'keep-place':
+    case 'keep-place-end':
+      note = `, the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px in the frame the ${appeared.after.height}px notice appeared`
+      captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
+      break
+    default:
+      captured.push(await capture(page, gate, theme, spec.name))
+  }
+  const c = state.clearance
+  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px header (${c.noticeFixed ? 'pinned' : 'in the page flow'}), <main> clears ${c.mainPaddingTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
+
+  // still down: a failed `try again` is announced, with the time of the check
+  if (!await pressRetry(page)) throw new Error(`the ${where} notice has no \`try again\` to press`)
+  const still = await waitFor(page, (s) => STILL_PATTERN.test(s.live) && s.retry === 'try again', 5000, `the ${where} live region announcing a failed try again`)
+  if (!still.shown) throw new Error(`the ${where} notice went away after a failed try again with the app still stopped`)
+
+  // back: restart, press try again (in the page, so a notice that already cleared is not an error;
+  // or, for a keyboard case, focus it and press Enter, as a keyboard user would)
+  const keyboard = spec.recover === 'keyboard'
+  let pressed
+  let beforeRecovery = null
+  if (keyboard) {
+    await page.focus(RETRY)
+    beforeRecovery = await page.evaluate(() => window.scrollY)
+  }
+  await startServer()
+  if (keyboard) {
+    pressed = !!await page.$(RETRY)
+    if (pressed) await page.keyboard.press('Enter')
+  } else {
+    pressed = await pressRetry(page)
+  }
+  await waitFor(page, (s) => !s.shown && s.noticeHeight === '' && s.clearance.failures.length === 0, RECOVER_WITHIN_MS, `the ${where} notice clearing after the restart (with <main> back under the header)`)
+  const back = await waitFor(page, (s) => s.live === ANNOUNCE.back, 2000, `the ${where} live region announcing the return`)
+  if (keepsPlace) {
+    const went = await frameTransition(page, false)
+    if (!went) throw new Error(`on ${where} no frame caught the notice going`)
+    if (went.before.scrollY <= went.before.height) throw new Error(`on ${where} the page was at ${Math.round(went.before.scrollY)}px when the notice went, too high to show whether the reader keeps their place`)
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const returnedTop = await page.$eval(spec.reference, (element) => element.getBoundingClientRect().top)
+    if (Math.abs(returnedTop - referenceTop) > 1) {
+      throw new Error(`on ${where} the content reference moved ${referenceTop} → ${returnedTop}px after recovery, so the reader lost their place`)
+    }
+  }
+  let keyNote = ''
+  if (keyboard) {
+    // Focus was on `try again` when the notice went: it moves to <main>, which is focusable only for
+    // that move, without scrolling; the next Tab goes into the page and <main> drops its tabindex.
+    const moved = await page.evaluate(() => ({ active: document.activeElement?.tagName.toLowerCase(), tabindex: document.querySelector('main')?.getAttribute('tabindex'), scrollY: window.scrollY }))
+    if (moved.active !== 'main' || moved.tabindex !== '-1') throw new Error(`on ${where} the keyboard recovery left focus on ${moved.active} (main tabindex ${JSON.stringify(moved.tabindex)}), not on <main>`)
+    if (Math.abs(moved.scrollY - beforeRecovery) > 1) throw new Error(`on ${where} the focus move scrolled the page ${Math.round(beforeRecovery)} → ${Math.round(moved.scrollY)}px`)
+    await page.keyboard.press('Tab')
+    await pause(200)
+    const tabbed = await page.evaluate(() => ({ active: document.activeElement?.tagName.toLowerCase(), tabindex: document.querySelector('main')?.getAttribute('tabindex'), scrollY: window.scrollY }))
+    if (tabbed.active === 'main' || tabbed.tabindex !== null) throw new Error(`on ${where} Tab after the focus move left <main> focused or focusable (focus ${tabbed.active}, tabindex ${JSON.stringify(tabbed.tabindex)})`)
+    keyNote = `; keyboard recovery put focus on <main> without scrolling, and Tab moved on to ${tabbed.active} with <main> no longer focusable`
+  }
+  await assertHeaderHolds(page, theme, `${spec.path} ${where}, back`)
+  console.log(`OK still+back ${where}: failed try again announced "${still.live}"; ${pressed ? (keyboard ? 'try again pressed with Enter; ' : 'try again pressed; ') : 'already reconnected; '}notice gone, page back under the header, live region "${back.live}"${keyNote}`)
+
+  if (diagnostics.length) throw new Error(`page errors appeared on ${where}: ${JSON.stringify(diagnostics.slice(0, 4))}`)
+  await page.close()
 }
 
-// Fail-fast coordinate check BEFORE Puppeteer boots — see validate-mock-coordinates.mjs.
+let browser = null
+const captured = []
 try {
-  await assertKnownProject(ORIGIN, SHELL_PROJECT, { where: 'shell-nav-default-gate.mjs' })
+  await startServer()
+  const provenance = await assertServedBuild({ origin: ORIGIN, markers: shellProvenanceMarkers(manifest), bin: BIN })
+  console.log(`OK provenance: ${BIN} (not older than web/out) serves this checkout's web/out (${provenance.chunks.length} chunks) carrying ${Object.entries(provenance.markerChunks).map(([marker, chunks]) => `${marker} in ${chunks.join(' ')}`).join('; ')}`)
+  await assertKnownProject(ORIGIN, SHELL_DEFAULT_PROJECT, { where: 'shell-nav-default-gate.mjs' })
+  // A short protocol timeout turns a stuck page into a named failure instead of a 3-minute stall.
+  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', protocolTimeout: 30000 })
+  for (const theme of SMOKE_THEMES) {
+    const seen = new Map()
+    for (const spec of PAGES) await drivePage(theme, spec, seen)
+  }
 } catch (e) {
-  console.error(e.message)
-  process.exit(2)
-}
-
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1460, height: 1000, deviceScaleFactor: 1 } })
-
-let captured = []
-try {
-  captured = await captureDefaultShell(browser)
-} catch (e) {
-  await fail(
-    browser,
-    `ERROR [shell-nav-default-gate.mjs] default-mode graph shell gate failed.\n` +
+  console.error(
+    `ERROR [shell-nav-default-gate.mjs] local shell offline gate failed.\n` +
     `  What failed: ${e.message}\n` +
-    `  Why: a default (non-experimental) server must hide the code map from the nav AND the command palette while keeping the /map routes directly mounted.\n` +
-    `  Where: shell-nav-default-gate.mjs while driving the default-mode peasant app at ${ORIGIN}.\n` +
-    `  Means: users on a default build may see a leaked code-map entry point, or a route that should stay mounted has regressed.\n` +
-    `  Fix: boot ./bin/peasant web start WITHOUT --experimental (with the shell mock store) at PEASANT_REAL_ORIGIN, then fix the reported nav/palette/route wiring.`
+    `  Why: when the peasant app on this computer stops, every page must say so under the header — this computer, not the internet — with the start command and try again, reachable on any screen and on a scrolled page, keep the reader's place and full-height pages readable, announce the stop, a failed retry and the return, clear when the app is back, and hand keyboard focus back to the page.\n` +
+    `  Where: shell-nav-default-gate.mjs driving ${BIN} on ${ORIGIN} (server log: ${serverLog}).\n` +
+    `  Means: a user whose local app stopped may see no notice, a notice that reads as an internet outage, a notice covering the page or out of reach, a crushed transcript, silence for a screen reader, or a notice that never clears.\n` +
+    `  Fix: make build so bin/peasant embeds this checkout's web/out, free port ${PORT}, then fix the reported notice, header or page geometry.`,
   )
+  process.exitCode = 1
+} finally {
+  try { await browser?.close() } catch {}
+  try { await stopServer() } catch {}
+  removeOwnConfigDir()
 }
 
-await browser.close()
-console.log(`\nOK [shell-nav-default-gate.mjs] default-mode shell verified: nav = ${EXPECTED_NAV.map((n) => n.label).join(' · ')}; code map absent from nav + palette; /map route preserved.`)
-console.log(`Default-mode shell frames captured for ${SMOKE_THEMES.length} themes:`)
-for (const file of captured) console.log(`  ${file}`)
+if (!process.exitCode) {
+  console.log(`\nOK [shell-nav-default-gate.mjs] offline notice verified on ${ORIGIN}: shows under the header when the app stops (pinned where the screen has room, in the page flow elsewhere), names this computer, offers "${EXPECTED_COMMAND}" and try again (reachable at 320×256), keeps the transcript and /share at their floor on short screens, stays on screen on a scrolled page, keeps a scrolled reader's place where it scrolls, announces the stop, a failed try again and the return, clears when the app is back, and returns keyboard focus to the page, in ${SMOKE_THEMES.join(' + ')} across ${PAGES.map((p) => `${p.name} ${p.width}×${p.height}`).join(', ')}.`)
+  console.log('Offline frames:')
+  for (const file of captured) console.log(`  ${file}`)
+}

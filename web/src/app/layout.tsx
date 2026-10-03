@@ -48,7 +48,9 @@ export default function RootLayout({
     >
       <body className="min-h-screen bg-surface text-ink antialiased">
         <LayoutShell>
-          <main className="min-h-screen pt-[var(--app-header-height)] grid-snap">{children}</main>
+          {/* The offline notice may move focus here (making <main> focusable only for that
+              move); it is a container, not a control, so it draws no focus ring. */}
+          <main className="min-h-screen pt-[var(--app-header-height)] grid-snap focus:outline-none">{children}</main>
         </LayoutShell>
       </body>
     </html>
