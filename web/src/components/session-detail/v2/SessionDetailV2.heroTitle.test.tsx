@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2, UNTITLED_SESSION_TITLE } from './SessionDetailV2';
 
 // The mounted hero heading. The shared viewer renders `session.title` when the
@@ -143,7 +144,11 @@ const BASE_QUALITY_SESSION = {
 function TestDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
   if (!routeQuery) throw new Error('hero title route query must be valid');
-  return <SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 beforeEach(() => {

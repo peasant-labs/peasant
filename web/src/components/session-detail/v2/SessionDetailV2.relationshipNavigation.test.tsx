@@ -7,6 +7,7 @@ import type { SessionDetailPayload, SessionRelationshipNavigation } from '@peasa
 import { SessionDetailV2 } from './SessionDetailV2';
 import { parseTranscriptRouteQuery, transcriptHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { loadContextNavigationFixture } from '@/test/contextNavigationFixture';
+import { PublishProvider } from '@/contexts/PublishContext';
 
 /**
  * The host's boundary with the published adapter, driven by the same fixture as
@@ -88,12 +89,14 @@ function routeQuery() {
 
 function TestDetail() {
   return (
-    <SessionDetailV2
-      sessionId="sess_contextchild"
-      projectHash={PROJECT_HASH}
-      projectName="alpha-project"
-      routeQuery={routeQuery()}
-    />
+    <PublishProvider>
+      <SessionDetailV2
+        sessionId="sess_contextchild"
+        projectHash={PROJECT_HASH}
+        projectName="alpha-project"
+        routeQuery={routeQuery()}
+      />
+    </PublishProvider>
   );
 }
 

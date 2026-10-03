@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { SessionDetailV2 } from './SessionDetailV2';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 
@@ -238,7 +239,11 @@ function renderChangeScope() {
 function TestSessionDetail({ sessionId }: { sessionId: string }) {
   const routeQuery = parseTranscriptRouteQuery(currentSearchParams);
   if (!routeQuery) throw new Error('test transcript query must be valid');
-  return <SessionDetailV2 sessionId={sessionId} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId={sessionId} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 function assertDataAttribute(element: HTMLElement, attribute: string, expected: string, invariant: string): void {

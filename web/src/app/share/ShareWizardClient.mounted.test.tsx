@@ -5,6 +5,7 @@ import YAML from 'yaml';
 import fixtureSource from './testdata/mounted-share.yaml?raw';
 import { buildGroupedSyncResponse } from './testdata/grouped-sync';
 import { ShareWizardClient } from './ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import * as useMockConfig from '@/hooks/useMockConfig';
 
 vi.mock('@/hooks/useMockConfig');
@@ -86,7 +87,7 @@ describe('mounted Share production boundary', () => {
     const redactionsGate = new Promise<void>((resolve) => { releaseRedactions = resolve; });
     const fetchMock = installFetch(fixture.items, redactionsGate);
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
     const projects = await screen.findAllByRole('region', { name: 'project alpha' });
     expect(projects).toHaveLength(2);
     const project = projects.find((candidate) => within(candidate).queryByRole('checkbox', { name: 'select session sess-new' }))!;
@@ -160,7 +161,7 @@ describe('mounted Share production boundary', () => {
           ? operation === 'malformed' ? { ...row, locationLabel: 7 } : { ...row, selectionStatus: 'unknown' }
           : row);
     installFetch(items);
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
     expect(await screen.findByText(/discovery|metadata|duplicate|locationLabel/i)).toBeInTheDocument();
     expect(screen.getByText('Retry')).toBeInTheDocument();
   });

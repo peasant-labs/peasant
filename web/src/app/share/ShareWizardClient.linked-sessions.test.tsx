@@ -4,6 +4,7 @@ import YAML from 'yaml';
 import fixtureSource from './testdata/mounted-share-linked-sessions.yaml?raw';
 import { buildGroupedSyncResponse } from './testdata/grouped-sync';
 import { ShareWizardClient } from './ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import * as useMockConfig from '@/hooks/useMockConfig';
 
 // Mockable search params: the deep-link arm sets ?sessions=, the control arm
@@ -151,7 +152,7 @@ describe('mounted Share link resolution', () => {
   it('resolves a link to an agent-driven session the chooser withholds, and offers it for selection', async () => {
     currentSearchParams = new URLSearchParams({ sessions: fixture.linkedSessionId });
     const fetchMock = installFetch();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     const checkbox = await screen.findByRole('checkbox', { name: `select session ${fixture.linkedSessionId}` });
     expect(checkbox).toBeEnabled();
@@ -166,7 +167,7 @@ describe('mounted Share link resolution', () => {
 
   it('leaves the same agent-driven session out of the chooser when no link named it', async () => {
     installFetch();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     // Wait for the surface to finish loading by finding the browsable row.
     for (const row of fixture.discoveryOnly) {

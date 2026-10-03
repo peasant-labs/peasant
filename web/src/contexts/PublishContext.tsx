@@ -33,6 +33,15 @@ export interface PublishState {
 
 const PublishContext = createContext<PublishState | null>(null);
 
+/** What a consumer outside the provider is told, naming the missing provider and its fix. */
+const MISSING_PUBLISH_PROVIDER =
+  'usePublishState() was called with no PublishProvider above this component, so the app-level '
+  + 'publish state — the redaction scan cache and the in-flight publish guard — is unavailable. '
+  + 'The app shell mounts PublishProvider once in LayoutShell, above every page; a component '
+  + 'outside it would fall back to page-local state that loses the cache and the guard on '
+  + 'navigation. Mount <PublishProvider> around this component (production already does in '
+  + 'LayoutShell; an isolated test or demo must mount it explicitly).';
+
 function usePublishStateStore(): PublishState {
   const [redactionCache, setRedactionCache] = useState<RedactionCache>(() => new Map());
   const [publishing, setPublishing] = useState<ReadonlyMap<string, number>>(() => new Map());
@@ -69,12 +78,12 @@ export function PublishProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * The app-level publish state. A component mounted without the provider (a
- * bare test mount) gets its own state instead, scoped to its own lifetime, which
- * is the wizard's behavior before the cache was lifted.
+ * The app-level publish state. It fails loudly outside `PublishProvider`: a
+ * silent page-local fallback would lose the shared scan cache and the in-flight
+ * publish guard without anyone noticing.
  */
 export function usePublishState(): PublishState {
-  const shared = useContext(PublishContext);
-  const local = usePublishStateStore();
-  return shared ?? local;
+  const state = useContext(PublishContext);
+  if (state === null) throw new Error(MISSING_PUBLISH_PROVIDER);
+  return state;
 }

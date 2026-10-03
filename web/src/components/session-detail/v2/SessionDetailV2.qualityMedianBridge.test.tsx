@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import type { ReactNode } from 'react';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactFields, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
 
 // computePersonalMedians is mocked as an args-ignoring stub in the other
@@ -230,7 +231,11 @@ const DETAIL = {
 function TestDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
   if (!routeQuery) throw new Error('quality median bridge route query must be valid');
-  return <SessionDetailV2 sessionId="sess-median-bridge" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId="sess-median-bridge" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 beforeEach(() => {

@@ -123,3 +123,13 @@ it('shares the publish cache between consumers through the production shell', as
   view.rerender(<LayoutShell><CacheReader /></LayoutShell>);
   expect(screen.getByText('scan failed')).toBeInTheDocument();
 });
+
+it('is the composition that supplies the publish provider: a consumer outside the shell fails', () => {
+  // The shell is the production mount for PublishProvider. A consumer without it
+  // must fail loudly rather than fall back to page-local publish state.
+  function BareConsumer() {
+    usePublishState();
+    return null;
+  }
+  expect(() => render(<BareConsumer />)).toThrow(/PublishProvider/);
+});

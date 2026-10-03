@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ShareWizardClient } from '@/app/share/ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { buildGroupedSyncResponse } from '@/app/share/testdata/grouped-sync';
 import type { Redaction } from '@/types/messages';
 import * as redactionsApi from '@/lib/share/redactions';
@@ -102,7 +103,7 @@ describe('ShareWizardClient redaction flow', () => {
     const user = userEvent.setup();
 
     try {
-      render(<ShareWizardClient />);
+      render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
       await waitFor(() => expect(fetchPreview).toHaveBeenCalledTimes(1));
       expect(fetchPreview).toHaveBeenCalledWith(REDACTION_STEP_SESSION.id, DEFAULT_REDACTION_LEVEL);
@@ -148,7 +149,7 @@ describe('ShareWizardClient redaction flow', () => {
     fetchPreview.mockRejectedValue(new Error(REDACTION_STEP_SCAN_FAILURE));
     const user = userEvent.setup();
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(REDACTION_STEP_SCAN_FAILURE);
     expect(

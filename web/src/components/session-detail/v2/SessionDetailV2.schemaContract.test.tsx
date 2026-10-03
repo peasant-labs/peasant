@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { Harness, StopReason, ToolCallKind, type SessionDetailPayload } from '@peasant-labs/schema';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
@@ -242,7 +243,11 @@ function buildPayload(fixture: ContractCase): SessionDetailPayload & { gitContex
 function TestDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
   if (!routeQuery) throw new Error('schema contract route query must be valid');
-  return <SessionDetailV2 sessionId="sess-contract" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId="sess-contract" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 const fixtureSet = loadFixtures();

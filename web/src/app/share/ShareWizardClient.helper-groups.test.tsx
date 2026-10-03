@@ -13,6 +13,7 @@ import {
   type FixtureMember,
 } from './testdata/helper-groups-fixture';
 import { ShareWizardClient } from './ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import * as useMockConfig from '@/hooks/useMockConfig';
 
 const fixture = loadHelperGroupFixture(fixtureSource, HELPER_GROUP_REQUIRED_ROLES);
@@ -174,7 +175,7 @@ describe('mounted Share helper-group chooser', () => {
   it('selects exactly one eligible helper member and pushes only its transcript id', async () => {
     const fetchMock = installFetch();
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     // The owner row anchors a collapsed group whose count is the saved-thread
     // count, never a message or review total.
@@ -201,7 +202,7 @@ describe('mounted Share helper-group chooser', () => {
   it('keeps an earlier helper pick when a second helper group is expanded', async () => {
     const fetchMock = installFetch();
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await user.click(await screen.findByRole('button', { name: /3 helper threads/ }));
     await waitFor(() => expect(memberCheckbox('eligible-member')).toBeVisible());
@@ -225,7 +226,7 @@ describe('mounted Share helper-group chooser', () => {
   it('keeps a pick on one page of a group while an independent group keeps its own paging state', async () => {
     const fetchMock = installFetch();
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     // The first group's three members all sit on one page.
     await user.click(await screen.findByRole('button', { name: /3 helper threads/ }));
@@ -258,7 +259,7 @@ describe('mounted Share helper-group chooser', () => {
   it('selects a nested helper member without widening to its owner or the parent group', async () => {
     const fetchMock = installFetch();
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await screen.findByRole('checkbox', { name: 'select session owner-nested' });
     await user.click(within(groupRoot('hg_nested_owner')).getByRole('button', { name: /1 helper thread/ }));
@@ -287,7 +288,7 @@ describe('mounted Share helper-group chooser', () => {
     currentSearchParams = new URLSearchParams({ sessionId: 'owner-1' });
     const fetchMock = installFetch();
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await waitFor(() => expect(sessionCheckbox('owner-1')).toBeChecked());
 
@@ -310,7 +311,7 @@ describe('mounted Share helper-group chooser', () => {
     let syncListCalls = 0;
     installFetch({ memberStatus: 409, onSyncList: () => { syncListCalls += 1; } });
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await user.click(await screen.findByRole('button', { name: /3 helper threads/ }));
 
@@ -341,7 +342,7 @@ describe('mounted Share helper-group chooser', () => {
       },
     });
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     // A confirmed ordinary session plus an explicit helper member.
     await waitFor(() => expect(sessionCheckbox('owner-1')).toBeVisible());

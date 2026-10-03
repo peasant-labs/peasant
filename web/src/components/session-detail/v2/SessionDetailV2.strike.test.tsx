@@ -5,6 +5,7 @@ import { providerDisplayName } from '@peasant-labs/fairtrade/ui';
 import { Harness } from '@peasant-labs/schema';
 import { parseTranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { strikeMountedWebFixture } from '@/test/fixtures/strikeMountedWeb';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
 
 const routerReplace = vi.hoisted(() => vi.fn());
@@ -44,12 +45,14 @@ function StrikeDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
   if (!routeQuery) throw new Error('mounted Strike transcript fixture route query must be valid');
   return (
-    <SessionDetailV2
-      sessionId={strikeMountedWebFixture.sessionDetail.id}
-      projectHash={strikeMountedWebFixture.projectHash}
-      projectName={strikeMountedWebFixture.projectName}
-      routeQuery={routeQuery}
-    />
+    <PublishProvider>
+      <SessionDetailV2
+        sessionId={strikeMountedWebFixture.sessionDetail.id}
+        projectHash={strikeMountedWebFixture.projectHash}
+        projectName={strikeMountedWebFixture.projectName}
+        routeQuery={routeQuery}
+      />
+    </PublishProvider>
   );
 }
 
