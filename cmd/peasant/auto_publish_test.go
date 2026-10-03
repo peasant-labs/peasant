@@ -32,21 +32,37 @@ import (
 const autoPublishSessionID = "abcd1234-abcd-4bcd-8bcd-abcdef123456"
 
 var autoPublishExtraIDs = map[autopublishtest.SessionRole]string{
-	"clone":          "abcd1234-abcd-4bcd-8bcd-abcdef120000",
-	"gone":           "abcd1234-abcd-4bcd-8bcd-abcdef120010",
-	"linked":         "abcd1234-abcd-4bcd-8bcd-abcdef120020",
-	"unrelated":      "abcd1234-abcd-4bcd-8bcd-abcdef120030",
-	"gone-subfolder": "abcd1234-abcd-4bcd-8bcd-abcdef120040",
+	"clone":             "abcd1234-abcd-4bcd-8bcd-abcdef120000",
+	"gone":              "abcd1234-abcd-4bcd-8bcd-abcdef120010",
+	"linked":            "abcd1234-abcd-4bcd-8bcd-abcdef120020",
+	"unrelated":         "abcd1234-abcd-4bcd-8bcd-abcdef120030",
+	"gone-subfolder":    "abcd1234-abcd-4bcd-8bcd-abcdef120040",
+	"empty-alpha":       "abcd1234-abcd-4bcd-8bcd-abcdef120050",
+	"empty-beta":        "abcd1234-abcd-4bcd-8bcd-abcdef120051",
+	"gone-shared-alpha": "abcd1234-abcd-4bcd-8bcd-abcdef120052",
+	"gone-shared-beta":  "abcd1234-abcd-4bcd-8bcd-abcdef120053",
 }
 
+// autoPublishLaterIDs are the sessions a later publication publishes, in order.
 var autoPublishLaterIDs = []string{"abcd1234-abcd-4bcd-8bcd-abcdef120001", "abcd1234-abcd-4bcd-8bcd-abcdef120002"}
 
 // autoPublishRemote is the world's origin, and autoPublishMatch its bare form,
-// which a rule for exactly that remote uses.
+// which a rule for exactly that remote uses. The alpha and beta remotes belong
+// to the sessions that recorded no directory, or one shared gone directory, so
+// a case can hold two sessions whose recorded path alone does not tell them
+// apart.
 const (
-	autoPublishRemote = "https://github.com/acme/tools.git"
-	autoPublishMatch  = "github.com/acme/tools"
+	autoPublishRemote      = "https://github.com/acme/tools.git"
+	autoPublishMatch       = "github.com/acme/tools"
+	autoPublishAlphaRemote = "https://github.com/acme/alpha.git"
+	autoPublishBetaRemote  = "https://github.com/acme/beta.git"
 )
+
+// autoPublishExtraStartMs is the newest start time of an extra session. A case
+// lists its sessions newest first, so the first role of the list is the first
+// candidate the push matches, and listing the same two roles in the other order
+// exercises the other candidate order.
+const autoPublishExtraStartMs = 1700000050000
 
 // autoPublishWorld is a recorded repository with one ready session, a second
 // clone of the same remote, a Village double that knows the fixture's
@@ -89,8 +105,8 @@ func newAutoPublishWorld(t *testing.T, fixture autopublishtest.Fixture, c autopu
 	writeTestCredentialsFor(t, w.dir, w.village.URL())
 
 	w.seed(t, autoPublishSessionID, w.repo)
-	for _, role := range c.Sessions {
-		w.seedExtra(t, role)
+	for order, role := range c.Sessions {
+		w.seedExtra(t, role, order)
 	}
 	body := "version: 1\noutput:\n  basePath: " + filepath.Join(w.dir, "peasant-sync") + "\npush:\n  method: all\n"
 	if c.Config.Visibility != "" {
@@ -110,8 +126,10 @@ func newAutoPublishWorld(t *testing.T, fixture autopublishtest.Fixture, c autopu
 }
 
 // seedExtra records the extra session of one role: in another clone, in a
-// clone that is then removed, or in a linked worktree inside the repository.
-func (w *autoPublishWorld) seedExtra(t *testing.T, role autopublishtest.SessionRole) {
+// clone that is then removed, in a linked worktree inside the repository, or
+// with no directory at all. order is the session's position in the case's
+// list, newest first, which fixes the candidate order a case exercises.
+func (w *autoPublishWorld) seedExtra(t *testing.T, role autopublishtest.SessionRole, order int) {
 	t.Helper()
 	switch role {
 	case "gone-subfolder":
@@ -146,7 +164,46 @@ func (w *autoPublishWorld) seedExtra(t *testing.T, role autopublishtest.SessionR
 		hooksGit(t, w.repo, "", "-c", "user.name=dev", "-c", "user.email=dev@example.test", "commit", "--quiet", "--allow-empty", "-m", "start")
 		hooksGit(t, w.repo, "", "worktree", "add", "--quiet", "-b", "feat", linked)
 		w.seed(t, autoPublishExtraIDs[role], linked)
+	case autopublishtest.SessionEmptyAlpha, autopublishtest.SessionEmptyBeta:
+		w.seedRecorded(t, autoPublishExtraIDs[role], "", autoPublishRemoteFor(role), autoPublishExtraStartMs-int64(order)*10000)
+	case autopublishtest.SessionGoneSharedAlpha, autopublishtest.SessionGoneSharedBeta:
+		shared := filepath.Join(w.world, "gone-shared")
+		if err := os.MkdirAll(shared, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		w.seedRecorded(t, autoPublishExtraIDs[role], shared, autoPublishRemoteFor(role), autoPublishExtraStartMs-int64(order)*10000)
+		if err := os.RemoveAll(shared); err != nil {
+			t.Fatal(err)
+		}
 	}
+}
+
+// autoPublishRemoteFor is the recorded remote of the sessions whose path alone
+// does not tell them apart.
+func autoPublishRemoteFor(role autopublishtest.SessionRole) string {
+	switch role {
+	case autopublishtest.SessionEmptyAlpha, autopublishtest.SessionGoneSharedAlpha:
+		return autoPublishAlphaRemote
+	default:
+		return autoPublishBetaRemote
+	}
+}
+
+// seedRecorded records one ready session in dir with an explicit recorded
+// remote, so a case can hold two sessions whose recorded directory is equal
+// and whose repository therefore differs only by the remote.
+func (w *autoPublishWorld) seedRecorded(t *testing.T, sessionID, dir, remote string, startMs int64) {
+	t.Helper()
+	db := w.openStore(t)
+	defer db.Close()
+	hash, _, err := ingest.DeriveProjectIdentifiers(db.InstallationSalt(), remote, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := makeCmdStoreEntry(t, sessionID, "github.com-acme-tools", remote, "main", startMs, dir)
+	entry.Metadata.Project.Hash = hash
+	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
+	w.sessions = append(w.sessions, sessionID)
 }
 
 // seed records one ready session in dir, under the project identity a push

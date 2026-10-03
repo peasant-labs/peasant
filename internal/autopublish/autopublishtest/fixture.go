@@ -72,10 +72,19 @@ const (
 	SessionLinked        SessionRole = "linked"
 	SessionUnrelated     SessionRole = "unrelated"
 	SessionGoneSubfolder SessionRole = "gone-subfolder"
+	// SessionEmptyAlpha and SessionEmptyBeta recorded no directory at all and
+	// different remotes, so their repository cache key differs only by remote.
+	SessionEmptyAlpha SessionRole = "empty-alpha"
+	SessionEmptyBeta  SessionRole = "empty-beta"
+	// SessionGoneSharedAlpha and SessionGoneSharedBeta recorded the SAME
+	// directory, which is gone, and different remotes: the recorded path is
+	// equal and the remote is the only evidence that tells them apart.
+	SessionGoneSharedAlpha SessionRole = "gone-shared-alpha"
+	SessionGoneSharedBeta  SessionRole = "gone-shared-beta"
 )
 
 // AllSessionRoles is the closed session arrangement set.
-var AllSessionRoles = []SessionRole{SessionClone, SessionGone, SessionLinked, SessionUnrelated, SessionGoneSubfolder}
+var AllSessionRoles = []SessionRole{SessionClone, SessionGone, SessionLinked, SessionUnrelated, SessionGoneSubfolder, SessionEmptyAlpha, SessionEmptyBeta, SessionGoneSharedAlpha, SessionGoneSharedBeta}
 
 // RepositoryRole identifies a repository in a mounted installation world.
 type RepositoryRole string

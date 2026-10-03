@@ -49,6 +49,9 @@ requiredNames:
   - rule-outside-selection-keeps-the-selected-audience
   - folder-rule-binds-a-gone-subfolder
   - remote-rule-binds-a-gone-clone
+  - repository-cache-keys-empty-directories-by-remote
+  - repository-cache-keys-empty-directories-by-remote-reversed
+  - repository-cache-keys-a-shared-gone-directory-by-remote
   - remote-double-wildcard-is-refused
   - folder-glob-match
   - remote-match
@@ -890,6 +893,57 @@ cases:
       - {id: tools, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: public, license: CC-BY-4.0}
     expect: {visibilityIntent: private, public: false, publishes: 2, audience: {platform: approved}, others: {gone: {platform: approved}}}
+
+  # The repository cache keys by the pair a repository is derived from: two
+  # sessions that recorded no directory, or one shared gone directory, name
+  # different repositories when their recorded remotes differ. Keyed by the
+  # recorded path alone, the second session inherits the first's rule and is
+  # shared with the first's collectives instead of its own. The two orders
+  # below differ only in which session is matched first.
+  - name: repository-cache-keys-empty-directories-by-remote
+    driver: push
+    unscoped: true
+    sessions: [empty-alpha, empty-beta]
+    rules:
+      - {id: alpha, kind: remote, match: github.com/acme/alpha, events: [pre-push], collectives: [platform]}
+      - {id: beta, kind: remote, match: github.com/acme/beta, events: [pre-push], collectives: [research]}
+    config: {visibility: private}
+    expect:
+      visibilityIntent: private
+      public: false
+      publishes: 3
+      audience: {}
+      others: {empty-alpha: {platform: approved}, empty-beta: {research: approved}}
+
+  - name: repository-cache-keys-empty-directories-by-remote-reversed
+    driver: push
+    unscoped: true
+    sessions: [empty-beta, empty-alpha]
+    rules:
+      - {id: alpha, kind: remote, match: github.com/acme/alpha, events: [pre-push], collectives: [platform]}
+      - {id: beta, kind: remote, match: github.com/acme/beta, events: [pre-push], collectives: [research]}
+    config: {visibility: private}
+    expect:
+      visibilityIntent: private
+      public: false
+      publishes: 3
+      audience: {}
+      others: {empty-beta: {research: approved}, empty-alpha: {platform: approved}}
+
+  - name: repository-cache-keys-a-shared-gone-directory-by-remote
+    driver: push
+    unscoped: true
+    sessions: [gone-shared-alpha, gone-shared-beta]
+    rules:
+      - {id: alpha, kind: remote, match: github.com/acme/alpha, events: [pre-push], collectives: [platform]}
+      - {id: beta, kind: remote, match: github.com/acme/beta, events: [pre-push], collectives: [research]}
+    config: {visibility: private}
+    expect:
+      visibilityIntent: private
+      public: false
+      publishes: 3
+      audience: {}
+      others: {gone-shared-alpha: {platform: approved}, gone-shared-beta: {research: approved}}
 
   - name: remote-double-wildcard-is-refused
     driver: validate

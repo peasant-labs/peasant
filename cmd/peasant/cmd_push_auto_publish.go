@@ -82,14 +82,23 @@ func planAutoPublish(ctx context.Context, cmd *cobra.Command, db *store.Store, c
 	// Only a remote rule reads remotes, and each read is a git process
 	// inside the hook's budget.
 	remotes := slices.ContainsFunc(rules, func(rule autopublish.Rule) bool { return rule.Kind == schema.AutoPublishRuleRemote })
+	// The cache key is the pair a repository is derived from: two sessions
+	// that recorded no directory, or the same gone directory, still name
+	// different repositories when their recorded remotes differ, and
+	// SessionRepository falls back to that remote.
+	type repositoryKey struct {
+		path   string
+		remote string
+	}
 	git := &ingest.ExecGitResolver{}
-	repositories := map[string]autopublish.Repository{}
+	repositories := map[repositoryKey]autopublish.Repository{}
 	repositoryOf := func(row ingest.PushSessionRow) autopublish.Repository {
-		if repo, ok := repositories[row.ProjectPath]; ok {
+		key := repositoryKey{path: row.ProjectPath, remote: row.GitRemote}
+		if repo, ok := repositories[key]; ok {
 			return repo
 		}
 		repo := autopublish.SessionRepository(ctx, git, row.ProjectPath, row.GitRemote, remotes)
-		repositories[row.ProjectPath] = repo
+		repositories[key] = repo
 		return repo
 	}
 
