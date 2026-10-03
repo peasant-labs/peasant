@@ -232,7 +232,7 @@ func TestSyncEndpoints_OmittedLevelResolvesToAnOfferedLevel(t *testing.T) {
 	body := `{"sessionIds":["` + syncValidationSessionID + `"]}`
 	pushRequest := httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(body))
 	pushResponse := httptest.NewRecorder()
-	handler := &syncHandler{store: new(store.Store), config: new(config.Config)}
+	handler := &syncHandler{store: new(store.Store), config: newLiveConfig(new(config.Config))}
 	handler.handleSyncPush(pushResponse, pushRequest)
 	if strings.Contains(pushResponse.Body.String(), "is not a level this version offers") {
 		t.Fatalf("an omitted redactionLevel was rejected as unofferable, so the push endpoint's default is a level this "+

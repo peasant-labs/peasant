@@ -97,7 +97,7 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 	// boundary is enforced. Origin scope is deliberately NOT applied here: the
 	// sync route's predicate is the pushable set, and helper sessions are
 	// agent-driven by definition.
-	policy, err := syncSelectionPolicy(h.config)
+	policy, err := syncSelectionPolicy(h.currentConfig())
 	if err != nil {
 		return nil, err
 	}

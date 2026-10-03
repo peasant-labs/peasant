@@ -60,6 +60,10 @@ type ServerConfig struct {
 	// Config is the loaded application config. Used by the sync handler for
 	// redaction settings and push configuration. Nil disables sync endpoints.
 	Config *config.Config
+	// ConfigPath is the configuration file Config was loaded from. The settings
+	// routes read and write it, and a setting saved through them applies to
+	// the sync handler at once. Empty disables the settings routes.
+	ConfigPath string
 	// RepositoryIdentityResolver resolves private discovery rows into logical
 	// repository cohorts. Nil uses the production Git topology resolver.
 	RepositoryIdentityResolver ingest.RepositoryIdentityResolver
@@ -99,6 +103,10 @@ type Server struct {
 	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
 	memberScopes *memberScopeCache
 
+	// live is the configuration the handlers apply: Config plus every setting
+	// saved through the settings routes since the server started.
+	live *liveConfig
+
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
 	// the store after the owner closes it.
@@ -132,6 +140,7 @@ func NewServer(cfg ServerConfig) *Server {
 		hub:             cfg.Hub,
 		groupedVariants: make(map[GroupedRouteVariant]GroupedVariantSource),
 		memberScopes:    newMemberScopeCache(memberScopeTTL, memberScopeMaxEntries),
+		live:            newLiveConfig(cfg.Config),
 	}
 	if provider, ok := cfg.Provider.(groupedCandidateProvider); ok {
 		s.groupedRevision = provider.GroupedScopeRevision()
@@ -143,6 +152,13 @@ func NewServer(cfg ServerConfig) *Server {
 // and sets up routes. After Listen returns, Addr() returns the bound address.
 // Call Serve to start accepting connections.
 func (s *Server) Listen(ctx context.Context) error {
+	// The settings catalog derives from the Config type and the `peasant
+	// config` registry. A defect there is a build defect: fail the start
+	// rather than the first settings request.
+	catalog, err := buildSettingCatalog()
+	if err != nil {
+		return fmt.Errorf("settings catalog: %w", err)
+	}
 	mux := http.NewServeMux()
 
 	// Grouped list views are opt-in over the existing flat list and search
@@ -193,7 +209,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	// Sync/push routes
 	sh := &syncHandler{
 		store:       s.cfg.Store,
-		config:      s.cfg.Config,
+		config:      s.live,
 		scopeIssuer: s,
 		configHome:  s.cfg.ConfigHome,
 		dataHome:    s.cfg.DataHome,
@@ -230,10 +246,16 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// Auto-publish rules: save or remove a rule, and install its hooks in one
 	// recorded repository.
-	aph := &autoPublishHandler{store: s.cfg.Store, config: s.cfg.Config, configHome: s.cfg.ConfigHome, binding: s.cfg.HookBinding}
+	aph := &autoPublishHandler{store: s.cfg.Store, config: s.live, configHome: s.cfg.ConfigHome, binding: s.cfg.HookBinding}
 	mux.HandleFunc("PUT "+defaults.RouteAutoPublishRule.String(), aph.handleSaveRule)
 	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
 	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)
+
+	// Settings routes: every configuration key and auto-publish rule, and one
+	// key changed at a time.
+	settingsRoutes := &settingsHandler{catalog: catalog, path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}, rules: aph}
+	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
+	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {

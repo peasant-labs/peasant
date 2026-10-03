@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -39,6 +40,18 @@ func SaveAtomic(path string, cfg *Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("config save: marshal configuration for %q before atomic replacement: %w; no file was changed; correct the unsupported configuration value and retry", path, err)
+	}
+	return SaveAtomicYAML(path, data)
+}
+
+// SaveAtomicYAML validates a configuration document with Parse and atomically
+// replaces the file at path with it, byte for byte. It is SaveAtomic for a
+// caller that edits the document rather than the Config, so the keys the file
+// does not name stay unnamed and its comments survive. A document Parse
+// refuses changes nothing.
+func SaveAtomicYAML(path string, data []byte) error {
+	if path == "" {
+		return fmt.Errorf("config save: destination path is empty while preparing an atomic configuration replacement; no file was changed; pass the resolved --config or --config-dir path and retry")
 	}
 	if _, err := Parse(data); err != nil {
 		return fmt.Errorf("config save: validate serialized configuration for %q before atomic replacement: %w; no file was changed; correct the reported field and retry", path, err)
@@ -218,13 +231,15 @@ const (
 func (m PushMethod) String() string { return string(m) }
 
 // IsValid reports whether the PushMethod is a known value.
-func (m PushMethod) IsValid() bool {
-	switch m {
-	case PushMethodAll, PushMethodBySource, PushMethodIndividual:
-		return true
-	}
-	return false
-}
+func (m PushMethod) IsValid() bool { return slices.Contains(AllPushMethods, m) }
+
+// AllPushMethods are the push methods a stored configuration may carry.
+var AllPushMethods = []PushMethod{PushMethodAll, PushMethodBySource, PushMethodIndividual}
+
+// OfferedPushMethods are the push methods a user may choose. Individual is
+// accepted in a stored configuration but not offered: every push without
+// --source-harness refuses it, a git hook's push included.
+var OfferedPushMethods = []PushMethod{PushMethodAll, PushMethodBySource}
 
 // SharePreference records the user's chosen publication intent. It is a stored
 // preference only: peasant never publishes on its own, and kickstart in
@@ -249,13 +264,10 @@ func (p SharePreference) String() string { return string(p) }
 
 // IsValid reports whether the SharePreference is a known value. The empty value
 // is valid and denotes keep-local.
-func (p SharePreference) IsValid() bool {
-	switch p {
-	case SharePreferenceKeepLocal, SharePreferenceShareLater:
-		return true
-	}
-	return false
-}
+func (p SharePreference) IsValid() bool { return slices.Contains(AllSharePreferences, p) }
+
+// AllSharePreferences is the closed set of publication preferences.
+var AllSharePreferences = []SharePreference{SharePreferenceKeepLocal, SharePreferenceShareLater}
 
 // Visibility controls the default visibility for pushed transcripts.
 // Type alias for schema.Visibility — single source of truth in the
@@ -432,13 +444,10 @@ const (
 func (t Theme) String() string { return string(t) }
 
 // IsValid reports whether the Theme is a known value.
-func (t Theme) IsValid() bool {
-	switch t {
-	case ThemeDark, ThemeLight:
-		return true
-	}
-	return false
-}
+func (t Theme) IsValid() bool { return slices.Contains(AllThemes, t) }
+
+// AllThemes is the closed set of terminal themes.
+var AllThemes = []Theme{ThemeDark, ThemeLight}
 
 // DisplayConfig controls terminal rendering preferences for the TUI.
 type DisplayConfig struct {
@@ -463,13 +472,10 @@ const (
 func (m SelectionMode) String() string { return string(m) }
 
 // IsValid reports whether the SelectionMode is a known value.
-func (m SelectionMode) IsValid() bool {
-	switch m {
-	case SelectionModeAll, SelectionModeSelected:
-		return true
-	}
-	return false
-}
+func (m SelectionMode) IsValid() bool { return slices.Contains(AllSelectionModes, m) }
+
+// AllSelectionModes is the closed set of selection modes.
+var AllSelectionModes = []SelectionMode{SelectionModeAll, SelectionModeSelected}
 
 // ProjectSelection identifies a project by git remote (or project name fallback)
 // and optionally restricts ingestion to specific branches.
