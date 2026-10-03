@@ -1,0 +1,99 @@
+requiredNames:
+  - invisible-add-not-sent
+  - existing-add-not-resent
+  - adding-new-reader
+  - removing-existing-reader-after-partial-publish
+  - dropping-unsent-add
+  - restoring-reader
+  - adding-restores-reader
+  - held-content
+  - missing-session-result
+  - missing-transcript-link
+  - removal-success
+  - skipped-share
+  - missing-share-result
+  - server-content-failure
+  - private-after-final-removal
+  - one-waiting-pull-request
+  - several-waiting-pull-requests
+cases:
+  - name: adding-new-reader
+    draft: { add: [], remove: [] }
+    readers: [a]
+    operation: add
+    id: b
+    expectedDraft: { add: [b], remove: [] }
+  - name: removing-existing-reader-after-partial-publish
+    draft: { add: [a, b], remove: [] }
+    readers: [a]
+    operation: remove
+    id: a
+    expectedDraft: { add: [b], remove: [a] }
+  - name: dropping-unsent-add
+    draft: { add: [b], remove: [] }
+    readers: [a]
+    operation: remove
+    id: b
+    expectedDraft: { add: [], remove: [] }
+  - name: restoring-reader
+    draft: { add: [], remove: [a] }
+    readers: [a]
+    operation: restore
+    id: a
+    expectedDraft: { add: [], remove: [] }
+  - name: adding-restores-reader
+    draft: { add: [], remove: [a] }
+    readers: [a]
+    operation: add
+    id: a
+    expectedDraft: { add: [], remove: [] }
+  - name: held-content
+    result: { status: held, steps: [{ step: content, outcome: skipped, reason: ingest has not finished }] }
+    expected: { kind: stopped, text: ingest has not finished }
+  - name: missing-session-result
+    expected: { kind: stopped, text: reading village’s answer }
+  - name: missing-transcript-link
+    result: { status: new, steps: [{ step: content, outcome: succeeded }] }
+    expected: { kind: stopped, text: reading the transcript’s link }
+  - name: removal-success
+    audience: [{ collectiveId: a, name: Platform, status: approved }, { collectiveId: b, name: Company, status: approved }]
+    result: { status: skipped, transcriptUrl: 'https://village.example/transcripts/test', steps: [{ step: content, outcome: skipped }, { step: remove_collective, collectiveId: a, outcome: succeeded }] }
+    expected: { kind: done, collectives: [Company] }
+  - name: skipped-share
+    requestedAdds: [b]
+    result: { status: new, transcriptUrl: 'https://village.example/transcripts/test', steps: [{ step: content, outcome: succeeded }, { step: add_collective, collectiveId: b, outcome: skipped, reason: contribution is not accepted }] }
+    expected: { kind: stopped, text: 'sharing it with Company: contribution is not accepted' }
+  - name: missing-share-result
+    requestedAdds: [b]
+    result: { status: new, transcriptUrl: 'https://village.example/transcripts/test', steps: [{ step: content, outcome: succeeded }] }
+    expected: { kind: stopped, text: sharing it with Company }
+  - name: server-content-failure
+    result: { status: error, error: village could not accept this content, steps: [{ step: content, outcome: failed, reason: village answered 502 }] }
+    expected: { kind: stopped, text: 'sending the content: village answered 502' }
+  - name: private-after-final-removal
+    audience: [{ collectiveId: a, name: Platform, status: approved }]
+    result: { status: skipped, transcriptUrl: 'https://village.example/transcripts/test', steps: [{ step: content, outcome: skipped }, { step: remove_collective, collectiveId: a, outcome: succeeded }] }
+    expected: { kind: done, collectives: [] }
+  - name: one-waiting-pull-request
+    audience: [{ collectiveId: a, name: Platform, status: approved }]
+    waiting: [42]
+    result: { status: skipped, transcriptUrl: 'https://village.example/transcripts/test' }
+    expected: { kind: done, collectives: [Platform], pullRequest: 42 }
+  - name: several-waiting-pull-requests
+    audience: [{ collectiveId: a, name: Platform, status: approved }]
+    waiting: [42, 43]
+    result: { status: skipped, transcriptUrl: 'https://village.example/transcripts/test' }
+    expected: { kind: done, collectives: [Platform] }
+
+  - name: invisible-add-not-sent
+    operation: request
+    draft: { add: [a, b, gone], remove: [a, gone] }
+    readers: [a]
+    listed: [a, b]
+    expectedRequest: { sessionIds: [session], redactionLevel: standard, collectives: { add: [b], remove: [a] } }
+  - name: existing-add-not-resent
+    operation: request
+    draft: { add: [a], remove: [] }
+    readers: [a]
+    listed: [a]
+    expectedRequest: { sessionIds: [session], redactionLevel: standard }

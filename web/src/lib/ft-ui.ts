@@ -21,6 +21,7 @@ import type {
   ButtonHTMLAttributes,
   ChangeEvent,
   ComponentType,
+  ComponentProps,
   ElementType,
   HTMLAttributes,
   InputHTMLAttributes,
@@ -81,9 +82,13 @@ import {
   SettingRow,
   SettingGroup,
   SETTING_ROW_STATES,
-  Menu,
   CopyIconButton,
   CommandBlock,
+  Menu as FtMenu,
+  PublishBar as FtPublishBar,
+  PublishDialog as FtPublishDialog,
+  PUBLISH_STATES as FT_PUBLISH_STATES,
+  PUBLISH_DIALOG_STATES as FT_PUBLISH_DIALOG_STATES,
 } from '@peasant-labs/fairtrade/ui';
 
 /**
@@ -224,7 +229,7 @@ export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
 
 // The settings page parts. Their declared props cover these call-sites; a row's
 // `data-*` attributes pass through to its element at runtime.
-export { SettingRow, SettingGroup, SETTING_ROW_STATES, Menu, CopyIconButton, CommandBlock };
+export { SettingRow, SettingGroup, SETTING_ROW_STATES, CopyIconButton, CommandBlock };
 
 /**
  * A single-color real brand mark for a harness (never a generic glyph);
@@ -825,3 +830,20 @@ export interface PublishStateLabelProps extends HTMLAttributes<HTMLSpanElement> 
   collective?: string;
 }
 export const PublishStateLabel = FtPublishStateLabel as unknown as ComponentType<PublishStateLabelProps>;
+// ---------------------------------------------------------------------------
+// Publish: the transcript page's bar and popup, and the menu the bar carries.
+// ---------------------------------------------------------------------------
+
+/** Props come from the installed fairtrade package so its changes are checked here. */
+export type MenuProps = ComponentProps<typeof FtMenu>;
+export type MenuItem = NonNullable<MenuProps['items']>[number];
+export const Menu = FtMenu;
+
+export type PublishBarProps = ComponentProps<typeof FtPublishBar> & HTMLAttributes<HTMLDivElement>;
+export type PublishDialogProps = ComponentProps<typeof FtPublishDialog>;
+export type PublishDialogState = PublishDialogProps['state'];
+export type PublishAccessItem = NonNullable<PublishDialogProps['access']>[number];
+export const PUBLISH_STATES = FT_PUBLISH_STATES;
+export const PUBLISH_DIALOG_STATES = FT_PUBLISH_DIALOG_STATES;
+export const PublishBar = FtPublishBar;
+export const PublishDialog = FtPublishDialog;

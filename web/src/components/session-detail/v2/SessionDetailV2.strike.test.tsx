@@ -5,9 +5,17 @@ import { providerDisplayName } from '@peasant-labs/fairtrade/ui';
 import { Harness } from '@peasant-labs/schema';
 import { parseTranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { strikeMountedWebFixture } from '@/test/fixtures/strikeMountedWeb';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
 
 const routerReplace = vi.hoisted(() => vi.fn());
+
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -37,12 +45,14 @@ function StrikeDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
   if (!routeQuery) throw new Error('mounted Strike transcript fixture route query must be valid');
   return (
-    <SessionDetailV2
-      sessionId={strikeMountedWebFixture.sessionDetail.id}
-      projectHash={strikeMountedWebFixture.projectHash}
-      projectName={strikeMountedWebFixture.projectName}
-      routeQuery={routeQuery}
-    />
+    <PublishProvider>
+      <SessionDetailV2
+        sessionId={strikeMountedWebFixture.sessionDetail.id}
+        projectHash={strikeMountedWebFixture.projectHash}
+        projectName={strikeMountedWebFixture.projectName}
+        routeQuery={routeQuery}
+      />
+    </PublishProvider>
   );
 }
 

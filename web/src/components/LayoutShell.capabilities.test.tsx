@@ -7,6 +7,7 @@ import {
   paletteFailures,
   shippedItems,
 } from '../../scripts/visual/shell-header-manifest.mjs';
+import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
 
@@ -103,4 +104,32 @@ describe('LayoutShell — the code map stays route-only whatever the server adve
       expect(within(dialog).queryByText('go to code map')).not.toBeInTheDocument();
     },
   );
+});
+
+function CacheWriter() {
+  const store = usePublishState();
+  return <button onClick={() => store.updateRedactionCache((cache) => new Map(cache).set('standard:session', { status: 'failure', error: 'scan failed' }))}>save scan failure</button>;
+}
+function CacheReader() {
+  const store = usePublishState();
+  const entry = store.redactionCache.get('standard:session');
+  return <p>{entry?.status === 'failure' ? entry.error : 'no cached scan'}</p>;
+}
+it('shares the publish cache between consumers through the production shell', async () => {
+  mockHttp(UI_CAPABILITY_CASES[0]);
+  const view = render(<LayoutShell><CacheWriter /><CacheReader /></LayoutShell>);
+  await act(async () => { screen.getByRole('button', { name: 'save scan failure' }).click(); });
+  expect(screen.getByText('scan failed')).toBeInTheDocument();
+  view.rerender(<LayoutShell><CacheReader /></LayoutShell>);
+  expect(screen.getByText('scan failed')).toBeInTheDocument();
+});
+
+it('is the composition that supplies the publish provider: a consumer outside the shell fails', () => {
+  // The shell is the production mount for PublishProvider. A consumer without it
+  // must fail loudly rather than fall back to page-local publish state.
+  function BareConsumer() {
+    usePublishState();
+    return null;
+  }
+  expect(() => render(<BareConsumer />)).toThrow(/PublishProvider/);
 });

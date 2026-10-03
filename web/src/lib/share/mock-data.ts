@@ -2,7 +2,6 @@ import {
   getMockRedactions,
   type MockRedaction,
 } from '@/lib/session-detail/mock-redactions';
-import type { AnnotationSummary } from '@/lib/api/annotations';
 import type {
   ShareStatus,
   ShareSession,
@@ -178,72 +177,4 @@ export function fetchMockSessions(): ShareDiscoveryResult {
 
 export function fetchMockRedactionPreview(sessionId: string): MockRedaction[] {
   return getMockRedactions(sessionId);
-}
-
-// ---------------------------------------------------------------------------
-// Deterministic id hashing — used to keep mock annotations stable per session.
-// ---------------------------------------------------------------------------
-
-function hashId(sessionId: string): number {
-  let hash = 0;
-  for (let i = 0; i < sessionId.length; i++) {
-    hash = ((hash << 5) - hash + sessionId.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-// ---------------------------------------------------------------------------
-// Mock session-level annotations — deterministic per session id.
-//
-// Shaped exactly like the live GET /api/v1/annotations response
-// (AnnotationSummary[]) so the Labels step can run identically against mock and
-// real data. Mixes `rule`/`agent` (auto) and `human` (manual) annotator kinds
-// so the auto/manual grouping is exercised.
-// ---------------------------------------------------------------------------
-
-interface MockAnnotationSpec {
-  typeId: string;
-  typeName: string;
-  value: string;
-  annotatorKind: AnnotationSummary['annotatorKind'];
-  annotatorName: string;
-}
-
-const MOCK_ANNOTATION_POOL: MockAnnotationSpec[] = [
-  { typeId: 'quality.outcome', typeName: 'Outcome', value: 'success', annotatorKind: 'rule', annotatorName: 'outcome-classifier' },
-  { typeId: 'quality.retry_loops', typeName: 'Retry loops', value: '2', annotatorKind: 'rule', annotatorName: 'retry-detector' },
-  { typeId: 'quality.frustration_signal', typeName: 'Frustration signal', value: 'present', annotatorKind: 'agent', annotatorName: 'claude-grader' },
-  { typeId: 'quality.resolution_evidence', typeName: 'Resolution evidence', value: 'tests-passed', annotatorKind: 'agent', annotatorName: 'claude-grader' },
-  { typeId: 'review.usefulness', typeName: 'Usefulness', value: 'high', annotatorKind: 'human', annotatorName: 'human-web' },
-  { typeId: 'review.note', typeName: 'Reviewer note', value: 'great refactor', annotatorKind: 'human', annotatorName: 'human-web' },
-];
-
-/**
- * Session-level annotations for a session, deterministic on the id hash so the
- * same session always yields the same labels. ~1 in 4 sessions has none,
- * exercising the Labels step's "no labels" empty state. Returns the same shape
- * as the live endpoint so the step is data-source agnostic.
- */
-export function getMockAnnotations(sessionId: string): AnnotationSummary[] {
-  const hash = hashId(sessionId);
-  if (hash % 4 === 0) return [];
-  const count = 2 + (hash % 4); // 2-5 annotations
-  const start = hash % MOCK_ANNOTATION_POOL.length;
-  const out: AnnotationSummary[] = [];
-  for (let i = 0; i < count; i++) {
-    const spec = MOCK_ANNOTATION_POOL[(start + i) % MOCK_ANNOTATION_POOL.length];
-    out.push({
-      id: `${sessionId}::ann::${i}`,
-      targetKind: 'session',
-      targetSessionId: sessionId,
-      isPrimary: i === 0,
-      annotatorKind: spec.annotatorKind,
-      annotatorName: spec.annotatorName,
-      typeId: spec.typeId,
-      typeName: spec.typeName,
-      value: spec.value,
-      createdAt: BigInt(1_700_000_000_000 + hash + i),
-    });
-  }
-  return out;
 }

@@ -3,6 +3,7 @@
 import { type ReactNode } from 'react';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ServerCapabilitiesProvider } from '@/contexts/ServerCapabilitiesContext';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { TopNavbar } from '@/components/TopNavbar';
 import { LocalOfflineNotice } from '@/components/LocalOfflineNotice';
 import { CommandPalette } from '@/components/command/CommandPalette';
@@ -20,16 +21,20 @@ import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
  *
  * The first-run tour (components/tour) is not mounted. Its provider, steps and
  * the `data-tour` anchors stay in the tree so it can come back.
+ * The publish scan cache and in-flight publishes also live here,
+ * so they outlive the pages that use them.
  */
 export function LayoutShell({ children }: { children: ReactNode }) {
   return (
     <WebSocketProvider>
       <ServerCapabilitiesProvider>
-        <TopNavbar />
-        <LocalOfflineNotice />
-        {children}
-        <CommandPalette />
-        {process.env.NODE_ENV === 'development' && <DevAnnotateOverlay />}
+        <PublishProvider>
+          <TopNavbar />
+          <LocalOfflineNotice />
+          {children}
+          <CommandPalette />
+          {process.env.NODE_ENV === 'development' && <DevAnnotateOverlay />}
+        </PublishProvider>
       </ServerCapabilitiesProvider>
     </WebSocketProvider>
   );

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ShareWizardClient } from '@/app/share/ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { buildGroupedSyncResponse } from '@/app/share/testdata/grouped-sync';
 import type { Redaction } from '@/types/messages';
 import * as redactionsApi from '@/lib/share/redactions';
@@ -30,7 +31,11 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/lib/share/redactions', async (importOriginal) => {
   const actual = await importOriginal<typeof redactionsApi>();
-  return { ...actual, fetchRedactionPreview: vi.fn() };
+  const fetchRedactionPreview = vi.fn();
+  return { ...actual, fetchRedactionPreview, fetchRedactionScan: async (id: string, level: redactionsApi.RedactionLevel) => {
+    const redactions = await fetchRedactionPreview(id, level);
+    return { redactions, matchCount: redactions.length };
+  } };
 });
 
 const fetchPreview = vi.mocked(redactionsApi.fetchRedactionPreview);
@@ -98,7 +103,7 @@ describe('ShareWizardClient redaction flow', () => {
     const user = userEvent.setup();
 
     try {
-      render(<ShareWizardClient />);
+      render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
       await waitFor(() => expect(fetchPreview).toHaveBeenCalledTimes(1));
       expect(fetchPreview).toHaveBeenCalledWith(REDACTION_STEP_SESSION.id, DEFAULT_REDACTION_LEVEL);
@@ -144,7 +149,7 @@ describe('ShareWizardClient redaction flow', () => {
     fetchPreview.mockRejectedValue(new Error(REDACTION_STEP_SCAN_FAILURE));
     const user = userEvent.setup();
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(REDACTION_STEP_SCAN_FAILURE);
     expect(

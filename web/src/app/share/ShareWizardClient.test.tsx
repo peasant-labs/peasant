@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ShareWizardClient } from '@/app/share/ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { buildGroupedSyncResponse } from '@/app/share/testdata/grouped-sync';
 import * as useMockConfig from '@/hooks/useMockConfig';
 import * as mockData from '@/lib/share/mock-data';
@@ -9,7 +10,7 @@ import * as mockData from '@/lib/share/mock-data';
 vi.mock('@/hooks/useMockConfig');
 vi.mock('@/lib/share/mock-data');
 
-// Four visible steps: Choose → Labels → Redact → Submit. RedactionStep is
+// Three visible steps: Choose → Redact → Submit. RedactionStep is
 // the heaviest leaf (simulated pipeline + diff views); stub it so the
 // deep-link test can assert the wizard reached the Redact step without
 // standing up that machinery.
@@ -66,7 +67,7 @@ describe('ShareWizardClient', () => {
       refetch: vi.fn(),
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     expect(screen.getByText('Loading sessions...')).toBeInTheDocument();
   });
@@ -98,7 +99,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 1, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await waitFor(() => {
       expect(fetchMockSessionsSpy).toHaveBeenCalled();
@@ -142,7 +143,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 0, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -162,7 +163,7 @@ describe('ShareWizardClient', () => {
     });
     fetchMock.mockRejectedValue(new Error('Network error'));
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await waitFor(() => {
       expect(screen.getByText('Network error')).toBeInTheDocument();
@@ -182,7 +183,7 @@ describe('ShareWizardClient', () => {
     // First fetch fails
     fetchMock.mockRejectedValueOnce(new Error('Network error'));
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await waitFor(() => {
       expect(screen.getByText('Network error')).toBeInTheDocument();
@@ -268,7 +269,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 2, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     // Wizard jumps straight to the Redact step and the selection is *only*
     // the linked session — not its whole project.
@@ -321,7 +322,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 2, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { level: 1, name: 'Contribute' })).toBeInTheDocument();
@@ -380,7 +381,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 2, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     const selectAll = await screen.findByRole('button', { name: 'select all' });
     // Starts empty.
@@ -457,7 +458,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 3, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     // The Choose list shows ONLY the evidence set's projects.
     expect(await screen.findByText('alpha-project')).toBeInTheDocument();
@@ -502,7 +503,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 1, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     expect(await screen.findByText('alpha-project')).toBeInTheDocument();
     expect(gmsTally()).toContain('0 selected');
@@ -511,7 +512,7 @@ describe('ShareWizardClient', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows all four visible steps in the indicator (choose / labels / redact / submit)', async () => {
+  it('shows the three visible steps in the indicator (choose / redact / submit), with no labels step', async () => {
     const mockConfig = { enabled: true, web: ['sessions'], tui: [] };
     mockConfigSpy.mockReturnValue({
       config: mockConfig,
@@ -538,14 +539,16 @@ describe('ShareWizardClient', () => {
       counts: { new: 1, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     const nav = await screen.findByRole('navigation', {
       name: 'Contribute progress',
     });
-    for (const label of ['choose', 'labels', 'redact', 'submit']) {
+    for (const label of ['choose', 'redact', 'submit']) {
       expect(within(nav).getByText(label)).toBeInTheDocument();
     }
+    // The labels step asked for labels the push never sent, so it is gone.
+    expect(within(nav).queryByText('labels')).not.toBeInTheDocument();
   });
 
   it('keeps the first-run tour anchor on the retained Contribute route', async () => {
@@ -576,7 +579,7 @@ describe('ShareWizardClient', () => {
       counts: { new: 1, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 },
     });
 
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     expect(await screen.findByText('alpha-project')).toBeInTheDocument();
     expect(document.querySelector('[data-tour="share-nav"]')).not.toBeNull();

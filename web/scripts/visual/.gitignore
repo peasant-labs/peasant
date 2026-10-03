@@ -52,3 +52,4 @@ baseline/shell-baseline/
 baseline/tb/
 # Generated smoke captures and SxS composites are local review artifacts. Keep them
 # ignored so visual runs do not dirty the repository; record durable evidence in Beads.
+!publish-states-shoot.mjs
