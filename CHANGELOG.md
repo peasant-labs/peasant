@@ -7,6 +7,72 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-03
+
+### Added
+- Publishing from the transcript page: a publish bar and one popup replace the
+  trip through the multi-session wizard. The popup mounts every state (not
+  published, publishing, up to date, new turns, auto-publish on, outside the
+  saved lists, connect, waiting, scanning, scan failed, not in a collective,
+  stopped, waits for approval), counts new turns from the stored `publishedAt`,
+  keeps the redaction scan cache across navigation, and opens from
+  `/share?sessionId=<id>` on that transcript (#498, #536).
+- Collective targets in the local API: list collectives and their linked
+  repositories, add and remove shares, and serve publication state from the
+  stored receipt with `outsideSelection` for sessions the saved selection
+  leaves out. `/sync/push` accepts typed `collectives {add, remove}` and reports
+  one result per step. A collective publish opens private and sends no license;
+  removing a collective revokes its access (#497, #521).
+- Automatic publishing: `hooks.yaml` binds a folder glob or a git remote to
+  collectives, and a managed hook applies the binding on push. `peasant village
+  auto` adds a rule for the repository and installs the hook; a bound push
+  publishes private and shares only with the rule's collectives; a transcript
+  that is public on Village is not updated. Installs are explicit, refuse
+  unrecorded repositories, and keep foreign hooks intact with their remedy
+  (#503, #530).
+- Kickstart's one auto-publish question: "publish automatically?" records
+  `push.autoPublishIntent` (with `push.sharePreference: share-later`), installs
+  nothing, and lets the first publish popup offer automatic setup later (#9,
+  #539).
+- The local settings API: `GET /settings` returns every yaml-backed key with
+  per-key metadata (`inPeasantConfig` derived from the terminal editor's
+  registry); `PATCH /settings` accepts one key, validates the whole
+  configuration, saves atomically, and applies the change live. Credentials are
+  never returned (#501, #532).
+- The local settings page: grouped rows with pending and settled feedback, a
+  failed write restored with the API reason, the "not in peasant config" tag,
+  explicit hook installation with per-repository disclosure, and rule editing
+  that keeps every event (#502, #538).
+- Home as a sessions-first page: a stats strip computed from the existing
+  topics, search with turn-level matches, and one session list with a
+  publish-state column, the all / not published / published / auto filters, a
+  load-more control, and a link from every row into its project's review view.
+  Selection notices and recovery are retained (#500, #537).
+- A quiet local shell: a one-row header (`peasant`, search, settings, theme),
+  fairtrade's offline notice with the start command and retry when the local
+  server stops, route-only sections reachable by URL, and the tour unmounted
+  (#499, #523).
+- `peasant open` records one session and opens its transcript in the local web
+  (#509).
+- C4 architecture diagrams and call sequences in the documentation (#475), and
+  the home-first local section registry documented (#511).
+
+### Changed
+- A web update keeps the audience of a published transcript: a collective-only
+  transcript stays collective-only (#510).
+- The local dashboard is served on loopback only and refuses requests that do
+  not come from it (#508).
+- Test-gate and CI performance work: a two-pass race-on budget gate, waits on
+  signals and deadlines instead of fixed sleeps, a golden-template cache and
+  store-open seam, the arm64 subset lane on releases only, and the GitHub Go
+  cache skipped on the self-hosted pool (#522, #528, #534, #535).
+
+### Fixed
+- SQLite callback ownership is preserved across connection reuse (#541).
+- Claude Code workflow subagent transcripts are ingested (#529).
+- The staging arena wrap gap is released with its copy (#527).
+- Code-map search short-circuits on a raw session id or project hash (#476).
+
 ## [0.7.0] - 2026-09-27
 
 ### Added
