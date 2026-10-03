@@ -14,19 +14,15 @@ import (
 
 var (
 	_ ingest.NativeGenerationActivator   = (*Store)(nil)
+	_ ingest.NativeGenerationStager      = (*Store)(nil)
 	_ ingest.NativeGenerationPriorReader = (*Store)(nil)
 )
 
-// ActivateNativeGeneration adapts the ingest-owned activation envelope to the
-// store's own immutable activation. It stages and fsyncs the content files,
-// persists the opaque prior document, installs the generation, counts and
-// pointer in ONE transaction, repairs the exported metadata and clears the
-// intent. It reuses the same expected-state compare and success-stamp rules as
-// every other managed activation. The outcome carries the lock-derived
-// disposition for per-invocation counting; a post-commit repair failure
-// returns a GenerationRepairPendingError with committed authority.
-func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
-	outcome, err := s.ActivateGeneration(ctx, GenerationActivation{
+// generationActivationFromNative mirrors the ingest-owned activation envelope
+// into the store's own immutable activation. Both entry points (pre-staging and
+// activation) share it so their preconditions cannot drift.
+func generationActivationFromNative(activation ingest.NativeGenerationActivation) GenerationActivation {
+	return GenerationActivation{
 		Generation:       activation.Generation,
 		Blobs:            activation.Blobs,
 		PriorEvidence:    activation.PriorEvidence,
@@ -39,8 +35,31 @@ func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.
 		ArtifactIdentity: activation.ArtifactIdentity,
 		ExplicitRebuild:  activation.ExplicitRebuild,
 		Capture:          activation.Capture,
-	})
+	}
+}
+
+// ActivateNativeGeneration adapts the ingest-owned activation envelope to the
+// store's own immutable activation. It stages and fsyncs the content files,
+// persists the opaque prior document, installs the generation, counts and
+// pointer in ONE transaction, repairs the exported metadata and clears the
+// intent. It reuses the same expected-state compare and success-stamp rules as
+// every other managed activation. The outcome carries the lock-derived
+// disposition for per-invocation counting; a post-commit repair failure
+// returns a GenerationRepairPendingError with committed authority.
+func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
+	outcome, err := s.ActivateGeneration(ctx, generationActivationFromNative(activation))
 	return outcome, err
+}
+
+// StageNativeGeneration pre-stages one managed generation's content files and
+// records its durable activation intent without running the database
+// transaction, so independent sessions can stage concurrently while only the
+// commit stays on the serialized writer. The matching
+// ActivateNativeGeneration call for the same candidate replays the recorded
+// intent. A staging error is not authoritative: the activation re-runs the
+// same preamble and reports the final refusal or repair outcome.
+func (s *Store) StageNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) error {
+	return s.StageGeneration(ctx, generationActivationFromNative(activation))
 }
 
 // ReadNativeGenerationPrior loads the active generation's reusable evidence for

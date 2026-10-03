@@ -100,6 +100,12 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 	// path below, so a read failure degrades to refusal, never to a wrong
 	// committed disposition.
 	pendingBefore, _ := s.generationArtifacts.ReadIntent(ctx, sessionID)
+	// A pending intent that names this candidate but binds different bytes must
+	// never be replayed for this request: discard it so the requested envelope
+	// is staged fresh (and verified against the installed candidate) instead.
+	if err := s.discardUnboundRequestedIntentLocked(ctx, sessionID, requestedID, activation); err != nil {
+		return notCommitted(err)
+	}
 
 	if err := s.recoverGenerationIntentLocked(ctx, sessionID); err != nil {
 		// A stale pending intent for the same generation identifier is a
@@ -222,6 +228,70 @@ reconciled:
 		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID, RepairPending: true}, &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: requestedID, Repair: ingest.GenerationRepairIntentClear}
 	}
 	return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID}, nil
+}
+
+// StageGeneration runs the activation preamble and stages (and fsyncs) one
+// managed generation's files, durably recording the activation intent, WITHOUT
+// running the database transaction. A later ActivateGeneration call for the
+// same candidate replays the recorded intent, so the serialized store writer
+// pays only for the commit. Several sessions may stage concurrently: the call
+// holds the session's exclusive lock, and staged generations are immutable and
+// content-addressed, so distinct sessions never contend.
+//
+// The ordering mirrors ActivateGeneration: the intent is recorded before the
+// atomic rename, so a crash at any seam leaves exactly the prior generation or
+// the staged candidate for recovery to replay. An already-committed candidate
+// is left alone; ActivateGeneration owns the idempotent repair. A preamble
+// that cannot be reconciled is returned unchanged so the caller can fall back
+// to ActivateGeneration, which reports the same refusal with its accounting.
+func (s *Store) StageGeneration(ctx context.Context, activation GenerationActivation) error {
+	requestedID := activation.Generation.Generation.ID
+	if err := s.requireGenerationSupport(); err != nil {
+		return err
+	}
+	if err := validateGenerationID(requestedID); err != nil {
+		return err
+	}
+	sessionID := activation.Generation.Generation.Metadata.SessionID
+	release, err := s.sessionLocker.LockExclusive(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = release() }()
+
+	// Reconcile any prior intent exactly as the activation preamble does: an
+	// intent that does not bind to the requested candidate is discarded, a
+	// stale intent for the requested candidate is a verified retry and is
+	// replaced, and any other preamble failure is left for the serial
+	// activation to refuse with its own disposition.
+	if err := s.discardUnboundRequestedIntentLocked(ctx, sessionID, requestedID, activation); err != nil {
+		return err
+	}
+	if err := s.recoverGenerationIntentLocked(ctx, sessionID); err != nil {
+		var stale *ingest.StaleIndexWorkError
+		if errors.As(err, &stale) {
+			pending, readErr := s.generationArtifacts.ReadIntent(ctx, sessionID)
+			if readErr == nil && pending != nil && pending.GenerationID == requestedID {
+				if clearErr := s.generationArtifacts.ClearIntent(ctx, sessionID); clearErr == nil {
+					goto reconciled
+				}
+			}
+		}
+		return err
+	}
+reconciled:
+	active, err := s.activeGenerationID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if active == requestedID {
+		// A prior attempt already committed this candidate (for example the
+		// preamble recovery above, or a crash retry). The files and intent are
+		// already durable; ActivateGeneration replays the idempotent repair.
+		return nil
+	}
+	_, err = s.stageWithIntent(ctx, sessionID, activation.Generation.Generation, activation.Blobs, activation)
+	return err
 }
 
 // RecoverGenerationActivation reconciles one session's pending intent under the
@@ -604,6 +674,41 @@ func (s *Store) verifyImmutableCandidateIdentity(ctx context.Context, sessionID 
 	}
 	if installed.ID != generation.ID || installed.Metadata.SessionID != sessionID || installedDigest != candidateDigest {
 		return fmt.Errorf("store: refuse to stage generation %s for session %s in verifyImmutableCandidateIdentity: the identifier is already installed with different candidate evidence; immutable identifiers cannot be reused; the installed generation is unchanged", generation.ID, sessionID)
+	}
+	return nil
+}
+
+// discardUnboundRequestedIntentLocked removes a pending intent that names the
+// requested generation identifier but does not bind to the requested candidate
+// envelope. Activation must never commit staged bytes the caller did not ask
+// for: a mismatched envelope is treated exactly like a stale intent and the
+// requested candidate is staged fresh (and still verified against the installed
+// candidate). A requested envelope whose own binding cannot be computed is
+// refused with the staging path's own error, so a candidate can never ride a
+// recorded intent it does not match.
+func (s *Store) discardUnboundRequestedIntentLocked(ctx context.Context, sessionID schema.SessionID, requestedID string, activation GenerationActivation) error {
+	pending, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
+	if err != nil {
+		// A preamble read failure degrades to the ordinary path below, which
+		// re-reads the intent and reports its own refusal; it is never treated
+		// as a match.
+		return nil
+	}
+	if pending == nil || pending.GenerationID != requestedID {
+		return nil
+	}
+	requestedDigest, err := computeActivationBinding(activation.Generation.Generation, bindingFromBlobs(activation.Blobs))
+	if err != nil {
+		// The wrapped error is the fixed, reference-free binding category; a
+		// missing captured blob is untrusted candidate detail and is never
+		// echoed.
+		return fmt.Errorf("store: bind activation for generation %s of session %s: %w; the candidate was not staged and any installed generation is unchanged", requestedID, sessionID, err)
+	}
+	if pending.CandidateDigest == requestedDigest {
+		return nil
+	}
+	if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
+		return fmt.Errorf("store: clear an unbound pending activation for session %s generation %s: %s; the requested candidate was not staged and any installed generation is unchanged", sessionID, requestedID, sanitizeFSError(err))
 	}
 	return nil
 }
