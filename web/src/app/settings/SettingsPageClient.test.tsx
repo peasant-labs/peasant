@@ -56,7 +56,10 @@ function mountServer({ settings, auth = { authenticated: false } }: { settings: 
   serve('GET', '/api/v1/settings', () => answer(200, settings));
   serve('GET', '/api/v1/sync/auth', () => answer(200, auth));
   serve('GET', '/api/v1/village/collectives', () => answer(200, {
-    collectives: [{ group: villageGroup('3f9c1a2b-0000-4000-8000-000000000001', 'Acme Platform') }],
+    collectives: [
+      { group: villageGroup('3f9c1a2b-0000-4000-8000-000000000001', 'Acme Platform') },
+      { group: villageGroup('3f9c1a2b-0000-4000-8000-000000000002', 'Acme Labs') },
+    ],
   }));
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input);
@@ -439,7 +442,7 @@ describe('auto-publish install', () => {
     });
   }
   it.each(loadInstallCases().map((testCase) => [testCase.name, testCase] as const))('%s', async (_name, testCase) => {
-    mountServer({ settings: withRules(testCase.rules) });
+    mountServer({ settings: withRules(testCase.rules), auth: { authenticated: true, username: 'alice-dev' } });
     serve('POST', '/api/v1/settings/auto-publish/acme-work/install', (body) => testCase.answers[(body as { path: string }).path]);
     serve('POST', '/api/v1/settings/auto-publish/acme-remote/install', (body) => testCase.answers[(body as { path: string }).path]);
     await mountPage();
@@ -452,8 +455,18 @@ describe('auto-publish install', () => {
       return;
     }
     const action = within(group).getByRole('button', { name: testCase.offer });
-    // Nothing is installed before the click.
+    // Nothing is installed before the click, and every repository discloses what
+    // the install will do first.
     expect(mutations()).toEqual([]);
+    const pending = within(group).getByRole('list', { name: 'repositories to install in' });
+    for (const [path, texts] of Object.entries(testCase.preview)) {
+      const item = Array.from(pending.querySelectorAll('li')).find((li) => li.querySelector(`[title="${path}"]`));
+      expect(item, `the preview for ${path}`).toBeDefined();
+      const details = item!.querySelector<HTMLDetailsElement>('details.stg-install-preview');
+      expect(details, `${path} has an install preview`).not.toBeNull();
+      details!.open = true;
+      for (const text of texts) expect(item!.textContent, `${path} preview shows ${text}`).toContain(text);
+    }
     fireEvent.click(action);
     const results = await within(group).findByRole('list', { name: 'install results' });
     expect(installs().map((call) => `${call.path.split('/').at(-2)} -> ${(call.body as { path: string }).path}`)).toEqual(testCase.calls);
@@ -461,6 +474,10 @@ describe('auto-publish install', () => {
       const item = Array.from(results.querySelectorAll('li')).find((li) => li.querySelector(`[title="${path}"]`));
       expect(item, `the result for ${path}`).toBeDefined();
       for (const text of texts) expect(item!.textContent, `${path} shows ${text}`).toContain(text);
+    }
+    for (const [ruleId, texts] of Object.entries(testCase.refreshed)) {
+      const item = group.querySelector<HTMLElement>(`[data-rule-id="${ruleId}"]`)!;
+      for (const text of texts) expect(item.textContent, `${ruleId} shows ${text}`).toContain(text);
     }
   });
 });
@@ -525,6 +542,44 @@ describe('auto-publish rules', () => {
     expect(mutations().map(({ method, path, body }) => ({ method, path, body }))).toEqual([
       { method: 'PUT', path: '/api/v1/settings/auto-publish/acme-work', body: { kind: 'folder', match: '~/work/acme/**', events: [], collectives: ['3f9c1a2b-0000-4000-8000-000000000001'] } },
     ]);
+  });
+
+  it('editing only the collectives keeps both of a two-event rule\'s events', async () => {
+    const twoEvent: AutoPublishRule = { ...rule, events: ['pre-push', 'post-commit'], repositories: [] };
+    mountServer({ settings: withRules([twoEvent]), auth: { authenticated: true, username: 'alice-dev' } });
+    serve('PUT', '/api/v1/settings/auto-publish/acme-work', (body) => answer(200, { ...twoEvent, ...(body as object), repositories: [] }));
+    await mountPage();
+    const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
+    fireEvent.click(within(group).getByRole('button', { name: 'more for ~/work/acme/**' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'edit' }));
+    const form = within(group).getByRole('form', { name: 'edit ~/work/acme/**' });
+    // Both events start checked from the rule, not from a default.
+    expect(within(form).getByRole('checkbox', { name: 'on git push' })).toBeChecked();
+    expect(within(form).getByRole('checkbox', { name: 'on each commit' })).toBeChecked();
+    fireEvent.click(within(form).getByRole('checkbox', { name: 'Acme Labs' }));
+    fireEvent.click(within(form).getByRole('button', { name: 'save rule' }));
+    await waitFor(() => expect(mutations()).toHaveLength(1));
+    expect(mutations()[0].body).toEqual({
+      kind: 'folder',
+      match: '~/work/acme/**',
+      events: ['pre-push', 'post-commit'],
+      collectives: ['3f9c1a2b-0000-4000-8000-000000000001', '3f9c1a2b-0000-4000-8000-000000000002'],
+    });
+  });
+
+  it('a deliberate event toggle saves only the chosen events', async () => {
+    const twoEvent: AutoPublishRule = { ...rule, events: ['pre-push', 'post-commit'], repositories: [] };
+    mountServer({ settings: withRules([twoEvent]), auth: { authenticated: true, username: 'alice-dev' } });
+    serve('PUT', '/api/v1/settings/auto-publish/acme-work', (body) => answer(200, { ...twoEvent, ...(body as object), repositories: [] }));
+    await mountPage();
+    const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
+    fireEvent.click(within(group).getByRole('button', { name: 'more for ~/work/acme/**' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'edit' }));
+    const form = within(group).getByRole('form', { name: 'edit ~/work/acme/**' });
+    fireEvent.click(within(form).getByRole('checkbox', { name: 'on each commit' }));
+    fireEvent.click(within(form).getByRole('button', { name: 'save rule' }));
+    await waitFor(() => expect(mutations()).toHaveLength(1));
+    expect((mutations()[0].body as { events: string[] }).events).toEqual(['pre-push']);
   });
 
   it('adds a rule with one save, installs nothing, then offers the repositories it covers', async () => {

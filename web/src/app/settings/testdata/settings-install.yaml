@@ -7,10 +7,15 @@
 #
 # offer: the action's label, or null when no action may be offered.
 # calls: every install call after the click, in order, as "rule id -> path".
+# preview: text each repository's install preview must show before the click,
+#   by path (timing, audience, failure behavior, uninstall command, remedy).
 # shows: text each repository's result must show, by path (a remedy included).
+# refreshed: text each rule's view must show after the install, by rule id.
 requiredNames:
   - installs once per repository and shows a foreign hook's remedy
-  - a repository two rules cover is counted once and installed per rule
+  - a repository two rules with the same event installs once
+  - a repository two rules cover with different events installs once per event
+  - a blocked hook in a repository to install shows its remedy in the preview
   - a paused rule offers no install
   - nothing is offered when every hook is there
   - a refused call shows the server's reason
@@ -45,6 +50,18 @@ cases:
       - acme-work -> /home/alice/work/acme/api
       - acme-work -> /home/alice/work/acme/web
       - acme-work -> /home/alice/work/acme/worker
+    preview:
+      /home/alice/work/acme/api:
+        - on git push
+        - publishes to Acme Platform, private
+        - always exits 0
+        - peasant village hooks uninstall --dir /home/alice/work/acme/api --event pre-push
+      /home/alice/work/acme/web:
+        - on git push
+        - peasant village hooks uninstall --dir /home/alice/work/acme/web --event pre-push
+      /home/alice/work/acme/worker:
+        - on git push
+        - peasant village hooks uninstall --dir /home/alice/work/acme/worker --event pre-push
     shows:
       /home/alice/work/acme/api: [hook installed]
       /home/alice/work/acme/web: [hook installed]
@@ -52,7 +69,9 @@ cases:
         - blocked
         - "a pre-push hook that Peasant did not write is already at /home/alice/work/acme/worker/.git/hooks/pre-push. add the section below to it by hand."
         - "peasant village push --non-interactive --quiet --timeout 5s --repository /home/alice/work/acme/worker"
-  - name: a repository two rules cover is counted once and installed per rule
+    refreshed:
+      acme-work: ["hook in 2 of 3 repositories", "blocked in 1"]
+  - name: a repository two rules with the same event installs once
     rules:
       - id: acme-work
         kind: folder
@@ -65,10 +84,10 @@ cases:
       - id: acme-remote
         kind: remote
         match: "github.com:acme/api"
-        events: [post-commit]
+        events: [pre-push]
         collectives: [3f9c1a2b-0000-4000-8000-000000000002]
         repositories:
-          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: post-commit, status: absent}]}
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: absent}]}
     answers:
       /home/alice/work/acme/api: {status: 200, body: {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: installed}]}}
       /home/alice/work/acme/web: {status: 200, body: {path: /home/alice/work/acme/web, label: "github.com:acme/web", hooks: [{event: pre-push, status: installed}]}}
@@ -76,9 +95,105 @@ cases:
     calls:
       - acme-work -> /home/alice/work/acme/api
       - acme-work -> /home/alice/work/acme/web
-      - acme-remote -> /home/alice/work/acme/api
+    preview:
+      /home/alice/work/acme/api:
+        - on git push · publishes to Acme Platform, private
+        - on git push · publishes to Acme Labs, private
+        - peasant village hooks uninstall --dir /home/alice/work/acme/api --event pre-push
+      /home/alice/work/acme/web:
+        - on git push · publishes to Acme Platform, private
+        - peasant village hooks uninstall --dir /home/alice/work/acme/web --event pre-push
     shows:
+      /home/alice/work/acme/api: [hook installed]
       /home/alice/work/acme/web: [hook installed]
+    refreshed:
+      acme-work: [hook in 2 of 2 repositories]
+      acme-remote: [hook in 1 of 1 repository]
+  - name: a repository two rules cover with different events installs once per event
+    rules:
+      - id: acme-work
+        kind: folder
+        match: ~/work/acme/**
+        events: [pre-push]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: pre-push, status: absent}]}
+      - id: acme-remote
+        kind: remote
+        match: "github.com:acme/api"
+        events: [post-commit]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000002]
+        repositories:
+          - {path: /home/alice/work/acme/api, label: "github.com:acme/api", hooks: [{event: post-commit, status: absent}]}
+    answers:
+      /home/alice/work/acme/api:
+        status: 200
+        body:
+          path: /home/alice/work/acme/api
+          label: "github.com:acme/api"
+          hooks:
+            - {event: pre-push, status: installed}
+            - {event: post-commit, status: installed}
+    offer: install in 1 repository
+    calls:
+      - acme-work -> /home/alice/work/acme/api
+      - acme-remote -> /home/alice/work/acme/api
+    preview:
+      /home/alice/work/acme/api:
+        - on git push · publishes to Acme Platform, private
+        - on each commit · publishes to Acme Labs, private
+        - peasant village hooks uninstall --dir /home/alice/work/acme/api --event pre-push
+        - peasant village hooks uninstall --dir /home/alice/work/acme/api --event post-commit
+    shows:
+      /home/alice/work/acme/api: ["pre-push: hook installed", "post-commit: hook installed"]
+    refreshed:
+      acme-work: [hook in 1 of 1 repository]
+      acme-remote: [hook in 1 of 1 repository]
+  - name: a blocked hook in a repository to install shows its remedy in the preview
+    rules:
+      - id: acme-work
+        kind: folder
+        match: ~/work/acme/**
+        events: [pre-push, post-commit]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - path: /home/alice/work/acme/api
+            label: "github.com:acme/api"
+            hooks:
+              - {event: pre-push, status: absent}
+              - event: post-commit
+                status: blocked
+                remedy:
+                  message: "a post-commit hook that Peasant did not write is already at /home/alice/work/acme/api/.git/hooks/post-commit. add the section below to it by hand."
+                  snippet: "# BEGIN peasant village upload (post-commit)\npeasant village push --non-interactive --quiet --timeout 5s --repository /home/alice/work/acme/api\n# END peasant village upload (post-commit)"
+    answers:
+      /home/alice/work/acme/api:
+        status: 200
+        body:
+          path: /home/alice/work/acme/api
+          label: "github.com:acme/api"
+          hooks:
+            - {event: pre-push, status: installed}
+            - event: post-commit
+              status: blocked
+              remedy:
+                message: "a post-commit hook that Peasant did not write is already at /home/alice/work/acme/api/.git/hooks/post-commit. add the section below to it by hand."
+                snippet: "# BEGIN peasant village upload (post-commit)\npeasant village push --non-interactive --quiet --timeout 5s --repository /home/alice/work/acme/api\n# END peasant village upload (post-commit)"
+    offer: install in 1 repository
+    calls:
+      - acme-work -> /home/alice/work/acme/api
+    preview:
+      /home/alice/work/acme/api:
+        - on git push
+        - on each commit
+        - "a post-commit hook that Peasant did not write is already at /home/alice/work/acme/api/.git/hooks/post-commit. add the section below to it by hand."
+        - "peasant village push --non-interactive --quiet --timeout 5s --repository /home/alice/work/acme/api"
+    shows:
+      /home/alice/work/acme/api:
+        - blocked
+        - "a post-commit hook that Peasant did not write is already at /home/alice/work/acme/api/.git/hooks/post-commit. add the section below to it by hand."
+    refreshed:
+      acme-work: ["hook in 0 of 1 repository", "blocked in 1"]
   - name: a paused rule offers no install
     rules:
       - id: personal
@@ -91,7 +206,9 @@ cases:
     answers: {}
     offer: null
     calls: []
+    preview: {}
     shows: {}
+    refreshed: {}
   - name: nothing is offered when every hook is there
     rules:
       - id: acme-work
@@ -105,7 +222,9 @@ cases:
     answers: {}
     offer: null
     calls: []
+    preview: {}
     shows: {}
+    refreshed: {}
   - name: a refused call shows the server's reason
     rules:
       - id: acme-work
@@ -122,7 +241,13 @@ cases:
     offer: install in 1 repository
     calls:
       - acme-work -> /home/alice/work/acme/api
+    preview:
+      /home/alice/work/acme/api:
+        - on git push · publishes to Acme Platform, private
+        - peasant village hooks uninstall --dir /home/alice/work/acme/api --event pre-push
     shows:
       /home/alice/work/acme/api:
         - not installed
         - "No hook was installed because redaction.level is \"maximum\", which this version cannot apply. Set redaction.level to standard, then retry."
+    refreshed:
+      acme-work: [hook in 0 of 1 repository]

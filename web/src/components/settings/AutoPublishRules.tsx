@@ -30,24 +30,58 @@ function needsHook(repository: AutoPublishRepository): boolean {
   return repository.hooks.some((hook) => hook.status === AutoPublishHookStatus.Absent);
 }
 
-/** One install the page offers: a rule's hooks in one recorded repository. */
+/** One install the page offers: one call to a rule's install endpoint. */
 export interface PendingInstall {
+  /** The rule whose endpoint makes the call. */
   ruleId: string;
   match: string;
   path: string;
   label?: string;
+  /** The events this call installs: the calling rule's event set. */
+  events: AutoPublishEvent[];
+  /** Every rule whose repository view this call's result refreshes. */
+  ruleIds: string[];
+}
+
+/** A stable key for an event set, so two rules with the same events share one call. */
+function eventSetKey(events: readonly AutoPublishEvent[]): string {
+  return [...events].sort().join(',');
 }
 
 /**
  * The installs the one action makes: every recorded repository a rule covers
- * that has no hook yet, once per rule. A repository whose hook is there or
- * blocked is not offered, and neither is one a paused rule covers: the server
- * reports one hook per rule event, so a paused rule's repositories have none.
+ * that has no hook yet. Identical work collapses: two rules whose event sets
+ * match over one repository install once, and both rule views refresh from the
+ * result. Different event sets over one repository still take one call each:
+ * the install endpoint is rule-scoped, so a call installs only the calling
+ * rule's events. Covering disjoint events in one call needs a schema-owned
+ * union operation; until then this stays one call per event set. A repository
+ * whose hook is there or blocked is not offered, and neither is one a paused
+ * rule covers: the server reports one hook per rule event, so a paused rule's
+ * repositories have none.
  */
 export function pendingInstalls(rules: readonly AutoPublishRule[]): PendingInstall[] {
-  return rules.flatMap((rule) => rule.repositories
-    .filter(needsHook)
-    .map((repository) => ({ ruleId: rule.id, match: rule.match, path: repository.path, label: repository.label })));
+  const operations = new Map<string, PendingInstall>();
+  for (const rule of rules) {
+    for (const repository of rule.repositories) {
+      if (!needsHook(repository)) continue;
+      const key = `${repository.path}\u0000${eventSetKey(rule.events)}`;
+      const existing = operations.get(key);
+      if (existing) {
+        existing.ruleIds.push(rule.id);
+        continue;
+      }
+      operations.set(key, {
+        ruleId: rule.id,
+        match: rule.match,
+        path: repository.path,
+        label: repository.label,
+        events: [...rule.events],
+        ruleIds: [rule.id],
+      });
+    }
+  }
+  return [...operations.values()];
 }
 
 function repositoryName(repository: { path: string; label?: string }): string {
@@ -137,15 +171,74 @@ function RepositoryState({ repository, shared }: { repository: AutoPublishReposi
   );
 }
 
+/** The command that removes the hook an install writes; a single event names it. */
+function uninstallCommand(path: string, events: readonly AutoPublishEvent[]): string {
+  const command = `peasant village hooks uninstall --dir ${path}`;
+  return events.length === 1 ? `${command} --event ${events[0]}` : command;
+}
+
+/**
+ * What installing in one repository will do, shown before the action: the
+ * events and the collectives they publish to, the managed hook's failure
+ * behavior, the uninstall command, and any blocked hook's remedy. The effective
+ * hook path and the exact bound command are not on the wire yet; they stay a
+ * follow-up rather than being reconstructed here.
+ */
+function InstallPreview({ operations, rules, collectives }: {
+  operations: readonly PendingInstall[];
+  rules: readonly AutoPublishRule[];
+  collectives: CollectiveNames;
+}) {
+  const byId = new Map(rules.map((rule) => [rule.id, rule]));
+  const steps = new Map<string, { event: AutoPublishEvent; to: readonly string[] }>();
+  const remedies = new Map<string, AutoPublishHook>();
+  for (const operation of operations) {
+    for (const ruleId of operation.ruleIds) {
+      const rule = byId.get(ruleId);
+      if (!rule) continue;
+      for (const event of rule.events) {
+        const key = `${event}\u0000${[...rule.collectives].sort().join(',')}`;
+        if (!steps.has(key)) steps.set(key, { event, to: rule.collectives });
+      }
+      const repository = rule.repositories.find((candidate) => candidate.path === operation.path);
+      for (const hook of repository?.hooks ?? []) {
+        if (hook.remedy) remedies.set(`${ruleId}\u0000${hook.event}`, hook);
+      }
+    }
+  }
+  return (
+    <details className="stg-install-preview">
+      <summary>what installing does</summary>
+      <ul className="stg-install-steps">
+        {[...steps.entries()].map(([key, step]) => (
+          <li key={key} className="stg-install-step">
+            {eventWords(step.event)} · publishes to {collectiveWords(step.to, collectives)}, private
+          </li>
+        ))}
+      </ul>
+      <p className="stg-note">the managed hook always exits 0, so a failed upload never blocks the push or commit.</p>
+      {operations.map((operation) => (
+        <p key={`${operation.ruleId}-${operation.path}`} className="stg-note">
+          remove it with <code className="stg-command">{uninstallCommand(operation.path, operation.events)}</code>.
+        </p>
+      ))}
+      {[...remedies.entries()].map(([key, hook]) => <Remedy key={key} hook={hook} />)}
+    </details>
+  );
+}
+
 interface RuleDraft {
   id: string;
   isNew: boolean;
   kind: AutoPublishRuleKind;
   match: string;
-  /** '' keeps a paused rule paused. */
-  event: AutoPublishEvent | '';
+  /** No events keeps a paused rule paused. */
+  events: AutoPublishEvent[];
   collectives: string[];
 }
+
+/** The two events a rule may publish on, in the order the form shows them. */
+const RULE_EVENTS: readonly AutoPublishEvent[] = [AutoPublishEvent.PrePush, AutoPublishEvent.PostCommit];
 
 function newRuleId(): string {
   const bytes = new Uint8Array(6);
@@ -167,11 +260,35 @@ function installedCount(outcomes: readonly InstallOutcome[]): number {
   return [...done].filter((path) => !notDone.has(path)).length;
 }
 
+/** One repository's final install result, however many calls covered it. */
+interface InstallResult {
+  path: string;
+  label?: string;
+  error?: string;
+  repository?: AutoPublishRepository;
+}
+
+/** Collapse the per-call outcomes into one result per repository, the latest call winning. */
+function installResults(outcomes: readonly InstallOutcome[]): InstallResult[] {
+  const byPath = new Map<string, InstallResult>();
+  for (const outcome of outcomes) {
+    const result = byPath.get(outcome.path) ?? { path: outcome.path, label: outcome.label };
+    if ('error' in outcome) {
+      result.error = outcome.error;
+    } else {
+      result.repository = outcome.repository;
+      result.error = undefined;
+    }
+    byPath.set(outcome.path, result);
+  }
+  return [...byPath.values()];
+}
+
 /**
  * The auto-publish rules in hooks.yaml. A rule binds a folder or a git remote
  * to collectives; saving one installs nothing. The recorded repositories a
  * publishing rule covers that have no hook yet are listed, with one action
- * that installs in all of them: one call per repository, only after the click.
+ * that installs in all of them, only after the click.
  */
 export function AutoPublishRules({ rules, onRulesChange, collectives, collectivesError = null, signedIn }: {
   rules: readonly AutoPublishRule[];
@@ -193,8 +310,15 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
   const busy = install?.running === true || switchPending || listStatus.state === 'pending' || formStatus.state === 'pending';
   const pending = pendingInstalls(rules);
   const pendingRepos = new Set(pending.map((item) => item.path)).size;
+  const pendingByPath = new Map<string, PendingInstall[]>();
+  for (const item of pending) {
+    const group = pendingByPath.get(item.path);
+    if (group) group.push(item);
+    else pendingByPath.set(item.path, [item]);
+  }
   const outcomes = install?.outcomes ?? [];
   const resultRepos = new Set(outcomes.map((outcome) => outcome.path)).size;
+  const currentOperation = install?.running ? pending[install.done] : undefined;
 
   const replaceRule = (saved: AutoPublishRule) => {
     const exists = rules.some((rule) => rule.id === saved.id);
@@ -255,7 +379,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
       const saved = await saveAutoPublishRule(draft.id, {
         kind: draft.kind,
         match: draft.match.trim(),
-        events: draft.event ? [draft.event] : [],
+        events: draft.events,
         collectives: draft.collectives,
       });
       replaceRule(saved);
@@ -276,10 +400,11 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
       try {
         const repository = await installAutoPublishRule(item.ruleId, item.path);
         outcomes.push({ ...item, repository });
-        current = current.map((rule) => (rule.id !== item.ruleId ? rule : {
+        // Every rule this operation covered refreshes from the one result.
+        current = current.map((rule) => (item.ruleIds.includes(rule.id) ? {
           ...rule,
           repositories: rule.repositories.map((existing) => (existing.path === repository.path ? repository : existing)),
-        }));
+        } : rule));
       } catch (failure) {
         outcomes.push({ ...item, error: failure instanceof Error ? failure.message : String(failure) });
       }
@@ -293,8 +418,8 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
     if (busy) return;
     setFormStatus({ state: 'idle' });
     setDraft(rule
-      ? { id: rule.id, isNew: false, kind: rule.kind, match: rule.match, event: rule.events[0] ?? '', collectives: [...rule.collectives] }
-      : { id: newRuleId(), isNew: true, kind: AutoPublishRuleKind.Folder, match: '', event: AutoPublishEvent.PrePush, collectives: [] });
+      ? { id: rule.id, isNew: false, kind: rule.kind, match: rule.match, events: [...rule.events], collectives: [...rule.collectives] }
+      : { id: newRuleId(), isNew: true, kind: AutoPublishRuleKind.Folder, match: '', events: [AutoPublishEvent.PrePush], collectives: [] });
   };
 
   const collectiveChoices = collectives ? Array.from(collectives.entries()) : [];
@@ -359,45 +484,58 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
           {pending.length > 0 && (
             <>
               <ul className="stg-repos" aria-label="repositories to install in">
-                {pending.map((item) => (
-                  <li key={`${item.ruleId}-${item.path}`} className="stg-repo">
-                    <RepositoryName repository={item} shared={sharedLabels(pending)} />
-                    <span className="stg-repo-state">for {item.match}</span>
-                  </li>
-                ))}
+                {[...pendingByPath.values()].map((operations) => {
+                  const first = operations[0];
+                  const matches = [...new Set(operations.map((operation) => operation.match))];
+                  return (
+                    <li key={first.path} className="stg-repo">
+                      <RepositoryName repository={first} shared={sharedLabels(pending)} />
+                      <span className="stg-repo-state">for {matches.join(', ')}</span>
+                      <InstallPreview operations={operations} rules={rules} collectives={collectives} />
+                    </li>
+                  );
+                })}
               </ul>
               <p className="stg-note">nothing is installed until you choose to. peasant never overwrites a hook it did not write.</p>
               <div className="stg-install-actions">
                 <Button variant="primary" onClick={runInstall} disabled={busy} loading={install?.running === true}>
                   install in {pendingRepos} {pendingRepos === 1 ? 'repository' : 'repositories'}
                 </Button>
-                {install?.running && <span className="stg-progress" aria-live="polite">installing <span className="tnum">{install.done + 1}</span> of <span className="tnum">{install.total}</span></span>}
+                {install?.running && (
+                  <span className="stg-progress" aria-live="polite">
+                    {currentOperation ? `installing ${repositoryName(currentOperation)} (${currentOperation.events.map(eventWords).join(' and ')}) ` : 'installing '}
+                    <span className="tnum">{install.done + 1}</span> of <span className="tnum">{install.total}</span>
+                  </span>
+                )}
               </div>
             </>
           )}
           {install && !install.running && (
             <ul className="stg-repos stg-install-results" aria-label="install results">
-              {install.outcomes.map((outcome) => (
-                <li key={`${outcome.ruleId}-${outcome.path}`} className="stg-repo">
-                  <RepositoryName repository={outcome} shared={sharedLabels(install.outcomes)} />
-                  {'error' in outcome ? (
-                    <>
-                      <span className="stg-repo-state stg-repo-state-failed"><CircleX aria-hidden="true" /> not installed</span>
-                      <div className="stg-remedy"><p className="stg-remedy-text" role="alert">{outcome.error}</p></div>
-                    </>
-                  ) : (
-                    <>
-                      {outcome.repository.hooks.map((hook) => (
-                        <span key={hook.event} className={`stg-repo-state stg-repo-state-${hook.status}`}>
-                          {hook.status === AutoPublishHookStatus.Installed ? <CircleCheck aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
-                          {outcome.repository.hooks.length > 1 ? ` ${hook.event}: ` : ' '}{hookWords(hook.status)}
-                        </span>
-                      ))}
-                      {outcome.repository.hooks.map((hook) => <Remedy key={`${hook.event}-remedy`} hook={hook} />)}
-                    </>
-                  )}
-                </li>
-              ))}
+              {installResults(outcomes).map((result) => {
+                const repository = result.repository;
+                return (
+                  <li key={result.path} className="stg-repo">
+                    <RepositoryName repository={result} shared={sharedLabels(outcomes)} />
+                    {result.error !== undefined ? (
+                      <>
+                        <span className="stg-repo-state stg-repo-state-failed"><CircleX aria-hidden="true" /> not installed</span>
+                        <div className="stg-remedy"><p className="stg-remedy-text" role="alert">{result.error}</p></div>
+                      </>
+                    ) : repository ? (
+                      <>
+                        {repository.hooks.map((hook) => (
+                          <span key={hook.event} className={`stg-repo-state stg-repo-state-${hook.status}`}>
+                            {hook.status === AutoPublishHookStatus.Installed ? <CircleCheck aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
+                            {repository.hooks.length > 1 ? ` ${hook.event}: ` : ' '}{hookWords(hook.status)}
+                          </span>
+                        ))}
+                        {repository.hooks.map((hook) => <Remedy key={`${hook.event}-remedy`} hook={hook} />)}
+                      </>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -424,18 +562,20 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
                 disabled={busy}
               />
             </div>
-            <Select
-              label="publish"
-              value={draft.event}
-              onChange={(event) => setDraft({ ...draft, event: event.target.value as AutoPublishEvent | '' })}
-              disabled={busy}
-              options={[
-                { value: AutoPublishEvent.PrePush, label: eventWords(AutoPublishEvent.PrePush) },
-                { value: AutoPublishEvent.PostCommit, label: eventWords(AutoPublishEvent.PostCommit) },
-                ...(draft.isNew ? [] : [{ value: '', label: 'paused, publishes nothing' }]),
-              ]}
-            />
           </div>
+          <fieldset className="stg-events" disabled={busy}>
+            <legend className="label">publish</legend>
+            {RULE_EVENTS.map((event) => (
+              <Checkbox
+                key={event}
+                checked={draft.events.includes(event)}
+                onChange={(checked) => setDraft({ ...draft, events: checked ? [...draft.events, event] : draft.events.filter((existing) => existing !== event) })}
+              >
+                {eventWords(event)}
+              </Checkbox>
+            ))}
+            <p className="stg-note">both off keeps this rule paused: it publishes nothing.</p>
+          </fieldset>
           <fieldset className="stg-collectives" disabled={busy}>
             <legend className="label">publish to</legend>
             {!signedIn ? (

@@ -135,7 +135,12 @@ export interface InstallCase {
   answers: Record<string, { status: number; body: unknown }>;
   offer: string | null;
   calls: string[];
+  /** Per repository path, the texts its install preview shows before the click. */
+  preview: Record<string, string[]>;
+  /** Per repository path, the texts its install result shows after the click. */
   shows: Record<string, string[]>;
+  /** Per rule id, the texts its rule view shows after the install. */
+  refreshed: Record<string, string[]>;
 }
 
 export function loadInstallCases(): InstallCase[] {
@@ -146,7 +151,7 @@ export function loadInstallCases(): InstallCase[] {
   const cases = root.cases.map((value, index) => {
     const at = `${path}.cases[${index}]`;
     const row = requireRecord(value, at);
-    requireExactRequiredFields(row, ['name', 'rules', 'answers', 'offer', 'calls', 'shows'], at);
+    requireExactRequiredFields(row, ['name', 'rules', 'answers', 'offer', 'calls', 'preview', 'shows', 'refreshed'], at);
     const parsed = zLocalSettingsResponse.safeParse({ settings: [], autoPublish: row.rules });
     if (!parsed.success) throw new Error(`${at}.rules break the Local API contract: ${parsed.error.issues[0]?.message}`);
     return row;

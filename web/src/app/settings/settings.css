@@ -87,9 +87,12 @@
 .stg-form .stg-note,
 .stg-form .stg-status-line { padding: 0; }
 .stg-mono-field .input { font-family: var(--font-mono); font-size: var(--fs-label); }
-.stg-collectives { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); margin: 0; padding: 0; border: 0; min-width: 0; }
-.stg-collectives > legend { margin-bottom: var(--sp-2); padding: 0; }
-.stg-collectives .stg-note { flex-basis: 100%; }
+.stg-collectives,
+.stg-events { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); margin: 0; padding: 0; border: 0; min-width: 0; }
+.stg-collectives > legend,
+.stg-events > legend { margin-bottom: var(--sp-2); padding: 0; }
+.stg-collectives .stg-note,
+.stg-events .stg-note { flex-basis: 100%; }
 
 /* the auto-publish rules: a switch row per rule, then its repositories */
 .stg-rule + .stg-rule { border-top: var(--bd); }
@@ -201,6 +204,27 @@
 .stg-install-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 .stg-progress { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-2); }
 .stg-install-results { border-top: var(--bd); }
+
+/* the per-repository preview of what an install does, shown before the click */
+.stg-install-preview { flex-basis: 100%; min-width: 0; }
+.stg-install-preview > summary {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink-2);
+  cursor: pointer;
+  min-height: var(--target-min);
+  display: inline-flex;
+  align-items: center;
+}
+.stg-install-preview > summary:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+.stg-install-steps { list-style: none; margin: 0; padding: 0 0 var(--sp-2); min-width: 0; }
+.stg-install-step {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink-2);
+}
 
 .stg-add { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
 
