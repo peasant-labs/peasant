@@ -87,6 +87,8 @@ func codexStrictEnvelopeKinds() []string {
 		codexTypeTurnContext,
 		codexTypeEventMsg,
 		codexTypeResponse,
+		codexTypeCompacted,
+		codexTypeWorldState,
 	}
 }
 
@@ -99,6 +101,10 @@ func codexStrictEventMsgKinds() []string {
 		"user_message",
 		"agent_message",
 		"agent_reasoning",
+		codexEventSubAgentActivity,
+		codexEventPatchApplyEnd,
+		codexEventThreadSettingsApplied,
+		codexEventWebSearchEnd,
 	}
 }
 
@@ -501,6 +507,11 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 		// gate above: extending the vocabulary means extending the slice.
 		if !slices.Contains(codexStrictEnvelopeKinds(), env.Type) {
 			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
+		}
+		if _, _, ok, err := codexControlRecordKind(env); err != nil {
+			return nil, err
+		} else if ok {
+			return nil, nil
 		}
 		switch env.Type {
 		case codexTypeSessionMeta, codexTypeTurnContext:

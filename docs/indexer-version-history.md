@@ -18,6 +18,7 @@ Actual per-capture producer stamps are separate evidence.
 | Strike | unchanged at 1 | 16 → 17 | Retain unknown events and nested blocks through authoritative and retained indexing while keeping tool/process validation. |
 | Pi | 1 → 2 | 16 → 17 | Native admission and metadata extraction now tolerate additive fields and unknown graph nodes; active-path indexing retains redacted unknown entry/role/block evidence. Format remains 1. |
 | Codex | unchanged at 1 | 16 → 17 | Retained rollout indexing preserves unknown envelope/event/response/block evidence with actual traversal positions; raw acquisition is unchanged. |
+| Codex | unchanged at 1 | 17 → 18 | Represent current control and lifecycle records as bounded system entries so otherwise complete retained rollouts certify. |
 | OpenCode | 1 → 2 | 16 → 17 | Legacy acquisition now retains opaque orphan parts instead of omitting them; retained indexing preserves unknown parts, inline blocks and tool-output children. |
 
 Claude Code, Cursor and Strike changes are in capture/indexing, not adapter
@@ -29,6 +30,7 @@ Managed-generation overrides are declared independently in
 | Native-generation harness | Adapter change | Indexer change | Index format | Reason |
 |---|---|---|---|---|
 | Codex | unchanged at 2 | 17 → 18 | 2 (unchanged) | Native history replay retains unknown source evidence, canonical item bodies and nested blocks with ownership/traversal coordinates; raw acquisition is unchanged. |
+| Codex | unchanged at 2 | 18 → 19 | 2 (unchanged) | Account for current world-state and control/lifecycle records in native replay instead of retaining them as unknown evidence. |
 | OpenCode | 2 → 3 | 17 → 18 | 2 (unchanged) | Current row normalization retains unknown rows and blocks before projection; native indexing carries them through selected main/earlier evidence. |
 
 OpenCode's private managed-projection version 3 and prior-evidence version 2 are

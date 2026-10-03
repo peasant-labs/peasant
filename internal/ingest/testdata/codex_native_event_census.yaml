@@ -11,6 +11,10 @@ required_names:
   - user mirror dispatches nothing
   - agent mirror dispatches nothing
   - reasoning mirror dispatches nothing
+  - sub-agent activity dispatches nothing
+  - patch apply end dispatches nothing
+  - thread settings applied dispatches nothing
+  - web search end dispatches nothing
   - item start pends its identity
   - opened turn completion is balanced
   - opened task completion is balanced
@@ -29,14 +33,18 @@ cases:
       - agent_reasoning
       - item_completed
       - item_started
+      - patch_apply_end
+      - sub_agent_activity
       - task_complete
       - task_started
       - thread_rolled_back
+      - thread_settings_applied
       - token_count
       - turn_aborted
       - turn_complete
       - turn_started
       - user_message
+      - web_search_end
   - name: candidate admission census membership
     census: native-only
     want:
@@ -61,6 +69,18 @@ cases:
     want_diagnostics: []
   - name: reasoning mirror dispatches nothing
     event: agent_reasoning
+    want_diagnostics: []
+  - name: sub-agent activity dispatches nothing
+    event: sub_agent_activity
+    want_diagnostics: []
+  - name: patch apply end dispatches nothing
+    event: patch_apply_end
+    want_diagnostics: []
+  - name: thread settings applied dispatches nothing
+    event: thread_settings_applied
+    want_diagnostics: []
+  - name: web search end dispatches nothing
+    event: web_search_end
     want_diagnostics: []
   - name: item start pends its identity
     event: item_started

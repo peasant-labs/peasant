@@ -23,6 +23,7 @@ var controlRecordIngestYAML []byte
 
 type controlRecordIngestCase struct {
 	Name                string            `yaml:"name"`
+	Harness             ingest.Harness    `yaml:"harness"`
 	Transcript          string            `yaml:"transcript"`
 	CaptureStatus       string            `yaml:"capture_status"`
 	CaptureFormat       string            `yaml:"capture_format"`
@@ -71,12 +72,24 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			root := t.TempDir()
-			sourceDir := filepath.Join(root, "source", "-workspace")
+			harness := fixture.Harness
+			if harness == "" {
+				harness = ingest.HarnessClaudeCode
+			}
+			sourceRoot := filepath.Join(root, "source")
+			sourceDir := filepath.Join(sourceRoot, "-workspace")
+			if harness == ingest.HarnessCodex {
+				sourceDir = filepath.Join(sourceRoot, "2026", "01", "01")
+			}
 			if err := os.MkdirAll(sourceDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			transcript := strings.ReplaceAll(fixture.Transcript, "SESSION_ID", testutil.TestSessionUUID)
-			sourcePath := filepath.Join(sourceDir, testutil.TestSessionUUID+".jsonl")
+			filename := testutil.TestSessionUUID + ".jsonl"
+			if harness == ingest.HarnessCodex {
+				filename = "rollout-2026-01-01T00-00-00-" + filename
+			}
+			sourcePath := filepath.Join(sourceDir, filename)
 			if err := os.WriteFile(sourcePath, []byte(transcript), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +101,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			fs := &ingest.OSFileSystem{}
 			cfg := ingest.PipelineConfig{
 				Sources: map[ingest.Harness]ingest.SourceConfig{
-					ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(filepath.Join(root, "source"))}},
+					harness: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(sourceRoot)}},
 				},
 				OutputDir:   ingest.ResolvedPath(filepath.Join(root, "output")),
 				Parallelism: 1,
@@ -148,7 +161,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 					t.Fatal("the complete-content reader accepted an incomplete capture")
 				}
 				if fixture.RetainedKind != "" {
-					records, err := ingest.ProjectRetainedUnknown(snapshot.Entries, ingest.HarnessClaudeCode)
+					records, err := ingest.ProjectRetainedUnknown(snapshot.Entries, harness)
 					if err != nil || len(records) != 1 || records[0].Kind != fixture.RetainedKind {
 						t.Fatalf("retained evidence missing: %+v %v", records, err)
 					}

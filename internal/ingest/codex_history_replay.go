@@ -199,7 +199,7 @@ type codexHistoryRecord struct {
 }
 
 func codexNativeEnvelopeKinds() []string {
-	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, "compacted"}
+	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, codexTypeCompacted, codexTypeWorldState}
 }
 
 // recognizedCodexEnvelopeType reports whether an envelope type advances the
@@ -1129,6 +1129,10 @@ const (
 	codexNativeEventTaskComplete     codexNativeEventType = "task_complete"
 	codexNativeEventThreadRolledBack codexNativeEventType = "thread_rolled_back"
 	codexNativeEventTurnAborted      codexNativeEventType = "turn_aborted"
+	codexNativeEventSubAgentActivity codexNativeEventType = codexEventSubAgentActivity
+	codexNativeEventPatchApplyEnd    codexNativeEventType = codexEventPatchApplyEnd
+	codexNativeEventSettingsApplied  codexNativeEventType = codexEventThreadSettingsApplied
+	codexNativeEventWebSearchEnd     codexNativeEventType = codexEventWebSearchEnd
 )
 
 // codexNativeEventHandler is one arm of the native event_msg dispatch: the
@@ -1154,6 +1158,10 @@ var codexNativeEventDispatch = map[codexNativeEventType]codexNativeEventHandler{
 	codexNativeEventTaskComplete:     (*codexReplayState).replayTurnCompleted,
 	codexNativeEventThreadRolledBack: (*codexReplayState).replayThreadRolledBack,
 	codexNativeEventTurnAborted:      (*codexReplayState).replayTurnAborted,
+	codexNativeEventSubAgentActivity: (*codexReplayState).replayMirroredEvent,
+	codexNativeEventPatchApplyEnd:    (*codexReplayState).replayMirroredEvent,
+	codexNativeEventSettingsApplied:  (*codexReplayState).replayMirroredEvent,
+	codexNativeEventWebSearchEnd:     (*codexReplayState).replayMirroredEvent,
 }
 
 // codexNativeOnlyEventTypes are the declared native event types the

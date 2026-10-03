@@ -7,6 +7,10 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Fixed
+- Codex captures represent current control and lifecycle records instead of
+  treating otherwise complete rollouts as partially interpreted (#408).
+
 ## [0.7.0] - 2026-09-27
 
 ### Added
