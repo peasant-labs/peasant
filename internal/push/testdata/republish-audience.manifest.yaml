@@ -3,19 +3,20 @@
 # from the fixture fails until it is removed here too.
 requiredNames:
   - web-update-keeps-collective-only
+  - web-update-keeps-public
   - hook-update-keeps-collective-only
   - cli-update-keeps-collective-only
-  - hook-leaves-an-unchanged-web-publication-alone
+  - hook-leaves-an-unchanged-public-publication-alone
   - cli-leaves-an-unchanged-licensed-publication-alone
   - cli-uploads-a-new-association-of-a-licensed-publication
   - cli-visibility-flag-changes-a-published-transcript
   - cli-visibility-flag-reaches-an-unchanged-transcript
   - cli-refuses-a-visibility-it-cannot-apply
   - cli-license-flag-changes-a-published-transcript
-  - web-retry-finishes-a-first-publish-whose-visibility-update-failed
+  - hook-retry-finishes-a-first-publish-whose-visibility-update-failed
   - cli-license-flag-relicenses-an-unchanged-transcript
   - hook-retry-finishes-a-first-publish-whose-answer-was-lost
-  - web-retry-keeps-an-owner-share-made-meanwhile
+  - hook-retry-keeps-an-owner-share-made-meanwhile
   - cli-visibility-flag-updates-the-receipt-of-an-unchanged-transcript
   - cli-retry-finishes-a-first-publish-whose-visibility-update-failed
   - cli-visibility-flag-failure-on-an-unchanged-transcript-sends-no-content

@@ -207,13 +207,13 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	}))
 	defer village.Close()
 	writeSyncDoorCredentials(t, hs.Config, village.URL)
-	publish := func() pushResponse {
+	publish := func() schema.SyncPushResponse {
 		t.Helper()
 		restoreSource := prepareSourceFreePublication(t, db, cfg.Output.BasePath, filepath.Join(source, id+".jsonl"), id, repo)
 		defer restoreSource()
 		response := httptest.NewRecorder()
-		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(`{"sessionIds":["`+id+`"],"visibility":"private"}`)))
-		var result pushResponse
+		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(`{"sessionIds":["`+id+`"]}`)))
+		var result schema.SyncPushResponse
 		if response.Code != http.StatusOK {
 			t.Fatalf("publish: %d %s", response.Code, response.Body.String())
 		}

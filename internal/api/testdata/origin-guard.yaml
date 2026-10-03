@@ -45,6 +45,7 @@ requiredNames:
   - put from a foreign origin is refused
   - patch from a foreign origin is refused
   - shutdown from a foreign origin is refused
+  - sign-out from a foreign origin is refused
   - read from a foreign origin is unaffected
   - head from a foreign origin is unaffected
   - options from a foreign origin is unaffected
@@ -79,6 +80,7 @@ cases:
   - {name: put from a foreign origin is refused, method: PUT, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: patch from a foreign origin is refused, method: PATCH, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: shutdown from a foreign origin is refused, method: POST, path: /api/v1/shutdown, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: sign-out from a foreign origin is refused, method: POST, path: /api/v1/sync/logout, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: read from a foreign origin is unaffected, method: GET, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
   - {name: head from a foreign origin is unaffected, method: HEAD, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
   - {name: options from a foreign origin is unaffected, method: OPTIONS, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}

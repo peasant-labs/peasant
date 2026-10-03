@@ -15,6 +15,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -114,7 +115,7 @@ func TestPromptRequestPrinting(t *testing.T) {
 			}
 			var out bytes.Buffer
 			printed := printWaitingPromptRequests(&out, []schema.VillagePromptRequest{request},
-				githubRepositoryFullName(fixture.PushedRemote))
+				village.GitHubRepositoryFullName(fixture.PushedRemote))
 
 			if printed != 1 {
 				if fixture.WantMatch {

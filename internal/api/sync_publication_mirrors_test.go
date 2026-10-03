@@ -137,7 +137,7 @@ func TestSyncReviewPublicationMirrors(t *testing.T) {
 			if response.StatusCode != http.StatusOK {
 				t.Fatalf("scan status=%d body=%s", response.StatusCode, body)
 			}
-			var scan groupedRedactionResponse
+			var scan schema.SyncRedactionsResponse
 			if err := json.Unmarshal(body, &scan); err != nil {
 				t.Fatal(err)
 			}

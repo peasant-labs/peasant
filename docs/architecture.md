@@ -584,9 +584,9 @@ sequenceDiagram
   sh->>sh: redact.NewRedactor(level).Detect
   sh-->>wiz: findings grouped by category
   Note over wiz,vapi: submit step
-  wiz->>sh: POST /api/v1/sync/push
-  sh->>sh: auth.LoadCredentials, village.NewVillageClient
-  sh->>push: push.NewPipeline(...).Run
+  wiz->>sh: POST /api/v1/sync/push (sessionIds, collectives add and remove)
+  sh->>sh: decode the closed request, auth.LoadCredentials, village.NewVillageClient
+  sh->>push: push.NewSharePipeline(...), SharePublish.Run
   push->>push: getTargetSessions, preflight (ValidatePublicationInput)
   push->>vc: negotiate: GetSchemaVersion
   vc->>vapi: GET /api/v1/schema/version
@@ -595,8 +595,12 @@ sequenceDiagram
   vc->>vapi: POST /api/v1/transcripts/publish (multipart)
   vapi-->>vc: AuthoritativePublishResponse
   push->>push: UpdateOwner if needed, SavePublication, push_log
-  push->>vc: PushAnnotationsSelected
-  sh-->>wiz: push result
+  push->>vc: UnshareTranscript for each removed collective
+  vc->>vapi: DELETE /api/v1/transcripts/{id}/share/{groupID}
+  push->>vc: ShareTranscript for each added collective, then LatestShareStatus
+  vc->>vapi: POST /api/v1/transcripts/{id}/share, GET /api/v1/users/me/collectives/{groupId}/transcripts/{id}/events
+  sh->>vc: PushAnnotations
+  sh-->>wiz: one result per session, its steps in run order
 ```
 
 ### Village login

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -93,17 +94,22 @@ func syncUserPatterns(cfg *config.Config) ([]redact.UserPattern, error) {
 // --------------------------------------------------------------------------
 
 type syncSessionResponse struct {
-	ID          string `json:"id"`
-	Harness     string `json:"harness"`
-	ProjectName string `json:"projectName"`
-	ProjectHash string `json:"projectHash"`
-	HostSlug    string `json:"hostSlug"`
-	StartTime   string `json:"startTime"`
-	DurationMs  int64  `json:"durationMs"`
-	TotalTokens int    `json:"totalTokens"`
-	TurnCount   int    `json:"turnCount"`
-	Model       string `json:"model"`
-	SyncStatus  string `json:"syncStatus"`
+	ID          string            `json:"id"`
+	Harness     string            `json:"harness"`
+	ProjectName string            `json:"projectName"`
+	ProjectHash string            `json:"projectHash"`
+	HostSlug    string            `json:"hostSlug"`
+	StartTime   string            `json:"startTime"`
+	DurationMs  int64             `json:"durationMs"`
+	TotalTokens int               `json:"totalTokens"`
+	TurnCount   int               `json:"turnCount"`
+	Model       string            `json:"model"`
+	SyncStatus  schema.SyncStatus `json:"syncStatus"`
+	// HoldReason says why a held row waits. Only a held row carries one.
+	HoldReason schema.SyncHoldReason `json:"holdReason,omitempty"`
+	// PreviouslyPushed reports that this session was published before, whatever
+	// its status now: a held row can have been published.
+	PreviouslyPushed bool `json:"previouslyPushed"`
 }
 
 func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request) {
@@ -156,17 +162,19 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 	for _, entry := range entries {
 		s := entry.row
 		result = append(result, syncSessionResponse{
-			ID:          s.SessionID,
-			Harness:     s.ModelHarness,
-			ProjectName: s.ProjectName,
-			ProjectHash: s.ProjectHash,
-			HostSlug:    s.HostSlug,
-			StartTime:   time.UnixMilli(s.StartMs).UTC().Format(time.RFC3339),
-			DurationMs:  s.DurationMs,
-			TotalTokens: s.TokensTotal,
-			TurnCount:   s.TurnCount,
-			Model:       s.ModelID,
-			SyncStatus:  entry.status,
+			ID:               s.SessionID,
+			Harness:          s.ModelHarness,
+			ProjectName:      s.ProjectName,
+			ProjectHash:      s.ProjectHash,
+			HostSlug:         s.HostSlug,
+			StartTime:        time.UnixMilli(s.StartMs).UTC().Format(time.RFC3339),
+			DurationMs:       s.DurationMs,
+			TotalTokens:      s.TokensTotal,
+			TurnCount:        s.TurnCount,
+			Model:            s.ModelID,
+			SyncStatus:       entry.status,
+			HoldReason:       entry.hold,
+			PreviouslyPushed: s.PushedAt != nil,
 		})
 	}
 
@@ -174,22 +182,24 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 	w.Write(data)
 }
 
-// computeSyncStatus determines the sync status for a session row.
-// Sessions without a coherent database capture are held until normal ingest.
-func computeSyncStatus(s ingest.PushSessionRow, heldMap map[string]bool, readiness ingest.PublicationReadiness) string {
-	if heldMap[s.SessionID] {
-		return "held"
+// computeSyncStatus determines the sync status for a session row, and why a held
+// row waits. A session whose metrics are not computed yet is held for its
+// metrics; one without a coherent database capture is held for its publication
+// metadata. Both wait for normal ingest.
+func computeSyncStatus(s ingest.PushSessionRow, metricsMissing, metadataReady bool) (schema.SyncStatus, schema.SyncHoldReason) {
+	if metricsMissing {
+		return schema.SyncStatusHeld, schema.SyncHoldReasonMetricsMissing
 	}
-	if readiness != ingest.PublicationReady {
-		return "held"
+	if !metadataReady {
+		return schema.SyncStatusHeld, schema.SyncHoldReasonMetadataMissing
 	}
 	if s.PushedAt == nil {
-		return "new"
+		return schema.SyncStatusNew, ""
 	}
 	if s.IngestedMs > *s.PushedAt {
-		return "updated"
+		return schema.SyncStatusUpdated, ""
 	}
-	return "synced"
+	return schema.SyncStatusSynced, ""
 }
 
 // --------------------------------------------------------------------------
@@ -201,18 +211,44 @@ func (h *syncHandler) handleSyncAuth(w http.ResponseWriter, _ *http.Request) {
 
 	creds, err := h.credentials()
 	if err != nil || creds == nil || !creds.IsValid() {
-		json.NewEncoder(w).Encode(map[string]any{
-			"authenticated": false,
-		})
+		_ = json.NewEncoder(w).Encode(schema.SyncAuthResponse{Authenticated: false})
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{
-		"authenticated":     true,
-		"username":          creds.Username,
-		"villageUrl":        creds.VillageURL,
-		"villageConfigured": creds.VillageURL != "",
+	_ = json.NewEncoder(w).Encode(schema.SyncAuthResponse{
+		Authenticated:     true,
+		Username:          creds.Username,
+		VillageURL:        creds.VillageURL,
+		VillageConfigured: creds.VillageURL != "",
 	})
+}
+
+// --------------------------------------------------------------------------
+// POST /api/v1/sync/logout — end this computer's Village sign-in
+// --------------------------------------------------------------------------
+
+// handleSyncLogout removes the stored Village credential. It changes local
+// state only: the key stays valid on Village until it is revoked there, which
+// `peasant village logout` does. Logging out a computer that holds no
+// credential is not an error.
+func (h *syncHandler) handleSyncLogout(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+
+	// A credential file that cannot be parsed still signs this computer in as
+	// far as the user can tell, so it is removed like a valid one.
+	creds, loadErr := h.credentials()
+	held := creds != nil || loadErr != nil
+	if err := auth.ClearCredentialsFrom(h.configHome); err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			"Village sign-out could not remove the stored credential in internal/api.handleSyncLogout: "+err.Error()+". This computer is still signed in. Fix the permissions of the Peasant config directory, then sign out again.",
+			"sync_logout_failed")
+		return
+	}
+	status := schema.SyncLogoutAlreadyLoggedOut
+	if held {
+		status = schema.SyncLogoutLoggedOut
+	}
+	_ = json.NewEncoder(w).Encode(schema.SyncLogoutResponse{Status: status})
 }
 
 // --------------------------------------------------------------------------
@@ -222,47 +258,6 @@ func (h *syncHandler) handleSyncAuth(w http.ResponseWriter, _ *http.Request) {
 // maxItemsPerRuleGroup is the maximum number of items returned per rule group
 // in the grouped redaction response.
 const maxItemsPerRuleGroup = 50
-
-// redactionItem is a single redaction match with context information.
-type redactionItem struct {
-	Category            redact.CategoryString `json:"category"`
-	RuleID              string                `json:"ruleId"`
-	RuleDisplayName     string                `json:"ruleDisplayName"`
-	OriginalText        string                `json:"originalText"`
-	RedactedReplacement string                `json:"redactedReplacement"`
-	Description         string                `json:"description"`
-	LineNumber          int                   `json:"lineNumber"`
-	ContextBefore       []string              `json:"contextBefore"`
-	ContextAfter        []string              `json:"contextAfter"`
-}
-
-// ruleGroup holds deduplicated items for a single redaction rule, capped at
-// maxItemsPerRuleGroup entries.
-type ruleGroup struct {
-	RuleID      string          `json:"ruleId"`
-	DisplayName string          `json:"displayName"`
-	Count       int             `json:"count"`
-	Items       []redactionItem `json:"items"`
-}
-
-// categoryGroup holds all rule groups for a single redaction category.
-type categoryGroup struct {
-	Category   redact.CategoryString `json:"category"`
-	TotalCount int                   `json:"totalCount"`
-	Rules      []ruleGroup           `json:"rules"`
-}
-
-// groupedRedactionResponse is the response shape for the grouped redaction endpoint.
-// The server pre-groups matches by category then by rule so the frontend can
-// render an accordion without any client-side aggregation.
-type groupedRedactionResponse struct {
-	Total      int             `json:"total"`
-	Categories []categoryGroup `json:"categories"`
-}
-
-// redactionResponse is kept for backward compatibility but the handler now
-// returns groupedRedactionResponse.
-type redactionResponse = groupedRedactionResponse
 
 func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
@@ -315,11 +310,12 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusInternalServerError, "create redactor: "+err.Error())
 		return
 	}
-	content, err := h.readReviewContent(r.Context(), sessionID, redactor)
+	document, err := h.readReviewDocument(r.Context(), sessionID, redactor)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	content := document.text
 
 	// Detect matches.
 	matches := redactor.Detect(content)
@@ -339,12 +335,26 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	}
 	seen := make(map[dedupKey]bool)
 	var deduped []redact.Match
+	// The item of a deduplicated match names the first turn that shows it. The
+	// scanned text starts with the publish metadata, which repeats the turns'
+	// text, so the first occurrence overall is usually not in a turn; a later
+	// occurrence of the same text under the same rule is.
+	type turnLocation struct {
+		entryIndex int
+		toolCallID string
+	}
+	firstTurn := make(map[dedupKey]turnLocation)
 
 	for _, m := range matches {
 		key := dedupKey{rule: m.Rule, text: m.MatchedText}
 		if !seen[key] {
 			seen[key] = true
 			deduped = append(deduped, m)
+		}
+		if _, located := firstTurn[key]; !located {
+			if entryIndex, toolCallID, inTurn := document.locate(m.Offset); inTurn {
+				firstTurn[key] = turnLocation{entryIndex: entryIndex, toolCallID: toolCallID}
+			}
 		}
 	}
 
@@ -356,7 +366,7 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	}
 	catCounts := make(map[redact.CategoryString]int)
 	catOrder := make([]redact.CategoryString, 0)
-	ruleItems := make(map[ruleKey][]redactionItem)
+	ruleItems := make(map[ruleKey][]schema.SyncRedactionItem)
 	ruleCounts := make(map[ruleKey]int)
 	ruleOrder := make(map[redact.CategoryString][]string) // category → ordered rule IDs
 
@@ -384,8 +394,8 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 			if !ok {
 				replacement = "<REDACTED>"
 			}
-			ruleItems[rk] = append(ruleItems[rk], redactionItem{
-				Category:            cat,
+			item := schema.SyncRedactionItem{
+				Category:            string(cat),
 				RuleID:              m.Rule,
 				RuleDisplayName:     ruleDisplayName(m.Rule),
 				OriginalText:        m.MatchedText,
@@ -394,7 +404,13 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 				LineNumber:          lineNum,
 				ContextBefore:       extractContext(lines, lineNum-1, -2),
 				ContextAfter:        extractContext(lines, lineNum-1, 2),
-			})
+			}
+			if location, inTurn := firstTurn[dedupKey{rule: m.Rule, text: m.MatchedText}]; inTurn {
+				entryIndex := location.entryIndex
+				item.EntryIndex = &entryIndex
+				item.ToolCallID = location.toolCallID
+			}
+			ruleItems[rk] = append(ruleItems[rk], item)
 		}
 	}
 
@@ -410,7 +426,7 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Build the grouped response.
-	categories := make([]categoryGroup, 0, len(sortedCats))
+	categories := make([]schema.SyncRedactionCategoryGroup, 0, len(sortedCats))
 	for _, cat := range sortedCats {
 		// Sort rules within category by count descending.
 		ruleIDs := make([]string, len(ruleOrder[cat]))
@@ -425,14 +441,14 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		rules := make([]ruleGroup, 0, len(ruleIDs))
+		rules := make([]schema.SyncRedactionRuleGroup, 0, len(ruleIDs))
 		for _, ruleID := range ruleIDs {
 			rk := ruleKey{category: cat, rule: ruleID}
 			items := ruleItems[rk]
 			if items == nil {
-				items = []redactionItem{}
+				items = []schema.SyncRedactionItem{}
 			}
-			rules = append(rules, ruleGroup{
+			rules = append(rules, schema.SyncRedactionRuleGroup{
 				RuleID:      ruleID,
 				DisplayName: ruleDisplayName(ruleID),
 				Count:       ruleCounts[rk],
@@ -440,16 +456,22 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 			})
 		}
 
-		categories = append(categories, categoryGroup{
-			Category:   cat,
+		categories = append(categories, schema.SyncRedactionCategoryGroup{
+			Category:   string(cat),
 			TotalCount: catCounts[cat],
 			Rules:      rules,
 		})
 	}
 
-	resp := groupedRedactionResponse{
+	resp := schema.SyncRedactionsResponse{
 		Total:      len(matches), // total raw matches (before dedup)
 		Categories: categories,
+	}
+	// The preview is what the consent step shows, so a preview that breaks
+	// its own contract is refused rather than shown.
+	if err := resp.Validate(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "redaction preview: "+err.Error())
+		return
 	}
 
 	data, _ := json.Marshal(resp)
@@ -494,12 +516,36 @@ func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr st
 }
 
 func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (string, error) {
+	document, err := h.readReviewDocument(ctx, sessionIDStr, redactor)
+	return document.text, err
+}
+
+// reviewDocument is the text the consent scan runs over, with where each turn
+// of the transcript lies in it.
+type reviewDocument struct {
+	text string
+	// transcriptStart is where the transcript's review text starts in text,
+	// after the metadata line.
+	transcriptStart int
+	spans           push.ReviewSpans
+}
+
+// locate names the turn, and the tool call when there is one, that holds the
+// byte at offset in the document's text.
+func (d reviewDocument) locate(offset int) (entryIndex int, toolCallID string, ok bool) {
+	if offset < d.transcriptStart {
+		return 0, "", false
+	}
+	return d.spans.Locate(offset - d.transcriptStart)
+}
+
+func (h *syncHandler) readReviewDocument(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (reviewDocument, error) {
 	input, detail, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	if err := push.ValidatePublicationInput(input); err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	var fields config.PushFieldVisibility
 	if h.config != nil {
@@ -509,30 +555,34 @@ func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string
 	// a successful scan. A metadata key collision must remain a failed scan.
 	redacted, err := push.RedactEntries(redactor, input.Entries)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	if _, err := push.BuildTranscriptContentValidated(&input.Metadata, redacted, defaults.PublishSchemaVersion, fields, input.SessionOrigin); err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	// The review scan must see the exact bytes the publish will carry, so it
 	// builds the same envelope through the shared durable-first builder and
 	// derives the same capability requirements the upload gate will enforce.
 	content, err := push.BuildPublishTranscriptContent(detail, &input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	metadata, err := push.MapMetadata(push.MapOptions{Meta: &input.Metadata, Metrics: input.Quality, Entries: input.Entries, Associations: input.Associations, Fields: fields.Resolve()})
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	if _, err := push.ScanPublication(content); err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	data, err := push.PublicationReviewText(content, redactor)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
-	return string(metadata) + "\n" + data, nil
+	spans, err := push.PublicationReviewSpans(content)
+	if err != nil {
+		return reviewDocument{}, err
+	}
+	return reviewDocument{text: string(metadata) + "\n" + data, transcriptStart: len(metadata) + 1, spans: spans}, nil
 }
 
 // buildReplacementLookup builds a map from rule ID to replacement string.
@@ -694,47 +744,22 @@ func ruleDescription(ruleID string) string {
 }
 
 // --------------------------------------------------------------------------
-// POST /api/v1/sync/push — execute push pipeline
+// POST /api/v1/sync/push — publish sessions and change who can read them
 // --------------------------------------------------------------------------
-
-type pushRequest struct {
-	SessionIDs     []string `json:"sessionIds"`
-	RedactionLevel string   `json:"redactionLevel"`
-	Visibility     string   `json:"visibility"`
-}
-
-type pushSessionResult struct {
-	SessionID string `json:"sessionId"`
-	Status    string `json:"status"`
-	Error     string `json:"error,omitempty"`
-	Title     string `json:"title,omitempty"`
-}
-
-type pushResponse struct {
-	New      int                 `json:"new"`
-	Updated  int                 `json:"updated"`
-	Skipped  int                 `json:"skipped"`
-	Errors   int                 `json:"errors"`
-	Sessions []pushSessionResult `json:"sessions"`
-}
 
 func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	if h.config == nil {
-		http.Error(w, `{"error":"store or config not available"}`, http.StatusServiceUnavailable)
+		writeAPIError(w, http.StatusServiceUnavailable, "store or config not available", "")
 		return
 	}
 
-	// Parse request body.
-	var req pushRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"invalid request body: %s"}`, err), http.StatusBadRequest)
-		return
-	}
-
-	if len(req.SessionIDs) == 0 {
-		http.Error(w, `{"error":"no session IDs provided"}`, http.StatusBadRequest)
+	// The request is typed and closed: an unknown field, such as a visibility or
+	// a license a stale client still sends, is refused before anything runs.
+	req, changes, err := decodeSyncPushRequest(r.Body)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), syncPushInvalidRequestCode)
 		return
 	}
 
@@ -772,18 +797,18 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.store == nil {
-		http.Error(w, `{"error":"store or config not available"}`, http.StatusServiceUnavailable)
+		writeAPIError(w, http.StatusServiceUnavailable, "store or config not available", "")
 		return
 	}
 
 	// Load credentials.
 	creds, err := h.credentials()
 	if err != nil || creds == nil || !creds.IsValid() {
-		http.Error(w, `{"error":"not authenticated — run 'peasant village login' first"}`, http.StatusUnauthorized)
+		writeAPIError(w, http.StatusUnauthorized, "not authenticated — run 'peasant village login' first", "")
 		return
 	}
 	if creds.VillageURL == "" {
-		http.Error(w, `{"error":"village URL not configured — run 'peasant village login' to set your village endpoint"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "village URL not configured — run 'peasant village login' to set your village endpoint", "")
 		return
 	}
 
@@ -799,50 +824,28 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create village client.
 	client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
-
-	// Resolve the visibility a first publish opens at. The Share wizard sends it
-	// on every push and has no control that changes the audience of a
-	// transcript already published, so it is never a visibility change: an
-	// update keeps the audience the transcript has on the village, which its
-	// owner may have shared with collectives there.
-	visibility := schema.Visibility("private")
-	if req.Visibility != "" {
-		visibility = schema.Visibility(req.Visibility)
-	}
 
 	// Resolve ~ in output base path (same as CLI cmd_push.go).
 	resolvedOutput, resolveErr := ingest.NewResolvedPath(h.config.Output.BasePath)
 	if resolveErr != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"resolve output path: %s"}`, resolveErr), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "resolve output path: "+resolveErr.Error())
 		return
 	}
 	pushCfg := *h.config
 	pushCfg.Output.BasePath = string(resolvedOutput)
 
-	// Build and run the push pipeline.
-	pipeline, err := push.NewPipeline(
-		h.store,
-		client,
-		creds,
-		&pushCfg,
-		&ingest.OSFileSystem{},
-		push.PipelineConfig{
-			FilterSessionIDs: req.SessionIDs,
-			Visibility:       visibility,
-		},
-		redactor,
-		io.Discard, // stderr warnings not needed for web response
-	)
+	// A publish from the local web is for collectives: a first publication
+	// opens private with no license, and the collective steps decide who can
+	// read it. An update keeps the audience and license it has.
+	pipeline, err := push.NewSharePipeline(h.store, client, creds, &pushCfg, redactor, req.SessionIDs)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "create push pipeline: "+err.Error())
 		return
 	}
-
-	result, err := pipeline.Run(r.Context())
+	published, err := push.SharePublish{Pipeline: pipeline, Store: h.store, Village: client, Creds: creds}.Run(r.Context(), req.SessionIDs, changes)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"push failed: %s"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "push failed: "+err.Error())
 		return
 	}
 
@@ -850,30 +853,105 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	// session this request published. The user chose those sessions; an
 	// annotation on any other session, or on no session at all, is outside what
 	// they chose to share.
-	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, push.AnnotationSelection{}.WithinPublishedSessions(result), false, push.DefaultConcurrency)
+	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, push.AnnotationSelection{}.WithinPublishedSessions(published.Pushed), false, push.DefaultConcurrency)
 
-	// Build response.
-	resp := pushResponse{
-		New:      result.New,
-		Updated:  result.Updated,
-		Skipped:  result.Skipped,
-		Errors:   result.Errors,
-		Sessions: make([]pushSessionResult, 0, len(result.Sessions)),
-	}
-	for _, s := range result.Sessions {
-		psr := pushSessionResult{
-			SessionID: s.SessionID,
-			Status:    s.Status.String(),
-			Title:     s.Title,
-		}
-		if s.Error != nil {
-			psr.Error = s.Error.Error()
-		}
-		resp.Sessions = append(resp.Sessions, psr)
-	}
+	_ = json.NewEncoder(w).Encode(published.Response)
+}
 
-	data, _ := json.Marshal(resp)
-	w.Write(data)
+// syncPushInvalidRequestCode marks a push request the typed contract refuses.
+const syncPushInvalidRequestCode = "sync_push_invalid_request"
+
+// syncPushRequestLimit bounds the push request body. A request names sessions
+// and collectives by identifier, so a megabyte holds thousands of each.
+const syncPushRequestLimit = 1 << 20
+
+// nullCollectiveList says why the body is refused when it sends collectives,
+// or one of its lists, as null. The contract declares them non-nullable, and
+// the typed decode would read null as an omitted list, so it is checked on the
+// raw body. It returns "" when the body sends no null list or is not an object.
+func nullCollectiveList(raw []byte) string {
+	var request struct {
+		Collectives json.RawMessage `json:"collectives"`
+	}
+	if json.Unmarshal(raw, &request) != nil || request.Collectives == nil {
+		return ""
+	}
+	if isJSONNull(request.Collectives) {
+		return "collectives is null; omit it to keep each transcript's audience"
+	}
+	var lists struct {
+		Add    json.RawMessage `json:"add"`
+		Remove json.RawMessage `json:"remove"`
+	}
+	if json.Unmarshal(request.Collectives, &lists) != nil {
+		return ""
+	}
+	if isJSONNull(lists.Add) {
+		return "collectives.add is null; omit a list you do not change"
+	}
+	if isJSONNull(lists.Remove) {
+		return "collectives.remove is null; omit a list you do not change"
+	}
+	return ""
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// villageUUIDPattern is the canonical lowercase form Village emits for a
+// collective, and the form the contract declares for collectives.add and
+// collectives.remove.
+var villageUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// decodeSyncPushRequest reads the typed push request strictly: one JSON object
+// with only the declared fields, a valid session list, and collectives named by
+// their Village identifier, each in one list. It runs before any read or send.
+func decodeSyncPushRequest(body io.Reader) (schema.SyncPushRequest, push.CollectiveChanges, error) {
+	var req schema.SyncPushRequest
+	refuse := func(why string) (schema.SyncPushRequest, push.CollectiveChanges, error) {
+		return schema.SyncPushRequest{}, push.CollectiveChanges{}, fmt.Errorf("what: the push request is not one this server accepts\nwhy: %s\nwhere: the JSON body of POST /api/v1/sync/push\nmeans: nothing was scanned, published, shared, or taken back\nfix: send {\"sessionIds\": [...], \"redactionLevel\"?: ..., \"collectives\"?: {\"add\"?: [...], \"remove\"?: [...]}} with no other field, then retry", why)
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, syncPushRequestLimit+1))
+	if err != nil {
+		return refuse(fmt.Sprintf("the body could not be read: %v", err))
+	}
+	if len(raw) > syncPushRequestLimit {
+		return refuse(fmt.Sprintf("the body is larger than %d bytes", syncPushRequestLimit))
+	}
+	if why := nullCollectiveList(raw); why != "" {
+		return refuse(why)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		why := fmt.Sprintf("the body could not be read as the typed request: %v", err)
+		if strings.Contains(err.Error(), "unknown field") {
+			why += "; the request names only sessions, a redaction level, and collectives, and carries no visibility or license, because publishing from the local web is for collectives"
+		}
+		return refuse(why)
+	}
+	if decoder.More() {
+		return refuse("the body holds more than one JSON value")
+	}
+	if err := req.Validate(); err != nil {
+		return refuse(err.Error())
+	}
+	var changes push.CollectiveChanges
+	if req.Collectives != nil {
+		for _, list := range []struct {
+			name string
+			ids  []schema.VillageUUID
+		}{{"collectives.add", req.Collectives.Add}, {"collectives.remove", req.Collectives.Remove}} {
+			for _, id := range list.ids {
+				if !villageUUIDPattern.MatchString(id.String()) {
+					return refuse(fmt.Sprintf("%s names %q, which is not a Village collective identifier; name each collective by its lowercase Village UUID", list.name, id))
+				}
+			}
+		}
+		changes = push.CollectiveChanges{Add: req.Collectives.Add, Remove: req.Collectives.Remove}
+	}
+	return req, changes, nil
 }
 
 func invalidSyncRedactionsLevelMessage(level redact.RedactionLevel) string {
@@ -955,7 +1033,7 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 	// If already fully authenticated (valid creds + village URL), nothing to do.
 	creds, err := h.credentials()
 	if err == nil && creds != nil && creds.IsValid() && creds.VillageURL != "" {
-		json.NewEncoder(w).Encode(map[string]string{"status": "already_authenticated"})
+		_ = json.NewEncoder(w).Encode(schema.SyncLoginResponse{Status: schema.SyncLoginAlreadyAuthenticated})
 		return
 	}
 
@@ -980,7 +1058,7 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 		}
 	}()
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+	_ = json.NewEncoder(w).Encode(schema.SyncLoginResponse{Status: schema.SyncLoginPending})
 }
 
 // --------------------------------------------------------------------------

@@ -174,7 +174,7 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 		t.Fatalf("registered scan missed stored entry: status=%d %s", scan.StatusCode, scanBody)
 	}
 
-	body, err := json.Marshal(pushRequest{SessionIDs: []string{sessionID}, Visibility: "private"})
+	body, err := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{sessionID}})
 	if err != nil {
 		t.Fatal(err)
 	}

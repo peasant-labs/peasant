@@ -22,7 +22,9 @@ import (
 // so it can never list a session the flat route withholds.
 type syncSessionEntry struct {
 	row    ingest.PushSessionRow
-	status string
+	status schema.SyncStatus
+	// hold says why a held row waits; it is empty on every other row.
+	hold schema.SyncHoldReason
 }
 
 // loadSyncEntries applies the EXISTING flat sync predicate and status policy:
@@ -48,10 +50,9 @@ func loadSyncEntries(ctx context.Context, db syncSessionReader) ([]syncSessionEn
 	entries := make([]syncSessionEntry, 0, len(sessions))
 	for _, session := range sessions {
 		input := metadata[session.SessionID]
-		if metadataErr != nil || !push.PublicationMetadataReady(input) {
-			heldMap[session.SessionID] = true
-		}
-		entries = append(entries, syncSessionEntry{row: session, status: computeSyncStatus(session, heldMap, input.Readiness)})
+		metadataReady := metadataErr == nil && push.PublicationMetadataReady(input) && input.Readiness == ingest.PublicationReady
+		status, hold := computeSyncStatus(session, heldMap[session.SessionID], metadataReady)
+		entries = append(entries, syncSessionEntry{row: session, status: status, hold: hold})
 	}
 	return entries, nil
 }
@@ -132,7 +133,7 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 	for _, entry := range entries {
 		row := entry.row
 		ev := evidence[row.SessionID]
-		summary, syncSummary, buildErr := buildSyncGroupedRow(row, entry.status, ev, previews[row.SessionID])
+		summary, syncSummary, buildErr := buildSyncGroupedRow(entry, ev, previews[row.SessionID])
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -158,7 +159,8 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 // for one pushable row from the SAME database read, so the schema's mirror check
 // (identity, harness, project, tokens, turn count and optional input count) can
 // only hold or fail closed here rather than downstream.
-func buildSyncGroupedRow(row ingest.PushSessionRow, status string, ev store.GroupingEvidenceRow, preview string) (schema.SessionSummary, schema.LocalSyncSummary, error) {
+func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, preview string) (schema.SessionSummary, schema.LocalSyncSummary, error) {
+	row := entry.row
 	projectHash, hashErr := schema.NewProjectHash(row.ProjectHash)
 	if hashErr != nil {
 		return schema.SessionSummary{}, schema.LocalSyncSummary{}, fmt.Errorf("api.buildSyncGroupedRow: session %q has an invalid stored project hash %q while building the sync chooser row: %w; run `peasant ingest verify` and repair the store, then retry", row.SessionID, row.ProjectHash, hashErr)
@@ -194,7 +196,9 @@ func buildSyncGroupedRow(row ingest.PushSessionRow, status string, ev store.Grou
 		TurnCount:            row.TurnCount,
 		Model:                row.ModelID,
 		InputSubmissionCount: ev.InputSubmissionCount,
-		SyncStatus:           status,
+		SyncStatus:           entry.status,
+		HoldReason:           entry.hold,
+		PreviouslyPushed:     row.PushedAt != nil,
 	}
 	return summary, syncSummary, nil
 }

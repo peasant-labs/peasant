@@ -1,0 +1,23 @@
+# The body the share wizard sends to POST /api/v1/sync/push. The request is
+# typed and closed: the server refuses any field it does not declare, and a
+# visibility or a license is not part of it, because publishing from the local
+# web is for collectives. forbiddenKeys must never appear in a body.
+requiredNames:
+  - one-session
+  - several-sessions
+forbiddenKeys:
+  - visibility
+  - license
+cases:
+  - name: one-session
+    sessionIds: [11112222-3333-4444-8555-666677778888]
+    redactionLevel: standard
+    expectedBody:
+      sessionIds: [11112222-3333-4444-8555-666677778888]
+      redactionLevel: standard
+  - name: several-sessions
+    sessionIds: [11112222-3333-4444-8555-666677778888, 22223333-4444-4555-8666-777788889999]
+    redactionLevel: standard
+    expectedBody:
+      sessionIds: [11112222-3333-4444-8555-666677778888, 22223333-4444-4555-8666-777788889999]
+      redactionLevel: standard
