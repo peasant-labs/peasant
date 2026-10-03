@@ -1,0 +1,32 @@
+# A real install request stays pending while the mounted page's conflicting
+# controls are exercised. The answer is released before pause/edit succeeds.
+requiredNames:
+  - installing locks existing rule actions until its response completes
+  - installing locks an open edit form until its response completes
+cases:
+  - name: installing locks existing rule actions until its response completes
+    openForm: false
+    nextMatch: ~/work/acme/revised/**
+    rule:
+      id: acme-work
+      kind: folder
+      match: ~/work/acme/**
+      events: [pre-push]
+      collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+      repositories:
+        - path: /home/alice/work/acme/api
+          label: github.com:acme/api
+          hooks: [{event: pre-push, status: absent}]
+  - name: installing locks an open edit form until its response completes
+    openForm: true
+    nextMatch: ~/work/acme/revised/**
+    rule:
+      id: acme-work
+      kind: folder
+      match: ~/work/acme/**
+      events: [pre-push]
+      collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+      repositories:
+        - path: /home/alice/work/acme/api
+          label: github.com:acme/api
+          hooks: [{event: pre-push, status: absent}]

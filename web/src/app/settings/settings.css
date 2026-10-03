@@ -1,0 +1,261 @@
+/* The settings page (.stg-*): the parts fairtrade's setting rows and groups do not draw — the
+   auto-publish rules and their install action, the custom pattern list, the forms, and the
+   read-only values. Fairtrade tokens only, radius 0; rows and groups are fairtrade's .srow-*. */
+
+.stg-groups { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* a value the page shows without a control: recorded content, its own case */
+.stg-readonly-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  text-align: right;
+  max-width: 28rem;
+}
+.stg-strong { font-weight: 700; color: var(--ink-strong); }
+.stg-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.stg-muted { color: var(--ink-3); font-family: var(--font-mono); font-size: var(--fs-label); }
+.stg-lock { width: var(--ic-sm); height: var(--ic-sm); color: var(--ink-3); flex: none; }
+.stg-description { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.stg-load-error { margin: 0 0 var(--sp-3); max-width: var(--measure-prose); color: var(--ink); }
+
+.stg-note,
+.stg-empty {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-3);
+  max-width: var(--measure-prose);
+}
+.stg-retired { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.stg-retired code { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-2); }
+
+/* a source is two rows: whether peasant reads it, and where */
+.stg-source + .stg-source { border-top: var(--bd); }
+.stg-source > .srow + .srow { border-top: 0; padding-top: 0; }
+
+/* a block that saves as a whole (the custom patterns), set off like a row */
+.stg-block { border-top: var(--bd); }
+.stg-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) 0;
+}
+.stg-status-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-4); }
+.stg-status-line[data-status='idle'] { display: none; }
+.stg-status-line .srow-status { min-width: 0; }
+
+.stg-patterns { list-style: none; margin: var(--sp-3) 0 0; padding: 0; }
+.stg-pattern {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) 6rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--row-h-standard);
+  padding: var(--sp-2) var(--sp-4);
+  border-top: var(--bd);
+}
+.stg-pattern-id { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink); overflow-wrap: anywhere; }
+.stg-pattern-category { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-2); }
+.stg-pattern-rule { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.stg-pattern-arrow { width: var(--ic-sm); height: var(--ic-sm); color: var(--ink-3); flex: none; }
+
+/* inline forms: a grid of fairtrade fields, then the actions */
+.stg-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: var(--sp-3) var(--sp-4);
+  padding: var(--sp-4);
+  border: var(--bd);
+  background: var(--surface-2);
+}
+.stg-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--sp-3) var(--sp-4); }
+.stg-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.stg-form .stg-note,
+.stg-form .stg-status-line { padding: 0; }
+.stg-mono-field .input { font-family: var(--font-mono); font-size: var(--fs-label); }
+.stg-collectives,
+.stg-events { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); margin: 0; padding: 0; border: 0; min-width: 0; }
+.stg-collectives > legend,
+.stg-events > legend { margin-bottom: var(--sp-2); padding: 0; }
+.stg-collectives .stg-note,
+.stg-events .stg-note { flex-basis: 100%; }
+
+/* the auto-publish rules: a switch row per rule, then its repositories */
+.stg-rule + .stg-rule { border-top: var(--bd); }
+.stg-rule > .srow { padding-bottom: var(--sp-2); }
+.stg-rule-foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+.stg-rule-repos { flex: 1 1 auto; min-width: 0; }
+.stg-rule-repos > summary,
+.stg-rule-repos-none {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink-2);
+}
+.stg-rule-repos > summary { cursor: pointer; min-height: var(--target-min); display: inline-flex; align-items: center; }
+.stg-rule-repos > summary:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+.stg-rule-repos-none { display: inline-flex; align-items: center; min-height: var(--target-min); }
+
+.stg-repos { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.stg-repo {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+.stg-repo + .stg-repo { border-top: var(--bd); }
+.stg-repo-id { display: flex; flex-direction: column; gap: var(--sp-1); flex: 1 1 12rem; min-width: 0; }
+.stg-repo-name { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink); overflow-wrap: anywhere; }
+.stg-repo-path { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-3); overflow-wrap: anywhere; }
+.stg-repo-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+}
+.stg-repo-state .lucide { width: var(--ic-sm); height: var(--ic-sm); flex: none; }
+.stg-repo-state-installed .lucide { color: var(--olive); }
+.stg-repo-state-blocked,
+.stg-repo-state-failed { color: var(--ink); }
+.stg-repo-state-blocked .lucide,
+.stg-repo-state-failed .lucide { color: var(--clay); }
+
+/* a refusal and its remedy: the reason in prose, the section to add by hand as code */
+.stg-remedy {
+  flex-basis: 100%;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding-inline-start: var(--sp-3);
+  border-left: var(--bd-strong);
+}
+.stg-remedy-text {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink);
+  max-width: var(--measure-prose);
+}
+.stg-snippet { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; max-width: 100%; }
+.stg-snippet-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  max-height: 16rem;
+  overflow: auto;
+  border: var(--bd);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink);
+  white-space: pre;
+}
+
+/* the one install action */
+.stg-install {
+  min-width: 0;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: var(--sp-3) var(--sp-4);
+  padding: var(--sp-4);
+  border: var(--bd-strong);
+}
+.stg-install-title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  line-height: var(--lh-body);
+  color: var(--ink-strong);
+}
+.stg-install .stg-note { padding: 0; }
+.stg-install-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.stg-progress { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-2); }
+.stg-install-results { border-top: var(--bd); }
+
+/* the per-repository preview of what an install does, shown before the click */
+.stg-install-preview { flex-basis: 100%; min-width: 0; }
+.stg-install-preview > summary {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink-2);
+  cursor: pointer;
+  min-height: var(--target-min);
+  display: inline-flex;
+  align-items: center;
+}
+.stg-install-preview > summary:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: 2px; }
+.stg-install-steps { list-style: none; margin: 0; padding: 0 0 var(--sp-2); min-width: 0; }
+.stg-install-step {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink-2);
+}
+
+.stg-add { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+
+/* the command that edits the selection sits where a control would */
+.stg-command { max-width: 20rem; }
+
+/* a read-only row's value and action shrink and wrap rather than push the page wider */
+.stg-readonly-control { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; }
+
+@media (max-width: 767px) {
+  /* below md a row stacks: its control takes its own line, and a long value wraps inside it
+     instead of scrolling the page sideways */
+  .stg-page .srow-control { flex: 1 1 100%; min-width: 0; justify-content: flex-start; }
+  .stg-page .srow-text { min-width: 0; }
+  .stg-readonly-value { max-width: 100%; }
+  .stg-command { max-width: 100%; min-width: 0; }
+  .stg-readonly-control > .srow-status { display: none; }
+  .stg-pattern { grid-template-columns: minmax(0, 1fr) auto; }
+  .stg-pattern-rule { grid-column: 1 / -1; }
+  .stg-readonly-value { text-align: left; }
+  .stg-form { margin-inline: var(--sp-3); padding: var(--sp-3); }
+  .stg-install { margin-inline: var(--sp-3); padding: var(--sp-3); }
+  .stg-rule-foot,
+  .stg-block-head,
+  .stg-status-line,
+  .stg-note,
+  .stg-empty,
+  .stg-add { padding-inline: var(--sp-3); }
+}
+
+/* the in-use demo pads a page from its view at phone width; this app's main has no padding of its own */
+@media (width <= 480px) {
+  .stg-page { padding-inline: var(--sp-3); }
+}

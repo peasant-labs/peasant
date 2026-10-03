@@ -77,6 +77,13 @@ import {
   LocalOfflineBanner as FtLocalOfflineBanner,
   TeachingEmptyState as FtTeachingEmptyState,
   useHelperSelection as ftUseHelperSelection,
+  // the settings page parts
+  SettingRow,
+  SettingGroup,
+  SETTING_ROW_STATES,
+  Menu,
+  CopyIconButton,
+  CommandBlock,
 } from '@peasant-labs/fairtrade/ui';
 
 /**
@@ -214,6 +221,10 @@ export const Skeleton = FtSkeleton as unknown as ComponentType<SkeletonProps>;
 // These take only their declared props at this app's call-sites — re-export as
 // shipped (their declared types are sufficient).
 export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
+
+// The settings page parts. Their declared props cover these call-sites; a row's
+// `data-*` attributes pass through to its element at runtime.
+export { SettingRow, SettingGroup, SETTING_ROW_STATES, Menu, CopyIconButton, CommandBlock };
 
 /**
  * A single-color real brand mark for a harness (never a generic glyph);

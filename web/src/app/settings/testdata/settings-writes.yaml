@@ -1,0 +1,89 @@
+# What one change on the settings page sends, and what the row shows after the
+# server answers. The page is mounted on settings-response.yaml; each case
+# changes one row, answers its PATCH /api/v1/settings as listed, and checks the
+# request body, the row's state (a SETTING_ROW_STATES member), the value the
+# control shows, and the alert. `request: null` means no request may be made.
+# A refusal answers 400 with the server's LocalSettingRefusal; a refused write
+# puts the previous value back and shows that reason.
+requiredNames:
+  - switch settles on
+  - menu refusal restores the value and shows the reason
+  - text refusal restores the value and shows the reason
+  - a whole number is required before any request
+  - clearing a text field unsets the key
+  - a list is sent as its items
+  - a write in flight is pending
+cases:
+  - name: switch settles on
+    key: push.fields.gitBranch
+    input: {toggle: true}
+    answer:
+      status: 200
+      body: {key: push.fields.gitBranch, kind: boolean, value: true, effective: true, editable: true, inPeasantConfig: false}
+    expect:
+      request: {key: push.fields.gitBranch, value: true}
+      status: settled
+      shown: "true"
+      alert: null
+  - name: menu refusal restores the value and shows the reason
+    key: display.theme
+    input: {select: light}
+    answer:
+      status: 400
+      body: {key: display.theme, error: "config.yaml could not be written: permission denied. Nothing was changed."}
+    expect:
+      request: {key: display.theme, value: light}
+      status: failed
+      shown: dark
+      alert: "config.yaml could not be written: permission denied. Nothing was changed."
+  - name: text refusal restores the value and shows the reason
+    key: output.stalenessThresholdSec
+    input: {type: "-5"}
+    answer:
+      status: 400
+      body: {key: output.stalenessThresholdSec, error: "This value would make the configuration invalid: config: stalenessThresholdSec must be >= 0, got -5. Nothing was changed."}
+    expect:
+      request: {key: output.stalenessThresholdSec, value: -5}
+      status: failed
+      shown: "60"
+      alert: "This value would make the configuration invalid: config: stalenessThresholdSec must be >= 0, got -5. Nothing was changed."
+  - name: a whole number is required before any request
+    key: push.concurrency
+    input: {type: "four"}
+    answer: null
+    expect:
+      request: null
+      status: failed
+      shown: "4"
+      alert: '"four" is not a whole number. enter one, or leave it empty for the default.'
+  - name: clearing a text field unsets the key
+    key: village.url
+    input: {type: ""}
+    answer:
+      status: 200
+      body: {key: village.url, kind: string, value: null, effective: "https://api.village.peasantlabs.org", editable: true, inPeasantConfig: false}
+    expect:
+      request: {key: village.url, value: null}
+      status: idle
+      shown: https://api.village.peasantlabs.org
+      alert: null
+  - name: a list is sent as its items
+    key: push.sources
+    input: {type: "claude-code, codex"}
+    answer:
+      status: 200
+      body: {key: push.sources, kind: string_list, value: [claude-code, codex], effective: [claude-code, codex], editable: true, inPeasantConfig: false}
+    expect:
+      request: {key: push.sources, value: [claude-code, codex]}
+      status: settled
+      shown: claude-code, codex
+      alert: null
+  - name: a write in flight is pending
+    key: push.fields.hostSlug
+    input: {toggle: true}
+    answer: {hold: true}
+    expect:
+      request: {key: push.fields.hostSlug, value: true}
+      status: pending
+      shown: "true"
+      alert: null
