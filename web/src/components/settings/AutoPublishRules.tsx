@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { CircleCheck, CircleX, MoreHorizontal, Plus, TriangleAlert } from 'lucide-react';
+import { CircleCheck, MoreHorizontal, Plus, TriangleAlert } from 'lucide-react';
 import {
   AutoPublishEvent,
   AutoPublishHookStatus,
@@ -12,6 +12,7 @@ import {
 } from '@peasant-labs/schema';
 import { Button, Checkbox, CopyIconButton, Input, Menu, Select, SettingRow } from '@/lib/ft-ui';
 import { installAutoPublishRule, removeAutoPublishRule, saveAutoPublishRule } from '@/lib/api/settings';
+import { shellQuote } from '@/lib/settings/shell';
 import { StatusLine, type BlockStatus } from './CustomPatterns';
 
 /** The collectives this computer's Village account can see, by identifier. null: not signed in or not read. */
@@ -171,9 +172,13 @@ function RepositoryState({ repository, shared }: { repository: AutoPublishReposi
   );
 }
 
-/** The command that removes the hook an install writes; a single event names it. */
+/**
+ * The command that removes the hook an install writes; a single event names it.
+ * The path is quoted so a directory with a space or a quote survives the shell;
+ * the event is a closed-set token and stays bare, as the Go renderer prints it.
+ */
 function uninstallCommand(path: string, events: readonly AutoPublishEvent[]): string {
-  const command = `peasant village hooks uninstall --dir ${path}`;
+  const command = `peasant village hooks uninstall --dir ${shellQuote(path)}`;
   return events.length === 1 ? `${command} --event ${events[0]}` : command;
 }
 
@@ -249,39 +254,67 @@ function newRuleId(): string {
 /** The result of one install call: the repository as it is now, or why the call failed. */
 type InstallOutcome = PendingInstall & ({ repository: AutoPublishRepository } | { error: string });
 
-/** The repositories whose every hook the install left installed. */
-function installedCount(outcomes: readonly InstallOutcome[]): number {
-  const done = new Set<string>();
-  const notDone = new Set<string>();
-  for (const outcome of outcomes) {
-    const ok = 'repository' in outcome && outcome.repository.hooks.every((hook) => hook.status === AutoPublishHookStatus.Installed);
-    (ok ? done : notDone).add(outcome.path);
-  }
-  return [...done].filter((path) => !notDone.has(path)).length;
+/** One event's install state in a repository, however many calls touched it. */
+interface InstallEventResult {
+  event: AutoPublishEvent;
+  /** The hook a successful call reported for this event. */
+  hook?: AutoPublishHook;
+  /** Why a failed call could not install this event. */
+  error?: string;
 }
 
 /** One repository's final install result, however many calls covered it. */
 interface InstallResult {
   path: string;
   label?: string;
-  error?: string;
-  repository?: AutoPublishRepository;
+  /** The events the calls touched, in the order they first appeared. */
+  events: InstallEventResult[];
 }
 
-/** Collapse the per-call outcomes into one result per repository, the latest call winning. */
+/** The repositories whose every event the install left installed. */
+function installedCount(outcomes: readonly InstallOutcome[]): number {
+  return installResults(outcomes).filter((result) =>
+    result.events.length > 0 &&
+    result.events.every((entry) => entry.error === undefined && entry.hook?.status === AutoPublishHookStatus.Installed)
+  ).length;
+}
+
+/**
+ * Collapse the per-call outcomes into one result per repository, by event. The
+ * install endpoint is rule-scoped, so a call answers only for the calling
+ * rule's events: two rules covering disjoint events over one repository each
+ * contribute their own hooks, and merging by event keeps them all instead of
+ * letting the last call hide the first. A call that failed leaves its events
+ * failed until a later call succeeds for that same event; a success for another
+ * event never clears the failure.
+ */
 function installResults(outcomes: readonly InstallOutcome[]): InstallResult[] {
-  const byPath = new Map<string, InstallResult>();
+  const byPath = new Map<string, { result: InstallResult; events: Map<AutoPublishEvent, InstallEventResult> }>();
   for (const outcome of outcomes) {
-    const result = byPath.get(outcome.path) ?? { path: outcome.path, label: outcome.label };
+    const entry = byPath.get(outcome.path) ?? {
+      result: { path: outcome.path, label: outcome.label, events: [] },
+      events: new Map<AutoPublishEvent, InstallEventResult>(),
+    };
+    const eventOf = (event: AutoPublishEvent): InstallEventResult => {
+      const existing = entry.events.get(event);
+      if (existing) return existing;
+      const created: InstallEventResult = { event };
+      entry.events.set(event, created);
+      entry.result.events.push(created);
+      return created;
+    };
     if ('error' in outcome) {
-      result.error = outcome.error;
+      for (const event of outcome.events) eventOf(event).error = outcome.error;
     } else {
-      result.repository = outcome.repository;
-      result.error = undefined;
+      for (const hook of outcome.repository.hooks) {
+        const event = eventOf(hook.event);
+        event.hook = hook;
+        event.error = undefined;
+      }
     }
-    byPath.set(outcome.path, result);
+    byPath.set(outcome.path, entry);
   }
-  return [...byPath.values()];
+  return [...byPath.values()].map((entry) => entry.result);
 }
 
 /**
@@ -513,26 +546,25 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
           {install && !install.running && (
             <ul className="stg-repos stg-install-results" aria-label="install results">
               {installResults(outcomes).map((result) => {
-                const repository = result.repository;
+                const multiple = result.events.length > 1;
                 return (
                   <li key={result.path} className="stg-repo">
                     <RepositoryName repository={result} shared={sharedLabels(outcomes)} />
-                    {result.error !== undefined ? (
-                      <>
-                        <span className="stg-repo-state stg-repo-state-failed"><CircleX aria-hidden="true" /> not installed</span>
-                        <div className="stg-remedy"><p className="stg-remedy-text" role="alert">{result.error}</p></div>
-                      </>
-                    ) : repository ? (
-                      <>
-                        {repository.hooks.map((hook) => (
-                          <span key={hook.event} className={`stg-repo-state stg-repo-state-${hook.status}`}>
-                            {hook.status === AutoPublishHookStatus.Installed ? <CircleCheck aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
-                            {repository.hooks.length > 1 ? ` ${hook.event}: ` : ' '}{hookWords(hook.status)}
-                          </span>
-                        ))}
-                        {repository.hooks.map((hook) => <Remedy key={`${hook.event}-remedy`} hook={hook} />)}
-                      </>
-                    ) : null}
+                    {result.events.map((entry) => {
+                      const status = entry.error !== undefined ? AutoPublishHookStatus.Failed : entry.hook?.status;
+                      if (status === undefined) return null;
+                      return (
+                        <span key={entry.event} className={`stg-repo-state stg-repo-state-${status}`}>
+                          {status === AutoPublishHookStatus.Installed ? <CircleCheck aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
+                          {multiple ? ` ${entry.event}: ` : ' '}{hookWords(status)}
+                        </span>
+                      );
+                    })}
+                    {result.events.map((entry) => entry.error !== undefined ? (
+                      <div key={`${entry.event}-error`} className="stg-remedy">
+                        <p className="stg-remedy-text" role="alert">{entry.error}</p>
+                      </div>
+                    ) : entry.hook ? <Remedy key={`${entry.event}-remedy`} hook={entry.hook} /> : null)}
                   </li>
                 );
               })}

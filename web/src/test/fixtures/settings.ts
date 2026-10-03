@@ -132,7 +132,8 @@ export function loadSettingWrites(): SettingWriteCase[] {
 export interface InstallCase {
   name: string;
   rules: AutoPublishRule[];
-  answers: Record<string, { status: number; body: unknown }>;
+  /** Per rule id, then per repository path, the answer that rule's install call gets. */
+  answers: Record<string, Record<string, { status: number; body: unknown }>>;
   offer: string | null;
   calls: string[];
   /** Per repository path, the texts its install preview shows before the click. */

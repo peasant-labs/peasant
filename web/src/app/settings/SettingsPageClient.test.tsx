@@ -443,8 +443,12 @@ describe('auto-publish install', () => {
   }
   it.each(loadInstallCases().map((testCase) => [testCase.name, testCase] as const))('%s', async (_name, testCase) => {
     mountServer({ settings: withRules(testCase.rules), auth: { authenticated: true, username: 'alice-dev' } });
-    serve('POST', '/api/v1/settings/auto-publish/acme-work/install', (body) => testCase.answers[(body as { path: string }).path]);
-    serve('POST', '/api/v1/settings/auto-publish/acme-remote/install', (body) => testCase.answers[(body as { path: string }).path]);
+    // The install endpoint is rule-scoped, so each rule's call gets its own
+    // answer: a rule answers only for the events it installs.
+    for (const rule of testCase.rules) {
+      const answers = testCase.answers[rule.id] ?? {};
+      serve('POST', `/api/v1/settings/auto-publish/${rule.id}/install`, (body) => answers[(body as { path: string }).path]);
+    }
     await mountPage();
     const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
     const installs = () => mutations().filter((call) => call.path.endsWith('/install'));
