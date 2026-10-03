@@ -44,6 +44,7 @@ import { GroupedSessionsSection } from "@/components/sessions/GroupedSessionsSec
 import type { LocalSessionRow } from "@/lib/api/grouped";
 import { RootSessionList } from "@/components/home/RootSessionList";
 import { RootStats } from "@/components/home/RootStats";
+import { AutoPublishTip } from "@/components/home/AutoPublishTip";
 import { useSessionTitles } from "@/hooks/useSessionTitles";
 import { useRootSessions } from "@/hooks/useRootSessions";
 import { publishFilterCounts, rowPublishState, type RootSessionRow } from "@/lib/home/publishState";
@@ -647,6 +648,7 @@ export default function HomePage() {
         {groupedSectionVisible && (
           <div className="flex flex-col gap-6">
             <RootStats items={statsItems} weekly={weekly} />
+            <AutoPublishTip />
 
             <RootSearch
               value={query}

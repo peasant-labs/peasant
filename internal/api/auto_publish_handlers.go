@@ -124,11 +124,31 @@ func (h *autoPublishHandler) handleSaveRule(w http.ResponseWriter, r *http.Reque
 	id := r.PathValue("id")
 	var request schema.AutoPublishRuleRequest
 	if err := decodeStrict(http.MaxBytesReader(w, r.Body, ruleBodyLimit), &request); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "The auto-publish rule "+id+" was not saved because the body is not a rule: "+err.Error()+". Nothing was changed. Send kind, match, events, and collectives, then retry.", autoPublishInvalidCode)
+		writeAPIError(w, http.StatusBadRequest, "The auto-publish rule "+id+" was not saved because the body is not a rule: "+err.Error()+". Nothing was changed. Send either sessionId or kind and match, with events and collectives, then retry.", autoPublishInvalidCode)
 		return
 	}
-	rule := autopublish.RuleFromRequest(id, request)
 	err := request.Validate()
+	if err == nil && request.SessionID != nil {
+		var session *store.SessionRow
+		session, err = h.store.SessionByID(r.Context(), string(*request.SessionID))
+		if err == nil && session == nil {
+			err = errors.New("the stored session could not be found; reload the session before enabling automatic publishing")
+		}
+		if err == nil {
+			var repository autopublish.Repository
+			repository, err = autopublish.Resolve(r.Context(), &ingest.ExecGitResolver{}, session.GitWorktree, false)
+			if err == nil {
+				root := repository.Root
+				if repository.MainRoot != "" {
+					root = repository.MainRoot
+				}
+				request.Kind = schema.AutoPublishRuleFolder
+				request.Match = autopublish.FolderMatch(root)
+				request.SessionID = nil
+			}
+		}
+	}
+	rule := autopublish.RuleFromRequest(id, request)
 	if err == nil {
 		err = rule.Validate()
 	}

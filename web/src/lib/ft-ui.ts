@@ -840,10 +840,18 @@ export type MenuItem = NonNullable<MenuProps['items']>[number];
 export const Menu = FtMenu;
 
 export type PublishBarProps = ComponentProps<typeof FtPublishBar> & HTMLAttributes<HTMLDivElement>;
-export type PublishDialogProps = ComponentProps<typeof FtPublishDialog>;
+/**
+ * The auto-publish offer's `hint` is a plain sentence while the offer is
+ * available, and an inline reason plus retry while its preference cannot be
+ * read. The shipped declaration types it as `string`; the component renders
+ * whatever node it is handed.
+ */
+export type PublishDialogProps = Omit<ComponentProps<typeof FtPublishDialog>, 'autoPublish'> & {
+  autoPublish?: { checked: boolean; onChange: (checked: boolean) => void; hint?: ReactNode };
+};
 export type PublishDialogState = PublishDialogProps['state'];
 export type PublishAccessItem = NonNullable<PublishDialogProps['access']>[number];
 export const PUBLISH_STATES = FT_PUBLISH_STATES;
 export const PUBLISH_DIALOG_STATES = FT_PUBLISH_DIALOG_STATES;
 export const PublishBar = FtPublishBar;
-export const PublishDialog = FtPublishDialog;
+export const PublishDialog = FtPublishDialog as unknown as ComponentType<PublishDialogProps>;

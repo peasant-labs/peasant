@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	requiredGuidedPresentationSections = 6
+	requiredGuidedPresentationSections = 7
 	requiredGuidedPresentationThemes   = 2
 	requiredGuidedPresentationSizes    = 2
-	requiredGuidedPresentationCases    = 24
+	requiredGuidedPresentationCases    = 28
 	requiredGuidedPrivacyMarkers       = 2
 )
 
@@ -76,6 +76,7 @@ func decodeGuidedPresentationDocument(data []byte) (guidedPresentationDocument, 
 	required := map[string]bool{
 		kickstart.SectionAutoIngest:  true,
 		kickstart.SectionPublication: true,
+		kickstart.SectionAutoPublish: true,
 		kickstart.SectionPrivacy:     true,
 		kickstart.SectionLicense:     true,
 		kickstart.SectionDestination: true,
@@ -302,7 +303,7 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 
 func TestGuidedPresentationFixtureRejectsMissingCanonicalSection(t *testing.T) {
 	t.Parallel()
-	mutated := mutateGuidedPresentationFixture(t, guidedPresentationFixtureData, []byte("expectedSectionCount: 6"), []byte("expectedSectionCount: 5"))
+	mutated := mutateGuidedPresentationFixture(t, guidedPresentationFixtureData, []byte("expectedSectionCount: 7"), []byte("expectedSectionCount: 6"))
 	mutated = mutateGuidedPresentationFixture(t, mutated, []byte("  - key: retention\n    heading: how long claude code keeps its transcripts\n    control: '( ) 30 days'\n    intro: choose how long claude code keeps its source transcript files.\n"), nil)
 	if _, err := decodeGuidedPresentationDocument(mutated); err == nil {
 		t.Fatal("guided presentation fixture accepted removal of a canonical guided section")

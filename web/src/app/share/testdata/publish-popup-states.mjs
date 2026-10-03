@@ -393,6 +393,8 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
     const query = parsed.searchParams
     const route = `${method} ${parsed.pathname.replace(/\/$/, '')}`
     switch (route) {
+      case 'GET /api/v1/settings':
+        return { status: 200, json: { settings: [{ key: 'push.autoPublishIntent', kind: 'boolean', value: null, effective: false, editable: true, inPeasantConfig: true, description: 'offer automatic publishing' }], autoPublish: [] } }
       case 'GET /api/v1/sync/auth':
         return { status: 200, json: signedIn ? { authenticated: true, username: 'alice-dev', villageUrl: FIXTURE_VILLAGE, villageConfigured: true } : { authenticated: false } }
       case 'POST /api/v1/sync/login':

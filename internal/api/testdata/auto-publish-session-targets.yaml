@@ -1,0 +1,22 @@
+requiredNames:
+  - a-stored-root-saves-an-exact-folder-rule
+  - a-stored-subdirectory-resolves-the-git-root
+  - a-stored-symlink-resolves-the-physical-root
+  - a-linked-worktree-saves-the-main-repository-rule
+  - a-glob-character-root-does-not-cover-its-neighbor
+  - a-gone-directory-refuses-before-replacing-a-rule
+  - an-empty-recorded-directory-refuses-without-a-remote-fallback
+  - a-missing-session-refuses-before-replacing-a-rule
+  - a-session-and-pattern-target-refuses-before-replacing-a-rule
+  - a-server-without-a-store-refuses-the-session-target
+cases:
+  - {name: a-stored-root-saves-an-exact-folder-rule, directory: root, status: 200}
+  - {name: a-stored-subdirectory-resolves-the-git-root, directory: subdirectory, status: 200}
+  - {name: a-stored-symlink-resolves-the-physical-root, directory: symlink, status: 200}
+  - {name: a-linked-worktree-saves-the-main-repository-rule, directory: linked, status: 200}
+  - {name: a-glob-character-root-does-not-cover-its-neighbor, directory: glob, status: 200}
+  - {name: a-gone-directory-refuses-before-replacing-a-rule, directory: gone, status: 400}
+  - {name: an-empty-recorded-directory-refuses-without-a-remote-fallback, directory: empty, status: 400}
+  - {name: a-missing-session-refuses-before-replacing-a-rule, directory: missing, status: 400}
+  - {name: a-session-and-pattern-target-refuses-before-replacing-a-rule, directory: ambiguous, status: 400}
+  - {name: a-server-without-a-store-refuses-the-session-target, directory: no-store, status: 503}

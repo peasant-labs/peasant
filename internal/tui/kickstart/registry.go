@@ -44,6 +44,7 @@ const (
 	SectionSelection   = "selection"
 	SectionAutoIngest  = "auto-ingest"
 	SectionPublication = "publication"
+	SectionAutoPublish = "auto-publish"
 	SectionPrivacy     = "privacy"
 	SectionLicense     = "license"
 	SectionDestination = "destination"
@@ -55,6 +56,7 @@ const (
 	FieldSelection   = "transcripts"
 	FieldAutoIngest  = "auto-ingest-new-branches"
 	FieldPublication = "publication-preference"
+	FieldAutoPublish = "publish-automatically"
 	FieldPrivacy     = "redaction-level"
 	FieldLicense     = "content-license"
 	FieldVisibility  = "default-visibility"
@@ -75,7 +77,8 @@ const RecommendedRetentionDays = neverExpireDays
 const licenseNone = "none (do not attach a license)"
 
 // BuildRegistry composes the kickstart onboarding as a settings.Registry: the
-// selection tree, the conditional auto-ingest-new-branches toggle, the privacy
+// selection tree, the conditional auto-ingest-new-branches toggle, the
+// publication preference, the "publish automatically?" intent, the privacy
 // (redaction) choice, and the content-license choice. The village
 // destination/visibility and Claude retention fields are gated by opts. Final
 // review and save guidance belongs to each presentation rather than appearing
@@ -130,6 +133,19 @@ func BuildRegistry(opts Options) settings.Registry {
 				settings.WithDescription(
 					settings.Radio(FieldPublication, "publication preference", publicationAccessor(), publicationOptions()...),
 					"keep local means nothing ever leaves this machine until you explicitly publish."),
+			},
+		},
+		{
+			Key:   SectionAutoPublish,
+			Title: "auto-publish",
+			// One question, two answers, and one line under the question. The
+			// answer is an intent only: which folders publish, and to which
+			// collectives, is chosen later in settings, so kickstart saves no
+			// rule and installs no hook whatever the answer. Always offered,
+			// because the intent needs no village connection.
+			Guide: sectionGuide(autoPublishNote),
+			Fields: []settings.Field{
+				settings.Radio(FieldAutoPublish, "publish automatically?", autoPublishAccessor(), autoPublishOptions()...),
 			},
 		},
 		{
@@ -380,7 +396,13 @@ func visibilityDescription(v schema.Visibility) string {
 func publicationAccessor() settings.Accessor[config.SharePreference] {
 	return settings.Accessor[config.SharePreference]{
 		Get: func(cfg *config.Config) config.SharePreference { return cfg.Push.SharePreference },
-		Set: func(cfg *config.Config, v config.SharePreference) { cfg.Push.SharePreference = v },
+		Set: func(cfg *config.Config, v config.SharePreference) {
+			cfg.Push.SharePreference = v
+			// Keep local never coexists with the auto-publish intent.
+			if v == config.SharePreferenceKeepLocal {
+				cfg.Push.AutoPublishIntent = false
+			}
+		},
 	}
 }
 
@@ -396,6 +418,36 @@ func publicationOptions() []settings.Option[config.SharePreference] {
 			Value:       config.SharePreferenceShareLater,
 			Description: "record that you intend to publish later. this still publishes nothing now; sharing remains a separate, explicit push.",
 		},
+	}
+}
+
+// autoPublishNote is the one line under the "publish automatically?" question.
+const autoPublishNote = "you choose which folders go to which collectives in settings later."
+
+// autoPublishAccessor lenses the auto-publish intent. It reads the intent that
+// holds (config.PushConfig.AutoPublishIntended), so a stored intent beside
+// keep-local reads as "not now". "yes" also records that the user plans to
+// publish, because the intent never coexists with keep local; "not now"
+// changes only the intent. Neither answer saves a rule or installs a hook.
+func autoPublishAccessor() settings.Accessor[bool] {
+	return settings.Accessor[bool]{
+		Get: func(cfg *config.Config) bool { return cfg.Push.AutoPublishIntended() },
+		Set: func(cfg *config.Config, v bool) {
+			cfg.Push.AutoPublishIntent = v
+			if v {
+				cfg.Push.SharePreference = config.SharePreferenceShareLater
+			}
+		},
+	}
+}
+
+// autoPublishOptions offers "yes" first and "not now" second, as the question
+// reads. The default is "not now": a config that never answered holds no
+// intent, so the radio starts there.
+func autoPublishOptions() []settings.Option[bool] {
+	return []settings.Option[bool]{
+		{Label: "yes", Value: true},
+		{Label: "not now", Value: false},
 	}
 }
 

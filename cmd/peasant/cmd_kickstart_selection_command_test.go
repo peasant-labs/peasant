@@ -395,6 +395,11 @@ func materializeSelectionCommandCase(t *testing.T, c *selectionCommandCase) {
 	if err := os.MkdirAll(clonePath, 0o755); err != nil {
 		t.Fatalf("create selection command clone path: %v", err)
 	}
+	physicalClone, err := ingest.NewPhysicalPathResolver().Resolve(clonePath)
+	if err != nil {
+		t.Fatalf("resolve selection command clone identity: %v", err)
+	}
+	clonePath = physicalClone.String()
 	materialized := append([]ftue.SessionListing(nil), c.Listings...)
 	for index := range materialized {
 		materialized[index].WorkingDir = clonePath

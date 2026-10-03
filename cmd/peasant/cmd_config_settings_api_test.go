@@ -67,7 +67,7 @@ func TestConfigShowsASettingSavedThroughTheLocalAPI(t *testing.T) {
 }
 
 // configEditorViews runs `peasant config` on the world's file and returns the
-// rendered sections through the content license.
+// actual content license section.
 func configEditorViews(t *testing.T, world *configScreenWorld) string {
 	t.Helper()
 	deps := world.dependencies(t)
@@ -75,7 +75,8 @@ func configEditorViews(t *testing.T, world *configScreenWorld) string {
 	deps.run = func(model tea.Model) (tea.Model, error) {
 		model = configScreenDrain(model, model.Init())
 		model = configScreenUpdate(model, tea.WindowSizeMsg{Width: 100, Height: 28})
-		model, views = configScreenVisibleViews(model, 4)
+		model = configScreenSelectSection(t, model, "content license")
+		views = ansiPattern.ReplaceAllString(model.View().Content, "")
 		return model, nil
 	}
 	if _, err := executeConfigScreenCommand(t, buildConfigCommand(deps), world, "config"); err != nil {

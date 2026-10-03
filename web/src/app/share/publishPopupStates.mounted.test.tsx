@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createAutomaticConsentWorld, loadAutomaticConsent } from './testdata/publish-automatic-consent.mjs';
 import type { ReactNode } from 'react';
 import { parseDocument } from 'yaml';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -40,13 +41,14 @@ const WAIT = { timeout: 3500 };
 let pathname = `/projects/${PROJECT_HASH}/${SESSION_ID}`;
 let search = '';
 const replaced: string[] = [];
+const pushed: string[] = [];
 const fetchProjectResolution = vi.fn();
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathname,
   useSearchParams: () => new URLSearchParams(search),
   useRouter: () => ({
-    push: vi.fn(),
+    push: (href: string) => { pushed.push(href); },
     replace: (href: string) => { replaced.push(href); },
   }),
 }));
@@ -181,7 +183,7 @@ function primaryButton(): HTMLButtonElement | null {
   return buttons[buttons.length - 1] ?? null;
 }
 
-async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
+async function runStep(step: string, user: ReturnType<typeof userEvent.setup>, keepRemoval = false) {
   if (step === 'arrive') return;
   if (step === 'open') {
     const action = await waitFor(() => within(bar()).getByRole('button', { name: /^(publish|update|manage)$/ }), WAIT);
@@ -209,7 +211,16 @@ async function runStep(step: string, user: ReturnType<typeof userEvent.setup>) {
     return;
   }
   const [verb, ...rest] = step.split(' ');
-  await user.click(await within(dialog()).findByRole('button', { name: `${verb} ${rest.join(' ')}` }, WAIT));
+  const button = await within(dialog()).findByRole('button', { name: `${verb} ${rest.join(' ')}` }, WAIT);
+  const connectedBeforeClick = button.isConnected;
+  await user.click(button);
+  if (verb === 'remove') {
+    await waitFor(() => {
+      const evidence = JSON.stringify({ step, keepRemoval, connectedBeforeClick, connectedAfterClick: button.isConnected, popup: dialog().textContent });
+      if (!keepRemoval) expect(within(dialog()).queryByRole('button', { name: `remove ${rest.join(' ')}` }), evidence).not.toBeInTheDocument();
+      else expect(within(dialog()).queryByRole('button', { name: `keep ${rest.join(' ')}` }), evidence).toBeInTheDocument();
+    }, WAIT);
+  }
 }
 
 beforeEach(() => {
@@ -217,6 +228,7 @@ beforeEach(() => {
   pathname = `/projects/${PROJECT_HASH}/${SESSION_ID}`;
   search = '';
   replaced.length = 0;
+  pushed.length = 0;
   fetchProjectResolution.mockReset();
   fetchProjectResolution.mockResolvedValue({ project: 'ingest-api', projectHash: PROJECT_HASH });
   if (typeof HTMLElement.prototype.scrollIntoView !== 'function') {
@@ -249,7 +261,11 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
 
     if ('alert' in entry.expect.bar) await within(bar()).findByRole('alert', {}, WAIT);
     else await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull(), WAIT);
-    for (const step of entry.steps) await runStep(step, user);
+    const actionSnapshots: { step: string; text: string }[] = [];
+    for (const step of entry.steps) {
+      await runStep(step, user, entry.expect.request?.remove.includes(step.replace(/^remove /, '')) ?? false);
+      actionSnapshots.push({ step, text: screen.queryByRole('dialog')?.textContent ?? '' });
+    }
 
     const expected = entry.expect;
     await waitFor(() => {
@@ -260,7 +276,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
       else {
         const label = bar().querySelector<HTMLElement>('.pub-state');
         expect(label?.dataset.state).toBe(expected.bar.state);
-        expect(label?.textContent).toBe(expected.bar.text);
+        expect(label?.textContent, JSON.stringify({ requests: world.pushRequests, actions: actionSnapshots })).toBe(expected.bar.text);
       }
     }, WAIT);
     if (!('alert' in expected.bar)) expect(within(bar()).getByRole('button', { name: expected.bar.action })).toBeInTheDocument();
@@ -464,3 +480,88 @@ for (const row of audienceReadinessCases()) {
     }
   });
 }
+
+// These cases reuse the mounted production route and its contract-decoded API.
+// The app-level provider is essential: a unit call cannot observe navigation
+// while hook installation is pending or the checkbox's explicit confirmation.
+const automaticSource = readFileSync(resolve(process.cwd(), 'src/app/share/testdata/publish-automatic-consent.yaml'), 'utf8');
+const automaticFixture = loadAutomaticConsent(automaticSource, fixture);
+
+describe.each(automaticFixture.cases)('automatic publishing consent: $name', (entry) => {
+  it('uses the actual checkbox, confirmed publish, and server repository', async () => {
+    const { world, mutations, order, base } = createAutomaticConsentWorld(fixture, automaticFixture, entry, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+    let releaseInstall!: () => void;
+    const installation = new Promise<void>((release) => { releaseInstall = release; });
+    installWorld(world, { hold: (url) => entry.leave && url.endsWith('/install') ? installation : undefined });
+    const user = userEvent.setup();
+    const view = render(<Page />);
+    await runStep('open', user);
+    if (entry.intent === 'error') {
+      await waitFor(() => expect(within(dialog()).getByRole('alert')).toHaveTextContent('settings read unavailable'), WAIT);
+      expect(world.pushRequests).toEqual([]);
+      expect(mutations).toEqual([]);
+      await runStep('retry', user);
+    }
+    if (entry.expect === 'existing') {
+      await waitFor(() => expect(primaryButton()).toBeEnabled(), WAIT);
+      expect(within(dialog()).queryByRole('checkbox')).not.toBeInTheDocument();
+      await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
+      await user.click(within(bar()).getByRole('button', { name: 'more' }));
+      await user.click(screen.getByRole('menuitem', { name: 'automatic publishing settings' }));
+      expect(pushed).toEqual(['/settings']);
+      expect(mutations).toEqual([]);
+      expect(world.pushRequests).toEqual([]);
+      return;
+    }
+    const checkbox = await within(dialog()).findByRole('checkbox', { name: 'publish this repo automatically on git push' }, WAIT);
+    expect((checkbox as HTMLInputElement).checked).toBe(entry.intent === true);
+    if (entry.action === 'toggle') await user.click(checkbox);
+    for (const name of entry.add ?? []) await runStep(`add ${name}`, user);
+    expect(mutations).toEqual([]);
+    expect(world.pushRequests).toEqual([]);
+    await runStep('publish', user);
+    if (entry.leave) {
+      await waitFor(() => expect(mutations.filter((item) => item.method === 'POST')).toHaveLength(1), WAIT);
+      view.rerender(<Page><p>another page</p></Page>);
+      view.rerender(<Page />);
+      await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveAttribute('data-state', 'publishing'), WAIT);
+      const busyAction = within(bar()).getByRole('button', { name: 'publish' });
+      expect(busyAction).toHaveAttribute('aria-disabled', 'true');
+      await user.click(busyAction);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(world.pushRequests).toHaveLength(1);
+      expect(mutations).toHaveLength(2);
+      await act(async () => { releaseInstall(); });
+    }
+    if (entry.expect === 'manual' || entry.expect === 'automatic') {
+      await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveAttribute('data-state', entry.expect === 'automatic' ? 'auto-publish' : 'published'), WAIT);
+    } else if (entry.expect === 'refused') {
+      await waitFor(() => expect(within(dialog()).getByRole('alert')).toHaveTextContent(base.expect.popup!.texts[0]), WAIT);
+      expect(mutations).toEqual([]);
+    } else {
+      await waitFor(() => expect(within(dialog()).getByRole('alert')).toHaveTextContent(entry.expect), WAIT);
+      expect(within(dialog()).getByRole('alert')).toHaveTextContent('the transcript was published');
+      expect(within(dialog()).queryByRole('button', { name: 'retry' })).not.toBeInTheDocument();
+      await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveAttribute('data-state', 'published'), WAIT);
+      await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
+      await user.click(within(bar()).getByRole('button', { name: 'more' }));
+      await user.click(screen.getByRole('menuitem', { name: 'automatic publishing settings' }));
+      expect(pushed).toEqual(['/settings']);
+    }
+    expect(world.pushRequests).toHaveLength(1);
+    if (entry.expect === 'manual') expect(mutations).toEqual([]);
+    else if (entry.expect !== 'refused') {
+      expect(mutations[0]?.method).toBe('PUT');
+      expect(mutations[0]?.body).toEqual({ sessionId: SESSION_ID, events: ['pre-push'], collectives: [...fixture.collectives.slice(0, 2), ...(entry.add ?? []).map((name) => fixture.collectives.find((item) => item.name === name)!)].map((item) => item.id) });
+      if (entry.add?.length) expect(dialog().textContent).toContain(base.expect.popup!.texts[0]);
+      expect(mutations[0]?.path.split('/').at(-1)).toMatch(/^[0-9a-f-]{36}$/);
+      const failedSave = entry.setup === 'save-error' || entry.setup === 'malformed' || entry.setup.startsWith('wrong-');
+      expect(mutations.map((item) => item.method)).toEqual(failedSave ? ['PUT'] : ['PUT', 'POST']);
+      expect(order).toEqual(failedSave ? ['push', 'PUT'] : ['push', 'PUT', 'POST']);
+      if (!failedSave) {
+        expect(mutations[1].path).toBe(`${mutations[0].path}/install`);
+        expect(mutations[1].body).toEqual({ path: automaticFixture.repository });
+      }
+    }
+  }, 15000);
+});

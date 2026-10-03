@@ -9,12 +9,12 @@ sheets:
     kind: guided
     title: "final guided sections: dark theme"
     theme: dark
-    viewport: {width: 1800, height: 3420}
+    viewport: {width: 1800, height: 3980}
   - name: guided-light
     kind: guided
     title: "final guided sections: light theme"
     theme: light
-    viewport: {width: 1800, height: 3420}
+    viewport: {width: 1800, height: 3980}
   - name: selection
     kind: selection
     title: "mounted selection: linked submodule and remote-less project, branch, and session previews"
@@ -83,6 +83,8 @@ guidedSections:
     wantContains: [auto-ingest new branches in fully-selected projects, "[on]"]
   - key: publication
     wantContains: [publication preference, keep local]
+  - key: auto-publish
+    wantContains: ["publish automatically?", "you choose which folders go to which collectives", "( ) yes", "(•) not now"]
   - key: privacy
     wantContains: [redaction level, "- before:", "+ after:"]
   - key: license
@@ -322,6 +324,10 @@ guidedCaptures:
   - {name: publication-dark-120x40, section: publication, theme: dark, width: 120, height: 40}
   - {name: publication-light-80x24, section: publication, theme: light, width: 80, height: 24}
   - {name: publication-light-120x40, section: publication, theme: light, width: 120, height: 40}
+  - {name: auto-publish-dark-80x24, section: auto-publish, theme: dark, width: 80, height: 24}
+  - {name: auto-publish-dark-120x40, section: auto-publish, theme: dark, width: 120, height: 40}
+  - {name: auto-publish-light-80x24, section: auto-publish, theme: light, width: 80, height: 24}
+  - {name: auto-publish-light-120x40, section: auto-publish, theme: light, width: 120, height: 40}
   - {name: privacy-dark-80x24, section: privacy, theme: dark, width: 80, height: 24}
   - {name: privacy-dark-120x40, section: privacy, theme: dark, width: 120, height: 40}
   - {name: privacy-light-80x24, section: privacy, theme: light, width: 80, height: 24}

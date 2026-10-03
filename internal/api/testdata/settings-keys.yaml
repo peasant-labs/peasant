@@ -53,6 +53,7 @@ requiredNames:
   - push.sources
   - push.visibility
   - push.sharePreference
+  - push.autoPublishIntent
   - push.license
   - push.fields.gitRemote
   - push.fields.gitBranch
@@ -89,6 +90,7 @@ editable:
   - push.sources
   - push.visibility
   - push.sharePreference
+  - push.autoPublishIntent
   - push.license
   - push.fields.gitRemote
   - push.fields.gitBranch
@@ -124,6 +126,7 @@ peasantConfig:
   - redaction.level
   - push.visibility
   - push.sharePreference
+  - push.autoPublishIntent
   - push.license
   - selection.mode
   - selection.autoIngestNewBranches
