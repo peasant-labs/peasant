@@ -1,0 +1,16 @@
+requiredNames:
+  - a-root-refresh-updates-the-audience-of-the-same-session
+  - a-root-refresh-retries-a-failed-audience-read-for-the-same-session
+cases:
+  - name: a-root-refresh-updates-the-audience-of-the-same-session
+    initialCount: 2
+    initialStatus: 200
+    nextCount: 1
+    expectedBefore: published · 2 collectives · up to date
+    expectedAfter: published · 1 collective · up to date
+  - name: a-root-refresh-retries-a-failed-audience-read-for-the-same-session
+    initialCount: 2
+    initialStatus: 502
+    nextCount: 1
+    expectedBefore: published · up to date
+    expectedAfter: published · 1 collective · up to date
