@@ -211,8 +211,10 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   }, [onArrivalHandled, openOnArrival]);
 
   // This is the server-effective setup preference, including keep-local
-  // precedence. It only selects the offer; a checkbox and publish confirmation
-  // are still required before any rule is saved or hook installed.
+  // precedence. It only selects the optional automatic-setup offer; a checkbox
+  // and publish confirmation are still required before any rule is saved or
+  // hook installed. A failed read never blocks the manual publish: it leaves
+  // only the offer unavailable, with its reason and a retry.
   useEffect(() => {
     if (!open) return;
     let live = true;
@@ -393,18 +395,17 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
         ? { stoppedAt: 'reading this session: it is not recorded on this computer yet; run peasant ingest, then retry', retry: reread }
         : read.status === 'ready' && publication?.state === 'published' && !read.audienceKnown
         ? { stoppedAt: 'reading who can read it on village', retry: reread }
-        : automaticPreference.status === 'error'
-          ? { stoppedAt: `reading the automatic publishing preference: ${oneLine(automaticPreference.message)}`, retry: () => setAutomaticNonce((nonce) => nonce + 1) }
         : collectivesRead.status === 'error'
           ? { stoppedAt: `reading your collectives on village: ${oneLine(collectivesRead.message)}`, retry: () => setCollectivesNonce((nonce) => nonce + 1) }
           : null;
 
   // Publish only from a clean scan of the content now on the page, signed in,
-  // with what village holds known.
+  // with what village holds known. The automatic-setup preference is NOT a
+  // gate: it selects an optional offer, and a failed read must not disable the
+  // manual publish.
   // An update can be sent before the collectives list arrives: its draft is
   // "no change" until the reader makes one.
   const canPublish = scanClean && signIn === 'signed-in' && blocked === null && read.status === 'ready'
-    && automaticPreference.status === 'ready'
     && (draft !== null || publishedNow === 'update');
 
   const runPublish = useCallback(async () => {
@@ -414,7 +415,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     setOutcome(null);
     setSubmitting(true);
     try {
-      const enableAutomatic = automaticChecked && publication?.autoPublish !== true;
+      const enableAutomatic = automaticPreference.status === 'ready' && automaticChecked && publication?.autoPublish !== true;
       const selectedCollectives = access.filter((item) => item.pending !== 'removal').map((item) => item.id);
       const response = await publish(sessionId, request, readerCount, enableAutomatic ? async (response) => {
         const result = response.sessions.find((item) => item.sessionId === sessionId);
@@ -478,7 +479,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     if (blocked) return 'stopped';
     if (signIn === 'waiting') return 'waiting-github';
     if (signIn === 'signed-out') return 'connect';
-    if (signIn === 'unknown' || read.status === 'loading' || scan.phase === 'scanning' || automaticPreference.status === 'loading') return 'checking';
+    if (signIn === 'unknown' || read.status === 'loading' || scan.phase === 'scanning') return 'checking';
     if (scan.scanError != null) return 'scan-failed';
     if (outcome?.kind === 'stopped') return 'stopped';
     if (collectivesRead.status === 'ready' && collectivesRead.collectives.length === 0 && access.length === 0) return 'no-collective';
@@ -515,6 +516,31 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       </span>
     );
 
+  // The optional automatic-setup offer. While the preference is still being
+  // read it is not offered; when the read failed it stays unchecked and inert
+  // (never inferred true), carrying its reason and a retry, so the manual
+  // publish keeps only its own sign-in, audience and scan gates.
+  const automaticOffer = publication?.autoPublish === true || automaticFailure !== null
+    ? undefined
+    : automaticPreference.status === 'ready'
+      ? {
+        checked: automaticChecked,
+        onChange: setAutomaticChecked,
+        hint: 'selected collectives · overlapping rules still apply · change them in settings',
+      }
+      : automaticPreference.status === 'error'
+        ? {
+          checked: false,
+          onChange: () => {},
+          hint: (
+            <>
+              <span role="alert">automatic publishing is unavailable: {oneLine(automaticPreference.message)}</span>{' '}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAutomaticNonce((nonce) => nonce + 1)}>retry</button>
+            </>
+          ),
+        }
+        : undefined;
+
   const dialog = (
     <PublishDialog
       open={open}
@@ -539,13 +565,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
           },
         }
         : undefined}
-      autoPublish={automaticPreference.status === 'ready' && publication?.autoPublish !== true && automaticFailure === null
-        ? {
-          checked: automaticChecked,
-          onChange: setAutomaticChecked,
-          hint: 'selected collectives · overlapping rules still apply · change them in settings',
-        }
-        : undefined}
+      autoPublish={automaticOffer}
       accessSummary={mode === 'update' ? accessSummary(activeDraft, names) : undefined}
       onPublish={() => { void runPublish(); }}
       onConnect={connect}
