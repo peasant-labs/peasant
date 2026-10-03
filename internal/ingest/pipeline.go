@@ -2289,8 +2289,21 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		flush.writeDuration = writeDuration
 	}
-	for _, position := range nativePositions {
-		indexed, logEntry, profileSession := p.activateNativeGenerationResult(ctx, results[position], outcome, logPrefix, writeLane)
+	// Native candidates stage their content files before the serialized write
+	// lane: preparation and staging run with the same cross-session
+	// parallelism the entry path gives to its file writes, and only the
+	// database commit below stays on the single writer lane.
+	nativeCommits := p.prepareNativeGenerationCommits(ctx, results, nativePositions, outcome, logPrefix)
+	for i, position := range nativePositions {
+		commit := nativeCommits[i]
+		var indexed indexedMeta
+		var logEntry IndexLogEntry
+		var profileSession IndexProfileSession
+		if commit.ready {
+			indexed, logEntry, profileSession = p.commitNativeGenerationResult(ctx, commit.prepared, outcome, logPrefix, writeLane)
+		} else {
+			indexed, logEntry, profileSession = commit.im, commit.logEntry, commit.profile
+		}
 		flush.indexed[position] = indexed
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = profileSession

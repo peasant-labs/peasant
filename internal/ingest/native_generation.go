@@ -70,6 +70,17 @@ type NativeGenerationActivator interface {
 	ActivateNativeGeneration(context.Context, NativeGenerationActivation) (ActivationOutcome, error)
 }
 
+// NativeGenerationStager pre-stages one managed generation's files and its
+// durable activation intent ahead of the activation transaction, so independent
+// sessions can write and fsync their content in parallel while only the
+// database commit stays on the serialized writer. It is optional: without a
+// stager, activation stages inline as before. A staging error is not reported
+// as the candidate's outcome; the activation that follows re-runs the same
+// preamble and owns the authoritative refusal or repair disposition.
+type NativeGenerationStager interface {
+	StageNativeGeneration(context.Context, NativeGenerationActivation) error
+}
+
 // NativeGenerationPrior is the last-good evidence a prior activation left for
 // one session. Metadata and Aliases are derived from the committed generation;
 // PriorEvidence is the exact persisted harness document, or nil when none was
