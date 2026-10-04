@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -247,6 +248,176 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 				t.Fatalf("the second harvest reported %d diagnostic(s), want 0: %+v", len(second.Diagnostics), second.Diagnostics)
 			}
 		})
+	}
+}
+
+// TestOrdinaryHarvestReportsStaleSessionsOutsideTheSessionAllowlist seeds one
+// stored session that BOTH maintenance inventories select (a stale revision
+// and a recorded pair whose index input proof is missing) and runs the
+// ordinary harvest with a session allowlist that excludes it. The session must
+// stay stale, and the run must report it exactly once with the remedy instead
+// of folding it into the unchanged total.
+func TestOrdinaryHarvestReportsStaleSessionsOutsideTheSessionAllowlist(t *testing.T) {
+	t.Parallel()
+	document := loadStaleIndexSettlingFixtures(t)
+	var fixture *staleIndexSettlingFixture
+	for index := range document.Cases {
+		if document.Cases[index].Name == "claude-stored-identity-strict-refused" {
+			fixture = &document.Cases[index]
+			break
+		}
+	}
+	if fixture == nil {
+		t.Fatal("fixture declares no claude-stored-identity-strict-refused case")
+	}
+	if !fixture.StoredIdentity {
+		t.Fatal("fixture invariant: the stored-identity case must record an artifact identity so both maintenance inventories select it")
+	}
+
+	ctx := t.Context()
+	fs := testutil.NewCountingFS(testutil.NewMemFS())
+	database := storetest.OpenWith(t)
+	defer database.Close()
+
+	id, err := ingest.NewSessionID(testutil.TestSessionUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte(document.Transcripts[fixture.Transcript])
+	meta := makeMinimalMeta(t, id.String())
+	meta.ModelHarness = ingest.HarnessClaudeCode
+	meta.ContentHash = schema.ComputeTranscriptHash(transcript)
+	dir := filepath.Join(testOutputDir, testutil.TestHostSlug, id.String())
+	if err := fs.WriteFile(filepath.Join(dir, id.String()+"--transcript.jsonl"), transcript, 0600); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteFile(filepath.Join(dir, id.String()+"--metadata.json"), encoded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+		t.Fatal(err)
+	}
+	// The recorded identity is what makes the repair inventory select the
+	// session on top of the stale revision: the shape that used to be counted
+	// twice.
+	pair, err := ingest.NewManagedArtifact(encoded, transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: pair}})
+	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+		t.Fatalf("seed stored artifact identity: %+v", results)
+	}
+	seedStalePreviewCapture(t, ctx, database, id)
+
+	// A committed selected-mode policy crosses as an allowlist naming the
+	// sessions the wizard kept. This run names a different session, so the
+	// seeded one is out of scope.
+	other, err := ingest.NewSessionID("11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := makePipelineConfig(testOutputDir, func(cfg *ingest.PipelineConfig) {
+		cfg.AllowedSessionIDs = map[ingest.SessionID]bool{other: true}
+	})
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
+	}
+	pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := pipeline.Run(ctx)
+	if err != nil {
+		t.Fatalf("harvest: %v", err)
+	}
+	if result.Summary.Indexed != 0 {
+		t.Fatalf("a session outside the allowlist was indexed; diagnostics: %+v", result.Diagnostics)
+	}
+	state, err := database.ReadIndexState(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil || state.IndexerVersion != 15 || state.IndexedInputHash != nil {
+		t.Fatalf("a session outside the allowlist changed its stored index state: %+v", state)
+	}
+	var reported *ingest.DiagnosticEntry
+	reportedCount := 0
+	for index := range result.Diagnostics {
+		if result.Diagnostics[index].ErrorType == "stale_index_outside_selection" {
+			reported = &result.Diagnostics[index]
+			reportedCount++
+		}
+	}
+	if reportedCount != 1 || reported == nil {
+		t.Fatalf("the run reported %d selection diagnostics, want exactly 1: %+v", reportedCount, result.Diagnostics)
+	}
+	if !strings.Contains(reported.Message, "1 stored session") {
+		t.Fatalf("diagnostic message = %q, want the skipped count of one", reported.Message)
+	}
+	if !strings.Contains(reported.Remediation, "peasant harvest index") {
+		t.Fatalf("diagnostic remediation = %q, want the harvest index remedy", reported.Remediation)
+	}
+}
+
+// TestOrdinaryHarvestReportsStaleSessionsWithoutInput seeds a stale stored
+// session whose managed pair and recorded source are both absent and runs the
+// ordinary harvest without a session allowlist. The run must count it and
+// report the missing-input remedy instead of dropping it silently.
+func TestOrdinaryHarvestReportsStaleSessionsWithoutInput(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fs := testutil.NewCountingFS(testutil.NewMemFS())
+	database := storetest.OpenWith(t)
+	defer database.Close()
+
+	id, err := ingest.NewSessionID(testutil.TestSessionUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No pair is written and the metadata records no source path, so neither
+	// reconstruction path can produce the session.
+	meta := makeMinimalMeta(t, id.String())
+	meta.ModelHarness = ingest.HarnessClaudeCode
+	if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+		t.Fatal(err)
+	}
+	seedStalePreviewCapture(t, ctx, database, id)
+
+	cfg := makePipelineConfig(testOutputDir)
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
+	}
+	pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := pipeline.Run(ctx)
+	if err != nil {
+		t.Fatalf("harvest: %v", err)
+	}
+	if result.Summary.Indexed != 0 {
+		t.Fatalf("a session with no readable input was indexed; diagnostics: %+v", result.Diagnostics)
+	}
+	var reported *ingest.DiagnosticEntry
+	for index := range result.Diagnostics {
+		if result.Diagnostics[index].ErrorType == "stale_index_missing_input" {
+			reported = &result.Diagnostics[index]
+		}
+	}
+	if reported == nil {
+		t.Fatalf("the run did not report the stale session without input: %+v", result.Diagnostics)
+	}
+	if !strings.Contains(reported.Message, "1 stored session") {
+		t.Fatalf("diagnostic message = %q, want the missing-input count of one", reported.Message)
 	}
 }
 

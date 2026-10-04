@@ -1237,14 +1237,41 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		// The ordinary index inventory is database-driven only: stale producer
 		// revisions, plus the sessions a crash between the two write commits can
 		// leave (the repair predicate). Neither reads the tree; each hit reads
-		// only its own pair when it is indexed.
-		candidates := append([]SessionID(nil), staleIDs...)
-		candidates = append(candidates, p.repairSessions(ctx)...)
+		// only its own pair when it is indexed. The two inventories select from
+		// the same table and are not disjoint, so the candidates are
+		// deduplicated before anything is counted or processed.
+		repairIDs := p.repairSessions(ctx)
+		candidates := make([]SessionID, 0, len(staleIDs)+len(repairIDs))
+		seenCandidates := make(map[SessionID]bool, len(staleIDs)+len(repairIDs))
+		for _, inventory := range [][]SessionID{staleIDs, repairIDs} {
+			for _, sid := range inventory {
+				if seenCandidates[sid] {
+					continue
+				}
+				seenCandidates[sid] = true
+				candidates = append(candidates, sid)
+			}
+		}
+		// Every candidate this pass does not index is counted so a stored
+		// session can never disappear into the run's unchanged total without a
+		// signal. The selection skip is the one the user can act on; the
+		// missing-input count names the sessions whose pair and recorded source
+		// are both unavailable.
+		var selectionSkipped, missingInput int
 		// A recovered session is content-repaired, not complete: it still gets
 		// the same adapter/indexer evaluation as every other eligible target. An
 		// already-current session sees an equal input hash and writes nothing.
 		for _, sid := range candidates {
 			if queued[sid] {
+				continue
+			}
+			// The session allowlist is the run's ingest scope, and it also gates
+			// retained-session maintenance here. Skip an out-of-scope session
+			// before reading its pair: the run must not reconstruct or report
+			// refusals for a session it was never going to upgrade, and the
+			// report names the count instead.
+			if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[sid] {
+				selectionSkipped++
 				continue
 			}
 
@@ -1261,6 +1288,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				// the original source but don't have peasant-sync metadata.
 				reconstructed, startMs, transcriptPath = p.reconstructFromSourceInfo(ctx, sid)
 				if reconstructed == nil {
+					missingInput++
 					continue
 				}
 			}
@@ -1268,6 +1296,22 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			if p.indexTargetNeedsWork(ctx, reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}) {
 				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
 			}
+		}
+		if selectionSkipped > 0 {
+			p.reportDiagnostic(DiagnosticEntry{
+				ErrorType:   "stale_index_outside_selection",
+				Location:    "stored index maintenance",
+				Message:     fmt.Sprintf("%d stored session(s) outside this run's session selection still need index maintenance (an older indexer revision or an unfinished repair) and were not processed by this run", selectionSkipped),
+				Remediation: "Run peasant harvest index to process every stored session that needs index maintenance, or include these sessions' projects in the kickstart selection and run again.",
+			})
+		}
+		if missingInput > 0 {
+			p.reportDiagnostic(DiagnosticEntry{
+				ErrorType:   "stale_index_missing_input",
+				Location:    "stored index maintenance",
+				Message:     fmt.Sprintf("%d stored session(s) with pending index maintenance have neither a readable managed pair nor a recorded source and were not processed by this run", missingInput),
+				Remediation: "Restore each session's managed pair or its recorded native source, then run peasant harvest index to process them.",
+			})
 		}
 	}
 
