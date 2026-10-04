@@ -283,7 +283,7 @@ func (v *CollectiveVillage) serve(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
 	case r.Method == http.MethodGet && path == "/api/v1/schema/version":
-		window := schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1}}
+		window := schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities}
 		v.mu.Lock()
 		if v.requiresNewerPeasant {
 			window.MinPushContractVersion, window.PushContractVersion = "99.0.0", "99.0.0"

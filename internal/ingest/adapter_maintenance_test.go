@@ -154,7 +154,13 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 				baselineConfig := makePipelineConfig(output)
 				baselineConfig.Reindex = true
 				baselineConfig.Sources = nil
-				baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, baselineConfig, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
+				// Bootstrap only the index: omitted adapter provenance is the
+				// historical baseline 1 that this corpus subsequently refreshes.
+				baselineVersions := maps.Clone(ingest.HarvesterVersionRegistry)
+				baselineTarget := baselineVersions[metadata.ModelHarness]
+				baselineTarget.AdapterVersion = 1
+				baselineVersions[metadata.ModelHarness] = baselineTarget
+				baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, baselineConfig, ingest.WithHarvesterVersions(baselineVersions), ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 				if err != nil {
 					t.Fatal(err)
 				}

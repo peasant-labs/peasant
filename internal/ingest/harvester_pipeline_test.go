@@ -66,6 +66,8 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			for _, session := range fixtures.Sessions {
 				meta := makeReindexMeta(t, string(session.ID), "/missing/native.jsonl")
 				meta.ModelHarness = session.Harness
+				adapterVersion := versions[session.Harness].AdapterVersion
+				meta.AdapterVersion = &adapterVersion
 				meta.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 				storetest.SeedManagedInput(t, db, fs, testOutputDir, *meta, []byte(session.Transcript))
 				previous := ingest.HarvesterVersionRegistry[session.Harness].IndexerVersion

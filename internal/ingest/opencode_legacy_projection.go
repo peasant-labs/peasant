@@ -920,29 +920,7 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	}
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeUnknownTypeDiagnostics(session, unknownPartTypes, "part")...)
 	summary := summarizeOpenCodeSemanticMessages(messages)
-	for _, message := range messages {
-		if message.Data.Role != RoleAssistant.String() {
-			continue
-		}
-		var evidence struct {
-			Model json.RawMessage `json:"model"`
-		}
-		if json.Unmarshal(message.Raw, &evidence) != nil {
-			continue
-		}
-		mapping, diagnostic := mapOpenCodeVariant(decodeOpenCodeModelVariant(evidence.Model))
-		if diagnostic != nil {
-			metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, *diagnostic)
-		}
-		applyThinkingLevelSeed(&metadata, mapping)
-	}
-	if metadata.ThinkingLevel == "" && metadata.ThinkingLevelRaw == "" {
-		mapping, diagnostic := mapOpenCodeVariant(session.OpenCodeModelVariant)
-		if diagnostic != nil {
-			metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, *diagnostic)
-		}
-		applyThinkingLevelSeed(&metadata, mapping)
-	}
+	applyOpenCodeThinkingSeed(&metadata, messages, session.OpenCodeModelVariant)
 	metadata.Stats = StatsInfo{TurnCount: summary.turnCount, ToolCallCount: summary.toolCallCount, TokensIn: summary.tokensIn, TokensOut: summary.tokensOut, DurationMs: summary.endMS - summary.startMS}
 	metadata.Timestamp = TimestampInfo{Start: summary.startMS, End: summary.endMS}
 	metadata.Version = summary.version

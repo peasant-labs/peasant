@@ -503,7 +503,7 @@ func assertPiNativeOutward(t *testing.T, db *store.Store, fs ingest.FileSystem, 
 		t.Fatalf("export namespace outcome: %v", err)
 	}
 	for _, dryRun := range tc.OutboundDryRunModes {
-		publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilityDetailedUsageV1, schema.ContentCapabilityNativeMetadataV1, schema.ContentCapabilityToolNamespaceV1}}}
+		publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities}}
 		var stderr bytes.Buffer
 		cfg := &config.Config{Output: config.OutputConfig{BasePath: output.String()}, Push: config.PushConfig{Method: config.PushMethodAll, Visibility: config.VisibilityPrivate}}
 		creds := &auth.Credentials{APIKey: "synthetic-key", KeyID: "synthetic-key-id", UserID: "synthetic-user", Username: "fixture", VillageURL: "https://village.example.com"}

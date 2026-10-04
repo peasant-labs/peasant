@@ -3832,6 +3832,10 @@ func setupPeasantSyncSession(t *testing.T, mfs *testutil.MemFS, outputDir, hostS
 func makeReindexMeta(t *testing.T, sessionIDStr, originalSourcePath string) *ingest.UnifiedMetadata {
 	t.Helper()
 	meta := makeMinimalMeta(t, sessionIDStr)
+	// Index-maintenance fixtures start with current metadata extraction;
+	// adapter-policy corpora explicitly override this provenance when needed.
+	adapterVersion := ingest.HarvesterVersionRegistry[meta.ModelHarness].AdapterVersion
+	meta.AdapterVersion = &adapterVersion
 	meta.Source = ingest.SourceInfo{
 		FilePath: originalSourcePath,
 		Format:   ingest.SourceFormatJSONL,
