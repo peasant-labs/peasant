@@ -705,7 +705,9 @@ CREATE TABLE sessions (
     indexed_input_hash IS NULL OR (
         length(indexed_input_hash) = 64 AND indexed_input_hash NOT GLOB '*[^0-9a-f]*'
     )
-), active_generation_id TEXT, root_session_id TEXT, session_purpose TEXT, input_submission_count INTEGER CHECK(input_submission_count IS NULL OR (input_submission_count BETWEEN 0 AND 9007199254740991))) STRICT;
+), active_generation_id TEXT, root_session_id TEXT, session_purpose TEXT, input_submission_count INTEGER CHECK(input_submission_count IS NULL OR (input_submission_count BETWEEN 0 AND 9007199254740991)), thinking_level TEXT
+  CHECK (thinking_level IS NULL OR thinking_level IN
+    ('off','minimal','low','medium','high','xhigh','max','ultra')), thinking_level_raw TEXT) STRICT;
 
 CREATE TABLE target_kinds (
     id   INTEGER PRIMARY KEY,
@@ -954,4 +956,4 @@ DELETE FROM "session_entries_fts_data";
 INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 61;
+PRAGMA user_version = 62;

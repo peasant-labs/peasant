@@ -73,6 +73,9 @@ func loadV62Fixture(t *testing.T) v62ThinkingLevelFixture {
 	}
 	rejections := map[string]bool{}
 	for _, r := range fixture.Rejections {
+		if rejections[r.Name] {
+			t.Fatalf("v62 thinking-level fixture: duplicate rejection name %q", r.Name)
+		}
 		rejections[r.Name] = true
 	}
 	if err := requireV62Names("record", fixture.RequiredRecordNames, records); err != nil {

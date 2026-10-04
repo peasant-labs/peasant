@@ -800,6 +800,10 @@ func sessionRowToSession(row *store.SessionRow) ingest.Session {
 	if q := rowToQualityMetrics(row); q != nil {
 		s.Metadata.Quality = q
 	}
+	// The stored session thinking-level seed feeds the local session_detail
+	// payload and export; empty stays empty (unknown, never off).
+	s.ThinkingLevel = row.ThinkingLevel
+	s.ThinkingLevelRaw = row.ThinkingLevelRaw
 	return s
 }
 

@@ -15,6 +15,8 @@ var _ ingest.StoredMetadataReader = (*Store)(nil)
 // One statement captures the session, dimensions, retained seed and commits.
 // Missing original fields (including redaction and project name) stay absent;
 // no computed metric, historical checksum or current adapter target is used.
+// The thinking-level seed rides in the patch object so a NULL column is removed
+// (absent, never off) rather than emitted as JSON null.
 func (s *Store) ReadStoredMetadata(ctx context.Context, sid ingest.SessionID) ([]byte, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -36,7 +38,8 @@ func (s *Store) ReadStoredMetadata(ctx context.Context, sid ingest.SessionID) ([
             'hash', c.commit_hash, 'message', c.message, 'authorName', c.author_name,
             'authorEmail', c.author_email, 'commitTime', c.commit_time, 'authorTime', c.author_time
         )) FROM (SELECT * FROM session_commits WHERE session_id = s.session_id ORDER BY commit_hash) c))
-), json_object('adapterVersion', s.adapter_version, 'stats', json(s.metric_seed_json))),
+), json_object('adapterVersion', s.adapter_version, 'stats', json(s.metric_seed_json),
+    'thinkingLevel', s.thinking_level, 'thinkingLevelRaw', s.thinking_level_raw)),
 json_type(s.metric_seed_json)
 FROM sessions s
 JOIN host_slugs h ON h.opaque_id = s.opaque_host_id
