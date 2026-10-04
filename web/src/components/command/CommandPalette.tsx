@@ -10,6 +10,7 @@ import { useServerCapabilities } from '@/contexts/ServerCapabilitiesContext';
 import { fetchGroupedSearchMatches } from '@/lib/api/grouped';
 import { fetchDiscovery, requireDiscoveryItem, type DiscoveryItem } from '@/lib/api/discovery';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
+import { displayProject } from '@/lib/quality/utils';
 import { parseProjectHash, transcriptHref } from '@/lib/navigation/projectRoutes';
 import type { SearchResult } from '@peasant-labs/schema';
 
@@ -77,6 +78,27 @@ const SEARCH_MIN_CHARS = 2;
 /** Collapse a FTS5 snippet to a single trimmed line for the command label. */
 export function messageLabel(snippet: string): string {
   return snippet.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A direct-lookup hit carries no FTS5 content snippet: the backend (#350)
+ * short-circuits a well-formed session id or project hash to the session
+ * itself, shaped as a SearchResult with an empty snippet. Whitespace-only
+ * counts as empty so a blank row can never render as a content match.
+ */
+export function isDirectLookupResult(result: Pick<SearchResult, 'snippet'>): boolean {
+  return result.snippet.trim() === '';
+}
+
+/**
+ * Identity label for a direct-lookup hit: the matched session in its project
+ * (`session <id> in <project>`). Chrome stays lowercase; the session id and
+ * the project display name keep their own casing. A project-hash query
+ * resolves to that project's newest session, so the same label identifies the
+ * project as well as the session.
+ */
+export function directLookupLabel(result: Pick<SearchResult, 'sessionId' | 'project'>): string {
+  return `session ${result.sessionId} in ${displayProject(result.project)}`;
 }
 
 /** Event name a visible affordance (e.g. the nav ⌘K pill) dispatches to open
@@ -199,15 +221,18 @@ export function CommandPalette() {
 
   // Server-ranked transcript hits — deep-link each to its task turn. Kept OUT
   // of filterCommands (the snippet may not contain the literal query) and
-  // appended after the filtered local commands.
+  // appended after the filtered local commands. A direct-lookup hit (empty
+  // snippet, from #350) renders its session/project identity instead of a
+  // content excerpt, and opens the same transcript turn as a content match.
   const messageCmds = useMemo<Command[]>(
     () =>
       messages.flatMap((r) => {
         const projectHash = parseProjectHash(r.projectHash);
         if (!projectHash) return [];
+        const direct = isDirectLookupResult(r);
         return [{
-          id: `msg:${r.sessionId}:${r.entryIndex}`,
-          label: messageLabel(r.snippet),
+          id: `${direct ? 'id' : 'msg'}:${r.sessionId}:${r.entryIndex}`,
+          label: direct ? directLookupLabel(r) : messageLabel(r.snippet),
           group: 'Messages',
           keywords: r.project,
           searchAnnotation: { discovery: r.discovery },

@@ -1,0 +1,30 @@
+valid:
+  search:
+    query: 11111111-1111-1111-1111-111111111111
+    results:
+      - sessionId: sess-selected
+        project: /work/alpha-project
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entryIndex: 6
+        role: user
+        snippet: "fix the [pipeline] retry"
+        score: 2
+      - sessionId: 11111111-1111-1111-1111-111111111111
+        project: /work/alpha-project
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entryIndex: 0
+        role: user
+        snippet: ""
+        score: 1
+  discovery:
+    items:
+      - sessionId: sess-selected
+        locationLabel: alpha-main
+        repositoryLocationId: opaque-location-a
+        branch: main
+        selectionStatus: selected
+      - sessionId: 11111111-1111-1111-1111-111111111111
+        locationLabel: alpha-main
+        repositoryLocationId: opaque-location-a
+        branch: main
+        selectionStatus: selected
