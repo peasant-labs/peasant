@@ -1237,9 +1237,21 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		// The ordinary index inventory is database-driven only: stale producer
 		// revisions, plus the sessions a crash between the two write commits can
 		// leave (the repair predicate). Neither reads the tree; each hit reads
-		// only its own pair when it is indexed.
-		candidates := append([]SessionID(nil), staleIDs...)
-		candidates = append(candidates, p.repairSessions(ctx)...)
+		// only its own pair when it is indexed. The two inventories select from
+		// the same table and are not disjoint, so the candidates are
+		// deduplicated before anything is counted or processed.
+		repairIDs := p.repairSessions(ctx)
+		candidates := make([]SessionID, 0, len(staleIDs)+len(repairIDs))
+		seenCandidates := make(map[SessionID]bool, len(staleIDs)+len(repairIDs))
+		for _, inventory := range [][]SessionID{staleIDs, repairIDs} {
+			for _, sid := range inventory {
+				if seenCandidates[sid] {
+					continue
+				}
+				seenCandidates[sid] = true
+				candidates = append(candidates, sid)
+			}
+		}
 		// Every candidate this pass does not index is counted so a stored
 		// session can never disappear into the run's unchanged total without a
 		// signal. The selection skip is the one the user can act on; the
@@ -1289,16 +1301,16 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			p.reportDiagnostic(DiagnosticEntry{
 				ErrorType:   "stale_index_outside_selection",
 				Location:    "stored index maintenance",
-				Message:     fmt.Sprintf("%d stored session(s) outside this run's session selection were left at an older index and were not upgraded by this run", selectionSkipped),
-				Remediation: "Run `peasant harvest index` to upgrade every stored session with a stale indexer revision, or include these sessions' projects in the kickstart selection and run again.",
+				Message:     fmt.Sprintf("%d stored session(s) outside this run's session selection still need index maintenance (an older indexer revision or an unfinished repair) and were not processed by this run", selectionSkipped),
+				Remediation: "Run peasant harvest index to process every stored session that needs index maintenance, or include these sessions' projects in the kickstart selection and run again.",
 			})
 		}
 		if missingInput > 0 {
 			p.reportDiagnostic(DiagnosticEntry{
 				ErrorType:   "stale_index_missing_input",
 				Location:    "stored index maintenance",
-				Message:     fmt.Sprintf("%d stored session(s) with an older index have neither a readable managed pair nor a recorded source and were not upgraded by this run", missingInput),
-				Remediation: "Restore each session's managed pair or its recorded native source, then run `peasant harvest index` to upgrade them.",
+				Message:     fmt.Sprintf("%d stored session(s) with pending index maintenance have neither a readable managed pair nor a recorded source and were not processed by this run", missingInput),
+				Remediation: "Restore each session's managed pair or its recorded native source, then run peasant harvest index to process them.",
 			})
 		}
 	}

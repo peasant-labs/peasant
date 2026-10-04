@@ -252,21 +252,26 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 }
 
 // TestOrdinaryHarvestReportsStaleSessionsOutsideTheSessionAllowlist seeds one
-// stale stored session and runs the ordinary harvest with a session allowlist
-// that excludes it. The session must stay stale, and the run must report the
-// count with the remedy instead of folding it into the unchanged total.
+// stored session that BOTH maintenance inventories select (a stale revision
+// and a recorded pair whose index input proof is missing) and runs the
+// ordinary harvest with a session allowlist that excludes it. The session must
+// stay stale, and the run must report it exactly once with the remedy instead
+// of folding it into the unchanged total.
 func TestOrdinaryHarvestReportsStaleSessionsOutsideTheSessionAllowlist(t *testing.T) {
 	t.Parallel()
 	document := loadStaleIndexSettlingFixtures(t)
-	var settling *staleIndexSettlingFixture
+	var fixture *staleIndexSettlingFixture
 	for index := range document.Cases {
-		if !document.Cases[index].Refused && document.Cases[index].Harness == string(ingest.HarnessClaudeCode) {
-			settling = &document.Cases[index]
+		if document.Cases[index].Name == "claude-stored-identity-strict-refused" {
+			fixture = &document.Cases[index]
 			break
 		}
 	}
-	if settling == nil {
-		t.Fatal("fixture declares no settling claude-code case")
+	if fixture == nil {
+		t.Fatal("fixture declares no claude-stored-identity-strict-refused case")
+	}
+	if !fixture.StoredIdentity {
+		t.Fatal("fixture invariant: the stored-identity case must record an artifact identity so both maintenance inventories select it")
 	}
 
 	ctx := t.Context()
@@ -278,7 +283,7 @@ func TestOrdinaryHarvestReportsStaleSessionsOutsideTheSessionAllowlist(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	transcript := []byte(document.Transcripts[settling.Transcript])
+	transcript := []byte(document.Transcripts[fixture.Transcript])
 	meta := makeMinimalMeta(t, id.String())
 	meta.ModelHarness = ingest.HarnessClaudeCode
 	meta.ContentHash = schema.ComputeTranscriptHash(transcript)
@@ -295,6 +300,17 @@ func TestOrdinaryHarvestReportsStaleSessionsOutsideTheSessionAllowlist(t *testin
 	}
 	if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
 		t.Fatal(err)
+	}
+	// The recorded identity is what makes the repair inventory select the
+	// session on top of the stale revision: the shape that used to be counted
+	// twice.
+	pair, err := ingest.NewManagedArtifact(encoded, transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: pair}})
+	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+		t.Fatalf("seed stored artifact identity: %+v", results)
 	}
 	seedStalePreviewCapture(t, ctx, database, id)
 
@@ -332,19 +348,76 @@ func TestOrdinaryHarvestReportsStaleSessionsOutsideTheSessionAllowlist(t *testin
 		t.Fatalf("a session outside the allowlist changed its stored index state: %+v", state)
 	}
 	var reported *ingest.DiagnosticEntry
+	reportedCount := 0
 	for index := range result.Diagnostics {
 		if result.Diagnostics[index].ErrorType == "stale_index_outside_selection" {
+			reported = &result.Diagnostics[index]
+			reportedCount++
+		}
+	}
+	if reportedCount != 1 || reported == nil {
+		t.Fatalf("the run reported %d selection diagnostics, want exactly 1: %+v", reportedCount, result.Diagnostics)
+	}
+	if !strings.Contains(reported.Message, "1 stored session") {
+		t.Fatalf("diagnostic message = %q, want the skipped count of one", reported.Message)
+	}
+	if !strings.Contains(reported.Remediation, "peasant harvest index") {
+		t.Fatalf("diagnostic remediation = %q, want the harvest index remedy", reported.Remediation)
+	}
+}
+
+// TestOrdinaryHarvestReportsStaleSessionsWithoutInput seeds a stale stored
+// session whose managed pair and recorded source are both absent and runs the
+// ordinary harvest without a session allowlist. The run must count it and
+// report the missing-input remedy instead of dropping it silently.
+func TestOrdinaryHarvestReportsStaleSessionsWithoutInput(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fs := testutil.NewCountingFS(testutil.NewMemFS())
+	database := storetest.OpenWith(t)
+	defer database.Close()
+
+	id, err := ingest.NewSessionID(testutil.TestSessionUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No pair is written and the metadata records no source path, so neither
+	// reconstruction path can produce the session.
+	meta := makeMinimalMeta(t, id.String())
+	meta.ModelHarness = ingest.HarnessClaudeCode
+	if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+		t.Fatal(err)
+	}
+	seedStalePreviewCapture(t, ctx, database, id)
+
+	cfg := makePipelineConfig(testOutputDir)
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
+	}
+	pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := pipeline.Run(ctx)
+	if err != nil {
+		t.Fatalf("harvest: %v", err)
+	}
+	if result.Summary.Indexed != 0 {
+		t.Fatalf("a session with no readable input was indexed; diagnostics: %+v", result.Diagnostics)
+	}
+	var reported *ingest.DiagnosticEntry
+	for index := range result.Diagnostics {
+		if result.Diagnostics[index].ErrorType == "stale_index_missing_input" {
 			reported = &result.Diagnostics[index]
 		}
 	}
 	if reported == nil {
-		t.Fatalf("the run did not report the stale sessions outside the session allowlist: %+v", result.Diagnostics)
+		t.Fatalf("the run did not report the stale session without input: %+v", result.Diagnostics)
 	}
 	if !strings.Contains(reported.Message, "1 stored session") {
-		t.Fatalf("diagnostic message = %q, want the skipped count", reported.Message)
-	}
-	if !strings.Contains(reported.Remediation, "peasant harvest index") {
-		t.Fatalf("diagnostic remediation = %q, want the harvest index remedy", reported.Remediation)
+		t.Fatalf("diagnostic message = %q, want the missing-input count of one", reported.Message)
 	}
 }
 
