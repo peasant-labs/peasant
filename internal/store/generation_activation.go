@@ -469,6 +469,14 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 	if intent.ExplicitRebuild {
 		mode = ingest.SessionEntryWriteExplicitRebuild
 	}
+	// Validate first, exactly as the ordinary activation does: the validator
+	// text is untrusted (it can echo candidate references), so a structural
+	// refusal carries only the fixed category. After this check, the guarded
+	// transaction's own refusal is safe to wrap and keeps its actionable
+	// reason.
+	if err := (generationIndexFormat{}).Validate(indexformat.V2{Generation: generation}); err != nil {
+		return fmt.Errorf("store: recover pending activation for session %s generation %s: the staged candidate failed managed generation validation; the prior generation is preserved and the candidate is retained; re-index the source for a fresh candidate", sessionID, intent.GenerationID)
+	}
 	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 		SessionID:          sessionID,
 		Result:             indexformat.V2{Generation: generation},
@@ -486,17 +494,11 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 	}})
 	for _, result := range results {
 		if result.Err != nil {
-			// Preserve the typed compare-and-swap refusal so the caller's
-			// verified-retry path keeps working; its message names only the
-			// validated session identifier.
-			var stale *ingest.StaleIndexWorkError
-			if errors.As(result.Err, &stale) {
-				return fmt.Errorf("store: recover pending activation for session %s generation %s: %w; the prior generation is preserved and the candidate is retained", sessionID, intent.GenerationID, result.Err)
-			}
-			// Every other replay failure can carry untrusted candidate detail:
-			// the managed validator echoes title and content references. The
-			// refusal names only the validated requested identities.
-			return fmt.Errorf("store: recover pending activation for session %s generation %s: the managed generation transaction refused the staged candidate; the prior generation is preserved and the candidate is retained; retry a verified activation", sessionID, intent.GenerationID)
+			// The candidate already passed validation above, so the guarded
+			// transaction's refusal (including the typed compare-and-swap
+			// refusal the verified-retry path relies on) names only
+			// validated identities; wrap it so its reason stays actionable.
+			return fmt.Errorf("store: recover pending activation for session %s generation %s: %w; the prior generation is preserved and the candidate is retained", sessionID, intent.GenerationID, result.Err)
 		}
 	}
 	if err := s.persistPriorEvidence(ctx, sessionID, intent.GenerationID, intent.PriorEvidence); err != nil {
