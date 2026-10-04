@@ -130,6 +130,8 @@ func buildLegacyExportPayload(ctx context.Context, db *store.Store, fs ingest.Fi
 	if detail != nil {
 		fullSession.Harness = defaults.Harness(detail.ModelHarness)
 		fullSession.Model = detail.ModelID
+		fullSession.ThinkingLevel = detail.ThinkingLevel
+		fullSession.ThinkingLevelRaw = detail.ThinkingLevelRaw
 		fullSession.Project = detail.ProjectName
 		fullSession.ProjectPath = detail.ProjectPath
 		fullSession.StartTime = time.UnixMilli(detail.StartMs)
