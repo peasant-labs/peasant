@@ -1,4 +1,6 @@
 # Native thinking-level mapping table: one case per harness/native value.
+# Every exact canonical spelling is identity (no raw) for every harness,
+# checked before harness aliases.
 # level empty = unknown (absent), never off. raw empty = no raw evidence.
 # rawDropped = the native value could not be kept as raw and the mapper
 # reports one thinking_level_raw_dropped diagnostic. nativeGo is a Go
@@ -50,10 +52,10 @@ cases:
     harness: codex
     native: "Turbo-Mode"
     raw: "Turbo-Mode"
-  - name: codex_off_is_not_a_codex_spelling
+  - name: codex_off_identity
     harness: codex
     native: "off"
-    raw: "off"
+    level: off
   - name: codex_case_is_not_folded
     harness: codex
     native: "High"
@@ -108,10 +110,10 @@ cases:
     harness: claude
     native: "trivial"
     raw: "trivial"
-  - name: claude_effort_minimal_is_not_a_claude_effort
+  - name: claude_effort_minimal_identity
     harness: claude
     native: "minimal"
-    raw: "minimal"
+    level: minimal
   - name: claude_effort_empty_is_not_observed
     harness: claude
     native: ""
@@ -234,6 +236,34 @@ cases:
     harness: pi
     native: "none"
     raw: "none"
+  - name: claude_effort_off_identity
+    harness: claude
+    native: "off"
+    level: off
+  - name: claude_legacy_minimal_identity
+    harness: claude_legacy
+    native: "minimal"
+    level: minimal
+  - name: claude_legacy_low_identity
+    harness: claude_legacy
+    native: "low"
+    level: low
+  - name: claude_legacy_medium_identity
+    harness: claude_legacy
+    native: "medium"
+    level: medium
+  - name: claude_legacy_xhigh_identity
+    harness: claude_legacy
+    native: "xhigh"
+    level: xhigh
+  - name: claude_legacy_max_identity
+    harness: claude_legacy
+    native: "max"
+    level: max
+  - name: opencode_ultra_identity
+    harness: opencode
+    native: "ultra"
+    level: ultra
   - name: raw_edge_whitespace_is_dropped_with_diagnostic
     harness: codex
     native: " high"

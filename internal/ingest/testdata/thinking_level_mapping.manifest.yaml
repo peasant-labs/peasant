@@ -10,7 +10,7 @@ requiredNames:
   - codex_persistent_maps_off_with_raw
   - codex_custom_is_unknown_with_raw
   - codex_arbitrary_is_unknown_with_exact_bytes
-  - codex_off_is_not_a_codex_spelling
+  - codex_off_identity
   - codex_case_is_not_folded
   - codex_numeric_budget_is_never_a_level
   - codex_empty_is_not_observed
@@ -24,7 +24,7 @@ requiredNames:
   - claude_effort_none_maps_off_with_raw
   - claude_effort_small_is_unknown_with_raw
   - claude_effort_trivial_is_unknown_with_raw
-  - claude_effort_minimal_is_not_a_claude_effort
+  - claude_effort_minimal_identity
   - claude_effort_empty_is_not_observed
   - claude_legacy_none_maps_off_with_raw
   - claude_legacy_high_identity
@@ -55,6 +55,13 @@ requiredNames:
   - pi_ultra_identity
   - pi_other_is_unknown_with_raw
   - pi_none_is_not_a_pi_spelling
+  - claude_effort_off_identity
+  - claude_legacy_minimal_identity
+  - claude_legacy_low_identity
+  - claude_legacy_medium_identity
+  - claude_legacy_xhigh_identity
+  - claude_legacy_max_identity
+  - opencode_ultra_identity
   - raw_edge_whitespace_is_dropped_with_diagnostic
   - raw_invalid_utf8_is_dropped_with_diagnostic
   - raw_over_byte_bound_is_dropped_with_diagnostic

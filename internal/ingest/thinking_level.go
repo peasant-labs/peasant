@@ -33,32 +33,19 @@ func (m thinkingLevelMapping) IsZero() bool {
 	return m.Level == "" && m.Raw == ""
 }
 
-// thinkingLevelRule describes one harness vocabulary: identity spellings map
-// to themselves without raw; aliases map to a fixed canonical (possibly empty
-// = unknown) and keep the native spelling as raw. Anything else is unknown
-// with the exact native bytes as raw.
+// thinkingLevelRule describes one harness vocabulary. Every exact canonical
+// spelling (schema.AllThinkingLevels) maps to itself without raw, checked
+// before any alias; aliases map to a fixed canonical (possibly empty =
+// unknown) and keep the native spelling as raw. Anything else is unknown with
+// the exact native bytes as raw.
 type thinkingLevelRule struct {
-	source   string
-	identity map[string]struct{}
-	aliases  map[string]schema.ThinkingLevel
-}
-
-func thinkingLevelSet(levels ...schema.ThinkingLevel) map[string]struct{} {
-	set := make(map[string]struct{}, len(levels))
-	for _, level := range levels {
-		set[string(level)] = struct{}{}
-	}
-	return set
+	source  string
+	aliases map[string]schema.ThinkingLevel
 }
 
 var (
 	codexEffortRule = thinkingLevelRule{
 		source: "Codex turn_context.payload.effort",
-		identity: thinkingLevelSet(
-			schema.ThinkingLevelMinimal, schema.ThinkingLevelLow, schema.ThinkingLevelMedium,
-			schema.ThinkingLevelHigh, schema.ThinkingLevelXHigh, schema.ThinkingLevelMax,
-			schema.ThinkingLevelUltra,
-		),
 		aliases: map[string]schema.ThinkingLevel{
 			"none":       schema.ThinkingLevelOff,
 			"persistent": schema.ThinkingLevelOff,
@@ -67,37 +54,26 @@ var (
 	}
 	claudeEffortRule = thinkingLevelRule{
 		source: "Claude Code assistant effort",
-		identity: thinkingLevelSet(
-			schema.ThinkingLevelLow, schema.ThinkingLevelMedium, schema.ThinkingLevelHigh,
-			schema.ThinkingLevelXHigh, schema.ThinkingLevelMax, schema.ThinkingLevelUltra,
-		),
 		aliases: map[string]schema.ThinkingLevel{
 			"none":      schema.ThinkingLevelOff,
 			"ultracode": schema.ThinkingLevelUltra,
 		},
 	}
 	claudeLegacyLevelRule = thinkingLevelRule{
-		source:   "Claude Code thinkingMetadata.level",
-		identity: thinkingLevelSet(schema.AllThinkingLevels...),
+		source: "Claude Code thinkingMetadata.level",
 		aliases: map[string]schema.ThinkingLevel{
 			"none": schema.ThinkingLevelOff,
 		},
 	}
 	openCodeVariantRule = thinkingLevelRule{
 		source: "OpenCode model.variant",
-		identity: thinkingLevelSet(
-			schema.ThinkingLevelOff, schema.ThinkingLevelMinimal, schema.ThinkingLevelLow,
-			schema.ThinkingLevelMedium, schema.ThinkingLevelHigh, schema.ThinkingLevelXHigh,
-			schema.ThinkingLevelMax,
-		),
 		aliases: map[string]schema.ThinkingLevel{
 			"none":    schema.ThinkingLevelOff,
 			"default": "",
 		},
 	}
 	piThinkingLevelRule = thinkingLevelRule{
-		source:   "Pi thinkingLevel",
-		identity: thinkingLevelSet(schema.AllThinkingLevels...),
+		source: "Pi thinkingLevel",
 	}
 )
 
@@ -137,8 +113,8 @@ func (r thinkingLevelRule) apply(native string) (thinkingLevelMapping, *Diagnost
 	if native == "" {
 		return thinkingLevelMapping{}, nil
 	}
-	if _, ok := r.identity[native]; ok {
-		return thinkingLevelMapping{Level: schema.ThinkingLevel(native)}, nil
+	if level := schema.ThinkingLevel(native); level.IsValid() {
+		return thinkingLevelMapping{Level: level}, nil
 	}
 	level := r.aliases[native]
 	raw, err := schema.NewThinkingLevelRaw(native)
