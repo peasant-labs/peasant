@@ -24,17 +24,26 @@ type arenaLifetimeCase struct {
 func loadArenaLifetimeFixtures(t *testing.T) []arenaLifetimeCase {
 	t.Helper()
 	var fixture struct {
-		Cases []arenaLifetimeCase `yaml:"cases"`
+		RequiredNames []string            `yaml:"required_names"`
+		Cases         []arenaLifetimeCase `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(arenaLifetimeFixtures, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	if len(fixture.RequiredNames) == 0 {
+		t.Fatal("arena lifetime fixture declares no required case names")
+	}
 	names := make(map[string]bool)
 	for _, c := range fixture.Cases {
+		if c.Name == "" || names[c.Name] {
+			t.Fatalf("arena lifetime fixture has an empty or repeated case name %q", c.Name)
+		}
 		names[c.Name] = true
 	}
-	if !names["later_parsers_finish_first"] || !names["child_waits_for_parent_commit"] {
-		t.Fatal("missing required arena lifetime regression")
+	for _, name := range fixture.RequiredNames {
+		if !names[name] {
+			t.Fatalf("arena lifetime fixture is missing required case %q", name)
+		}
 	}
 	return fixture.Cases
 }

@@ -1,3 +1,6 @@
+required_names:
+  - later_parsers_finish_first
+  - child_waits_for_parent_commit
 cases:
   - name: later_parsers_finish_first
     ack: [1, 2]
