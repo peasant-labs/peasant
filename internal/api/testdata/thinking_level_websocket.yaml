@@ -1,0 +1,29 @@
+requiredNames: [stored_seed, first_turn_not_final, raw_only, absent_not_off]
+cases:
+  - name: stored_seed
+    storedLevel: ultra
+    storedRaw: ultracode
+    expectedLevel: ultra
+    expectedRaw: ultracode
+    turns:
+      - role: assistant
+  - name: first_turn_not_final
+    storedLevel: high
+    expectedLevel: off
+    expectedRaw: none
+    turns:
+      - role: user
+      - role: assistant
+        level: off
+        raw: none
+      - role: user
+      - role: assistant
+        level: ultra
+  - name: raw_only
+    expectedRaw: custom
+    turns:
+      - role: assistant
+        raw: custom
+  - name: absent_not_off
+    turns:
+      - role: assistant
