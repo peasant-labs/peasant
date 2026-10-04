@@ -26,6 +26,12 @@ type Session struct {
 	ProjectPath string // from projects.project_path (working directory)
 	PushedAt    *int64 // from sessions.pushed_at (nil = not pushed)
 
+	// ThinkingLevel is the session-level seed (earliest valid root-assistant
+	// observation); empty means unknown, never off. ThinkingLevelRaw is the
+	// exact native spelling when it differs from the canonical level.
+	ThinkingLevel    ThinkingLevel
+	ThinkingLevelRaw ThinkingLevelRaw
+
 	// Managed graph fields — populated from a committed generation snapshot
 	// (ReadSnapshot metadata) on the durable detail path. Nil/zero means the
 	// source has no durable graph evidence; they are omitted from the wire
@@ -72,6 +78,11 @@ type Turn struct {
 	// ObservedModel is exact source evidence. Omission remains omission; readers
 	// derive sticky state without mutating this raw observation.
 	ObservedModel ObservedModelID
+
+	// ThinkingLevel / ThinkingLevelRaw are the per-turn thinking-level
+	// evidence lifted from assistant entry Extra. Empty means not observed.
+	ThinkingLevel    ThinkingLevel
+	ThinkingLevelRaw ThinkingLevelRaw
 
 	// Command is the skill or user-defined slash command this turn invoked, as
 	// recorded at index time. It is nil when the turn invoked none. The rendered
