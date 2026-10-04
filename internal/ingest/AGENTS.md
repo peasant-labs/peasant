@@ -94,6 +94,10 @@ multi-file readers retain their existing consistency limitations.
 Slot state machine (monotonic): `empty(0) ──Add──▶ ready(1) ──Drain──▶ claimed(2) ──AckBatch──▶ acked(3)`
 `Drain()` returns a `DrainBatch` (Results + Claimed indices). `AckBatch(DrainBatch)` frees arena space.
 Multiple `DrainBatch` values may be outstanding simultaneously; each owns its own `Claimed` slice. The drain loop now attaches one completion token to the streamed INDEX work for that batch, so arena bytes are released only after all parser workers that can read that batch finish.
+Released allocation spans (including wrap gaps) are tracked by linear arena coordinates.
+Only a contiguous released prefix advances the tail: slot publication, parent gates, and
+batch completion may reorder allocations, but no release may skip an older live span.
+Exhausted-slot rollbacks use the same ordered release path.
 
 **SessionEntryQueue** — Vyukov MPMC. Each slot has a `sequence` atomic (sole sync point).
 Push: CAS `head`, write, store `seq = pos+1`. Pop: CAS `tail`, read, store `seq = pos+cap`.

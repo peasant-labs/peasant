@@ -370,7 +370,7 @@ bounded backoff timer (1ms→16ms cap), or its context, until the drainLoop's
    Add: free < payload? wait on {arenaFreed, backoff 1→16 ms, ctx.Done}
         else copy, mark ready ─▶ wake Drain (ready | workersDone | indexDone | ctx)
    ctx.Done (Option B): keep the result outside the arena, arenaLen 0
-   AckBatch: arenaTail += freed; close arenaFreed ─▶ wake waiters
+   AckBatch: release spans; advance contiguous freed prefix ─▶ wake waiters
    Drain() ─▶ DB Insert ─▶ AckBatch() ─▶ free arena
 ```
 
@@ -381,6 +381,14 @@ advances `arenaTail` first and then closes and replaces the generation, so a
 woken producer always observes the freed bytes. Option B keeps a cancelled run's
 accounting: the stopped result stays in its slot with `arenaLen` 0, so it is
 still drained and recorded, while nothing is copied into the arena.
+
+Acknowledgement order need not match arena allocation order: a parent gate can
+delay a slot, producers can publish out of order, and later parser batches can
+finish first. Releases are tracked by allocation coordinates, including wrap
+padding. The tail advances only over the contiguous released prefix; a later
+acknowledgement cannot recycle an older live transcript. An exhausted-slot
+rollback obeys the same rule. The release broadcast fires only when that prefix
+advances.
 
 ### Producer Path (Add)
 

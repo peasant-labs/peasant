@@ -510,7 +510,7 @@ type stagedEntry struct {
 // transcriptData slice pointing into the arena slab.
 //
 // The arena is treated as a ring: arenaHead bumps forward as entries are
-// added; Drain advances arenaTail past the regions freed by released entries.
+// added; AckBatch advances arenaTail over the contiguous released prefix.
 // When the arena has insufficient contiguous space a producer waits on the
 // arena-freed broadcast, a bounded backoff timer, or its context, whichever
 // fires first; AckBatch frees the bytes.
@@ -581,6 +581,10 @@ type StagingBuffer struct {
 	// to re-check the arena.
 	freedMu sync.Mutex
 	freed   chan struct{}
+	// released maps allocation starts to ends under freedMu. Slot publication,
+	// parent eligibility and parser completion can all reorder allocations;
+	// only a released span starting at arenaTail can make bytes reusable.
+	released map[int64]int64
 }
 
 // NewStagingBuffer allocates a StagingBuffer with the given slot capacity and
@@ -618,15 +622,33 @@ func (b *StagingBuffer) arenaFreed() chan struct{} {
 	return b.freed
 }
 
-// broadcastArenaFreed closes the current release generation and installs a new
-// one, waking every producer parked on the previous generation. A broadcast,
-// not a cap-1 signal: one ack may free room for several waiting producers.
-// Callers advance arenaTail first so a woken producer observes the freed bytes.
-func (b *StagingBuffer) broadcastArenaFreed() {
+// releaseArena records a completed allocation (including its wrap gap). Later
+// allocations may finish first, but cannot recycle an older live span. This
+// also handles a producer rolling back a copy before it could publish a slot.
+func (b *StagingBuffer) releaseArena(start, end int64) {
 	b.freedMu.Lock()
+	defer b.freedMu.Unlock()
+	if b.released == nil {
+		b.released = make(map[int64]int64)
+	}
+	b.released[start] = end
+	tail := b.arenaTail.Load()
+	for {
+		next, ok := b.released[tail]
+		if !ok {
+			break
+		}
+		delete(b.released, tail)
+		tail = next
+	}
+	if tail == b.arenaTail.Load() {
+		return
+	}
+	b.arenaTail.Store(tail)
+	// Broadcast only after publishing reusable space, so every waiting
+	// producer wakes to coordinates that include the released prefix.
 	close(b.freed)
 	b.freed = make(chan struct{})
-	b.freedMu.Unlock()
 }
 
 // copyToArena copies src into the arena ring and returns (start, length, pad,
@@ -746,8 +768,7 @@ func (b *StagingBuffer) Add(ctx context.Context, r workerResult) bool {
 			if aLen > 0 {
 				// Release the rolled-back copy and the wrap gap it claimed,
 				// matching what AckBatch would have freed for this entry.
-				b.arenaTail.Add(aLen + aPad)
-				b.broadcastArenaFreed()
+				b.releaseArena(aStart-aPad, aStart+aLen)
 			}
 			return false
 		}
@@ -874,26 +895,23 @@ func (b *StagingBuffer) Drain() DrainBatch {
 }
 
 // AckBatch finalises a batch returned by Drain. It marks each claimed slot as
-// acked(3) and frees the arena space those entries occupied, advancing
-// arenaTail first and then broadcasting the release so every producer waiting
-// in copyToArena wakes to re-check the arena.
+// acked(3) and releases their arena allocations. Only the contiguous released
+// prefix advances arenaTail; later completed allocations wait for older live
+// spans. Advancing the tail broadcasts to producers waiting in copyToArena.
 //
 // Must be called from the same goroutine as Drain, after the consumer has
 // finished reading the batch's transcriptData slices. Multiple in-flight
 // batches may be acked in any order.
 func (b *StagingBuffer) AckBatch(batch DrainBatch) {
-	var freedArenaBytes int64
 	for _, idx := range batch.Claimed {
 		// arenaPad is the wrap gap this entry's copy skipped; it was charged to
 		// the entry at copy time, so freeing it here keeps the ring's capacity
 		// intact across wraps.
-		freedArenaBytes += b.slots[idx].arenaLen + b.slots[idx].arenaPad
+		slot := b.slots[idx]
 		b.state[idx].Store(3) // acked
-	}
-
-	if freedArenaBytes > 0 {
-		b.arenaTail.Add(freedArenaBytes)
-		b.broadcastArenaFreed()
+		if slot.arenaLen > 0 {
+			b.releaseArena(slot.arenaStart-slot.arenaPad, slot.arenaStart+slot.arenaLen)
+		}
 	}
 }
 
@@ -916,7 +934,8 @@ func (b *StagingBuffer) Cap() int { return len(b.slots) }
 // ArenaSize returns the total arena size in bytes.
 func (b *StagingBuffer) ArenaSize() int64 { return int64(len(b.arena)) }
 
-// ArenaUsed returns the number of arena bytes currently in use (live entries).
+// ArenaUsed returns bytes not yet reusable: live allocations, wrap gaps and
+// released allocations waiting behind an older live span.
 func (b *StagingBuffer) ArenaUsed() int64 {
 	used := b.arenaHead.Load() - b.arenaTail.Load()
 	if used < 0 {
