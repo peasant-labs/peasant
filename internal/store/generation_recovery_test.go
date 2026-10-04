@@ -38,6 +38,7 @@ type projectionRecoveryFixture struct {
 	Generation struct {
 		CompleteID      string `yaml:"complete_id"`
 		FailedID        string `yaml:"failed_id"`
+		DiscardedID     string `yaml:"discarded_id"`
 		LongTextPadding int    `yaml:"long_text_padding"`
 	} `yaml:"generation"`
 	Cases []struct {
@@ -412,11 +413,12 @@ func TestProjectionCommitRecovery(t *testing.T) {
 				// the last-good read authority.
 				assertIntentDigestMismatchRefused(t, s, id, fixture)
 				return
-			case "corrupt-staged-blob":
+			case "discard-unverifiable":
 				// A staged blob was damaged after the candidate was renamed
-				// into place. Recovery must verify the bytes instead of
-				// trusting the manifest digest.
-				assertCorruptStagedBlobRefused(t, s, root, id, fixture)
+				// into place. Recovery must verify the bytes, discard the
+				// unverifiable candidate instead of wedging the session, and
+				// let a fresh candidate stage and activate.
+				assertUnverifiableCandidateDiscarded(t, s, root, id, fixture)
 				return
 			default:
 				t.Fatalf("unknown recovery %q", tc.Recovery)
@@ -507,18 +509,18 @@ func assertIntentDigestMismatchRefused(t *testing.T, s *Store, id schema.Session
 	}
 }
 
-// assertCorruptStagedBlobRefused damages one blob of a candidate that was
+// assertUnverifiableCandidateDiscarded damages one blob of a candidate that was
 // renamed into place with a pending intent, then replays it through the real
-// recovery path. Recovery must verify the staged bytes instead of trusting the
-// manifest digest: the replay is refused, the last-good generation stays
-// visible, and the candidate and intent are retained. Restoring the exact
-// bytes lets the same intent settle, so the refusal is the damage, not a
-// permanent block.
-func assertCorruptStagedBlobRefused(t *testing.T, s *Store, root string, id schema.SessionID, fixture projectionRecoveryFixture) {
+// recovery path. A candidate whose bytes no longer verify can never replay, so
+// recovery must discard the pending intent instead of wedging the session: the
+// last-good generation stays visible, the damaged directory is retained for
+// cleanup, a fresh candidate stages and activates, and the damaged directory
+// becomes removable once it no longer owns the intent.
+func assertUnverifiableCandidateDiscarded(t *testing.T, s *Store, root string, id schema.SessionID, fixture projectionRecoveryFixture) {
 	t.Helper()
 	ref := schema.SourceEntryRef(fixture.CorruptArtifact.EntryRef)
-	blobPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.FailedID, blobName(ref))
-	original, err := os.ReadFile(blobPath)
+	damagedPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.FailedID, blobName(ref))
+	original, err := os.ReadFile(damagedPath)
 	if err != nil {
 		t.Fatalf("read staged blob: %v", err)
 	}
@@ -527,36 +529,40 @@ func assertCorruptStagedBlobRefused(t *testing.T, s *Store, root string, id sche
 	}
 	damaged := append([]byte(nil), original...)
 	damaged[0] ^= 0xff
-	if err := os.WriteFile(blobPath, damaged, 0o600); err != nil {
+	if err := os.WriteFile(damagedPath, damaged, 0o600); err != nil {
 		t.Fatalf("damage staged blob: %v", err)
 	}
 	before := readIndexStateForTest(t, s, id)
-	if _, err := s.RecoverGenerationActivation(context.Background(), id); err == nil {
-		t.Fatal("recovery replayed a staged candidate whose blob no longer matches its recorded digest")
+	if _, err := s.RecoverGenerationActivation(context.Background(), id); !errors.Is(err, errGenerationCandidateDiscarded) {
+		t.Fatalf("recovery error = %v, want the discarded-candidate signal", err)
 	}
 	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
-		t.Fatalf("after refused recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
-	}
-	retained, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.FailedID)
-	if err != nil || retained.ID != fixture.Generation.FailedID {
-		t.Fatalf("staged candidate was not retained after refused recovery: %v (%q)", err, retained.ID)
-	}
-	pending, err := s.generationArtifacts.ReadIntent(context.Background(), id)
-	if err != nil || pending == nil || pending.GenerationID != fixture.Generation.FailedID {
-		t.Fatalf("pending intent was not retained after refused recovery: %+v (err %v)", pending, err)
+		t.Fatalf("after discarded recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
 	}
 	after := readIndexStateForTest(t, s, id)
 	if after.IndexerVersion != before.IndexerVersion {
-		t.Fatalf("refused recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
+		t.Fatalf("discarded recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
 	}
-	if err := os.WriteFile(blobPath, original, 0o600); err != nil {
-		t.Fatalf("restore staged blob: %v", err)
+	if pending, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || pending != nil {
+		t.Fatalf("discarded recovery left a pending intent: %+v (err %v)", pending, err)
 	}
-	if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
-		t.Fatalf("recover after restoring the staged blob: %v", err)
+	if _, err := os.Stat(damagedPath); err != nil {
+		t.Fatalf("damaged candidate was not retained for cleanup: %v", err)
 	}
-	if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
-		t.Fatalf("after restored recovery visible = %q, want %q", got, fixture.Generation.FailedID)
+	// A fresh candidate stages and activates; the discarded one never blocks it.
+	fresh, freshBlobs := buildTestGeneration(t, id, fixture.Generation.DiscardedID, "diag text G3", "diag input G3", "diag output G3")
+	if err := activateTestGeneration(t, s, fresh, freshBlobs); err != nil {
+		t.Fatalf("activate a fresh candidate after a discarded one: %v", err)
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.DiscardedID {
+		t.Fatalf("after fresh activation visible = %q, want %q", got, fixture.Generation.DiscardedID)
+	}
+	// With the intent gone, the damaged directory is removable.
+	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err != nil {
+		t.Fatalf("clean up the discarded candidate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(damagedPath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("discarded candidate directory survived cleanup: %v", err)
 	}
 }
 

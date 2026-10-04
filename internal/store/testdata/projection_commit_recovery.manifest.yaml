@@ -6,5 +6,5 @@ requiredNames:
   - after-db-before-metadata
   - after-metadata-before-intent-clear
   - mismatched-durable-intent-digest-refused
-  - corrupt-staged-blob-refused
+  - unverifiable-candidate-discarded
   - corrupt-artifact

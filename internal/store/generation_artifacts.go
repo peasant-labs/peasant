@@ -636,6 +636,13 @@ var errGenerationContentDigestMissing = errors.New("store: a content record carr
 // category only and never the reference or a path it carries.
 var errGenerationContentBlobUnverified = errors.New("store: a staged content blob could not be read and verified; the generation is not self-contained; re-stage the candidate")
 
+// errGenerationContentRecordInvalid marks a staged content record the manifest
+// itself makes unusable: an invalid reference, an unowned blob path, a negative
+// length, or a missing digest. The record may be untrusted, so the diagnostic
+// names the fixed category only. Unlike a verification failure, the candidate
+// is retained: a repaired manifest or a later build can still bind it.
+var errGenerationContentRecordInvalid = errors.New("store: a staged content record is invalid; the candidate binding cannot be verified; the candidate was retained for a verified retry")
+
 // computeActivationBinding binds one activation envelope to the COMPLETE
 // candidate. contentDigest supplies each content record's payload digest: the
 // pre-stage caller hashes the blob bytes and the replay path reuses the
@@ -690,11 +697,18 @@ func bindingFromBlobs(blobs map[schema.SourceEntryRef][]byte) func(indexformat.C
 // refuses recovery or an identity check instead of being activated under
 // digests only the manifest still carries.
 //
-// A failed read returns the fixed, reference-free category: the record comes
-// from a manifest that may still be untrusted, so the diagnostic never echoes
-// the reference or a path it carries. Context cancellation is preserved.
+// Two fixed, reference-free categories separate the outcomes a caller acts on:
+// errGenerationContentRecordInvalid for a record the manifest itself makes
+// unusable (the candidate stays for a verified retry), and
+// errGenerationContentBlobUnverified for bytes that no longer verify (the
+// candidate can never replay). Neither echoes the reference or a path it
+// carries, because the manifest may still be untrusted. Context cancellation
+// is preserved.
 func verifiedBlobDigest(ctx context.Context, reader GenerationArtifactStore, sessionID schema.SessionID, generationID string) func(indexformat.ContentRecord) (string, error) {
 	return func(record indexformat.ContentRecord) (string, error) {
+		if err := record.Validate(); err != nil {
+			return "", errGenerationContentRecordInvalid
+		}
 		data, err := reader.ReadBlob(ctx, sessionID, generationID, record)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {

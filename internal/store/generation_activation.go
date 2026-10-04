@@ -116,6 +116,12 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 	}
 
 	if err := s.recoverGenerationIntentLocked(ctx, sessionID); err != nil {
+		// A discarded unverifiable candidate is already reconciled: its intent
+		// is cleared and the damaged directory is retained for cleanup, so the
+		// requested candidate may stage and activate normally.
+		if errors.Is(err, errGenerationCandidateDiscarded) {
+			goto reconciled
+		}
 		// A stale pending intent for the same generation identifier is a
 		// verified-retry case: the new activation carries fresh preconditions
 		// that replace the refused envelope. Clear the stale marker and
@@ -327,8 +333,10 @@ func (s *Store) StageGeneration(ctx context.Context, activation GenerationActiva
 // exclusive lock. It is safe to call at any time; a committed generation is
 // re-repaired from its committed row and its intent cleared, while an
 // uncommitted synced candidate is activated by replaying the persisted
-// envelope with the original guarded preconditions. A stale or unverified
-// candidate stays inactive for a verified retry.
+// envelope with the original guarded preconditions. A candidate whose bytes no
+// longer verify is discarded (errGenerationCandidateDiscarded, its intent
+// cleared and the damaged directory retained for cleanup); a stale, invalid,
+// or mismatched candidate stays inactive for a verified retry.
 //
 // The outcome carries the lock-derived disposition for the recovered intent:
 // CommittedNow when recovery newly committed it, AlreadyCommitted when it was
@@ -382,6 +390,12 @@ func (s *Store) RecoverGenerationActivation(ctx context.Context, sessionID schem
 	return ingest.ActivationOutcome{Disposition: ingest.ActivationNotCommitted, CandidateID: recoveredID}, nil
 }
 
+// errGenerationCandidateDiscarded reports that a pending activation whose
+// content no longer verifies was discarded: its intent is cleared so a fresh
+// candidate can stage, and the damaged directory is retained for cleanup. The
+// active generation and its success stamps are unchanged.
+var errGenerationCandidateDiscarded = errors.New("store: the staged candidate's content no longer verifies and the pending activation was discarded; the damaged directory is retained for cleanup; the next activation stages a fresh candidate")
+
 func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID schema.SessionID) error {
 	intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
 	if err != nil || intent == nil {
@@ -426,12 +440,24 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		return fmt.Errorf("store: recover pending activation for session %s: %w; the synced candidate was preserved and the prior generation is unchanged", sessionID, err)
 	}
 	// Verify the envelope binding before replaying anything: the staged bytes
-	// must still produce the digest the intent recorded. A rejected candidate
-	// whose envelope was replaced, or a manifest that changed under the intent,
-	// stays inactive for a verified retry instead of being activated under the
-	// wrong stamps.
+	// must still produce the digest the intent recorded. A candidate whose
+	// bytes no longer verify is discarded so a fresh candidate can stage; a
+	// rejected candidate whose envelope was replaced, or a manifest that
+	// changed under the intent, stays inactive for a verified retry instead of
+	// being activated under the wrong stamps.
 	stagedDigest, err := computeActivationBinding(generation, verifiedBlobDigest(ctx, s.generationArtifacts, sessionID, intent.GenerationID))
 	if err != nil {
+		if errors.Is(err, errGenerationContentBlobUnverified) {
+			// A damaged or lost blob is not a retryable envelope: nothing can
+			// ever replay it. Discard the pending intent so the next activation
+			// stages a fresh candidate, and keep the damaged directory for
+			// cleanup. Every other binding failure (an invalid record, a
+			// mismatched envelope) keeps the candidate for a verified retry.
+			if clearErr := s.generationArtifacts.ClearIntent(ctx, sessionID); clearErr != nil {
+				return fmt.Errorf("store: discard unverifiable pending activation for session %s generation %s: %w; the damaged candidate was retained and the active generation is unchanged", sessionID, intent.GenerationID, clearErr)
+			}
+			return fmt.Errorf("store: recover pending activation for session %s generation %s: %w", sessionID, intent.GenerationID, errGenerationCandidateDiscarded)
+		}
 		// The staged manifest is untrusted: a content reference can carry a
 		// private path. The wrapped error is the fixed, reference-free binding
 		// category, so the refusal names only the validated requested
