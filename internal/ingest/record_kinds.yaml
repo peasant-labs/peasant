@@ -4,8 +4,8 @@
 version: 3
 harnesses:
   claude-code:
-    adapter_version: 1
-    indexer_version: 18
+    adapter_version: 2
+    indexer_version: 19
     index_version: 1
     fallback: &fallback
       status: retained-unknown
@@ -157,8 +157,8 @@ harnesses:
           - {<<: *tool, kind: tool_use}
           - {<<: *result, kind: tool_result}
   pi:
-    adapter_version: 2
-    indexer_version: 17
+    adapter_version: 3
+    indexer_version: 18
     index_version: 1
     fallback: &fallback
       status: retained-unknown
@@ -202,10 +202,10 @@ harnesses:
           - {<<: *text, kind: image, payload: textual media marker}
           - &tool {kind: toolCall, status: represented, preview: no, payload: tool name and arguments}
   codex:
-    adapter_version: 1
-    indexer_version: 17
+    adapter_version: 2
+    indexer_version: 18
     index_version: 1
-    native_versions: {adapter_version: 2, indexer_version: 18, index_version: 2}
+    native_versions: {adapter_version: 3, indexer_version: 19, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
@@ -432,10 +432,10 @@ harnesses:
           - {<<: *text, kind: network_proxy.rule_saved}
           - {<<: *text, kind: user_verification.notice}
   opencode:
-    adapter_version: 2
-    indexer_version: 17
+    adapter_version: 3
+    indexer_version: 18
     index_version: 1
-    native_versions: {adapter_version: 3, indexer_version: 18, index_version: 2}
+    native_versions: {adapter_version: 4, indexer_version: 19, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
