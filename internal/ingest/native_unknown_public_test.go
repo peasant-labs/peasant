@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,19 +94,53 @@ func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
 	return doc
 }
 
-type nativeUnknownFailingStore struct{ *unknownFailingStore }
+// nativeUnknownFailingStore drops one captured blob from the envelope at both
+// store seams, so the parallel preparation and the serial activation see the
+// same faulty candidate. The preparation error is recorded for assertions.
+type nativeUnknownFailingStore struct {
+	*unknownFailingStore
+	stageMu   sync.Mutex
+	stageErrs []error
+}
+
+func dropFirstBlob(activation ingest.NativeGenerationActivation) ingest.NativeGenerationActivation {
+	activation.Blobs = maps.Clone(activation.Blobs)
+	delete(activation.Blobs, activation.Generation.Generation.Content[0].Ref)
+	return activation
+}
+
+func (s *nativeUnknownFailingStore) StageNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.NativeGenerationStaged, error) {
+	if !s.fail {
+		return s.Store.StageNativeGeneration(ctx, activation)
+	}
+	// Exercise the real artifact preparation's missing-blob failure, not a
+	// prepared success result or a fabricated accounting diagnostic.
+	staged, err := s.Store.StageNativeGeneration(ctx, dropFirstBlob(activation))
+	s.stageMu.Lock()
+	s.stageErrs = append(s.stageErrs, err)
+	s.stageMu.Unlock()
+	return staged, err
+}
+
+func (s *nativeUnknownFailingStore) ActivateStagedNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation, staged ingest.NativeGenerationStaged) (ingest.ActivationOutcome, error) {
+	if s.fail {
+		activation = dropFirstBlob(activation)
+	}
+	return s.Store.ActivateStagedNativeGeneration(ctx, activation, staged)
+}
 
 func (s *nativeUnknownFailingStore) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
 	if s.fail {
-		// Exercise the real artifact transaction's missing-blob failure, not a
-		// prepared success result or a fabricated accounting diagnostic.
-		activation.Blobs = maps.Clone(activation.Blobs)
-		delete(activation.Blobs, activation.Generation.Generation.Content[0].Ref)
+		activation = dropFirstBlob(activation)
 	}
 	return s.Store.ActivateNativeGeneration(ctx, activation)
 }
 
-var _ ingest.NativeGenerationActivator = (*nativeUnknownFailingStore)(nil)
+var (
+	_ ingest.NativeGenerationActivator         = (*nativeUnknownFailingStore)(nil)
+	_ ingest.NativeGenerationStager            = (*nativeUnknownFailingStore)(nil)
+	_ ingest.NativeGenerationPreparedActivator = (*nativeUnknownFailingStore)(nil)
+)
 
 func TestNativeUnknownSourceToPublication(t *testing.T) {
 	t.Parallel()
@@ -356,6 +391,31 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			afterBytes, _ := json.Marshal(after)
 			if !bytes.Equal(before, afterBytes) {
 				t.Fatal("failed write replaced prior export")
+			}
+			if c.Native {
+				writer.stageMu.Lock()
+				stageErrs := slices.Clone(writer.stageErrs)
+				writer.stageMu.Unlock()
+				if len(stageErrs) == 0 {
+					t.Fatal("the faulty candidate was never prepared")
+				}
+				for _, err := range stageErrs {
+					if err == nil || !strings.Contains(err.Error(), "is missing; the generation is not self-contained") {
+						t.Fatalf("preparation did not refuse the missing blob: %v", err)
+					}
+				}
+				recovered, err := db.RecoverGenerationActivation(t.Context(), sid)
+				if err != nil || recovered.Disposition != ingest.ActivationNotCommitted || recovered.CandidateID != "" {
+					t.Fatalf("refused candidate left a recoverable intent: %+v, %v", recovered, err)
+				}
+				recoveredExport, err := export.ExportSession(t.Context(), db, fs, string(sid))
+				if err != nil {
+					t.Fatal(err)
+				}
+				recoveredBytes, _ := json.Marshal(recoveredExport)
+				if !bytes.Equal(before, recoveredBytes) {
+					t.Fatal("recovery after the refused candidate replaced prior export")
+				}
 			}
 			if damageSource != nil {
 				writer.fail = false
