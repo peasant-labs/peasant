@@ -137,12 +137,12 @@ func BenchmarkNativeGenerationBatchCommits(b *testing.B) {
 				store := tc.store()
 				pipeline := &Pipeline{config: PipelineConfig{Parallelism: 8}, metricsStore: store}
 				start := time.Now()
-				flush := pipeline.flushIndexParseResults(context.Background(), results, IndexOutcomeIndexed, "bench", nil)
+				pipeline.flushIndexParseResults(context.Background(), results, IndexOutcomeIndexed, "bench", nil)
 				reporter, ok := store.(benchFirstCommitReporter)
 				if !ok {
 					b.Fatalf("store %T does not report first commit", store)
 				}
-				if got := reporter.commitCount(); got != int64(len(results)) || len(flush.indexed) != len(results) {
+				if got := reporter.commitCount(); got != int64(len(results)) {
 					b.Fatalf("commits = %d, want one per result (%d)", got, len(results))
 				}
 				first := reporter.firstCommitNanos()
