@@ -1,0 +1,9 @@
+requiredNames:
+  - retained_claude
+  - retained_codex
+  - retained_opencode
+  - retained_pi
+  - cursor_unchanged
+  - strike_unchanged
+  - native_codex
+  - native_opencode
