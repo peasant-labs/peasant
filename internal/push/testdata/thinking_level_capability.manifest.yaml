@@ -1,0 +1,10 @@
+expectedCaseCount: 8
+requiredNames:
+  - push_envelope_carries_thinking_level
+  - raw_only_requires_token
+  - canonical_only_requires_token
+  - absent_needs_no_token
+  - missing_token_refuses_before_upload
+  - raw_missing_token_refuses_before_upload
+  - requirements_accumulate
+  - other_token_does_not_cover_thinking
