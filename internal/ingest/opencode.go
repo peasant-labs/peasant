@@ -1462,6 +1462,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	md.ModelHarness = HarnessOpenCode
 	md.Model = modelID
 	md.Version = ses.Version
+	applyOpenCodeThinkingSeed(&md, semanticMessages, decodeOpenCodeModelVariant(ses.Model))
 
 	if session.ParentUUID != nil {
 		parent := *session.ParentUUID
@@ -1537,14 +1538,15 @@ type openCodeProject struct {
 
 // openCodeSession represents the JSON structure of session/{hash}/ses_{id}.json.
 type openCodeSession struct {
-	ID        string `json:"id"`
-	Slug      string `json:"slug"`
-	Version   string `json:"version"`
-	Agent     string `json:"agent"`
-	ProjectID string `json:"projectID"`
-	Directory string `json:"directory"`
-	ParentID  string `json:"parentID"`
-	Title     string `json:"title"`
+	ID        string          `json:"id"`
+	Slug      string          `json:"slug"`
+	Version   string          `json:"version"`
+	Agent     string          `json:"agent"`
+	ProjectID string          `json:"projectID"`
+	Directory string          `json:"directory"`
+	ParentID  string          `json:"parentID"`
+	Title     string          `json:"title"`
+	Model     json.RawMessage `json:"model"`
 	Time      struct {
 		Created int64 `json:"created"`
 		Updated int64 `json:"updated"`
