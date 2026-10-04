@@ -59,6 +59,8 @@ type snapshotHydrationFoldedTool struct {
 }
 
 type snapshotHydrationCase struct {
+	ThinkingSeed                 thinkingLevelPair            `yaml:"thinkingSeed,omitempty"`
+	ExpectedThinkingSeed         thinkingLevelPair            `yaml:"expectedThinkingSeed,omitempty"`
 	Name                         string                       `yaml:"name"`
 	Harness                      string                       `yaml:"harness,omitempty"`
 	Purpose                      string                       `yaml:"purpose,omitempty"`
@@ -224,9 +226,11 @@ func buildHydrationSnapshot(t *testing.T, fixtureCase snapshotHydrationCase) (in
 	}
 	purpose := schema.SessionPurpose(fixtureCase.Purpose)
 	metadata := schema.UnifiedMetadata{
-		SchemaVersion: 1,
-		SessionID:     sessionID,
-		ModelHarness:  harness,
+		ThinkingLevel:    schema.ThinkingLevel(fixtureCase.ThinkingSeed.Level),
+		ThinkingLevelRaw: schema.ThinkingLevelRaw(fixtureCase.ThinkingSeed.Raw),
+		SchemaVersion:    1,
+		SessionID:        sessionID,
+		ModelHarness:     harness,
 		Stats: schema.SessionStats{
 			TurnCount:            fixtureCase.TurnCount,
 			InputSubmissionCount: count,
@@ -306,6 +310,9 @@ func TestSnapshotToDetailValidated(t *testing.T) {
 			}
 			if len(detail.Turns) != len(fixtureCase.ExpectedMainIndices) {
 				t.Fatalf("main turns = %d, want %d", len(detail.Turns), len(fixtureCase.ExpectedMainIndices))
+			}
+			if got := (thinkingLevelPair{Level: string(detail.ThinkingLevel), Raw: string(detail.ThinkingLevelRaw)}); got != fixtureCase.ExpectedThinkingSeed {
+				t.Fatalf("thinking seed = %+v, want %+v", got, fixtureCase.ExpectedThinkingSeed)
 			}
 			for i, want := range fixtureCase.ExpectedMainIndices {
 				if detail.Turns[i].Index != want {
