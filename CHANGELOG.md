@@ -7,6 +7,31 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-04
+
+### Changed
+- Managed-generation staging and commits: candidates prepare their content
+  files in parallel with bounded blob writers, each candidate commits through
+  the serialized writer lane as its own staging completes, and the INDEX
+  progress advances per committed session instead of per batch. A large
+  OpenCode re-index no longer stalls behind one session's file writes (#546).
+- FILTER maintenance passes run their per-session work through the bounded
+  worker pool, read session locations in one bulk query per pass, and no longer
+  rescan the whole output tree when the database already records a location.
+  The stale-adapter and pair-repair inventories no longer take minutes on a
+  large store (#547).
+
+### Fixed
+- OpenCode sessions refused with "transcript checksum does not match committed
+  metadata": the staging arena released byte spans out of allocation order, so
+  a later batch could recycle bytes a parser was still reading. Arena releases
+  now advance the tail only over the contiguous released prefix (#548).
+- Codex subagent sessions refused with "captured metadata is not
+  self-consistent with the captured identity": a subagent rollout embeds the
+  parent thread's envelope in a later `session_meta` record, and the parser
+  re-checked every record. The first decodable metadata envelope now owns
+  identity and context (#549).
+
 ## [0.8.0] - 2026-10-03
 
 ### Added
@@ -577,6 +602,8 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1
+[0.8.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.0
 [0.7.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.7.0-rc1
 [0.6.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0
