@@ -77,10 +77,11 @@ type GenerationIntent struct {
 }
 
 // GenerationArtifactStore owns the file half of the crash protocol. The
-// production implementation is root-confined through os.Root and fsyncs every
-// file and directory before the generation directory is atomically renamed
-// into place. Tests substitute a failing implementation to interrupt a chosen
-// seam.
+// production implementation is root-confined through os.Root, writes the
+// content blobs, fsyncs the manifest and the directory, and atomically renames
+// the generation directory into place. Every binding that trusts a staged
+// candidate re-reads and verifies its blobs. Tests substitute a failing
+// implementation to interrupt a chosen seam.
 type GenerationArtifactStore interface {
 	// Stage writes the generation's content blobs and manifest under an owned,
 	// root-confined generation directory, fsyncs the manifest and the
@@ -291,9 +292,10 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 	return a.install(ctx, files, blobs)
 }
 
-// stagedGenerationFiles is one fully written and fsynced candidate that still
-// lives in its owned temporary directory. It is not installed: no generation
-// directory carries its identifier until install renames it into place.
+// stagedGenerationFiles is one fully written candidate whose manifest and
+// directory are fsynced and which still lives in its owned temporary
+// directory. It is not installed: no generation directory carries its
+// identifier until install renames it into place.
 type stagedGenerationFiles struct {
 	generation indexformat.Generation
 	tmpRel     string

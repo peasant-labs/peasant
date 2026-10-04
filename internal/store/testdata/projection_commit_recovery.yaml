@@ -59,6 +59,14 @@ cases:
     seam: after-rename-before-db
     visible: g1
     recovery: discard-unverifiable
+  # A manifest that exists but cannot be decoded can never replay either.
+  # Recovery must discard its intent so a fresh candidate can stage, exactly as
+  # for a blob that no longer verifies. The undecodable directory stays in
+  # place because ownership cannot be proven for cleanup.
+  - name: undecodable-manifest-discarded
+    seam: after-rename-before-db
+    visible: g1
+    recovery: discard-undecodable-manifest
 # A committed generation whose content blob is damaged after the commit must be
 # refused with an actionable managed-recovery error, never served as partial or
 # empty content.

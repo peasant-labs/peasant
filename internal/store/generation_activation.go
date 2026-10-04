@@ -16,9 +16,11 @@ import (
 )
 
 // GenerationActivation is one immutable V2 candidate plus the file bytes its
-// content records address. The file bytes are staged and fsynced BEFORE the one
-// activation transaction; the transaction installs the generation rows, the
-// canonical main projection, the count mirrors and the active pointer together.
+// content records address. The file bytes are staged BEFORE the one activation
+// transaction: content blobs are written, and the manifest and the directory
+// are fsynced, so every binding that trusts the staged candidate can re-read
+// and verify it. The transaction installs the generation rows, the canonical
+// main projection, the count mirrors and the active pointer together.
 // An incomplete_new candidate leaves success and indexed-at unset so
 // maintenance stays required; only a complete candidate may carry a positive
 // producing indexer revision.
@@ -48,7 +50,7 @@ type GenerationActivation struct {
 	// set only for complete candidates with a positive producer revision.
 	IndexedInputHash *string
 	// Prepared is the file-only staging StageGeneration produced for this
-	// candidate. When set, activation installs those already-fsynced files
+	// candidate. When set, activation installs those staged files
 	// instead of writing them again; nil stages inline.
 	Prepared *PreparedGeneration
 	// ArtifactIdentity is the pair identity this parse consumed, established
@@ -57,8 +59,9 @@ type GenerationActivation struct {
 }
 
 // ActivateGeneration is the production V2 activation entry point. It takes the
-// exclusive per-session lock, reconciles any prior intent, stages and fsyncs the
-// generation files, records a synced intent carrying the full validated
+// exclusive per-session lock, reconciles any prior intent, stages the
+// generation files (fsyncing the manifest and the directory), records a
+// durable intent carrying the full validated
 // envelope, installs the generation in ONE SQLite transaction, repairs the
 // exported metadata, and clears the intent. A crash at any seam leaves exactly
 // G1 (the prior generation) or G2 (the new generation) visible; recovery
@@ -232,7 +235,7 @@ reconciled:
 	}})
 	for _, result := range results {
 		if result.Err != nil {
-			return notCommitted(fmt.Errorf("store: activate generation %s for session %s: %w; the database transaction rolled back and the prior generation is visible; the synced candidate is retained for retry", staged.ID, sessionID, result.Err))
+			return notCommitted(fmt.Errorf("store: activate generation %s for session %s: %w; the database transaction rolled back and the prior generation is visible; the staged candidate is retained for retry", staged.ID, sessionID, result.Err))
 		}
 	}
 	if err := s.generationArtifacts.RepairMetadata(ctx, sessionID, metadataJSON); err != nil {
@@ -245,7 +248,7 @@ reconciled:
 }
 
 // PreparedGeneration is one candidate's file-only staging: every content blob
-// and the manifest are written and fsynced in an owned temporary directory,
+// is written and the manifest is fsynced in an owned temporary directory,
 // but no activation intent exists and nothing is installed. It is opaque to
 // callers and only ActivateGeneration (through GenerationActivation.Prepared)
 // installs it. A handle that is never activated leaves only its temporary
@@ -289,8 +292,8 @@ func (p *PreparedGeneration) discardUnlessInstalled() {
 }
 
 // StageGeneration prepares one managed generation's files WITHOUT making it
-// activatable: under the session lock it writes and fsyncs every content blob
-// and the manifest into an owned temporary directory and returns a handle. It
+// activatable: under the session lock it writes every content blob and fsyncs
+// the manifest into an owned temporary directory and returns a handle. It
 // writes no activation intent, performs no rename, does not reconcile any
 // pending intent and never touches the database, so a candidate that a caller
 // later refuses can never be replayed by recovery. Passing the handle as
@@ -332,7 +335,7 @@ func (s *Store) StageGeneration(ctx context.Context, activation GenerationActiva
 // RecoverGenerationActivation reconciles one session's pending intent under the
 // exclusive lock. It is safe to call at any time; a committed generation is
 // re-repaired from its committed row and its intent cleared, while an
-// uncommitted synced candidate is activated by replaying the persisted
+// uncommitted staged candidate is activated by replaying the persisted
 // envelope with the original guarded preconditions. A candidate whose bytes no
 // longer verify is discarded (errGenerationCandidateDiscarded, its intent
 // cleared and the damaged directory retained for cleanup); a stale, invalid,
@@ -391,10 +394,11 @@ func (s *Store) RecoverGenerationActivation(ctx context.Context, sessionID schem
 }
 
 // errGenerationCandidateDiscarded reports that a pending activation whose
-// content no longer verifies was discarded: its intent is cleared so a fresh
-// candidate can stage, and the damaged directory is retained for cleanup. The
-// active generation and its success stamps are unchanged.
-var errGenerationCandidateDiscarded = errors.New("store: the staged candidate's content no longer verifies and the pending activation was discarded; the damaged directory is retained for cleanup; the next activation stages a fresh candidate")
+// staged candidate can no longer be read or verified was discarded: its intent
+// is cleared so a fresh candidate can stage, and the damaged directory is
+// retained for cleanup. The active generation and its success stamps are
+// unchanged.
+var errGenerationCandidateDiscarded = errors.New("store: the staged candidate can no longer be read or verified and the pending activation was discarded; the damaged directory is retained for cleanup; the next activation stages a fresh candidate")
 
 func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID schema.SessionID) error {
 	intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
@@ -437,7 +441,15 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 			// generation was never touched.
 			return s.generationArtifacts.ClearIntent(ctx, sessionID)
 		}
-		return fmt.Errorf("store: recover pending activation for session %s: %w; the synced candidate was preserved and the prior generation is unchanged", sessionID, err)
+		// A manifest that cannot be read or decoded can never replay either.
+		// Discard the intent so the next activation stages a fresh candidate,
+		// exactly as a blob that no longer verifies is discarded, and retain
+		// the directory for cleanup. The repair for either is a fresh
+		// candidate, so a transient read failure costs only a re-stage.
+		if clearErr := s.generationArtifacts.ClearIntent(ctx, sessionID); clearErr != nil {
+			return fmt.Errorf("store: discard unreadable pending activation for session %s generation %s: %w; the damaged candidate was retained and the active generation is unchanged", sessionID, intent.GenerationID, clearErr)
+		}
+		return fmt.Errorf("store: recover pending activation for session %s generation %s: %w", sessionID, intent.GenerationID, errGenerationCandidateDiscarded)
 	}
 	// Verify the envelope binding before replaying anything: the staged bytes
 	// must still produce the digest the intent recorded. A candidate whose
@@ -448,11 +460,13 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 	stagedDigest, err := computeActivationBinding(generation, verifiedBlobDigest(ctx, s.generationArtifacts, sessionID, intent.GenerationID))
 	if err != nil {
 		if errors.Is(err, errGenerationContentBlobUnverified) {
-			// A damaged or lost blob is not a retryable envelope: nothing can
-			// ever replay it. Discard the pending intent so the next activation
-			// stages a fresh candidate, and keep the damaged directory for
-			// cleanup. Every other binding failure (an invalid record, a
-			// mismatched envelope) keeps the candidate for a verified retry.
+			// The staged bytes cannot currently be verified, so this candidate
+			// is not a retryable envelope: the repair is a fresh candidate.
+			// Discard the pending intent so the next activation stages one, and
+			// keep the damaged directory for cleanup. A transient read failure
+			// therefore costs only a re-stage. Every other binding failure (an
+			// invalid record, a mismatched envelope) keeps the candidate for a
+			// verified retry.
 			if clearErr := s.generationArtifacts.ClearIntent(ctx, sessionID); clearErr != nil {
 				return fmt.Errorf("store: discard unverifiable pending activation for session %s generation %s: %w; the damaged candidate was retained and the active generation is unchanged", sessionID, intent.GenerationID, clearErr)
 			}
@@ -462,7 +476,7 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		// private path. The wrapped error is the fixed, reference-free binding
 		// category, so the refusal names only the validated requested
 		// identities and never the manifest detail.
-		return fmt.Errorf("store: recover pending activation for session %s generation %s: %w; the synced candidate was preserved and the prior generation is unchanged; retry a verified activation", sessionID, intent.GenerationID, err)
+		return fmt.Errorf("store: recover pending activation for session %s generation %s: %w; the staged candidate was preserved and the prior generation is unchanged; retry a verified activation", sessionID, intent.GenerationID, err)
 	}
 	if intent.CandidateDigest == "" || stagedDigest != intent.CandidateDigest {
 		return fmt.Errorf("store: refuse pending activation for session %s generation %s in recoverGenerationIntentLocked: the durable intent does not bind to the staged candidate bytes; the candidate was preserved and the prior generation is unchanged; retry a verified activation", sessionID, intent.GenerationID)

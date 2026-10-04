@@ -420,6 +420,12 @@ func TestProjectionCommitRecovery(t *testing.T) {
 				// let a fresh candidate stage and activate.
 				assertUnverifiableCandidateDiscarded(t, s, root, id, fixture)
 				return
+			case "discard-undecodable-manifest":
+				// A staged manifest became undecodable after the candidate was
+				// renamed into place. Recovery must discard it for the same
+				// reason and let a fresh candidate stage and activate.
+				assertUndecodableManifestDiscarded(t, s, root, id, fixture)
+				return
 			default:
 				t.Fatalf("unknown recovery %q", tc.Recovery)
 			}
@@ -563,6 +569,42 @@ func assertUnverifiableCandidateDiscarded(t *testing.T, s *Store, root string, i
 	}
 	if _, err := os.Stat(filepath.Dir(damagedPath)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("discarded candidate directory survived cleanup: %v", err)
+	}
+}
+
+// assertUndecodableManifestDiscarded corrupts a staged candidate's manifest so
+// it cannot be decoded, then replays it through the real recovery path. A
+// manifest that cannot be read or decoded can never replay, so recovery must
+// discard the pending intent instead of wedging the session: the last-good
+// generation stays visible and a fresh candidate stages and activates. The
+// undecodable directory stays in place because ownership cannot be proven for
+// cleanup.
+func assertUndecodableManifestDiscarded(t *testing.T, s *Store, root string, id schema.SessionID, fixture projectionRecoveryFixture) {
+	t.Helper()
+	manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.FailedID, "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte("{not a generation manifest"), 0o600); err != nil {
+		t.Fatalf("corrupt staged manifest: %v", err)
+	}
+	before := readIndexStateForTest(t, s, id)
+	if _, err := s.RecoverGenerationActivation(context.Background(), id); !errors.Is(err, errGenerationCandidateDiscarded) {
+		t.Fatalf("recovery error = %v, want the discarded-candidate signal", err)
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
+		t.Fatalf("after discarded recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
+	}
+	after := readIndexStateForTest(t, s, id)
+	if after.IndexerVersion != before.IndexerVersion {
+		t.Fatalf("discarded recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
+	}
+	if pending, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || pending != nil {
+		t.Fatalf("discarded recovery left a pending intent: %+v (err %v)", pending, err)
+	}
+	fresh, freshBlobs := buildTestGeneration(t, id, fixture.Generation.DiscardedID, "diag text G3", "diag input G3", "diag output G3")
+	if err := activateTestGeneration(t, s, fresh, freshBlobs); err != nil {
+		t.Fatalf("activate a fresh candidate after a discarded one: %v", err)
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.DiscardedID {
+		t.Fatalf("after fresh activation visible = %q, want %q", got, fixture.Generation.DiscardedID)
 	}
 }
 
