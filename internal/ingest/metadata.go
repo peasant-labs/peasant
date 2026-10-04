@@ -57,6 +57,37 @@ func metadataNeedsRefresh(version, current metadataSchemaVersion) bool {
 	return version < current
 }
 
+// MetadataSchemaVersionIsCurrent reports whether a recorded metadata schema
+// version is one this build reads as it stands: at or below the version this
+// build writes, and not requiring a rebuild. It is the one place the readable
+// set is stated, so a store-side predicate that compares a stored version
+// against this build's current version shares the refresh-free policy instead
+// of re-stating an exact equality. A version above the current one is not
+// current: only a build that writes it can read it.
+func MetadataSchemaVersionIsCurrent(version int) bool {
+	if version < 1 || version > int(CurrentSchemaVersion) {
+		return false
+	}
+	recorded, err := newMetadataSchemaVersion(version)
+	return err == nil && !metadataNeedsRefresh(recorded, CurrentSchemaVersion)
+}
+
+// ReadableMetadataSchemaVersions returns every recorded metadata schema version
+// this build reads as current, in ascending order. It is the complement, within
+// the versions this build writes, of the versions that require a native
+// refresh. A store-side predicate binds this set instead of comparing a stored
+// version to the current version exactly, so a declared refresh-free schema
+// bump does not make an otherwise current capture read as needing a re-ingest.
+func ReadableMetadataSchemaVersions() []int {
+	versions := make([]int, 0, int(CurrentSchemaVersion))
+	for version := 1; version <= int(CurrentSchemaVersion); version++ {
+		if MetadataSchemaVersionIsCurrent(version) {
+			versions = append(versions, version)
+		}
+	}
+	return versions
+}
+
 // UnifiedMetadata is the on-disk JSON stored alongside each raw transcript.
 type UnifiedMetadata = schema.UnifiedMetadata
 

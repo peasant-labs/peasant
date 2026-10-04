@@ -144,7 +144,7 @@ func ValidatePublicationCaptureSnapshot(m *schema.UnifiedMetadata, kind CWDProve
 	if (kind == CWDSourceExact) != (m.CWD != "") {
 		return errors.New("CWD and its source provenance disagree")
 	}
-	if m.SchemaVersion != CurrentSchemaVersion {
+	if !MetadataSchemaVersionIsCurrent(m.SchemaVersion) {
 		return errors.New("unsupported metadata schema")
 	}
 	if _, err := schema.NewSessionID(string(m.SessionID)); err != nil {
