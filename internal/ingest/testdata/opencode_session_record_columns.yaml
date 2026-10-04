@@ -6,11 +6,31 @@
 # required_cases names the cases that must stay present. Removing one goes red
 # by name; adding a case need not appear here. The list, not a count, guards.
 required_cases:
+  - extended-model-variant
+  - v2-extended-model-variant
+  - extended-invalid-model
   - populated-extended-layout
   - older-layout-empty
   - v2-populated-extended-layout
   - v2-base-attribution
 cases:
+  - &model
+    name: extended-model-variant
+    extended: true
+    model_column: true
+    rows:
+      - id: ses_thinkingExtended
+        model_json: '{"variant":"high"}'
+        want_variant: high
+  - <<: *model
+    name: v2-extended-model-variant
+    table: session_v2
+  - name: extended-invalid-model
+    extended: true
+    model_column: true
+    rows:
+      - id: ses_thinkingInvalid
+        model_json: '{bad'
   - &populated
     name: populated-extended-layout
     extended: true

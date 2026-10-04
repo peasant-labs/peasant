@@ -70,3 +70,52 @@ retainedIndexerCases:
       - {id: msg_001, role: user, variant: high}
     turns:
       - {}
+
+# Session-row materialization cases. Retained-indexer cases have their own section.
+sessionRows:
+  - name: session-message-invalid-raw-diagnostic
+    messageVariant: medium
+    laterVariant: " high"
+    wantLevel: medium
+    wantDiagnostic: true
+  - name: session-column-present-fallback
+    modelColumn: true
+    modelJSON: '{"variant":"high"}'
+    changedModelJSON: '{"variant":"low"}'
+    wantVariant: high
+    wantLevel: high
+  - name: session-message-wins
+    modelColumn: true
+    modelJSON: '{"variant":"high"}'
+    wantVariant: high
+    messageVariant: medium
+    laterVariant: max
+    wantLevel: medium
+  - name: session-message-unknown-wins
+    modelColumn: true
+    modelJSON: '{"variant":"high"}'
+    wantVariant: high
+    messageVariant: default
+    laterVariant: max
+    wantRaw: default
+  - name: session-column-absent
+  - name: session-model-invalid-json
+    modelColumn: true
+    modelJSON: '{not json'
+  - name: session-model-invalid-variant
+    modelColumn: true
+    modelJSON: '{"variant":42}'
+  - name: session-model-null
+    modelColumn: true
+    modelJSON: 'null'
+  - name: session-model-ultra-identity
+    modelColumn: true
+    modelJSON: '{"variant":"ultra"}'
+    wantVariant: ultra
+    wantLevel: ultra
+  - name: session-model-none-alias
+    modelColumn: true
+    modelJSON: '{"variant":"none"}'
+    wantVariant: none
+    wantLevel: "off"
+    wantRaw: none

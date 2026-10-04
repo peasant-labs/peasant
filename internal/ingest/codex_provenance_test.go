@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,17 +55,19 @@ type codexPriorFixture struct {
 }
 
 type codexEntryFixture struct {
-	Ref           string                 `yaml:"ref"`
-	Role          string                 `yaml:"role"`
-	EntryType     string                 `yaml:"entryType"`
-	Depth         int                    `yaml:"depth"`
-	ParentIndex   *int                   `yaml:"parentIndex"`
-	Content       string                 `yaml:"content"`
-	ToolInput     string                 `yaml:"toolInput"`
-	ToolOutput    string                 `yaml:"toolOutput"`
-	ToolCallID    string                 `yaml:"toolCallId"`
-	SubmissionRef string                 `yaml:"submissionRef"`
-	Provenance    codexProvenanceFixture `yaml:"provenance"`
+	ThinkingLevel    string                 `yaml:"thinkingLevel"`
+	ThinkingLevelRaw string                 `yaml:"thinkingLevelRaw"`
+	Ref              string                 `yaml:"ref"`
+	Role             string                 `yaml:"role"`
+	EntryType        string                 `yaml:"entryType"`
+	Depth            int                    `yaml:"depth"`
+	ParentIndex      *int                   `yaml:"parentIndex"`
+	Content          string                 `yaml:"content"`
+	ToolInput        string                 `yaml:"toolInput"`
+	ToolOutput       string                 `yaml:"toolOutput"`
+	ToolCallID       string                 `yaml:"toolCallId"`
+	SubmissionRef    string                 `yaml:"submissionRef"`
+	Provenance       codexProvenanceFixture `yaml:"provenance"`
 }
 
 type codexEarlierFixture struct {
@@ -172,6 +175,51 @@ func loadCodexProvenanceFixture(t *testing.T) codexProvenanceFixtureDoc {
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+func assertManagedManifestMutationGuards(t *testing.T, data []byte, names []string) {
+	t.Helper()
+	manifest, err := testutil.DecodeRequiredNamesManifest(data, "managed evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range manifest.RequiredNames {
+		index := slices.Index(names, required)
+		if index < 0 {
+			t.Fatalf("required case %q missing before mutation", required)
+		}
+		deleted := append(slices.Clone(names[:index]), names[index+1:]...)
+		if testutil.ValidateRequiredNames(manifest, deleted, "managed evidence") == nil {
+			t.Fatalf("deletion of %q was accepted", required)
+		}
+		renamed := slices.Clone(names)
+		renamed[index] += "-renamed"
+		if testutil.ValidateRequiredNames(manifest, renamed, "managed evidence") == nil {
+			t.Fatalf("rename of %q was accepted", required)
+		}
+	}
+}
+
+func TestManagedEvidenceManifestMutationGuards(t *testing.T) {
+	var names []string
+	for _, c := range loadCodexProvenanceFixture(t).Cases {
+		names = append(names, c.Name)
+	}
+	assertManagedManifestMutationGuards(t, codexProvenanceManifestYAML, names)
+	names = nil
+	for _, c := range loadCodexHistoryProjectionFixture(t).Cases {
+		names = append(names, c.Name)
+	}
+	assertManagedManifestMutationGuards(t, codexHistoryProjectionManifestYAML, names)
+	names = nil
+	doc := loadOpenCodeProvenanceDocument(t)
+	for _, c := range doc.Cases {
+		names = append(names, c.Name)
+	}
+	for _, c := range doc.HistoricalCase {
+		names = append(names, c.Name)
+	}
+	assertManagedManifestMutationGuards(t, openCodeProvenanceManifestYAML, names)
 }
 
 // codexProvenanceSource is a deterministic read-only source double. The
@@ -416,6 +464,31 @@ func codexAssertProvenance(t *testing.T, label string, want codexProvenanceFixtu
 	}
 }
 
+func assertManagedThinkingLevel(t *testing.T, entry schema.SessionEntry, level, raw string) {
+	t.Helper()
+	var extra map[string]json.RawMessage
+	if entry.Extra != nil {
+		if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertValue := func(key, want string) {
+		value, present := extra[key]
+		if want == "" {
+			if present {
+				t.Errorf("entry %s: unexpected %s = %s", entry.SourceEntryRef, key, value)
+			}
+			return
+		}
+		var got string
+		if !present || json.Unmarshal(value, &got) != nil || got != want {
+			t.Errorf("entry %s: %s = %s, want %q", entry.SourceEntryRef, key, value, want)
+		}
+	}
+	assertValue(ingest.ThinkingLevelExtraKey, level)
+	assertValue(ingest.ThinkingLevelRawExtraKey, raw)
+}
+
 func codexAssertEntries(t *testing.T, label string, want []codexEntryFixture, got []schema.SessionEntry) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -423,6 +496,7 @@ func codexAssertEntries(t *testing.T, label string, want []codexEntryFixture, go
 	}
 	for i, w := range want {
 		g := got[i]
+		assertManagedThinkingLevel(t, g, w.ThinkingLevel, w.ThinkingLevelRaw)
 		where := fmt.Sprintf("%s[%d]", label, i)
 		if w.Ref != "" && string(g.SourceEntryRef) != w.Ref {
 			t.Errorf("%s ref = %q, want %q", where, g.SourceEntryRef, w.Ref)

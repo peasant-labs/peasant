@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/peasant-labs/schema"
@@ -536,7 +537,10 @@ func codexMediaDisplayContent(contentType string) string {
 // history no longer contains them. Uncertain earlier nodes move to the first
 // declared earlier section with uncertain ownership. The returned earlier
 // states are empty when no uncertain block exists.
-func ClassifyCodexBlocks(stableThreadID string, nodes []CodexCapturedNode, thread CodexThreadEvidence, correlations []CodexCapturedCorrelation) ([]ClassifiedBlock, []schema.EarlierHistoryState, error) {
+//
+// Controls are applied at native coordinates, so replaced items use the
+// governing turn_context at their final source position, not their old slot.
+func ClassifyCodexBlocks(stableThreadID string, nodes []CodexCapturedNode, controls []CodexCapturedControl, thread CodexThreadEvidence, correlations []CodexCapturedCorrelation) ([]ClassifiedBlock, []schema.EarlierHistoryState, error) {
 	registry := codexContentKindRegistry()
 	classifier := codexBlockClassifier{
 		stableThreadID: stableThreadID,
@@ -545,6 +549,17 @@ func ClassifyCodexBlocks(stableThreadID string, nodes []CodexCapturedNode, threa
 		correlated:     codexCorrelatedItems(correlations),
 	}
 	for _, node := range nodes {
+		classifier.thinkingLevel = thinkingLevelMapping{}
+		// Repeated native items can replace a node in place. Its final source
+		// coordinates, not its retained display slot, determine the effort.
+		next := sort.Search(len(controls), func(i int) bool {
+			control := controls[i]
+			return control.SegmentOrdinal > node.SegmentOrdinal ||
+				(control.SegmentOrdinal == node.SegmentOrdinal && control.Ordinal > node.Ordinal)
+		})
+		if next > 0 {
+			classifier.thinkingLevel = controls[next-1].ThinkingLevel
+		}
 		if err := classifier.classifyNode(node); err != nil {
 			return nil, nil, err
 		}
@@ -594,6 +609,9 @@ type codexBlockClassifier struct {
 	// attach to an unrelated earlier assistant message.
 	carrierKey string
 	uncertain  bool
+	// thinkingLevel is the governing turn_context effort for the node being
+	// classified. It is stamped on assistant blocks only.
+	thinkingLevel thinkingLevelMapping
 }
 
 // emit appends one classified block to the active stream. While the current
@@ -602,6 +620,10 @@ type codexBlockClassifier struct {
 // captured segment it came from, and never enters a main or earlier
 // conversational partition.
 func (c *codexBlockClassifier) emit(block ClassifiedBlock) {
+	if block.Role == schema.RoleAssistant {
+		block.ThinkingLevel = c.thinkingLevel.Level
+		block.ThinkingLevelRaw = c.thinkingLevel.Raw
+	}
 	if !c.retaining {
 		c.blocks = append(c.blocks, block)
 		return

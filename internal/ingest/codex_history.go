@@ -376,6 +376,25 @@ type CodexCapturedHistory struct {
 	RawBytes         []byte
 	Fingerprint      string
 	Diagnostics      []DiagnosticEntry
+	// Controls is the non-display control evidence observed between nodes,
+	// in source order. It never contributes nodes, refs or segment bytes, and
+	// it is not a fingerprint input: the fingerprint hashes decoded segment
+	// bytes only.
+	Controls []CodexCapturedControl
+}
+
+// CodexCapturedControl is one turn_context record surfaced as non-display
+// control evidence. NodeIndex is the insertion position in Nodes when the
+// record was read. SegmentOrdinal and Ordinal are the authoritative native
+// coordinates, including when replay replaces an older node in place.
+// ThinkingLevel is the mapped
+// turn_context.payload.effort; the zero mapping means the turn declared no
+// usable effort, so later assistant blocks carry no level.
+type CodexCapturedControl struct {
+	NodeIndex      int
+	SegmentOrdinal int
+	Ordinal        int64
+	ThinkingLevel  thinkingLevelMapping
 }
 
 // CodexSourceChangedError reports that the authoritative source kept changing

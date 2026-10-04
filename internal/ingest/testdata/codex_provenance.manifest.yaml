@@ -1,4 +1,7 @@
 requiredNames:
+  - turn-context-replaced-item-effort
+  - turn-context-effort-high
+  - turn-context-effort-absent-invalid
   - aligned-user-context-media-unknown
   - typed-context-kinds
   - context-kind-modality-conflict

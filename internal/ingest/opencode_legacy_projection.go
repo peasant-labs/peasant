@@ -293,6 +293,7 @@ func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, s
 	// Clear discovery-view source fields, including absent and zero values.
 	session.ParentUUID = nil
 	session.Title, session.CWD, session.Agent = "", "", ""
+	session.OpenCodeModelVariant = ""
 	session.Version, session.Slug, session.Cost = "", "", 0
 	session.TokensIn, session.TokensOut, session.EventSeq = 0, 0, 0
 	session.CreatedAt, session.ModTime = time.Time{}, time.Time{}
@@ -303,6 +304,7 @@ func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, s
 			continue
 		}
 		found = true
+		session.OpenCodeModelVariant = record.ModelVariant
 		session.Title, session.CWD, session.Agent = record.Title, record.Directory, record.Agent
 		session.Version, session.Slug, session.Cost = record.Version, record.Slug, record.Cost
 		session.TokensIn, session.TokensOut = int(record.TokensInput), int(record.TokensOutput)
@@ -918,6 +920,29 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	}
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeUnknownTypeDiagnostics(session, unknownPartTypes, "part")...)
 	summary := summarizeOpenCodeSemanticMessages(messages)
+	for _, message := range messages {
+		if message.Data.Role != RoleAssistant.String() {
+			continue
+		}
+		var evidence struct {
+			Model json.RawMessage `json:"model"`
+		}
+		if json.Unmarshal(message.Raw, &evidence) != nil {
+			continue
+		}
+		mapping, diagnostic := mapOpenCodeVariant(decodeOpenCodeModelVariant(evidence.Model))
+		if diagnostic != nil {
+			metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, *diagnostic)
+		}
+		applyThinkingLevelSeed(&metadata, mapping)
+	}
+	if metadata.ThinkingLevel == "" && metadata.ThinkingLevelRaw == "" {
+		mapping, diagnostic := mapOpenCodeVariant(session.OpenCodeModelVariant)
+		if diagnostic != nil {
+			metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, *diagnostic)
+		}
+		applyThinkingLevelSeed(&metadata, mapping)
+	}
 	metadata.Stats = StatsInfo{TurnCount: summary.turnCount, ToolCallCount: summary.toolCallCount, TokensIn: summary.tokensIn, TokensOut: summary.tokensOut, DurationMs: summary.endMS - summary.startMS}
 	metadata.Timestamp = TimestampInfo{Start: summary.startMS, End: summary.endMS}
 	metadata.Version = summary.version

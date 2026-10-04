@@ -49,23 +49,25 @@ type ocProvAllocator struct {
 }
 
 type ocProvEntryExpect struct {
-	Ref         string `yaml:"ref"`
-	Index       int    `yaml:"index"`
-	Role        string `yaml:"role"`
-	EntryType   string `yaml:"entryType"`
-	Depth       int    `yaml:"depth"`
-	ParentIndex *int   `yaml:"parentIndex"`
-	Content     string `yaml:"content"`
-	ToolInput   string `yaml:"toolInput"`
-	ToolOutput  string `yaml:"toolOutput"`
-	ToolCallID  string `yaml:"toolCallId"`
-	Submission  string `yaml:"submission"`
-	Origin      string `yaml:"origin"`
-	Actor       string `yaml:"actor"`
-	Delivery    string `yaml:"delivery"`
-	Ownership   string `yaml:"ownership"`
-	Evidence    string `yaml:"evidence"`
-	Modality    string `yaml:"modality"`
+	ThinkingLevel    string `yaml:"thinkingLevel"`
+	ThinkingLevelRaw string `yaml:"thinkingLevelRaw"`
+	Ref              string `yaml:"ref"`
+	Index            int    `yaml:"index"`
+	Role             string `yaml:"role"`
+	EntryType        string `yaml:"entryType"`
+	Depth            int    `yaml:"depth"`
+	ParentIndex      *int   `yaml:"parentIndex"`
+	Content          string `yaml:"content"`
+	ToolInput        string `yaml:"toolInput"`
+	ToolOutput       string `yaml:"toolOutput"`
+	ToolCallID       string `yaml:"toolCallId"`
+	Submission       string `yaml:"submission"`
+	Origin           string `yaml:"origin"`
+	Actor            string `yaml:"actor"`
+	Delivery         string `yaml:"delivery"`
+	Ownership        string `yaml:"ownership"`
+	Evidence         string `yaml:"evidence"`
+	Modality         string `yaml:"modality"`
 }
 
 type ocProvWant struct {
@@ -244,6 +246,7 @@ func assertOpenCodeEntries(t *testing.T, entries []schema.SessionEntry, want []o
 	}
 	for i, expected := range want {
 		entry := entries[i]
+		assertManagedThinkingLevel(t, entry, expected.ThinkingLevel, expected.ThinkingLevelRaw)
 		label := "main[" + itoa(i) + "]"
 		if string(entry.SourceEntryRef) != expected.Ref {
 			t.Fatalf("%s ref = %q, want %q", label, entry.SourceEntryRef, expected.Ref)
