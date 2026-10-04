@@ -430,7 +430,7 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 	// whose envelope was replaced, or a manifest that changed under the intent,
 	// stays inactive for a verified retry instead of being activated under the
 	// wrong stamps.
-	stagedDigest, err := computeActivationBinding(generation, bindingFromStaged)
+	stagedDigest, err := computeActivationBinding(generation, verifiedBlobDigest(ctx, s.generationArtifacts, sessionID, intent.GenerationID))
 	if err != nil {
 		// The staged manifest is untrusted: a content reference can carry a
 		// private path. The wrapped error is the fixed, reference-free binding
@@ -703,7 +703,7 @@ func (s *Store) verifyImmutableCandidateIdentity(ctx context.Context, sessionID 
 		}
 		return fmt.Errorf("store: verify installed candidate for generation %s of session %s before staging: %w; the candidate was not staged and any installed bytes are unchanged", generation.ID, sessionID, err)
 	}
-	installedDigest, err := computeActivationBinding(installed, bindingFromStaged)
+	installedDigest, err := computeActivationBinding(installed, verifiedBlobDigest(ctx, s.generationArtifacts, sessionID, generation.ID))
 	if err != nil {
 		// The installed manifest is untrusted; its content references can carry
 		// private paths. The wrapped error is the fixed, reference-free binding

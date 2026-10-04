@@ -49,6 +49,15 @@ cases:
     seam: after-rename-before-db
     visible: g1
     recovery: mismatched-digest
+  # The staged candidate's bytes are verified at recovery. Damage one blob
+  # after the rename and before the commit: recovery must refuse the replay
+  # instead of activating a generation whose content cannot be served. The
+  # restored bytes must let the same pending intent settle, so the refusal is
+  # the damage, not a permanent block.
+  - name: corrupt-staged-blob-refused
+    seam: after-rename-before-db
+    visible: g1
+    recovery: corrupt-staged-blob
 # A committed generation whose content blob is damaged after the commit must be
 # refused with an actionable managed-recovery error, never served as partial or
 # empty content.
