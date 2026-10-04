@@ -1,0 +1,10 @@
+cases:
+  - name: later_parsers_finish_first
+    ack: [1, 2]
+    held: 0
+    expected_used: 90
+  - name: child_waits_for_parent_commit
+    ack: [0, 2]
+    held: 1
+    parent_gated: true
+    expected_used: 60
