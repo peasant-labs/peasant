@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	schema "github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -40,11 +41,11 @@ type thinkingLevelMappingManifest struct {
 }
 
 var thinkingLevelMappers = map[string]func(string) (thinkingLevelMapping, *DiagnosticEntry){
-	"codex":         mapCodexEffort,
-	"claude":        mapClaudeEffort,
-	"claude_legacy": mapClaudeLegacyLevel,
-	"opencode":      mapOpenCodeVariant,
-	"pi":            mapPiThinkingLevel,
+	string(defaults.HarnessCodex):        mapCodexEffort,
+	string(defaults.LegacyHarnessClaude): mapClaudeEffort,
+	"claude_legacy":                      mapClaudeLegacyLevel,
+	string(defaults.HarnessOpenCode):     mapOpenCodeVariant,
+	"pi":                                 mapPiThinkingLevel,
 }
 
 func decodeStrictYAML(data []byte, target any) error {
