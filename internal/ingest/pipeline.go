@@ -4560,19 +4560,27 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 // Missing input returns (nil, 0, "", nil). Unreadable metadata returns an error
 // that prohibits fallback reconstruction from native source information.
 //
-// Optimization: queries the DB for host_slug and parent_id before scanning the
-// filesystem. If the DB has a location record, jumps directly to the session
-// directory. Falls back to full directory scan only when the session is not in
-// the DB (e.g. pre-DB ingestion data).
+// The database location is authoritative: when it records the session, only
+// that directory is read, and a missing metadata file there is missing input,
+// not a reason to search the tree. The full directory scan runs only when the
+// database has no location for the session (e.g. pre-DB ingestion data) or the
+// lookup itself failed.
 func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string, error) {
-	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
+	return p.reconstructFromMetadataIn(ctx, sid, nil)
+}
+
+// reconstructFromMetadataIn is reconstructFromMetadata answering stored
+// location reads from snap when it holds the session. It writes no shared
+// pipeline state, so maintenance passes call it from parallel workers.
+func (p *Pipeline) reconstructFromMetadataIn(ctx context.Context, sid SessionID, snap locationSnapshot) (*DiscoveredSession, int64, string, error) {
+	if err := p.checkStoredMetadataCompatibilityIn(ctx, sid, nil, snap); err != nil {
 		return nil, 0, "", err
 	}
 	outputDir := string(p.config.OutputDir)
 
 	// Fast path: query DB for the session's host_slug and parent_id.
 	if p.metricsStore != nil {
-		hostSlug, parentID, lookupErr := p.metricsStore.LookupSessionLocation(ctx, sid)
+		hostSlug, parentID, lookupErr := p.storedLocation(ctx, sid, snap)
 		if lookupErr != nil {
 			slog.Warn("pipeline: lookup session location", "session_id", sid, "error", lookupErr)
 			// Fall through to full scan below.
@@ -4598,7 +4606,9 @@ func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (
 					return &result.session, result.startMs, result.transcriptPath, nil
 				}
 			}
-			// DB had a record but the file was missing — fall through to full scan.
+			// The recorded location is authoritative: its metadata file is
+			// missing, so there is nothing to reconstruct from.
+			return nil, 0, "", nil
 		}
 	}
 

@@ -44,17 +44,68 @@ func (p *Pipeline) checkStoredRewriteVersion(ctx context.Context, sid SessionID,
 	return p.checkStoredMetadataCompatibility(ctx, sid, &target)
 }
 
-func (p *Pipeline) checkStoredMetadataCompatibility(ctx context.Context, sid SessionID, adapterTarget *int) error {
-	backing := p.store
-	if backing == nil {
-		backing, _ = p.metricsStore.(SessionStore)
+// locationSnapshot is the stored location of a batch of maintenance candidates,
+// read with one bulk query before the per-candidate work fans out. It is
+// read-only after construction, so parallel workers share it without locking.
+// A nil snapshot means no batch read happened, and every lookup falls back to
+// its own per-session query.
+type locationSnapshot map[SessionID]SessionLocation
+
+// compatibilityBacking is the store the stored-metadata compatibility check
+// reads; nil in file-only mode.
+func (p *Pipeline) compatibilityBacking() SessionStore {
+	if p.store != nil {
+		return p.store
 	}
-	if backing == nil {
-		return nil // File-only mode has no stored metadata version.
+	backing, _ := p.metricsStore.(SessionStore)
+	return backing
+}
+
+// snapshotLocations reads the stored locations of ids with one bulk query from
+// the same store the per-session compatibility check reads. A failed or
+// unavailable read returns nil, so each candidate repeats its own query and
+// reports its own failure exactly as before.
+func (p *Pipeline) snapshotLocations(ctx context.Context, ids []SessionID) locationSnapshot {
+	backing := p.compatibilityBacking()
+	if backing == nil || len(ids) == 0 {
+		return nil
 	}
-	locations, err := backing.BulkLookupSessionLocations(ctx, []SessionID{sid})
+	locations, err := backing.BulkLookupSessionLocations(ctx, ids)
 	if err != nil {
-		return fmt.Errorf("read stored metadata compatibility for session %s before refresh or indexing: %w; compatibility could not be verified, so this operation was refused without changing session artifacts or index; restore database access and retry", sid, err)
+		return nil
+	}
+	if locations == nil {
+		locations = map[SessionID]SessionLocation{}
+	}
+	return locationSnapshot(locations)
+}
+
+// storedLocation returns the host slug and parent the database records for
+// sid, answering from the snapshot when it holds the row and otherwise asking
+// the store for that one session.
+func (p *Pipeline) storedLocation(ctx context.Context, sid SessionID, snap locationSnapshot) (string, string, error) {
+	if location, ok := snap[sid]; ok && location.HostSlug != "" {
+		return location.HostSlug, location.ParentID, nil
+	}
+	return p.metricsStore.LookupSessionLocation(ctx, sid)
+}
+
+func (p *Pipeline) checkStoredMetadataCompatibility(ctx context.Context, sid SessionID, adapterTarget *int) error {
+	return p.checkStoredMetadataCompatibilityIn(ctx, sid, adapterTarget, nil)
+}
+
+func (p *Pipeline) checkStoredMetadataCompatibilityIn(ctx context.Context, sid SessionID, adapterTarget *int, snap locationSnapshot) error {
+	locations := map[SessionID]SessionLocation(snap)
+	if snap == nil {
+		backing := p.compatibilityBacking()
+		if backing == nil {
+			return nil // File-only mode has no stored metadata version.
+		}
+		var err error
+		locations, err = backing.BulkLookupSessionLocations(ctx, []SessionID{sid})
+		if err != nil {
+			return fmt.Errorf("read stored metadata compatibility for session %s before refresh or indexing: %w; compatibility could not be verified, so this operation was refused without changing session artifacts or index; restore database access and retry", sid, err)
+		}
 	}
 	if location, ok := locations[sid]; ok && location.SchemaVersion > CurrentSchemaVersion {
 		return &UnsupportedMetadataVersionError{Path: string(sid) + " (stored metadata)", Version: location.SchemaVersion}

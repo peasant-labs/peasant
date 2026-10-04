@@ -31,10 +31,15 @@ func adapterTargetMetadataPath(target reindexTarget) string {
 }
 
 func (p *Pipeline) adapterTargetMetadata(ctx context.Context, target reindexTarget) *UnifiedMetadata {
+	return p.adapterTargetMetadataIn(ctx, target, nil)
+}
+
+func (p *Pipeline) adapterTargetMetadataIn(ctx context.Context, target reindexTarget, snap locationSnapshot) *UnifiedMetadata {
 	if !p.includesManagedSession(target.session.SessionID, target.session.Harness) || p.config.Since != nil && time.UnixMilli(target.startMs).Before(*p.config.Since) {
 		return nil
 	}
-	if err := p.checkStoredRewriteVersion(ctx, target.session.SessionID, target.session.Harness); err != nil {
+	adapterTarget := p.versionTargets()[target.session.Harness].AdapterVersion
+	if err := p.checkStoredMetadataCompatibilityIn(ctx, target.session.SessionID, &adapterTarget, snap); err != nil {
 		p.reportMetadataRefusal(string(target.session.SessionID), err)
 		return nil
 	}
@@ -82,6 +87,10 @@ func (p *Pipeline) nativeSessionForTarget(target reindexTarget, metadata *Unifie
 // the sessions whose stored adapter revision is behind this build, or whose
 // stored schema this build re-extracts, reading no file. Each hit reconstructs
 // its session from its stored location and its own retained pair.
+//
+// The candidates' locations are read with one bulk query, and the
+// per-candidate reconstruction runs on the bounded worker pool. Outcomes are
+// appended in candidate order, so the result is the same as a serial pass.
 func (p *Pipeline) appendStoredAdapterWork(ctx context.Context, entries []DiffEntry, discovered []DiscoveredSession) []DiffEntry {
 	lister, ok := p.metricsStore.(StaleAdapterSessionLister)
 	if !ok {
@@ -100,42 +109,59 @@ func (p *Pipeline) appendStoredAdapterWork(ctx context.Context, entries []DiffEn
 	for _, session := range discovered {
 		native[session.SessionID] = session
 	}
+	candidates := make([]SessionID, 0, len(staleIDs))
 	for _, sid := range staleIDs {
 		if queued[sid] {
 			continue
 		}
-		reconstructed, startMs, transcriptPath, metadataErr := p.reconstructFromMetadata(ctx, sid)
-		if metadataErr != nil {
-			p.reportMetadataRefusal(string(sid), metadataErr)
-			continue
+		queued[sid] = true
+		candidates = append(candidates, sid)
+	}
+	snap := p.snapshotLocations(ctx, candidates)
+	outcomes := runParallel(ctx.Err, candidates, parallelWorkers(p.config), func(sid SessionID) *DiffEntry {
+		return p.storedAdapterEntry(ctx, sid, native, snap)
+	})
+	for _, entry := range outcomes {
+		if entry != nil {
+			entries = append(entries, *entry)
 		}
-		if reconstructed == nil {
-			continue
-		}
-		target := reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}
-		metadata := p.adapterTargetMetadata(ctx, target)
-		if !p.adapterNeedsRefresh(metadata) {
-			continue
-		}
-		// The stored metadata carries the original native source locator. A
-		// retained-input reconstruction has no native session, so the target
-		// must carry it forward: without it the reconstructed session's source
-		// path is empty and reads as native input that moved, which forces a
-		// native re-extraction the retained pair could have served.
-		if metadata != nil {
-			target.originalSourcePath = metadata.Source.FilePath
-		}
-		session, found := native[sid]
-		if !found {
-			session = p.nativeSessionForTarget(target, metadata)
-		}
-		if !p.config.IncludeActive && p.config.StalenessThreshold > 0 && !session.stalenessSourceTime().IsZero() && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold {
-			continue
-		}
-		entries = append(entries, DiffEntry{Session: session, Status: DiffUpdated, retainedOnly: !found})
-		queued[session.SessionID] = true
 	}
 	return entries
+}
+
+// storedAdapterEntry decides one stale-adapter candidate. It reads shared
+// pipeline state only, and its diagnostics go through the locked reporter, so
+// it is safe on parallel workers. Nil means the candidate contributes no work.
+func (p *Pipeline) storedAdapterEntry(ctx context.Context, sid SessionID, native map[SessionID]DiscoveredSession, snap locationSnapshot) *DiffEntry {
+	reconstructed, startMs, transcriptPath, metadataErr := p.reconstructFromMetadataIn(ctx, sid, snap)
+	if metadataErr != nil {
+		p.reportMetadataRefusal(string(sid), metadataErr)
+		return nil
+	}
+	if reconstructed == nil {
+		return nil
+	}
+	target := reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}
+	metadata := p.adapterTargetMetadataIn(ctx, target, snap)
+	if !p.adapterNeedsRefresh(metadata) {
+		return nil
+	}
+	// The stored metadata carries the original native source locator. A
+	// retained-input reconstruction has no native session, so the target
+	// must carry it forward: without it the reconstructed session's source
+	// path is empty and reads as native input that moved, which forces a
+	// native re-extraction the retained pair could have served.
+	if metadata != nil {
+		target.originalSourcePath = metadata.Source.FilePath
+	}
+	session, found := native[sid]
+	if !found {
+		session = p.nativeSessionForTarget(target, metadata)
+	}
+	if !p.config.IncludeActive && p.config.StalenessThreshold > 0 && !session.stalenessSourceTime().IsZero() && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold {
+		return nil
+	}
+	return &DiffEntry{Session: session, Status: DiffUpdated, retainedOnly: !found}
 }
 
 // pairRepairCandidateIDs returns the stored sessions that may need their saved
@@ -175,8 +201,8 @@ func (p *Pipeline) pairRepairCandidateIDs(ctx context.Context) ([]SessionID, err
 
 // storedMetadataPath returns the metadata locator the database records for a
 // session, and whether it has one.
-func (p *Pipeline) storedMetadataPath(ctx context.Context, sid SessionID) (string, bool) {
-	hostSlug, parentID, err := p.metricsStore.LookupSessionLocation(ctx, sid)
+func (p *Pipeline) storedMetadataPath(ctx context.Context, sid SessionID, snap locationSnapshot) (string, bool) {
+	hostSlug, parentID, err := p.storedLocation(ctx, sid, snap)
 	if err != nil || hostSlug == "" {
 		return "", false
 	}
@@ -190,10 +216,17 @@ func (p *Pipeline) storedMetadataPath(ctx context.Context, sid SessionID) (strin
 // not a pair to overwrite, and a stored metadata or schema this build refuses
 // is not damage; both stay with the existing refusal paths.
 func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
+	return p.pairNeedsRepairIn(ctx, sid, nil)
+}
+
+// pairNeedsRepairIn is pairNeedsRepair answering stored location reads from
+// snap when it holds the session. It writes no shared pipeline state, so the
+// repair selection calls it from parallel workers.
+func (p *Pipeline) pairNeedsRepairIn(ctx context.Context, sid SessionID, snap locationSnapshot) bool {
 	if p.metricsStore == nil {
 		return false
 	}
-	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
+	if err := p.checkStoredMetadataCompatibilityIn(ctx, sid, nil, snap); err != nil {
 		return false
 	}
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
@@ -211,7 +244,7 @@ func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
 	if err := p.checkIndexProducer(state); err != nil {
 		return false
 	}
-	metadataPath, ok := p.storedMetadataPath(ctx, sid)
+	metadataPath, ok := p.storedMetadataPath(ctx, sid, snap)
 	if !ok {
 		return false // No recorded location: the source-info fallback owns it.
 	}
@@ -384,61 +417,95 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	for _, session := range discovered {
 		native[session.SessionID] = session
 	}
+	snap := p.snapshotLocations(ctx, ids)
+	outcomes := runParallel(ctx.Err, ids, parallelWorkers(p.config), func(sid SessionID) pairRepairOutcome {
+		return p.pairRepairDecision(ctx, sid, entries, entryIndex, native, snap)
+	})
 	var repaired []SessionID
-	for _, sid := range ids {
-		if i, queued := entryIndex[sid]; queued {
-			if p.queuedForNativeChange(entries[i].Session) {
-				// Queued for a proven rewrite reason (a forced run, a
-				// native-refresh schema, or a clock hint no stored fingerprint
-				// can overrule): the queued path re-acquires native input and
-				// rewrites the pair, recreating a missing sidecar, so a
-				// selection-stage damage verdict would only add a read the path
-				// does not need.
-				continue
-			}
-			if !p.pairNeedsRepair(ctx, sid) {
-				continue
-			}
-			// Queued for a reason that can settle without republishing the
-			// pair: index readiness, or a newer clock that captured fingerprint
-			// comparison may classify unchanged before any write. Carry the
-			// damage verdict onto the existing entry so a database-first no-op
-			// cannot leave the damaged pair behind.
-			metadataPath, _ := p.storedMetadataPath(ctx, sid)
-			entries[i].pairRepair = true
-			entries[i].repairMetadataPath = metadataPath
-			repaired = append(repaired, sid)
+	for i, outcome := range outcomes {
+		switch outcome.kind {
+		case pairRepairMarkQueued:
+			entries[outcome.queuedIndex].pairRepair = true
+			entries[outcome.queuedIndex].repairMetadataPath = outcome.metadataPath
+		case pairRepairAppend:
+			entries = append(entries, outcome.entry)
+		default:
 			continue
 		}
-		if !p.pairNeedsRepair(ctx, sid) {
-			continue
-		}
-		metadataPath, _ := p.storedMetadataPath(ctx, sid)
-		session, found := native[sid]
-		if !found {
-			reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
-			if reconstructed == nil {
-				p.reportPairRepairUnavailable(sid, "")
-				continue
-			}
-			session = *reconstructed
-			if !p.pairRepairInScope(session, startMs) {
-				continue
-			}
-		} else if !p.pairRepairInScope(session, 0) {
-			continue
-		}
-		if !p.pairSourceAvailable(session) {
-			p.reportPairRepairUnavailable(sid, session.SourcePath.String())
-			continue
-		}
-		entries = append(entries, DiffEntry{
-			Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
-		})
-		repaired = append(repaired, sid)
+		repaired = append(repaired, ids[i])
 	}
+	// The location cache is written only here, after every worker finished.
 	p.cacheRepairLocations(ctx, repaired)
 	return entries
+}
+
+// pairRepairOutcomeKind is what the repair selection decided for one candidate.
+type pairRepairOutcomeKind int
+
+const (
+	pairRepairNone       pairRepairOutcomeKind = iota // no repair work
+	pairRepairMarkQueued                              // mark the already-queued entry
+	pairRepairAppend                                  // append a new repair entry
+)
+
+// pairRepairOutcome carries one candidate's decision from a parallel worker
+// back to the serial pass that applies it in candidate order.
+type pairRepairOutcome struct {
+	kind         pairRepairOutcomeKind
+	queuedIndex  int
+	metadataPath string
+	entry        DiffEntry
+}
+
+// pairRepairDecision decides one repair candidate. It only reads entries, the
+// location cache and the snapshot; diagnostics go through the locked reporter.
+func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entries []DiffEntry, entryIndex map[SessionID]int, native map[SessionID]DiscoveredSession, snap locationSnapshot) pairRepairOutcome {
+	if i, queued := entryIndex[sid]; queued {
+		if p.queuedForNativeChange(entries[i].Session) {
+			// Queued for a proven rewrite reason (a forced run, a
+			// native-refresh schema, or a clock hint no stored fingerprint
+			// can overrule): the queued path re-acquires native input and
+			// rewrites the pair, recreating a missing sidecar, so a
+			// selection-stage damage verdict would only add a read the path
+			// does not need.
+			return pairRepairOutcome{}
+		}
+		if !p.pairNeedsRepairIn(ctx, sid, snap) {
+			return pairRepairOutcome{}
+		}
+		// Queued for a reason that can settle without republishing the
+		// pair: index readiness, or a newer clock that captured fingerprint
+		// comparison may classify unchanged before any write. Carry the
+		// damage verdict onto the existing entry so a database-first no-op
+		// cannot leave the damaged pair behind.
+		metadataPath, _ := p.storedMetadataPath(ctx, sid, snap)
+		return pairRepairOutcome{kind: pairRepairMarkQueued, queuedIndex: i, metadataPath: metadataPath}
+	}
+	if !p.pairNeedsRepairIn(ctx, sid, snap) {
+		return pairRepairOutcome{}
+	}
+	metadataPath, _ := p.storedMetadataPath(ctx, sid, snap)
+	session, found := native[sid]
+	if !found {
+		reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
+		if reconstructed == nil {
+			p.reportPairRepairUnavailable(sid, "")
+			return pairRepairOutcome{}
+		}
+		session = *reconstructed
+		if !p.pairRepairInScope(session, startMs) {
+			return pairRepairOutcome{}
+		}
+	} else if !p.pairRepairInScope(session, 0) {
+		return pairRepairOutcome{}
+	}
+	if !p.pairSourceAvailable(session) {
+		p.reportPairRepairUnavailable(sid, session.SourcePath.String())
+		return pairRepairOutcome{}
+	}
+	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
+		Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
+	}}
 }
 
 // pairRepairTargets returns reindex targets for stored sessions whose saved
