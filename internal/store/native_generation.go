@@ -41,7 +41,8 @@ func generationActivationFromNative(activation ingest.NativeGenerationActivation
 }
 
 // ActivateNativeGeneration adapts the ingest-owned activation envelope to the
-// store's own immutable activation. It stages and fsyncs the content files,
+// store's own immutable activation. It stages the content files and fsyncs the
+// manifest and the directory,
 // persists the opaque prior document, installs the generation, counts and
 // pointer in ONE transaction, repairs the exported metadata and clears the
 // intent. It reuses the same expected-state compare and success-stamp rules as
@@ -55,7 +56,7 @@ func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.
 
 // StageNativeGeneration prepares one managed generation's content files in an
 // owned temporary directory without recording an activation intent or
-// installing anything, so independent sessions can write and fsync in
+// installing anything, so independent sessions can write in
 // parallel while only the install and commit stay on the serialized writer.
 // The returned handle is consumed by ActivateStagedNativeGeneration; a handle
 // that is dropped (for example after the caller refuses stale input) can
