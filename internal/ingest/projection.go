@@ -126,6 +126,12 @@ type ClassifiedBlock struct {
 	// producing this block. Nil means no observation. When present it must
 	// name an assistant block and survive layout on the owning entry.
 	ObservedModel *string
+	// ThinkingLevel / ThinkingLevelRaw are the mapped thinking-level evidence
+	// governing this block. Both empty means no observation. They are legal on
+	// assistant blocks only and are encoded under the entry Extra keys
+	// thinking_level / thinking_level_raw.
+	ThinkingLevel    schema.ThinkingLevel
+	ThinkingLevelRaw schema.ThinkingLevelRaw
 	// NativeAttachments carries optional typed native-metadata enrichment
 	// owned by this block. Each record is remapped to the allocated block ref
 	// in the owner's final partition; a tool attachment is remapped from its
@@ -828,10 +834,25 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 			entry.TokensOut = &value
 		}
 	}
+	extra := map[string]string{}
 	if block.ObservedModel != nil {
-		encoded, err := json.Marshal(map[string]string{"model_id": *block.ObservedModel})
+		extra["model_id"] = *block.ObservedModel
+	}
+	if block.ThinkingLevel != "" || block.ThinkingLevelRaw != "" {
+		if err := schema.ValidateThinkingLevelEvidence(block.Role, block.ThinkingLevel, block.ThinkingLevelRaw); err != nil {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q carries thinking-level evidence the contract refuses; the entry cannot be emitted; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+		}
+		if block.ThinkingLevel != "" {
+			extra[ThinkingLevelExtraKey] = string(block.ThinkingLevel)
+		}
+		if block.ThinkingLevelRaw != "" {
+			extra[ThinkingLevelRawExtraKey] = string(block.ThinkingLevelRaw)
+		}
+	}
+	if len(extra) > 0 {
+		encoded, err := json.Marshal(extra)
 		if err != nil {
-			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q observedModel cannot be encoded; the observation cannot be preserved; supply the exact source identifier: %w", block.NativeKey, err)
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q observation evidence cannot be encoded; the observation cannot be preserved; supply the exact source identifier: %w", block.NativeKey, err)
 		}
 		value := string(encoded)
 		entry.Extra = &value

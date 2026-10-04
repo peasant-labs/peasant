@@ -1,10 +1,23 @@
 package ingest
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
+
+// decodeOpenCodeModelVariant tolerates malformed optional model evidence;
+// it never turns a readable session into a dropped row.
+func decodeOpenCodeModelVariant(data []byte) string {
+	var model struct {
+		Variant string `json:"variant"`
+	}
+	if json.Unmarshal(data, &model) != nil {
+		return ""
+	}
+	return model.Variant
+}
 
 // decodeOpenCodeSessionRecord is shared by paged discovery and targeted
 // materialization attribution. Presence survives a dropped optional row so the
@@ -83,6 +96,9 @@ func decodeOpenCodeSessionRecord(stmt *sqlite.Stmt, support openCodeSessionColum
 		}
 		if stmt.ColumnType(15) == sqlite.TypeText {
 			record.Revert = stmt.ColumnText(15)
+		}
+		if support.hasModel && stmt.ColumnType(16) == sqlite.TypeText {
+			record.ModelVariant = decodeOpenCodeModelVariant([]byte(stmt.ColumnText(16)))
 		}
 	}
 	return record, &sessionID, nil

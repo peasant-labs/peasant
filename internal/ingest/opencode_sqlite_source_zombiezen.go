@@ -85,6 +85,10 @@ const (
 	openCodeSessionV2ClockAfterStatement       = "SELECT id, time_updated FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionV2IDsFirstStatement         = "SELECT id FROM session_v2 ORDER BY id LIMIT ?1"
 	openCodeSessionV2IDsAfterStatement         = "SELECT id FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionModelFirstStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionModelAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2ModelFirstStatement       = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2ModelAfterStatement       = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -130,6 +134,7 @@ type openCodeSessionColumnSupport struct {
 	hasVersion      bool
 	hasSlug         bool
 	hasRevert       bool
+	hasModel        bool
 }
 
 // attribution reports whether the session table carries the working directory,
@@ -622,6 +627,8 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		args := []any{request.SessionID.value}
 		if support.table == OpenCodeSessionTableV2 {
 			switch {
+			case readExtended && support.hasModel:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 WHERE id = ?1", args, decode)
 			case readExtended:
 				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session_v2 WHERE id = ?1", args, decode)
 			case readAttribution:
@@ -637,6 +644,8 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 			}
 		} else {
 			switch {
+			case readExtended && support.hasModel:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session WHERE id = ?1", args, decode)
 			case readExtended:
 				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE id = ?1", args, decode)
 			case readAttribution:
@@ -652,6 +661,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	} else if support.table == OpenCodeSessionTableV2 {
 		projection = "session_v2(id, parent_id, time_updated)"
 		switch {
+		case readExtended && support.hasModel:
+			projection = "session_v2 extended attribution and model"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ModelFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ModelAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
 		case readExtended:
 			projection = "session_v2(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
 			if request.After == nil {
@@ -697,6 +713,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	} else {
 		projection = "session(id, parent_id, time_updated)"
 		switch {
+		case readExtended && support.hasModel:
+			projection = "session extended attribution and model"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionModelFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionModelAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
 		case readExtended:
 			projection = "session(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
 			if request.After == nil {
@@ -739,6 +762,26 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// The shared bounded page counts every row seen, valid or skipped, so dropped
 	// rows never shrink a page below its bound and hide later sessions.
 	records, hasNext := bounded.assemble()
+	// Partial layouts can carry model without the extended attribution group.
+	// Enrich only the bounded kept rows, under this same read lease/snapshot.
+	if support.hasModel && !readExtended {
+		for i := range records {
+			decodeModel := func(model *sqlite.Stmt) error {
+				if model.ColumnType(0) == sqlite.TypeText {
+					records[i].ModelVariant = decodeOpenCodeModelVariant([]byte(model.ColumnText(0)))
+				}
+				return nil
+			}
+			if support.table == OpenCodeSessionTableV2 {
+				err = s.executeRowsLocked(lease.ctx, "SELECT model FROM session_v2 WHERE id = ?1", []any{records[i].SessionID.String()}, decodeModel)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, "SELECT model FROM session WHERE id = ?1", []any{records[i].SessionID.String()}, decodeModel)
+			}
+			if err != nil {
+				return page, s.sourceReadError(lease.ctx, "read optional session model", err, "session model", "supported OpenCode session metadata")
+			}
+		}
+	}
 	page.Records = records
 	page.PresentSessionIDs = present
 	page.Skipped = skipped
@@ -836,6 +879,8 @@ func openCodeSessionColumns(table OpenCodeSessionTable, columns []OpenCodeColumn
 			support.hasSlug = true
 		case "revert":
 			support.hasRevert = true
+		case "model":
+			support.hasModel = true
 		}
 	}
 	if table == OpenCodeSessionTableV2 && primaryColumns != 1 {

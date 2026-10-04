@@ -366,12 +366,15 @@ type OpenCodeSessionRecordCursor struct{ sessionID OpenCodeSessionLinkID }
 // title, and creation time when the session table exposes them; they stay
 // empty for an older layout that lacks those columns.
 type OpenCodeSessionRecord struct {
-	SessionID   OpenCodeSessionLinkID
-	ParentID    OpenCodeSessionLinkID
-	TimeUpdated int64
-	Directory   string
-	Title       string
-	TimeCreated int64
+	// ModelVariant is optional native evidence decoded tolerantly from model.
+	// It is read independently of whether all attribution columns exist.
+	ModelVariant string
+	SessionID    OpenCodeSessionLinkID
+	ParentID     OpenCodeSessionLinkID
+	TimeUpdated  int64
+	Directory    string
+	Title        string
+	TimeCreated  int64
 	// The extended record columns are read together only when the session table
 	// carries every one of them. An older layout that lacks any of them leaves
 	// these fields at their zero value rather than failing the read. Agent labels

@@ -503,8 +503,12 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
 		}
 		switch env.Type {
-		case codexTypeSessionMeta, codexTypeTurnContext:
+		case codexTypeSessionMeta:
 			return &IgnoredSourceRecord{Kind: env.Type, Reason: IgnoredRecordMetadata}, nil
+		case codexTypeTurnContext:
+			// turn_context carries per-turn control evidence (the thinking
+			// effort) that the indexer consumes; it is never a display record.
+			return &IgnoredSourceRecord{Kind: env.Type, Reason: IgnoredRecordControl}, nil
 		case codexTypeEventMsg:
 			var event struct {
 				Type    string `json:"type"`

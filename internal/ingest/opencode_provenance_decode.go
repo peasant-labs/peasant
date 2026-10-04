@@ -226,6 +226,8 @@ func decodeOpenCodeProvenanceAssistant(row OpenCodeProvenanceRow, msg OpenCodePr
 		}
 	}
 	msg.Parts = collector.parts
+	mapping, _ := mapOpenCodeVariant(value.Model.Variant)
+	msg.ThinkingLevel, msg.ThinkingLevelRaw = mapping.Level, mapping.Raw
 	msg.TimeCompleted = value.Time.Completed
 	return msg, collector.settled(), nil
 }
@@ -426,6 +428,13 @@ func decodeOpenCodeSemanticProvenance(semantic openCodeSemanticMessage, scope Op
 		msg.Text = joinOpenCodeSemanticText(semantic.Parts)
 		return msg, true, nil
 	case RoleAssistant:
+		var evidence struct {
+			Model json.RawMessage `json:"model"`
+		}
+		if json.Unmarshal(semantic.Raw, &evidence) == nil {
+			mapping, _ := mapOpenCodeVariant(decodeOpenCodeModelVariant(evidence.Model))
+			msg.ThinkingLevel, msg.ThinkingLevelRaw = mapping.Level, mapping.Raw
+		}
 		settled := true
 		for _, part := range semantic.Parts {
 			partMsg, partRunning := decodeOpenCodeSemanticPart(part)
