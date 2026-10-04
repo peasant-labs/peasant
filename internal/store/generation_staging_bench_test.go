@@ -39,7 +39,7 @@ func benchGeneration(tb testing.TB, n int) (indexformat.Generation, map[schema.S
 		Metadata: schema.UnifiedMetadata{
 			SchemaVersion: ingest.CurrentSchemaVersion,
 			SessionID:     sid,
-			ModelHarness:  schema.Harness("opencode"),
+			ModelHarness:  ingest.HarnessOpenCode,
 		},
 		Content:              content,
 		SourceEvidenceDigest: strings.Repeat("a", 64),
