@@ -27,15 +27,19 @@ const (
 // not a block. Only the owning row carries Usage or Metadata; siblings must not
 // repeat them. The shared projection resolves metadata attachments.
 type PiExtra struct {
-	Kind            PiExtraKind                   `json:"kind"`
-	Harness         schema.Harness                `json:"harness"`
-	SourceRef       string                        `json:"sourceRef,omitempty"`
-	Usage           *schema.UsageDetail           `json:"usage,omitempty"`
-	Metadata        []schema.NativeMetadataRecord `json:"metadata,omitempty"`
-	ModelID         schema.ObservedModelID        `json:"model_id,omitempty"`
-	Namespace       *string                       `json:"namespace,omitempty"`
-	SessionName     *string                       `json:"sessionName,omitempty"`
-	RetainedUnknown []RetainedUnknown             `json:"retainedUnknown,omitempty"`
+	Kind      PiExtraKind                   `json:"kind"`
+	Harness   schema.Harness                `json:"harness"`
+	SourceRef string                        `json:"sourceRef,omitempty"`
+	Usage     *schema.UsageDetail           `json:"usage,omitempty"`
+	Metadata  []schema.NativeMetadataRecord `json:"metadata,omitempty"`
+	ModelID   schema.ObservedModelID        `json:"model_id,omitempty"`
+	// ThinkingLevel / ThinkingLevelRaw are the mapped level governing an
+	// assistant row; raw is the native spelling when it differs.
+	ThinkingLevel    schema.ThinkingLevel    `json:"thinking_level,omitempty"`
+	ThinkingLevelRaw schema.ThinkingLevelRaw `json:"thinking_level_raw,omitempty"`
+	Namespace        *string                 `json:"namespace,omitempty"`
+	SessionName      *string                 `json:"sessionName,omitempty"`
+	RetainedUnknown  []RetainedUnknown       `json:"retainedUnknown,omitempty"`
 }
 
 // PiPublicRef domain-separates irreversible references. Never publish native IDs.
@@ -46,6 +50,9 @@ func PiPublicRef(sessionID, domain, nativeID string) string {
 
 // EncodePiExtra validates and serializes evidence for SessionEntry.Extra.
 func EncodePiExtra(value PiExtra) (*string, error) {
+	if !value.ThinkingLevel.IsValid() || (value.ThinkingLevelRaw != "" && !value.ThinkingLevelRaw.IsValid()) {
+		return nil, piEvidenceError(fmt.Errorf("thinking-level evidence must use a canonical level and valid UTF-8 raw spelling within 128 bytes without edge whitespace"))
+	}
 	if (value.Namespace != nil && !utf8.ValidString(*value.Namespace)) || !utf8.ValidString(string(value.ModelID)) {
 		return nil, piEvidenceError(fmt.Errorf("typed Pi evidence contains invalid UTF-8"))
 	}
@@ -133,6 +140,12 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	case PiExtraState, PiExtraUsage, PiExtraNativeMetadata, PiExtraCarrier:
 	default:
 		return value, true, piEvidenceError(fmt.Errorf("unknown Pi evidence kind"))
+	}
+	if !value.ThinkingLevel.IsValid() {
+		return value, true, piEvidenceError(fmt.Errorf("thinking_level %q is outside the canonical thinking-level set", value.ThinkingLevel))
+	}
+	if value.ThinkingLevelRaw != "" && !value.ThinkingLevelRaw.IsValid() {
+		return value, true, piEvidenceError(fmt.Errorf("thinking_level_raw must be non-empty valid UTF-8 within 128 bytes without edge whitespace"))
 	}
 	if value.SourceRef != "" && !validPiRef(value.SourceRef) {
 		return value, true, piEvidenceError(fmt.Errorf("source reference is not a generated Pi public reference"))

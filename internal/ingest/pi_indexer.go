@@ -166,6 +166,9 @@ type piMessagePayload struct {
 	Output        string          `json:"output"`
 	ExitCode      *int            `json:"exitCode"`
 	Cancelled     bool            `json:"cancelled"`
+	// ThinkingLevel is an assistant record's own level; when present it wins
+	// over the level set by the latest thinking_level_change.
+	ThinkingLevel string `json:"thinkingLevel"`
 }
 type piContentBlock struct {
 	Type      piBlockType     `json:"type"`
@@ -258,6 +261,9 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 	var rows []schema.SessionEntry
 	metadataCount, metadataBytes := 0, 0
 	calls := make(map[string]*piToolOwner)
+	// currentLevel is the level set by the latest thinking_level_change; it
+	// governs the assistant rows that follow it.
+	var currentLevel thinkingLevelMapping
 	appendRow := func(row schema.SessionEntry, extra PiExtra) error {
 		row.SessionID, row.EntryIndex, row.Harness = sessionID, len(rows), schema.HarnessPi
 		if !i.fullContent {
@@ -374,6 +380,11 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 					}
 					extra.ModelID = observed
 				}
+				level := currentLevel
+				if message.ThinkingLevel != "" {
+					level, _ = mapPiThinkingLevel(message.ThinkingLevel)
+				}
+				extra.ThinkingLevel, extra.ThinkingLevelRaw = level.Level, level.Raw
 			case piRoleToolResult:
 				owner := calls[message.ToolCallID]
 				if owner == nil || owner.finished || owner.name != message.ToolName {
@@ -407,6 +418,10 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			}
 		case piCustom:
 			metadataKind, sourceType, data = schema.NativeMetadataPiCustomData, schema.NativeSourcePiCustom, entry.Data
+		case piThinkingChange:
+			// The change stays a carrier row (no new display turn); it only
+			// sets the level governing the assistant rows that follow.
+			currentLevel, _ = mapPiThinkingLevel(entry.ThinkingLevel)
 		}
 		if scope != "" {
 			usage, err := PiUsageFromRaw(sessionID.String(), entry.ID, scope, rawUsage)

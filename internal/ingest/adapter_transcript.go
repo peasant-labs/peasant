@@ -51,6 +51,7 @@ func (a *PiAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []by
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.ThinkingLevel, metadata.ThinkingLevelRaw = parsed.ThinkingLevel, parsed.ThinkingLevelRaw
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	parsed.Stats.SubagentCount = metadata.Stats.SubagentCount
 	metadata.Stats = parsed.Stats
@@ -129,6 +130,7 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.ThinkingLevel, metadata.ThinkingLevelRaw = parsed.ThinkingLevel, parsed.ThinkingLevelRaw
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount
@@ -155,6 +157,7 @@ func (a *CodexAdapter) ExtractMetadataFromTranscript(ctx context.Context, data [
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.ThinkingLevel, metadata.ThinkingLevelRaw = parsed.ThinkingLevel, parsed.ThinkingLevelRaw
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount

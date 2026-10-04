@@ -30,6 +30,9 @@ type codexFixtureOpts struct {
 	reasoningTokens int
 	omitSessionMeta bool // when true, skip the session_meta line entirely
 	omitGit         bool // when true, emit session_meta without the git block
+	// effort is the turn_context effort; empty keeps the representative
+	// "medium". The thinking-level corpus supplies it per case.
+	effort string
 }
 
 // codexRolloutJSONL builds a representative Codex rollout JSONL covering every
@@ -38,6 +41,10 @@ type codexFixtureOpts struct {
 // custom_tool_call_output,reasoning}, event_msg.{token_count,task_complete}).
 func codexRolloutJSONL(o codexFixtureOpts) []byte {
 	var lines []string
+	effort := o.effort
+	if effort == "" {
+		effort = "medium"
+	}
 
 	if !o.omitSessionMeta {
 		gitFragment := fmt.Sprintf(`,"git":{"commit_hash":"abc123","branch":%q,"repository_url":%q}`, o.branch, o.repositoryURL)
@@ -52,8 +59,8 @@ func codexRolloutJSONL(o codexFixtureOpts) []byte {
 	lines = append(lines,
 		`{"timestamp":"2026-05-30T04:29:25.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"019e7724-57c2-71f1-a865-4bf8dee6a242","started_at":1780115364,"model_context_window":258400}}`,
 		fmt.Sprintf(
-			`{"timestamp":"2026-05-30T04:29:25.001Z","type":"turn_context","payload":{"cwd":%q,"current_date":"2026-05-29","timezone":"UTC","model":%q,"effort":"medium","turn_id":"019e7724-57c2-71f1-a865-4bf8dee6a242"}}`,
-			o.cwd, o.model),
+			`{"timestamp":"2026-05-30T04:29:25.001Z","type":"turn_context","payload":{"cwd":%q,"current_date":"2026-05-29","timezone":"UTC","model":%q,"effort":%q,"turn_id":"019e7724-57c2-71f1-a865-4bf8dee6a242"}}`,
+			o.cwd, o.model, effort),
 		`{"timestamp":"2026-05-30T04:29:25.002Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first prompt"}]}}`,
 		`{"timestamp":"2026-05-30T04:29:26.556Z","type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"opaque-blob"}}`,
 		`{"timestamp":"2026-05-30T04:29:31.611Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first response"}],"phase":"commentary"}}`,
