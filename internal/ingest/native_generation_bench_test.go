@@ -42,7 +42,10 @@ type benchNativeStore struct {
 
 type benchFirstCommitReporter interface {
 	firstCommitNanos() int64
+	commitCount() int64
 }
+
+func (s *benchNativeStore) commitCount() int64 { return s.commitCalls.Load() }
 
 func (s *benchNativeStore) firstCommitNanos() int64 { return s.firstCommit.Load() }
 
@@ -81,19 +84,34 @@ type benchNativeStagingStore struct {
 	*benchNativeStore
 }
 
-func (s *benchNativeStagingStore) StageNativeGeneration(_ context.Context, activation NativeGenerationActivation) error {
+// benchStaged is the inert prepared-files handle the bench stager returns.
+type benchStaged string
+
+func (b benchStaged) NativeGenerationCandidateID() string { return string(b) }
+
+func (s *benchNativeStagingStore) StageNativeGeneration(_ context.Context, activation NativeGenerationActivation) (NativeGenerationStaged, error) {
 	s.stage(len(activation.Blobs))
-	return nil
+	return benchStaged(activation.Generation.Generation.ID), nil
 }
 
-func (s *benchNativeStagingStore) ActivateNativeGeneration(_ context.Context, activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *benchNativeStagingStore) ActivateStagedNativeGeneration(_ context.Context, activation NativeGenerationActivation, _ NativeGenerationStaged) (ActivationOutcome, error) {
 	return s.commitOnly(activation)
 }
 
+func (s *benchNativeStagingStore) ActivateNativeGeneration(ctx context.Context, activation NativeGenerationActivation) (ActivationOutcome, error) {
+	// Without a prepared handle the activation stages inline.
+	return s.benchNativeStore.ActivateNativeGeneration(ctx, activation)
+}
+
+var (
+	_ NativeGenerationStager            = (*benchNativeStagingStore)(nil)
+	_ NativeGenerationPreparedActivator = (*benchNativeStagingStore)(nil)
+)
+
 // BenchmarkNativeGenerationBatchCommits drives the real native flush over one
-// giant candidate and eight small ones. "serial-inline" is the historical
-// behavior (stage+commit per candidate, one at a time); "streamed" is the
-// current behavior (parallel staging, commits as each staging completes).
+// giant candidate and eight small ones. "serial-inline" stages inline inside
+// each activation (a store without a stager, one candidate at a time);
+// "streamed" prepares in parallel and commits as each preparation completes.
 func BenchmarkNativeGenerationBatchCommits(b *testing.B) {
 	results := benchNativeResults(b)
 	for _, tc := range []struct {
@@ -120,12 +138,12 @@ func BenchmarkNativeGenerationBatchCommits(b *testing.B) {
 				pipeline := &Pipeline{config: PipelineConfig{Parallelism: 8}, metricsStore: store}
 				start := time.Now()
 				flush := pipeline.flushIndexParseResults(context.Background(), results, IndexOutcomeIndexed, "bench", nil)
-				if len(flush.indexed) != len(results) {
-					b.Fatalf("indexed results = %d, want %d", len(flush.indexed), len(results))
-				}
 				reporter, ok := store.(benchFirstCommitReporter)
 				if !ok {
 					b.Fatalf("store %T does not report first commit", store)
+				}
+				if got := reporter.commitCount(); got != int64(len(results)) || len(flush.indexed) != len(results) {
+					b.Fatalf("commits = %d, want one per result (%d)", got, len(results))
 				}
 				first := reporter.firstCommitNanos()
 				if first == 0 {

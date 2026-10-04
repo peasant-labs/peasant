@@ -36,6 +36,8 @@ type nativeRecoveryCase struct {
 	WantActive        string `yaml:"want_active"`
 	WantFullRead      string `yaml:"want_full_read"`
 	WantAvailable     string `yaml:"want_available"`
+	WantIntentCleared bool   `yaml:"want_intent_cleared"`
+	WantErrorContains string `yaml:"want_error_contains"`
 }
 
 type nativeRecoveryDocument struct {
@@ -273,8 +275,55 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 					t.Fatalf("write forged intent: %v", err)
 				}
 				outcome, actErr = s.RecoverGenerationActivation(context.Background(), sid)
+			case "same_id_mismatched_intent", "same_id_unbindable_request":
+				// A replayable pending intent for the requested identifier.
+				// The mismatched row installs different bytes under that
+				// identifier, so a replay would commit bytes the request
+				// never asked for; the unbindable row installs the requested
+				// bytes but the request itself is missing a captured blob.
+				pendingBlobs := blobs
+				if c.Fault == "same_id_mismatched_intent" {
+					pendingBlobs = map[schema.SourceEntryRef][]byte{}
+					for ref, data := range blobs {
+						pendingBlobs[ref] = append([]byte("different "), data...)
+					}
+				}
+				digest, err := computeActivationBinding(v2.Generation, bindingFromBlobs(pendingBlobs))
+				if err != nil {
+					t.Fatalf("binding: %v", err)
+				}
+				if _, err := s.generationArtifacts.Stage(context.Background(), v2.Generation, pendingBlobs); err != nil {
+					t.Fatalf("stage same-id candidate: %v", err)
+				}
+				if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
+					SessionID: sid, GenerationID: genID,
+					ManifestPath: "generations/" + genID + "/manifest.json",
+					Completeness: string(v2.Generation.Completeness), StagedAtMs: 1,
+					IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: capture,
+					CandidateDigest: digest,
+				}); err != nil {
+					t.Fatalf("write same-id intent: %v", err)
+				}
+				requestBlobs := blobs
+				if c.Fault == "same_id_unbindable_request" {
+					requestBlobs = map[schema.SourceEntryRef][]byte{}
+					for ref, data := range blobs {
+						requestBlobs[ref] = data
+					}
+					delete(requestBlobs, v2.Generation.Content[0].Ref)
+				}
+				outcome, actErr = execActivate(capture, requestBlobs, nil)
 			default:
 				t.Fatalf("unknown fault %q", c.Fault)
+			}
+			if c.WantErrorContains != "" && (actErr == nil || !strings.Contains(actErr.Error(), c.WantErrorContains)) {
+				t.Fatalf("error = %v, want it to contain %q", actErr, c.WantErrorContains)
+			}
+			if c.WantIntentCleared {
+				pending, err := s.generationArtifacts.ReadIntent(context.Background(), sid)
+				if err != nil || pending != nil {
+					t.Fatalf("pending intent after activation = %+v (err=%v), want cleared", pending, err)
+				}
 			}
 			// Disposition and repair-pending.
 			wantDisposition := map[string]ingest.ActivationDisposition{

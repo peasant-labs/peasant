@@ -70,15 +70,32 @@ type NativeGenerationActivator interface {
 	ActivateNativeGeneration(context.Context, NativeGenerationActivation) (ActivationOutcome, error)
 }
 
-// NativeGenerationStager pre-stages one managed generation's files and its
-// durable activation intent ahead of the activation transaction, so independent
-// sessions can write and fsync their content in parallel while only the
-// database commit stays on the serialized writer. It is optional: without a
-// stager, activation stages inline as before. A staging error is not reported
-// as the candidate's outcome; the activation that follows re-runs the same
-// preamble and owns the authoritative refusal or repair disposition.
+// NativeGenerationStager prepares one managed generation's files ahead of the
+// activation, so independent sessions can write and fsync their content in
+// parallel while only the install and database commit stay on the serialized
+// writer. Preparation records no activation intent and installs nothing: the
+// returned handle is inert until passed to a NativeGenerationPreparedActivator,
+// so a candidate the pipeline later refuses can never be recovered into
+// authority. It is optional: without a stager, activation stages inline. A
+// preparation error is not reported as the candidate's outcome; the activation
+// that follows stages inline and owns the authoritative disposition.
 type NativeGenerationStager interface {
-	StageNativeGeneration(context.Context, NativeGenerationActivation) error
+	StageNativeGeneration(context.Context, NativeGenerationActivation) (NativeGenerationStaged, error)
+}
+
+// NativeGenerationStaged is the opaque store-owned handle for one prepared
+// candidate. It names the candidate it prepared and carries nothing the
+// pipeline may inspect or persist.
+type NativeGenerationStaged interface {
+	NativeGenerationCandidateID() string
+}
+
+// NativeGenerationPreparedActivator activates one candidate using the files a
+// NativeGenerationStager prepared for it. It applies exactly the guarded
+// activation of NativeGenerationActivator; the handle only saves the file
+// writes.
+type NativeGenerationPreparedActivator interface {
+	ActivateStagedNativeGeneration(context.Context, NativeGenerationActivation, NativeGenerationStaged) (ActivationOutcome, error)
 }
 
 // NativeGenerationPrior is the last-good evidence a prior activation left for

@@ -260,34 +260,52 @@ func blobName(ref schema.SourceEntryRef) string {
 }
 
 func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte) (indexformat.Generation, error) {
+	files, err := a.stageTemp(ctx, generation, blobs)
+	if err != nil {
+		return indexformat.Generation{}, err
+	}
+	return a.install(ctx, files, blobs)
+}
+
+// stagedGenerationFiles is one fully written and fsynced candidate that still
+// lives in its owned temporary directory. It is not installed: no generation
+// directory carries its identifier until install renames it into place.
+type stagedGenerationFiles struct {
+	generation indexformat.Generation
+	tmpRel     string
+}
+
+// stageTemp is the file-only staging phase: it creates a unique owned
+// temporary directory, writes and fsyncs every content blob and the manifest,
+// and fsyncs the temporary directory. It performs no identity check and no
+// rename, so the result is invisible to activation and recovery until install
+// runs. A failure removes the temporary directory.
+func (a *osGenerationArtifactStore) stageTemp(ctx context.Context, generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte) (stagedGenerationFiles, error) {
 	sessionID := generation.Metadata.SessionID
 	if err := ctx.Err(); err != nil {
-		return indexformat.Generation{}, err
+		return stagedGenerationFiles{}, err
 	}
 	if err := validateGenerationID(generation.ID); err != nil {
-		return indexformat.Generation{}, err
+		return stagedGenerationFiles{}, err
 	}
-	if _, err := a.sessionRel(sessionID); err != nil {
-		return indexformat.Generation{}, err
+	sessionRel, err := a.sessionRel(sessionID)
+	if err != nil {
+		return stagedGenerationFiles{}, err
 	}
 	root, err := a.openOwnedRoot()
 	if err != nil {
-		return indexformat.Generation{}, err
+		return stagedGenerationFiles{}, err
 	}
 	defer root.Close()
-	sessionRel, genRel, err := a.generationRel(sessionID, generation.ID)
-	if err != nil {
-		return indexformat.Generation{}, err
-	}
 	parentRel := path.Join(sessionRel, "generations")
 	if err := root.MkdirAll(parentRel, 0o700); err != nil {
-		return indexformat.Generation{}, fmt.Errorf("store: create generation parent in Stage for session %s generation %s: %s; no generation was staged", sessionID, generation.ID, sanitizeFSError(err))
+		return stagedGenerationFiles{}, fmt.Errorf("store: create generation parent in Stage for session %s generation %s: %s; no generation was staged", sessionID, generation.ID, sanitizeFSError(err))
 	}
-	// A previous interrupted staging may have left an owned temporary directory.
-	// Activation is serialized by the exclusive session lock, so no live writer
-	// owns one; removing stale temp candidates here cannot touch the active
-	// generation. Listing runs through the owned root so a namespace symlink
-	// cannot redirect the scan.
+	// A previous interrupted or abandoned staging may have left an owned
+	// temporary directory. Staging is serialized by the exclusive session
+	// lock, so no live writer owns one; removing stale temp candidates here
+	// cannot touch any installed generation. Listing runs through the owned
+	// root so a namespace symlink cannot redirect the scan.
 	if stale := listStaleTempDirs(root, parentRel); stale != nil {
 		for _, dir := range stale {
 			_ = root.RemoveAll(dir)
@@ -295,11 +313,11 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 	}
 	tmpRel, err := makeTempGenDir(root, parentRel, generation.ID)
 	if err != nil {
-		return indexformat.Generation{}, fmt.Errorf("store: create temporary generation directory in Stage for session %s generation %s: %s; no generation was staged", sessionID, generation.ID, sanitizeFSError(err))
+		return stagedGenerationFiles{}, fmt.Errorf("store: create temporary generation directory in Stage for session %s generation %s: %s; no generation was staged", sessionID, generation.ID, sanitizeFSError(err))
 	}
-	fail := func(cause error) (indexformat.Generation, error) {
+	fail := func(cause error) (stagedGenerationFiles, error) {
 		_ = root.RemoveAll(tmpRel)
-		return indexformat.Generation{}, fmt.Errorf("store: stage generation %s for session %s in Stage: %s; the temporary candidate was removed and the active generation is unchanged", generation.ID, sessionID, sanitizeFSError(cause))
+		return stagedGenerationFiles{}, fmt.Errorf("store: stage generation %s for session %s in Stage: %s; the temporary candidate was removed and the active generation is unchanged", generation.ID, sessionID, sanitizeFSError(cause))
 	}
 	filled := append([]indexformat.ContentRecord(nil), generation.Content...)
 	refs := make([]int, 0, len(filled))
@@ -326,6 +344,37 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 		}
 	}
 	if err := fsyncRootDir(root, tmpRel); err != nil {
+		return fail(err)
+	}
+	return stagedGenerationFiles{generation: generation, tmpRel: tmpRel}, nil
+}
+
+// install is the publishing phase: it verifies the immutable candidate
+// identity against any already-installed directory with the same identifier,
+// atomically renames the temporary directory into place, and fsyncs the
+// parent. A failure before the rename removes the temporary directory.
+func (a *osGenerationArtifactStore) install(ctx context.Context, files stagedGenerationFiles, blobs map[schema.SourceEntryRef][]byte) (indexformat.Generation, error) {
+	generation := files.generation
+	sessionID := generation.Metadata.SessionID
+	sessionRel, genRel, err := a.generationRel(sessionID, generation.ID)
+	if err != nil {
+		return indexformat.Generation{}, err
+	}
+	parentRel := path.Join(sessionRel, "generations")
+	tmpRel := files.tmpRel
+	if path.Dir(tmpRel) != parentRel || !strings.HasPrefix(path.Base(tmpRel), ".tmp-gen-") {
+		return indexformat.Generation{}, fmt.Errorf("store: install generation %s for session %s: the prepared temporary directory is not owned by this session; nothing was installed and the active generation is unchanged; prepare the candidate again", generation.ID, sessionID)
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return indexformat.Generation{}, err
+	}
+	defer root.Close()
+	fail := func(cause error) (indexformat.Generation, error) {
+		_ = root.RemoveAll(tmpRel)
+		return indexformat.Generation{}, fmt.Errorf("store: stage generation %s for session %s in Stage: %s; the temporary candidate was removed and the active generation is unchanged", generation.ID, sessionID, sanitizeFSError(cause))
+	}
+	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
 	if a.seam != nil {
@@ -367,8 +416,22 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 			return indexformat.Generation{}, err
 		}
 	}
-	generation.Content = filled
 	return generation, nil
+}
+
+// discardTemp removes one prepared temporary directory that will never be
+// installed. It is best-effort: the next staging for the session removes any
+// leftover temporary directory.
+func (a *osGenerationArtifactStore) discardTemp(files stagedGenerationFiles) {
+	if !strings.HasPrefix(path.Base(files.tmpRel), ".tmp-gen-") {
+		return
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	_ = root.RemoveAll(files.tmpRel)
 }
 
 // writeContentBlobs writes and fsyncs every content blob of one staged

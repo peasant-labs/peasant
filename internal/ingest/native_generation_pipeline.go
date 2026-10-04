@@ -234,11 +234,13 @@ func managedActivationCapture(input *CapturedIndexInput, session DiscoveredSessi
 
 // preparedNativeGeneration is one native candidate whose activation envelope is
 // final: its adapter stamp, capture assessment, expected state and prior
-// evidence are resolved. The files it names may already be staged when the
-// store implements NativeGenerationStager.
+// evidence are resolved. staged is the store's inert prepared-files handle
+// when the store implements NativeGenerationStager and preparation succeeded;
+// it becomes activatable only through the guarded activation below.
 type preparedNativeGeneration struct {
 	result       indexParseResult
 	activation   NativeGenerationActivation
+	staged       NativeGenerationStaged
 	entriesCount int
 	candidates   []RetainedUnknownKindCount
 }
@@ -365,16 +367,18 @@ func (p *Pipeline) nativeGenerationStager() NativeGenerationStager {
 }
 
 // prepareAndStageNativeGeneration prepares one candidate and, when the store
-// supports it, stages its files ahead of the serial commit. Staging is
-// best-effort: a failure is not reported here because the serial activation
-// re-runs the same preamble and owns the authoritative refusal or repair
-// outcome.
+// supports it, writes its files ahead of the serial commit. Preparation is
+// best-effort and records nothing activatable: a failure is not reported here
+// because the serial activation then stages inline and owns the authoritative
+// refusal or repair outcome.
 func (p *Pipeline) prepareAndStageNativeGeneration(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string, stager NativeGenerationStager) nativeGenerationCommit {
 	commit := p.prepareNativeGenerationResult(result, outcome, logPrefix)
 	if !commit.ready || stager == nil {
 		return commit
 	}
-	_ = stager.StageNativeGeneration(ctx, commit.prepared.activation)
+	if staged, err := stager.StageNativeGeneration(ctx, commit.prepared.activation); err == nil {
+		commit.prepared.staged = staged
+	}
 	return commit
 }
 
@@ -454,9 +458,11 @@ func (p *Pipeline) stageAndCommitNativeGenerations(
 	producers.Wait()
 }
 
-// commitNativeGenerationResult commits one prepared native candidate. When the
-// store pre-staged its files, the activation replays the recorded intent, so
-// the writer lane only pays the database transaction.
+// commitNativeGenerationResult commits one prepared native candidate. The
+// current-input check runs first, so a refused candidate's prepared files are
+// dropped with no activation intent ever written. When the store prepared the
+// files, the activation installs them, so the writer lane pays only for the
+// intent, rename and database transaction.
 func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared preparedNativeGeneration, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) (indexedMeta, IndexLogEntry, IndexProfileSession) {
 	result := prepared.result
 	im := result.im
@@ -474,6 +480,12 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 	p.runStoreWrite(writeLane, func() {
 		activationErr = p.withCurrentIndexInput(ctx, result.input, func() error {
 			var err error
+			if staged := prepared.staged; staged != nil {
+				if preparedActivator, ok := p.metricsStore.(NativeGenerationPreparedActivator); ok {
+					activationOutcome, err = preparedActivator.ActivateStagedNativeGeneration(ctx, prepared.activation, staged)
+					return err
+				}
+			}
 			activationOutcome, err = activator.ActivateNativeGeneration(ctx, prepared.activation)
 			return err
 		})

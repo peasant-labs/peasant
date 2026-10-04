@@ -13,9 +13,11 @@ import (
 )
 
 var (
-	_ ingest.NativeGenerationActivator   = (*Store)(nil)
-	_ ingest.NativeGenerationStager      = (*Store)(nil)
-	_ ingest.NativeGenerationPriorReader = (*Store)(nil)
+	_ ingest.NativeGenerationActivator         = (*Store)(nil)
+	_ ingest.NativeGenerationStager            = (*Store)(nil)
+	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
+	_ ingest.NativeGenerationStaged            = (*PreparedGeneration)(nil)
+	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
 )
 
 // generationActivationFromNative mirrors the ingest-owned activation envelope
@@ -51,15 +53,31 @@ func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.
 	return outcome, err
 }
 
-// StageNativeGeneration pre-stages one managed generation's content files and
-// records its durable activation intent without running the database
-// transaction, so independent sessions can stage concurrently while only the
-// commit stays on the serialized writer. The matching
-// ActivateNativeGeneration call for the same candidate replays the recorded
-// intent. A staging error is not authoritative: the activation re-runs the
-// same preamble and reports the final refusal or repair outcome.
-func (s *Store) StageNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) error {
-	return s.StageGeneration(ctx, generationActivationFromNative(activation))
+// StageNativeGeneration prepares one managed generation's content files in an
+// owned temporary directory without recording an activation intent or
+// installing anything, so independent sessions can write and fsync in
+// parallel while only the install and commit stay on the serialized writer.
+// The returned handle is consumed by ActivateStagedNativeGeneration; a handle
+// that is dropped (for example after the caller refuses stale input) can
+// never be activated by recovery.
+func (s *Store) StageNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.NativeGenerationStaged, error) {
+	prepared, err := s.StageGeneration(ctx, generationActivationFromNative(activation))
+	if err != nil {
+		return nil, err
+	}
+	return prepared, nil
+}
+
+// ActivateStagedNativeGeneration activates one candidate, installing the
+// files a prior StageNativeGeneration prepared when the handle belongs to this
+// store and candidate. Any other handle is ignored and the candidate is
+// staged inline, exactly as ActivateNativeGeneration does.
+func (s *Store) ActivateStagedNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation, staged ingest.NativeGenerationStaged) (ingest.ActivationOutcome, error) {
+	generationActivation := generationActivationFromNative(activation)
+	if prepared, ok := staged.(*PreparedGeneration); ok {
+		generationActivation.Prepared = prepared
+	}
+	return s.ActivateGeneration(ctx, generationActivation)
 }
 
 // ReadNativeGenerationPrior loads the active generation's reusable evidence for

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -46,6 +47,10 @@ type GenerationActivation struct {
 	// IndexedInputHash is the proof of the input this parser consumed. It is
 	// set only for complete candidates with a positive producer revision.
 	IndexedInputHash *string
+	// Prepared is the file-only staging StageGeneration produced for this
+	// candidate. When set, activation installs those already-fsynced files
+	// instead of writing them again; nil stages inline.
+	Prepared *PreparedGeneration
 	// ArtifactIdentity is the pair identity this parse consumed, established
 	// when the captured state records none.
 	ArtifactIdentity *string
@@ -91,6 +96,9 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 		return notCommitted(err)
 	}
 	defer func() { _ = release() }()
+	// A prepared candidate that this call does not install (an early refusal
+	// or an already-committed retry) is discarded under the session lock.
+	defer activation.Prepared.discardUnlessInstalled()
 
 	activeBefore, err := s.activeGenerationID(ctx, sessionID)
 	if err != nil {
@@ -171,7 +179,7 @@ reconciled:
 		return ingest.ActivationOutcome{Disposition: ingest.ActivationAlreadyCommitted, CandidateID: requestedID}, nil
 	}
 
-	staged, err := s.stageWithIntent(ctx, sessionID, activation.Generation.Generation, activation.Blobs, activation)
+	staged, err := s.stageWithIntent(ctx, sessionID, activation.Generation.Generation, activation.Blobs, activation, activation.Prepared)
 	if err != nil {
 		return notCommitted(err)
 	}
@@ -230,68 +238,89 @@ reconciled:
 	return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID}, nil
 }
 
-// StageGeneration runs the activation preamble and stages (and fsyncs) one
-// managed generation's files, durably recording the activation intent, WITHOUT
-// running the database transaction. A later ActivateGeneration call for the
-// same candidate replays the recorded intent, so the serialized store writer
-// pays only for the commit. Several sessions may stage concurrently: the call
-// holds the session's exclusive lock, and staged generations are immutable and
-// content-addressed, so distinct sessions never contend.
+// PreparedGeneration is one candidate's file-only staging: every content blob
+// and the manifest are written and fsynced in an owned temporary directory,
+// but no activation intent exists and nothing is installed. It is opaque to
+// callers and only ActivateGeneration (through GenerationActivation.Prepared)
+// installs it. A handle that is never activated leaves only its temporary
+// directory, which the next staging for the session removes; recovery can
+// never activate it because no intent records it.
+type PreparedGeneration struct {
+	sessionID    schema.SessionID
+	generationID string
+	files        stagedGenerationFiles
+	artifacts    *osGenerationArtifactStore
+	installed    atomic.Bool
+}
+
+// NativeGenerationCandidateID names the candidate the handle prepared. It
+// marks the handle as an ingest staged generation.
+func (p *PreparedGeneration) NativeGenerationCandidateID() string {
+	if p == nil {
+		return ""
+	}
+	return p.generationID
+}
+
+// claim reports whether the handle can install the requested candidate. A
+// handle is single-use: once claimed it never installs again.
+func (p *PreparedGeneration) claim(sessionID schema.SessionID, generationID string) bool {
+	if p == nil || p.artifacts == nil || p.sessionID != sessionID || p.generationID != generationID {
+		return false
+	}
+	return p.installed.CompareAndSwap(false, true)
+}
+
+// discardUnlessInstalled removes the prepared temporary directory when no
+// activation claimed it.
+func (p *PreparedGeneration) discardUnlessInstalled() {
+	if p == nil || p.artifacts == nil {
+		return
+	}
+	if p.installed.CompareAndSwap(false, true) {
+		p.artifacts.discardTemp(p.files)
+	}
+}
+
+// StageGeneration prepares one managed generation's files WITHOUT making it
+// activatable: under the session lock it writes and fsyncs every content blob
+// and the manifest into an owned temporary directory and returns a handle. It
+// writes no activation intent, performs no rename, does not reconcile any
+// pending intent and never touches the database, so a candidate that a caller
+// later refuses can never be replayed by recovery. Passing the handle as
+// GenerationActivation.Prepared lets ActivateGeneration record the intent and
+// install these files instead of writing them again, so the serialized writer
+// pays only for the rename and the commit. Several sessions may prepare
+// concurrently; each holds only its own session lock.
 //
-// The ordering mirrors ActivateGeneration: the intent is recorded before the
-// atomic rename, so a crash at any seam leaves exactly the prior generation or
-// the staged candidate for recovery to replay. An already-committed candidate
-// is left alone; ActivateGeneration owns the idempotent repair. A preamble
-// that cannot be reconciled is returned unchanged so the caller can fall back
-// to ActivateGeneration, which reports the same refusal with its accounting.
-func (s *Store) StageGeneration(ctx context.Context, activation GenerationActivation) error {
+// A store whose artifact implementation cannot stage files separately returns
+// a handle that activation ignores, staging inline instead.
+func (s *Store) StageGeneration(ctx context.Context, activation GenerationActivation) (*PreparedGeneration, error) {
 	requestedID := activation.Generation.Generation.ID
 	if err := s.requireGenerationSupport(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := validateGenerationID(requestedID); err != nil {
-		return err
+		return nil, err
 	}
 	sessionID := activation.Generation.Generation.Metadata.SessionID
+	handle := &PreparedGeneration{sessionID: sessionID, generationID: requestedID}
+	artifacts, ok := s.generationArtifacts.(*osGenerationArtifactStore)
+	if !ok {
+		return handle, nil
+	}
 	release, err := s.sessionLocker.LockExclusive(ctx, sessionID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = release() }()
-
-	// Reconcile any prior intent exactly as the activation preamble does: an
-	// intent that does not bind to the requested candidate is discarded, a
-	// stale intent for the requested candidate is a verified retry and is
-	// replaced, and any other preamble failure is left for the serial
-	// activation to refuse with its own disposition.
-	if err := s.discardUnboundRequestedIntentLocked(ctx, sessionID, requestedID, activation); err != nil {
-		return err
-	}
-	if err := s.recoverGenerationIntentLocked(ctx, sessionID); err != nil {
-		var stale *ingest.StaleIndexWorkError
-		if errors.As(err, &stale) {
-			pending, readErr := s.generationArtifacts.ReadIntent(ctx, sessionID)
-			if readErr == nil && pending != nil && pending.GenerationID == requestedID {
-				if clearErr := s.generationArtifacts.ClearIntent(ctx, sessionID); clearErr == nil {
-					goto reconciled
-				}
-			}
-		}
-		return err
-	}
-reconciled:
-	active, err := s.activeGenerationID(ctx, sessionID)
+	files, err := artifacts.stageTemp(ctx, activation.Generation.Generation, activation.Blobs)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if active == requestedID {
-		// A prior attempt already committed this candidate (for example the
-		// preamble recovery above, or a crash retry). The files and intent are
-		// already durable; ActivateGeneration replays the idempotent repair.
-		return nil
-	}
-	_, err = s.stageWithIntent(ctx, sessionID, activation.Generation.Generation, activation.Blobs, activation)
-	return err
+	handle.files = files
+	handle.artifacts = artifacts
+	return handle, nil
 }
 
 // RecoverGenerationActivation reconciles one session's pending intent under the
@@ -590,7 +619,7 @@ func readActiveGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (
 // complete candidate digest, and any identifier collision is rejected BEFORE
 // the intent is replaced, so a refused candidate cannot leave an activatable
 // envelope bound to older staged bytes.
-func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID, generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte, activation GenerationActivation) (indexformat.Generation, error) {
+func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID, generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte, activation GenerationActivation, prepared *PreparedGeneration) (indexformat.Generation, error) {
 	if err := validateGenerationID(generation.ID); err != nil {
 		return indexformat.Generation{}, err
 	}
@@ -642,7 +671,14 @@ func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID,
 	}); err != nil {
 		return indexformat.Generation{}, err
 	}
-	staged, err := s.generationArtifacts.Stage(ctx, generation, blobs)
+	// The intent is durable before the rename: a prepared candidate is
+	// installed only now, under the same ordering as inline staging.
+	var staged indexformat.Generation
+	if prepared.claim(sessionID, generation.ID) {
+		staged, err = prepared.artifacts.install(ctx, prepared.files, blobs)
+	} else {
+		staged, err = s.generationArtifacts.Stage(ctx, generation, blobs)
+	}
 	if err != nil {
 		return indexformat.Generation{}, err
 	}

@@ -22,6 +22,8 @@ required_names:
   - preamble-recovery-commit
   - retry-no-double-count
   - forged-intent-replay
+  - same-id-mismatched-intent
+  - same-id-unbindable-request
 cases:
   - name: preview-direct-write
     completeness: incomplete_new
@@ -234,3 +236,47 @@ cases:
     want_active: none
     want_full_read: refused
     want_available: success_empty
+  # A replayable pending intent names the requested identifier but binds
+  # different installed bytes: it is discarded, never replayed, and the
+  # requested envelope is refused against the immutable installed identifier.
+  - name: same-id-mismatched-intent
+    completeness: complete
+    fault: same_id_mismatched_intent
+    prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
+    want_disposition: not_committed
+    want_occurrences: 0
+    want_repair_pending: false
+    want_active: none
+    want_full_read: refused
+    want_available: success_empty
+    want_intent_cleared: true
+    want_error_contains: "immutable identifiers cannot be reused"
+  # A replayable pending intent names the requested identifier, but the
+  # requested envelope itself cannot be bound (a captured blob is missing):
+  # refused with the binding category instead of riding the recorded intent,
+  # last-good authority unchanged.
+  - name: same-id-unbindable-request
+    completeness: complete
+    fault: same_id_unbindable_request
+    prior: full
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
+    want_disposition: not_committed
+    want_occurrences: 0
+    want_repair_pending: false
+    want_active: prior
+    want_full_read: success
+    want_available: success
+    want_error_contains: "store: bind activation for generation"
