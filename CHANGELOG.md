@@ -7,6 +7,20 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-04
+
+### Fixed
+- `peasant harvest index --dry-run` resolves the same managed-generation
+  harness targets a real run uses. On a store upgraded to managed generations
+  the forecast previously reported the retained baseline, planned a different
+  set of sessions than the real run, and emitted false "stored producer
+  revision is newer than this indexer's revision" refusals (#551).
+- The stale-index pass at the end of a harvest reports the stored sessions the
+  run's session selection left at an older index, or with an unfinished repair,
+  with the remedy. A selected-mode kickstart run previously left thousands of
+  stored sessions behind while the report showed only an "unchanged" total
+  (#552).
+
 ## [0.8.1] - 2026-10-04
 
 ### Changed
@@ -602,6 +616,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
 [0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1
 [0.8.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.0
 [0.7.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.7.0-rc1
