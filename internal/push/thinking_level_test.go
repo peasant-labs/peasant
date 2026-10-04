@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -32,6 +33,7 @@ func TestPipelineThinkingLevelCapability(t *testing.T) {
 			Advertisement []schema.ContentCapability `yaml:"advertisement"`
 			Required      []schema.ContentCapability `yaml:"required"`
 			Refuse        bool                       `yaml:"refuse"`
+			SeedOnly      bool                       `yaml:"seedOnly"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeFixtureYAML(thinkingLevelCapabilityYAML, &fixture); err != nil {
@@ -52,11 +54,30 @@ func TestPipelineThinkingLevelCapability(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()
 			seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
+			if tc.SeedOnly {
+				path := filepath.Join("/sync", testutil.TestHostSlug, testutil.TestSessionUUID, testutil.TestSessionUUID+"--metadata.json")
+				data, err := fs.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var metadata schema.UnifiedMetadata
+				if err := json.Unmarshal(data, &metadata); err != nil {
+					t.Fatal(err)
+				}
+				metadata.ThinkingLevel, metadata.ThinkingLevelRaw = tc.Level, tc.Raw
+				data, err = json.Marshal(metadata)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := fs.WriteFile(path, data, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
 			extra := map[string]string{}
-			if tc.Level != "" {
+			if tc.Level != "" && !tc.SeedOnly {
 				extra["thinking_level"] = string(tc.Level)
 			}
-			if tc.Raw != "" {
+			if tc.Raw != "" && !tc.SeedOnly {
 				extra["thinking_level_raw"] = string(tc.Raw)
 			}
 			if tc.ObservedModel != "" {
@@ -101,15 +122,19 @@ func TestPipelineThinkingLevelCapability(t *testing.T) {
 			if detail == nil || detail.ThinkingLevel != tc.Level || detail.ThinkingLevelRaw != tc.Raw || len(detail.Turns) != 1 {
 				t.Fatalf("unexpected envelope: %+v", envelope)
 			}
-			if detail.Turns[0].ThinkingLevel != tc.Level || detail.Turns[0].ThinkingLevelRaw != tc.Raw {
+			wantLevel, wantRaw := tc.Level, tc.Raw
+			if tc.SeedOnly {
+				wantLevel, wantRaw = "", ""
+			}
+			if detail.Turns[0].ThinkingLevel != wantLevel || detail.Turns[0].ThinkingLevelRaw != wantRaw {
 				t.Fatalf("lost turn evidence: %+v", detail.Turns)
 			}
 			got := schema.RequiredContentCapabilities(*detail)
 			if !slices.Equal(got, tc.Required) {
 				t.Fatalf("required=%v, want %v", got, tc.Required)
 			}
-			if defaults.PublishSchemaVersion != "0.1.1" {
-				t.Fatalf("publish contract changed: %s", defaults.PublishSchemaVersion)
+			if envelope.ContractVersion != "0.1.1" {
+				t.Fatalf("publish envelope contract changed: %s", envelope.ContractVersion)
 			}
 		})
 	}

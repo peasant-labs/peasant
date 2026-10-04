@@ -303,6 +303,10 @@ func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixtu
 	}
 	meta := ingest.NewUnifiedMetadata()
 	meta.SessionID, meta.ModelHarness = fixture.ID, fixture.Harness
+	// This corpus varies indexer eligibility, not metadata freshness. Keep its
+	// adapter current so an adapter back-fill cannot rewrite an unselected peer.
+	adapterVersion := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)[fixture.Harness].AdapterVersion
+	meta.AdapterVersion = &adapterVersion
 	meta.HostSlug = ingest.HostSlug(testutil.TestHostSlug)
 	meta.Timestamp.Start = time.Now().Add(-age).UnixMilli()
 	meta.Timestamp.End = meta.Timestamp.Start + 60000

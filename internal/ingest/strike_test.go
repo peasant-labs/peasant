@@ -86,6 +86,9 @@ func TestStrikeCanonicalProtocolWire(t *testing.T) {
 	if metadata.Model.String() != "gpt-5.6-sol" {
 		t.Errorf("metadata model = %q, want model.selected value", metadata.Model)
 	}
+	if metadata.ThinkingLevel != "" || metadata.ThinkingLevelRaw != "" {
+		t.Fatalf("Strike has no recorded thinking-level source, got (%q,%q)", metadata.ThinkingLevel, metadata.ThinkingLevelRaw)
+	}
 	if metadata.Stats.TokensIn != 0 || metadata.Stats.TokensOut != 3 {
 		t.Errorf("metadata tokens = (%d, %d), want known counts (0, 3)", metadata.Stats.TokensIn, metadata.Stats.TokensOut)
 	}
@@ -97,6 +100,7 @@ func TestStrikeCanonicalProtocolWire(t *testing.T) {
 	if len(entries) != 4 {
 		t.Fatalf("indexed entries = %d, want user, assistant, tool use, and tool result", len(entries))
 	}
+	assertNoThinkingLevelEntries(t, entries)
 	parent := entries[1]
 	if parent.ContentPreview == nil || *parent.ContentPreview != "internal thought\nanswer" || !parent.HasThinking {
 		t.Errorf("assistant parent = %+v, want source-ordered reasoning and text", parent)

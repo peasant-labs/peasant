@@ -23,6 +23,28 @@ type pipelineThinkingPair struct {
 	Raw   schema.ThinkingLevelRaw `yaml:"raw"`
 }
 
+func assertNoThinkingLevelEntries(t *testing.T, entries []schema.SessionEntry) {
+	t.Helper()
+	if len(entries) == 0 {
+		t.Fatal("absence assertion requires indexed content")
+	}
+	for _, entry := range entries {
+		if entry.Extra == nil {
+			continue
+		}
+		var extra map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := extra[ingest.ThinkingLevelExtraKey]; ok {
+			t.Fatalf("invented level on entry %d", entry.EntryIndex)
+		}
+		if _, ok := extra[ingest.ThinkingLevelRawExtraKey]; ok {
+			t.Fatalf("invented raw on entry %d", entry.EntryIndex)
+		}
+	}
+}
+
 func TestPipelineThinkingLevel(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -110,6 +132,11 @@ func TestPipelineThinkingLevel(t *testing.T) {
 				if want.Level == "" {
 					if _, ok := extra[ingest.ThinkingLevelExtraKey]; ok {
 						t.Fatal("absent level must omit Extra key")
+					}
+				}
+				if want.Raw == "" {
+					if _, ok := extra[ingest.ThinkingLevelRawExtraKey]; ok {
+						t.Fatal("absent raw must omit Extra key")
 					}
 				}
 			}
