@@ -687,12 +687,22 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	// Readiness is the publication binding plus a current metadata schema
-	// version. The binding half is shared, so it cannot drift from the binding
-	// that captured index state reports.
+	// Readiness is the publication binding plus a metadata schema this build
+	// reads as current. The binding half is shared, so it cannot drift from the
+	// binding that captured index state reports. The schema half binds the
+	// readable set rather than the current version exactly, so a declared
+	// refresh-free schema bump does not make every stored capture read as
+	// needing a re-ingest.
+	readableVersions := ingest.ReadableMetadataSchemaVersions()
+	schemaPlaceholders := make([]string, len(readableVersions))
+	schemaArgs := make([]any, len(readableVersions))
+	for i, version := range readableVersions {
+		schemaPlaceholders[i] = "?"
+		schemaArgs[i] = version
+	}
 	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version,
 s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
-CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version=? THEN 1 ELSE 0 END,
+CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version IN (` + strings.Join(schemaPlaceholders, ",") + `) THEN 1 ELSE 0 END,
 p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
 c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),s.adapter_version,
 s.index_version,s.indexed_input_hash
@@ -705,7 +715,7 @@ WHERE s.session_id IN (` +
 
 	result := make(map[ingest.SessionID]ingest.SessionLocation, len(sessionIDs))
 	err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
-		Args: append([]any{ingest.CurrentSchemaVersion}, args...),
+		Args: append(schemaArgs, args...),
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			id, parseErr := schema.NewSessionID(stmt.ColumnText(0))
 			if parseErr != nil {
