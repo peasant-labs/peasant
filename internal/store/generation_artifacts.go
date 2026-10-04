@@ -153,6 +153,27 @@ func NewOSGenerationArtifactStore(root string) (GenerationArtifactStore, error) 
 	}, nil
 }
 
+// NewOSGenerationArtifactStoreExisting opens the owned-artifact root for
+// read-only planning. It never creates the root: a dry run promises to change
+// no file, and a store without an owned tree has no staged generation to read.
+// A missing root is returned as fs.ErrNotExist so the caller can fall back to
+// the retained baseline, which is the target set a fresh store resolves anyway.
+func NewOSGenerationArtifactStoreExisting(root string) (GenerationArtifactStore, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, fmt.Errorf("store: generation artifact root is empty in NewOSGenerationArtifactStoreExisting; managed content cannot be read; configure the owned-artifact root")
+	}
+	owned, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	_ = owned.Close()
+	return &osGenerationArtifactStore{
+		root:        root,
+		blobWorkers: defaultBlobWriteWorkers,
+		blobSlots:   make(chan struct{}, defaultBlobWriteSlots),
+	}, nil
+}
+
 // openOwnedRoot confines one filesystem operation to the owned root.
 func (a *osGenerationArtifactStore) openOwnedRoot() (*os.Root, error) {
 	root, err := os.OpenRoot(a.root)

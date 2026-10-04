@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -100,5 +101,63 @@ func TestOpenReadOnlyRefusesMissingDatabase(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("OpenReadOnly created the database: stat err = %v", err)
+	}
+}
+
+// A dry-run store opened with the managed-generation reader reports the same
+// capabilities a writable store would, so the run resolves the native harness
+// targets instead of the retained baseline, and it still rewrites nothing.
+func TestOpenReadOnlyWithGenerationOptionsAdvertisesManagedGenerationSupport(t *testing.T) {
+	path := storetest.CopyGoldenDB(t)
+	root := t.TempDir()
+
+	artifacts, err := store.NewOSGenerationArtifactStoreExisting(root)
+	if err != nil {
+		t.Fatalf("open existing artifact root: %v", err)
+	}
+	locker, err := store.NewFileSessionLocker(root)
+	if err != nil {
+		t.Fatalf("open owned root for locks: %v", err)
+	}
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := store.OpenReadOnlyWithOptions(path,
+		store.WithIndexFormats(store.V2IndexFormat()),
+		store.WithGenerationArtifacts(artifacts, locker),
+	)
+	if err != nil {
+		t.Fatalf("OpenReadOnlyWithOptions with generation options: %v", err)
+	}
+	if !read.SupportsIndexFormat(2) {
+		t.Fatal("read-only store with generation options does not report format 2 support")
+	}
+	if !read.GenerationSnapshotsSupported() {
+		t.Fatal("read-only store with generation options does not report managed-generation support")
+	}
+	if err := read.Close(); err != nil {
+		t.Fatalf("close read-only store: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("read-only store with generation options rewrote the database file")
+	}
+}
+
+// The read-only artifact constructor never creates the owned root: a dry run
+// against a store without one must resolve the retained baseline, not leave a
+// new directory behind.
+func TestNewOSGenerationArtifactStoreExistingDoesNotCreateRoot(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+	if _, err := store.NewOSGenerationArtifactStoreExisting(missing); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("constructor error = %v, want fs.ErrNotExist", err)
+	}
+	if _, err := os.Stat(missing); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("constructor created the owned root: stat err = %v", err)
 	}
 }
