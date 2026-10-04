@@ -37,14 +37,14 @@ func newMetadataSchemaVersion(value int) (metadataSchemaVersion, error) {
 // version: writing the rule as "version 9 while the current version is 10"
 // silently stops matching at the next re-pin, and every stored sidecar at 9 AND
 // 10 would then be marked stale by one contract bump that added nothing
-// required. Version 11 is listed for exactly that reason: it is the next
-// expected current version and it adds no required field, so the re-pin is a
-// one-line change here rather than a corpus-wide re-harvest.
+// required. Versions 11 and 12 add only optional fields and remain readable
+// across later bumps. Thinking-level back-fill is driven by the per-harness
+// adapter and indexer targets, not by the metadata schema version.
 //
 // Adding a version here is a claim that nothing REQUIRED was added between it
 // and the current version. A version that adds a required field must be left
 // out, and every older sidecar then refreshes as usual.
-var refreshFreeMetadataVersions = map[metadataSchemaVersion]bool{9: true, 10: true, 11: true}
+var refreshFreeMetadataVersions = map[metadataSchemaVersion]bool{9: true, 10: true, 11: true, 12: true}
 
 // metadataNeedsRefresh reports whether a sidecar recorded at version must be
 // rebuilt before this build can rely on it. current is a parameter, not the
