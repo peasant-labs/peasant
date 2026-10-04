@@ -2120,9 +2120,10 @@ func (p *Pipeline) flushIndexParseResults(ctx context.Context, results []indexPa
 
 // flushIndexParseResultsWithProgress is flushIndexParseResults with an
 // optional per-result callback. emit runs exactly once for every result
-// position as soon as that result's outcome is final. Native candidates emit
-// when their own commit completes, not when the whole batch does, so progress
-// keeps moving while a slow candidate is still staging.
+// position. Native candidates emit as soon as their own commit completes, not
+// when the whole batch does, so progress keeps moving while a slow candidate
+// is still preparing. Other result kinds carry no such promise: they may emit
+// only after the native candidates in the same batch drain.
 func (p *Pipeline) flushIndexParseResultsWithProgress(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
 	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
 	if !ok || len(results) == 0 {
