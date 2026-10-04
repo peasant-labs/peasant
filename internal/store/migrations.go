@@ -328,6 +328,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV59,
 		migrationV60,
 		migrationV61,
+		migrationV62,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -383,5 +384,6 @@ var dbSchema = sqlitemigration.Schema{
 		{DisableForeignKeys: true}, // V59: rebuild session_content_captures for the closed capture-format set
 		nil,                        // V60: managed-generation catalog (new tables, no data rewrite)
 		nil,                        // V61: reverse logical-target lookup indexes (additive, no data rewrite)
+		nil,                        // V62: ALTER TABLE ADD COLUMN sessions.thinking_level + thinking_level_raw (no FKs)
 	},
 }

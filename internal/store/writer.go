@@ -9,6 +9,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // deriveOpaqueHostID computes HMAC-SHA256(salt, hashInput) for a host_slugs row.
@@ -83,14 +84,17 @@ VALUES (?, ?, ?, ?)`
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
+    thinking_level, thinking_level_raw,
     adapter_version, metric_seed_json, source_fingerprint, artifact_hash
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id = excluded.parent_id,
     opaque_host_id = excluded.opaque_host_id,
     project_hash = excluded.project_hash,
     model_harness = excluded.model_harness,
     model_id = excluded.model_id,
+    thinking_level = excluded.thinking_level,
+    thinking_level_raw = excluded.thinking_level_raw,
     start_ms = excluded.start_ms,
     end_ms = excluded.end_ms,
     ingested_ms = excluded.ingested_ms,
@@ -110,11 +114,13 @@ ON CONFLICT(session_id) DO UPDATE SET
 	sqlInsertSessionBeforeSourceFingerprint = `INSERT INTO sessions (
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
-    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
+    thinking_level, thinking_level_raw
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id=excluded.parent_id, model_harness=excluded.model_harness,
-    model_id=excluded.model_id, opaque_host_id=excluded.opaque_host_id,
+    model_id=excluded.model_id, thinking_level=excluded.thinking_level,
+    thinking_level_raw=excluded.thinking_level_raw, opaque_host_id=excluded.opaque_host_id,
     project_hash=excluded.project_hash, start_ms=excluded.start_ms,
     end_ms=excluded.end_ms, ingested_ms=excluded.ingested_ms,
     source_path=excluded.source_path, source_format=excluded.source_format,
@@ -431,6 +437,14 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			sessionOrigin = sessionorigin.Unknown
 		}
 
+		// The canonical thinking level is a closed set mirrored by the
+		// sessions CHECK; refuse an out-of-set value here so the caller gets
+		// an actionable error instead of a bare constraint failure. The raw
+		// spelling is source evidence bounded at ingest, not by the writer.
+		if !m.ThinkingLevel.IsValid() {
+			return fmt.Errorf("store: insert session %s: thinking level %q is not one of the canonical levels %v (store.insertSessionsOnConn, before the sessions upsert); the batch is not written — map the native value through the ingest thinking-level mapping, or leave the level empty and keep the native spelling in ThinkingLevelRaw", m.SessionID, m.ThinkingLevel, schema.AllThinkingLevels)
+		}
+
 		// V23+: opaque_host_id replaces host_slug in sessions FK.
 		// The FK cache follows the resolved cacheParent, never the raw logical
 		// evidence: an orphaned Codex/OpenCode child stores NULL while its
@@ -443,6 +457,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			string(m.Source.Format), m.SchemaVersion, derefString(m.Git.Branch),
 			derefString(m.Git.Worktree), derefString(m.Git.Tracking), m.Version,
 			sessionOrigin.String(),
+			nullableString(string(m.ThinkingLevel)), nullableString(string(m.ThinkingLevelRaw)),
 		}
 		if hasSourceFingerprint {
 			sessionArgs = append(sessionArgs, adapterVersion, seedJSON, sorted[i].SourceFingerprint, derefString(sorted[i].ArtifactHash))
