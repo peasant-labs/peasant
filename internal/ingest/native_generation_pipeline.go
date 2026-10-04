@@ -378,39 +378,80 @@ func (p *Pipeline) prepareAndStageNativeGeneration(ctx context.Context, result i
 	return commit
 }
 
-// prepareNativeGenerationCommits prepares the given native candidates, staging
-// their files in parallel when the store supports pre-staging. Cross-session
-// staging restores the parallelism the entry path gives to its file writes;
-// only the database commit that follows stays on the serialized writer lane.
-func (p *Pipeline) prepareNativeGenerationCommits(ctx context.Context, results []indexParseResult, positions []int, outcome IndexOutcome, logPrefix string) []nativeGenerationCommit {
-	commits := make([]nativeGenerationCommit, len(positions))
+// nativeGenerationCommitJob carries one prepared (or refused) candidate from a
+// staging worker to the serial commit consumer.
+type nativeGenerationCommitJob struct {
+	position int
+	commit   nativeGenerationCommit
+}
+
+// stageAndCommitNativeGenerations prepares and stages every native candidate
+// in parallel, then commits each candidate through the serialized store writer
+// lane as soon as its own staging completes. Committing as results arrive
+// keeps a slow candidate from delaying the commits (and progress) of the
+// others: the batch finishes when its slowest staging plus the commits behind
+// it finish, instead of when the sum of staging and commits does. onCommit
+// runs once per candidate, in completion order, on the calling goroutine.
+func (p *Pipeline) stageAndCommitNativeGenerations(
+	ctx context.Context,
+	results []indexParseResult,
+	positions []int,
+	outcome IndexOutcome,
+	logPrefix string,
+	writeLane *storeWriteLane,
+	onCommit func(position int, indexed indexedMeta, logEntry IndexLogEntry, profile IndexProfileSession),
+) {
 	if len(positions) == 0 {
-		return commits
+		return
 	}
 	stager := p.nativeGenerationStager()
 	workers := 1
 	if stager != nil {
 		workers = min(len(positions), parallelWorkers(p.config))
 	}
-	if workers <= 1 {
-		for i, position := range positions {
-			commits[i] = p.prepareAndStageNativeGeneration(ctx, results[position], outcome, logPrefix, stager)
+	jobs := make(chan nativeGenerationCommitJob, workers)
+
+	// Producers: prepare and stage candidates with bounded parallelism, then
+	// hand each one to the commit consumer in completion order.
+	var producers sync.WaitGroup
+	producers.Add(1)
+	go func() {
+		defer producers.Done()
+		defer close(jobs)
+		sem := make(chan struct{}, workers)
+		var staging sync.WaitGroup
+		for i := range positions {
+			sem <- struct{}{}
+			staging.Add(1)
+			go func(i int) {
+				defer staging.Done()
+				defer func() { <-sem }()
+				jobs <- nativeGenerationCommitJob{
+					position: positions[i],
+					commit:   p.prepareAndStageNativeGeneration(ctx, results[positions[i]], outcome, logPrefix, stager),
+				}
+			}(i)
 		}
-		return commits
+		staging.Wait()
+	}()
+
+	// Consumer: commit each candidate as it arrives. runStoreWrite serializes
+	// the commits through the writer lane; staging continues meanwhile.
+	for job := range jobs {
+		commit := job.commit
+		var indexed indexedMeta
+		var logEntry IndexLogEntry
+		var profile IndexProfileSession
+		if commit.ready {
+			indexed, logEntry, profile = p.commitNativeGenerationResult(ctx, commit.prepared, outcome, logPrefix, writeLane)
+		} else {
+			indexed, logEntry, profile = commit.im, commit.logEntry, commit.profile
+		}
+		if onCommit != nil {
+			onCommit(job.position, indexed, logEntry, profile)
+		}
 	}
-	sem := make(chan struct{}, workers)
-	var wg sync.WaitGroup
-	for i := range positions {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			commits[i] = p.prepareAndStageNativeGeneration(ctx, results[positions[i]], outcome, logPrefix, stager)
-		}(i)
-	}
-	wg.Wait()
-	return commits
+	producers.Wait()
 }
 
 // commitNativeGenerationResult commits one prepared native candidate. When the

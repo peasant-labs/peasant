@@ -1566,13 +1566,14 @@ func (p *Pipeline) indexLoop(
 				refused = append(refused, *result.refusedKind)
 			}
 		}
-		flush := p.flushIndexParseResults(ctx, results, outcome, logPrefix, writeLane)
+		flush := p.flushIndexParseResultsWithProgress(ctx, results, outcome, logPrefix, writeLane, func() {
+			emitAdvance(prog, StageIndex, 1, 0)
+		})
 		for i, indexedResult := range flush.indexed {
 			indexed = append(indexed, indexedResult)
 			if flush.logEntries[i].SessionID != "" {
 				logEntries = append(logEntries, flush.logEntries[i])
 			}
-			emitAdvance(prog, StageIndex, 1, 0)
 			if indexedResult.indexed && downstreamCh != nil {
 				select {
 				case downstreamCh <- indexedResult:
@@ -2114,14 +2115,23 @@ type indexWriteFlush struct {
 }
 
 func (p *Pipeline) flushIndexParseResults(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) indexWriteFlush {
-	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
-	if !ok || len(results) == 0 {
-		return p.flushIndexParseResultsOneByOne(ctx, results, outcome, logPrefix, writeLane)
-	}
-	return p.flushIndexParseResultsBatch(ctx, results, batchStore, outcome, logPrefix, writeLane)
+	return p.flushIndexParseResultsWithProgress(ctx, results, outcome, logPrefix, writeLane, nil)
 }
 
-func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) indexWriteFlush {
+// flushIndexParseResultsWithProgress is flushIndexParseResults with an
+// optional per-result callback. emit runs exactly once for every result
+// position as soon as that result's outcome is final. Native candidates emit
+// when their own commit completes, not when the whole batch does, so progress
+// keeps moving while a slow candidate is still staging.
+func (p *Pipeline) flushIndexParseResultsWithProgress(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
+	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
+	if !ok || len(results) == 0 {
+		return p.flushIndexParseResultsOneByOne(ctx, results, outcome, logPrefix, writeLane, emit)
+	}
+	return p.flushIndexParseResultsBatch(ctx, results, batchStore, outcome, logPrefix, writeLane, emit)
+}
+
+func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
 	flush := indexWriteFlush{
 		indexed:         make([]indexedMeta, 0, len(results)),
 		logEntries:      make([]IndexLogEntry, 0, len(results)),
@@ -2133,11 +2143,14 @@ func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results [
 		flush.logEntries = append(flush.logEntries, logEntry)
 		flush.profileSessions = append(flush.profileSessions, profileSession)
 		flush.writeDuration += profileSession.WriteDuration
+		if emit != nil {
+			emit()
+		}
 	}
 	return flush
 }
 
-func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []indexParseResult, batchStore SessionEntryBatchStore, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) indexWriteFlush {
+func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []indexParseResult, batchStore SessionEntryBatchStore, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
 	flush := indexWriteFlush{
 		indexed:         make([]indexedMeta, len(results)),
 		logEntries:      make([]IndexLogEntry, len(results)),
@@ -2152,6 +2165,9 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
 			flush.logEntries[i] = result.logEntry
 			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
+			if emit != nil {
+				emit()
+			}
 			continue
 		}
 		if result.nativeCandidate != nil {
@@ -2290,25 +2306,18 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		flush.writeDuration = writeDuration
 	}
 	// Native candidates stage their content files before the serialized write
-	// lane: preparation and staging run with the same cross-session
-	// parallelism the entry path gives to its file writes, and only the
-	// database commit below stays on the single writer lane.
-	nativeCommits := p.prepareNativeGenerationCommits(ctx, results, nativePositions, outcome, logPrefix)
-	for i, position := range nativePositions {
-		commit := nativeCommits[i]
-		var indexed indexedMeta
-		var logEntry IndexLogEntry
-		var profileSession IndexProfileSession
-		if commit.ready {
-			indexed, logEntry, profileSession = p.commitNativeGenerationResult(ctx, commit.prepared, outcome, logPrefix, writeLane)
-		} else {
-			indexed, logEntry, profileSession = commit.im, commit.logEntry, commit.profile
-		}
+	// lane, and each candidate commits through the lane as soon as its own
+	// staging completes: a slow candidate no longer delays the commits of the
+	// others, and every commit reports its own progress immediately.
+	p.stageAndCommitNativeGenerations(ctx, results, nativePositions, outcome, logPrefix, writeLane, func(position int, indexed indexedMeta, logEntry IndexLogEntry, profileSession IndexProfileSession) {
 		flush.indexed[position] = indexed
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = profileSession
 		flush.writeDuration += profileSession.WriteDuration
-	}
+		if emit != nil {
+			emit()
+		}
+	})
 	for i, writeResult := range writeResults {
 		perSessionWriteDuration := writeDurations[i]
 		flush.writeStats.Add(writeResult.Stats)
@@ -2329,6 +2338,9 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
 			flush.logEntries[position] = logEntry
 			flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
+			if emit != nil {
+				emit()
+			}
 			continue
 		}
 		result.entryCount = writeResult.EntriesCount
@@ -2345,6 +2357,9 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
+		if emit != nil {
+			emit()
+		}
 	}
 	return flush
 }
