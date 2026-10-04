@@ -6,4 +6,6 @@ requiredNames:
   - after-db-before-metadata
   - after-metadata-before-intent-clear
   - mismatched-durable-intent-digest-refused
+  - unverifiable-candidate-discarded
+  - undecodable-manifest-discarded
   - corrupt-artifact

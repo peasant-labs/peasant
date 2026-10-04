@@ -57,7 +57,7 @@ func (s *benchNativeStore) IndexSessionEntryBatch(_ context.Context, writes []Se
 	return results
 }
 
-// stage simulates writing and fsyncing one candidate's content blobs.
+// stage simulates one candidate's content staging cost.
 func (s *benchNativeStore) stage(blobCount int) {
 	s.stageCalls.Add(1)
 	time.Sleep(time.Duration(blobCount) * s.stagePerBlob)

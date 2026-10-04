@@ -151,7 +151,7 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 	}
 
 	// Attempt G2 with the stale precondition: the activation is refused and
-	// the synced candidate is retained, but recovery must refuse it again
+	// the staged candidate is retained, but recovery must refuse it again
 	// rather than bypassing the stale comparison.
 	g2, g2Blobs := buildTestGeneration(t, sid, "gen_stale_g2", "stale text G2", "stale input G2", "stale output G2")
 	staleActivation := GenerationActivation{

@@ -398,6 +398,20 @@ func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ing
 	return bundle, err
 }
 
+// readableMetadataSchemaVersions is the set form of the versions this build
+// reads as current. Publication readiness compares a stored capture's version
+// against this set, not against the current version exactly, so a declared
+// refresh-free schema bump does not make every stored capture read as needing a
+// re-ingest.
+var readableMetadataSchemaVersions = func() map[int]bool {
+	versions := ingest.ReadableMetadataSchemaVersions()
+	set := make(map[int]bool, len(versions))
+	for _, version := range versions {
+		set[version] = true
+	}
+	return set
+}()
+
 // Capture-state columns only: eligibility deliberately does not verify payload.
 //
 // The columns are read back into the typed capture value and judged by the ONE
@@ -458,7 +472,7 @@ func scanPublicationMetadataProof(stmt *sqlite.Stmt, id ingest.SessionID) (bundl
 			return publicationRepairError("invalid stored session origin")
 		}
 		bundle.CaptureRevision = stmt.ColumnInt64(2)
-		if stmt.ColumnType(9) == sqlite.TypeNull || stmt.ColumnInt(10) != ingest.CurrentSchemaVersion {
+		if stmt.ColumnType(9) == sqlite.TypeNull || !readableMetadataSchemaVersions[stmt.ColumnInt(10)] {
 			return nil
 		}
 		kind, parseErr := ingest.NewCWDProvenanceKind(stmt.ColumnText(5))
