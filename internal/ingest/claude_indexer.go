@@ -165,6 +165,9 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 	// in the transcript. tool_result blocks referencing these IDs keep role=user
 	// (genuine user answers) instead of being reclassified to role=tool.
 	askUserCallIDs := make(map[string]bool)
+	// levelState tracks the ultracode session mode in source order so each
+	// assistant entry carries the level that governed it.
+	var levelState claudeThinkingLevelState
 
 	for scanner.Scan() {
 		var placeholderErr error
@@ -219,7 +222,16 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			}
 			completion.recognized++
 		}
+		if decodeErr == nil {
+			levelState.observe(line.Type, line.Attachment)
+		}
 		entry, ok := claudeLineEntry(sessionID, entryIndex, trimmed, idx.fullContent, line, decodeErr)
+		if ok && entry.Role == RoleAssistant {
+			// The legacy thinkingMetadata.level is seed-only evidence and is
+			// never stamped per turn.
+			mapping, _ := levelState.governing(claudeEffortValue(line.Effort))
+			entry.Extra = addThinkingLevelObservation(entry.Extra, mapping)
+		}
 		if !ok {
 			// Malformed line — skip silently.
 			entryIndex++
@@ -332,6 +344,11 @@ type claudeIndexLine struct {
 	Timestamp  json.RawMessage `json:"timestamp"`
 	StopReason string          `json:"stop_reason"`
 	Content    json.RawMessage `json:"content"` // Top-level content (system entries use this, not message.content)
+	// Effort is the assistant line's resolved effort; Attachment carries the
+	// nested attachment of an attachment record (ultracode mode evidence).
+	// Both are decoded tolerantly by their helpers.
+	Effort     json.RawMessage `json:"effort"`
+	Attachment json.RawMessage `json:"attachment"`
 	Message    struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`

@@ -1,0 +1,38 @@
+requiredNames:
+  - canonical
+  - raw-only
+  - alias-pair
+  - absent
+  - invalid-canonical
+  - edge-whitespace
+  - invalid-utf8
+  - null-canonical
+  - null-raw
+  - unknown-field
+cases:
+  - name: canonical
+    level: ultra
+  - name: raw-only
+    raw: custom
+  - name: alias-pair
+    level: "off"
+    raw: none
+  - name: absent
+  - name: invalid-canonical
+    level: custom
+    error: true
+  - name: edge-whitespace
+    raw: " high"
+    error: true
+  - name: invalid-utf8
+    rawBase64: /w==
+    error: true
+  - name: null-canonical
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":null}'
+    error: true
+  - name: null-raw
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level_raw":null}'
+    error: true
+  - name: unknown-field
+    extra: '{"kind":"pi.state","harness":"pi","thinkingLevel":"high"}'
+    error: true

@@ -79,6 +79,8 @@ type piEntry struct {
 	Data          json.RawMessage `json:"data"`
 	Details       json.RawMessage `json:"details"`
 	Usage         json.RawMessage `json:"usage"`
+	// ThinkingLevel is the new level carried by a thinking_level_change entry.
+	ThinkingLevel string `json:"thinkingLevel"`
 }
 
 type piDocument struct {

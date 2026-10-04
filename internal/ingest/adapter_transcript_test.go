@@ -19,14 +19,16 @@ var adapterTranscriptYAML []byte
 type adapterTranscriptFixtures struct {
 	RequiredNames []string `yaml:"requiredNames"`
 	Cases         []struct {
-		Name          string         `yaml:"name"`
-		Harness       ingest.Harness `yaml:"harness"`
-		Transcript    string         `yaml:"transcript"`
-		Turns         int            `yaml:"turns"`
-		TokensIn      int            `yaml:"tokensIn"`
-		TokensOut     int            `yaml:"tokensOut"`
-		PreserveTimes bool           `yaml:"preserveTimes"`
-		Insufficient  bool           `yaml:"insufficient"`
+		Name             string         `yaml:"name"`
+		Harness          ingest.Harness `yaml:"harness"`
+		Transcript       string         `yaml:"transcript"`
+		Turns            int            `yaml:"turns"`
+		TokensIn         int            `yaml:"tokensIn"`
+		TokensOut        int            `yaml:"tokensOut"`
+		PreserveTimes    bool           `yaml:"preserveTimes"`
+		Insufficient     bool           `yaml:"insufficient"`
+		ThinkingLevel    string         `yaml:"thinkingLevel"`
+		ThinkingLevelRaw string         `yaml:"thinkingLevelRaw"`
 	} `yaml:"cases"`
 }
 
@@ -93,6 +95,9 @@ func TestAdaptersExtractMetadataFromTranscriptJSONL(t *testing.T) {
 			}
 			if metadata.Stats.TurnCount != row.Turns || metadata.Stats.TokensIn != row.TokensIn || metadata.Stats.TokensOut != row.TokensOut {
 				t.Fatalf("metadata extraction did not parse represented statistics: %+v", metadata.Stats)
+			}
+			if string(metadata.ThinkingLevel) != row.ThinkingLevel || string(metadata.ThinkingLevelRaw) != row.ThinkingLevelRaw {
+				t.Fatalf("retained thinking level = %q/%q, want %q/%q", metadata.ThinkingLevel, metadata.ThinkingLevelRaw, row.ThinkingLevel, row.ThinkingLevelRaw)
 			}
 			if metadata.SessionID != original.SessionID || metadata.HostSlug != original.HostSlug || !reflect.DeepEqual(metadata.Project, original.Project) || !reflect.DeepEqual(metadata.Git, original.Git) || !reflect.DeepEqual(metadata.Source, original.Source) || metadata.Stats.SubagentCount != original.Stats.SubagentCount || metadata.Timestamp.Ingested == nil || *metadata.Timestamp.Ingested != ingested || metadata.AdapterVersion != nil {
 				t.Fatalf("metadata extraction replaced retained context or producer evidence: %+v", metadata)

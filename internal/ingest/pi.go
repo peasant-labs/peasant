@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -217,11 +218,23 @@ func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMe
 		if timestamp := parseIndexTimestamp(entry.Timestamp); timestamp != nil && *timestamp > meta.Timestamp.End {
 			meta.Timestamp.End = *timestamp
 		}
+		var nativeLevel string
+		if entry.Type == piThinkingChange {
+			nativeLevel = entry.ThinkingLevel
+		} else if entry.Type == piMessage {
+			var message piMessagePayload
+			if json.Unmarshal(entry.Message, &message) == nil && message.Role == piRoleAssistant {
+				nativeLevel = message.ThinkingLevel
+			}
+		}
+		_, diagnostic := mapPiThinkingLevel(nativeLevel)
+		appendThinkingLevelDiagnostic(&meta, diagnostic, 0)
 	}
 	if meta.Timestamp.End < meta.Timestamp.Start {
 		meta.Timestamp.End = meta.Timestamp.Start
 	}
 	meta.Stats.DurationMs = meta.Timestamp.End - meta.Timestamp.Start
+	seenAssistant := false
 	for _, row := range rows {
 		if IsPiCarrier(row) {
 			continue
@@ -250,6 +263,16 @@ func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMe
 				}
 				meta.Model = model
 			}
+		}
+		// The governing level of the first depth-0 assistant row seeds the
+		// session; later level changes never do.
+		if !seenAssistant {
+			seenAssistant = true
+			extra, _, err := DecodePiEntryExtra(row)
+			if err != nil {
+				return nil, piSourceError("PiAdapter.ExtractMetadata thinking level", 0, err)
+			}
+			applyThinkingLevelSeed(&meta, thinkingLevelMapping{Level: extra.ThinkingLevel, Raw: extra.ThinkingLevelRaw})
 		}
 		const maxSafe = 9007199254740991
 		if row.TokensIn != nil {

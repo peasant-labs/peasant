@@ -297,6 +297,9 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 	entryIndex := 0
 	var traversalPosition int64
 	previousLine := 0
+	// currentLevel is the effort of the latest turn_context; it governs the
+	// assistant messages that follow it.
+	var currentLevel thinkingLevelMapping
 
 	for scanner.Scan() {
 		var placeholderErr error
@@ -372,6 +375,13 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		// turn_context drive ExtractMetadata; event_msg.{token_count,
 		// task_*} are session-level signals or UI mirrors of response_item
 		// content and would double-count if indexed.
+		if env.Type == codexTypeTurnContext {
+			currentLevel = thinkingLevelMapping{}
+			var tc codexTurnContext
+			if json.Unmarshal(env.Payload, &tc) == nil {
+				currentLevel, _ = mapCodexEffort(tc.Effort)
+			}
+		}
 		if env.Type != codexTypeResponse {
 			continue
 		}
@@ -413,6 +423,9 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		}
 		if len(unknown) > 0 && entry.ContentPreview == nil && entry.ToolInput == nil && entry.ToolOutput == nil {
 			entry.Role, entry.EntryType, entry.HasThinking = RoleSystem, EntryTypeSystem, false
+		}
+		if entry.Role == RoleAssistant && payload.Type == codexResponseMessage {
+			entry.Extra = addThinkingLevelObservation(entry.Extra, currentLevel)
 		}
 		entries = append(entries, entry)
 		if completion != nil {

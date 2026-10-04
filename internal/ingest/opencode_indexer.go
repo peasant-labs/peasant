@@ -389,6 +389,8 @@ type openCodeIndexMsg struct {
 	Model     struct {
 		ID      string `json:"id"`
 		ModelID string `json:"modelID"`
+		// Variant is the native thinking-level variant (model.variant).
+		Variant string `json:"variant"`
 	} `json:"model"`
 	Version   string `json:"version"`
 	Directory string `json:"directory"`
@@ -575,7 +577,7 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 			entry.EntryType = EntryTypeToolUse
 		}
 		if entry.Role != RoleAssistant {
-			entry.Extra = removeModelObservation(entry.Extra)
+			entry.Extra = removeThinkingLevelObservation(removeModelObservation(entry.Extra))
 		}
 		if entry.Role == RoleAssistant && pendingObservedModel != "" {
 			// The following assistant turn adopts a preceding model switch only
@@ -1294,6 +1296,17 @@ func buildExtraJSON(msg *openCodeIndexMsg) *string {
 	}
 	if msg.Role == RoleAssistant.String() && ValidObservedModel(msg.ModelID) {
 		extra["model_id"] = msg.ModelID
+	}
+	if msg.Role == RoleAssistant.String() && msg.Model.Variant != "" {
+		// The same mapping the managed provenance path uses; an unrecognized
+		// variant keeps only its raw spelling, never a fabricated level.
+		mapping, _ := mapOpenCodeVariant(msg.Model.Variant)
+		if mapping.Level != "" {
+			extra[ThinkingLevelExtraKey] = mapping.Level
+		}
+		if mapping.Raw != "" {
+			extra[ThinkingLevelRawExtraKey] = mapping.Raw
+		}
 	}
 
 	// Cache fields: prefer tokens-level, fall back to top-level message fields.

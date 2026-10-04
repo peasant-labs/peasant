@@ -1,0 +1,8 @@
+requiredNames:
+  - invalid_raw_is_dropped_with_diagnostic
+  - off_is_off_identity
+  - medium_then_high_seed_is_earliest
+  - change_after_first_assistant_never_seeds
+  - assistant_record_level_wins
+  - unrecognized_level_is_absent_with_raw
+  - no_level_evidence_stays_absent
