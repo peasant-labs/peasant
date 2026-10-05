@@ -76,6 +76,20 @@ type GenerationIntent struct {
 	CandidateDigest string `json:"candidateDigest"`
 }
 
+// GenerationFootprint is the on-disk size of one owned generation directory.
+// Bytes is the sum of the file sizes and Files is the number of regular files.
+// A missing directory is the zero footprint, never an error.
+type GenerationFootprint struct {
+	Bytes int64
+	Files int64
+}
+
+// Add accumulates another footprint.
+func (f *GenerationFootprint) Add(other GenerationFootprint) {
+	f.Bytes += other.Bytes
+	f.Files += other.Files
+}
+
 // GenerationArtifactStore owns the file half of the crash protocol. The
 // production implementation is root-confined through os.Root, writes the
 // content blobs, fsyncs the manifest and the directory, and atomically renames
@@ -114,6 +128,16 @@ type GenerationArtifactStore interface {
 	// ReadPriorEvidence returns the persisted prior document for one
 	// generation, or (nil, nil) when none was written.
 	ReadPriorEvidence(context.Context, schema.SessionID, string) ([]byte, error)
+	// GenerationSize reports the on-disk size of one owned generation
+	// directory. A missing directory is the zero footprint, never an error, so
+	// a row-first reclaim that crashed before removing files still plans
+	// cleanly.
+	GenerationSize(context.Context, schema.SessionID, string) (GenerationFootprint, error)
+	// ListGenerationDirectories returns the installed generation directory
+	// names owned by one session, sorted. It skips the owned temporary staging
+	// directories. A missing session directory is an empty list, never an
+	// error.
+	ListGenerationDirectories(context.Context, schema.SessionID) ([]string, error)
 }
 
 // priorEvidenceName is the fixed file name of the activation-owned prior
@@ -1047,6 +1071,105 @@ func (a *osGenerationArtifactStore) ReadPriorEvidence(ctx context.Context, id sc
 		return nil, nil
 	}
 	return data, nil
+}
+
+// GenerationSize reports the on-disk footprint of one owned generation
+// directory through the root-confined view. A missing directory is the zero
+// footprint: a row-first reclaim that already removed the directory, or a
+// generation that was never staged, is not an error.
+func (a *osGenerationArtifactStore) GenerationSize(ctx context.Context, id schema.SessionID, generationID string) (GenerationFootprint, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationFootprint{}, err
+	}
+	_, genRel, err := a.generationRel(id, generationID)
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	defer root.Close()
+	return footprintUnderRoot(root, genRel)
+}
+
+// ListGenerationDirectories returns the installed generation directory names
+// owned by one session. It reads through the owned root so a namespace symlink
+// cannot redirect the scan, skips the reserved temporary staging directories,
+// and refuses a name the central identifier guard rejects so a caller never
+// treats an unowned entry as a generation. A missing session directory is an
+// empty list.
+func (a *osGenerationArtifactStore) ListGenerationDirectories(ctx context.Context, id schema.SessionID) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sessionRel, err := a.sessionRel(id)
+	if err != nil {
+		return nil, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	dir, err := root.Open(path.Join(sessionRel, "generations"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: list generation directories for session %s: %s; the owned generation set cannot be read", id, sanitizeFSError(err))
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("store: list generation directories for session %s: %s; the owned generation set cannot be read", id, sanitizeFSError(err))
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".tmp-gen-") {
+			continue
+		}
+		if err := validateGenerationID(name); err != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// footprintUnderRoot sums the regular files under one root-relative directory.
+// A missing directory is the zero footprint. The walk runs through the
+// root-confined filesystem view, so a symlink cannot redirect it outside the
+// owned root.
+func footprintUnderRoot(root *os.Root, rel string) (GenerationFootprint, error) {
+	var footprint GenerationFootprint
+	err := fs.WalkDir(root.FS(), rel, func(_ string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return fs.SkipAll
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		footprint.Bytes += info.Size()
+		footprint.Files++
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return GenerationFootprint{}, fmt.Errorf("store: measure generation directory: %s; the footprint could not be read", sanitizeFSError(err))
+	}
+	return footprint, nil
 }
 
 // writeRootFile writes one managed file without a per-file sync. Content blobs
