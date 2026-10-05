@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -223,6 +224,14 @@ func TestSupersededGenerationReclaimForecastAndApply(t *testing.T) {
 	}
 	if activeAfter := generationRowCounts(t, s, id, fixture.Generation.ActiveID); activeAfter != activeBefore {
 		t.Fatalf("active generation rows changed across the reclaim: before=%+v after=%+v", activeBefore, activeAfter)
+	}
+
+	// The active complete row remains the last-good read authority, so the
+	// completeness guard still refuses an incomplete candidate.
+	incomplete, incompleteBlobs := buildTestGeneration(t, id, "gen_reclaim_incomplete", "incomplete text", "incomplete input", "incomplete output")
+	incomplete.Generation.Completeness = indexformat.GenerationCompletenessIncompleteNew
+	if err := activateTestGeneration(t, s, incomplete, incompleteBlobs); err == nil {
+		t.Fatal("completeness guard no longer refuses an incomplete candidate after the reclaim")
 	}
 	if visible := visibleGeneration(t, s, id); visible != fixture.Generation.ActiveID {
 		t.Fatalf("visible generation = %q after reclaim, want active %q", visible, fixture.Generation.ActiveID)
