@@ -198,7 +198,10 @@ type reclaimCandidate struct {
 // included, so a batched run resumes where the previous one stopped.
 //
 // The method reads only. It takes no exclusive session lock and changes no row
-// and no file, so it runs against a read-only store opened for a dry run.
+// and no file, so it runs against a read-only store opened for a dry run. A
+// store opened without the owned-artifact store still forecasts the row counts
+// and the committed catalog generations; it reports a zero footprint and no
+// owned directories, so a dry run over a missing artifact root stays useful.
 func (s *Store) PlanSupersededGenerationReclaim(ctx context.Context, limit int) (ReclaimPlan, error) {
 	var plan ReclaimPlan
 	candidates, err := s.reclaimCandidateSessions(ctx)
@@ -394,13 +397,11 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 	if len(ids) == 0 {
 		return outcome, nil
 	}
-	rows := sumReclaimRowCounts(rowCounts)
 
 	deleted, err := s.deleteSupersededGenerationRows(ctx, candidate.sessionID, active)
 	if err != nil {
 		return outcome, err
 	}
-	_ = deleted // the forecast rowCounts is the reported count; the delete is the action
 
 	// The row transaction has committed. Release the lock before the directory
 	// pass so a long cleanup cannot block a reader that shares the lock; the
@@ -410,7 +411,7 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 
 	if s.reclaimSeam != nil {
 		if err := s.reclaimSeam(reclaimSeamAfterRows); err != nil {
-			outcome.rows = rows
+			outcome.rows = deleted
 			outcome.generations = len(ids)
 			return outcome, err
 		}
@@ -431,8 +432,8 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 		outcome.footprint.Add(footprint)
 	}
 	outcome.generations = len(ids)
-	outcome.rows = rows
-	outcome.didWork = rows.Total() > 0 || outcome.directoriesRemoved > 0
+	outcome.rows = deleted
+	outcome.didWork = deleted.Total() > 0 || outcome.directoriesRemoved > 0
 	return outcome, nil
 }
 
@@ -575,13 +576,4 @@ func reclaimGenerationUnion(rowCounts map[string]ReclaimTableCounts, committed, 
 	}
 	sort.Strings(ids)
 	return ids
-}
-
-// sumReclaimRowCounts sums every generation's per-table count.
-func sumReclaimRowCounts(counts map[string]ReclaimTableCounts) ReclaimTableCounts {
-	var total ReclaimTableCounts
-	for _, entry := range counts {
-		total.Add(entry)
-	}
-	return total
 }

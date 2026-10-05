@@ -119,6 +119,20 @@ func countGenerationRows(t *testing.T, s *Store, table string, id schema.Session
 	return count
 }
 
+// generationRowCounts returns the per-table row counts for one generation.
+func generationRowCounts(t *testing.T, s *Store, id schema.SessionID, generationID string) ReclaimTableCounts {
+	t.Helper()
+	var counts ReclaimTableCounts
+	for _, table := range reclaimTableNames {
+		field := reclaimCountField(&counts, table)
+		if field == nil {
+			t.Fatalf("table %s has no count field", table)
+		}
+		*field = countGenerationRows(t, s, table, id, generationID)
+	}
+	return counts
+}
+
 // generationDirectoryExists reports whether an owned generation directory is
 // present under the artifact root.
 func generationDirectoryExists(root string, id schema.SessionID, generationID string) bool {
@@ -167,7 +181,7 @@ func TestSupersededGenerationReclaimForecastAndApply(t *testing.T) {
 	if wantCounts.Total() == 0 {
 		t.Fatal("fixture left no superseded rows to reclaim")
 	}
-	activeEntriesBefore := countGenerationRows(t, s, "session_projection_entries", id, fixture.Generation.ActiveID)
+	activeBefore := generationRowCounts(t, s, id, fixture.Generation.ActiveID)
 
 	plan, err := s.PlanSupersededGenerationReclaim(context.Background(), 0)
 	if err != nil {
@@ -201,17 +215,14 @@ func TestSupersededGenerationReclaimForecastAndApply(t *testing.T) {
 		t.Fatalf("reclaim warnings = %v, want none", result.Warnings)
 	}
 
-	// Zero superseded rows remain; the active generation is intact.
+	// Zero superseded rows remain; every active-generation row is intact.
 	for _, table := range reclaimTableNames {
 		if remaining := countGenerationRows(t, s, table, id, fixture.Generation.SupersededID); remaining != 0 {
 			t.Fatalf("%s still holds %d superseded row(s)", table, remaining)
 		}
 	}
-	for _, table := range reclaimTableNames {
-		got := countGenerationRows(t, s, table, id, fixture.Generation.ActiveID)
-		if table == "session_projection_entries" && got != activeEntriesBefore {
-			t.Fatalf("active session_projection_entries = %d, want %d", got, activeEntriesBefore)
-		}
+	if activeAfter := generationRowCounts(t, s, id, fixture.Generation.ActiveID); activeAfter != activeBefore {
+		t.Fatalf("active generation rows changed across the reclaim: before=%+v after=%+v", activeBefore, activeAfter)
 	}
 	if visible := visibleGeneration(t, s, id); visible != fixture.Generation.ActiveID {
 		t.Fatalf("visible generation = %q after reclaim, want active %q", visible, fixture.Generation.ActiveID)
@@ -221,6 +232,52 @@ func TestSupersededGenerationReclaimForecastAndApply(t *testing.T) {
 	}
 	if generationDirectoryExists(root, id, fixture.Generation.SupersededID) {
 		t.Fatal("superseded generation directory survived the reclaim")
+	}
+	assertReclaimIntegrity(t, s)
+}
+
+// TestSupersededGenerationReclaimLimitResumes proves the batch limit advances:
+// the first pass reclaims one session, the next pass skips it and reclaims the
+// next, and a final pass finds no work.
+func TestSupersededGenerationReclaimLimitResumes(t *testing.T) {
+	fixture := loadGenerationReclaimFixture(t)
+	s, _ := openGenerationStore(t)
+	seedSupersededReclaimSession(t, s, fixture)
+
+	secondID, err := schema.NewSessionID("bbbb4444-4444-4444-8444-444444444444")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedGenerationSession(t, s, string(secondID))
+	old, oldBlobs := buildTestGeneration(t, secondID, fixture.Generation.SupersededID, "second old text", "second old input", "second old output")
+	if err := activateTestGeneration(t, s, old, oldBlobs); err != nil {
+		t.Fatalf("activate second session superseded generation: %v", err)
+	}
+	active, activeBlobs := buildTestGeneration(t, secondID, fixture.Generation.ActiveID, "second active text", "second active input", "second active output")
+	if err := activateTestGeneration(t, s, active, activeBlobs); err != nil {
+		t.Fatalf("activate second session active generation: %v", err)
+	}
+
+	first, err := s.ReclaimSupersededGenerations(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("first limited pass: %v", err)
+	}
+	if first.Sessions != 1 {
+		t.Fatalf("first pass reclaimed %d session(s), want 1", first.Sessions)
+	}
+	second, err := s.ReclaimSupersededGenerations(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("second limited pass: %v", err)
+	}
+	if second.Sessions != 1 {
+		t.Fatalf("second pass reclaimed %d session(s), want 1", second.Sessions)
+	}
+	third, err := s.ReclaimSupersededGenerations(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("third limited pass: %v", err)
+	}
+	if third.Sessions != 0 {
+		t.Fatalf("third pass reclaimed %d session(s), want 0", third.Sessions)
 	}
 	assertReclaimIntegrity(t, s)
 }
