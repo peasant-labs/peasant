@@ -2,7 +2,7 @@ requiredNames:
   - off_and_minimal_are_canonical_identity
   - effort_medium_identity
   - two_efforts_seed_is_earliest
-  - ultracode_enter_before_first_assistant_seeds_ultra
+  - ultracode_enter_before_first_assistant_seeds_ultracode
   - ultracode_mid_session_enter_marks_later_turns_only
   - ultracode_exit_reverts_to_recorded_effort
   - no_level_evidence_stays_absent

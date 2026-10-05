@@ -3,8 +3,8 @@ cases:
   - name: claude_level
     harness: claude-code
     root: /claude
-    seed: {level: ultra, raw: ultracode}
-    turns: [{level: ultra, raw: ultracode}, {level: medium}]
+    seed: {level: ultracode}
+    turns: [{level: ultracode}, {level: medium}]
     files:
       - path: /claude/-workspace/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
         content: |

@@ -9,6 +9,7 @@
 required_round_trip_names:
   - a canonical level with its native raw spelling round-trips
   - a canonical level without a raw spelling round-trips
+  - ultracode round-trips without raw evidence
   - a raw-only unmapped spelling round-trips with the level absent
   - a session without thinking-level evidence stays absent
   - a multibyte raw spelling round-trips exact bytes
@@ -26,6 +27,9 @@ round_trips:
   - name: a canonical level without a raw spelling round-trips
     session_id: 62000000-0000-4000-8000-000000000002
     first: {level: ultra}
+  - name: ultracode round-trips without raw evidence
+    session_id: 62000000-0000-4000-8000-000000000008
+    first: {level: ultracode}
   - name: a raw-only unmapped spelling round-trips with the level absent
     session_id: 62000000-0000-4000-8000-000000000003
     first: {raw: custom}

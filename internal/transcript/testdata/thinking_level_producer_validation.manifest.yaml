@@ -1,5 +1,6 @@
 requiredNames:
   - assistant_accepted
+  - assistant_ultracode_accepted
   - user_refused
   - system_refused
   - tool_refused

@@ -92,11 +92,10 @@ cases:
     harness: claude
     native: "ultra"
     level: ultra
-  - name: claude_effort_ultracode_maps_ultra_with_raw
+  - name: claude_effort_ultracode_identity_without_raw
     harness: claude
     native: "ultracode"
-    level: ultra
-    raw: "ultracode"
+    level: ultracode
   - name: claude_effort_none_maps_off_with_raw
     harness: claude
     native: "none"

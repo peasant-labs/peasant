@@ -20,7 +20,7 @@ requiredNames:
   - claude_effort_xhigh_identity
   - claude_effort_max_identity
   - claude_effort_ultra_identity_without_raw
-  - claude_effort_ultracode_maps_ultra_with_raw
+  - claude_effort_ultracode_identity_without_raw
   - claude_effort_none_maps_off_with_raw
   - claude_effort_small_is_unknown_with_raw
   - claude_effort_trivial_is_unknown_with_raw

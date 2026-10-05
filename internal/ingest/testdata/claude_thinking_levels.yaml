@@ -30,16 +30,16 @@ cases:
     turns:
       - {level: medium}
       - {level: high}
-  - name: ultracode_enter_before_first_assistant_seeds_ultra
+  - name: ultracode_enter_before_first_assistant_seeds_ultracode
     transcript: |
       {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
       {"type":"attachment","timestamp":"2026-01-01T00:00:00Z","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}
       {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
       {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
-    seed: {level: ultra, raw: ultracode}
+    seed: {level: ultracode}
     turns:
-      - {level: ultra, raw: ultracode}
-      - {level: ultra, raw: ultracode}
+      - {level: ultracode}
+      - {level: ultracode}
   - name: ultracode_mid_session_enter_marks_later_turns_only
     transcript: |
       {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
@@ -49,16 +49,16 @@ cases:
     seed: {level: high}
     turns:
       - {level: high}
-      - {level: ultra, raw: ultracode}
+      - {level: ultracode}
   - name: ultracode_exit_reverts_to_recorded_effort
     transcript: |
       {"type":"attachment","timestamp":"2026-01-01T00:00:00Z","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}
       {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
       {"type":"attachment","timestamp":"2026-01-01T00:00:02Z","attachment":{"type":"ultra_effort_exit"}}
       {"type":"assistant","timestamp":"2026-01-01T00:00:03Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
-    seed: {level: ultra, raw: ultracode}
+    seed: {level: ultracode}
     turns:
-      - {level: ultra, raw: ultracode}
+      - {level: ultracode}
       - {level: xhigh}
   - name: no_level_evidence_stays_absent
     transcript: |
