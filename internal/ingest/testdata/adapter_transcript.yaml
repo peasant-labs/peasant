@@ -65,8 +65,7 @@ cases:
       {"type":"attachment","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}
       {"type":"assistant","effort":"xhigh","message":{"role":"assistant","content":"answer"}}
     turns: 1
-    thinkingLevel: ultra
-    thinkingLevelRaw: ultracode
+    thinkingLevel: ultracode
   - name: codex-retained-thinking-level
     harness: codex
     transcript: |

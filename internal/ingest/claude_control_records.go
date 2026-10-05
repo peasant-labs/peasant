@@ -384,8 +384,8 @@ func claudeScalarText(raw json.RawMessage) string {
 const (
 	claudeAttachmentUltraEffortEnter = "ultra_effort_enter"
 	claudeAttachmentUltraEffortExit  = "ultra_effort_exit"
-	// claudeUltracodeModeName is the native mode name kept as raw evidence on
-	// the ultra level while the mode governs a turn.
+	// claudeUltracodeModeName maps identically to the canonical level without
+	// raw evidence while the mode governs a turn.
 	claudeUltracodeModeName = "ultracode"
 )
 

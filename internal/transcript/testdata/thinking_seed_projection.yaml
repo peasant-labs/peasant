@@ -52,11 +52,11 @@ cases:
     expectedSeed: {level: xhigh}
     expectedTurns: [{}, {level: xhigh}]
   - name: stored_seed_without_observations
-    storedSeed: {level: ultra, raw: ultracode}
+    storedSeed: {level: ultracode}
     entries:
       - {index: 1, role: user, depth: 0, content: request}
       - {index: 2, role: assistant, depth: 0, content: answer}
-    expectedSeed: {level: ultra, raw: ultracode}
+    expectedSeed: {level: ultracode}
     expectedTurns: [{}, {}]
   - name: latest_observation_is_not_seed
     entries:

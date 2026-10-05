@@ -55,8 +55,7 @@ var (
 	claudeEffortRule = thinkingLevelRule{
 		source: "Claude Code assistant effort",
 		aliases: map[string]schema.ThinkingLevel{
-			"none":      schema.ThinkingLevelOff,
-			"ultracode": schema.ThinkingLevelUltra,
+			"none": schema.ThinkingLevelOff,
 		},
 	}
 	claudeLegacyLevelRule = thinkingLevelRule{
@@ -83,7 +82,7 @@ func mapCodexEffort(native string) (thinkingLevelMapping, *DiagnosticEntry) {
 }
 
 // mapClaudeEffort maps a Claude Code assistant-line effort value, including
-// the native ultracode mode name (ultra with raw "ultracode").
+// the canonical ultracode mode name (identity, without raw).
 func mapClaudeEffort(native string) (thinkingLevelMapping, *DiagnosticEntry) {
 	return claudeEffortRule.apply(native)
 }

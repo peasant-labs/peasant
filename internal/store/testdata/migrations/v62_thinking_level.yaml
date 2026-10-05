@@ -13,6 +13,7 @@ required_record_names:
   - canonical level xhigh round-trips
   - canonical level max round-trips
   - canonical level ultra round-trips
+  - canonical level ultracode round-trips
   - a canonical level with its native raw spelling round-trips as a pair
   - a raw-only row with an unmapped native spelling keeps the canonical absent
   - a multibyte raw spelling round-trips exact bytes
@@ -55,6 +56,10 @@ records:
   - name: canonical level ultra round-trips
     session_id: v62-level-ultra
     thinking_level: "ultra"
+    thinking_level_raw: null
+  - name: canonical level ultracode round-trips
+    session_id: v62-level-ultracode
+    thinking_level: "ultracode"
     thinking_level_raw: null
   - name: a canonical level with its native raw spelling round-trips as a pair
     session_id: v62-pair

@@ -1,7 +1,6 @@
 cases:
   - name: stored_seed_requires_token
-    level: ultra
-    raw: ultracode
+    level: ultracode
     seedOnly: true
     advertisement: [thinking_level_v1]
     required: [thinking_level_v1]
@@ -11,8 +10,7 @@ cases:
     required: [thinking_level_v1]
     refuse: true
   - name: push_envelope_carries_thinking_level
-    level: ultra
-    raw: ultracode
+    level: ultracode
     advertisement: [thinking_level_v1]
     required: [thinking_level_v1]
   - name: raw_only_requires_token

@@ -9,6 +9,7 @@ errorFragments:
   - retry
 cases:
   - {name: assistant_accepted, role: assistant, level: "off", raw: none, accepted: true}
+  - {name: assistant_ultracode_accepted, role: assistant, level: ultracode, accepted: true}
   - {name: user_refused, role: user, level: high, accepted: false}
   - {name: system_refused, role: system, raw: deep, accepted: false}
   - {name: tool_refused, role: tool, level: high, accepted: false}

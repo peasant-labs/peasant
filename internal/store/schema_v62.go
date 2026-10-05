@@ -15,7 +15,7 @@ const migrationV62 = `
 ALTER TABLE sessions
   ADD COLUMN thinking_level TEXT
   CHECK (thinking_level IS NULL OR thinking_level IN
-    ('off','minimal','low','medium','high','xhigh','max','ultra'));
+    ('off','minimal','low','medium','high','xhigh','max','ultra','ultracode'));
 ALTER TABLE sessions
   ADD COLUMN thinking_level_raw TEXT;
 `
