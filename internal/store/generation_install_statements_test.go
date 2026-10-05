@@ -118,9 +118,9 @@ func assertInstalledEntries(t *testing.T, conn *sqlite.Conn, sid schema.SessionI
 	for _, entry := range candidate.Generation.Main.Entries {
 		want = append(want, expected{partition: 0, entry: entry})
 	}
-	for _, section := range candidate.Generation.Earlier {
+	for i, section := range candidate.Generation.Earlier {
 		for _, entry := range section.Content.Entries {
-			want = append(want, expected{partition: 1, entry: entry})
+			want = append(want, expected{partition: i + 1, entry: entry})
 		}
 	}
 	if len(rows) != len(want) {
@@ -162,7 +162,10 @@ func assertInstalledSections(t *testing.T, conn *sqlite.Conn, sid schema.Session
 	}); err != nil {
 		t.Fatalf("read projection sections: %v", err)
 	}
-	want := map[int]string{0: "<null>", 1: string(candidate.Generation.Earlier[0].State)}
+	want := map[int]string{0: "<null>"}
+	for i, section := range candidate.Generation.Earlier {
+		want[i+1] = string(section.State)
+	}
 	if len(got) != len(want) {
 		t.Fatalf("installed section rows = %v, want %v", got, want)
 	}
