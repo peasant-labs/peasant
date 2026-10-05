@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,6 +198,31 @@ func TestReclaimCmdEmptyStoreReportsNothing(t *testing.T) {
 	}
 	if !strings.Contains(output, "no superseded managed generations to reclaim") {
 		t.Fatalf("empty-store output = %q", output)
+	}
+}
+
+// TestReclaimCmdDryRunJSON proves the machine-readable forecast is valid JSON
+// with the session and totals the dry run reports.
+func TestReclaimCmdDryRunJSON(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ownedRoot := filepath.Join(dir, "managed")
+	seedReclaimCmdStore(t, dir, ownedRoot)
+
+	output, err := executeReclaimCmd(t, dir, ownedRoot, []string{"--dry-run", "--json"})
+	if err != nil {
+		t.Fatalf("reclaim --dry-run --json: %v\n%s", err, output)
+	}
+	var decoded struct {
+		DryRun   bool             `json:"dry_run"`
+		Sessions []map[string]any `json:"sessions"`
+		Totals   map[string]any   `json:"totals"`
+	}
+	if err := json.Unmarshal([]byte(output), &decoded); err != nil {
+		t.Fatalf("decode dry-run JSON: %v\n%s", err, output)
+	}
+	if !decoded.DryRun || len(decoded.Sessions) != 1 || decoded.Totals["generations"] != float64(1) {
+		t.Fatalf("unexpected dry-run JSON: %s", output)
 	}
 }
 
