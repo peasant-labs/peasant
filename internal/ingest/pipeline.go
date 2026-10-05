@@ -291,6 +291,12 @@ type Pipeline struct {
 	// contentRecoveries holds this run's completed retained-content repairs,
 	// keyed by session, so the index log and summary can report them.
 	contentRecoveries map[SessionID]contentRecovery
+	// pairRepairOwned names the candidates whose saved pair the pair-repair
+	// pass found missing or damaged. The ordinary index inventory skips them:
+	// their pair is not a readable index input, and the pair-repair pass owns
+	// the outcome, so re-attempting the index read only repeats an acquisition
+	// failure. Populated by appendPairRepairWork before the index inventory runs.
+	pairRepairOwned map[SessionID]bool
 	// contentCaptureStoppedOnBudget reports that the one-time full-content pass
 	// stopped this run on its byte budget, with sessions still to capture.
 	contentCaptureStoppedOnBudget bool
@@ -1291,6 +1297,14 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 					missingInput++
 					continue
 				}
+			}
+			// The pair-repair pass owns a session whose saved pair is missing
+			// or damaged: its pair is not a readable index input, and that pass
+			// already re-ingested it from native input or reported the
+			// unavailable source once. Queueing it here would only read the same
+			// unreadable pair and repeat the acquisition failure.
+			if p.pairRepairOwned[sid] {
+				continue
 			}
 			queued[sid] = true
 			if p.indexTargetNeedsWork(ctx, reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}) {

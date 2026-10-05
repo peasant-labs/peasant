@@ -24,6 +24,7 @@ type harvesterRepairSession struct {
 	IndexedInputHash                  string           `yaml:"indexed_input_hash"` // "set" | "clear" | ""
 	PublicationCaptureRevision        int              `yaml:"publication_capture_revision"`
 	IndexedPublicationCaptureRevision int              `yaml:"indexed_publication_capture_revision"`
+	CWDProvenance                     string           `yaml:"cwd_provenance_kind"`
 	MetadataRowAtRevision             *int             `yaml:"metadata_row_at_revision"`
 }
 
@@ -95,6 +96,9 @@ func seedRepairSession(t *testing.T, s *store.Store, session harvesterRepairSess
 		inputSQL(t, s, session.ID,
 			"UPDATE sessions SET publication_capture_revision = ?, indexed_publication_capture_revision = ? WHERE session_id = ?",
 			session.PublicationCaptureRevision, session.IndexedPublicationCaptureRevision)
+	}
+	if session.CWDProvenance != "" {
+		inputSQL(t, s, session.ID, "UPDATE sessions SET cwd_provenance_kind = ? WHERE session_id = ?", session.CWDProvenance)
 	}
 	if session.MetadataRowAtRevision != nil {
 		inputSQL(t, s, session.ID,
