@@ -11,6 +11,7 @@ required_cases:
   - extended-invalid-model
   - populated-extended-layout
   - older-layout-empty
+  - partial-layout-model-variant
   - v2-populated-extended-layout
   - v2-base-attribution
 cases:
@@ -71,6 +72,22 @@ cases:
         version: 1.1.53
         slug: glowing-wizard
         revert: '{"messageID":"msg_x"}'
+  # A base attribution layout that also carries the optional model column: the
+  # record read resolves the base attribution from one bounded statement and
+  # then fills the model variant from the batched identifier-span read, with no
+  # extended attribution columns present.
+  - name: partial-layout-model-variant
+    extended: false
+    model_column: true
+    rows:
+      - id: ses_thinkingPartial
+        parent_id: ""
+        time_created: 4000
+        time_updated: 5000
+        directory: /home/dev/peasant-labs/partial
+        title: base attribution with model column
+        model_json: '{"variant":"high"}'
+        want_variant: high
   - <<: *populated
     name: v2-populated-extended-layout
     table: session_v2
