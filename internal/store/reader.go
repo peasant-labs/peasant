@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -84,6 +85,10 @@ type SessionRow struct {
 	// ThinkingLevelRaw is the sessions.thinking_level_raw native spelling,
 	// returned exactly as stored; empty when NULL.
 	ThinkingLevelRaw schema.ThinkingLevelRaw
+	// ThinkingLevelHistory is the sessions.thinking_level_history JSON array of
+	// later in-session changes, in source order with consecutive duplicates
+	// collapsed. Nil when the column is NULL (no change observed).
+	ThinkingLevelHistory []schema.ThinkingLevelChange
 }
 
 // DashboardRow holds global aggregate metrics from daily_summary.
@@ -154,7 +159,7 @@ const (
 	// signal_density(24), spec_quality_score(25), exploration_ratio(26),
 	// scope_breadth(27), discovery_turns(28), parent_id(29), canonical_remote(30),
 	// git_worktree(31), session_origin(32), indexed_at(33), thinking_level(34),
-	// thinking_level_raw(35)
+	// thinking_level_raw(35), thinking_level_history(36)
 	//
 	// V23+: sessions stores opaque_host_id FK, but we JOIN host_slugs and return
 	// the human-readable h.host_slug at col 3 for backward-compatible SessionRow.HostSlug.
@@ -177,7 +182,7 @@ const (
     COALESCE(s.git_worktree, ''),
     s.session_origin,
     s.indexed_at,
-    s.thinking_level, s.thinking_level_raw
+    s.thinking_level, s.thinking_level_raw, s.thinking_level_history
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 JOIN projects p ON s.project_hash = p.project_hash
@@ -186,11 +191,11 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 	sqlSessionByID = sqlAllSessions + ` WHERE s.session_id = ?`
 
 	// sqlSessionDetailByID extends sqlAllSessions with extra columns for the detail view.
-	// Columns 0-35: same as sqlAllSessions (scanned by scanSessionRow), including
-	//               column 33 s.indexed_at and columns 34-35 the thinking level.
-	// Column 36: h.git_remote (nullable, from host_slugs JOIN on opaque_id)
-	// Column 37: s.pushed_at (nullable)
-	// Column 38: p.canonical_cwd (project working dir, replaces project_path)
+	// Columns 0-36: same as sqlAllSessions (scanned by scanSessionRow), including
+	//               column 33 s.indexed_at and columns 34-36 the thinking level.
+	// Column 37: h.git_remote (nullable, from host_slugs JOIN on opaque_id)
+	// Column 38: s.pushed_at (nullable)
+	// Column 39: p.canonical_cwd (project working dir, replaces project_path)
 	sqlSessionDetailByID = `SELECT
     s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
     s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
@@ -207,7 +212,7 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
     COALESCE(s.git_worktree, ''),
     s.session_origin,
     s.indexed_at,
-    s.thinking_level, s.thinking_level_raw,
+    s.thinking_level, s.thinking_level_raw, s.thinking_level_history,
     h.git_remote, s.pushed_at, COALESCE(p.canonical_cwd, '')
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
@@ -1127,24 +1132,24 @@ func TruncateToRunes(s string, maxRunes int) string {
 // ---------------------------------------------------------------------------
 
 // scanSessionDetailRow reads a SessionDetailRow from the current statement.
-// Columns 0-35 are scanned by scanSessionRow (33 = s.indexed_at, 34-35 = the
-// thinking level); columns 36-38 are the extra detail fields.
+// Columns 0-36 are scanned by scanSessionRow (33 = s.indexed_at, 34-36 = the
+// thinking level); columns 37-39 are the extra detail fields.
 func scanSessionDetailRow(stmt *sqlite.Stmt) SessionDetailRow {
 	row := SessionDetailRow{
 		SessionRow: scanSessionRow(stmt),
 	}
-	// Column 36: h.git_remote (nullable)
-	if stmt.ColumnType(36) != sqlite.TypeNull {
-		v := stmt.ColumnText(36)
+	// Column 37: h.git_remote (nullable)
+	if stmt.ColumnType(37) != sqlite.TypeNull {
+		v := stmt.ColumnText(37)
 		row.GitRemote = &v
 	}
-	// Column 37: s.pushed_at (nullable)
-	if stmt.ColumnType(37) != sqlite.TypeNull {
-		v := stmt.ColumnInt64(37)
+	// Column 38: s.pushed_at (nullable)
+	if stmt.ColumnType(38) != sqlite.TypeNull {
+		v := stmt.ColumnInt64(38)
 		row.PushedAt = &v
 	}
-	// Column 38: p.canonical_cwd (V23+: was project_path)
-	row.ProjectPath = stmt.ColumnText(38)
+	// Column 39: p.canonical_cwd (V23+: was project_path)
+	row.ProjectPath = stmt.ColumnText(39)
 	return row
 }
 
@@ -1252,6 +1257,17 @@ func scanSessionRow(stmt *sqlite.Stmt) SessionRow {
 	// reads back as empty, which means unknown (never off).
 	row.ThinkingLevel = schema.ThinkingLevel(stmt.ColumnText(34))
 	row.ThinkingLevelRaw = schema.ThinkingLevelRaw(stmt.ColumnText(35))
+
+	// Column 36: s.thinking_level_history (nullable JSON array). NULL reads back
+	// as nil (no change observed), never as an empty history.
+	if stmt.ColumnType(36) != sqlite.TypeNull {
+		if err := json.Unmarshal([]byte(stmt.ColumnText(36)), &row.ThinkingLevelHistory); err != nil {
+			// A stored value that cannot be decoded is corrupt evidence. Keep
+			// the read total rather than fabricating a history: the session
+			// still resolves and the caller sees no history.
+			row.ThinkingLevelHistory = nil
+		}
+	}
 
 	return row
 }

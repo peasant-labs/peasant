@@ -32,10 +32,11 @@ type v62ThinkingLevelFixture struct {
 }
 
 type v62Record struct {
-	Name             string  `yaml:"name"`
-	SessionID        string  `yaml:"session_id"`
-	ThinkingLevel    *string `yaml:"thinking_level"`
-	ThinkingLevelRaw *string `yaml:"thinking_level_raw"`
+	Name                 string  `yaml:"name"`
+	SessionID            string  `yaml:"session_id"`
+	ThinkingLevel        *string `yaml:"thinking_level"`
+	ThinkingLevelRaw     *string `yaml:"thinking_level_raw"`
+	ThinkingLevelHistory *string `yaml:"thinking_level_history"`
 }
 
 type v62NamedRefusal struct {
@@ -95,9 +96,9 @@ func nullableArg(v *string) any {
 }
 
 // TestMigrationV62UpgradeFromV61 migrates a populated V61 database to V62 and
-// proves the pre-existing row reads back with both new columns NULL (absent,
-// never 'off'), then round-trips every fixture record through the upgraded
-// table and confirms the CHECK refuses every fixture rejection.
+// proves the pre-existing row reads back with every new thinking-level column
+// NULL (absent, never 'off'), then round-trips every fixture record through the
+// upgraded table and confirms the CHECK refuses every fixture rejection.
 func TestMigrationV62UpgradeFromV61(t *testing.T) {
 	t.Parallel()
 	fixture := loadV62Fixture(t)
@@ -126,10 +127,10 @@ VALUES('v62-preexisting','codex','m','h','p',1,2,3,'/synthetic/v62.jsonl','jsonl
 		t.Fatalf("migrate to V62: %v", err)
 	}
 
-	readBack := func(id string) (level, raw *string) {
+	readBack := func(id string) (level, raw, history *string) {
 		t.Helper()
 		found := false
-		if err := sqlitex.ExecuteTransient(conn, `SELECT thinking_level, thinking_level_raw FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.ExecuteTransient(conn, `SELECT thinking_level, thinking_level_raw, thinking_level_history FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{id},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				found = true
@@ -141,6 +142,10 @@ VALUES('v62-preexisting','codex','m','h','p',1,2,3,'/synthetic/v62.jsonl','jsonl
 					v := stmt.ColumnText(1)
 					raw = &v
 				}
+				if stmt.ColumnType(2) != sqlite.TypeNull {
+					v := stmt.ColumnText(2)
+					history = &v
+				}
 				return nil
 			},
 		}); err != nil {
@@ -149,25 +154,26 @@ VALUES('v62-preexisting','codex','m','h','p',1,2,3,'/synthetic/v62.jsonl','jsonl
 		if !found {
 			t.Fatalf("row %s missing after insert", id)
 		}
-		return level, raw
+		return level, raw, history
 	}
 
-	if level, raw := readBack("v62-preexisting"); level != nil || raw != nil {
-		t.Fatalf("pre-existing V61 row must read back with both thinking-level columns NULL, got level=%v raw=%v", level, raw)
+	if level, raw, history := readBack("v62-preexisting"); level != nil || raw != nil || history != nil {
+		t.Fatalf("pre-existing V61 row must read back with every thinking-level column NULL, got level=%v raw=%v history=%v", level, raw, history)
 	}
 
 	const insert = `INSERT INTO sessions
-		(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, thinking_level, thinking_level_raw)
-		VALUES (?, 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', ?, ?)`
+		(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, thinking_level, thinking_level_raw, thinking_level_history)
+		VALUES (?, 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', ?, ?, ?)`
 	for _, record := range fixture.Records {
 		if err := sqlitex.ExecuteTransient(conn, insert, &sqlitex.ExecOptions{
-			Args: []any{record.SessionID, nullableArg(record.ThinkingLevel), nullableArg(record.ThinkingLevelRaw)},
+			Args: []any{record.SessionID, nullableArg(record.ThinkingLevel), nullableArg(record.ThinkingLevelRaw), nullableArg(record.ThinkingLevelHistory)},
 		}); err != nil {
 			t.Fatalf("case %q: insert: %v", record.Name, err)
 		}
-		level, raw := readBack(record.SessionID)
+		level, raw, history := readBack(record.SessionID)
 		assertNullableEqual(t, record.Name, "thinking_level", level, record.ThinkingLevel)
 		assertNullableEqual(t, record.Name, "thinking_level_raw", raw, record.ThinkingLevelRaw)
+		assertNullableEqual(t, record.Name, "thinking_level_history", history, record.ThinkingLevelHistory)
 		if level != nil && !schema.ThinkingLevel(*level).IsValid() {
 			t.Errorf("case %q: stored thinking_level %q is not a canonical schema.ThinkingLevel", record.Name, *level)
 		}

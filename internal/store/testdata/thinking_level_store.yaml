@@ -15,10 +15,13 @@ required_round_trip_names:
   - a multibyte raw spelling round-trips exact bytes
   - re-extraction replaces the stored pair with the newest evidence
   - re-extraction without evidence clears the stored pair
+  - a session thinking-level history round-trips in source order
+  - re-extraction replaces the stored history
 
 required_refusal_names:
   - an out-of-set canonical level is refused before the upsert
   - a case-variant canonical level is refused before the upsert
+  - a history entry with neither level nor raw is refused before the upsert
 
 round_trips:
   - name: a canonical level with its native raw spelling round-trips
@@ -46,7 +49,20 @@ round_trips:
   - name: re-extraction without evidence clears the stored pair
     session_id: 62000000-0000-4000-8000-000000000007
     first: {level: medium}
+    first_history: [{level: high}]
     then: {}
+  - name: a session thinking-level history round-trips in source order
+    session_id: 62000000-0000-4000-8000-000000000009
+    first: {level: medium}
+    first_history:
+      - {level: high}
+      - {level: "off", raw: none}
+  - name: re-extraction replaces the stored history
+    session_id: 62000000-0000-4000-8000-000000000010
+    first: {level: low}
+    first_history: [{level: medium}]
+    then: {level: high}
+    then_history: [{level: xhigh}]
 
 # Canonical values the writer must refuse with an actionable error before the
 # sessions CHECK is reached, leaving the batch unwritten.
@@ -59,3 +75,8 @@ refusals:
     session_id: 62000000-0000-4000-8000-000000000102
     level: High
     expected_fragments: ["thinking level \"High\"", "not one of the canonical levels"]
+  - name: a history entry with neither level nor raw is refused before the upsert
+    session_id: 62000000-0000-4000-8000-000000000103
+    level: medium
+    history: [{}]
+    expected_fragments: ["thinking level history entry 0", "insertSessionsOnConn"]

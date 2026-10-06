@@ -84,9 +84,9 @@ VALUES (?, ?, ?, ?)`
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
-    thinking_level, thinking_level_raw,
+    thinking_level, thinking_level_raw, thinking_level_history,
     adapter_version, metric_seed_json, source_fingerprint, artifact_hash
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id = excluded.parent_id,
     opaque_host_id = excluded.opaque_host_id,
@@ -95,6 +95,7 @@ ON CONFLICT(session_id) DO UPDATE SET
     model_id = excluded.model_id,
     thinking_level = excluded.thinking_level,
     thinking_level_raw = excluded.thinking_level_raw,
+    thinking_level_history = excluded.thinking_level_history,
     start_ms = excluded.start_ms,
     end_ms = excluded.end_ms,
     ingested_ms = excluded.ingested_ms,
@@ -115,12 +116,13 @@ ON CONFLICT(session_id) DO UPDATE SET
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
-    thinking_level, thinking_level_raw
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    thinking_level, thinking_level_raw, thinking_level_history
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id=excluded.parent_id, model_harness=excluded.model_harness,
     model_id=excluded.model_id, thinking_level=excluded.thinking_level,
-    thinking_level_raw=excluded.thinking_level_raw, opaque_host_id=excluded.opaque_host_id,
+    thinking_level_raw=excluded.thinking_level_raw, thinking_level_history=excluded.thinking_level_history,
+    opaque_host_id=excluded.opaque_host_id,
     project_hash=excluded.project_hash, start_ms=excluded.start_ms,
     end_ms=excluded.end_ms, ingested_ms=excluded.ingested_ms,
     source_path=excluded.source_path, source_format=excluded.source_format,
@@ -444,6 +446,19 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		if !m.ThinkingLevel.IsValid() {
 			return fmt.Errorf("store: insert session %s: thinking level %q is not one of the canonical levels %v (store.insertSessionsOnConn, before the sessions upsert); the batch is not written — map the native value through the ingest thinking-level mapping, or leave the level empty and keep the native spelling in ThinkingLevelRaw", m.SessionID, m.ThinkingLevel, schema.AllThinkingLevels)
 		}
+		for i, change := range m.ThinkingLevelHistory {
+			if err := change.Validate(); err != nil {
+				return fmt.Errorf("store: insert session %s: thinking level history entry %d is not a valid in-session change (store.insertSessionsOnConn, before the sessions upsert); the batch is not written — keep at least one of level or raw on the entry, use a canonical level, and bound the raw spelling: %w", m.SessionID, i, err)
+			}
+		}
+		historyArg := any(nil)
+		if len(m.ThinkingLevelHistory) > 0 {
+			encoded, err := json.Marshal(m.ThinkingLevelHistory)
+			if err != nil {
+				return fmt.Errorf("store: insert session %s: encode thinking level history: %w", m.SessionID, err)
+			}
+			historyArg = string(encoded)
+		}
 
 		// V23+: opaque_host_id replaces host_slug in sessions FK.
 		// The FK cache follows the resolved cacheParent, never the raw logical
@@ -457,7 +472,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			string(m.Source.Format), m.SchemaVersion, derefString(m.Git.Branch),
 			derefString(m.Git.Worktree), derefString(m.Git.Tracking), m.Version,
 			sessionOrigin.String(),
-			nullableString(string(m.ThinkingLevel)), nullableString(string(m.ThinkingLevelRaw)),
+			nullableString(string(m.ThinkingLevel)), nullableString(string(m.ThinkingLevelRaw)), historyArg,
 		}
 		if hasSourceFingerprint {
 			sessionArgs = append(sessionArgs, adapterVersion, seedJSON, sorted[i].SourceFingerprint, derefString(sorted[i].ArtifactHash))

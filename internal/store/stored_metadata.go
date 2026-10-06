@@ -39,7 +39,8 @@ func (s *Store) ReadStoredMetadata(ctx context.Context, sid ingest.SessionID) ([
             'authorEmail', c.author_email, 'commitTime', c.commit_time, 'authorTime', c.author_time
         )) FROM (SELECT * FROM session_commits WHERE session_id = s.session_id ORDER BY commit_hash) c))
 ), json_object('adapterVersion', s.adapter_version, 'stats', json(s.metric_seed_json),
-    'thinkingLevel', s.thinking_level, 'thinkingLevelRaw', s.thinking_level_raw)),
+    'thinkingLevel', s.thinking_level, 'thinkingLevelRaw', s.thinking_level_raw,
+    'thinkingLevelHistory', json(s.thinking_level_history))),
 json_type(s.metric_seed_json)
 FROM sessions s
 JOIN host_slugs h ON h.opaque_id = s.opaque_host_id
