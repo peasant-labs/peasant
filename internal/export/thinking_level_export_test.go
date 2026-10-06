@@ -33,12 +33,14 @@ func TestExportSessionThinkingLevel(t *testing.T) {
 	if err := testutil.DecodeFixtureYAML(thinkingLevelExportYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]bool{}
+	names := make([]string, len(fixture.Cases))
+	for i, tc := range fixture.Cases {
+		names[i] = tc.Name
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "thinking level export"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range fixture.Cases {
-		if tc.Name == "" || seen[tc.Name] {
-			t.Fatalf("empty or duplicate case %q", tc.Name)
-		}
-		seen[tc.Name] = true
 		t.Run(tc.Name, func(t *testing.T) {
 			ctx := context.Background()
 			db := storetest.Open(t)
@@ -83,13 +85,5 @@ func TestExportSessionThinkingLevel(t *testing.T) {
 				t.Fatalf("invented per-turn evidence: %+v", payload.Turns)
 			}
 		})
-	}
-	if len(fixture.RequiredNames) == 0 {
-		t.Fatal("missing required-name inventory")
-	}
-	for _, name := range fixture.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing required case %q", name)
-		}
 	}
 }

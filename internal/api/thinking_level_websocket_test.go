@@ -47,12 +47,14 @@ func TestHubSessionDetailThinkingLevel(t *testing.T) {
 	if err := testutil.DecodeFixtureYAML(thinkingLevelWebSocketYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]bool{}
+	names := make([]string, len(fixture.Cases))
+	for i, tc := range fixture.Cases {
+		names[i] = tc.Name
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "thinking level websocket"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range fixture.Cases {
-		if tc.Name == "" || seen[tc.Name] {
-			t.Fatalf("empty or duplicate case %q", tc.Name)
-		}
-		seen[tc.Name] = true
 		t.Run(tc.Name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -137,13 +139,5 @@ func TestHubSessionDetailThinkingLevel(t *testing.T) {
 				}
 			}
 		})
-	}
-	if len(fixture.RequiredNames) == 0 {
-		t.Fatal("missing required-name inventory")
-	}
-	for _, name := range fixture.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing required case %q", name)
-		}
 	}
 }
