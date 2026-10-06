@@ -54,6 +54,9 @@ func TestOpenCodeSessionThinkingLevels(t *testing.T) {
 	if err := yaml.Unmarshal(openCodeSessionThinkingManifest, &manifest); err != nil {
 		t.Fatal(err)
 	}
+	if len(manifest.RequiredNames) == 0 {
+		t.Fatal("session thinking fixture declares no requiredNames inventory; name every case the fixture must retain")
+	}
 	names := map[string]bool{}
 	for _, c := range fixture.SessionRows {
 		if c.Name == "" || names[c.Name] {
@@ -61,7 +64,19 @@ func TestOpenCodeSessionThinkingLevels(t *testing.T) {
 		}
 		names[c.Name] = true
 	}
+	required := map[string]bool{}
 	for _, name := range manifest.RequiredNames {
+		if name == "" || required[name] {
+			t.Fatalf("empty or repeated required case name %q", name)
+		}
+		required[name] = true
+	}
+	for name := range names {
+		if !required[name] {
+			t.Fatalf("session thinking case %q is not declared in requiredNames; name every case the fixture must retain", name)
+		}
+	}
+	for name := range required {
 		if !names[name] {
 			t.Fatalf("missing session thinking case %q", name)
 		}
