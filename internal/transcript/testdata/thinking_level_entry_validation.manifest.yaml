@@ -1,0 +1,13 @@
+requiredNames:
+  - assistant_canonical_accepted
+  - assistant_canonical_with_raw_accepted
+  - assistant_raw_only_accepted
+  - absent_no_extra_accepted
+  - absent_empty_extra_accepted
+  - user_level_refused
+  - system_raw_refused
+  - tool_level_refused
+  - non_string_level_refused
+  - non_string_raw_refused
+  - unknown_canonical_refused
+  - edge_whitespace_raw_refused
