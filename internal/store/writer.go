@@ -444,11 +444,11 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		// an actionable error instead of a bare constraint failure. The raw
 		// spelling is source evidence bounded at ingest, not by the writer.
 		if !m.ThinkingLevel.IsValid() {
-			return fmt.Errorf("store: insert session %s: thinking level %q is not one of the canonical levels %v (store.insertSessionsOnConn, before the sessions upsert); the batch is not written — map the native value through the ingest thinking-level mapping, or leave the level empty and keep the native spelling in ThinkingLevelRaw", m.SessionID, m.ThinkingLevel, schema.AllThinkingLevels)
+			return fmt.Errorf("store: insert session %s: thinking level %q is not one of the canonical levels %v (store.insertSessionsOnConn, before the sessions upsert); the batch is not written; map the native value through the ingest thinking-level mapping, or leave the level empty and keep the native spelling in ThinkingLevelRaw", m.SessionID, m.ThinkingLevel, schema.AllThinkingLevels)
 		}
 		for i, change := range m.ThinkingLevelHistory {
 			if err := change.Validate(); err != nil {
-				return fmt.Errorf("store: insert session %s: thinking level history entry %d is not a valid in-session change (store.insertSessionsOnConn, before the sessions upsert); the batch is not written — keep at least one of level or raw on the entry, use a canonical level, and bound the raw spelling: %w", m.SessionID, i, err)
+				return fmt.Errorf("store: insert session %s: thinking level history entry %d is not a valid in-session change (store.insertSessionsOnConn, before the sessions upsert); the batch is not written; keep at least one of level or raw on the entry, use a canonical level, and bound the raw spelling: %w", m.SessionID, i, err)
 			}
 		}
 		historyArg := any(nil)
