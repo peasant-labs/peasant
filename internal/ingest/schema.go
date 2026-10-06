@@ -31,6 +31,10 @@ type Session struct {
 	// exact native spelling when it differs from the canonical level.
 	ThinkingLevel    ThinkingLevel
 	ThinkingLevelRaw ThinkingLevelRaw
+	// ThinkingLevelHistory records the in-session level changes observed after
+	// the seed, in source order, with consecutive duplicates collapsed. It is
+	// empty when the session never changed level or no observation existed.
+	ThinkingLevelHistory []schema.ThinkingLevelChange
 
 	// Managed graph fields — populated from a committed generation snapshot
 	// (ReadSnapshot metadata) on the durable detail path. Nil/zero means the

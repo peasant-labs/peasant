@@ -91,6 +91,14 @@ sessionRows:
     messageVariant: medium
     laterVariant: max
     wantLevel: medium
+    wantHistory:
+      - {level: max}
+  - name: session-message-change-records-history
+    messageVariant: medium
+    laterVariant: max
+    wantLevel: medium
+    wantHistory:
+      - {level: max}
   - name: session-message-unknown-wins
     modelColumn: true
     modelJSON: '{"variant":"high"}'
@@ -98,6 +106,8 @@ sessionRows:
     messageVariant: default
     laterVariant: max
     wantRaw: default
+    wantHistory:
+      - {level: max}
   - name: session-column-absent
   - name: session-model-invalid-json
     modelColumn: true

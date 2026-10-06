@@ -234,7 +234,6 @@ func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMe
 		meta.Timestamp.End = meta.Timestamp.Start
 	}
 	meta.Stats.DurationMs = meta.Timestamp.End - meta.Timestamp.Start
-	seenAssistant := false
 	for _, row := range rows {
 		if IsPiCarrier(row) {
 			continue
@@ -248,32 +247,24 @@ func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMe
 		if row.Role != RoleAssistant || row.Depth != 0 {
 			continue
 		}
+		extra, _, err := DecodePiEntryExtra(row)
+		if err != nil {
+			return nil, piSourceError("PiAdapter.ExtractMetadata assistant evidence", 0, err)
+		}
 		// The publication preflight needs the session model as well as per-turn
 		// observations. Use the first actual assistant observation, never state
 		// changes or configuration, just as other file-backed harnesses do.
-		if meta.Model == "" {
-			extra, _, err := DecodePiEntryExtra(row)
+		if meta.Model == "" && extra.ModelID != "" {
+			model, err := NewModelID(string(extra.ModelID))
 			if err != nil {
 				return nil, piSourceError("PiAdapter.ExtractMetadata model", 0, err)
 			}
-			if extra.ModelID != "" {
-				model, err := NewModelID(string(extra.ModelID))
-				if err != nil {
-					return nil, piSourceError("PiAdapter.ExtractMetadata model", 0, err)
-				}
-				meta.Model = model
-			}
+			meta.Model = model
 		}
-		// The governing level of the first depth-0 assistant row seeds the
-		// session; later level changes never do.
-		if !seenAssistant {
-			seenAssistant = true
-			extra, _, err := DecodePiEntryExtra(row)
-			if err != nil {
-				return nil, piSourceError("PiAdapter.ExtractMetadata thinking level", 0, err)
-			}
-			applyThinkingLevelSeed(&meta, thinkingLevelMapping{Level: extra.ThinkingLevel, Raw: extra.ThinkingLevelRaw})
-		}
+		// The governing level of each depth-0 assistant row is one ordered
+		// observation: the first valid one seeds the session and later distinct
+		// governing levels are recorded as in-session changes in source order.
+		applyThinkingLevelObservation(&meta, thinkingLevelMapping{Level: extra.ThinkingLevel, Raw: extra.ThinkingLevelRaw})
 		const maxSafe = 9007199254740991
 		if row.TokensIn != nil {
 			if meta.Stats.TokensIn > maxSafe-*row.TokensIn {

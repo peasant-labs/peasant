@@ -7,4 +7,5 @@ requiredNames:
   - persistent_maps_off_with_raw
   - custom_is_absent_with_raw
   - two_turn_contexts_seed_is_earliest
+  - repeated_turn_context_effort_collapses_in_history
   - no_effort_stays_absent
