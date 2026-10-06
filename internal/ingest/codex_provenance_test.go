@@ -114,6 +114,10 @@ type codexExpectFixture struct {
 	Earlier               []codexEarlierFixture      `yaml:"earlier"`
 	Retained              []codexRetainedFixture     `yaml:"retained"`
 	MetadataCWD           string                     `yaml:"metadataCWD"`
+	// Diagnostics names the captured-diagnostic error types the case must
+	// produce, so the managed boundary proves a dropped observation is
+	// reported rather than silently ignored.
+	Diagnostics []string `yaml:"diagnostics"`
 }
 
 type codexThreadFixture struct {
@@ -602,6 +606,18 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 	}
 	if c.Expected.TitleRefs != nil && !slices.Equal(codexReferenceStrings(generation.TitleRefs), c.Expected.TitleRefs) {
 		t.Errorf("titleRefs = %v, want %v", codexReferenceStrings(generation.TitleRefs), c.Expected.TitleRefs)
+	}
+	for _, want := range c.Expected.Diagnostics {
+		found := false
+		for _, diagnostic := range candidate.Diagnostics {
+			if diagnostic.ErrorType == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("captured diagnostics = %+v, want a %q entry", candidate.Diagnostics, want)
+		}
 	}
 	codexAssertEntries(t, "main", c.Expected.Main, generation.Main.Entries)
 	if len(generation.Earlier) != len(c.Expected.Earlier) {

@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,7 +79,7 @@ func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discovere
 			}
 			// Validate the candidate before ordering it: a newer corrupt transcript
 			// must never replace a valid older copy with the same header identity.
-			if _, err := NewPiIndexer(a.fs).project(doc, sid); err != nil {
+			if _, _, err := NewPiIndexer(a.fs).project(doc, sid); err != nil {
 				a.diagnose(path, err)
 				continue
 			}
@@ -202,7 +201,7 @@ func (a *PiAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSessi
 // piTranscriptMetadata reads only the captured document; native project and Git
 // attribution stay in ExtractMetadata and are preserved during retained refresh.
 func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMetadata, error) {
-	rows, err := NewPiIndexer(nil).project(doc, session.SessionID)
+	rows, thinkingDiagnostics, err := NewPiIndexer(nil).project(doc, session.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -218,16 +217,10 @@ func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMe
 		if timestamp := parseIndexTimestamp(entry.Timestamp); timestamp != nil && *timestamp > meta.Timestamp.End {
 			meta.Timestamp.End = *timestamp
 		}
-		var nativeLevel string
-		if entry.Type == piThinkingChange {
-			nativeLevel = entry.ThinkingLevel
-		} else if entry.Type == piMessage {
-			var message piMessagePayload
-			if json.Unmarshal(entry.Message, &message) == nil && message.Role == piRoleAssistant {
-				nativeLevel = message.ThinkingLevel
-			}
-		}
-		_, diagnostic := mapPiThinkingLevel(nativeLevel)
+	}
+	// The projection maps every native observation exactly once and returns the
+	// resulting diagnostics, so the extraction rules are not re-derived here.
+	for _, diagnostic := range thinkingDiagnostics {
 		appendThinkingLevelDiagnostic(&meta, diagnostic, 0)
 	}
 	if meta.Timestamp.End < meta.Timestamp.Start {

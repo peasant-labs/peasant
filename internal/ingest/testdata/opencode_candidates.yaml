@@ -178,10 +178,10 @@ allowed_query_statements:
     statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session order by id limit ?1'
   - name: session-model-after
     statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session where id > ?1 order by id limit ?2'
-  - name: partial-session-v2-model
-    statement: 'select model from session_v2 where id = ?1'
-  - name: partial-session-model
-    statement: 'select model from session where id = ?1'
+  - name: partial-session-v2-model-range
+    statement: 'select id, model from session_v2 where id >= ?1 and id <= ?2 order by id limit ?3'
+  - name: partial-session-model-range
+    statement: 'select id, model from session where id >= ?1 and id <= ?2 order by id limit ?3'
   - name: captured-session-v2-extended
     statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session_v2 where id = ?1'
   - name: captured-session-v2-attribution

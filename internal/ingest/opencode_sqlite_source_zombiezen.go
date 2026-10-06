@@ -70,6 +70,7 @@ const (
 	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionClockAfterStatement               = "SELECT id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionModelRangeStatement               = "SELECT id, model FROM session WHERE id >= ?1 AND id <= ?2 ORDER BY id LIMIT ?3"
 )
 
 const (
@@ -89,6 +90,7 @@ const (
 	openCodeSessionModelAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionV2ModelFirstStatement       = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 ORDER BY id LIMIT ?1"
 	openCodeSessionV2ModelAfterStatement       = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2ModelRangeStatement       = "SELECT id, model FROM session_v2 WHERE id >= ?1 AND id <= ?2 ORDER BY id LIMIT ?3"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -763,23 +765,32 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// rows never shrink a page below its bound and hide later sessions.
 	records, hasNext := bounded.assemble()
 	// Partial layouts can carry model without the extended attribution group.
-	// Enrich only the bounded kept rows, under this same read lease/snapshot.
-	if support.hasModel && !readExtended {
-		for i := range records {
-			decodeModel := func(model *sqlite.Stmt) error {
-				if model.ColumnType(0) == sqlite.TypeText {
-					records[i].ModelVariant = decodeOpenCodeModelVariant([]byte(model.ColumnText(0)))
-				}
+	// Read the model column for the whole observed identifier span in one
+	// bounded statement, under this same read lease/snapshot, instead of one
+	// SELECT per kept record. The span endpoints are the first and last
+	// observed identifiers, so every kept record's model is covered.
+	if support.hasModel && !readExtended && len(records) > 0 && len(present) > 0 {
+		models := make(map[string]string, len(records))
+		decodeModel := func(model *sqlite.Stmt) error {
+			if model.ColumnType(0) != sqlite.TypeText {
 				return nil
 			}
-			if support.table == OpenCodeSessionTableV2 {
-				err = s.executeRowsLocked(lease.ctx, "SELECT model FROM session_v2 WHERE id = ?1", []any{records[i].SessionID.String()}, decodeModel)
-			} else {
-				err = s.executeRowsLocked(lease.ctx, "SELECT model FROM session WHERE id = ?1", []any{records[i].SessionID.String()}, decodeModel)
+			if model.ColumnType(1) == sqlite.TypeText {
+				models[model.ColumnText(0)] = decodeOpenCodeModelVariant([]byte(model.ColumnText(1)))
 			}
-			if err != nil {
-				return page, s.sourceReadError(lease.ctx, "read optional session model", err, "session model", "supported OpenCode session metadata")
-			}
+			return nil
+		}
+		args := []any{present[0].String(), present[len(present)-1].String(), request.PageSize.value + 1}
+		if support.table == OpenCodeSessionTableV2 {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ModelRangeStatement, args, decodeModel)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionModelRangeStatement, args, decodeModel)
+		}
+		if err != nil {
+			return page, s.sourceReadError(lease.ctx, "read optional session model", err, "session model", "supported OpenCode session metadata")
+		}
+		for i := range records {
+			records[i].ModelVariant = models[records[i].SessionID.String()]
 		}
 	}
 	page.Records = records

@@ -2,6 +2,7 @@ requiredNames:
   - turn-context-replaced-item-effort
   - turn-context-effort-high
   - turn-context-effort-absent-invalid
+  - turn-context-effort-edge-whitespace-dropped
   - aligned-user-context-media-unknown
   - typed-context-kinds
   - context-kind-modality-conflict

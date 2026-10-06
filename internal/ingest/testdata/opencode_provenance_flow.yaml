@@ -83,6 +83,17 @@ cases:
     payloadEditId: msg_native_user
     payloadEditData: '{"text":"mutated native question","time":{"created":1000}}'
 
+  # The variant is classification-relevant decoded payload: it maps to the
+  # thinking-level pair the classifier stamps on assistant blocks. Editing only
+  # model.variant must therefore move the source-evidence digest, exactly as a
+  # text edit does.
+  - name: opencode-native-digest-binds-thinking-variant
+    kind: digest
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    deliveryMessageIds: [msg_native_user]
+    payloadEditId: msg_native_assistant
+    payloadEditData: '{"agent":"build","content":[{"text":"native assistant answer","type":"text"}],"cost":0,"finish":"stop","model":{"id":"synthetic-model","providerID":"synthetic-provider","variant":"high"},"rawFinish":"stop","snapshot":{"end":"redacted","files":[],"start":"redacted"},"time":{"completed":2000,"created":1000,"streamed":2000},"tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0}}'
+
   - name: opencode-native-projection-refusal-sanitized
     kind: projection-refusal
     sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
