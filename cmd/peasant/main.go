@@ -27,6 +27,7 @@ var commands = [...]func() *cobra.Command{
 	BuildMemoryCommand,
 	BuildExportCommand,
 	BuildPruneCommand,
+	BuildReclaimCommand,
 	BuildRedactCommand,
 	BuildDocgenCommand,
 	BuildPlayIngestCommand,
