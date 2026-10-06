@@ -216,7 +216,7 @@ enums:
   - name: testgate.RegistryClasses
     members: [single-threaded-bytes, subprocess, static-analysis, toolchain]
   - name: testgate.PreTestSteps
-    members: [fmt, lint, ast-grep-scan, ast-grep-gate-test, release-guard]
+    members: [fmt, lint, ast-grep-scan, ast-grep-gate-test, projection-negative-seed, projection-negative-scope, release-guard]
   - name: testgate.PassModeValues
     members: [race, no-race]
   - name: testgate.BudgetEnforcement

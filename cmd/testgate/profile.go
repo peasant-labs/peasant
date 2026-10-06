@@ -42,7 +42,7 @@ func runProfile(opts profileOptions) int {
 	return runPackageProfile(opts)
 }
 
-// runPreTestProfile measures the five `make check` pre-test steps. It returns 1
+// runPreTestProfile measures the `make check` pre-test steps. It returns 1
 // when any measured step failed, so it can substitute for the recipe lines it
 // mirrors.
 func runPreTestProfile(opts profileOptions) int {
