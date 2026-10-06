@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -186,7 +184,7 @@ func listenLoopback(port int) ([]net.Listener, error) {
 		switch {
 		case err == nil:
 			return []net.Listener{v4, v6}, nil
-		case !errors.Is(err, syscall.EADDRINUSE):
+		case !isAddrInUse(err):
 			slog.Debug("http: listening on the IPv4 loopback only", "ipv6", v6Addr, "error", err)
 			return []net.Listener{v4}, nil
 		}
