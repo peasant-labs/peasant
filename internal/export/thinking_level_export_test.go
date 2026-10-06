@@ -33,6 +33,9 @@ func TestExportSessionThinkingLevel(t *testing.T) {
 	if err := testutil.DecodeFixtureYAML(thinkingLevelExportYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	if len(fixture.RequiredNames) == 0 {
+		t.Fatal("thinking level export fixture declares no requiredNames inventory; name every case the fixture must retain")
+	}
 	names := make([]string, len(fixture.Cases))
 	for i, tc := range fixture.Cases {
 		names[i] = tc.Name
