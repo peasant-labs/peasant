@@ -19,7 +19,7 @@ func applyOpenCodeThinkingSeed(metadata *UnifiedMetadata, messages []openCodeSem
 		if diagnostic != nil {
 			metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, *diagnostic)
 		}
-		applyThinkingLevelSeed(metadata, mapping)
+		applyThinkingLevelObservation(metadata, mapping)
 	}
 	if metadata.ThinkingLevel == "" && metadata.ThinkingLevelRaw == "" {
 		mapping, diagnostic := mapOpenCodeVariant(sessionVariant)

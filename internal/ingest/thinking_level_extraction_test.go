@@ -63,6 +63,7 @@ type thinkingLevelTranscriptCase struct {
 	Transcript    string                  `yaml:"transcript"`
 	BuilderEffort string                  `yaml:"builderEffort"`
 	Seed          *expectedThinkingLevel  `yaml:"seed"`
+	History       []expectedThinkingLevel `yaml:"history"`
 	Turns         []expectedThinkingLevel `yaml:"turns"`
 	Diagnostic    string                  `yaml:"diagnostic"`
 }
@@ -197,6 +198,13 @@ func runThinkingLevelTranscriptCase(t *testing.T, harness ingest.Harness, data [
 	gotSeed := expectedThinkingLevel{Level: string(metadata.ThinkingLevel), Raw: string(metadata.ThinkingLevelRaw)}
 	if gotSeed != c.Seed.pair() {
 		t.Errorf("session seed = %+v, want %+v", gotSeed, c.Seed.pair())
+	}
+	var gotHistory []expectedThinkingLevel
+	for _, change := range metadata.ThinkingLevelHistory {
+		gotHistory = append(gotHistory, expectedThinkingLevel{Level: string(change.Level), Raw: string(change.Raw)})
+	}
+	if fmt.Sprint(gotHistory) != fmt.Sprint(c.History) {
+		t.Errorf("session history = %+v, want %+v", gotHistory, c.History)
 	}
 	if c.Diagnostic != "" {
 		found := false

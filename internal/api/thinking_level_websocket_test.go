@@ -21,16 +21,23 @@ import (
 //go:embed testdata/thinking_level_websocket.yaml
 var thinkingLevelWebSocketYAML []byte
 
+type wsThinkingChange struct {
+	Level schema.ThinkingLevel    `yaml:"level"`
+	Raw   schema.ThinkingLevelRaw `yaml:"raw"`
+}
+
 func TestHubSessionDetailThinkingLevel(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
-			Name          string                  `yaml:"name"`
-			StoredLevel   schema.ThinkingLevel    `yaml:"storedLevel"`
-			StoredRaw     schema.ThinkingLevelRaw `yaml:"storedRaw"`
-			ExpectedLevel schema.ThinkingLevel    `yaml:"expectedLevel"`
-			ExpectedRaw   schema.ThinkingLevelRaw `yaml:"expectedRaw"`
-			Turns         []struct {
+			Name            string                  `yaml:"name"`
+			StoredLevel     schema.ThinkingLevel    `yaml:"storedLevel"`
+			StoredRaw       schema.ThinkingLevelRaw `yaml:"storedRaw"`
+			StoredHistory   []wsThinkingChange      `yaml:"storedHistory"`
+			ExpectedLevel   schema.ThinkingLevel    `yaml:"expectedLevel"`
+			ExpectedRaw     schema.ThinkingLevelRaw `yaml:"expectedRaw"`
+			ExpectedHistory []wsThinkingChange      `yaml:"expectedHistory"`
+			Turns           []struct {
 				Role  schema.Role             `yaml:"role"`
 				Level schema.ThinkingLevel    `yaml:"level"`
 				Raw   schema.ThinkingLevelRaw `yaml:"raw"`
@@ -53,6 +60,9 @@ func TestHubSessionDetailThinkingLevel(t *testing.T) {
 			sid := testutil.TestSessionUUID
 			stored := makeStoreEntry(t, sid, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fixture-host", defaults.HarnessClaudeCode, 1700000000000, 1, 1, "fixture-project", len(tc.Turns), 0, 1000)
 			stored.Metadata.ThinkingLevel, stored.Metadata.ThinkingLevelRaw = tc.StoredLevel, tc.StoredRaw
+			for _, change := range tc.StoredHistory {
+				stored.Metadata.ThinkingLevelHistory = append(stored.Metadata.ThinkingLevelHistory, schema.ThinkingLevelChange{Level: change.Level, Raw: change.Raw})
+			}
 			if err := db.InsertSessions(ctx, []ingest.StoreEntry{stored}); err != nil {
 				t.Fatal(err)
 			}
@@ -107,6 +117,15 @@ func TestHubSessionDetailThinkingLevel(t *testing.T) {
 			}
 			if message.Type != api.MsgSessionDetail || message.Data.ThinkingLevel != tc.ExpectedLevel || message.Data.ThinkingLevelRaw != tc.ExpectedRaw {
 				t.Fatalf("unexpected detail: %s", data)
+			}
+			if len(message.Data.ThinkingLevelHistory) != len(tc.ExpectedHistory) {
+				t.Fatalf("history mismatch: %s", data)
+			}
+			for i, want := range tc.ExpectedHistory {
+				got := message.Data.ThinkingLevelHistory[i]
+				if got.Level != want.Level || got.Raw != want.Raw {
+					t.Fatalf("history %d=(%q,%q), want (%q,%q)", i, got.Level, got.Raw, want.Level, want.Raw)
+				}
 			}
 			if len(message.Data.Turns) != len(tc.Turns) {
 				t.Fatalf("turn count mismatch: %s", data)

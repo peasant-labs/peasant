@@ -26,6 +26,20 @@ type thinkingLevelPair struct {
 	Raw   string `yaml:"raw,omitempty"`
 }
 
+// thinkingLevelChanges converts a fixture history into wire history entries.
+// An empty fixture list yields nil, which is how an absent history is
+// represented.
+func thinkingLevelChanges(pairs []thinkingLevelPair) []schema.ThinkingLevelChange {
+	if len(pairs) == 0 {
+		return nil
+	}
+	changes := make([]schema.ThinkingLevelChange, len(pairs))
+	for i, pair := range pairs {
+		changes[i] = schema.ThinkingLevelChange{Level: schema.ThinkingLevel(pair.Level), Raw: schema.ThinkingLevelRaw(pair.Raw)}
+	}
+	return changes
+}
+
 type thinkingSeedEntry struct {
 	Index       int    `yaml:"index"`
 	Role        string `yaml:"role"`
@@ -37,11 +51,13 @@ type thinkingSeedEntry struct {
 }
 
 type thinkingSeedCase struct {
-	Name          string              `yaml:"name"`
-	StoredSeed    thinkingLevelPair   `yaml:"storedSeed"`
-	Entries       []thinkingSeedEntry `yaml:"entries"`
-	ExpectedSeed  thinkingLevelPair   `yaml:"expectedSeed"`
-	ExpectedTurns []thinkingLevelPair `yaml:"expectedTurns"`
+	Name            string              `yaml:"name"`
+	StoredSeed      thinkingLevelPair   `yaml:"storedSeed"`
+	StoredHistory   []thinkingLevelPair `yaml:"storedHistory"`
+	Entries         []thinkingSeedEntry `yaml:"entries"`
+	ExpectedSeed    thinkingLevelPair   `yaml:"expectedSeed"`
+	ExpectedHistory []thinkingLevelPair `yaml:"expectedHistory"`
+	ExpectedTurns   []thinkingLevelPair `yaml:"expectedTurns"`
 }
 
 type thinkingSeedFixture struct {
@@ -102,14 +118,22 @@ func runThinkingSeedFixture(fixture thinkingSeedFixture) map[string][]string {
 		}
 		turns := EntriesToTurns(entries)
 		session := &ingest.Session{
-			ThinkingLevel:    schema.ThinkingLevel(fixtureCase.StoredSeed.Level),
-			ThinkingLevelRaw: schema.ThinkingLevelRaw(fixtureCase.StoredSeed.Raw),
-			Turns:            turns,
+			ThinkingLevel:        schema.ThinkingLevel(fixtureCase.StoredSeed.Level),
+			ThinkingLevelRaw:     schema.ThinkingLevelRaw(fixtureCase.StoredSeed.Raw),
+			ThinkingLevelHistory: thinkingLevelChanges(fixtureCase.StoredHistory),
+			Turns:                turns,
 		}
 		detail := SessionToDetail(session)
 		var caseFailures []string
 		if got := (thinkingLevelPair{Level: string(detail.ThinkingLevel), Raw: string(detail.ThinkingLevelRaw)}); got != fixtureCase.ExpectedSeed {
 			caseFailures = append(caseFailures, fmt.Sprintf("seed=%+v, want %+v", got, fixtureCase.ExpectedSeed))
+		}
+		var gotHistory []thinkingLevelPair
+		for _, change := range detail.ThinkingLevelHistory {
+			gotHistory = append(gotHistory, thinkingLevelPair{Level: string(change.Level), Raw: string(change.Raw)})
+		}
+		if fmt.Sprint(gotHistory) != fmt.Sprint(fixtureCase.ExpectedHistory) {
+			caseFailures = append(caseFailures, fmt.Sprintf("history=%+v, want %+v", gotHistory, fixtureCase.ExpectedHistory))
 		}
 		if len(detail.Turns) != len(fixtureCase.ExpectedTurns) {
 			caseFailures = append(caseFailures, fmt.Sprintf("turn count=%d, want %d", len(detail.Turns), len(fixtureCase.ExpectedTurns)))

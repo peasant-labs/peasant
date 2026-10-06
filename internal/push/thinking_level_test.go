@@ -26,9 +26,13 @@ var thinkingLevelCapabilityManifestYAML []byte
 func TestPipelineThinkingLevelCapability(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Name          string                     `yaml:"name"`
-			Level         schema.ThinkingLevel       `yaml:"level"`
-			Raw           schema.ThinkingLevelRaw    `yaml:"raw"`
+			Name    string                  `yaml:"name"`
+			Level   schema.ThinkingLevel    `yaml:"level"`
+			Raw     schema.ThinkingLevelRaw `yaml:"raw"`
+			History []struct {
+				Level schema.ThinkingLevel    `yaml:"level"`
+				Raw   schema.ThinkingLevelRaw `yaml:"raw"`
+			} `yaml:"history"`
 			ObservedModel string                     `yaml:"observedModel"`
 			Advertisement []schema.ContentCapability `yaml:"advertisement"`
 			Required      []schema.ContentCapability `yaml:"required"`
@@ -65,6 +69,9 @@ func TestPipelineThinkingLevelCapability(t *testing.T) {
 					t.Fatal(err)
 				}
 				metadata.ThinkingLevel, metadata.ThinkingLevelRaw = tc.Level, tc.Raw
+				for _, change := range tc.History {
+					metadata.ThinkingLevelHistory = append(metadata.ThinkingLevelHistory, schema.ThinkingLevelChange{Level: change.Level, Raw: change.Raw})
+				}
 				data, err = json.Marshal(metadata)
 				if err != nil {
 					t.Fatal(err)
@@ -128,6 +135,14 @@ func TestPipelineThinkingLevelCapability(t *testing.T) {
 			}
 			if detail.Turns[0].ThinkingLevel != wantLevel || detail.Turns[0].ThinkingLevelRaw != wantRaw {
 				t.Fatalf("lost turn evidence: %+v", detail.Turns)
+			}
+			if len(detail.ThinkingLevelHistory) != len(tc.History) {
+				t.Fatalf("history=%+v, want %+v", detail.ThinkingLevelHistory, tc.History)
+			}
+			for i, change := range detail.ThinkingLevelHistory {
+				if change.Level != tc.History[i].Level || change.Raw != tc.History[i].Raw {
+					t.Fatalf("history[%d]=(%q,%q), want %+v", i, change.Level, change.Raw, tc.History[i])
+				}
 			}
 			got := schema.RequiredContentCapabilities(*detail)
 			if !slices.Equal(got, tc.Required) {

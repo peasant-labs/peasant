@@ -3,6 +3,7 @@ package store_test
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,20 +21,28 @@ type thinkingLevelPair struct {
 	Raw   string `yaml:"raw"`
 }
 
+type thinkingLevelChange struct {
+	Level string `yaml:"level"`
+	Raw   string `yaml:"raw"`
+}
+
 type thinkingLevelStoreFixture struct {
 	RequiredRoundTripNames []string `yaml:"required_round_trip_names"`
 	RequiredRefusalNames   []string `yaml:"required_refusal_names"`
 	RoundTrips             []struct {
-		Name      string             `yaml:"name"`
-		SessionID string             `yaml:"session_id"`
-		First     thinkingLevelPair  `yaml:"first"`
-		Then      *thinkingLevelPair `yaml:"then"`
+		Name         string                `yaml:"name"`
+		SessionID    string                `yaml:"session_id"`
+		First        thinkingLevelPair     `yaml:"first"`
+		FirstHistory []thinkingLevelChange `yaml:"first_history"`
+		Then         *thinkingLevelPair    `yaml:"then"`
+		ThenHistory  []thinkingLevelChange `yaml:"then_history"`
 	} `yaml:"round_trips"`
 	Refusals []struct {
-		Name              string   `yaml:"name"`
-		SessionID         string   `yaml:"session_id"`
-		Level             string   `yaml:"level"`
-		ExpectedFragments []string `yaml:"expected_fragments"`
+		Name              string                `yaml:"name"`
+		SessionID         string                `yaml:"session_id"`
+		Level             string                `yaml:"level"`
+		History           []thinkingLevelChange `yaml:"history"`
+		ExpectedFragments []string              `yaml:"expected_fragments"`
 	} `yaml:"refusals"`
 }
 
@@ -68,12 +77,39 @@ func loadThinkingLevelStoreFixture(t *testing.T) thinkingLevelStoreFixture {
 
 const thinkingLevelTestProject = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-func thinkingLevelEntry(t *testing.T, sessionID string, pair thinkingLevelPair) ingest.StoreEntry {
+func thinkingLevelEntry(t *testing.T, sessionID string, pair thinkingLevelPair, history []thinkingLevelChange) ingest.StoreEntry {
 	t.Helper()
 	entry := makeStoreEntry(t, sessionID, thinkingLevelTestProject, "github.com-user-repo1", defaults.HarnessCodex, 1700000000000, 10, 5)
 	entry.Metadata.ThinkingLevel = schema.ThinkingLevel(pair.Level)
 	entry.Metadata.ThinkingLevelRaw = schema.ThinkingLevelRaw(pair.Raw)
+	entry.Metadata.ThinkingLevelHistory = schemaThinkingLevelHistory(history)
 	return entry
+}
+
+// schemaThinkingLevelHistory converts a fixture history into wire entries. An
+// empty fixture list yields nil so the column is written NULL (absent), which
+// stays distinct from a recorded empty history.
+func schemaThinkingLevelHistory(changes []thinkingLevelChange) []schema.ThinkingLevelChange {
+	if len(changes) == 0 {
+		return nil
+	}
+	out := make([]schema.ThinkingLevelChange, len(changes))
+	for i, change := range changes {
+		out[i] = schema.ThinkingLevelChange{Level: schema.ThinkingLevel(change.Level), Raw: schema.ThinkingLevelRaw(change.Raw)}
+	}
+	return out
+}
+
+func assertThinkingHistoryEqual(t *testing.T, label string, got []schema.ThinkingLevelChange, want []thinkingLevelChange) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s history=%+v, want %+v", label, got, want)
+	}
+	for i, change := range got {
+		if change.Level != schema.ThinkingLevel(want[i].Level) || change.Raw != schema.ThinkingLevelRaw(want[i].Raw) {
+			t.Fatalf("%s history[%d]=(%q,%q), want %+v", label, i, change.Level, change.Raw, want[i])
+		}
+	}
 }
 
 // TestThinkingLevelStoreRoundTrip writes each fixture pair through
@@ -87,12 +123,14 @@ func TestThinkingLevelStoreRoundTrip(t *testing.T) {
 	ctx := t.Context()
 	for _, c := range fixture.RoundTrips {
 		want := c.First
-		if err := db.InsertSessions(ctx, []ingest.StoreEntry{thinkingLevelEntry(t, c.SessionID, c.First)}); err != nil {
+		wantHistory := c.FirstHistory
+		if err := db.InsertSessions(ctx, []ingest.StoreEntry{thinkingLevelEntry(t, c.SessionID, c.First, c.FirstHistory)}); err != nil {
 			t.Fatalf("case %q: first insert: %v", c.Name, err)
 		}
 		if c.Then != nil {
 			want = *c.Then
-			if err := db.InsertSessions(ctx, []ingest.StoreEntry{thinkingLevelEntry(t, c.SessionID, *c.Then)}); err != nil {
+			wantHistory = c.ThenHistory
+			if err := db.InsertSessions(ctx, []ingest.StoreEntry{thinkingLevelEntry(t, c.SessionID, *c.Then, c.ThenHistory)}); err != nil {
 				t.Fatalf("case %q: re-extraction insert: %v", c.Name, err)
 			}
 		}
@@ -104,6 +142,7 @@ func TestThinkingLevelStoreRoundTrip(t *testing.T) {
 		if string(row.ThinkingLevel) != want.Level || string(row.ThinkingLevelRaw) != want.Raw {
 			t.Errorf("case %q: SessionRow = (%q, %q), want (%q, %q)", c.Name, row.ThinkingLevel, row.ThinkingLevelRaw, want.Level, want.Raw)
 		}
+		assertThinkingHistoryEqual(t, fmt.Sprintf("case %q: SessionRow", c.Name), row.ThinkingLevelHistory, wantHistory)
 		detail, err := db.SessionDetailByID(ctx, c.SessionID)
 		if err != nil || detail == nil {
 			t.Fatalf("case %q: SessionDetailByID: row=%v err=%v", c.Name, detail, err)
@@ -111,6 +150,7 @@ func TestThinkingLevelStoreRoundTrip(t *testing.T) {
 		if string(detail.ThinkingLevel) != want.Level || string(detail.ThinkingLevelRaw) != want.Raw {
 			t.Errorf("case %q: SessionDetailRow = (%q, %q), want (%q, %q)", c.Name, detail.ThinkingLevel, detail.ThinkingLevelRaw, want.Level, want.Raw)
 		}
+		assertThinkingHistoryEqual(t, fmt.Sprintf("case %q: SessionDetailRow", c.Name), detail.ThinkingLevelHistory, wantHistory)
 		if detail.ProjectPath != "/home/test/project" {
 			t.Errorf("case %q: detail columns shifted: ProjectPath = %q", c.Name, detail.ProjectPath)
 		}
@@ -136,6 +176,18 @@ func TestThinkingLevelStoreRoundTrip(t *testing.T) {
 				t.Errorf("case %q: recovery JSON %s = %s, want %q", c.Name, key, raw, value)
 			}
 		}
+		if raw, present := fields["thinkingLevelHistory"]; len(wantHistory) == 0 {
+			if present {
+				t.Errorf("case %q: recovery JSON carries thinkingLevelHistory=%s for an absent history; absence must stay absent", c.Name, raw)
+			}
+		} else {
+			var got []schema.ThinkingLevelChange
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Errorf("case %q: recovery JSON thinkingLevelHistory = %s, want a JSON array: %v", c.Name, raw, err)
+			} else {
+				assertThinkingHistoryEqual(t, fmt.Sprintf("case %q: recovery JSON", c.Name), got, wantHistory)
+			}
+		}
 		var metadata schema.UnifiedMetadata
 		if err := json.Unmarshal(data, &metadata); err != nil {
 			t.Fatalf("case %q: recovery JSON does not decode as UnifiedMetadata: %v", c.Name, err)
@@ -143,6 +195,7 @@ func TestThinkingLevelStoreRoundTrip(t *testing.T) {
 		if string(metadata.ThinkingLevel) != want.Level || string(metadata.ThinkingLevelRaw) != want.Raw {
 			t.Errorf("case %q: UnifiedMetadata = (%q, %q), want (%q, %q)", c.Name, metadata.ThinkingLevel, metadata.ThinkingLevelRaw, want.Level, want.Raw)
 		}
+		assertThinkingHistoryEqual(t, fmt.Sprintf("case %q: UnifiedMetadata", c.Name), metadata.ThinkingLevelHistory, wantHistory)
 	}
 }
 
@@ -154,7 +207,7 @@ func TestInsertSessionsRefusesInvalidThinkingLevel(t *testing.T) {
 	db := openTestStore(t)
 	ctx := t.Context()
 	for _, c := range fixture.Refusals {
-		err := db.InsertSessions(ctx, []ingest.StoreEntry{thinkingLevelEntry(t, c.SessionID, thinkingLevelPair{Level: c.Level})})
+		err := db.InsertSessions(ctx, []ingest.StoreEntry{thinkingLevelEntry(t, c.SessionID, thinkingLevelPair{Level: c.Level}, c.History)})
 		if err == nil {
 			t.Fatalf("case %q: InsertSessions accepted canonical thinking level %q", c.Name, c.Level)
 		}

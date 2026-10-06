@@ -1139,7 +1139,7 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 			// line's own effort.
 			mapping, diagnostic := levelState.governing(effort)
 			appendThinkingLevelDiagnostic(meta, diagnostic, lineNum)
-			applyThinkingLevelSeed(meta, mapping)
+			applyThinkingLevelObservation(meta, mapping)
 		}
 
 		// Count turns.

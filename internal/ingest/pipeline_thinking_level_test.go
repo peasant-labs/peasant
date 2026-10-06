@@ -45,6 +45,22 @@ func assertNoThinkingLevelEntries(t *testing.T, entries []schema.SessionEntry) {
 	}
 }
 
+// assertPipelineThinkingHistory compares a projected history (stored row,
+// sidecar metadata, or wire detail) against the fixture expectation. An empty
+// expectation means the session never changed level, so the history must be
+// absent rather than an empty slice carrying no evidence.
+func assertPipelineThinkingHistory(t *testing.T, label string, got []schema.ThinkingLevelChange, want []pipelineThinkingPair) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s history=%+v, want %+v", label, got, want)
+	}
+	for i, change := range got {
+		if change.Level != want[i].Level || change.Raw != want[i].Raw {
+			t.Fatalf("%s history[%d]=(%q,%q), want %+v", label, i, change.Level, change.Raw, want[i])
+		}
+	}
+}
+
 func TestPipelineThinkingLevel(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -53,6 +69,7 @@ func TestPipelineThinkingLevel(t *testing.T) {
 			Harness    ingest.Harness         `yaml:"harness"`
 			Root       ingest.ResolvedPath    `yaml:"root"`
 			Seed       pipelineThinkingPair   `yaml:"seed"`
+			History    []pipelineThinkingPair `yaml:"history"`
 			Turns      []pipelineThinkingPair `yaml:"turns"`
 			Diagnostic string                 `yaml:"diagnostic"`
 			Files      []struct {
@@ -104,6 +121,7 @@ func TestPipelineThinkingLevel(t *testing.T) {
 			if row.ThinkingLevel != tc.Seed.Level || row.ThinkingLevelRaw != tc.Seed.Raw {
 				t.Fatalf("stored seed=(%q,%q), want %+v", row.ThinkingLevel, row.ThinkingLevelRaw, tc.Seed)
 			}
+			assertPipelineThinkingHistory(t, "stored row", row.ThinkingLevelHistory, tc.History)
 			entries, err := db.ListEntries(ctx, sid)
 			if err != nil {
 				t.Fatal(err)
@@ -152,6 +170,7 @@ func TestPipelineThinkingLevel(t *testing.T) {
 			if detail.ThinkingLevel != tc.Seed.Level || detail.ThinkingLevelRaw != tc.Seed.Raw {
 				t.Fatalf("projected seed=(%q,%q), want %+v", detail.ThinkingLevel, detail.ThinkingLevelRaw, tc.Seed)
 			}
+			assertPipelineThinkingHistory(t, "wire detail", detail.ThinkingLevelHistory, tc.History)
 			observations = 0
 			for _, turn := range detail.Turns {
 				if turn.Role != schema.RoleAssistant || turn.Depth != 0 {
@@ -183,6 +202,7 @@ func TestPipelineThinkingLevel(t *testing.T) {
 			if metadata.ThinkingLevel != tc.Seed.Level || metadata.ThinkingLevelRaw != tc.Seed.Raw {
 				t.Fatalf("sidecar seed differs: %+v", metadata)
 			}
+			assertPipelineThinkingHistory(t, "sidecar metadata", metadata.ThinkingLevelHistory, tc.History)
 			found := false
 			for _, diagnostic := range metadata.Diagnostics.Warnings {
 				if diagnostic.ErrorType == tc.Diagnostic {

@@ -7,3 +7,7 @@ cases:
   - name: absent_is_not_off
   - name: explicit_off
     level: off
+  - name: stored_history_without_turn_evidence
+    history:
+      - {level: high}
+      - {level: "off", raw: none}

@@ -707,7 +707,7 @@ CREATE TABLE sessions (
     )
 ), active_generation_id TEXT, root_session_id TEXT, session_purpose TEXT, input_submission_count INTEGER CHECK(input_submission_count IS NULL OR (input_submission_count BETWEEN 0 AND 9007199254740991)), thinking_level TEXT
   CHECK (thinking_level IS NULL OR thinking_level IN
-    ('off','minimal','low','medium','high','xhigh','max','ultra','ultracode')), thinking_level_raw TEXT) STRICT;
+    ('off','minimal','low','medium','high','xhigh','max','ultra','ultracode')), thinking_level_raw TEXT, thinking_level_history TEXT) STRICT;
 
 CREATE TABLE target_kinds (
     id   INTEGER PRIMARY KEY,

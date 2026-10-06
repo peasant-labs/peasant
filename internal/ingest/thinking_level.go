@@ -129,6 +129,39 @@ func (r thinkingLevelRule) apply(native string) (thinkingLevelMapping, *Diagnost
 	return thinkingLevelMapping{Level: level, Raw: raw}, nil
 }
 
+// ThinkingLevelHistoryState accumulates source-ordered thinking-level
+// observations into the session seed and the collapsed history of later
+// changes. The first valid observation seeds the session; each later
+// observation whose canonical+raw pair differs from the last recorded pair
+// appends a ThinkingLevelChange, so consecutive duplicates collapse and source
+// order is preserved. It is the single rule behind both the ingest walk and the
+// transcript projection fallback.
+type ThinkingLevelHistoryState struct {
+	Level   schema.ThinkingLevel
+	Raw     schema.ThinkingLevelRaw
+	History []schema.ThinkingLevelChange
+}
+
+// Observe records one ordered observation. An empty pair carries no evidence
+// and changes nothing.
+func (s *ThinkingLevelHistoryState) Observe(level schema.ThinkingLevel, raw schema.ThinkingLevelRaw) {
+	if level == "" && raw == "" {
+		return
+	}
+	if s.Level == "" && s.Raw == "" {
+		s.Level, s.Raw = level, raw
+		return
+	}
+	last := schema.ThinkingLevelChange{Level: s.Level, Raw: s.Raw}
+	if n := len(s.History); n > 0 {
+		last = s.History[n-1]
+	}
+	if level == last.Level && raw == last.Raw {
+		return
+	}
+	s.History = append(s.History, schema.ThinkingLevelChange{Level: level, Raw: raw})
+}
+
 // applyThinkingLevelSeed records the session-level seed from the earliest
 // valid observation. It sets nothing when the metadata already carries a
 // level or raw (the earliest observation wins, including an unknown one with
@@ -144,4 +177,17 @@ func applyThinkingLevelSeed(meta *UnifiedMetadata, mapping thinkingLevelMapping)
 	meta.ThinkingLevel = mapping.Level
 	meta.ThinkingLevelRaw = mapping.Raw
 	return true
+}
+
+// applyThinkingLevelObservation records one observation of a source-ordered
+// walk: the first valid observation seeds the session, and every later distinct
+// observation is appended to the history. It is the single entry point for a
+// harness that walks observations in source order.
+func applyThinkingLevelObservation(meta *UnifiedMetadata, mapping thinkingLevelMapping) {
+	if meta == nil || mapping.IsZero() {
+		return
+	}
+	state := ThinkingLevelHistoryState{Level: meta.ThinkingLevel, Raw: meta.ThinkingLevelRaw, History: meta.ThinkingLevelHistory}
+	state.Observe(mapping.Level, mapping.Raw)
+	meta.ThinkingLevel, meta.ThinkingLevelRaw, meta.ThinkingLevelHistory = state.Level, state.Raw, state.History
 }

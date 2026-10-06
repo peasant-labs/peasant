@@ -4,6 +4,7 @@ cases:
     harness: claude-code
     root: /claude
     seed: {level: ultracode}
+    history: [{level: medium}]
     turns: [{level: ultracode}, {level: medium}]
     files:
       - path: /claude/-workspace/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
@@ -36,6 +37,7 @@ cases:
     harness: codex
     root: /codex
     seed: {level: off, raw: none}
+    history: [{level: ultra}]
     turns: [{level: off, raw: none}, {level: ultra}]
     files:
       - path: /codex/2026/01/01/rollout-2026-01-01T00-00-00-99d59925-36bc-424c-a789-8be54d9702ba.jsonl
@@ -58,6 +60,7 @@ cases:
     harness: pi
     root: /pi
     seed: {level: high}
+    history: [{level: off}]
     turns: [{level: high}, {level: off}]
     files:
       - path: /pi/session.jsonl
@@ -80,6 +83,7 @@ cases:
     harness: opencode
     root: /opencode
     seed: {raw: default}
+    history: [{level: medium}]
     turns: [{raw: default}, {level: medium}]
     files:
       - path: /opencode/storage/session/project/ses_99d59925-36bc-424c-a789-8be54d9702ba.json

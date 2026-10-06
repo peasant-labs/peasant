@@ -22,17 +22,23 @@ var openCodeSessionThinkingYAML []byte
 //go:embed testdata/opencode_thinking_levels.session.manifest.yaml
 var openCodeSessionThinkingManifest []byte
 
+type openCodeThinkingChange struct {
+	Level string `yaml:"level"`
+	Raw   string `yaml:"raw"`
+}
+
 type openCodeSessionThinkingCase struct {
-	Name             string `yaml:"name"`
-	ModelColumn      bool   `yaml:"modelColumn"`
-	ModelJSON        string `yaml:"modelJSON"`
-	ChangedModelJSON string `yaml:"changedModelJSON"`
-	MessageVariant   string `yaml:"messageVariant"`
-	LaterVariant     string `yaml:"laterVariant"`
-	WantVariant      string `yaml:"wantVariant"`
-	WantLevel        string `yaml:"wantLevel"`
-	WantRaw          string `yaml:"wantRaw"`
-	WantDiagnostic   bool   `yaml:"wantDiagnostic"`
+	Name             string                   `yaml:"name"`
+	ModelColumn      bool                     `yaml:"modelColumn"`
+	ModelJSON        string                   `yaml:"modelJSON"`
+	ChangedModelJSON string                   `yaml:"changedModelJSON"`
+	MessageVariant   string                   `yaml:"messageVariant"`
+	LaterVariant     string                   `yaml:"laterVariant"`
+	WantVariant      string                   `yaml:"wantVariant"`
+	WantLevel        string                   `yaml:"wantLevel"`
+	WantRaw          string                   `yaml:"wantRaw"`
+	WantHistory      []openCodeThinkingChange `yaml:"wantHistory"`
+	WantDiagnostic   bool                     `yaml:"wantDiagnostic"`
 }
 
 func TestOpenCodeSessionThinkingLevels(t *testing.T) {
@@ -114,6 +120,13 @@ func TestOpenCodeSessionThinkingLevels(t *testing.T) {
 			}
 			if captured.Metadata == nil || string(captured.Metadata.ThinkingLevel) != c.WantLevel || string(captured.Metadata.ThinkingLevelRaw) != c.WantRaw {
 				t.Fatalf("materialized metadata = %+v, want thinking %q/%q", captured.Metadata, c.WantLevel, c.WantRaw)
+			}
+			var gotHistory []openCodeThinkingChange
+			for _, change := range captured.Metadata.ThinkingLevelHistory {
+				gotHistory = append(gotHistory, openCodeThinkingChange{Level: string(change.Level), Raw: string(change.Raw)})
+			}
+			if fmt.Sprint(gotHistory) != fmt.Sprint(c.WantHistory) {
+				t.Fatalf("materialized history = %+v, want %+v", gotHistory, c.WantHistory)
 			}
 			diagnostic := false
 			for _, warning := range captured.Metadata.Diagnostics.Warnings {

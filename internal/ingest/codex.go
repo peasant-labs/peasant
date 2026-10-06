@@ -515,11 +515,11 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 				}
 			}
 			// The first non-empty effort seeds the session thinking level;
-			// later turn_context values are per-turn evidence only.
+			// later turn_context values are recorded as in-session changes.
 			if tc.Effort != "" {
 				mapping, diagnostic := mapCodexEffort(tc.Effort)
 				appendThinkingLevelDiagnostic(meta, diagnostic, 0)
-				applyThinkingLevelSeed(meta, mapping)
+				applyThinkingLevelObservation(meta, mapping)
 			}
 
 		case codexTypeResponse:

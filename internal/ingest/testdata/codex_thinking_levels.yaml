@@ -60,9 +60,27 @@ cases:
       {"type":"response_item","timestamp":"2026-01-01T00:00:03Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]}}
       {"type":"response_item","timestamp":"2026-01-01T00:00:04Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second answer"}]}}
     seed: {level: medium}
+    history:
+      - {level: high}
     turns:
       - {level: medium}
       - {level: high}
+  - name: repeated_turn_context_effort_collapses_in_history
+    transcript: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","cli_version":"fixture","cwd":"/retained/project"}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"low"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first answer"}]}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"low"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:02Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second answer"}]}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"max"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:03Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"third answer"}]}}
+    seed: {level: low}
+    history:
+      - {level: max}
+    turns:
+      - {level: low}
+      - {level: low}
+      - {level: max}
   - name: no_effort_stays_absent
     transcript: |
       {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","cli_version":"fixture","cwd":"/retained/project"}}

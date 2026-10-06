@@ -109,6 +109,10 @@ func TestStoredMetadataRecoveryCarriesThinkingLevel(t *testing.T) {
 	entry := makeStoreEntry(t, fixture.SessionID, fixture.ProjectHash, fixture.HostSlug, defaults.HarnessOpenCode, fixture.StartedAt, 100, 50)
 	entry.Metadata.ThinkingLevel = schema.ThinkingLevel(pair.Level)
 	entry.Metadata.ThinkingLevelRaw = schema.ThinkingLevelRaw(pair.Raw)
+	entry.Metadata.ThinkingLevelHistory = []schema.ThinkingLevelChange{
+		{Level: schema.ThinkingLevelHigh},
+		{Level: schema.ThinkingLevelOff, Raw: "none"},
+	}
 	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,5 +126,8 @@ func TestStoredMetadataRecoveryCarriesThinkingLevel(t *testing.T) {
 	}
 	if string(artifact.Metadata.ThinkingLevel) != pair.Level || string(artifact.Metadata.ThinkingLevelRaw) != pair.Raw {
 		t.Fatalf("recovered thinking level = (%q, %q), want (%q, %q)", artifact.Metadata.ThinkingLevel, artifact.Metadata.ThinkingLevelRaw, pair.Level, pair.Raw)
+	}
+	if !reflect.DeepEqual(artifact.Metadata.ThinkingLevelHistory, entry.Metadata.ThinkingLevelHistory) {
+		t.Fatalf("recovered thinking level history = %+v, want %+v", artifact.Metadata.ThinkingLevelHistory, entry.Metadata.ThinkingLevelHistory)
 	}
 }
