@@ -8,12 +8,40 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// ValidateThinkingLevelEntries enforces exact string typing, value, and
-// assistant attribution at the indexed-entry trust boundary. It mirrors
-// ValidateObservedModelEntries for thinking-level evidence: a stored row whose
-// Extra carries a non-string value, an out-of-set canonical level, or an
-// invalid raw spelling is refused instead of being silently folded to absent.
-func ValidateThinkingLevelEntries(entries []schema.SessionEntry) error {
+// ThinkingLevelEntryWarning is one malformed stored per-turn thinking-level
+// evidence occurrence found while reading indexed entries. Stored evidence is
+// dropped with this warning, never refused: the fold already serves an
+// out-of-contract value as absent (see thinkingLevelObservation), so the
+// warning lets an operator repair or re-index the source instead of losing the
+// diagnostic.
+type ThinkingLevelEntryWarning struct {
+	SessionID  schema.SessionID
+	EntryIndex int
+	Role       schema.Role
+	Level      schema.ThinkingLevel
+	Raw        schema.ThinkingLevelRaw
+	// Why names the exact contract rule the stored value violates.
+	Why string
+	// Fix names the concrete repair for the stored row.
+	Fix string
+}
+
+// Message renders the actionable what/why/where/when/meaning/fix diagnostic
+// for one dropped occurrence.
+func (w ThinkingLevelEntryWarning) Message() string {
+	return fmt.Sprintf("thinking-level stored evidence dropped\n  what: indexed entry %d (role %q) carries malformed thinking-level evidence level=%q raw=%q\n  why: %s\n  where: transcript.ThinkingLevelEntryWarnings during storage read\n  when: while folding stored entries into a projection, before local viewing, export, or publication\n  meaning: the entry is served with no thinking-level evidence (absent, never guessed or normalized), so this turn's level is unknown until the source is repaired\n  fix: %s", w.EntryIndex, w.Role, w.Level, w.Raw, w.Why, w.Fix)
+}
+
+// ThinkingLevelEntryWarnings collects one warning per indexed entry whose
+// stored Extra carries malformed thinking-level evidence: a non-string
+// thinking_level/thinking_level_raw value, an out-of-set canonical level, an
+// invalid raw spelling, or non-assistant attribution. It is a pure collector:
+// it never mutates entries and never returns an error, because malformed
+// stored evidence is dropped rather than refused. The producer and wire
+// boundaries still refuse malformed turns (ValidateThinkingLevelTurnEvidence,
+// schema.ValidateSessionDetailPayload).
+func ThinkingLevelEntryWarnings(entries []schema.SessionEntry) []ThinkingLevelEntryWarning {
+	var warnings []ThinkingLevelEntryWarning
 	for _, entry := range entries {
 		if entry.Extra == nil {
 			continue
@@ -31,7 +59,14 @@ func ValidateThinkingLevelEntries(entries []schema.SessionEntry) error {
 		if hasLevel {
 			var value string
 			if err := json.Unmarshal(levelRaw, &value); err != nil {
-				return fmt.Errorf("thinking-level entry validation failed\n  what: indexed entry %d carries a non-string thinking_level value\n  why: thinking-level source evidence must be an exact string: %v\n  where: transcript.ValidateThinkingLevelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently changing or dropping evidence\n  fix: repair or re-index the source entry so thinking_level is an exact canonical string, then retry", entry.EntryIndex, err)
+				warnings = append(warnings, ThinkingLevelEntryWarning{
+					SessionID:  entry.SessionID,
+					EntryIndex: entry.EntryIndex,
+					Role:       entry.Role,
+					Why:        fmt.Sprintf("thinking_level must be an exact canonical string, but the stored JSON value is not a string: %v", err),
+					Fix:        "repair or re-index the source entry so thinking_level is an exact canonical string",
+				})
+				continue
 			}
 			level = schema.ThinkingLevel(value)
 		}
@@ -39,15 +74,30 @@ func ValidateThinkingLevelEntries(entries []schema.SessionEntry) error {
 		if hasRaw {
 			var value string
 			if err := json.Unmarshal(rawRaw, &value); err != nil {
-				return fmt.Errorf("thinking-level entry validation failed\n  what: indexed entry %d carries a non-string thinking_level_raw value\n  why: thinking-level source evidence must be an exact string: %v\n  where: transcript.ValidateThinkingLevelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently changing or dropping evidence\n  fix: repair or re-index the source entry so thinking_level_raw is an exact bounded string, then retry", entry.EntryIndex, err)
+				warnings = append(warnings, ThinkingLevelEntryWarning{
+					SessionID:  entry.SessionID,
+					EntryIndex: entry.EntryIndex,
+					Role:       entry.Role,
+					Why:        fmt.Sprintf("thinking_level_raw must be an exact bounded string, but the stored JSON value is not a string: %v", err),
+					Fix:        "repair or re-index the source entry so thinking_level_raw is an exact bounded string",
+				})
+				continue
 			}
 			raw = schema.ThinkingLevelRaw(value)
 		}
 		if err := schema.ValidateThinkingLevelEvidence(entry.Role, level, raw); err != nil {
-			return fmt.Errorf("thinking-level entry validation failed\n  what: indexed entry %d (role %q) carries thinking-level evidence level=%q raw=%q that the contract refuses\n  why: %v\n  where: transcript.ValidateThinkingLevelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently normalizing or dropping evidence\n  fix: keep thinking_level/thinking_level_raw only on assistant entries; omit unknown canonical levels, preserve exact valid raw spellings (at most 128 UTF-8 bytes without edge whitespace), repair or re-index the source entry, and retry", entry.EntryIndex, entry.Role, level, raw, err)
+			warnings = append(warnings, ThinkingLevelEntryWarning{
+				SessionID:  entry.SessionID,
+				EntryIndex: entry.EntryIndex,
+				Role:       entry.Role,
+				Level:      level,
+				Raw:        raw,
+				Why:        err.Error(),
+				Fix:        "keep thinking_level/thinking_level_raw only on assistant entries; omit unknown canonical levels, and preserve exact valid raw spellings (at most 128 UTF-8 bytes without edge whitespace)",
+			})
 		}
 	}
-	return nil
+	return warnings
 }
 
 // ValidateThinkingLevelTurnEvidence enforces the producer-only rule that

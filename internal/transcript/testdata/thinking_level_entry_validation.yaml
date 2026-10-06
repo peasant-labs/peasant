@@ -1,27 +1,27 @@
-# Entry-boundary thinking-level validation cases. Each case builds one indexed
-# entry from its role and raw Extra JSON and asserts whether
-# transcript.ValidateThinkingLevelEntries accepts or refuses it. A refused case
-# must carry the actionable what/why/where/when/meaning/fix shape and a retry
-# hint, so a stored corrupt value is refused rather than folded to absent.
+# Entry-boundary thinking-level handling cases. Each case builds one indexed
+# entry from its role and raw Extra JSON and drives both the warning collector
+# and the shared entries-to-projection boundary. A malformed stored value is
+# DROPPED with an actionable warning and served absent (never refused at the
+# fold); the warning carries the what/why/where/when/meaning/fix shape and a
+# repair hint. Accepted cases carry no warning and are served as recorded.
 errorFragments:
-  - "thinking-level entry validation failed"
+  - "thinking-level stored evidence dropped"
   - "  what:"
   - "  why:"
-  - "  where: transcript.ValidateThinkingLevelEntries"
-  - "  when: after storage read and before entry folding or payload emission"
+  - "  where: transcript.ThinkingLevelEntryWarnings"
+  - "  when:"
   - "  meaning:"
   - "  fix:"
-  - retry
 cases:
-  - {name: assistant_canonical_accepted, role: assistant, extra: '{"thinking_level":"off"}', accepted: true}
-  - {name: assistant_canonical_with_raw_accepted, role: assistant, extra: '{"thinking_level":"high","thinking_level_raw":"High"}', accepted: true}
-  - {name: assistant_raw_only_accepted, role: assistant, extra: '{"thinking_level_raw":"deep"}', accepted: true}
-  - {name: absent_no_extra_accepted, role: user, accepted: true}
-  - {name: absent_empty_extra_accepted, role: user, extra: '{}', accepted: true}
-  - {name: user_level_refused, role: user, extra: '{"thinking_level":"high"}', accepted: false}
-  - {name: system_raw_refused, role: system, extra: '{"thinking_level_raw":"deep"}', accepted: false}
-  - {name: tool_level_refused, role: tool, extra: '{"thinking_level":"high"}', accepted: false}
-  - {name: non_string_level_refused, role: assistant, extra: '{"thinking_level":7}', accepted: false}
-  - {name: non_string_raw_refused, role: assistant, extra: '{"thinking_level_raw":false}', accepted: false}
-  - {name: unknown_canonical_refused, role: assistant, extra: '{"thinking_level":"deep"}', accepted: false}
-  - {name: edge_whitespace_raw_refused, role: assistant, extra: '{"thinking_level_raw":" deep"}', accepted: false}
+  - {name: assistant_canonical_served, role: assistant, extra: '{"thinking_level":"off"}', dropped: false, servedLevel: "off"}
+  - {name: assistant_canonical_with_raw_served, role: assistant, extra: '{"thinking_level":"high","thinking_level_raw":"High"}', dropped: false, servedLevel: "high", servedRaw: "High"}
+  - {name: assistant_raw_only_served, role: assistant, extra: '{"thinking_level_raw":"deep"}', dropped: false, servedRaw: "deep"}
+  - {name: absent_no_extra_served, role: user, dropped: false}
+  - {name: absent_empty_extra_served, role: user, extra: '{}', dropped: false}
+  - {name: user_level_dropped, role: user, extra: '{"thinking_level":"high"}', dropped: true}
+  - {name: system_raw_dropped, role: system, extra: '{"thinking_level_raw":"deep"}', dropped: true}
+  - {name: tool_level_dropped, role: tool, extra: '{"thinking_level":"high"}', dropped: true}
+  - {name: non_string_level_dropped, role: assistant, extra: '{"thinking_level":7}', dropped: true}
+  - {name: non_string_raw_dropped, role: assistant, extra: '{"thinking_level_raw":false}', dropped: true}
+  - {name: unknown_canonical_dropped, role: assistant, extra: '{"thinking_level":"deep"}', dropped: true}
+  - {name: edge_whitespace_raw_dropped, role: assistant, extra: '{"thinking_level_raw":" deep"}', dropped: true}

@@ -1,13 +1,13 @@
 requiredNames:
-  - assistant_canonical_accepted
-  - assistant_canonical_with_raw_accepted
-  - assistant_raw_only_accepted
-  - absent_no_extra_accepted
-  - absent_empty_extra_accepted
-  - user_level_refused
-  - system_raw_refused
-  - tool_level_refused
-  - non_string_level_refused
-  - non_string_raw_refused
-  - unknown_canonical_refused
-  - edge_whitespace_raw_refused
+  - assistant_canonical_served
+  - assistant_canonical_with_raw_served
+  - assistant_raw_only_served
+  - absent_no_extra_served
+  - absent_empty_extra_served
+  - user_level_dropped
+  - system_raw_dropped
+  - tool_level_dropped
+  - non_string_level_dropped
+  - non_string_raw_dropped
+  - unknown_canonical_dropped
+  - edge_whitespace_raw_dropped
