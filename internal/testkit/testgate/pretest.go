@@ -18,7 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The five pre-test steps of `make check` are inside the budget, so the gate
+// The pre-test steps of `make check` are inside the budget, so the gate
 // must be able to price them as wall/user/system rather than as one aggregate.
 // The commands live in testdata/pretest_steps.yaml so the list is a fixture, not
 // an inline table, and each row names the Makefile target it mirrors plus a

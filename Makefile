@@ -97,6 +97,8 @@ check: fmt lint sqlite-source-audit
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
+	go test -tags=projection_negative_seed -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
+	go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
 	go run ./cmd/testgate run -race=$(RACE)
 	# The gate above replaces the single `go test` pass. It computes the run

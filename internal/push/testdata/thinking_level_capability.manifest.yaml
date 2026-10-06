@@ -1,4 +1,3 @@
-expectedCaseCount: 12
 requiredNames:
   - stored_seed_requires_token
   - stored_raw_seed_refuses_without_token

@@ -96,6 +96,9 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 		if err := ValidateObservedModelEntries(entries); err != nil {
 			return p, err
 		}
+		if err := ValidateThinkingLevelEntries(entries); err != nil {
+			return p, err
+		}
 	}
 	p.Turns = foldEntries(entries, evidence)
 	tools := make(map[string]*ingest.ToolCall)

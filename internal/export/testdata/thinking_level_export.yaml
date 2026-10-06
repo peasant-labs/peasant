@@ -1,4 +1,4 @@
-requiredNames: [stored_seed_without_turn_evidence, stored_unknown_native_seed, absent_is_not_off, explicit_off]
+requiredNames: [stored_seed_without_turn_evidence, stored_unknown_native_seed, absent_is_not_off, explicit_off, stored_history_without_turn_evidence]
 cases:
   - name: stored_seed_without_turn_evidence
     level: ultracode

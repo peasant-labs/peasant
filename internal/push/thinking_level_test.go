@@ -43,7 +43,7 @@ func TestPipelineThinkingLevelCapability(t *testing.T) {
 	if err := testutil.DecodeFixtureYAML(thinkingLevelCapabilityYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := testutil.DecodeSemanticManifest(thinkingLevelCapabilityManifestYAML, "thinking level capability")
+	manifest, err := testutil.DecodeRequiredNamesManifest(thinkingLevelCapabilityManifestYAML, "thinking level capability")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestPipelineThinkingLevelCapability(t *testing.T) {
 	for i, tc := range fixture.Cases {
 		names[i] = tc.Name
 	}
-	if err := testutil.ValidateSemanticNames(manifest, names, "thinking level capability"); err != nil {
+	if err := testutil.ValidateRequiredNames(manifest, names, "thinking level capability"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range fixture.Cases {

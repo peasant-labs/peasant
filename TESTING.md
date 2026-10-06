@@ -35,6 +35,24 @@ and to prove that every test still runs exactly once across the passes.
   computes the plan and applies the screen. The gate computes the plan from
   `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
 
+### Pre-test steps
+
+`make check` runs a fixed set of steps before the test passes: fmt, lint, the
+ast-grep scan, the ast-grep key gate, the two tagged projection mutation proofs,
+and the release-workflow guard. Each is measured as its own unit so the pre-test
+wall stays separate from the test wall. The frozen step set lives in
+`internal/testkit/testgate/class.go` and is mirrored by
+`internal/testkit/testgate/testdata/pretest_steps.yaml`, which a test resolves
+against the Makefile so a dropped or reordered recipe line fails loudly.
+
+The two `projection-negative-*` steps run the build-tagged negative builds in
+`internal/transcript` with a scoped `-run`. Each build replaces the production
+seed policy with a deliberately wrong one and asserts that exactly the designated
+fixture cases fail, so a regression in the seed policy is caught. The scoped
+`-run` matters: a plain `go test -tags=projection_negative_seed
+./internal/transcript/` also runs the default production-path tests, which the
+wrong policy fails by design.
+
 ### Subset runs (`-pkgs`)
 
 `run` and `plan` take `-pkgs`, a comma-separated list of repo-relative package
