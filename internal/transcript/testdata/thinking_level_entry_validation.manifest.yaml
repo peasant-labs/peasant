@@ -11,3 +11,11 @@ requiredNames:
   - non_string_raw_dropped
   - unknown_canonical_dropped
   - edge_whitespace_raw_dropped
+  - unknown_canonical_valid_raw_serves_raw
+  - valid_level_invalid_raw_serves_level
+  - non_string_level_valid_raw_serves_absent
+  - non_string_raw_valid_level_serves_absent
+  - pi_valid_evidence_served
+  - pi_unknown_canonical_dropped_served_absent
+  - pi_valid_level_invalid_raw_serves_level
+  - pi_non_string_level_dropped_served_absent

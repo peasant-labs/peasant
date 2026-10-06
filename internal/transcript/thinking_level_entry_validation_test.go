@@ -3,6 +3,7 @@ package transcript
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,8 @@ type thinkingEntryValidationFixture struct {
 		Name        string      `yaml:"name"`
 		Role        schema.Role `yaml:"role"`
 		Extra       string      `yaml:"extra"`
+		Pi          bool        `yaml:"pi"`
+		Overlay     string      `yaml:"overlay"`
 		Dropped     bool        `yaml:"dropped"`
 		ServedLevel string      `yaml:"servedLevel"`
 		ServedRaw   string      `yaml:"servedRaw"`
@@ -61,12 +64,14 @@ func loadThinkingEntryValidationFixture(t *testing.T) thinkingEntryValidationFix
 }
 
 // TestThinkingLevelStoredEvidenceDropsWithWarning proves malformed stored
-// per-turn thinking-level evidence is DROPPED with an actionable warning and
-// served absent, not refused at the fold. Each case drives both the pure
-// warning collector and EntriesToProjectionValidated, the boundary the
-// WebSocket viewer and the export path share, and observes the slog warning the
-// boundary emits. The test is serial because it installs a process-global slog
-// handler.
+// per-turn thinking-level evidence is DROPPED with an actionable warning, not
+// refused at the fold. The malformed half is served absent and a well-formed
+// surviving half is still served; a non-string half drops the whole pair. Each
+// case drives both the pure warning collector and EntriesToProjectionValidated,
+// the boundary the WebSocket viewer and the export path share, and observes the
+// slog warning the boundary emits. Pi cases carry a real typed pi.state
+// envelope so the same behavior is pinned on the Pi stored read path. The test
+// is serial because it installs a process-global slog handler.
 func TestThinkingLevelStoredEvidenceDropsWithWarning(t *testing.T) {
 	fixture := loadThinkingEntryValidationFixture(t)
 
@@ -80,7 +85,13 @@ func TestThinkingLevelStoredEvidenceDropsWithWarning(t *testing.T) {
 			entry := schema.SessionEntry{EntryIndex: i + 1, Role: c.Role, EntryType: schema.EntryTypeText}
 			content := "recorded output"
 			entry.ContentPreview = &content
-			if c.Extra != "" {
+			opts := ProjectionOptions{}
+			switch {
+			case c.Pi:
+				entry.Harness = schema.HarnessPi
+				entry.Extra = piStoredExtraWithOverlay(t, c.Name, c.Overlay)
+				opts.Harness = schema.HarnessPi
+			case c.Extra != "":
 				value := c.Extra
 				entry.Extra = &value
 			}
@@ -112,16 +123,12 @@ func TestThinkingLevelStoredEvidenceDropsWithWarning(t *testing.T) {
 			}
 
 			buf.Reset()
-			projection, err := EntriesToProjectionValidated([]schema.SessionEntry{entry}, ProjectionOptions{})
+			projection, err := EntriesToProjectionValidated([]schema.SessionEntry{entry}, opts)
 			if err != nil {
 				t.Fatalf("malformed stored evidence must be dropped, not refused: %v", err)
 			}
 			level, raw := servedThinkingLevel(projection.Turns)
-			if c.Dropped {
-				if level != "" || raw != "" {
-					t.Fatalf("dropped evidence served as level=%q raw=%q, want absent", level, raw)
-				}
-			} else if level != schema.ThinkingLevel(c.ServedLevel) || raw != schema.ThinkingLevelRaw(c.ServedRaw) {
+			if level != schema.ThinkingLevel(c.ServedLevel) || raw != schema.ThinkingLevelRaw(c.ServedRaw) {
 				t.Fatalf("served level=%q raw=%q, want level=%q raw=%q", level, raw, c.ServedLevel, c.ServedRaw)
 			}
 
@@ -152,4 +159,45 @@ func servedThinkingLevel(turns []ingest.Turn) (schema.ThinkingLevel, schema.Thin
 		}
 	}
 	return "", ""
+}
+
+// piStoredExtraWithOverlay builds a valid typed Pi row for the test session
+// (pi.state envelope, sourceRef and an assistant usage owner) and merges the
+// fixture's overlay JSON onto the encoded evidence. It models a stored Pi row
+// whose private thinking-level evidence was corrupted after indexing: the row
+// must still decode and project, dropping the malformed value with a warning.
+func piStoredExtraWithOverlay(t *testing.T, name, overlay string) *string {
+	t.Helper()
+	sid := schema.SessionID(testutil.TestSessionUUID)
+	extra := ingest.PiExtra{
+		Kind:      ingest.PiExtraState,
+		Harness:   schema.HarnessPi,
+		SourceRef: ingest.PiPublicRef(string(sid), "entry", name),
+	}
+	usage, err := ingest.PiUsageFromRaw(string(sid), name, schema.UsageScopeAssistant, json.RawMessage(`{"input":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra.Usage = &usage
+	encoded, err := ingest.EncodePiExtra(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(*encoded), &fields); err != nil {
+		t.Fatal(err)
+	}
+	var corrupt map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(overlay), &corrupt); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range corrupt {
+		fields[key] = value
+	}
+	merged, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := string(merged)
+	return &result
 }

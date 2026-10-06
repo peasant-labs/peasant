@@ -34,8 +34,11 @@ func modelObservation(entry schema.SessionEntry) entryModelObservation {
 // thinkingLevelObservation reads the per-entry thinking-level evidence from an
 // assistant entry's Extra. Non-assistant entries never carry the evidence, and
 // a malformed or out-of-contract value is dropped rather than normalized: the
-// turn is served with the evidence absent (unknown), and
-// ThinkingLevelEntryWarnings reports the drop so the source can be repaired.
+// malformed half is served absent while a well-formed surviving half is still
+// served, so this turn's level is unknown only when the canonical level was
+// dropped. A non-string half fails the typed decode and drops the whole pair,
+// and ThinkingLevelEntryWarnings reports the drop so the source can be
+// repaired.
 func thinkingLevelObservation(entry schema.SessionEntry) (schema.ThinkingLevel, schema.ThinkingLevelRaw) {
 	if entry.Role != schema.RoleAssistant || entry.Extra == nil {
 		return "", ""

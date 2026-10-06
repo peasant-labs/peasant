@@ -65,7 +65,7 @@ cases:
 
   - name: transcript-thinking-level-slog-default
     file: internal/transcript/thinking_level_entry_validation_test.go
-    line: 75
+    line: 80
     test: TestThinkingLevelStoredEvidenceDropsWithWarning
     hazard: slog.SetDefault
 

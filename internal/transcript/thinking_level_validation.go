@@ -10,8 +10,8 @@ import (
 
 // ThinkingLevelEntryWarning is one malformed stored per-turn thinking-level
 // evidence occurrence found while reading indexed entries. Stored evidence is
-// dropped with this warning, never refused: the fold already serves an
-// out-of-contract value as absent (see thinkingLevelObservation), so the
+// dropped with this warning, never refused: the fold drops the malformed half
+// and keeps a well-formed surviving half (see thinkingLevelObservation), so the
 // warning lets an operator repair or re-index the source instead of losing the
 // diagnostic.
 type ThinkingLevelEntryWarning struct {
@@ -29,16 +29,18 @@ type ThinkingLevelEntryWarning struct {
 // Message renders the actionable what/why/where/when/meaning/fix diagnostic
 // for one dropped occurrence.
 func (w ThinkingLevelEntryWarning) Message() string {
-	return fmt.Sprintf("thinking-level stored evidence dropped\n  what: indexed entry %d (role %q) carries malformed thinking-level evidence level=%q raw=%q\n  why: %s\n  where: transcript.ThinkingLevelEntryWarnings during storage read\n  when: while folding stored entries into a projection, before local viewing, export, or publication\n  meaning: the entry is served with no thinking-level evidence (absent, never guessed or normalized), so this turn's level is unknown until the source is repaired\n  fix: %s", w.EntryIndex, w.Role, w.Level, w.Raw, w.Why, w.Fix)
+	return fmt.Sprintf("thinking-level stored evidence dropped\n  what: indexed entry %d (role %q) carries malformed thinking-level evidence level=%q raw=%q\n  why: %s\n  where: transcript.ThinkingLevelEntryWarnings during storage read\n  when: while folding stored entries into a projection, before local viewing, export, or publication\n  meaning: the malformed half is dropped and served absent, never guessed or normalized; a well-formed surviving half is still served, so this turn's level is unknown only when the canonical level was dropped. A non-string half fails the entry's typed decode and drops the whole pair with one warning for the entry, and evidence on a non-assistant entry is dropped entirely; the source must be repaired to restore it\n  fix: %s", w.EntryIndex, w.Role, w.Level, w.Raw, w.Why, w.Fix)
 }
 
 // ThinkingLevelEntryWarnings collects one warning per indexed entry whose
 // stored Extra carries malformed thinking-level evidence: a non-string
 // thinking_level/thinking_level_raw value, an out-of-set canonical level, an
-// invalid raw spelling, or non-assistant attribution. It is a pure collector:
-// it never mutates entries and never returns an error, because malformed
-// stored evidence is dropped rather than refused. The producer and wire
-// boundaries still refuse malformed turns (ValidateThinkingLevelTurnEvidence,
+// invalid raw spelling, or non-assistant attribution. A non-string half yields
+// one warning and stops examining that entry, so an entry with two non-string
+// halves still yields exactly one warning. It is a pure collector: it never
+// mutates entries and never returns an error, because malformed stored evidence
+// is dropped rather than refused. The producer and wire boundaries still refuse
+// malformed turns (ValidateThinkingLevelTurnEvidence,
 // schema.ValidateSessionDetailPayload).
 func ThinkingLevelEntryWarnings(entries []schema.SessionEntry) []ThinkingLevelEntryWarning {
 	var warnings []ThinkingLevelEntryWarning
