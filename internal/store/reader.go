@@ -1262,9 +1262,15 @@ func scanSessionRow(stmt *sqlite.Stmt) SessionRow {
 	// as nil (no change observed), never as an empty history.
 	if stmt.ColumnType(36) != sqlite.TypeNull {
 		if err := json.Unmarshal([]byte(stmt.ColumnText(36)), &row.ThinkingLevelHistory); err != nil {
-			// A stored value that cannot be decoded is corrupt evidence. Keep
-			// the read total rather than fabricating a history: the session
-			// still resolves and the caller sees no history.
+			// A stored value that cannot be decoded is corrupt evidence, not an
+			// absent history. Keep the read total rather than fabricating a
+			// history: the session still resolves, but surface the corruption
+			// with an actionable diagnostic instead of silently conflating it
+			// with "no change observed".
+			slog.Warn("store: corrupt thinking_level_history JSON in DB; serving no history for this session",
+				"session_id", row.SessionID,
+				"error", err,
+				"fix", "re-index the session from its source so the stored history is rewritten as valid JSON")
 			row.ThinkingLevelHistory = nil
 		}
 	}
