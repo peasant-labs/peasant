@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -203,7 +204,7 @@ func runThinkingLevelTranscriptCase(t *testing.T, harness ingest.Harness, data [
 	for _, change := range metadata.ThinkingLevelHistory {
 		gotHistory = append(gotHistory, expectedThinkingLevel{Level: string(change.Level), Raw: string(change.Raw)})
 	}
-	if fmt.Sprint(gotHistory) != fmt.Sprint(c.History) {
+	if !slices.Equal(gotHistory, c.History) {
 		t.Errorf("session history = %+v, want %+v", gotHistory, c.History)
 	}
 	if c.Diagnostic != "" {
@@ -235,7 +236,7 @@ func runThinkingLevelTranscriptCase(t *testing.T, harness ingest.Harness, data [
 		}
 		turns = append(turns, thinkingLevelEvidence(t, entry))
 	}
-	if fmt.Sprint(turns) != fmt.Sprint(c.Turns) {
+	if !slices.Equal(turns, c.Turns) {
 		t.Errorf("assistant turn evidence = %+v, want %+v", turns, c.Turns)
 	}
 }
@@ -345,7 +346,7 @@ func TestOpenCodeRetainedIndexerThinkingLevel(t *testing.T) {
 				}
 				turns = append(turns, got)
 			}
-			if fmt.Sprint(turns) != fmt.Sprint(c.Turns) {
+			if !slices.Equal(turns, c.Turns) {
 				t.Errorf("message evidence = %+v, want %+v", turns, c.Turns)
 			}
 		})
