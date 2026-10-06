@@ -58,12 +58,15 @@ func loadThinkingEntryValidationFixture(t *testing.T) thinkingEntryValidationFix
 // TestValidateThinkingLevelEntries proves the indexed-entry boundary refuses a
 // non-string value, an out-of-set canonical level, an invalid raw spelling, and
 // non-assistant attribution instead of silently folding the evidence to absent.
+// Each refused case is also pushed through EntriesToProjectionValidated, the
+// boundary the WebSocket viewer and the export path share, so the wiring at the
+// fold is proven rather than only the standalone validator.
 func TestValidateThinkingLevelEntries(t *testing.T) {
 	t.Parallel()
 	fixture := loadThinkingEntryValidationFixture(t)
 	for i, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			entry := schema.SessionEntry{EntryIndex: i + 1, Role: c.Role}
+			entry := schema.SessionEntry{EntryIndex: i + 1, Role: c.Role, EntryType: schema.EntryTypeText}
 			if c.Extra != "" {
 				value := c.Extra
 				entry.Extra = &value
@@ -72,12 +75,20 @@ func TestValidateThinkingLevelEntries(t *testing.T) {
 			if (err == nil) != c.Accepted {
 				t.Fatalf("accepted=%t, want %t: %v", err == nil, c.Accepted, err)
 			}
-			if err != nil {
-				for _, fragment := range fixture.ErrorFragments {
-					if !strings.Contains(err.Error(), fragment) {
-						t.Errorf("error missing %q: %v", fragment, err)
-					}
+			if err == nil {
+				return
+			}
+			for _, fragment := range fixture.ErrorFragments {
+				if !strings.Contains(err.Error(), fragment) {
+					t.Errorf("error missing %q: %v", fragment, err)
 				}
+			}
+			_, boundaryErr := EntriesToProjectionValidated([]schema.SessionEntry{entry}, ProjectionOptions{})
+			if boundaryErr == nil {
+				t.Fatal("the entries-to-projection boundary accepted evidence the validator refused")
+			}
+			if !strings.Contains(boundaryErr.Error(), "thinking-level entry validation failed") {
+				t.Fatalf("the boundary refused for an unrelated reason: %v", boundaryErr)
 			}
 		})
 	}
