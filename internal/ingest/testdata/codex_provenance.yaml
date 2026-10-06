@@ -86,6 +86,30 @@ cases:
           entryType: text
           content: next
           provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+  - name: turn-context-effort-edge-whitespace-dropped
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-effort-edge-whitespace
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"turn_context","payload":{"effort":" high"}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m1","content":[{"type":"output_text","text":"answer"}]}}
+    entryRefs: [e_first]
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 0
+      diagnostics:
+        - thinking_level_raw_dropped
+      main:
+        - ref: e_first
+          role: assistant
+          entryType: text
+          content: answer
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
   - name: aligned-user-context-media-unknown
     stableThreadID: "11111111-1111-4111-8111-111111111111"
     pointer: /synthetic/current.jsonl
