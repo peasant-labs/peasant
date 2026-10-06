@@ -13,7 +13,13 @@ cases:
   - name: v2_opencode_session_row_seed_carries_to_payload
     harness: opencode
     thinkingSeed: {level: "off", raw: none}
+    thinkingHistory:
+      - {level: medium}
+      - {raw: custom}
     expectedThinkingSeed: {level: "off", raw: none}
+    expectedThinkingHistory:
+      - {level: medium}
+      - {raw: custom}
     main:
       - {index: 0, role: assistant, depth: 0, ref: "e_row_seed", content: answer}
     expectedMainIndices: [0]

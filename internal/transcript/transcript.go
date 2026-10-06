@@ -742,6 +742,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		Model:                model,
 		ThinkingLevel:        thinkingLevel,
 		ThinkingLevelRaw:     thinkingLevelRaw,
+		ThinkingLevelHistory: sessionThinkingHistory(s),
 		WorkingDirectory:     s.ProjectPath,
 		GitBranch:            s.GitBranch,
 		GitRemote:            s.GitRemote,
