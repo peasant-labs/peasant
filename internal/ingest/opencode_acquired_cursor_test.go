@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,10 +14,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 //go:embed testdata/opencode_acquired_cursor.yaml
@@ -42,14 +41,8 @@ type acquiredCursorFixtures struct {
 func LoadAcquiredCursorFixtures(t *testing.T) acquiredCursorFixtures {
 	t.Helper()
 	var fixture acquiredCursorFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(acquiredCursorYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(acquiredCursorYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("cursor fixture requires one YAML document")
 	}
 	required := []string{"acquired-zero-then-newer", "changed-attribution-preserves-artifact", "missing-cursor-preserves-progress"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {
@@ -139,14 +132,14 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			if !reflect.DeepEqual(legacyMeta, materialized.Metadata) || !bytes.Equal(legacyTranscript, materialized.Transcript) {
 				t.Fatal("cursor acquisition changed frozen materialization output")
 			}
-			database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = database.Close() })
 			staleDiscovery := &discoveredCursorAdapter{OpenCodeAdapter: adapter, session: *selected}
 			registry := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return staleDiscovery }}
-			pipeline, err := ingest.NewPipeline(filesystem, git, registry, config, ingest.WithStore(database))
+			pipeline, err := newTestPipeline(filesystem, git, registry, config, ingest.WithStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,7 +168,7 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			applyAcquiredCursorSetup(t, source, row.Change)
 			beforeSource := testfixture.SnapshotSource(t, source)
 			config.Force = true
-			pipeline, err = ingest.NewPipeline(filesystem, git, registry, config, ingest.WithStore(database))
+			pipeline, err = newTestPipeline(filesystem, git, registry, config, ingest.WithStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}

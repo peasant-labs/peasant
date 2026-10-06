@@ -4,15 +4,15 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PushStep } from '@/components/share/PushStep';
 import type { ShareFooterActions } from '@/components/share/footer-actions';
-import type { ShareSession, ShareLabel, LabelSelection } from '@/lib/share/types';
+import type { ShareSession } from '@/lib/share/types';
 import * as pushApi from '@/lib/share/push';
 
 vi.mock('@/lib/share/push', () => ({ runPush: vi.fn() }));
 
-function PushHarness({ labels }: { labels: LabelSelection }) {
+function PushHarness() {
   const [actions, setActions] = useState<ShareFooterActions | null>(null);
   return <>
-    <PushStep sessions={PUSH_SESSIONS} selectedIds={PUSH_SELECTED} labels={labels} onFooterActionsChange={setActions} />
+    <PushStep sessions={PUSH_SESSIONS} selectedIds={PUSH_SELECTED} onFooterActionsChange={setActions} />
     {actions?.primary && <button type="button" onClick={actions.primary.onClick}>{actions.primary.label}</button>}
   </>;
 }
@@ -37,35 +37,16 @@ function makeSession(id: string, totalTokens = 10000): ShareSession {
   };
 }
 
-function label(id: string, origin: 'auto' | 'manual'): ShareLabel {
-  return {
-    id,
-    sessionId: 'sess-1',
-    origin,
-    annotatorKind: origin === 'manual' ? 'human' : 'rule',
-    annotatorName: origin === 'manual' ? 'human-web' : 'classifier',
-    typeId: `type.${id}`,
-    typeName: id,
-    value: 'v',
-  };
-}
-
 describe('PushStep transparency panel', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetAllMocks();
   });
   it('shows the destination, payload, privacy, and post-publish note', () => {
-    const labels: LabelSelection = {
-      bySession: new Map([['sess-1', [label('a1', 'auto'), label('a2', 'manual')]]]),
-      includedIds: new Set(['a1', 'a2']),
-    };
-
     render(
       <PushStep
         sessions={[makeSession('sess-1')]}
         selectedIds={new Set(['sess-1'])}
-        labels={labels}
         redactionLevel="standard"
         onFooterActionsChange={() => {}}
       />,
@@ -73,14 +54,18 @@ describe('PushStep transparency panel', () => {
 
     // fairtrade WhereDoesThisGo composite — chrome is lowercased.
     expect(screen.getByText('where does this go?')).toBeInTheDocument();
-    // Destination is the commons URL.
+    // Destination is the village URL.
     expect(screen.getByText('https://village.peasantlabs.org')).toBeInTheDocument();
     // What gets sent / stays private headings.
     expect(screen.getByText('what gets sent')).toBeInTheDocument();
     expect(screen.getByText('what stays private')).toBeInTheDocument();
-    // Redacted transcripts + selected-labels rows (measure encoded into the line).
+    // Redacted transcripts row (measure encoded into the line). The labels step
+    // is gone, and so is its row: the push never sent the labels it listed.
     expect(screen.getByText(/redacted transcripts/)).toBeInTheDocument();
-    expect(screen.getByText(/selected labels/)).toBeInTheDocument();
+    expect(screen.queryByText(/selected labels/)).not.toBeInTheDocument();
+    // A first publication is private; the wizard never claims it is public.
+    expect(screen.getByText('private')).toBeInTheDocument();
+    expect(screen.queryByText('public')).not.toBeInTheDocument();
     // Local copy note mentions the sync path.
     expect(
       screen.getByText(/~\/\.local\/share\/peasant\/peasant-sync\//),
@@ -93,16 +78,10 @@ describe('PushStep transparency panel', () => {
   });
 
   it('states the boundary-values and context-travels one-liners', () => {
-    const labels: LabelSelection = {
-      bySession: new Map([['sess-1', [label('a1', 'auto')]]]),
-      includedIds: new Set(['a1']),
-    };
-
     render(
       <PushStep
         sessions={[makeSession('sess-1')]}
         selectedIds={new Set(['sess-1'])}
-        labels={labels}
         onFooterActionsChange={() => {}}
       />,
     );
@@ -122,29 +101,7 @@ describe('PushStep transparency panel', () => {
     ).toBeInTheDocument();
   });
 
-  it('reflects the included-vs-discovered label count in the panel', () => {
-    const labels: LabelSelection = {
-      bySession: new Map([
-        ['sess-1', [label('a1', 'auto'), label('a2', 'manual'), label('a3', 'auto')]],
-      ]),
-      // Only one of three labels kept.
-      includedIds: new Set(['a1']),
-    };
-
-    render(
-      <PushStep
-        sessions={[makeSession('sess-1')]}
-        selectedIds={new Set(['sess-1'])}
-        labels={labels}
-        onFooterActionsChange={() => {}}
-      />,
-    );
-
-    // "1 of 3" included labels (encoded into the "Selected labels" line).
-    expect(screen.getByText(/selected labels · 1 of 3/)).toBeInTheDocument();
-  });
-
-  it('uses the configured commons destination after a successful submission', async () => {
+  it('uses the configured village destination after a successful submission, and never calls it the commons', async () => {
     vi.stubEnv('NEXT_PUBLIC_COMMONS_URL', 'https://configured.example.test');
     vi.mocked(pushApi.runPush).mockResolvedValue({
       new: 1,
@@ -153,14 +110,14 @@ describe('PushStep transparency panel', () => {
       errors: 0,
       sessions: [{ sessionId: 'sess-1', status: 'new' }],
     });
-    const labels: LabelSelection = { bySession: new Map(), includedIds: new Set() };
-
-    render(<PushHarness labels={labels} />);
+    render(<PushHarness />);
     await userEvent.click(await screen.findByRole('button', { name: 'Submit' }));
 
-    expect(await screen.findByRole('link', { name: /View in the commons/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /open village/i })).toHaveAttribute(
       'href',
       'https://configured.example.test',
     );
+    expect(screen.getByText('1 published to village')).toBeInTheDocument();
+    expect(screen.queryByText(/commons/i)).not.toBeInTheDocument();
   });
 });

@@ -17,9 +17,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/deferred_pair_repair.yaml
@@ -63,9 +63,7 @@ type deferredSelectionRead struct {
 func loadDeferredPairRepairFixtures(t *testing.T) deferredPairRepairDocument {
 	t.Helper()
 	var document deferredPairRepairDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(deferredPairRepairFixtureData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(deferredPairRepairFixtureData, &document); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -339,7 +337,7 @@ func runDeferredPairPipeline(t *testing.T, ctx context.Context, filesystem inges
 		ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})),
 		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database),
 	}
-	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config, append(base, options...)...)
+	pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config, append(base, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +361,7 @@ func TestDeferredPairRepairDetection(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := t.Context()
 			memfs := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "deferred-pair.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -467,7 +465,7 @@ func TestDeferredPairRepairSelectionReads(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := t.Context()
 			memfs := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "deferred-pair-reads.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

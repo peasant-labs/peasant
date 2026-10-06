@@ -170,6 +170,7 @@ func candidateMultiplicity(t *testing.T, caseName string, value candidateMultipl
 }
 
 func TestSelectionCandidateCohortsDriveCommandBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadSelectionCandidateFixtures(t).Cases {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -284,6 +285,7 @@ func TestSelectionCandidateCohortsDriveCommandBoundaries(t *testing.T) {
 }
 
 func TestHarvestSelectionPreparesClonePathsBeforeLookup(t *testing.T) {
+	t.Parallel()
 	fixtures := loadSelectionCandidateFixtures(t)
 	var fixture selectionCandidateFixtureCase
 	for _, candidate := range fixtures.Cases {
@@ -379,6 +381,7 @@ func assertPreparedPushPartition(
 }
 
 func TestSessionSelectionMissingRowFailsClosed(t *testing.T) {
+	t.Parallel()
 	selection := push.NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
 		"11111111-1111-4111-8111-111111111111": ingest.BranchMatchYes,
 	})

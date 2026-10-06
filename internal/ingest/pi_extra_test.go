@@ -1,16 +1,13 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pi_usage_carriers.yaml
@@ -20,6 +17,7 @@ var piUsageYAML []byte
 var piUsageManifest []byte
 
 func TestPiUsageCarrierBoundaries(t *testing.T) {
+	t.Parallel()
 	var f struct {
 		Cases []struct {
 			Name         string `yaml:"name"`
@@ -29,14 +27,8 @@ func TestPiUsageCarrierBoundaries(t *testing.T) {
 			Error        bool   `yaml:"error"`
 		} `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(piUsageYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&f); err != nil {
+	if err := testutil.DecodeFixtureYAML(piUsageYAML, &f); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing YAML: %v", err)
 	}
 	m, err := testutil.DecodeRequiredNamesManifest(piUsageManifest, "Pi usage")
 	if err != nil {

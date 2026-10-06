@@ -13,9 +13,9 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitemigration"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/migrations/v59_capture_format.yaml
@@ -59,6 +59,7 @@ func decodeCaptureFormatYAML(t *testing.T, raw []byte, dest any) {
 }
 
 func TestMigrationV59CaptureFormatClosesTheStoredSet(t *testing.T) {
+	t.Parallel()
 	var f struct {
 		Cases []migrationCaptureFormatCase `yaml:"cases"`
 	}
@@ -205,6 +206,7 @@ func TestMigrationV59CaptureFormatClosesTheStoredSet(t *testing.T) {
 // the user to delete rows that were mappable all along. Both directions are
 // asserted as set equality, never as a count.
 func TestCaptureFormatUpgradeMappingsMatchTheMigration(t *testing.T) {
+	t.Parallel()
 	arms := map[string]string{}
 	for _, arm := range regexp.MustCompile(`WHEN '([^']+)' THEN '([^']+)'`).FindAllStringSubmatch(migrationV59, -1) {
 		if _, duplicate := arms[arm[1]]; duplicate {

@@ -14,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/profile_transport/cases.yaml
@@ -59,14 +58,8 @@ func loadTransportProfileFixtures(t *testing.T) []transportProfileCase {
 	var doc struct {
 		Cases []transportProfileCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(transportProfileCases))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(transportProfileCases, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(transportProfileManifest, "transport profiles")
 	if err != nil {

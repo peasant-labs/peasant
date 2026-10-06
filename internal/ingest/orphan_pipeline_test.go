@@ -26,6 +26,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -160,7 +161,7 @@ func orphanSummaryNew(result *ingest.PipelineResult) int {
 }
 
 // seedOrphanUnrelatedRoots stores independent-harness roots a case's harvests
-// do not discover. They are settled (current index revision, no artifact
+// do not discover. They are settled (current adapter and index revisions, no artifact
 // identity, no publication capture) so ordinary maintenance selection does not
 // read them either. That leaves the parent-cache reconciliation as the only
 // way an incremental harvest could open their metadata, which is exactly what
@@ -174,6 +175,10 @@ func seedOrphanUnrelatedRoots(t *testing.T, ctx context.Context, db *store.Store
 		}
 		meta := makeMinimalMeta(t, raw)
 		meta.ModelHarness = orphanHarness(t, fixture.Harness)
+		// Adapter maintenance is independent of index freshness. Stamp both
+		// producers so this warm-state fixture isolates parent-cache I/O.
+		versions := ingest.HarvesterVersionRegistry[meta.ModelHarness]
+		meta.AdapterVersion = &versions.AdapterVersion
 		meta.ParentUUID = nil
 		if err := db.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta, CWDProvenance: ingest.CWDNotRecovered}}); err != nil {
 			t.Fatalf("seed unrelated root %q: %v", raw, err)
@@ -182,7 +187,7 @@ func seedOrphanUnrelatedRoots(t *testing.T, ctx context.Context, db *store.Store
 		if err != nil {
 			t.Fatalf("unrelated root %q: %v", raw, err)
 		}
-		target := ingest.HarvesterVersionRegistry[meta.ModelHarness].IndexerVersion
+		target := versions.IndexerVersion
 		if err := db.UpdateIndexState(ctx, sid, target, time.Now().UnixMilli()); err != nil {
 			t.Fatalf("settle unrelated root %q: %v", raw, err)
 		}
@@ -347,8 +352,8 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if err := fs.MkdirAll(env.outputDir, 0o755); err != nil {
 		t.Fatalf("create output directory %q: %v", env.outputDir, err)
 	}
-	dbPath := filepath.Join(t.TempDir(), "peasant.db")
-	db, err := store.Open(dbPath)
+	dbPath := storetest.CopyGoldenDB(t)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +419,7 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 				return filtered[string(s.SessionID)]
 			}
 		}
-		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithStore(reconcileStore), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db),
 			ingest.WithIndexers(indexers))
 		if err != nil {
@@ -462,7 +467,7 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if err := db.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
 	}
-	reopened, err := store.Open(dbPath)
+	reopened, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}

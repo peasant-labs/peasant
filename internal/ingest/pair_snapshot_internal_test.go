@@ -8,7 +8,6 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -149,70 +148,7 @@ func seedSnapshotPair(t *testing.T, filesystem FileSystem, output, metadataPath 
 	return transcriptPath
 }
 
-// countingReadFS records disk reads of one pair's two halves, so a case can
-// tell a lone metadata read (the mixed snapshot) from one validated read of
-// both halves.
-type countingReadFS struct {
-	FileSystem
-	metadataPath    string
-	transcriptPath  string
-	metadataReads   int
-	transcriptReads int
-}
-
-var _ FileSystem = (*countingReadFS)(nil)
-
-func (filesystem *countingReadFS) ReadFile(path string) ([]byte, error) {
-	switch path {
-	case filesystem.metadataPath:
-		filesystem.metadataReads++
-	case filesystem.transcriptPath:
-		filesystem.transcriptReads++
-	}
-	return filesystem.FileSystem.ReadFile(path)
-}
-
-// swapAfterTranscriptReadFS serves the first generation until the first
-// transcript read completes, then installs the second generation. The first
-// transcript read of a fallback run is the fallback's own pair read, so the
-// swap lands after the fallback capture and before the index capture, the
-// way a concurrent writer landing between the two reads does.
-type swapAfterTranscriptReadFS struct {
-	FileSystem
-	mu             sync.Mutex
-	transcriptPath string
-	metadataPath   string
-	nextMetadata   []byte
-	nextTranscript []byte
-	hookFired      bool
-}
-
-var _ FileSystem = (*swapAfterTranscriptReadFS)(nil)
-
-func (filesystem *swapAfterTranscriptReadFS) ReadFile(path string) ([]byte, error) {
-	data, err := filesystem.FileSystem.ReadFile(path)
-	if err == nil && path == filesystem.transcriptPath {
-		filesystem.mu.Lock()
-		defer filesystem.mu.Unlock()
-		if !filesystem.hookFired {
-			if err := filesystem.FileSystem.WriteFile(filesystem.metadataPath, filesystem.nextMetadata, 0o600); err != nil {
-				return nil, err
-			}
-			if err := filesystem.FileSystem.WriteFile(filesystem.transcriptPath, filesystem.nextTranscript, 0o600); err != nil {
-				return nil, err
-			}
-			filesystem.hookFired = true
-		}
-		return data, nil
-	}
-	return data, err
-}
-
-func (filesystem *swapAfterTranscriptReadFS) fired() bool {
-	filesystem.mu.Lock()
-	defer filesystem.mu.Unlock()
-	return filesystem.hookFired
-}
+// countingReadFS and swapAfterTranscriptReadFS live in fsfault_test.go (Owner B).
 
 type snapshotGitResolver struct{}
 
@@ -391,7 +327,7 @@ func TestFallbackCarrySurvivesConcurrentMetadataWrite(t *testing.T) {
 		SourcePath:   ResolvedPath(filepath.Join(string(output), "native-missing.jsonl")),
 		SourceFormat: SourceFormatJSONL,
 	}
-	result := pipeline.processSession(t.Context(), DiffEntry{Session: session, Status: DiffUpdated})
+	result := pipeline.processSession(t.Context(), DiffEntry{Session: session, Status: DiffUpdated}, nil)
 	if result.result.Error != nil {
 		t.Fatalf("the fallback run failed instead of carrying its retained pair: %v", result.result.Error)
 	}

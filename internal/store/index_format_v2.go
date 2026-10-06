@@ -3,15 +3,153 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
+
+// The per-row generation install inserts. They are prepared once per install in
+// generationInstallStatements and re-bound per row, so a native session with
+// thousands of projection entries does not parse and plan the same SQL for
+// every row. The one-off statements (the generation row, the pointing UPDATE
+// and the metrics upsert) stay on sqlitex.ExecuteTransient.
+const (
+	sqlInsertGenerationSection = `INSERT INTO session_projection_sections (session_id, generation_id, partition_id, earlier_state, native_metadata) VALUES (?, ?, ?, ?, ?)`
+
+	sqlInsertGenerationEntry = `INSERT INTO session_projection_entries (session_id, generation_id, partition_id, entry_index, source_entry_ref, entry_json) VALUES (?, ?, ?, ?, ?, ?)`
+
+	sqlInsertGenerationSegment = `INSERT INTO session_context_segments
+ (session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind,
+  start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion, captured_refs_json)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	sqlInsertGenerationContent = `INSERT INTO session_projection_content (session_id, generation_id, source_entry_ref, relative_blob, byte_length, integrity_digest) VALUES (?, ?, ?, ?, ?, ?)`
+
+	sqlInsertGenerationAlias = `INSERT INTO session_projection_aliases (session_id, generation_id, native_key, source_entry_ref) VALUES (?, ?, ?, ?)`
+
+	sqlInsertRelationshipEvidence = `INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state, target_local_id, evidence, anchor) VALUES (?, ?, ?, ?, ?, ?, ?)`
+)
+
+// generationInstallStatements holds the reusable per-row inserts for one
+// managed-generation install. Each accessor prepares its statement on first
+// use and returns the same statement for every later row; stepAndReset returns
+// it to the reusable state. Close finalizes every prepared statement, so a
+// failed install leaves nothing behind on the caller's connection.
+type generationInstallStatements struct {
+	conn         *sqlite.Conn
+	sectionStmt  *sqlite.Stmt
+	entryStmt    *sqlite.Stmt
+	segmentStmt  *sqlite.Stmt
+	contentStmt  *sqlite.Stmt
+	aliasStmt    *sqlite.Stmt
+	evidenceStmt *sqlite.Stmt
+}
+
+func newGenerationInstallStatements(conn *sqlite.Conn) *generationInstallStatements {
+	return &generationInstallStatements{conn: conn}
+}
+
+// Close finalizes every statement this install prepared. It is safe to call on
+// an install that prepared none.
+func (stmts *generationInstallStatements) Close() error {
+	if stmts == nil {
+		return nil
+	}
+	var err error
+	for _, entry := range []struct {
+		stmt  **sqlite.Stmt
+		label string
+	}{
+		{&stmts.sectionStmt, "session_projection_sections"},
+		{&stmts.entryStmt, "session_projection_entries"},
+		{&stmts.segmentStmt, "session_context_segments"},
+		{&stmts.contentStmt, "session_projection_content"},
+		{&stmts.aliasStmt, "session_projection_aliases"},
+		{&stmts.evidenceStmt, "session_relationship_evidence"},
+	} {
+		stmt := *entry.stmt
+		if stmt == nil {
+			continue
+		}
+		if closeErr := stmt.Finalize(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("finalize %s insert statement: %w", entry.label, closeErr))
+		}
+		*entry.stmt = nil
+	}
+	return err
+}
+
+func (stmts *generationInstallStatements) Section() (*sqlite.Stmt, error) {
+	if stmts.sectionStmt == nil {
+		stmt, _, err := stmts.conn.PrepareTransient(sqlInsertGenerationSection)
+		if err != nil {
+			return nil, err
+		}
+		stmts.sectionStmt = stmt
+	}
+	return stmts.sectionStmt, nil
+}
+
+func (stmts *generationInstallStatements) Entry() (*sqlite.Stmt, error) {
+	if stmts.entryStmt == nil {
+		stmt, _, err := stmts.conn.PrepareTransient(sqlInsertGenerationEntry)
+		if err != nil {
+			return nil, err
+		}
+		stmts.entryStmt = stmt
+	}
+	return stmts.entryStmt, nil
+}
+
+func (stmts *generationInstallStatements) Segment() (*sqlite.Stmt, error) {
+	if stmts.segmentStmt == nil {
+		stmt, _, err := stmts.conn.PrepareTransient(sqlInsertGenerationSegment)
+		if err != nil {
+			return nil, err
+		}
+		stmts.segmentStmt = stmt
+	}
+	return stmts.segmentStmt, nil
+}
+
+func (stmts *generationInstallStatements) Content() (*sqlite.Stmt, error) {
+	if stmts.contentStmt == nil {
+		stmt, _, err := stmts.conn.PrepareTransient(sqlInsertGenerationContent)
+		if err != nil {
+			return nil, err
+		}
+		stmts.contentStmt = stmt
+	}
+	return stmts.contentStmt, nil
+}
+
+func (stmts *generationInstallStatements) Alias() (*sqlite.Stmt, error) {
+	if stmts.aliasStmt == nil {
+		stmt, _, err := stmts.conn.PrepareTransient(sqlInsertGenerationAlias)
+		if err != nil {
+			return nil, err
+		}
+		stmts.aliasStmt = stmt
+	}
+	return stmts.aliasStmt, nil
+}
+
+func (stmts *generationInstallStatements) Evidence() (*sqlite.Stmt, error) {
+	if stmts.evidenceStmt == nil {
+		stmt, _, err := stmts.conn.PrepareTransient(sqlInsertRelationshipEvidence)
+		if err != nil {
+			return nil, err
+		}
+		stmts.evidenceStmt = stmt
+	}
+	return stmts.evidenceStmt, nil
+}
 
 // generationIndexFormat persists the immutable V2 managed generation. It runs on
 // the caller's connection and savepoint: the activation transaction is owned by
@@ -54,7 +192,7 @@ func (generationIndexFormat) Validate(result indexformat.Result) error {
 // generation is never replaced by an incomplete capture. The same guard runs
 // for activation, recovery and direct format writes because all three commit
 // through this handler on the activation connection.
-func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID, result indexformat.Result) ([]schema.SessionEntry, error) {
+func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID, result indexformat.Result) (entries []schema.SessionEntry, retErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -79,6 +217,12 @@ func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessi
 	if err != nil {
 		return nil, fmt.Errorf("store: encode managed generation title refs for session %s: %w; no generation was activated", sessionID, err)
 	}
+	// Prepare the per-row inserts once and re-bind them for every row. The
+	// projection entry insert dominates: a native session writes one row per
+	// entry, so re-preparing it for every row parses and plans the same SQL
+	// thousands of times.
+	stmts := newGenerationInstallStatements(conn)
+	defer func() { retErr = errors.Join(retErr, stmts.Close()) }()
 	now := time.Now().UnixMilli()
 	if err := deleteGenerationRowsOnConn(conn, sessionID, generation.ID); err != nil {
 		return nil, err
@@ -86,19 +230,19 @@ func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessi
 	if err := insertGenerationRowOnConn(conn, sessionID, generation, metadataJSON, titleRefsJSON, now); err != nil {
 		return nil, err
 	}
-	if err := insertGenerationPartitionsOnConn(conn, sessionID, generation); err != nil {
+	if err := insertGenerationPartitionsOnConn(stmts, sessionID, generation); err != nil {
 		return nil, err
 	}
-	if err := insertGenerationSegmentsOnConn(conn, sessionID, generation); err != nil {
+	if err := insertGenerationSegmentsOnConn(stmts, sessionID, generation); err != nil {
 		return nil, err
 	}
-	if err := insertGenerationContentOnConn(conn, sessionID, generation); err != nil {
+	if err := insertGenerationContentOnConn(stmts, sessionID, generation); err != nil {
 		return nil, err
 	}
-	if err := insertGenerationAliasesOnConn(conn, sessionID, generation); err != nil {
+	if err := insertGenerationAliasesOnConn(stmts, sessionID, generation); err != nil {
 		return nil, err
 	}
-	if err := insertRelationshipEvidenceOnConn(conn, sessionID, generation); err != nil {
+	if err := insertRelationshipEvidenceOnConn(stmts, sessionID, generation); err != nil {
 		return nil, err
 	}
 	if err := pointSessionAtGenerationOnConn(conn, sessionID, generation); err != nil {
@@ -165,16 +309,16 @@ func insertGenerationRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID, ge
 	return nil
 }
 
-func insertGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
+func insertGenerationPartitionsOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
 	// partition_id 0 is the main stream; earlier sections are 1..N in order.
 	mainMetadata, err := json.Marshal(generation.Main.NativeMetadata)
 	if err != nil {
 		return fmt.Errorf("store: encode main native metadata for generation %s: %w; no generation was activated", generation.ID, err)
 	}
-	if err := insertSectionOnConn(conn, sessionID, generation.ID, 0, "", mainMetadata); err != nil {
+	if err := insertSectionOnConn(stmts, sessionID, generation.ID, 0, "", mainMetadata); err != nil {
 		return err
 	}
-	if err := insertEntriesOnConn(conn, sessionID, generation.ID, 0, generation.Main.Entries); err != nil {
+	if err := insertEntriesOnConn(stmts, sessionID, generation.ID, 0, generation.Main.Entries); err != nil {
 		return err
 	}
 	for i := range generation.Earlier {
@@ -184,30 +328,44 @@ func insertGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.Sessio
 		if err != nil {
 			return fmt.Errorf("store: encode earlier[%d] native metadata for generation %s: %w; no generation was activated", i, generation.ID, err)
 		}
-		if err := insertSectionOnConn(conn, sessionID, generation.ID, partitionID, string(section.State), nativeMetadata); err != nil {
+		if err := insertSectionOnConn(stmts, sessionID, generation.ID, partitionID, string(section.State), nativeMetadata); err != nil {
 			return err
 		}
-		if err := insertEntriesOnConn(conn, sessionID, generation.ID, partitionID, section.Content.Entries); err != nil {
+		if err := insertEntriesOnConn(stmts, sessionID, generation.ID, partitionID, section.Content.Entries); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func insertSectionOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, partitionID int, earlierState string, nativeMetadata []byte) error {
-	var state any
-	if earlierState != "" {
-		state = earlierState
+func insertSectionOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generationID string, partitionID int, earlierState string, nativeMetadata []byte) error {
+	stmt, err := stmts.Section()
+	if err != nil {
+		return fmt.Errorf("store: prepare partition insert for generation %s of session %s: %w; no generation was activated", generationID, sessionID, err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_sections (session_id, generation_id, partition_id, earlier_state, native_metadata) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-		string(sessionID), generationID, partitionID, state, string(nativeMetadata),
-	}}); err != nil {
+	stmt.BindText(1, string(sessionID))
+	stmt.BindText(2, generationID)
+	stmt.BindInt64(3, int64(partitionID))
+	if earlierState != "" {
+		stmt.BindText(4, earlierState)
+	} else {
+		stmt.BindNull(4)
+	}
+	stmt.BindText(5, string(nativeMetadata))
+	if err := stepAndReset(stmt); err != nil {
 		return fmt.Errorf("store: install partition %d for generation %s of session %s: %w; no generation was activated", partitionID, generationID, sessionID, err)
 	}
 	return nil
 }
 
-func insertEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, partitionID int, entries []schema.SessionEntry) error {
+func insertEntriesOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generationID string, partitionID int, entries []schema.SessionEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	stmt, err := stmts.Entry()
+	if err != nil {
+		return fmt.Errorf("store: prepare projection entry insert for generation %s: %w; no generation was activated", generationID, err)
+	}
 	for i := range entries {
 		entry := entries[i]
 		if entry.SessionID != sessionID {
@@ -217,79 +375,119 @@ func insertEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generati
 		if err != nil {
 			return fmt.Errorf("store: encode entry %d of partition %d for generation %s: %w; no generation was activated", entry.EntryIndex, partitionID, generationID, err)
 		}
-		var ref any
+		stmt.BindText(1, string(sessionID))
+		stmt.BindText(2, generationID)
+		stmt.BindInt64(3, int64(partitionID))
+		stmt.BindInt64(4, int64(entry.EntryIndex))
 		if entry.SourceEntryRef != "" {
-			ref = string(entry.SourceEntryRef)
+			stmt.BindText(5, string(entry.SourceEntryRef))
+		} else {
+			stmt.BindNull(5)
 		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_entries (session_id, generation_id, partition_id, entry_index, source_entry_ref, entry_json) VALUES (?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generationID, partitionID, entry.EntryIndex, ref, string(encoded),
-		}}); err != nil {
+		stmt.BindText(6, string(encoded))
+		if err := stepAndReset(stmt); err != nil {
 			return fmt.Errorf("store: install entry %d of partition %d for generation %s: %w; no generation was activated", entry.EntryIndex, partitionID, generationID, err)
 		}
 	}
 	return nil
 }
 
-func insertGenerationSegmentsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
+func insertGenerationSegmentsOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
+	if len(generation.Segments) == 0 {
+		return nil
+	}
+	stmt, err := stmts.Segment()
+	if err != nil {
+		return fmt.Errorf("store: prepare context segment insert for generation %s: %w; no generation was activated", generation.ID, err)
+	}
 	for i := range generation.Segments {
 		segment := generation.Segments[i]
 		refs, err := json.Marshal(segment.CapturedRefs)
 		if err != nil {
 			return fmt.Errorf("store: encode captured refs for segment %d of generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
 		}
-		var logical any
+		stmt.BindText(1, string(sessionID))
+		stmt.BindText(2, generation.ID)
+		stmt.BindInt64(3, int64(segment.Ordinal))
 		if segment.LogicalSessionID != nil {
-			logical = string(*segment.LogicalSessionID)
+			stmt.BindText(4, string(*segment.LogicalSessionID))
+		} else {
+			stmt.BindNull(4)
 		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_context_segments
- (session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind,
-  start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion, captured_refs_json)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, segment.Ordinal, logical, segment.PhysicalSourceID,
-			string(segment.Coordinates.Kind), nullableInt64Value(segment.Coordinates.Start), nullableInt64Value(segment.Coordinates.EndExclusive),
-			nullableInt64Value(segment.Coordinates.DecodedByteStart), nullableInt64Value(segment.Coordinates.DecodedByteEndExclusive),
-			string(segment.Inclusion), string(refs),
-		}}); err != nil {
+		stmt.BindText(5, segment.PhysicalSourceID)
+		stmt.BindText(6, string(segment.Coordinates.Kind))
+		bindNullableInt64Value(stmt, 7, segment.Coordinates.Start)
+		bindNullableInt64Value(stmt, 8, segment.Coordinates.EndExclusive)
+		bindNullableInt64Value(stmt, 9, segment.Coordinates.DecodedByteStart)
+		bindNullableInt64Value(stmt, 10, segment.Coordinates.DecodedByteEndExclusive)
+		stmt.BindText(11, string(segment.Inclusion))
+		stmt.BindText(12, string(refs))
+		if err := stepAndReset(stmt); err != nil {
 			return fmt.Errorf("store: install context segment %d for generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
 		}
 	}
 	return nil
 }
 
-func insertGenerationContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
+func insertGenerationContentOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
+	if len(generation.Content) == 0 {
+		return nil
+	}
+	stmt, err := stmts.Content()
+	if err != nil {
+		return fmt.Errorf("store: prepare content record insert for generation %s: %w; no generation was activated", generation.ID, err)
+	}
 	for i := range generation.Content {
 		record := generation.Content[i]
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_content (session_id, generation_id, source_entry_ref, relative_blob, byte_length, integrity_digest) VALUES (?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, string(record.Ref), record.RelativeBlob, record.ByteLength, record.Digest,
-		}}); err != nil {
+		stmt.BindText(1, string(sessionID))
+		stmt.BindText(2, generation.ID)
+		stmt.BindText(3, string(record.Ref))
+		stmt.BindText(4, record.RelativeBlob)
+		stmt.BindInt64(5, record.ByteLength)
+		stmt.BindText(6, record.Digest)
+		if err := stepAndReset(stmt); err != nil {
 			return fmt.Errorf("store: install content record %s for generation %s: %w; no generation was activated", record.Ref, generation.ID, err)
 		}
 	}
 	return nil
 }
 
-func insertGenerationAliasesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
+func insertGenerationAliasesOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
+	if len(generation.Aliases) == 0 {
+		return nil
+	}
+	stmt, err := stmts.Alias()
+	if err != nil {
+		return fmt.Errorf("store: prepare native alias insert for generation %s: %w; no generation was activated", generation.ID, err)
+	}
 	for i := range generation.Aliases {
 		alias := generation.Aliases[i]
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_aliases (session_id, generation_id, native_key, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, alias.NativeKey, string(alias.Ref),
-		}}); err != nil {
+		stmt.BindText(1, string(sessionID))
+		stmt.BindText(2, generation.ID)
+		stmt.BindText(3, alias.NativeKey)
+		stmt.BindText(4, string(alias.Ref))
+		if err := stepAndReset(stmt); err != nil {
 			return fmt.Errorf("store: install native alias %q for generation %s: %w; no generation was activated", alias.NativeKey, generation.ID, err)
 		}
 	}
 	return nil
 }
 
-func insertRelationshipEvidenceOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
+func insertRelationshipEvidenceOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
+	if len(generation.Metadata.Relationships) == 0 {
+		return nil
+	}
+	stmt, err := stmts.Evidence()
+	if err != nil {
+		return fmt.Errorf("store: prepare relationship evidence insert for generation %s: %w; no generation was activated", generation.ID, err)
+	}
 	for i := range generation.Metadata.Relationships {
 		relationship := generation.Metadata.Relationships[i]
-		var target, evidence, anchor any
+		var target string
 		if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
 			target = string(*relationship.TargetLocalID)
 		}
-		if relationship.Evidence != "" {
-			evidence = string(relationship.Evidence)
-		}
+		var anchor string
 		if relationship.Anchor != nil {
 			encoded, err := json.Marshal(relationship.Anchor)
 			if err != nil {
@@ -297,13 +495,41 @@ func insertRelationshipEvidenceOnConn(conn *sqlite.Conn, sessionID schema.Sessio
 			}
 			anchor = string(encoded)
 		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state, target_local_id, evidence, anchor) VALUES (?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, string(relationship.Kind), string(relationship.TargetState), target, evidence, anchor,
-		}}); err != nil {
+		stmt.BindText(1, string(sessionID))
+		stmt.BindText(2, generation.ID)
+		stmt.BindText(3, string(relationship.Kind))
+		stmt.BindText(4, string(relationship.TargetState))
+		if target != "" {
+			stmt.BindText(5, target)
+		} else {
+			stmt.BindNull(5)
+		}
+		if relationship.Evidence != "" {
+			stmt.BindText(6, string(relationship.Evidence))
+		} else {
+			stmt.BindNull(6)
+		}
+		if anchor != "" {
+			stmt.BindText(7, anchor)
+		} else {
+			stmt.BindNull(7)
+		}
+		if err := stepAndReset(stmt); err != nil {
 			return fmt.Errorf("store: install %s relationship evidence for generation %s: %w; no generation was activated", relationship.Kind, generation.ID, err)
 		}
 	}
 	return nil
+}
+
+// bindNullableInt64Value binds a nullable *int64 parameter. A nil bound value
+// stays NULL, matching the value sqlitex.ExecuteTransient wrote before the
+// statements were reused.
+func bindNullableInt64Value(stmt *sqlite.Stmt, param int, value *int64) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
+	}
+	stmt.BindInt64(param, *value)
 }
 
 func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
@@ -476,11 +702,4 @@ func firstTitleLine(text string) string {
 		}
 	}
 	return ""
-}
-
-func nullableInt64Value(value *int64) any {
-	if value == nil {
-		return nil
-	}
-	return *value
 }

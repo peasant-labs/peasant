@@ -563,16 +563,16 @@ func assertLegacyEncryptedStorage(t *testing.T, opts harnessOptions, stack harne
 	if !hasOpaqueShape || objectIDErr != nil {
 		return
 	}
-	client, err := newMinioClient(stack.minioEndpoint)
+	client, err := newS3Client(stack.s3Endpoint)
 	if err != nil {
 		fatalActionable(t, actionableFailure{
 			title: "legacy ciphertext client",
-			what:  fmt.Sprintf("the E2E MinIO client could not be created: %v", err),
+			what:  fmt.Sprintf("the E2E S3 client could not be created: %v", err),
 			why:   "the gate must read the exact object named by the persisted transcript descriptor",
 			where: "internal/e2e/content_render_e2e_test.go assertLegacyEncryptedStorage",
 			when:  "after authenticated publication and before exercising legacy-envelope reads",
 			means: "the gate cannot prove the legacy fixture was encrypted at rest",
-			fix:   "inspect the E2E MinIO endpoint and credentials, then rerun make e2e",
+			fix:   "inspect the E2E S3 endpoint and credentials, then rerun make e2e",
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s3OpTimeout)
@@ -596,7 +596,7 @@ func assertLegacyEncryptedStorage(t *testing.T, opts harnessOptions, stack harne
 			what:  fmt.Sprintf("the persisted object %s could not be opened: %v", after.blobKey, err),
 			why:   "the gate must compare the stored bytes with the committed plaintext fixture",
 			where: "internal/e2e/content_render_e2e_test.go assertLegacyEncryptedStorage",
-			when:  "reading the exact MinIO object named by the transcript row",
+			when:  "reading the exact S3 object named by the transcript row",
 			means: "the gate cannot prove ciphertext rather than plaintext was stored",
 			fix:   "inspect Village encrypted transcript persistence and rerun make e2e",
 		})
@@ -611,13 +611,13 @@ func assertLegacyEncryptedStorage(t *testing.T, opts harnessOptions, stack harne
 			where: "internal/e2e/content_render_e2e_test.go assertLegacyEncryptedStorage",
 			when:  "comparing the authenticated publish result with its plaintext fixture",
 			means: "the gate cannot prove the object is encrypted at rest",
-			fix:   "inspect the MinIO object and Village encrypted writer, then rerun make e2e",
+			fix:   "inspect the S3 object and Village encrypted writer, then rerun make e2e",
 		})
 	}
 	check(t, opts, objectInfo.ContentType == "application/octet-stream",
 		"the persisted encrypted object uses application/octet-stream")
 	check(t, opts, len(ciphertext) > 0 && objectInfo.Size == int64(len(ciphertext)),
-		"the persisted descriptor resolves to a complete non-empty MinIO object")
+		"the persisted descriptor resolves to a complete non-empty S3 object")
 	check(t, opts, !bytes.Equal(ciphertext, plaintext) && !bytes.Contains(ciphertext, plaintext),
 		"the persisted object bytes differ from and do not embed the committed plaintext fixture")
 	plaintextProbe := []byte(spec.plaintextProbe)

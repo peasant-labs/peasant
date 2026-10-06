@@ -270,5 +270,20 @@ func (p *ProgressiveProvider) GroupedScopeRevision() string {
 	return ""
 }
 
+// SelectionScopeByID answers from the real store whatever the mock settings
+// say: the publication read it serves reads this computer's receipts, which
+// the mock does not have.
+func (p *ProgressiveProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
+	scoped, ok := p.real.(selectionScopeReader)
+	if !ok {
+		return nil, fmt.Errorf("progressive provider: selection scope by id: no stored-session provider is wired, so the saved selection cannot be applied to the named sessions; start Peasant with its normal store and retry")
+	}
+	return scoped.SelectionScopeByID(ctx, ids)
+}
+
 // Ensure implementation of DataProvider interface.
 var _ DataProvider = (*ProgressiveProvider)(nil)
+
+// The publication read reaches the stored sessions through the provider the
+// server is started with, which is a ProgressiveProvider in production.
+var _ selectionScopeReader = (*ProgressiveProvider)(nil)

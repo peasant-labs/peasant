@@ -1,11 +1,9 @@
 package metrics_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"testing"
 	"unicode/utf8"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/title.yaml
@@ -68,15 +65,9 @@ func (s *titleMetricsStore) GetTitleContext(context.Context, ingest.SessionID) (
 
 func loadTitleFixture(t *testing.T) titleFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(titleFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture titleFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(titleFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode title fixture: %v", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatalf("title fixture must contain exactly one YAML document: %v", err)
 	}
 	if len(fixture.Cases) != titleFixtureCaseCount {
 		t.Fatalf("title fixture holds %d cases, want exactly %d; update titleFixtureCaseCount when a case is deliberately added or removed", len(fixture.Cases), titleFixtureCaseCount)
@@ -165,6 +156,7 @@ func runTitleCase(tc titleCase) error {
 }
 
 func TestEngine_CanonicalTitleFixture(t *testing.T) {
+	t.Parallel()
 	fixture := loadTitleFixture(t)
 	for _, tc := range fixture.Cases {
 		tc := tc
@@ -177,6 +169,7 @@ func TestEngine_CanonicalTitleFixture(t *testing.T) {
 }
 
 func TestEngine_TitleFixtureMutationIsDetected(t *testing.T) {
+	t.Parallel()
 	fixture := loadTitleFixture(t)
 	var mutated titleCase
 	for _, tc := range fixture.Cases {

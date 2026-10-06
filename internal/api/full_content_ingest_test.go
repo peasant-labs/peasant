@@ -22,9 +22,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // Only discovery and metadata extraction are controlled; materialization reads
@@ -50,9 +51,8 @@ func (a *consumerSource) MaterializeTranscript(ctx context.Context, s ingest.Dis
 	return ingest.MaterializedTranscript{Metadata: meta, Data: data, SourceFingerprint: fingerprint[:], EventSeq: s.EventSeq}, err
 }
 
-func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePath, text string) *store.Store {
+func ingestConsumerSession(t *testing.T, dbPath string, fixture fullConsumerFixture, id, basePath, text string) *store.Store {
 	t.Helper()
-	t.Setenv(ingest.EnvArenaSizeBytes, "1048576")
 	harness := ingest.Harness(fixture.Harness)
 	sid, err := ingest.NewSessionID(id)
 	if err != nil {
@@ -87,11 +87,11 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 	remote, branch := "git@github.com:user/repo.git", "main"
 	meta.Git = ingest.GitContext{Remote: &remote, Branch: &branch}
 	meta.Project = ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "myapp", FilePath: "/home/test/myapp"}
-	dbPath := string(defaults.ResolveDBFilePath())
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	storetest.CopyGoldenTo(t, dbPath)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +128,12 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 		t.Fatal(err)
 	}
 	capture, found, err := db.GetSessionContentCapture(t.Context(), sid)
+	if fixture.Damage == "retained-no-model" {
+		if err != nil || !found || capture.Status != ingest.ContentCaptureIncomplete || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || capture.CaptureFormat != ingest.ContentCaptureFormatFull {
+			t.Fatalf("retained unknown capture was not certified locally: %+v %v", capture, err)
+		}
+		return db
+	}
 	if fixture.Damage == "source-omitted" {
 		if err != nil || found && capture.Status == ingest.ContentCaptureComplete {
 			t.Fatalf("native omission certified: %+v %v", capture, err)

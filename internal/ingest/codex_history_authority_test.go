@@ -14,7 +14,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,10 +23,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/codex_history_authority.yaml
@@ -70,15 +68,9 @@ type codexFileAuthorityFixture struct {
 }
 
 func decodeCodexFileAuthorityFixture(data []byte) (codexFileAuthorityFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture codexFileAuthorityFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return codexFileAuthorityFixture{}, fmt.Errorf("decode codex history authority fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return codexFileAuthorityFixture{}, fmt.Errorf("codex history authority fixture must contain exactly one YAML document: %v", err)
 	}
 	for _, c := range fixture.Cases {
 		if strings.TrimSpace(c.Name) == "" {
@@ -129,15 +121,9 @@ type codexAuthorityLayoutFixture struct {
 }
 
 func decodeCodexAuthorityLayouts(data []byte) (codexAuthorityLayoutFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture codexAuthorityLayoutFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return codexAuthorityLayoutFixture{}, fmt.Errorf("decode codex history authority layouts: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return codexAuthorityLayoutFixture{}, fmt.Errorf("codex history authority layouts must contain exactly one YAML document: %v", err)
 	}
 	for _, layout := range fixture.Layouts {
 		if strings.TrimSpace(layout.Name) == "" {

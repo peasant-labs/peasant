@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VILLAGE_REF: 4d48936be9be8e8c52ef2c04eaa5fcc6369ff82a
+  VILLAGE_REF: 8f9ce396addcf2eeb9ad3a64f0b3bd013a189300
 
 permissions:
   contents: read
@@ -53,6 +53,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+          # Our pool keeps GOCACHE/GOMODCACHE on the host, so the GitHub cache
+          # there only re-downloads that host's own snapshot, and a key miss tars
+          # the whole shared cache for an upload over the 10 GB limit.
+          cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
       - name: Verify schema module pin parity
         env:

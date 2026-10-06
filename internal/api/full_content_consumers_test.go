@@ -19,13 +19,14 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/full_content_consumers.yaml
@@ -35,6 +36,7 @@ type fullConsumerFixture struct {
 	Name, Damage, Prefix, Tail, Secret, PII string
 	Harness, Source                         string
 	NativeSource, SessionID                 string
+	RetainedPayload, KnownSibling           string
 	ToolFile                                string
 	Backfill                                bool
 	// Previewable marks a session whose capture is merely UNFINISHED. Its
@@ -115,22 +117,20 @@ func (f *deniedTranscriptFS) ReadFile(string) ([]byte, error) {
 func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 	for _, fixture := range loadFullConsumerFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(home, "config"))
-			t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, "data"))
-			t.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, "state"))
+			t.Parallel()
+			hs := newTestXDGHomes(t)
 			id := "eeee5555-eeee-4eee-8eee-eeeeeeeeeeee"
 			if fixture.SessionID != "" {
 				id = fixture.SessionID
 			}
 			sid := ingest.SessionID(id)
-			basePath := filepath.Join(home, "retained")
+			basePath := filepath.Join(hs.Data, "retained")
 			text := strings.Repeat(fixture.Prefix, fixture.Repetitions) + fixture.Tail + " key " + fixture.Secret + " email " + fixture.PII
 			var db *store.Store
 			if fixture.Source != "" {
-				db = ingestConsumerSession(t, fixture, id, basePath, text)
+				db = ingestConsumerSession(t, hs.dbPath(), fixture, id, basePath, text)
 			} else {
-				db = seedSyncDoorSession(t, id, basePath)
+				db = seedSyncDoorSession(t, hs.dbPath(), id, basePath)
 			}
 			entries := []schema.SessionEntry{
 				{SessionID: sid, EntryIndex: 0, Role: schema.RoleUser, Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, ContentPreview: &text},
@@ -144,7 +144,12 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 				testutil.SeedReadyPublication(t, db, &input.Metadata, entries)
 			}
 			switch fixture.Damage {
-			case "none", "source-omitted":
+			case "none", "retained-no-model":
+			case "source-omitted":
+				written := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureSourceRecordsOmitted, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly}}})
+				if len(written) != 1 || written[0].Err != nil {
+					t.Fatalf("seed unaccounted omission: %+v", written)
+				}
 			case "incomplete":
 				if err := db.IndexSessionEntries(t.Context(), sid, entries); err != nil {
 					t.Fatal(err)
@@ -172,7 +177,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(string(defaults.ResolveDBFilePath()))
+			db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -211,7 +216,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			detail, exportErr := export.ExportSession(t.Context(), db, denied, id)
 			cfg := config.BaseConfig()
 			cfg.Output.BasePath = basePath
-			handler := &syncHandler{store: db, config: cfg}
+			handler := hs.handler(db, cfg)
 			scan := httptest.NewRecorder()
 			handler.handleSyncRedactions(scan, httptest.NewRequest("GET", "/api/v1/sync/redactions?session_id="+id+"&level=standard", nil))
 			captured := &syncCapturedPublish{parts: map[string]string{}}
@@ -232,15 +237,25 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 				_, _ = w.Write(receipt)
 			}))
 			defer remote.Close()
-			writeSyncDoorCredentials(t, remote.URL)
-			body, _ := json.Marshal(pushRequest{SessionIDs: []string{id}, Visibility: "private"})
+			writeSyncDoorCredentials(t, hs.Config, remote.URL)
+			body, _ := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{id}})
 			response := httptest.NewRecorder()
 			handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body)))
 			parts := captured.snapshot()
 			if (detailErr != nil) != previewRefused {
 				t.Fatalf("mounted previewer outcome=%v, want refused=%t", detailErr, previewRefused)
 			}
-			if strictRefused {
+			if fixture.Damage == "retained-no-model" {
+				if exportErr != nil || detail.Diagnostics == nil || !detail.Diagnostics.Partial || len(detail.RetainedUnknown) != 1 || detail.RetainedUnknown[0].Payload != fixture.RetainedPayload {
+					t.Fatalf("retained source did not survive partial export: %v", exportErr)
+				}
+				if len(detail.Turns) != 1 || detail.Turns[0].Content != fixture.KnownSibling || detail.Model != "" {
+					t.Fatal("known sibling lost or model invented")
+				}
+				if scan.Code == http.StatusOK || len(parts) != 0 || !strings.Contains(scan.Body.String(), fixture.WantRemedy) || !strings.Contains(response.Body.String(), fixture.WantRemedy) {
+					t.Fatal("publication was not refused specifically for absent source model")
+				}
+			} else if strictRefused {
 				if exportErr == nil || scan.Code == http.StatusOK || len(parts) != 0 {
 					t.Fatalf("uncertified capture escaped: export=%v scan=%d uploads=%d", exportErr, scan.Code, len(parts))
 				}

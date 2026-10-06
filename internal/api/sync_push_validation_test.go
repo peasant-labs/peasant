@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/redact"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,7 +25,6 @@ type syncPushValidationFixture struct {
 	Name           string                `yaml:"name"`
 	SessionIDs     []string              `yaml:"sessionIds"`
 	RedactionLevel redact.RedactionLevel `yaml:"redactionLevel"`
-	Visibility     string                `yaml:"visibility"`
 	ExpectedStatus int                   `yaml:"expectedStatus"`
 	ExpectedError  string                `yaml:"expectedError"`
 }
@@ -89,17 +89,17 @@ func TestHandleSyncPush_RejectsInvalidRedactionLevelAsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// If credential loading happens before request validation, this empty
+	// If credential loading happens before request validation, an empty
 	// isolated config home forces an authentication response instead of the
 	// fixture's expected validation response.
-	t.Setenv(defaults.EnvXDGConfigHome.String(), t.TempDir())
 
 	for _, fixture := range fixtures {
 		t.Run(fixture.Name, func(t *testing.T) {
-			body, err := json.Marshal(pushRequest{
+			t.Parallel()
+			hs := newTestXDGHomes(t)
+			body, err := json.Marshal(schema.SyncPushRequest{
 				SessionIDs:     fixture.SessionIDs,
 				RedactionLevel: fixture.RedactionLevel.String(),
-				Visibility:     fixture.Visibility,
 			})
 			if err != nil {
 				t.Fatalf("marshal %s request: %v", fixture.Name, err)
@@ -107,7 +107,7 @@ func TestHandleSyncPush_RejectsInvalidRedactionLevelAsJSON(t *testing.T) {
 
 			request := httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body))
 			response := httptest.NewRecorder()
-			handler := &syncHandler{store: new(store.Store), config: new(config.Config)}
+			handler := hs.handler(new(store.Store), new(config.Config))
 			handler.handleSyncPush(response, request)
 
 			if response.Code != fixture.ExpectedStatus {

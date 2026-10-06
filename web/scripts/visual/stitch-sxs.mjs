@@ -35,7 +35,7 @@ import { writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { diffPixels, dataUrl } from './png-diff.mjs'
-import { GRAPH_SHELL_SURFACE_LABELS, GRAPH_SHELL_SURFACE_SET, SMOKE_SURFACE_LABELS, SMOKE_SURFACE_SET } from './smoke-surfaces.mjs'
+import { SMOKE_SURFACE_LABELS, SMOKE_SURFACE_SET } from './smoke-surfaces.mjs'
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
 
 // imgdiff gate (additive to the human-glance composite below): per [surface, theme], pixel-diff the RAW
@@ -82,8 +82,9 @@ const THEMES = ['dark', 'light']
 //   smoke      — the real-binary smoke surfaces from full-app-smoke.mjs. App captures live under
 //                <base>/smoke/<theme>/; missing references render as labeled placeholders so visual
 //                review can cover every first-class surface before a baseline exists.
-//   shell      — the persistent graph shell frames captured by shell-nav-gate.mjs. App captures live under
-//                <base>/shell/<theme>/ and prove the shared nav hosts mounted body content in both themes.
+//   (The local shell has no SxS arm: its header has no counterpart in the fairtrade in-use demo, whose
+//   local app renders a section sub-nav instead, so shell-nav-gate.mjs and shell-nav-default-gate.mjs
+//   assert the header and the offline notice directly and write their own review frames.)
 const SURFACE_SETS = {
   transcript: [
     ['txn-highlights', null],
@@ -102,7 +103,6 @@ const SURFACE_SETS = {
     ['gmp-change-detail', null],
   ],
   smoke: SMOKE_SURFACE_SET,
-  shell: GRAPH_SHELL_SURFACE_SET,
 }
 const SURFACE_SET = process.env.SURFACE_SET || 'transcript'
 const SURFACES = SURFACE_SETS[SURFACE_SET]
@@ -110,11 +110,10 @@ if (!SURFACES) {
   console.error(`ERROR [stitch-sxs.mjs] unknown SURFACE_SET="${SURFACE_SET}" (known: ${Object.keys(SURFACE_SETS).join(', ')}).`)
   process.exit(1)
 }
-// Output subdir, PER SURFACE_SET by default, so smoke-SxS and shell/nav-SxS composites never
-// land in the same folder and get confused for one another (or silently overwritten — `map.png`
-// from `smoke` vs `shell-map.png` from `shell` look adjacent but are DIFFERENT evidence). Override
-// with SXS_OUT_SUBDIR for a custom location.
-const DEFAULT_OUT_SUBDIR = { smoke: 'sxs-smoke', shell: 'sxs-shell' }[SURFACE_SET] || 'sxs'
+// Output subdir, PER SURFACE_SET by default, so smoke-SxS composites never land in the same folder
+// as the transcript/changes composites and get confused for them (or silently overwritten).
+// Override with SXS_OUT_SUBDIR for a custom location.
+const DEFAULT_OUT_SUBDIR = { smoke: 'sxs-smoke' }[SURFACE_SET] || 'sxs'
 const OUT_SUBDIR = process.env.SXS_OUT_SUBDIR || DEFAULT_OUT_SUBDIR
 
 // Per-pane captions, PARAMETERIZED per SURFACE_SET (and per-surface for `changes`). The
@@ -122,7 +121,7 @@ const OUT_SUBDIR = process.env.SXS_OUT_SUBDIR || DEFAULT_OUT_SUBDIR
 // fidelity composite names each pane by what it is — "fairtrade demo · <Surface>" (reference)
 // vs "peasant /review · <Surface>" (subject) — so a bare `SURFACE_SET=changes` run is correct
 // without env overrides (env REF_LABEL/APP_LABEL still win if explicitly set).
-const SURFACE_PRETTY = { 'gmp-changes': 'Changes', 'gmp-change-detail': 'Change detail', ...SMOKE_SURFACE_LABELS, ...GRAPH_SHELL_SURFACE_LABELS }
+const SURFACE_PRETTY = { 'gmp-changes': 'Changes', 'gmp-change-detail': 'Change detail', ...SMOKE_SURFACE_LABELS }
 const captionsFor = (surface) => {
   if (SURFACE_SET === 'changes') {
     const name = SURFACE_PRETTY[surface] || surface
@@ -135,18 +134,11 @@ const captionsFor = (surface) => {
     const name = SURFACE_PRETTY[surface] || surface
     return {
       // Explicit "committed app baseline (regression ref)" — NOT "reference" alone — so this
-      // same-component, same-binary regression arm can never be misread as the shell arm's
-      // canonical fairtrade-demo reference (a glancer seeing just "reference" could conflate
+      // same-component, same-binary regression arm can never be misread as a canonical
+      // fairtrade-demo reference (a glancer seeing just "reference" could conflate
       // the two; see scripts/visual/baseline/smoke-baseline/).
       ref: process.env.REF_LABEL || `committed app baseline (regression ref) · ${name}`,
       app: process.env.APP_LABEL || `real bin/peasant · ${name}`,
-    }
-  }
-  if (SURFACE_SET === 'shell') {
-    const name = SURFACE_PRETTY[surface] || surface
-    return {
-      ref: process.env.REF_LABEL || `fairtrade in-use demo · ${name}`,
-      app: process.env.APP_LABEL || `current peasant app · ${name}`,
     }
   }
   return { ref: REF_LABEL, app: APP_LABEL }
@@ -155,9 +147,6 @@ const captionsFor = (surface) => {
 const missingReferenceReason = (surface) => {
   if (SURFACE_SET === 'smoke') {
     return `No smoke reference image for ${surface}. Stage one at <base>/${REF_DIR}/<theme>/${surface}.png or scripts/visual/baseline/${REF_DIR}/<theme>/${surface}.png.`
-  }
-  if (SURFACE_SET === 'shell') {
-    return `No fairtrade graph shell reference image for ${surface}. Run shell-nav-gate with DEMO_URL pointing at the fairtrade demo so <base>/${REF_DIR}/<theme>/${surface}.png exists.`
   }
   return `No reference image for ${surface}. Expected <base>/${REF_DIR}/<theme>/${surface}.png or scripts/visual/baseline/${REF_DIR}/<theme>/${surface}.png.`
 }
@@ -185,7 +174,7 @@ if (!['threshold', 'presence'].includes(IMGDIFF_MODE)) {
 // SMOKE SxS is durable review evidence (committed/deterministic baselines, §README "Real-binary
 // smoke SxS") — a missing reference or app capture must FAIL CLOSED with NO placeholder composite
 // written, so a reviewer browsing the output directory can never mistake a labeled "not staged"
-// panel for real evidence. (The other arms — transcript/changes/shell — keep their existing
+// panel for real evidence. (The other arms — transcript/changes — keep their existing
 // tiered placeholder-for-gaps behavior; see the README "Two-tier failure contract".)
 const NO_PLACEHOLDER_ON_GAP = SURFACE_SET === 'smoke'
 for (const theme of THEMES) {
@@ -359,9 +348,6 @@ if ((ENFORCE_PIXEL_DIFF ? comparedCount : pairedCount) === 0) {
   const smokeNoRefHint = SURFACE_SET === 'smoke'
     ? `  For SURFACE_SET=smoke, this usually means current smoke captures exist but no smoke reference baseline is staged.\n` +
       `  Fix: run full-app-smoke for current captures, then stage references under ${CAPTURE_ROOT}/${REF_DIR}/<theme>/ or scripts/visual/baseline/${REF_DIR}/<theme>/.`
-    : SURFACE_SET === 'shell'
-      ? `  For SURFACE_SET=shell, this usually means current shell captures exist but no fairtrade demo reference is staged.\n` +
-        `  Fix: run shell-nav-gate with DEMO_URL pointing at the fairtrade demo so references exist under ${CAPTURE_ROOT}/${REF_DIR}/<theme>/.`
     : `  Fix: run the shoot for ${APP_DIR} in both themes so ${CAPTURE_ROOT}/${APP_DIR}/<theme>/<surface>.png exist, then re-stitch.`
   console.error(
     `\nFAIL [stitch-sxs.mjs] imgdiff compared ZERO surfaces — the gate would pass vacuously.\n` +

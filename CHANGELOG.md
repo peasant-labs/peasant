@@ -7,6 +7,217 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-04
+
+### Changed
+- Managed-generation staging writes content blobs without a per-file sync and
+  verifies every blob when a binding re-reads it, while the manifest and the
+  directory stay durable. Staging a 1000-blob generation dropped from 1.40 s to
+  0.067 s at 16 writers (19.09 s to 0.078 s at one writer), and a blob torn by
+  a power loss refuses recovery instead of activating unservable content (#554).
+
+### Fixed
+- `peasant harvest index --dry-run` resolves the same managed-generation
+  harness targets a real run uses. On a store upgraded to managed generations
+  the forecast previously reported the retained baseline, planned a different
+  set of sessions than the real run, and emitted false "stored producer
+  revision is newer than this indexer's revision" refusals (#551).
+- The stale-index pass at the end of a harvest reports the stored sessions the
+  run's session selection left at an older index, or with an unfinished repair,
+  with the remedy. A selected-mode kickstart run previously left thousands of
+  stored sessions behind while the report showed only an "unchanged" total
+  (#552).
+- Publication readiness compares a stored capture's metadata schema version
+  against the declared refresh-free set instead of exact equality, so a schema
+  bump that adds no required field no longer marks every bound capture as
+  needing a re-ingest. An ordinary harvest previously re-extracted and
+  re-indexed thousands of unchanged sessions after the 10→11 bump (#555).
+
+## [0.8.1] - 2026-10-04
+
+### Changed
+- Managed-generation staging and commits: candidates prepare their content
+  files in parallel with bounded blob writers, each candidate commits through
+  the serialized writer lane as its own staging completes, and the INDEX
+  progress advances per committed session instead of per batch. A large
+  OpenCode re-index no longer stalls behind one session's file writes (#546).
+- FILTER maintenance passes run their per-session work through the bounded
+  worker pool, read session locations in one bulk query per pass, and no longer
+  rescan the whole output tree when the database already records a location.
+  The stale-adapter and pair-repair inventories no longer take minutes on a
+  large store (#547).
+
+### Fixed
+- OpenCode sessions refused with "transcript checksum does not match committed
+  metadata": the staging arena released byte spans out of allocation order, so
+  a later batch could recycle bytes a parser was still reading. Arena releases
+  now advance the tail only over the contiguous released prefix (#548).
+- Codex subagent sessions refused with "captured metadata is not
+  self-consistent with the captured identity": a subagent rollout embeds the
+  parent thread's envelope in a later `session_meta` record, and the parser
+  re-checked every record. The first decodable metadata envelope now owns
+  identity and context (#549).
+
+## [0.8.0] - 2026-10-03
+
+### Added
+- Publishing from the transcript page: a publish bar and one popup replace the
+  trip through the multi-session wizard. The popup mounts every state (not
+  published, publishing, up to date, new turns, auto-publish on, outside the
+  saved lists, connect, waiting, scanning, scan failed, not in a collective,
+  stopped, waits for approval), counts new turns from the stored `publishedAt`,
+  keeps the redaction scan cache across navigation, and opens from
+  `/share?sessionId=<id>` on that transcript (#498, #536).
+- Collective targets in the local API: list collectives and their linked
+  repositories, add and remove shares, and serve publication state from the
+  stored receipt with `outsideSelection` for sessions the saved selection
+  leaves out. `/sync/push` accepts typed `collectives {add, remove}` and reports
+  one result per step. A collective publish opens private and sends no license;
+  removing a collective revokes its access (#497, #521).
+- Automatic publishing: `hooks.yaml` binds a folder glob or a git remote to
+  collectives, and a managed hook applies the binding on push. `peasant village
+  auto` adds a rule for the repository and installs the hook; a bound push
+  publishes private and shares only with the rule's collectives; a transcript
+  that is public on Village is not updated. Installs are explicit, refuse
+  unrecorded repositories, and keep foreign hooks intact with their remedy
+  (#503, #530).
+- Kickstart's one auto-publish question: "publish automatically?" records
+  `push.autoPublishIntent` (with `push.sharePreference: share-later`), installs
+  nothing, and lets the first publish popup offer automatic setup later (#9,
+  #539).
+- The local settings API: `GET /settings` returns every yaml-backed key with
+  per-key metadata (`inPeasantConfig` derived from the terminal editor's
+  registry); `PATCH /settings` accepts one key, validates the whole
+  configuration, saves atomically, and applies the change live. Credentials are
+  never returned (#501, #532).
+- The local settings page: grouped rows with pending and settled feedback, a
+  failed write restored with the API reason, the "not in peasant config" tag,
+  explicit hook installation with per-repository disclosure, and rule editing
+  that keeps every event (#502, #538).
+- Home as a sessions-first page: a stats strip computed from the existing
+  topics, search with turn-level matches, and one session list with a
+  publish-state column, the all / not published / published / auto filters, a
+  load-more control, and a link from every row into its project's review view.
+  Selection notices and recovery are retained (#500, #537).
+- A quiet local shell: a one-row header (`peasant`, search, settings, theme),
+  fairtrade's offline notice with the start command and retry when the local
+  server stops, route-only sections reachable by URL, and the tour unmounted
+  (#499, #523).
+- `peasant open` records one session and opens its transcript in the local web
+  (#509).
+- C4 architecture diagrams and call sequences in the documentation (#475), and
+  the home-first local section registry documented (#511).
+
+### Changed
+- A web update keeps the audience of a published transcript: a collective-only
+  transcript stays collective-only (#510).
+- The local dashboard is served on loopback only and refuses requests that do
+  not come from it (#508).
+- Test-gate and CI performance work: a two-pass race-on budget gate, waits on
+  signals and deadlines instead of fixed sleeps, a golden-template cache and
+  store-open seam, the arm64 subset lane on releases only, and the GitHub Go
+  cache skipped on the self-hosted pool (#522, #528, #534, #535).
+
+### Fixed
+- SQLite callback ownership is preserved across connection reuse (#541).
+- Claude Code workflow subagent transcripts are ingested (#529).
+- The staging arena wrap gap is released with its copy (#527).
+- Code-map search short-circuits on a raw session id or project hash (#476).
+
+## [0.7.0] - 2026-09-27
+
+### Added
+- Unknown harness data is retained under a per-harness record-kind registry. A
+  well-formed kind this build does not recognize resolves to redacted opaque
+  retained evidence instead of being dropped; refused kinds are aggregated by
+  harness and kind in the harvest text and JSON reports; a generated
+  `docs/record-kinds.md` documents the registry, and the retained evidence is
+  certified through export and publication exactly when a placeholder accounts
+  for it (#412, #455).
+- Native repair activation through the harvester registry: a harness whose
+  effective target is a managed generation is built, staged, and activated
+  through the store instead of replacing bare entries, so repaired sessions keep
+  their captured content and prior evidence; a store that cannot persist a
+  managed generation keeps the retained baseline (#426).
+- The generation activation records the publication-capture agreement in the
+  same transaction as the managed-generation install, so a session repaired from
+  a stale index is publishable immediately. An uncertifiable provenance kind
+  records nothing and leaves stored provenance unchanged; an unchanged capture
+  never moves; a changed capture advances its revision once; a disagreement
+  refuses the activation (#429).
+- Published payloads carry durable session provenance — relationships and their
+  public anchors, the root session, the purpose, the input-submission count
+  (including a measured zero), and retained earlier history — through the
+  snapshot-first publish path, with the consent overlay and the metadata mirrors
+  the receiver requires (#428).
+- Mounted session navigation on the new detail surface: a stored context link
+  opens the exact stored target, current-parent links navigate, and the retained
+  earlier-history disclosure restores on Back, reload, and copied links without
+  moving the stream position (#432).
+- Grouped local browse and share: grouped local session lists on the home
+  picker, grouped search and share flows, and a share chooser that selects
+  explicit helper members (#426).
+- `peasant push` scans payloads offline and negotiates receiver capabilities
+  freshly before publishing (#426), and matches the prompt-request hint against
+  either the base or the fork remote a request names (#461).
+- The web app includes an inspect and feedback tool, development-gated and
+  app-local (#422).
+- `peasant -v` and `peasant --version` print the same version line as
+  `peasant version` (#285, #442).
+
+### Changed
+- The durable session detail no longer carries the read-only navigation field;
+  the viewer receives it as an adapter option, so sessions with relationships
+  cook correctly (#432).
+- The projects home no longer embeds the change graph (#425).
+- The `changes` visual regression baselines were re-blessed (#427).
+
+### Fixed
+- A stored session origin is read past leading harness scaffolding, so a
+  repaired-session origin is not misread from an unrecognized record (#452).
+- Repair eligibility survives an interrupted pair install, so a session
+  interrupted mid-repair is retried instead of being left settled incorrectly
+  (#454).
+- Session summaries and child-reference start times are emitted as UTC
+  instants, so the grouped and flat session lists and the sync chooser decode
+  against the Z-only wire contract on non-UTC hosts (#460).
+- Review and upload read the committed publication inputs rather than a
+  re-derived snapshot, so a published payload matches what was committed (#456).
+- Published payloads derive the metadata publication mirrors — the
+  input-submission count and the graph identity (root session, purpose,
+  relationships) — from the same active generation snapshot as the durable
+  detail; previously the metadata part could omit or diverge from those values,
+  so a receiver could refuse an otherwise valid publish with a mirror
+  disagreement (#433).
+- Pi publications keep their recorded duration when publishing through the
+  snapshot path; previously the duration was emitted as zero (#428).
+- The generated Homebrew cask carries the frozen string literal comment, so the
+  cask passes `brew style` (#477).
+
+### Performance
+- `peasant push` shares one lookup client and resolves the pushed repository
+  once per run instead of twice (#453).
+
+### CI
+- CI calls the shared runner router, pulls the e2e images and the
+  release-validate matrix from the project mirrors and publisher registries, and
+  runs the Go suite on the self-hosted pool with a dedicated arm64 lane
+  (#441, #445, #451, #474).
+- The harvester version guard is routed to the runner pool, and the post-merge
+  `make check` is skipped only with proven pull-request evidence (#473, #440).
+- Release tooling: the release-PR gate re-runs only with a clear delta and
+  passing evidence (#419); partial re-runs of a failed release are documented
+  (#416); the release gate no longer runs the race detector (#414).
+- The full-stack e2e harness runs RustFS as its S3-compatible object store in
+  place of MinIO, whose official images were withdrawn from Docker Hub and Quay
+  (#485).
+
+### Dependencies
+- Contract pins: schema `v0.24.0`, redact `v0.1.6`, fairtrade `0.0.20`. The
+  full-stack e2e gate provisions the matching Village revision, so the release
+  gate exercises provenance publication against a receiver that advertises the
+  session-graph capability.
+
 ## [0.7.0-rc1] - 2026-09-16
 
 ### Added
@@ -417,6 +628,9 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
+[0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1
+[0.8.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.0
 [0.7.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.7.0-rc1
 [0.6.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0

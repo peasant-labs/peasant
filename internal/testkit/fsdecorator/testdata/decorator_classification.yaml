@@ -1,0 +1,219 @@
+# Classification of every `*FS` test decorator in the tree, recorded BEFORE any
+# migration. Each entry names the capability the decorator actually needs and the
+# owner that implements it (white_box routes to the white-box `package ingest`
+# owner; everything else to internal/testutil). See internal/testkit/fsdecorator/classify.go.
+# A decorator's `where` names the file that declares it today: it is updated in
+# the same change that relocates the type.
+#
+# The three capabilities:
+#   counting -> the path-keyed fault/count surface of testutil.CountingFS
+#   gated    -> the blocking gate of fsdecorator.GatedFS
+#   bounded  -> the bound/read-only surface of fsdecorator.BoundedFS
+#   none     -> needs none of the three: a scripted hook, a stub, or a wrapper
+#               with no reusable behavior. Deleted or kept bespoke with the
+#               rationale recorded; the classification says which.
+#
+# required_names keeps a type from being dropped from the audit silently.
+required_names:
+  - cancellingLookupFS
+  - cancelNestedDiffFS
+  - emptyProgressFS
+  - blockingReadDirFS
+  - countingReadFS
+  - swapAfterTranscriptReadFS
+  - stubStatFS
+  - preparedRetainedFS
+  - openCodeSQLiteFreshnessFS
+  - countingCancelFS
+  - gatedInstallFS
+  - countingInstallFS
+  - boundedOnlyCodexFS
+  - pairRepairFaultFS
+  - piCaptureTimingFS
+  - forbiddenPublicationFS
+  - completionPartialReadFS
+  - countingCodexFS
+  - refusingFS
+  - adapterMaintenanceFS
+  - swapPairFS
+  - publicationCaptureFS
+  - metadataPolicyFS
+  - completionFaultFS
+  - boundedCaptureFS
+  - gatedPairFS
+  - deniedTranscriptFS
+  - readFileSpyFS
+
+version: 1
+entries:
+  # --- white-box `package ingest` decorators (Owner B, fsfault_test.go) -----
+  - type: cancellingLookupFS
+    package: internal/ingest
+    white_box: true
+    capability: counting
+    where: internal/ingest/fsfault_test.go:32
+    rationale: counts Stat and ReadDir lookups and cancels the run at an ordinal; a path-keyed count is the capability it needs
+  - type: cancelNestedDiffFS
+    package: internal/ingest
+    white_box: true
+    capability: counting
+    where: internal/ingest/fsfault_test.go:60
+    rationale: serves a scripted nested layout and cancels on a counted Stat; the count is the reusable capability, the cancel hook stays local
+  - type: emptyProgressFS
+    package: internal/ingest
+    white_box: true
+    capability: bounded
+    where: internal/ingest/fsfault_test.go:153
+    rationale: an empty read-only filesystem; every mutating operation is refused, which is BoundedFS.ReadOnly over an empty MemFS
+  - type: blockingReadDirFS
+    package: internal/ingest
+    white_box: true
+    capability: gated
+    where: internal/ingest/fsfault_test.go:167
+    rationale: holds the Stat of a named session until released; a single-operation blocking gate
+  - type: countingReadFS
+    package: internal/ingest
+    white_box: true
+    capability: counting
+    where: internal/ingest/fsfault_test.go:96
+    rationale: counts ReadFile per pair half; exactly CountingFS.Count(ReadFile, path)
+  - type: swapAfterTranscriptReadFS
+    package: internal/ingest
+    white_box: true
+    capability: none
+    where: internal/ingest/fsfault_test.go:196
+    rationale: a read hook that installs a second generation; no fault, count, gate, or bound, so it stays a local scripted decorator
+  - type: stubStatFS
+    package: internal/ingest
+    white_box: true
+    capability: none
+    where: internal/ingest/fsfault_test.go:237
+    rationale: a Stat-only stub that panics on every other operation; not a capability and not a MemFS case
+  - type: preparedRetainedFS
+    package: internal/ingest
+    white_box: true
+    capability: none
+    where: internal/ingest/fsfault_test.go:272
+    rationale: asserts against the store before Rename; a pre-rename assertion hook, not a filesystem capability
+  - type: openCodeSQLiteFreshnessFS
+    package: internal/ingest
+    white_box: true
+    capability: none
+    where: internal/ingest/fsfault_test.go:291
+    rationale: synthesizes Stat info for the database, WAL and SHM paths; a scripted Stat, no reusable capability
+  - type: countingCancelFS
+    package: internal/ingest
+    white_box: true
+    capability: counting
+    where: internal/ingest/fsfault_test.go:119
+    rationale: counts reads and cancels at an ordinal; the count is the reusable capability
+
+  # --- internal/testutil owner (Owner A) -----------------------------------
+  - type: gatedInstallFS
+    package: cmd/peasant
+    white_box: false
+    capability: gated
+    where: cmd/peasant/interrupted_pair_install_test.go:114
+    rationale: holds the pair-install Rename at a named seam until the child observes it
+  - type: countingInstallFS
+    package: cmd/peasant
+    white_box: false
+    capability: counting
+    where: cmd/peasant/interrupted_pair_install_test.go:379
+    rationale: path-keyed read, walk and rename counts over the install world
+  - type: boundedOnlyCodexFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/codex_history_projection_test.go:593
+    rationale: faults every ReadFile to force the bounded capture path; a path-keyed read fault
+  - type: pairRepairFaultFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/pair_repair_test.go:325
+    rationale: a transient read fault on one pair half; CountingFS.Fail on that path
+  - type: piCaptureTimingFS
+    package: internal/ingest
+    white_box: false
+    capability: none
+    where: internal/ingest/pi_capture_test.go:34
+    rationale: rewrites the source during acquisition; a scripted mutation hook with no reusable capability
+  - type: forbiddenPublicationFS
+    package: internal/push
+    white_box: false
+    capability: none
+    where: internal/push/database_publication_test.go:25
+    rationale: embeds ingest.FileSystem and adds no behavior; a pure wrapper with no capability to share
+  - type: completionPartialReadFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/indexer_completion_test.go:42
+    rationale: returns a synthetic read error after a successful read; a path-keyed read fault
+  - type: countingCodexFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/codex_history_authority_test.go:435
+    rationale: counts full, prefix and header reads by path; the count is the capability
+  - type: refusingFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/origin_backfill_test.go:206
+    rationale: refuses reads for a named path set; path-keyed read faults
+  - type: adapterMaintenanceFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/adapter_maintenance_test.go:65
+    rationale: refuses the read of one native path; a path-keyed read fault
+  - type: swapPairFS
+    package: internal/ingest
+    white_box: false
+    capability: none
+    where: internal/ingest/pair_snapshot_support_test.go:136
+    rationale: an armed read hook that swaps a pair generation; no reusable capability
+  - type: publicationCaptureFS
+    package: internal/ingest
+    white_box: false
+    capability: none
+    where: internal/ingest/publication_capture_test.go:564
+    rationale: scripted disappear and mutate side effects on read and write; a bespoke mutation hook
+  - type: metadataPolicyFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/metadata_read_policy_test.go:90
+    rationale: path-keyed read, stat and readdir faults keyed by operation
+  - type: completionFaultFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/opencode_index_completion_test.go:36
+    rationale: path-keyed read and readdir faults
+  - type: boundedCaptureFS
+    package: internal/ingest
+    white_box: false
+    capability: counting
+    where: internal/ingest/captured_source_test.go:287
+    rationale: counts captures against writes to prove the acquisition bound; the count is the capability
+  - type: gatedPairFS
+    package: internal/ingest
+    white_box: false
+    capability: gated
+    where: internal/ingest/pair_concurrency_test.go:18
+    rationale: holds the transcript WriteFile inside the install window until released; the canonical gate case
+  - type: deniedTranscriptFS
+    package: internal/api
+    white_box: false
+    capability: counting
+    where: internal/api/full_content_consumers_test.go:105
+    rationale: refuses every read and counts the attempts; a path-keyed read fault plus count
+  - type: readFileSpyFS
+    package: internal/api
+    white_box: false
+    capability: counting
+    where: internal/api/store_adapter_test.go:2320
+    rationale: counts ReadFile calls per path to prove a re-index was skipped

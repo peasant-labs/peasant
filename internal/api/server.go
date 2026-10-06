@@ -24,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/annotations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	schema "github.com/peasant-labs/schema"
@@ -59,6 +60,10 @@ type ServerConfig struct {
 	// Config is the loaded application config. Used by the sync handler for
 	// redaction settings and push configuration. Nil disables sync endpoints.
 	Config *config.Config
+	// ConfigPath is the configuration file Config was loaded from. The settings
+	// routes read and write it, and a setting saved through them applies to
+	// the sync handler at once. Empty disables the settings routes.
+	ConfigPath string
 	// RepositoryIdentityResolver resolves private discovery rows into logical
 	// repository cohorts. Nil uses the production Git topology resolver.
 	RepositoryIdentityResolver ingest.RepositoryIdentityResolver
@@ -67,6 +72,16 @@ type ServerConfig struct {
 	// The server serves a transcript download from here, so a server started
 	// with --data-dir resolves the same tree the harvest wrote.
 	OutputDir string
+	// ConfigHome, DataHome, and StateHome override the XDG roots the handlers
+	// resolve their config, data, and state paths under: the overrides the
+	// --config-dir/--data-dir/--state-dir flags carry. Empty falls back to the
+	// process environment.
+	ConfigHome string
+	DataHome   string
+	StateHome  string
+	// HookBinding is bound into every git hook the server installs, so the
+	// hook runs with the configuration, rules, and store the server runs with.
+	HookBinding githooks.Binding
 }
 
 // Server is the HTTP server for the web dashboard.
@@ -74,7 +89,9 @@ type Server struct {
 	cfg    ServerConfig
 	server *http.Server
 	hub    *Hub
-	ln     net.Listener
+	// lns are the loopback listeners Listen bound: IPv4 first, then IPv6
+	// when the host has an IPv6 loopback.
+	lns []net.Listener
 
 	// groupedMu guards groupedVariants. Registration happens during Listen and,
 	// for a route owner that registers later, before Serve; handlers read it.
@@ -85,6 +102,10 @@ type Server struct {
 	groupedRevision string
 	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
 	memberScopes *memberScopeCache
+
+	// live is the configuration the handlers apply: Config plus every setting
+	// saved through the settings routes since the server started.
+	live *liveConfig
 
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
@@ -103,11 +124,11 @@ func (s *Server) spawnBackground(ctx context.Context, fn func(context.Context)) 
 	}()
 }
 
-// Addr returns the listener's address after ListenAndServe has bound.
+// Addr returns the IPv4 loopback address after Listen has bound.
 // Returns nil if the server has not started listening.
 func (s *Server) Addr() net.Addr {
-	if s.ln != nil {
-		return s.ln.Addr()
+	if len(s.lns) > 0 {
+		return s.lns[0].Addr()
 	}
 	return nil
 }
@@ -119,6 +140,7 @@ func NewServer(cfg ServerConfig) *Server {
 		hub:             cfg.Hub,
 		groupedVariants: make(map[GroupedRouteVariant]GroupedVariantSource),
 		memberScopes:    newMemberScopeCache(memberScopeTTL, memberScopeMaxEntries),
+		live:            newLiveConfig(cfg.Config),
 	}
 	if provider, ok := cfg.Provider.(groupedCandidateProvider); ok {
 		s.groupedRevision = provider.GroupedScopeRevision()
@@ -126,10 +148,17 @@ func NewServer(cfg ServerConfig) *Server {
 	return s
 }
 
-// Listen binds the server to the configured port and sets up routes.
-// After Listen returns, Addr() returns the bound address.
+// Listen binds the server to the configured port on the loopback interface
+// and sets up routes. After Listen returns, Addr() returns the bound address.
 // Call Serve to start accepting connections.
 func (s *Server) Listen(ctx context.Context) error {
+	// The settings catalog derives from the Config type and the `peasant
+	// config` registry. A defect there is a build defect: fail the start
+	// rather than the first settings request.
+	catalog, err := buildSettingCatalog()
+	if err != nil {
+		return fmt.Errorf("settings catalog: %w", err)
+	}
 	mux := http.NewServeMux()
 
 	// Grouped list views are opt-in over the existing flat list and search
@@ -180,8 +209,11 @@ func (s *Server) Listen(ctx context.Context) error {
 	// Sync/push routes
 	sh := &syncHandler{
 		store:       s.cfg.Store,
-		config:      s.cfg.Config,
+		config:      s.live,
 		scopeIssuer: s,
+		configHome:  s.cfg.ConfigHome,
+		dataHome:    s.cfg.DataHome,
+		stateHome:   s.cfg.StateHome,
 	}
 	// The grouped sync chooser view registers the exact sync predicate on the
 	// same member seam the sessions and search routes use, so expanding a sync
@@ -199,8 +231,31 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteSyncRedactions.String(), sh.handleSyncRedactions)
 	mux.HandleFunc("POST "+defaults.RouteSyncPush.String(), sh.handleSyncPush)
 	mux.HandleFunc("POST "+defaults.RouteSyncLogin.String(), sh.handleSyncLogin)
+	mux.HandleFunc("POST "+defaults.RouteSyncLogout.String(), sh.handleSyncLogout)
 	mux.HandleFunc("POST "+defaults.RouteSyncIngest.String(), sh.handleSyncIngest)
 	mux.HandleFunc("GET "+defaults.RouteSyncIngestStatus.String(), sh.handleSyncIngestStatus)
+
+	// Publishing reads: the publication state of sessions and the Village
+	// collectives the user can publish to.
+	ph := &publishingHandler{store: s.cfg.Store, configHome: s.cfg.ConfigHome}
+	if selection, ok := s.cfg.Provider.(selectionScopeReader); ok {
+		ph.selection = selection
+	}
+	mux.HandleFunc("GET "+defaults.RoutePublications.String(), ph.handlePublications)
+	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
+
+	// Auto-publish rules: save or remove a rule, and install its hooks in one
+	// recorded repository.
+	aph := &autoPublishHandler{store: s.cfg.Store, config: s.live, configHome: s.cfg.ConfigHome, binding: s.cfg.HookBinding}
+	mux.HandleFunc("PUT "+defaults.RouteAutoPublishRule.String(), aph.handleSaveRule)
+	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
+	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)
+
+	// Settings routes: every configuration key and auto-publish rule, and one
+	// key changed at a time.
+	settingsRoutes := &settingsHandler{catalog: catalog, path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}, rules: aph}
+	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
+	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {
@@ -219,17 +274,15 @@ func (s *Server) Listen(ctx context.Context) error {
 		})
 	}
 
-	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	s.server = &http.Server{
-		Addr:    addr,
-		Handler: requestLogger(mux),
+		Handler: requestLogger(localRequestGuard(mux)),
 	}
 
-	ln, err := net.Listen("tcp", addr)
+	lns, err := listenLoopback(s.cfg.Port)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", addr, err)
+		return err
 	}
-	s.ln = ln
+	s.lns = lns
 
 	return nil
 }
@@ -237,7 +290,7 @@ func (s *Server) Listen(ctx context.Context) error {
 // Serve starts accepting connections and blocks until shutdown.
 // Listen must be called first.
 func (s *Server) Serve(ctx context.Context) error {
-	if s.ln == nil {
+	if len(s.lns) == 0 {
 		return fmt.Errorf("server not listening; call Listen first")
 	}
 
@@ -246,13 +299,15 @@ func (s *Server) Serve(ctx context.Context) error {
 		go s.hub.Run(ctx)
 	}
 
-	port := s.ln.Addr().(*net.TCPAddr).Port
+	port := s.lns[0].Addr().(*net.TCPAddr).Port
 	log.Printf("Peasant web dashboard listening on http://localhost:%d", port)
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- s.server.Serve(s.ln)
-	}()
+	errCh := make(chan error, len(s.lns))
+	for _, ln := range s.lns {
+		go func() {
+			errCh <- s.server.Serve(ln)
+		}()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -263,6 +318,10 @@ func (s *Server) Serve(ctx context.Context) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+		// One listener failed; stop the others so none keeps serving alone.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.ServerShutdownGrace)
+		defer cancel()
+		_ = s.Shutdown(shutdownCtx)
 		return err
 	}
 }
@@ -516,7 +575,7 @@ func (s *Server) handleSessionTranscript(w http.ResponseWriter, r *http.Request)
 	// elsewhere is the download data-dir defect this handler fixes.
 	output := s.cfg.OutputDir
 	if output == "" {
-		output = filepath.Join(string(defaults.Data.DataDirPath), "peasant-sync")
+		output = filepath.Join(string(defaults.ResolveDataDirPathWith(s.cfg.DataHome)), "peasant-sync")
 	}
 	var sessionDir string
 	if parentID != "" {
@@ -637,7 +696,9 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleShutdown(_ context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Only allow shutdown from localhost
+		// Only allow shutdown from localhost. This reads the peer address the
+		// kernel reports, not a header the client sets, so it stays a backstop
+		// even though the loopback bind already keeps other hosts out.
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		isLocal := false
 		for _, addr := range defaults.LocalhostAddrs {

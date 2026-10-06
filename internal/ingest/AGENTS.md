@@ -8,13 +8,19 @@ For detailed diagrams and sequence flows, see [README.md](README.md).
 ## Pipeline at a Glance
 
 The ordinary harvest selects its work from the database and walks no saved tree.
-A crash between the pair install and the mirror commit, or between the mirror and
-the entry commit, is repaired by the database-driven repair predicate on the next
+A process interruption during pair replacement or between the mirror and
+the entry commit is selected by the database-driven repair predicate on the next
 harvest; a one-time upgrade pass finishes writes an earlier build interrupted. The
 saved tree is walked only by `harvest index`; `harvest index --all` records rows
 the database is missing from the saved files and rebuilds a lost database. Explicit
 harness/session/since filters apply independently of saved discovery selection.
 Dry-run and file-only runs open no database.
+
+Before replacing the first installed file, the existing writer lane commits a
+clear of the row's indexed input proof. The mirror preserves that pending proof;
+successful indexing restores it. This covers process termination while the OS
+survives, not power loss or older unmarked damage. It introduces no repair tree
+scan and preserves the ordinary index command's existing inventory.
 
 Adapter refresh is independent of indexer eligibility. Claude, Codex and Cursor
 implement `ExtractMetadataFromTranscript` over captured JSONL and original
@@ -88,6 +94,10 @@ multi-file readers retain their existing consistency limitations.
 Slot state machine (monotonic): `empty(0) ──Add──▶ ready(1) ──Drain──▶ claimed(2) ──AckBatch──▶ acked(3)`
 `Drain()` returns a `DrainBatch` (Results + Claimed indices). `AckBatch(DrainBatch)` frees arena space.
 Multiple `DrainBatch` values may be outstanding simultaneously; each owns its own `Claimed` slice. The drain loop now attaches one completion token to the streamed INDEX work for that batch, so arena bytes are released only after all parser workers that can read that batch finish.
+Released allocation spans (including wrap gaps) are tracked by linear arena coordinates.
+Only a contiguous released prefix advances the tail: slot publication, parent gates, and
+batch completion may reorder allocations, but no release may skip an older live span.
+Exhausted-slot rollbacks use the same ordered release path.
 
 **SessionEntryQueue** — Vyukov MPMC. Each slot has a `sequence` atomic (sole sync point).
 Push: CAS `head`, write, store `seq = pos+1`. Pop: CAS `tail`, read, store `seq = pos+cap`.
@@ -95,6 +105,37 @@ Push: CAS `head`, write, store `seq = pos+1`. Pop: CAS `tail`, read, store `seq 
 See [README.md](README.md) for full sequence diagrams covering contention, backpressure, and slot recycling.
 
 ---
+
+## Record-kind vocabulary and generated registry
+
+Each of the six adapters owns one co-located vocabulary declaration: `claude_vocabulary.go`,
+`cursor_vocabulary.go`, `strike_vocabulary.go`, `codex_vocabulary.go`, `opencode_vocabulary.go`, or
+`pi_vocabulary.go`. The declaration mirrors the production dispatch and is the source of truth for
+recognized record, part, and content-block kinds.
+
+- The shared `indexformat.Outcome` enum records what the parser concluded: text, tool call, tool
+  result, control, ignored, or opaque. It is interpretation only; it does not decide admission.
+- The central lowering maps an outcome to stored entry mode, preview eligibility, payload shape, and
+  coordinate requirements. Adapters never own that policy.
+- An undeclared but well-formed valid kind resolves to opaque retained evidence with its source
+  position. Malformed known data and failed retention still fail validation and preserve prior good
+  data.
+- `record_kinds.yaml` and `docs/record-kinds.md` are generated output. Regenerate them with
+  `go generate ./internal/ingest`; committed bytes must equal fresh codegen.
+- The exact per-adapter production-census and required-name tests are the drift gates. The former
+  AST scanner is retired and must not be reintroduced.
+- Where the dispatch itself is a closed declaration, the census reads that declaration instead of a
+  second list. The Codex native `event_msg` types are the reference case: `codexNativeEventDispatch`
+  in `codex_history_replay.go` maps each `codexNativeEventType` to its replay arm, the candidate
+  boundary admits the types it adds beyond `codexStrictEventMsgKinds` through
+  `codexNativeOnlyEventTypes` derived from it, and `codex_vocabulary.go` reads its keys. Add an arm
+  there, never to a separate inventory list.
+- Rendering belongs to `internal/transcript` and Fairtrade. Do not add visualization state, renderer
+  names, or viewer coverage to this registry.
+
+When adding or changing a kind, update the adapter declaration beside its dispatch, adjust the
+production-owned census when the dispatch shape changes, regenerate the artifacts, and bump the
+relevant indexer version when settled sessions must be re-indexed.
 
 ## Constraints
 
@@ -104,7 +145,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | C2 | Parent-Before-Child DB | FK ordering via `StagingBuffer.Commit()`: children invisible to `Drain()` until parent committed. |
 | C3 | Atomic File Writes | The pair is installed by writing both files to a temp directory and renaming them into place, transcript first and metadata last, with no file sync and no lock. Never delete a session subtree; children and unrelated files are not owned. Ownership is decided by NAME, never by location: inside the session `debug/` directory only names whose extension is in the closed set `defaults.DebugArtifactSuffixes()` are peasant's own, so a user file with any other extension survives a write. The database commit, not the file write, is the durability point. |
 | C4 | Metadata Compatibility | Versions below 9 require native refresh. Reading metadata 9/10 alone causes no adapter call or metadata rewrite. An omitted adapter version uses baseline 1 for refresh eligibility but stays unknown in provenance until actual extraction succeeds. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. |
-| C5 | Arena Concurrent Drain | `Add()` uses bounded exponential backoff (1ms→16ms) when arena full. drainLoop goroutine runs concurrently with workers; arena only recycles via `AckBatch`. |
+| C5 | Arena Concurrent Drain | `Add(ctx, r)` waits on the arena-freed broadcast, the bounded backoff fallback (1ms→16ms), or ctx when the arena is full; on ctx it stages the result outside the arena (`arenaLen` 0) and still returns true, so a cancelled run drops no session. drainLoop goroutine runs concurrently with workers and wakes on the ready signal, `workersDone`, the INDEX ack, or ctx; arena only recycles via `AckBatch`. |
 | C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. A `KindAdvance` carries a `Delta` that the store adds to a stage-owned cumulative `Done`, so workers that finish out of order cannot move the count backwards. |
 
 ## Invariants
@@ -126,7 +167,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 |----|------|--------------------|
 | A1 | Linux Overcommit | 2 GiB arena uses virtual memory overcommit. RSS = actual transcript volume. May fail if `vm.overcommit_memory=2`. |
 | A2 | Shallow Trees | Root-owns-subtree (C1) assumes 1-2 levels. Deep trees cause load imbalance. |
-| A3 | Single Instance | One pipeline per process. External PID lock prevents concurrent `peasant ingest`. |
+| A3 | Single Instance | One pipeline per process; independent overlapping writers to the same session are unsupported. The pair installer adds no external lock. |
 | A4 | Unique Session IDs | UUIDs globally unique across providers/hosts. `committed` map + DB keys depend on this. |
 | A5 | Rename Atomicity | `os.Rename()` atomic on local FS (ext4, APFS, NTFS). Not guaranteed on network FS. |
 

@@ -1,0 +1,16 @@
+name: Notify Discord of pull requests
+
+# Posts pull request events to the Discord channel behind the
+# DISCORD_WEBHOOK_URL organization secret, using the shared reusable
+# workflow in peasant-labs/.github. pull_request_target covers fork pull
+# requests; the workflow never checks out or executes PR code.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, closed]
+
+jobs:
+  notify:
+    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    uses: peasant-labs/.github/.github/workflows/discord-pr-notify.yml@main
+    secrets: inherit

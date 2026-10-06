@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,9 +18,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/omitted_records_ingest.yaml
@@ -61,15 +59,9 @@ type omittedRecordsIngestFixture struct {
 }
 
 func decodeOmittedRecordsIngestFixture(raw []byte) (omittedRecordsIngestFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	decoder.KnownFields(true)
 	var fixture omittedRecordsIngestFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(raw, &fixture); err != nil {
 		return fixture, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, errors.New("omitted-records ingest fixture must contain exactly one YAML document")
 	}
 	return fixture, nil
 }
@@ -190,11 +182,7 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			db, err := store.Open(filepath.Join(root, "peasant.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
+			db := storetest.Open(t)
 
 			fs := &ingest.OSFileSystem{}
 			cfg := ingest.PipelineConfig{
@@ -251,7 +239,7 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bundle, err := push.LoadPublicationInput(ctx, db, omittedRecordsSessionID)
+			bundle, _, err := push.LoadPublicationInput(ctx, db, omittedRecordsSessionID)
 			if err != nil {
 				t.Fatalf("load the publication input the push command reads: %v", err)
 			}

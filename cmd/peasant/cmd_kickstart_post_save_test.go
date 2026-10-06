@@ -63,6 +63,7 @@ func loadKickstartPostSaveDocument(t *testing.T) kickstartPostSaveDocument {
 }
 
 func TestKickstartPostSaveIngestUsesResolvedCloneCohort(t *testing.T) {
+	t.Parallel()
 	document := loadKickstartPostSaveDocument(t)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

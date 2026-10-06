@@ -1,18 +1,14 @@
 package kickstart_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -54,17 +50,8 @@ type restorationDocument struct {
 func loadRestorationDocument(t *testing.T) restorationDocument {
 	t.Helper()
 	var document restorationDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(restorationData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(restorationData, &document); err != nil {
 		t.Fatalf("decode testdata/restoration.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("restoration.yaml must hold exactly one document: %v", err)
 	}
 	if document.ExpectedCaseCount != len(document.Cases) || len(document.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", document.ExpectedCaseCount, len(document.Cases))
@@ -190,6 +177,7 @@ func TestMountedProgramRestoresSavedSelectionThroughProductionRegistry(t *testin
 }
 
 func TestMountedKickstartNoEditSaveKeepsExplicitSessionsScoped(t *testing.T) {
+	t.Parallel()
 	testCase := restorationCaseNamed(t, loadRestorationDocument(t), "all-current-explicit-sessions-stay-session-scoped")
 	configured := config.BaseConfig()
 	configured.Selection = testCase.Saved
@@ -232,6 +220,7 @@ func TestMountedKickstartNoEditSaveKeepsExplicitSessionsScoped(t *testing.T) {
 }
 
 func TestMountedKickstartSelectAllNamesProjectScopeAndCommitsCurrentClones(t *testing.T) {
+	t.Parallel()
 	testCase := restorationCaseNamed(t, loadRestorationDocument(t), "select-all-saves-exact-current-clones")
 
 	configured := config.BaseConfig()

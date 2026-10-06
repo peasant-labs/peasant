@@ -1,12 +1,10 @@
 package push_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -15,13 +13,16 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/annotation_repository_scope.yaml
 var annotationRepositoryScopeFixtureData []byte
+
+//go:embed testdata/annotation_repository_scope.manifest.yaml
+var annotationRepositoryScopeManifestData []byte
 
 const annotationRepositoryScopeFixturePath = "internal/push/testdata/annotation_repository_scope.yaml"
 
@@ -54,13 +55,15 @@ type scopeState string
 const (
 	scopeActive   scopeState = "repository-scoped"
 	scopeInactive scopeState = "selection-only"
+	// scopeSessionsOnly is the scope of the Share wizard and the CLI chooser:
+	// only the chosen sessions.
+	scopeSessionsOnly scopeState = "sessions-only"
 )
 
-var allScopeStates = [...]scopeState{scopeActive, scopeInactive}
+var allScopeStates = [...]scopeState{scopeActive, scopeInactive, scopeSessionsOnly}
 
 type annotationScopeDocument struct {
-	ExpectedCaseCount int                   `yaml:"expectedCaseCount"`
-	Cases             []annotationScopeCase `yaml:"cases"`
+	Cases []annotationScopeCase `yaml:"cases"`
 }
 
 type annotationScopeCase struct {
@@ -72,29 +75,18 @@ type annotationScopeCase struct {
 
 func loadAnnotationScopeFixture(data []byte) (annotationScopeDocument, error) {
 	var document annotationScopeDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf(
 			"annotation repository scope fixture rule failed: typed YAML fields must match the document schema; unknown or "+
 				"malformed data invalidates the attribution evidence; where=%s loader=first-document decode; when=test fixture loading; "+
 				"impact=what a repository-scoped push publishes cannot be trusted; fix=match the typed schema: %w",
 			annotationRepositoryScopeFixturePath, err)
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
+	if len(document.Cases) == 0 {
 		return document, fmt.Errorf(
-			"annotation repository scope fixture rule failed: exactly one YAML document is allowed; trailing data is silently "+
-				"ignored; where=%s loader=end-of-document check; when=test fixture loading; "+
-				"impact=what a repository-scoped push publishes cannot be trusted; fix=remove the second document",
+			"annotation repository scope fixture rule failed: the corpus carries no cases; where=%s loader=case validation; "+
+				"when=test fixture loading; impact=what a repository-scoped push publishes cannot be trusted; fix=restore the cases",
 			annotationRepositoryScopeFixturePath)
-	}
-	if len(document.Cases) == 0 || document.ExpectedCaseCount != len(document.Cases) {
-		return document, fmt.Errorf(
-			"annotation repository scope fixture rule failed: declared and actual case counts must match and be non-zero, got "+
-				"expectedCaseCount=%d cases=%d; where=%s loader=case-count validation; when=test fixture loading; "+
-				"impact=what a repository-scoped push publishes cannot be trusted; fix=set expectedCaseCount to the number of cases present",
-			document.ExpectedCaseCount, len(document.Cases), annotationRepositoryScopeFixturePath)
 	}
 	seen := make(map[string]bool, len(document.Cases))
 	for index, testCase := range document.Cases {
@@ -107,7 +99,7 @@ func loadAnnotationScopeFixture(data []byte) (annotationScopeDocument, error) {
 		if !annotationScopeContains(allScopeStates[:], testCase.Scope) {
 			return document, annotationScopeRuleError(index,
 				fmt.Sprintf("unsupported scope %q", testCase.Scope),
-				"fix=use repository-scoped or selection-only")
+				"fix=use repository-scoped, selection-only, or sessions-only")
 		}
 		accounted := make(map[annotationTarget]bool, len(allAnnotationTargets))
 		for _, group := range [][]annotationTarget{testCase.Published, testCase.Withheld} {
@@ -161,8 +153,7 @@ func annotationScopeContains[T comparable](values []T, want T) bool {
 
 func TestLoadAnnotationScopeFixture_RejectsUnaccountedTarget(t *testing.T) {
 	t.Parallel()
-	_, err := loadAnnotationScopeFixture([]byte(`expectedCaseCount: 1
-cases:
+	_, err := loadAnnotationScopeFixture([]byte(`cases:
   - name: forgets one
     scope: repository-scoped
     published: [selected-session]
@@ -175,8 +166,7 @@ cases:
 
 func TestLoadAnnotationScopeFixture_RejectsPublishingAnotherSession(t *testing.T) {
 	t.Parallel()
-	_, err := loadAnnotationScopeFixture([]byte(`expectedCaseCount: 1
-cases:
+	_, err := loadAnnotationScopeFixture([]byte(`cases:
   - name: publishes another session
     scope: repository-scoped
     published: [selected-session, other-session, scoped-project, other-project, unattributable]
@@ -213,6 +203,20 @@ func TestPushAnnotationsSelected_RepositoryScopeGatesUnattributable(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	manifest, err := testutil.DecodeRequiredNamesManifest(annotationRepositoryScopeManifestData, "annotation repository scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(document.Cases))
+	scopes := make([]scopeState, 0, len(document.Cases))
+	for _, testCase := range document.Cases {
+		names = append(names, testCase.Name)
+		scopes = append(scopes, testCase.Scope)
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "annotation repository scope"); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RequireClosedSetCoverage(t, "annotation repository scope", "scope", allScopeStates[:], scopes)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
@@ -240,8 +244,11 @@ func TestPushAnnotationsSelected_RepositoryScopeGatesUnattributable(t *testing.T
 			selection := push.AnnotationSelection{
 				SessionIDs: map[string]bool{selectedSessionID: true},
 			}
-			if testCase.Scope == scopeActive {
+			switch testCase.Scope {
+			case scopeActive:
 				selection.RepositoryProjectHashes = map[string]bool{scopedProjectHash: true}
+			case scopeSessionsOnly:
+				selection.SessionsOnly = true
 			}
 
 			client := village.NewVillageClient(srv.URL, testAPIKey, nil)

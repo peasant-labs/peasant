@@ -1,0 +1,49 @@
+cases:
+  - name: absent historical driver receives only shared fixture runtime support
+    mode: absent
+    candidate_files:
+      sqlite.go: "package sqlite\n"
+      sqlitex/exec.go: "package sqlitex\n"
+      LICENSE: "original ISC grant\n"
+      README.md: "original documentation\n"
+      auth_test.go: "package sqlite\n"
+    expected_files:
+      sqlite.go: "package sqlite\n"
+      sqlitex/exec.go: "package sqlitex\n"
+      LICENSE: "original ISC grant\n"
+  - name: identical historical driver remains untouched
+    mode: identical
+    candidate_files:
+      sqlite.go: "package sqlite\n"
+      LICENSE: "original ISC grant\n"
+    historical_files:
+      sqlite.go: "package sqlite\n"
+      LICENSE: "original ISC grant\n"
+      README.md: "historical documentation\n"
+    expected_files:
+      sqlite.go: "package sqlite\n"
+      LICENSE: "original ISC grant\n"
+      README.md: "historical documentation\n"
+  - name: different historical runtime cannot be overwritten
+    mode: different
+    candidate_files:
+      sqlite.go: "package sqlite // candidate\n"
+    historical_files:
+      sqlite.go: "package sqlite // historical\n"
+    expected_files:
+      sqlite.go: "package sqlite // historical\n"
+    expected_error: cannot replace historical production driver
+  - name: additional historical runtime cannot be hidden
+    mode: additional
+    candidate_files:
+      sqlite.go: "package sqlite\n"
+    historical_files:
+      sqlite.go: "package sqlite\n"
+      extra.go: "package sqlite\n"
+    expected_files:
+      sqlite.go: "package sqlite\n"
+      extra.go: "package sqlite\n"
+    expected_error: cannot replace historical production driver
+  - name: original module based fixture builder needs no driver injection
+    mode: legacy
+    expected_files: {}

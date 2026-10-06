@@ -22,10 +22,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/testcase"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/helper_group_listing.yaml
@@ -102,7 +102,7 @@ type helperGroupListingItem struct {
 	NestedMemberGroups []helperGroupListingNestedGroup `yaml:"nestedMemberGroups"`
 	// SyncStatus is asserted on the sync route only: the grouped sync row must
 	// carry the same status the flat sync route computes for that session.
-	SyncStatus string `yaml:"syncStatus"`
+	SyncStatus schema.SyncStatus `yaml:"syncStatus"`
 }
 
 // helperGroupListingNestedGroup asserts a helper that itself owns saved helpers:
@@ -178,6 +178,9 @@ func TestHelperGroupListingThroughRegisteredRoutes(t *testing.T) {
 	for _, tc := range fixture.Cases {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
+			// Each case owns its golden-copy store and a port-0 server and
+			// touches no process-global sink, so the cases pack in parallel.
+			t.Parallel()
 			runHelperGroupListingCase(t, tc)
 		})
 	}

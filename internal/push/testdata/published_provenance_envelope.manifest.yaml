@@ -5,6 +5,9 @@ requiredNames:
   - relationships_with_public_anchors_publish
   - absent_input_count_stays_absent
   - measured_zero_input_count_stays_zero
+  - measured_zero_generation_mirrors_omitted_capture_metadata
+  - absent_count_stays_absent_with_omitted_capture_metadata
+  - generation_graph_mirrors_omitted_capture_metadata
   - positive_input_count_root_and_purpose_publish
   - retained_earlier_history_publishes_with_state
   - full_tool_body_publishes_past_preview_bound

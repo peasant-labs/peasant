@@ -1,25 +1,22 @@
 package metrics_test
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 func TestClassifierCapturedCompletionAndRetirement(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := store.Open(filepath.Join(t.TempDir(), "classifiers.db"), store.WithPoolSize(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := storetest.OpenWith(t, store.WithPoolSize(1))
 	sid := mustSessionID(t, testutil.TestSessionUUID)
 	seedSession(t, ctx, db, string(sid))
 	var entries []schema.SessionEntry

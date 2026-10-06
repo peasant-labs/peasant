@@ -9,7 +9,7 @@ import (
 // wantVillageAPIVersion is the single-update-point expectation for the Village
 // API contract generation exposed by Peasant's schema module pin. Bump it here
 // only after reviewing both the current and retained compatibility surfaces.
-const wantVillageAPIVersion = "0.20.0"
+const wantVillageAPIVersion = "0.24.0"
 
 // TestPinnedContractVersion_MatchesExpected fails if the schema module peasant
 // depends on reports a different Village API contract version than expected.
@@ -19,8 +19,9 @@ const wantVillageAPIVersion = "0.20.0"
 // breaking-change gate exempts it. Peasant maps its local metadata through the
 // retained PublishRequest shape, then promotes and validates the authoritative
 // request used by transport. The frozen Village 0.10.0 legacy validator does not
-// classify new harnesses; preflight uses the current 0.20.0 successor instead.
+// classify new harnesses; preflight uses the current 0.24.0 successor instead.
 func TestPinnedContractVersion_MatchesExpected(t *testing.T) {
+	t.Parallel()
 	if schema.VillageAPIVersion != wantVillageAPIVersion {
 		t.Fatalf(
 			"VillageAPIVersion mismatch.\n"+

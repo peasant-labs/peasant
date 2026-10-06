@@ -9,13 +9,12 @@ package store_test
 // blanks or skips the managed hydration now fails this oracle.
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +27,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_candidate_committed_wrapper.yaml
@@ -74,14 +72,8 @@ type codexCommittedPayloadFixture struct {
 func loadCodexCommittedPayloadFixture(t *testing.T) codexCommittedPayloadFixture {
 	t.Helper()
 	var fixture codexCommittedPayloadFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(codexCommittedPayloadYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexCommittedPayloadYAML, &fixture); err != nil {
 		t.Fatalf("decode codex_candidate_committed_wrapper.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("codex_candidate_committed_wrapper.yaml must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(codexCommittedPayloadManifestYAML, "codex committed payload")
 	if err != nil {
@@ -174,8 +166,15 @@ func openCodexCommittedPayloadStore(t *testing.T, dir string) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The test closes and reopens the same dir to prove the committed payload
+	// survives a reopen; seed the golden only on first creation.
+	destPath := filepath.Join(dir, "generations.db")
+	if _, err := os.Stat(destPath); errors.Is(err, os.ErrNotExist) {
+		storetest.CopyGoldenTo(t, destPath)
+	}
 	s, err := store.Open(
-		filepath.Join(dir, "generations.db"),
+		destPath,
+		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),
@@ -276,7 +275,7 @@ func TestCodexCommittedWrapperPayloadKeepsLiteralBodies(t *testing.T) {
 	dir := t.TempDir()
 	s := openCodexCommittedPayloadStore(t, dir)
 	storetest.SeedSession(t, s, fixture.Session.ID)
-	if err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
+	if _, err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
 		Generation:     candidate.V2,
 		Blobs:          candidate.Content,
 		IndexerVersion: 1,

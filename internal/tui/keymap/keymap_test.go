@@ -1,15 +1,12 @@
 package keymap_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"reflect"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 )
 
@@ -27,17 +24,8 @@ type actionsEntry struct {
 
 func loadActionsFixture(data []byte) (actionsDocument, error) {
 	var doc actionsDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/actions.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("testdata/actions.yaml must hold exactly one YAML document: %w", err)
 	}
 	if doc.ExpectedActionCount != len(doc.Actions) || len(doc.Actions) == 0 {
 		return doc, fmt.Errorf(
@@ -115,17 +103,8 @@ type defaultBindingCase struct {
 
 func loadDefaultBindingsFixture(data []byte) (defaultBindingsDocument, error) {
 	var doc defaultBindingsDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/default_bindings.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("testdata/default_bindings.yaml must hold exactly one YAML document: %w", err)
 	}
 	if doc.ExpectedBindingCount != len(doc.Bindings) || len(doc.Bindings) == 0 {
 		return doc, fmt.Errorf(
@@ -215,17 +194,8 @@ type matchDispatchCase struct {
 
 func loadMatchDispatchFixture(data []byte) (matchDispatchDocument, error) {
 	var doc matchDispatchDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/match_dispatch.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("testdata/match_dispatch.yaml must hold exactly one YAML document: %w", err)
 	}
 	if doc.ExpectedCaseCount != requiredMatchDispatchCaseCount || len(doc.Cases) != requiredMatchDispatchCaseCount {
 		return doc, fmt.Errorf(

@@ -1,13 +1,10 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,11 +12,11 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/index_format_snapshots.yaml
@@ -57,14 +54,8 @@ type indexFormatSnapshotDocument struct {
 func loadIndexFormatSnapshotFixtures(t *testing.T) indexFormatSnapshotDocument {
 	t.Helper()
 	var document indexFormatSnapshotDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(indexFormatSnapshotsYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexFormatSnapshotsYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("snapshot fixtures require one document: %v", err)
 	}
 	guardNames, snapshotNames := make(map[string]bool), make(map[string]bool)
 	for _, row := range document.Guards {
@@ -155,13 +146,13 @@ func TestIndexFormatReadersKeepBaseAndExtraInOneSnapshot(t *testing.T) {
 	for _, row := range loadIndexFormatSnapshotFixtures(t).Snapshots {
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
-			path := filepath.Join(t.TempDir(), "snapshot.db")
-			reader, err := store.Open(path, store.WithPoolSize(1))
+			path := storetest.CopyGoldenDB(t)
+			reader, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer reader.Close()
-			writer, err := store.Open(path, store.WithPoolSize(1))
+			writer, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

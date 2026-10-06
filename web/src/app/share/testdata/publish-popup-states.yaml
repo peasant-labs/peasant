@@ -1,0 +1,639 @@
+# The states of the transcript page's publish bar and publish popup.
+#
+# Each case is served to the mounted transcript route, /projects/[name]/[id]
+# (ProjectsRouter -> SessionDetailV2 -> fairtrade's TranscriptViewer and
+# publish parts), by the mounted test in ../publishPopupStates.mounted.test.tsx,
+# and to the real binary's served build by web/scripts/visual/publish-states-shoot.mjs,
+# which shoots each one in both themes. Both answer the same Local API routes
+# from the same case, through publish-popup-states.mjs.
+#
+# requiredNames is the deletion guard. It names every state the bar and the
+# popup must reach; a case leaves only by removing its name here too, and a case
+# without a name here is refused.
+mobileCases: [not-published, ready-to-publish, update-with-new-turns]
+# Different request paths can finish on the same canonical result. Only these
+# named pairs/groups may share a screenshot; every case still asserts its own
+# rendered copy and exact request body before the non-empty image gate runs.
+visualEquivalentCases:
+  - [ready-to-publish, connect-completes, already-authenticated]
+  - [published-done, update-adds-collective]
+  - [update-removes-collective, manage-removes-collective, partial-publish-removes-reader]
+  - [connect-to-village, signed-out-on-push]
+requiredNames:
+  - only-curated-collective-waits
+  - removes-final-collective
+  - publication-read-failed
+  - transcript-missing
+  - connect-completes
+  - published-while-signed-out
+  - manage-opens
+  - update-adds-collective
+  - update-removes-collective
+  - manage-removes-collective
+  - partial-publish-removes-reader
+  - stopped-rescan-fails
+  - skipped-collective
+  - held-until-ingest
+  - content-step-failed
+  - collectives-read-failed
+  - audience-unknown
+  - signed-out-on-push
+  - login-start-failed
+  - already-authenticated
+  # the bar
+  - not-published
+  - publishing
+  - up-to-date
+  - new-turns
+  - auto-publish-on
+  - outside-saved-lists
+  # the popup
+  - connect-to-village
+  - waiting-for-github
+  - scanning
+  - scan-failed
+  - not-in-a-collective
+  - stopped-at-a-step
+  - waits-for-approval
+  # the popup's other states, as the wireframes draw them
+  - ready-to-publish
+  - published-done
+  - update-with-new-turns
+  - update-keeps-audience
+
+# /share links that keep the multi-session wizard instead of opening one
+# transcript's popup: a wizard step, an evidence set, and a plain visit.
+# {session} is the mounted session's id.
+wizardLinks:
+  - 'sessionId={session}&step=redact'
+  - 'sessions=a,b'
+  - ''
+
+# The collectives the signed-in reader belongs to. A case names the ones
+# village returns; their identifiers are derived from their position here.
+collectives:
+  - { name: Acme Platform, members: 12, acceptance: open, suggestion: { reason: linked_repository, match: 'github.com:acme/ingest-api' } }
+  - { name: Acme Company, members: 87, acceptance: open, suggestion: { reason: linked_github_org, match: acme } }
+  - { name: ML Reading Group, members: 21, acceptance: curated, role: owner }
+
+# What the local scan finds when a case's scan succeeds.
+matches:
+  - { category: CREDENTIAL, rule: aws_access_key, display: AWS Access Key ID, original: AKIAIOSFODNN7EXAMPLE, replacement: '<AWS_ACCESS_KEY>', entryIndex: 2, count: 7 }
+  - { category: PII, rule: email_address, display: Email Address, original: alice@acme.dev, replacement: '<EMAIL>', entryIndex: 3 }
+  - { category: PATH, rule: home_directory, display: home directory, original: /Users/alice/work/acme/ingest-api, replacement: '/Users/<USER>/work/acme/ingest-api', entryIndex: 5 }
+
+# The pull request waiting for the transcript when a case's push reports one.
+pullRequest: { owner: acme, name: ingest-api, number: 42 }
+
+# Each case:
+#   publication  the stored receipt; a signed-out read reports unpublished
+#   signIn       signed-in; signed-out (the sign-in completes); waits (it never does)
+#   village      the collectives GET /api/v1/village/collectives answers
+#   scan         matches, failure, or pending (never answers)
+#   push         the answer to POST /api/v1/sync/push: published, pending (never
+#                answers), approval (curated collectives wait), or stopped:<collective>
+#                (sharing with it fails)
+#   steps        what the reader does: open (the bar's action), connect,
+#                add <collective>, remove <collective>, publish
+#   expect       bar: its state, its words and its action
+#                popup: null, or the heading ({title} is the session's title),
+#                words it shows, and its primary
+#                button (label and whether it is enabled; null when none)
+#                request: the collective change the push asked for, when a
+#                push ran (an empty add and remove keeps the audience)
+cases:
+  - name: not-published
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: []
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup: null
+
+  - name: up-to-date
+    publication: { state: published, newTurns: 0, audience: [Acme Platform, Acme Company] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: []
+    expect:
+      bar: { state: published, text: published · 2 collectives · up to date, action: manage }
+      popup: null
+
+  - name: new-turns
+    publication: { state: published, newTurns: 6, audience: [Acme Platform, Acme Company] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: []
+    expect:
+      bar: { state: new-turns, text: published · 2 collectives · 6 new turns, action: update }
+      popup: null
+
+  - name: auto-publish-on
+    publication: { state: published, newTurns: 0, autoPublish: true, audience: [Acme Platform] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: []
+    expect:
+      bar: { state: auto-publish, text: auto-publish on · Acme Platform, action: manage }
+      popup: null
+
+  - name: outside-saved-lists
+    publication: { state: unpublished, outsideSelection: true }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: []
+    expect:
+      bar: { state: outside-lists, text: not published · outside your saved lists, action: publish }
+      popup: null
+
+  - name: connect-to-village
+    publication: { state: unpublished }
+    signIn: signed-out
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [connect this computer to village once to publish., continue with GitHub, nothing leaves your machine until you publish.]
+        primary: null
+      request: null
+
+  - name: waiting-for-github
+    publication: { state: unpublished }
+    signIn: waits
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, connect]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [waiting for github in your browser]
+        primary: null
+      request: null
+
+  - name: scanning
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: pending
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [what leaves your machine, checking for sensitive content, who can read it]
+        primary: { label: publish to 2 collectives, enabled: false }
+      request: null
+
+  - name: scan-failed
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: failure
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: ['the scan failed, so publish is off.', re-scan]
+        primary: { label: publish to 2 collectives, enabled: false }
+      request: null
+
+  - name: not-in-a-collective
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: []
+    scan: matches
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [you are not in a collective yet., create or join one on village]
+        link: { text: create or join one on village, href: 'https://village.peasantlabs.org/groups' }
+        primary: { label: publish, enabled: false }
+      request: null
+
+  - name: ready-to-publish
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [9 matches · all redacted, show 3 examples, Acme Platform, suggested · repo acme/ingest-api is linked, Acme Company, suggested · github org acme, add a collective, nothing leaves your machine until you publish.]
+        primary: { label: publish to 2 collectives, enabled: true }
+      request: null
+
+  - name: publishing
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: pending
+    steps: [open, publish]
+    expect:
+      bar: { state: publishing, text: publishing to 2 collectives, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [publishing to 2 collectives]
+        primary: { label: publish to 2 collectives, enabled: false }
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: published-done
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, publish]
+    expect:
+      bar: { state: published, text: published · 2 collectives · up to date, action: manage }
+      popup:
+        heading: published to Acme Platform and Acme Company
+        texts: [village.peasantlabs.org/transcripts/, 'pull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.']
+        primary: { label: done, enabled: true }
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: waits-for-approval
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: approval
+    steps: [open, add ML Reading Group, publish]
+    expect:
+      bar: { state: published, text: published · 2 collectives · up to date, action: manage }
+      popup:
+        heading: published to Acme Platform and Acme Company
+        texts: [ML Reading Group shows it once its owner approves.]
+        primary: { label: done, enabled: true }
+      request: { add: [Acme Platform, Acme Company, ML Reading Group], remove: [] }
+
+  - name: stopped-at-a-step
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: stopped:Acme Company
+    steps: [open, publish]
+    expect:
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
+      popup:
+        heading: publish “{title}”
+        texts: ['stopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript: village answered 502']
+        primary: { label: retry, enabled: true }
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: update-with-new-turns
+    publication: { state: published, newTurns: 6, audience: [Acme Platform, Acme Company] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, add ML Reading Group]
+    expect:
+      bar: { state: new-turns, text: published · 2 collectives · 6 new turns, action: update }
+      popup:
+        heading: update “{title}”
+        texts: [what changed, 6 new turns since you published, ML Reading Group, adding · waits for approval, removing a collective takes the transcript back from it., adds ML Reading Group · removes nothing, nothing leaves your machine until you update.]
+        primary: { label: update and add 1 collective, enabled: true }
+      request: null
+
+  - name: update-keeps-audience
+    publication: { state: published, newTurns: 6, audience: [Acme Platform] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, publish]
+    expect:
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
+      popup:
+        heading: published to Acme Platform
+        texts: [village.peasantlabs.org/transcripts/]
+        primary: { label: done, enabled: true }
+      request: { add: [], remove: [] }
+
+  - name: connect-completes
+    publication: { state: unpublished }
+    signIn: signed-out
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, connect]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [9 matches · all redacted, Acme Platform, Acme Company]
+        primary: { label: publish to 2 collectives, enabled: true }
+      request: null
+
+  - name: published-while-signed-out
+    publication: { state: published, newTurns: 6, audience: [Acme Platform] }
+    signIn: signed-out
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, connect]
+    expect:
+      bar: { state: new-turns, text: published · 1 collective · 6 new turns, action: update }
+      popup:
+        heading: update “{title}”
+        texts: [6 new turns since you published, Acme Platform, leave access as it is]
+        primary: { label: update, enabled: true }
+      request: null
+
+  - name: manage-opens
+    publication: { state: published, newTurns: 0, audience: [Acme Platform, Acme Company] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: published, text: published · 2 collectives · up to date, action: manage }
+      popup:
+        heading: update “{title}”
+        texts: [no new turns since you published, Acme Platform, Acme Company]
+        primary: { label: update, enabled: true }
+      request: null
+
+  - name: update-adds-collective
+    publication: { state: published, newTurns: 6, audience: [Acme Platform] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, add Acme Company, publish]
+    expect:
+      bar: { state: published, text: published · 2 collectives · up to date, action: manage }
+      popup:
+        heading: published to Acme Platform and Acme Company
+        texts: [village.peasantlabs.org/transcripts/]
+        primary: { label: done, enabled: true }
+      request: { add: [Acme Company], remove: [] }
+
+  - name: update-removes-collective
+    publication: { state: published, newTurns: 6, audience: [Acme Platform, Acme Company] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, remove Acme Platform, publish]
+    expect:
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
+      popup:
+        heading: published to Acme Company
+        texts: [village.peasantlabs.org/transcripts/]
+        primary: { label: done, enabled: true }
+      request: { add: [], remove: [Acme Platform] }
+
+  - name: manage-removes-collective
+    publication: { state: published, newTurns: 0, audience: [Acme Platform, Acme Company] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, remove Acme Platform, publish]
+    expect:
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
+      popup:
+        heading: published to Acme Company
+        texts: [village.peasantlabs.org/transcripts/]
+        primary: { label: done, enabled: true }
+      request: { add: [], remove: [Acme Platform] }
+
+  - name: partial-publish-removes-reader
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: stopped-once:Acme Company
+    steps: [open, publish, remove Acme Platform, retry]
+    expect:
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
+      popup:
+        heading: published to Acme Company
+        texts: [village.peasantlabs.org/transcripts/]
+        primary: { label: done, enabled: true }
+      request: { add: [Acme Company], remove: [Acme Platform] }
+
+  - name: stopped-rescan-fails
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches-then-failure
+    push: stopped:Acme Company
+    steps: [open, publish, rescan]
+    expect:
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
+      popup:
+        heading: publish “{title}”
+        texts: ['the scan failed, so publish is off.']
+        primary: { label: publish to 2 collectives, enabled: false }
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: skipped-collective
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: skipped:Acme Company
+    steps: [open, publish]
+    expect:
+      bar: { state: published, text: published · 1 collective · up to date, action: manage }
+      popup:
+        heading: publish “{title}”
+        texts: ['Village did not share the transcript with this collective']
+        primary: { label: retry, enabled: true }
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: held-until-ingest
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: held
+    steps: [open, publish]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: ['waiting for this session’s ingest to finish: the session is held until ingest completes']
+        primary: { label: retry, enabled: true }
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: content-step-failed
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: content-failed
+    steps: [open, publish]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: ['sending the content: sending the content failed: village answered 502']
+        primary: { label: retry, enabled: true }
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: collectives-read-failed
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: unreachable
+    scan: matches
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: ['reading your collectives on village: The Village collectives could not be listed']
+        primary: { label: retry, enabled: true }
+      request: null
+
+  - name: audience-unknown
+    publication: { state: published, newTurns: 6, audience: [Acme Platform], audienceRead: unreachable }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open]
+    expect:
+      bar: { state: new-turns, text: published · 6 new turns, action: update }
+      popup:
+        heading: update “{title}”
+        texts: [reading who can read it on village]
+        primary: { label: retry, enabled: true }
+      request: null
+
+  - name: signed-out-on-push
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: unauthorized
+    steps: [open, publish]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [connect this computer to village once to publish.]
+        primary: null
+      request: { add: [Acme Platform, Acme Company], remove: [] }
+
+  - name: login-start-failed
+    publication: { state: unpublished }
+    signIn: login-failed
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, connect]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: ['starting the github sign-in: github sign-in could not be started: connection refused']
+        primary: { label: retry, enabled: true }
+      request: null
+
+  - name: already-authenticated
+    publication: { state: unpublished }
+    signIn: already-authenticated
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, connect]
+    expect:
+      bar: { state: not-published, text: not published, action: publish }
+      popup:
+        heading: publish “{title}”
+        texts: [9 matches · all redacted, Acme Platform]
+        primary: { label: publish to 2 collectives, enabled: true }
+      request: null
+
+  - name: publication-read-failed
+    publication: { state: unpublished, audienceRead: failed }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [arrive]
+    expect:
+      bar: { alert: the publish state could not be read, retry: true }
+      popup:
+        heading: publish “{title}”
+        texts: ['reading whether this is published: the local publication store could not be read']
+        primary: { label: retry, enabled: true }
+      request: null
+
+  - name: transcript-missing
+    publication: { state: published, newTurns: 0, audience: [Acme Platform], audienceRead: missing }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [arrive]
+    expect:
+      bar: { alert: 'village no longer holds this transcript: run peasant village push --force for this session', retry: false }
+      popup:
+        heading: publish “{title}”
+        texts: ['run peasant village push --force for this session']
+        primary: null
+      request: null
+
+  - name: removes-final-collective
+    publication: { state: published, newTurns: 0, audience: [Acme Platform] }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: published
+    steps: [open, remove Acme Platform, publish]
+    expect:
+      bar: { state: published, text: published · 0 collectives · up to date, action: manage }
+      popup:
+        heading: updated · no collective can read it
+        texts: [village.peasantlabs.org/transcripts/]
+        primary: { label: done, enabled: true }
+      request: { add: [], remove: [Acme Platform] }
+
+  - name: only-curated-collective-waits
+    publication: { state: unpublished }
+    signIn: signed-in
+    village: [Acme Platform, Acme Company, ML Reading Group]
+    scan: matches
+    push: approval
+    steps: [open, remove Acme Platform, remove Acme Company, add ML Reading Group, publish]
+    expect:
+      bar: { state: published, text: published · 0 collectives · up to date, action: manage }
+      popup:
+        heading: submitted to ML Reading Group
+        texts: [ML Reading Group shows it once its owner approves.]
+        primary: { label: done, enabled: true }
+      request: { add: [ML Reading Group], remove: [] }

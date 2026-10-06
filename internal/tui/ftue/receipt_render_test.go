@@ -29,6 +29,7 @@ type receiptRenderDocument struct {
 }
 
 func TestCompletionReceiptIsSafeCompleteAndCountBounded(t *testing.T) {
+	t.Parallel()
 	decoder := yaml.NewDecoder(bytes.NewReader(receiptRenderYAML))
 	decoder.KnownFields(true)
 	var doc receiptRenderDocument

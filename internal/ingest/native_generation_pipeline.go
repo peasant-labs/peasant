@@ -2,8 +2,10 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -230,25 +232,58 @@ func managedActivationCapture(input *CapturedIndexInput, session DiscoveredSessi
 	return &PublicationCaptureWrite{Metadata: meta, CWDProvenance: kind}
 }
 
-// activateNativeGenerationResult stages and activates one validated managed
-// generation through the store's activation. It reuses the captured expected
-// state so a changed stored row refuses the replacement, stamps the producing
-// revision together with the generation, and never claims a success stamp for
-// an incomplete candidate.
-func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+// preparedNativeGeneration is one native candidate whose activation envelope is
+// final: its adapter stamp, capture assessment, expected state and prior
+// evidence are resolved. staged is the store's inert prepared-files handle
+// when the store implements NativeGenerationStager and preparation succeeded;
+// it becomes activatable only through the guarded activation below.
+type preparedNativeGeneration struct {
+	result       indexParseResult
+	activation   NativeGenerationActivation
+	staged       NativeGenerationStaged
+	entriesCount int
+	candidates   []RetainedUnknownKindCount
+}
+
+// nativeGenerationCommit carries either one prepared candidate or the refusal
+// outcome that replaces it. A refusal is fully reported during preparation, so
+// the serial loop records it without touching the store again.
+type nativeGenerationCommit struct {
+	prepared preparedNativeGeneration
+	ready    bool
+	im       indexedMeta
+	logEntry IndexLogEntry
+	profile  IndexProfileSession
+}
+
+// nativeGenerationUnsupportedError is the single refusal for a store that
+// cannot activate a managed generation.
+func nativeGenerationUnsupportedError(logPrefix string, sessionID SessionID) error {
+	return fmt.Errorf("%s: session %s produced a native managed generation but the store cannot activate one; the stored generation and producer stamps are unchanged; configure a store that supports managed-generation activation", logPrefix, sessionID)
+}
+
+// refuseNativeGeneration reports one refused native generation with the
+// refusal, warning and log entry every native refusal path shares.
+func (p *Pipeline) refuseNativeGeneration(result indexParseResult, entriesCount int, logPrefix string, err error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+	im := result.im
+	p.reportIndexRefusal(im.session.SessionID, err)
+	slog.Warn(logPrefix+": store native generation", "session_id", im.session.SessionID, "error", err)
+	errMsg := err.Error()
+	logEntry := p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
+	return indexedMeta{session: im.session, startMs: im.startMs}, logEntry, p.makeIndexProfileSession(result, logEntry, 0)
+}
+
+// prepareNativeGenerationResult resolves one native candidate into its final
+// activation envelope. It performs no file staging and no store transaction,
+// so callers may prepare candidates concurrently. A refused candidate returns
+// the same refusal outcome the serial activation would report.
+func (p *Pipeline) prepareNativeGenerationResult(result indexParseResult, outcome IndexOutcome, logPrefix string) nativeGenerationCommit {
 	im := result.im
 	candidate := result.nativeCandidate
 	entriesCount := len(candidate.Result.Generation.Main.Entries)
-	fail := func(err error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
-		p.reportIndexRefusal(im.session.SessionID, err)
-		slog.Warn(logPrefix+": store native generation", "session_id", im.session.SessionID, "error", err)
-		errMsg := err.Error()
-		logEntry := p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
-		return indexedMeta{session: im.session, startMs: im.startMs}, logEntry, p.makeIndexProfileSession(result, logEntry, 0)
-	}
-	activator, ok := p.metricsStore.(NativeGenerationActivator)
-	if !ok || result.input == nil {
-		return fail(fmt.Errorf("%s: session %s produced a native managed generation but the store cannot activate one; the stored generation and producer stamps are unchanged; configure a store that supports managed-generation activation", logPrefix, im.session.SessionID))
+	if _, ok := p.metricsStore.(NativeGenerationActivator); !ok || result.input == nil {
+		refused, logEntry, profile := p.refuseNativeGeneration(result, entriesCount, logPrefix, nativeGenerationUnsupportedError(logPrefix, im.session.SessionID))
+		return nativeGenerationCommit{im: refused, logEntry: logEntry, profile: profile}
 	}
 	nowMs := time.Now().UnixMilli()
 	var artifactIdentity *string
@@ -265,6 +300,33 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		version := target.AdapterVersion
 		generation.Generation.Metadata.AdapterVersion = &version
 	}
+	// Native partitions are the selected history, not every source node seen by
+	// replay. The one capture assessment owns the mapping from validated
+	// evidence and parser coverage to the store write; native completeness is
+	// carrier-independent and never depends on retained carrier count. Counts
+	// stay candidates until the store outcome confirms CommittedNow.
+	// Validate Main + Earlier as one set via AssessCapture, then publish
+	// accounting only after the atomic generation write succeeds.
+	sourceOmitted := result.input.session.ContentOmitted || outputRecordsItsOmissions(generation)
+	unaccounted := result.input.session.ContentOmitted && !outputRecordsItsOmissions(generation)
+	assessment, err := AssessCapture(CaptureFacts{
+		Harness: im.session.Harness, Result: generation,
+		Policy: CaptureFreshCandidate, Authoritative: true,
+		SourceOmitted: sourceOmitted, Unaccounted: unaccounted,
+	})
+	if err != nil {
+		refused, logEntry, profile := p.refuseNativeGeneration(result, entriesCount, logPrefix, err)
+		return nativeGenerationCommit{im: refused, logEntry: logEntry, profile: profile}
+	}
+	capture, err := assessment.ContentCapture(contentAuthorityFor(result), im.session.TranscriptOrigin, nowMs)
+	if err != nil {
+		refused, logEntry, profile := p.refuseNativeGeneration(result, entriesCount, logPrefix, fmt.Errorf("%s: session %s assessment refused the store write; the stored index was preserved: %w", logPrefix, im.session.SessionID, err))
+		return nativeGenerationCommit{im: refused, logEntry: logEntry, profile: profile}
+	}
+	candidates := assessment.CandidateCounts()
+	// Operator-initiated native rebuilds opt out of the last-good refusal on
+	// the same principle as entry rebuilds; ordinary activations stay guarded.
+	explicit := p.config.Force || p.config.Reindex || outcome == IndexOutcomeReindexed
 	activation := NativeGenerationActivation{
 		Generation:       generation,
 		Blobs:            candidate.Blobs,
@@ -272,22 +334,193 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		IndexerVersion:   target.IndexerVersion,
 		IndexedAtMs:      nowMs,
 		ExpectedState:    result.input.expected,
-		ContentCapture:   SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs},
+		ContentCapture:   capture,
 		CaptureRevision:  im.captureRevision,
 		IndexedInputHash: &result.input.inputHash,
 		ArtifactIdentity: artifactIdentity,
+		ExplicitRebuild:  explicit,
 		Capture:          managedActivationCapture(result.input, im.session, generation.Generation.Completeness),
 	}
+	return nativeGenerationCommit{
+		prepared: preparedNativeGeneration{result: result, activation: activation, entriesCount: entriesCount, candidates: candidates},
+		ready:    true,
+	}
+}
+
+// activateNativeGenerationResult stages and activates one validated managed
+// generation through the store's activation. It is the inline path for stores
+// without pre-staging support; stores that implement NativeGenerationStager
+// stage their files in the parallel pass, so the serialized commit below pays
+// only for the database transaction.
+func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+	commit := p.prepareAndStageNativeGeneration(ctx, result, outcome, logPrefix, p.nativeGenerationStager())
+	if !commit.ready {
+		return commit.im, commit.logEntry, commit.profile
+	}
+	return p.commitNativeGenerationResult(ctx, commit.prepared, outcome, logPrefix, writeLane)
+}
+
+// nativeGenerationStager returns the store's optional pre-staging support.
+func (p *Pipeline) nativeGenerationStager() NativeGenerationStager {
+	stager, _ := p.metricsStore.(NativeGenerationStager)
+	return stager
+}
+
+// prepareAndStageNativeGeneration prepares one candidate and, when the store
+// supports it, writes its files ahead of the serial commit. Preparation is
+// best-effort and records nothing activatable: a failure is not reported here
+// because the serial activation then stages inline and owns the authoritative
+// refusal or repair outcome.
+func (p *Pipeline) prepareAndStageNativeGeneration(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string, stager NativeGenerationStager) nativeGenerationCommit {
+	commit := p.prepareNativeGenerationResult(result, outcome, logPrefix)
+	if !commit.ready || stager == nil {
+		return commit
+	}
+	if staged, err := stager.StageNativeGeneration(ctx, commit.prepared.activation); err == nil {
+		commit.prepared.staged = staged
+	}
+	return commit
+}
+
+// nativeGenerationCommitJob carries one prepared (or refused) candidate from a
+// staging worker to the serial commit consumer.
+type nativeGenerationCommitJob struct {
+	position int
+	commit   nativeGenerationCommit
+}
+
+// stageAndCommitNativeGenerations prepares and stages every native candidate
+// in parallel, then commits each candidate through the serialized store writer
+// lane as soon as its own staging completes. Committing as results arrive
+// keeps a slow candidate from delaying the commits (and progress) of the
+// others: the batch finishes when its slowest staging plus the commits behind
+// it finish, instead of when the sum of staging and commits does. onCommit
+// runs once per candidate, in completion order, on the calling goroutine.
+func (p *Pipeline) stageAndCommitNativeGenerations(
+	ctx context.Context,
+	results []indexParseResult,
+	positions []int,
+	outcome IndexOutcome,
+	logPrefix string,
+	writeLane *storeWriteLane,
+	onCommit func(position int, indexed indexedMeta, logEntry IndexLogEntry, profile IndexProfileSession),
+) {
+	if len(positions) == 0 {
+		return
+	}
+	stager := p.nativeGenerationStager()
+	workers := 1
+	if stager != nil {
+		workers = min(len(positions), parallelWorkers(p.config))
+	}
+	jobs := make(chan nativeGenerationCommitJob, workers)
+
+	// Producers: prepare and stage candidates with bounded parallelism, then
+	// hand each one to the commit consumer in completion order.
+	var producers sync.WaitGroup
+	producers.Add(1)
+	go func() {
+		defer producers.Done()
+		defer close(jobs)
+		sem := make(chan struct{}, workers)
+		var staging sync.WaitGroup
+		for i := range positions {
+			sem <- struct{}{}
+			staging.Add(1)
+			go func(i int) {
+				defer staging.Done()
+				defer func() { <-sem }()
+				jobs <- nativeGenerationCommitJob{
+					position: positions[i],
+					commit:   p.prepareAndStageNativeGeneration(ctx, results[positions[i]], outcome, logPrefix, stager),
+				}
+			}(i)
+		}
+		staging.Wait()
+	}()
+
+	// Consumer: commit each candidate as it arrives. runStoreWrite serializes
+	// the commits through the writer lane; staging continues meanwhile.
+	for job := range jobs {
+		commit := job.commit
+		var indexed indexedMeta
+		var logEntry IndexLogEntry
+		var profile IndexProfileSession
+		if commit.ready {
+			indexed, logEntry, profile = p.commitNativeGenerationResult(ctx, commit.prepared, outcome, logPrefix, writeLane)
+		} else {
+			indexed, logEntry, profile = commit.im, commit.logEntry, commit.profile
+		}
+		if onCommit != nil {
+			onCommit(job.position, indexed, logEntry, profile)
+		}
+	}
+	producers.Wait()
+}
+
+// commitNativeGenerationResult commits one prepared native candidate. The
+// current-input check runs first, so a refused candidate's prepared files are
+// dropped with no activation intent ever written. When the store prepared the
+// files, the activation installs them, so the writer lane pays only for the
+// intent, rename and database transaction.
+func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared preparedNativeGeneration, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+	result := prepared.result
+	im := result.im
+	entriesCount := prepared.entriesCount
+	candidates := prepared.candidates
+	fail := func(err error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+		return p.refuseNativeGeneration(result, entriesCount, logPrefix, err)
+	}
+	activator, ok := p.metricsStore.(NativeGenerationActivator)
+	if !ok || result.input == nil {
+		return fail(nativeGenerationUnsupportedError(logPrefix, im.session.SessionID))
+	}
+	var activationOutcome ActivationOutcome
 	var activationErr error
 	p.runStoreWrite(writeLane, func() {
 		activationErr = p.withCurrentIndexInput(ctx, result.input, func() error {
-			return activator.ActivateNativeGeneration(ctx, activation)
+			var err error
+			if staged := prepared.staged; staged != nil {
+				if preparedActivator, ok := p.metricsStore.(NativeGenerationPreparedActivator); ok {
+					activationOutcome, err = preparedActivator.ActivateStagedNativeGeneration(ctx, prepared.activation, staged)
+					return err
+				}
+			}
+			activationOutcome, err = activator.ActivateNativeGeneration(ctx, prepared.activation)
+			return err
 		})
 	})
 	if activationErr != nil {
+		var repairPending *GenerationRepairPendingError
+		if errors.As(activationErr, &repairPending) {
+			// Post-commit repair failure: authority already committed, never
+			// rollback. CommittedNow counts once, AlreadyCommitted zero.
+			// Report repair pending honestly, not as a capture refusal, and
+			// never report duplicate successful retained occurrences.
+			if activationOutcome.Disposition == ActivationCommittedNow {
+				slog.Warn(logPrefix+": native generation committed with pending repair", "session_id", im.session.SessionID, "candidate", activationOutcome.CandidateID, "error", activationErr)
+				logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
+				profile := p.makeIndexProfileSession(result, logEntry, 0)
+				return indexedMeta{session: im.session, startMs: im.startMs, indexed: true, retainedUnknown: candidates}, logEntry, profile
+			}
+			if activationOutcome.Disposition == ActivationAlreadyCommitted {
+				slog.Warn(logPrefix+": already-committed native generation repair pending", "session_id", im.session.SessionID, "candidate", activationOutcome.CandidateID, "error", activationErr)
+				logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
+				profile := p.makeIndexProfileSession(result, logEntry, 0)
+				return indexedMeta{session: im.session, startMs: im.startMs, indexed: true}, logEntry, profile
+			}
+		}
 		return fail(fmt.Errorf("%s: activate managed generation for session %s: %w; the stored generation and producer stamps are unchanged", logPrefix, im.session.SessionID, activationErr))
+	}
+	// Per-invocation counting, never crash-global exactly-once: only
+	// CommittedNow counts once. AlreadyCommitted is an idempotent repair with
+	// zero new counts, not a failed capture. NotCommitted carries no counts
+	// by construction (activationErr would be non-nil above).
+	var committed []RetainedUnknownKindCount
+	if activationOutcome.Disposition == ActivationCommittedNow {
+		committed = candidates
 	}
 	logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
 	profile := p.makeIndexProfileSession(result, logEntry, 0)
-	return indexedMeta{session: im.session, startMs: im.startMs, indexed: true}, logEntry, profile
+	return indexedMeta{session: im.session, startMs: im.startMs, indexed: true, retainedUnknown: committed}, logEntry, profile
 }

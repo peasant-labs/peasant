@@ -1,7 +1,7 @@
 //go:build e2e
 
 // End-to-end pull round-trip + pollution gate. It REUSES the skip-gate harness's
-// provisioning machinery (podman Postgres + MinIO + the real village ./cmd/server
+// provisioning machinery (podman Postgres + RustFS + the real village ./cmd/server
 // + the real peasant CLI in throwaway XDG sandboxes) and adds a SECOND village
 // user (village_users.go) to drive the full pull surface end-to-end.
 //
@@ -53,9 +53,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/pull"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // foreignAnnotationType / foreignAnnotationValue is the manual annotation user2
@@ -91,13 +91,13 @@ func TestPullRoundTripE2E(t *testing.T) {
 	user2XDG, user2Dirs := makeSandbox(t, realStateDir, sandboxToken+1)
 
 	// Ephemeral infra — Postgres (with an open database/sql handle for in-DB SQL),
-	// MinIO, the real village server, user1 via setup-demo, user2 via the sibling
+	// RustFS, the real village server, user1 via setup-demo, user2 via the sibling
 	// mint. startEphemeralPostgres owns container cleanup; the parameterized seed
 	// helpers take the returned *sql.DB.
 	bucket := uniqueName("transcripts")
 	dsn, db := startEphemeralPostgres(t)
-	minioEndpoint := startEphemeralMinIO(t, bucket)
-	villageURL := startVillageServer(t, bins.server, dsn, minioEndpoint, bucket)
+	s3Endpoint := startEphemeralRustFS(t, bucket)
+	villageURL := startVillageServer(t, bins.server, dsn, s3Endpoint, bucket)
 
 	// user1 owns the published transcripts; capture its API key to drive the
 	// owner-authenticated seed steps (group-share + set-public) through the real
@@ -570,7 +570,7 @@ func createAssociationRoundTripAnnotation(t *testing.T, dbPath string, associati
 	if err != nil {
 		t.Fatalf("association_roundtrip session_id %q is not a valid session ID: %v", fixture.SessionID, err)
 	}
-	localStore, err := store.Open(dbPath, store.WithPoolSize(1))
+	localStore, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatalf("open production store for association_roundtrip seed at %s: %v", dbPath, err)
 	}

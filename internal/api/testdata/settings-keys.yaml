@@ -1,0 +1,133 @@
+# The keys GET /api/v1/settings serves.
+#
+# requiredNames names every field of config.Config that has a yaml key, by
+# its dotted yaml path. A struct field is not a key; each of its fields is. A
+# test renders a configuration with every field set and fails when a path
+# config.yaml can hold belongs to no entry, and fails when a name here owns no
+# path or GET does not return it.
+#
+# Every name is in exactly one of editable and readOnly, so a new key fails the
+# test until someone decides whether the settings page may change it.
+# editable is the exact set of keys PATCH accepts. readOnly is the exact set of
+# keys GET marks editable false and PATCH refuses: the format version, the
+# Village sign-in flag, the saved selection (the settings page does not edit
+# it), the settings the dashboard reads only when it starts, and the retired
+# keys peasant reads only to refuse or report.
+#
+# choices is the exact set of choice keys, each with its exact menu in order.
+# Every other key has no menu. A test saves every offered value of every
+# editable choice key and reads it back.
+#
+# peasantConfig is the exact set of keys the `peasant config` registry
+# writes. The test also derives the set from the registry itself; this list
+# pins it, so a probe that finds nothing cannot pass.
+requiredNames:
+  - version
+  - user.email
+  - redaction.level
+  - redaction.custom_patterns
+  - sources.claude-code.enabled
+  - sources.claude-code.paths
+  - sources.opencode.enabled
+  - sources.opencode.paths
+  - sources.codex.enabled
+  - sources.codex.paths
+  - sources.cursor.enabled
+  - sources.cursor.paths
+  - sources.strike.enabled
+  - sources.strike.paths
+  - sources.pi.enabled
+  - sources.pi.paths
+  - sources.claude.enabled
+  - sources.claude.paths
+  - sources.mock.enabled
+  - sources.mock.web
+  - sources.mock.tui
+  - sources.mock.api
+  - output.basePath
+  - output.stalenessThresholdSec
+  - village.url
+  - village.connected
+  - daemon.projectMode
+  - push.method
+  - push.sources
+  - push.visibility
+  - push.sharePreference
+  - push.autoPublishIntent
+  - push.license
+  - push.fields.gitRemote
+  - push.fields.gitBranch
+  - push.fields.projectPath
+  - push.fields.hostSlug
+  - push.fields.projectName
+  - push.fields.projectHash
+  - push.concurrency
+  - selection.mode
+  - selection.autoIngestNewBranches
+  - selection.harnesses
+  - selection.providers
+  - display.theme
+editable:
+  - user.email
+  - redaction.level
+  - redaction.custom_patterns
+  - sources.claude-code.enabled
+  - sources.claude-code.paths
+  - sources.opencode.enabled
+  - sources.opencode.paths
+  - sources.codex.enabled
+  - sources.codex.paths
+  - sources.cursor.enabled
+  - sources.cursor.paths
+  - sources.strike.enabled
+  - sources.strike.paths
+  - sources.pi.enabled
+  - sources.pi.paths
+  - output.stalenessThresholdSec
+  - village.url
+  - daemon.projectMode
+  - push.method
+  - push.sources
+  - push.visibility
+  - push.sharePreference
+  - push.autoPublishIntent
+  - push.license
+  - push.fields.gitRemote
+  - push.fields.gitBranch
+  - push.fields.projectPath
+  - push.fields.hostSlug
+  - push.fields.projectName
+  - push.concurrency
+  - display.theme
+readOnly:
+  - version
+  - village.connected
+  - selection.mode
+  - selection.autoIngestNewBranches
+  - selection.harnesses
+  - selection.providers
+  - sources.claude.enabled
+  - sources.claude.paths
+  - sources.mock.enabled
+  - sources.mock.web
+  - sources.mock.tui
+  - sources.mock.api
+  - output.basePath
+  - push.fields.projectHash
+choices:
+  redaction.level: [standard]
+  push.method: [all, by-source]
+  push.visibility: [private, group, public]
+  push.sharePreference: ["", share-later]
+  push.license: ["", CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0]
+  selection.mode: [all, selected]
+  display.theme: [dark, light]
+peasantConfig:
+  - redaction.level
+  - push.visibility
+  - push.sharePreference
+  - push.autoPublishIntent
+  - push.license
+  - selection.mode
+  - selection.autoIngestNewBranches
+  - selection.harnesses

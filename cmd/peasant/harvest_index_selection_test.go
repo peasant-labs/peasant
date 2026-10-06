@@ -19,10 +19,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/harvest_index_selection.yaml
@@ -93,6 +93,7 @@ func LoadHarvestIndexSelectionFixtures(t testing.TB) ([]harvestIndexSessionFixtu
 }
 
 func TestHarvestIndexSelectionMounted(t *testing.T) {
+	t.Parallel()
 	sessions, cases := LoadHarvestIndexSelectionFixtures(t)
 	// The mounted command opens its store with the managed-generation writer and
 	// snapshot reader, so the run advertises the activated native targets for the
@@ -107,7 +108,7 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
+			db, err := openPreparedStore(t, dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatal(err)
 			}

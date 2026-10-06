@@ -14,9 +14,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // openCodeSessionClockMutation names the freshness change a case applies before
@@ -89,6 +89,7 @@ func loadOpenCodeSessionClockMountCases(data []byte) ([]openCodeSessionClockCase
 // Moving only the mtime floor is a no-op; moving source metadata recaptures the
 // session even when the source clock remains older than the ingest audit time.
 func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
+	t.Parallel()
 	oldModTime := time.Unix(1_700_001_000, 0)
 	newerModTime := time.Unix(1_700_002_000, 0)
 	newRowMS := int64(1_700_002_000_000)
@@ -122,7 +123,7 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			}
 			capture := func() ingest.PublicationInputBundle {
 				t.Helper()
-				db, err := store.Open(storePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+				db, err := openPreparedStore(t, storePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 				if err != nil {
 					t.Fatal(err)
 				}

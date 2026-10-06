@@ -10,11 +10,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -116,9 +119,6 @@ func TestWebCapabilitiesMatrix_StrictDecoder(t *testing.T) {
 // forwarded to the forked foreground child.
 func TestWebCapabilitiesMatrix(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping real-binary web capabilities matrix in -short mode")
-	}
 	fixtures := loadWebCapabilityMatrixFixtures(t)
 	bin := buildPeasantMatrixBinary(t)
 
@@ -142,29 +142,99 @@ func TestWebCapabilitiesMatrix(t *testing.T) {
 			assertSPARouteMounted(t, baseURL+"/projects/abc123/11111111-1111-4111-8111-111111111111")
 		})
 	}
+
+	// The same real binary proves that background `web start` refuses a port
+	// another server already answers, before it forks. Without that check the
+	// readiness probe would take the other server's answer as its own.
+	t.Run("background start refuses a port another server answers", func(t *testing.T) {
+		holder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer holder.Close()
+		port := holder.Listener.Addr().(*net.TCPAddr).Port
+		env := isolatedXDGEnv(t)
+		stateHome := ""
+		for _, kv := range env {
+			if value, ok := strings.CutPrefix(kv, defaults.EnvXDGStateHome.String()+"="); ok {
+				stateHome = value
+			}
+		}
+		t.Cleanup(func() {
+			stop := exec.Command(bin, "web", "stop", "--port", strconv.Itoa(port))
+			stop.Env = env
+			_ = stop.Run()
+		})
+
+		cmd := exec.Command(bin, "web", "start", "--no-browser", "--port", strconv.Itoa(port))
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("background `peasant web start` succeeded on port %d that another server answers; output: %s", port, out)
+		}
+		if !strings.Contains(string(out), "peasant web stop") || strings.Contains(string(out), "Usage:") {
+			t.Fatalf("background `peasant web start` output = %q, want the actionable refusal without usage text", out)
+		}
+		pidFile := filepath.Join(stateHome, "peasant", fmt.Sprintf("web:%d.pid", port))
+		if _, statErr := os.Stat(pidFile); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("background `peasant web start` wrote %s for a server it did not start (stat error: %v)", pidFile, statErr)
+		}
+	})
 }
 
-// buildPeasantMatrixBinary compiles the peasant CLI into the test's temp dir so
-// the matrix drives the real production entry point rather than an in-process
-// server.
+// peasantCLIOnce guards the single per-test-binary CLI build. Both the web
+// capabilities matrix and any future in-process test that needs the real
+// production entry point share this one artifact, so the test binary runs
+// exactly one `go build` no matter how many tests ask for it.
+var (
+	peasantCLIOnce sync.Once
+	peasantCLIPath string
+	peasantCLIErr  error
+)
+
+// buildPeasantMatrixBinary returns the peasant CLI for the matrix. The binary is
+// built once per test binary (through the shared peasantCLIOnce) so the matrix
+// drives the real production entry point rather than an in-process server.
+//
+// The existing PEASANT_BIN seam is honored first: when a caller (or the gate)
+// has already produced a CLI, that path is used instead of building, so a suite
+// that pre-builds once pays for the build once, not once per test binary.
 func buildPeasantMatrixBinary(t *testing.T) string {
 	t.Helper()
-	out := filepath.Join(t.TempDir(), "peasant")
-	cmd := exec.Command("go", "build", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf(
-			"build peasant binary for the web capabilities matrix failed.\n"+
-				"  what: `go build -o %s github.com/peasant-labs/peasant/cmd/peasant` returned an error\n"+
-				"  why:  %v\n"+
-				"  where: cmd/peasant/web_capabilities_matrix_test.go buildPeasantMatrixBinary\n"+
-				"  when: before booting any matrix case\n"+
-				"  means: the matrix cannot exercise the real binary\n"+
-				"  fix:  run the build manually to see the compiler error; ensure the module builds\n"+
-				"  output:\n%s",
-			out, err, output,
-		)
+	if injected := strings.TrimSpace(os.Getenv(defaults.EnvPeasantBin.String())); injected != "" {
+		return injected
 	}
-	return out
+	peasantCLIOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "peasant-matrix-bin-*")
+		if err != nil {
+			peasantCLIErr = fmt.Errorf("create temp dir for the peasant CLI build: %w", err)
+			return
+		}
+		out := filepath.Join(dir, "peasant")
+		// -race=false is explicit: the matrix asserts the advertised
+		// capabilities of the production binary, not race coverage of it. The
+		// build flag is resolved by the no-race partition registry against this
+		// exec site.
+		cmd := exec.Command("go", "build", "-race=false", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			peasantCLIErr = fmt.Errorf(
+				"build peasant binary for the web capabilities matrix failed.\n"+
+					"  what: `go build -race=false -o %s github.com/peasant-labs/peasant/cmd/peasant` returned an error\n"+
+					"  why:  %v\n"+
+					"  where: cmd/peasant/web_capabilities_matrix_test.go buildPeasantMatrixBinary\n"+
+					"  when: before booting any matrix case\n"+
+					"  means: the matrix cannot exercise the real binary\n"+
+					"  fix:  run the build manually to see the compiler error; ensure the module builds\n"+
+					"  output:\n%s",
+				out, err, output,
+			)
+			return
+		}
+		peasantCLIPath = out
+	})
+	if peasantCLIErr != nil {
+		t.Fatalf("%v", peasantCLIErr)
+	}
+	return peasantCLIPath
 }
 
 // isolatedXDGEnv returns the parent process environment with HOME and the XDG
@@ -358,18 +428,32 @@ func assertSPARouteMounted(t *testing.T, url string) {
 	}
 }
 
-// freeTCPPort reserves an ephemeral port and returns it. There is a small window
-// between closing the listener and the server binding; it is acceptable for a
-// local test and mirrors the existing free-port discovery idiom.
+// freeTCPPort reserves an ephemeral port that is free on both loopback
+// addresses, because the server binds both, and returns it. There is a small
+// window between closing the listeners and the server binding; it is
+// acceptable for a local test and mirrors the existing free-port discovery
+// idiom.
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve free TCP port: %v", err)
+	for attempt := 1; attempt <= 8; attempt++ {
+		ln, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("reserve free TCP port: %v", err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		v6, v6Err := net.Listen("tcp6", net.JoinHostPort("::1", strconv.Itoa(port)))
+		if v6Err == nil {
+			_ = v6.Close()
+		}
+		if err := ln.Close(); err != nil {
+			t.Fatalf("release reserved TCP port %d: %v", port, err)
+		}
+		// Any IPv6 failure other than a busy port means the host has no IPv6
+		// loopback, and the server then binds IPv4 only.
+		if v6Err == nil || !errors.Is(v6Err, syscall.EADDRINUSE) {
+			return port
+		}
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	if err := ln.Close(); err != nil {
-		t.Fatalf("release reserved TCP port %d: %v", port, err)
-	}
-	return port
+	t.Fatal("every reserved TCP port was already taken on the IPv6 loopback")
+	return 0
 }

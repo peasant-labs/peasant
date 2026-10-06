@@ -1,16 +1,13 @@
 package kit_test
 
 import (
-	"bytes"
 	_ "embed"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/render_matrix.yaml
@@ -39,17 +36,8 @@ type renderMatrixDocument struct {
 func loadRenderMatrix(t *testing.T) renderMatrixDocument {
 	t.Helper()
 	var doc renderMatrixDocument
-	dec := yaml.NewDecoder(bytes.NewReader(renderMatrixData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(renderMatrixData, &doc); err != nil {
 		t.Fatalf("decode testdata/render_matrix.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("render_matrix.yaml must hold exactly one document: %v", err)
 	}
 	return doc
 }

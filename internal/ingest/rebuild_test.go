@@ -10,6 +10,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -124,7 +125,7 @@ func TestHarvestRebuildFromFiles(t *testing.T) {
 			}
 
 			output := "/output"
-			database, err := store.Open(filepath.Join(t.TempDir(), "rebuild.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +159,7 @@ func TestHarvestRebuildFromFiles(t *testing.T) {
 				c.Force = true
 			})
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessStrike: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 				ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 				ingest.WithHarvesterVersions(maps.Clone(ingest.HarvesterVersionRegistry)),
 				ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))

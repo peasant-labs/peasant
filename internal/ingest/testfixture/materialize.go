@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // MaterializedSource is a synthetic source confined to a test-owned temporary

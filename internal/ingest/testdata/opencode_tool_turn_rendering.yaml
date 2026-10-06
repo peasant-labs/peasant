@@ -325,7 +325,4 @@ cases:
       - role: system
         entry_type: system
         content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"
-      # The unrecognized part keeps rendering as its own inert system note.
-      - role: system
-        entry_type: system
-        content: "an inert note from a newer OpenCode"
+      # The unrecognized part is retained as hidden evidence on its owner.

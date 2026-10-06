@@ -1,15 +1,14 @@
 package sessionorigin_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,14 +43,8 @@ type menuCase struct {
 // lost a required case or declares a refusal with no needle to prove it by.
 func LoadMenuFixtures(data []byte) (menuFixture, error) {
 	var fixture menuFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return menuFixture{}, fmt.Errorf("decode menu fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return menuFixture{}, fmt.Errorf("menu fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {

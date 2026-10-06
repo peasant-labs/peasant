@@ -13,9 +13,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -60,6 +60,7 @@ type mountRetentionSeedFixture struct {
 }
 
 func TestKickstartPreview_ImportedEmptySessionShowsRawSource(t *testing.T) {
+	t.Parallel()
 	dataHome := t.TempDir()
 	sourcePath := filepath.Join(t.TempDir(), "snapshot.jsonl")
 	source := []byte(`{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}` + "\n")
@@ -71,7 +72,7 @@ func TestKickstartPreview_ImportedEmptySessionShowsRawSource(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create data directory: %v", err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -143,6 +144,7 @@ func loadMountContractDocument(t *testing.T) mountContractDocument {
 // radio option proves the mounted Working value equals the fixture; the clean
 // receipt proves the same accessor sees an equal Baseline before any edit.
 func TestRunKickstartFlowPairsRetentionBeforeMount(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadMountContractDocument(t).RetentionSeeds {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
@@ -315,7 +317,7 @@ func seedKickstartStore(t *testing.T, dataHome string, recorded []testutil.TurnF
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create data directory: %v", err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

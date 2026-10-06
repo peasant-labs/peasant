@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type PublicationRecord struct {
@@ -126,6 +126,73 @@ func (s *Store) Publication(ctx context.Context, origin, owner string, projectHa
 	return out, nil
 }
 
+// HasPublication reports whether the store holds a publication receipt for the
+// session, from any Village origin and owner and under any project hash.
+// SavePublication writes a receipt only after Village confirmed the publish, so
+// its presence is the local record that the session was published. The read is
+// keyed on the session alone: a later harvest can re-attribute the session to a
+// new project hash, and the receipt keeps the hash it was published under until
+// the next publish.
+func (s *Store) HasPublication(ctx context.Context, sessionID string) (bool, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return false, fmt.Errorf("check publication receipt: acquire SQLite connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	found := false
+	err = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_publications WHERE session_id=? LIMIT 1`, &sqlitex.ExecOptions{Args: []any{sessionID}, ResultFunc: func(*sqlite.Stmt) error {
+		found = true
+		return nil
+	}})
+	if err != nil {
+		return false, fmt.Errorf("check publication receipt: query session %q: %w", sessionID, err)
+	}
+	return found, nil
+}
+
+// PublishedToVillage reports whether the store holds a receipt for the session
+// from this Village account, under any project identity. The Village keys a
+// transcript by its owner and the local session, so a harvest that
+// re-attributes the session to a new project does not make its next upload a
+// first publication; a receipt from another Village or account does not count.
+func (s *Store) PublishedToVillage(ctx context.Context, origin, owner, sessionID string) (bool, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return false, fmt.Errorf("check village publication receipt: acquire SQLite connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	found := false
+	err = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_publications WHERE village_origin=? AND owner_user_id=? AND session_id=? LIMIT 1`, &sqlitex.ExecOptions{Args: []any{origin, owner, sessionID}, ResultFunc: func(*sqlite.Stmt) error {
+		found = true
+		return nil
+	}})
+	if err != nil {
+		return false, fmt.Errorf("check village publication receipt: query session %q: %w", sessionID, err)
+	}
+	return found, nil
+}
+
+// LatestSessionPublicationAttempt returns the most recent recorded attempt to
+// publish the session to this Village account, under any project identity, or
+// nil when none was recorded. Like PublishedToVillage it follows the Village's
+// key, so an attempt recorded before a re-attribution still counts.
+func (s *Store) LatestSessionPublicationAttempt(ctx context.Context, origin, owner, sessionID string) (*PublicationAttemptDiagnostic, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read publication attempt diagnostic: acquire SQLite connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	var out *PublicationAttemptDiagnostic
+	err = sqlitex.ExecuteTransient(conn, `SELECT attempted_at,stage,message,project_hash FROM publication_attempt_diagnostics WHERE village_origin=? AND owner_user_id=? AND session_id=? ORDER BY attempted_at DESC,id DESC LIMIT 1`, &sqlitex.ExecOptions{Args: []any{origin, owner, sessionID}, ResultFunc: func(stmt *sqlite.Stmt) error {
+		out = &PublicationAttemptDiagnostic{VillageOrigin: origin, OwnerUserID: owner, SessionID: sessionID, ProjectHash: schema.ProjectHash(stmt.ColumnText(3)), AttemptedAt: stmt.ColumnInt64(0), Stage: PublicationAttemptStage(stmt.ColumnText(1)), Message: stmt.ColumnText(2)}
+		return nil
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("read publication attempt diagnostic: query latest attempt for session %q: %w", sessionID, err)
+	}
+	return out, nil
+}
+
 func (s *Store) RecordPublicationAttempt(ctx context.Context, d PublicationAttemptDiagnostic) error {
 	if d.VillageOrigin == "" || d.OwnerUserID == "" || d.SessionID == "" || d.ProjectHash == "" || d.Stage == "" || d.Message == "" {
 		return fmt.Errorf("record publication attempt: origin, owner, project, session, stage, and actionable message are required")
@@ -166,4 +233,99 @@ func (s *Store) LatestPublicationAttempt(ctx context.Context, origin, owner stri
 		return nil, fmt.Errorf("read publication attempt diagnostic: query latest targeted failure: %w", err)
 	}
 	return out, nil
+}
+
+// SessionPublications returns, for each named session that holds a receipt, the
+// receipt this account holds for it on this Village: the one origin and owner
+// name. The read is keyed on the session and not on its project: a later
+// harvest can re-attribute a session to another project hash, and the receipt
+// keeps the hash it was published under until the next publish. When a session
+// holds receipts under more than one project hash, the one Village updated last
+// is returned. A session with no receipt for this account is absent from the
+// map.
+func (s *Store) SessionPublications(ctx context.Context, origin, owner string, sessionIDs []string) (map[string]PublicationRecord, error) {
+	out := make(map[string]PublicationRecord, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read session publication receipts: acquire SQLite connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		batch := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		args := append([]any{origin, owner}, sessionIDArgs(batch)...)
+		query := `SELECT session_id, project_hash, receipt_json FROM session_publications
+WHERE village_origin=? AND owner_user_id=? AND session_id IN (` + sqlPlaceholders(len(batch)) + `)
+ORDER BY session_id, remote_updated_at DESC, project_hash`
+		err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
+			sessionID := stmt.ColumnText(0)
+			if _, seen := out[sessionID]; seen {
+				return nil
+			}
+			record, scanErr := scanPublicationRecord(stmt, origin, owner)
+			if scanErr != nil {
+				return scanErr
+			}
+			out[sessionID] = record
+			return nil
+		}})
+		if err != nil {
+			return nil, fmt.Errorf("read session publication receipts: decode persisted authoritative state: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// SessionPublicationAttempts returns, for each named session, the most recent
+// failed publish attempt this account recorded for it on this Village, under any
+// project hash. A session with no recorded attempt is absent from the map. The
+// attempt is reported whether or not a later publish succeeded; a caller
+// compares its time with the receipt's.
+func (s *Store) SessionPublicationAttempts(ctx context.Context, origin, owner string, sessionIDs []string) (map[string]PublicationAttemptDiagnostic, error) {
+	out := make(map[string]PublicationAttemptDiagnostic, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read session publication attempts: acquire SQLite connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		batch := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		args := append([]any{origin, owner}, sessionIDArgs(batch)...)
+		query := `SELECT session_id, project_hash, attempted_at, stage, message FROM publication_attempt_diagnostics
+WHERE village_origin=? AND owner_user_id=? AND session_id IN (` + sqlPlaceholders(len(batch)) + `)
+ORDER BY session_id, attempted_at DESC, id DESC`
+		err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
+			sessionID := stmt.ColumnText(0)
+			if _, seen := out[sessionID]; seen {
+				return nil
+			}
+			out[sessionID] = PublicationAttemptDiagnostic{
+				VillageOrigin: origin,
+				OwnerUserID:   owner,
+				SessionID:     sessionID,
+				ProjectHash:   schema.ProjectHash(stmt.ColumnText(1)),
+				AttemptedAt:   stmt.ColumnInt64(2),
+				Stage:         PublicationAttemptStage(stmt.ColumnText(3)),
+				Message:       stmt.ColumnText(4),
+			}
+			return nil
+		}})
+		if err != nil {
+			return nil, fmt.Errorf("read session publication attempts: query the latest failure of each session: %w", err)
+		}
+	}
+	return out, nil
+}
+
+func sessionIDArgs(sessionIDs []string) []any {
+	args := make([]any, len(sessionIDs))
+	for i, id := range sessionIDs {
+		args[i] = id
+	}
+	return args
 }

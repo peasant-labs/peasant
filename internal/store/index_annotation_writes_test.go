@@ -1,10 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,10 +11,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/index_annotation_writes.yaml
@@ -44,14 +41,8 @@ func loadIndexAnnotationWriteFixtures(t *testing.T) []indexAnnotationWriteCase {
 		RequiredNames []string                   `yaml:"requiredNames"`
 		Cases         []indexAnnotationWriteCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexAnnotationWritesYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexAnnotationWritesYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("annotation writes fixture requires one document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, row := range document.Cases {

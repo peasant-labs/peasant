@@ -24,7 +24,7 @@ func TestOpenCodeMetadataFillsRowStatsIdentityAndSlugFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve synthetic OpenCode root: %v", err)
 	}
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
 	discovered, err := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
 	if err != nil {
 		t.Fatalf("run production OpenCode discovery: %v", err)

@@ -1,14 +1,13 @@
 package kit_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/previewsplit_error_tokens.yaml
@@ -24,9 +23,7 @@ type previewErrorTokens struct {
 func loadPreviewErrorTokens(t *testing.T) previewErrorTokens {
 	t.Helper()
 	var doc previewErrorTokens
-	dec := yaml.NewDecoder(bytes.NewReader(previewErrorTokensData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewErrorTokensData, &doc); err != nil {
 		t.Fatalf("decode previewsplit_error_tokens.yaml: %v", err)
 	}
 	if doc.ExpectedTokenCount != len(doc.Tokens) || len(doc.Tokens) == 0 {

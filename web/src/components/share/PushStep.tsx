@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { WhereDoesThisGo, Button } from '@/lib/ft-ui';
 import { displayProject } from '@/lib/quality/utils';
 import { runPush } from '@/lib/share/push';
-import type { ShareSession, LabelSelection } from '@/lib/share/types';
+import type { ShareSession } from '@/lib/share/types';
 import {
   DEFAULT_REDACTION_LEVEL,
   type SelectableRedactionLevel,
@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
-function commonsUrl(): string {
+/** The village transcripts are published to. */
+function villageUrl(): string {
   return process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://village.peasantlabs.org';
 }
 
@@ -95,7 +96,7 @@ function usePush(sessionIds: string[], redactionLevel: SelectableRedactionLevel,
       setStates((prev) => prev.map((s) => ({ ...s, state: 'skipped' })));
       setSummary({ done: 0, skipped: sessionIds.length, errors: 0, total: sessionIds.length });
       setTopError(
-        'mock mode · the push is not run. Disable mock data to contribute for real.',
+        'mock mode · the push is not run. Disable mock data to publish for real.',
       );
       setPhase('done');
       return;
@@ -109,7 +110,8 @@ function usePush(sessionIds: string[], redactionLevel: SelectableRedactionLevel,
           const r = byId.get(id);
           if (!r) return { sessionId: id, state: 'skipped' };
           if (r.status === 'error') return { sessionId: id, state: 'error', error: r.error };
-          if (r.status === 'skipped') return { sessionId: id, state: 'skipped' };
+          // A held session waits for ingest: nothing was sent, so it is not done.
+          if (r.status === 'skipped' || r.status === 'held') return { sessionId: id, state: 'skipped' };
           return { sessionId: id, state: 'done' };
         }),
       );
@@ -192,13 +194,6 @@ function SessionPushRow({
 interface PushStepProps {
   sessions: ShareSession[];
   selectedIds: Set<string>;
-  /**
-   * Labels (annotations) chosen on the Labels step, grouped auto/manual.
-   * Surfaced in the transparency panel for the count only — the web push sends
-   * the session's annotations as ingested and does not filter by this
-   * selection. Label-level filtering is CLI-only (`peasant push --annotation-id`).
-   */
-  labels: LabelSelection;
   /** Redaction level chosen on the Redact step — sent with the push. */
   redactionLevel?: SelectableRedactionLevel;
   /** When true, the push is not run (mock mode has no village). */
@@ -209,7 +204,6 @@ interface PushStepProps {
 export function PushStep({
   sessions,
   selectedIds,
-  labels,
   redactionLevel = DEFAULT_REDACTION_LEVEL,
   useMock = false,
   onFooterActionsChange,
@@ -234,36 +228,14 @@ export function PushStep({
     [selectedSessions],
   );
 
-  // Label totals for the transparency panel: how many annotations were
-  // discovered vs. how many the user kept. Display-only — see the `labels` prop
-  // note (the web push does not filter by label).
-  const labelStats = useMemo(() => {
-    let discovered = 0;
-    let auto = 0;
-    let manual = 0;
-    for (const labelsForSession of labels.bySession.values()) {
-      for (const label of labelsForSession) {
-        discovered++;
-        if (!labels.includedIds.has(label.id)) continue;
-        if (label.origin === 'manual') manual++;
-        else auto++;
-      }
-    }
-    return { discovered, included: labels.includedIds.size, auto, manual };
-  }, [labels]);
-
   // The two-column transparency split, encoded for the fairtrade
   // `WhereDoesThisGo` composite: each line names a thing + its measure.
   const sentItems = useMemo(
     () => [
       `redacted transcripts (~${formatBytes(transcriptBytes)})`,
       `session metadata · ${totalTokens.toLocaleString()} tokens`,
-      `selected labels · ${labelStats.included} of ${labelStats.discovered}` +
-        (labelStats.included > 0
-          ? ` (${labelStats.auto} automatic · ${labelStats.manual} manual)`
-          : ''),
     ],
-    [transcriptBytes, totalTokens, labelStats],
+    [transcriptBytes, totalTokens],
   );
 
   const privateItems = useMemo(
@@ -273,13 +245,12 @@ export function PushStep({
       // matching is best effort, so this line describes what the ${redactionLevel}
       // level FINDS rather than promising it found everything.
       `PII matching known redaction patterns · rewritten at the ${redactionLevel} level, best effort`,
-      `excluded labels · ${labelStats.discovered - labelStats.included} opted out`,
     ],
-    [redactionLevel, labelStats],
+    [redactionLevel],
   );
 
   const { states, phase, topError, start, summary } = usePush(sessionIds, redactionLevel, useMock);
-  const destination = commonsUrl();
+  const destination = villageUrl();
 
   useEffect(() => {
     onFooterActionsChange(
@@ -307,8 +278,8 @@ export function PushStep({
           {/* Destination context + the context-travels line — kept as
               app chrome; the composite carries the two-column split. */}
           <p className="px-1 text-xs text-ink-3">
-            The public Peasant commons — {selectedSessions.length} session
-            {selectedSessions.length === 1 ? '' : 's'} will be uploaded.
+            {selectedSessions.length} session
+            {selectedSessions.length === 1 ? '' : 's'} will be uploaded to village.
           </p>
           <p className="px-1 text-xs text-ink-3">
             Annotations and commit links travel with the transcript — minus whatever
@@ -318,10 +289,14 @@ export function PushStep({
           {/* Post-publish note — kept as app chrome; the local copy is untouched. */}
           <div className="flex items-start gap-2 border border-rule bg-surface-hover px-5 py-3">
             <ShieldCheckIcon className="mt-0.5 size-3.5 flex-shrink-0 text-ink-2" />
+            {/* The push opens a first publication private and keeps the
+                audience of an update; who can read a transcript is set from
+                its own page, in the publish popup. */}
             <p className="text-xs text-ink-2">
-              After publishing, sessions are{' '}
-              <span className="font-medium text-ink">public</span> on the commons.
-              Your local copy is untouched and stays in{' '}
+              A first publication is{' '}
+              <span className="font-medium text-ink">private</span> on village, and an
+              update keeps who can read it. Share a transcript with a collective from
+              its own page. Your local copy is untouched and stays in{' '}
               <span className="font-mono text-ink">{LOCAL_SYNC_PATH}</span>.
             </p>
           </div>
@@ -331,11 +306,11 @@ export function PushStep({
       {(phase === 'pushing' || phase === 'done') && <div className="px-5 py-3 bg-surface border border-rule-strong">
         {phase === 'pushing' ? (
           <span className="inline-flex items-center gap-2 text-sm text-ink-3">
-            <LoaderIcon className="size-4 animate-spin" /> Contributing…
+            <LoaderIcon className="size-4 animate-spin" /> publishing…
           </span>
         ) : (
           <span className="text-sm text-ink-3 tabular-nums">
-            {summary.done} shared
+            {summary.done} published
             {summary.skipped > 0 ? `, ${summary.skipped} skipped` : ''}
             {summary.errors > 0 ? `, ${summary.errors} failed` : ''}
           </span>
@@ -358,7 +333,7 @@ export function PushStep({
           <div className="flex flex-col items-center text-center px-6 py-8">
             <CheckCircle2Icon className="size-10 text-success mb-3" />
             <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink">
-              {summary.done} contributed to the commons
+              {summary.done} published to village
               {summary.errors > 0 ? ` · ${summary.errors} failed` : ''}
             </h3>
             <Button
@@ -371,7 +346,7 @@ export function PushStep({
               rel="noopener noreferrer"
               iconRight={ExternalLinkIcon}
             >
-              View in the commons
+              open village
             </Button>
           </div>
         </div>

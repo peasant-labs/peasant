@@ -1,0 +1,57 @@
+required_names:
+  - canonical_user_lexical
+  - reasoning_content_lexical
+  - reasoning_summary_lexical
+  - whitespace_escaped_numeric
+  - wide_128
+  - wide_512
+  - wide_2048
+cases:
+  - name: canonical_user_lexical
+    kind: future
+    namespace: message_block
+    pointer: /payload/item/content/1
+    record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"lex-user-1","content":[{"type":"input_text","text":"before"},{"type":"future","n":9007199254740993,"text":"lexical-leaf"},{"type":"input_text","text":"after"}]}}}'
+    expected_payload: '{"type":"future","n":9007199254740993,"text":"lexical-leaf"}'
+    expected_siblings: 2
+    expected_known: ['{"type":"input_text","text":"before"}', '{"type":"input_text","text":"after"}']
+    expected_position: 4
+  - name: reasoning_content_lexical
+    kind: future
+    namespace: reasoning_content
+    pointer: /payload/item/content/1
+    record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"lex-reason-1","content":[{"type":"reasoning_text","text":"before"},{"type":"future","e":1e3,"text":"reason-leaf"},{"type":"reasoning_text","text":"after"}]}}}'
+    expected_payload: '{"type":"future","e":1e3,"text":"reason-leaf"}'
+    expected_siblings: 2
+    expected_known: ['{"type":"reasoning_text","text":"before"}', '{"type":"reasoning_text","text":"after"}']
+    expected_position: 4
+  - name: reasoning_summary_lexical
+    kind: future
+    namespace: reasoning_summary
+    pointer: /payload/item/summary/1
+    record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"lex-reason-2","summary":[{"type":"summary_text","text":"before"},{"type":"future","z":-0.0,"text":"summary-leaf"},{"type":"summary_text","text":"after"}]}}}'
+    expected_payload: '{"type":"future","z":-0.0,"text":"summary-leaf"}'
+    expected_siblings: 2
+    expected_known: ['{"type":"summary_text","text":"before"}', '{"type":"summary_text","text":"after"}']
+    expected_position: 4
+  - name: whitespace_escaped_numeric
+    kind: future
+    namespace: message_block
+    pointer: /payload/content/1
+    record: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"},{ "type" : "future" , "n" : 9007199254740993 , "e" : 1E3 , "z" : -0.0 , "text" : "a\"b\\c" },{"type":"input_text","text":"after"}]}}'
+    expected_payload: '{ "type" : "future" , "n" : 9007199254740993 , "e" : 1E3 , "z" : -0.0 , "text" : "a\"b\\c" }'
+    expected_siblings: 2
+    expected_known: ['{"type":"input_text","text":"before"}', '{"type":"input_text","text":"after"}']
+    expected_position: 3
+  - name: wide_128
+    wide_siblings: 128
+    leaf_size: 256
+    unknown_every: 3
+  - name: wide_512
+    wide_siblings: 512
+    leaf_size: 256
+    unknown_every: 3
+  - name: wide_2048
+    wide_siblings: 2048
+    leaf_size: 256
+    unknown_every: 3

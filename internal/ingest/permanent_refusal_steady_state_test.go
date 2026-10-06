@@ -12,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -66,7 +67,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
-			database, err := store.Open(filepath.Join(t.TempDir(), "steady.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +130,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 				cfg := makePipelineConfig(testOutputDir)
 				cfg.Reindex = true
 				adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessStrike: makeStubAdapter(nil, nil)}
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 					ingest.WithHarvesterVersions(versions),
 					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
@@ -167,7 +168,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 			if capture.Status == ingest.ContentCaptureComplete {
 				t.Fatalf("a refused transcript was certified complete: %+v", capture)
 			}
-			wantCode := ingest.ContentCaptureStrictRefused
+			wantCode := ingest.ContentCaptureUnknownDataRetained
 			if fixture.Omitted {
 				wantCode = ingest.ContentCaptureSourceRecordsOmitted
 			}

@@ -8,7 +8,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
@@ -123,7 +122,7 @@ func seedTestSession(t *testing.T, dir, sessionID string) {
 		t.Fatalf("seed: create data directory: %v", err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seed: open store: %v", err)
 	}

@@ -5,16 +5,15 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io/fs"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"testing/fstest"
-	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"gopkg.in/yaml.v3"
 )
@@ -126,7 +125,8 @@ func TestPipelineCancellationBeforeDiff(t *testing.T) {
 			filesystem.canceled.Store(true)
 			adapter := progressAdapter{sessions: []DiscoveredSession{{SessionID: "session-one", Harness: HarnessClaudeCode}}}
 			pipeline := &Pipeline{
-				fs: filesystem,
+				arenaSizeBytes: testIngestArenaBytes,
+				fs:             filesystem,
 				adapters: map[Harness]AdapterFactory{
 					HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter { return adapter },
 				},
@@ -202,10 +202,11 @@ func TestPipelineReindexCancellationDuringDiffLookup(t *testing.T) {
 	// on disk for DIFF to have a target at all.
 	output := writeReindexProgressFixture(t)
 	pipeline := &Pipeline{
-		fs:           &OSFileSystem{},
-		store:        &cancelProgressStore{cancel: cancel, returnError: true},
-		metricsStore: &cancelReindexProgressStore{},
-		config:       PipelineConfig{Reindex: true, Progress: progress, OutputDir: ResolvedPath(output)},
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             &OSFileSystem{},
+		store:          &cancelProgressStore{cancel: cancel, returnError: true},
+		metricsStore:   &cancelReindexProgressStore{},
+		config:         PipelineConfig{Reindex: true, Progress: progress, OutputDir: ResolvedPath(output)},
 	}
 	_, err := pipeline.Run(ctx)
 	if !errors.Is(err, context.Canceled) {
@@ -272,7 +273,8 @@ func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
 	progress := NewProgressState()
 	filesystem := &cancelNestedDiffFS{cancel: cancel}
 	pipeline := &Pipeline{
-		fs: filesystem,
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             filesystem,
 		adapters: map[Harness]AdapterFactory{
 			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
 				return progressAdapter{sessions: []DiscoveredSession{
@@ -314,43 +316,7 @@ func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
 
 const cancelNestedDiffOutputDir = "/out"
 
-// cancelNestedDiffFS returns a host/session layout for every directory read, so
-// a lookup that misses the flat metadata path walks into the nested subagents
-// layout. The first Stat under "/subagents/session-two/" cancels the run from
-// inside that walk. Counters are atomic because the classifier pool calls the
-// filesystem from several goroutines at once.
-type cancelNestedDiffFS struct {
-	emptyProgressFS
-	cancel      context.CancelFunc
-	reads       atomic.Int64
-	stats       atomic.Int64
-	canceled    atomic.Bool
-	afterCancel atomic.Int64
-}
-
-var _ FileSystem = (*cancelNestedDiffFS)(nil)
-
-func (f *cancelNestedDiffFS) ReadDir(string) ([]os.DirEntry, error) {
-	f.reads.Add(1)
-	if f.canceled.Load() {
-		f.afterCancel.Add(1)
-	}
-	return fs.ReadDir(fstest.MapFS{
-		"parent":  &fstest.MapFile{Mode: fs.ModeDir},
-		"sibling": &fstest.MapFile{Mode: fs.ModeDir},
-	}, ".")
-}
-
-func (f *cancelNestedDiffFS) Stat(path string) (os.FileInfo, error) {
-	f.stats.Add(1)
-	if f.canceled.Load() {
-		f.afterCancel.Add(1)
-	}
-	if f.cancel != nil && strings.Contains(path, "/subagents/session-two/") && f.canceled.CompareAndSwap(false, true) {
-		f.cancel()
-	}
-	return nil, os.ErrNotExist
-}
+// cancelNestedDiffFS lives in fsfault_test.go (Owner B).
 
 func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	progress := NewProgressState()
@@ -365,7 +331,8 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 		{SessionID: "session-two", Harness: HarnessClaudeCode},
 	}
 	pipeline := &Pipeline{
-		fs: filesystem,
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             filesystem,
 		adapters: map[Harness]AdapterFactory{
 			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
 				return progressAdapter{sessions: sessions}
@@ -388,24 +355,21 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 		done <- err
 	}()
 
+	waitCtx := testwait.Context(t)
 	select {
 	case <-secondReadStarted:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("DIFF did not reach the controlled second-session metadata lookup")
 	}
 
 	// The pool classifies sessions concurrently, so the first session may not
 	// have finished yet when the second blocks. Wait for it: progress advances
-	// as each session finishes, not only when the slice ends.
-	waitForDiffProgress(t, progress, 1)
+	// as each session finishes, not only when the batch ends.
+	waitForStageProgress(t, progress, StageDiff, 1)
 	close(releaseSecondRead)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("pipeline run: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("DIFF did not finish after releasing the blocked metadata lookup")
+	err := testwait.Receive(t, done, "DIFF to finish after releasing the blocked metadata lookup")
+	if err != nil {
+		t.Fatalf("pipeline run: %v", err)
 	}
 	diffProgress := progress.Snapshot()[StageDiff]
 	if diffProgress.Done != 2 || diffProgress.Total != 2 || !diffProgress.Ended {
@@ -413,19 +377,17 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	}
 }
 
-// waitForDiffProgress waits until DIFF reports at least want classified
-// sessions, so a test that blocks one session can still observe the others
-// landing rather than sampling the count once and racing the pool.
-func waitForDiffProgress(t *testing.T, progress *ProgressState, want int) {
+// waitForStageProgress waits until the named stage reports at least want
+// completed items, so a test that blocks one session can still observe the
+// others landing rather than sampling the count once and racing the pool.
+// ProgressState is a pull model with no production hook for per-stage
+// completion, so there is no signal to wait on; the bound comes from the test
+// deadline.
+func waitForStageProgress(t *testing.T, progress *ProgressState, stage Stage, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if progress.Snapshot()[StageDiff].Done >= want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("DIFF progress = %+v, want at least %d classified", progress.Snapshot()[StageDiff], want)
+	testwait.Until(t, fmt.Sprintf("%s progress to reach %d", stage, want), func() bool {
+		return progress.Snapshot()[stage].Done >= want
+	})
 }
 
 func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
@@ -438,7 +400,8 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 		{SessionID: "session-two", Harness: HarnessClaudeCode},
 	}
 	pipeline := &Pipeline{
-		fs: emptyProgressFS{},
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             emptyProgressFS{},
 		adapters: map[Harness]AdapterFactory{
 			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
 				return progressAdapter{sessions: sessions}
@@ -467,9 +430,10 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 		done <- err
 	}()
 
+	waitCtx := testwait.Context(t)
 	select {
 	case <-secondFilterStarted:
-	case <-time.After(2 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("FILTER did not reach the controlled second-session callback")
 	}
 
@@ -481,13 +445,8 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 		t.Fatal("FILTER progress ended before the blocked filter callback returned")
 	}
 	close(releaseSecondFilter)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("pipeline run: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("pipeline did not finish after releasing the blocked filter callback")
+	if err := testwait.Receive(t, done, "the pipeline to finish after releasing the blocked filter callback"); err != nil {
+		t.Fatalf("pipeline run: %v", err)
 	}
 	filterProgress = progress.Snapshot()[StageFilter]
 	if filterProgress.Done != 2 || filterProgress.Total != 2 || !filterProgress.Ended {
@@ -513,48 +472,4 @@ func (adapter progressAdapter) ExtractMetadata(context.Context, DiscoveredSessio
 	return nil, errors.New("progressAdapter: ExtractMetadata should not run in this dry-run test")
 }
 
-type emptyProgressFS struct{}
-
-func (emptyProgressFS) ReadFile(string) ([]byte, error) { return nil, os.ErrNotExist }
-
-func (emptyProgressFS) WriteFile(string, []byte, os.FileMode) error { return os.ErrPermission }
-
-func (emptyProgressFS) MkdirAll(string, os.FileMode) error { return os.ErrPermission }
-
-func (emptyProgressFS) Stat(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-
-func (emptyProgressFS) Lstat(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-
-func (emptyProgressFS) WalkDir(string, fs.WalkDirFunc) error { return os.ErrNotExist }
-
-func (emptyProgressFS) Rename(string, string) error { return os.ErrPermission }
-
-func (emptyProgressFS) ReadDir(string) ([]os.DirEntry, error) { return nil, os.ErrNotExist }
-
-func (emptyProgressFS) Remove(string) error { return os.ErrPermission }
-
-func (emptyProgressFS) RemoveAll(string) error { return os.ErrPermission }
-
-func (emptyProgressFS) CopyFile(string, string, os.FileMode) error { return os.ErrPermission }
-
-type blockingReadDirFS struct {
-	emptyProgressFS
-	blocked           atomic.Bool
-	secondReadStarted chan struct{}
-	releaseSecondRead chan struct{}
-}
-
-func (filesystem *blockingReadDirFS) ReadDir(string) ([]os.DirEntry, error) {
-	return fs.ReadDir(fstest.MapFS{"host": &fstest.MapFile{Mode: fs.ModeDir}}, ".")
-}
-
-// Block the metadata lookup of the SECOND session, named by its path. A call
-// ordinal cannot name it: one session's lookup probes both the flat and the
-// nested layout, so the number of probes per session is incidental.
-func (filesystem *blockingReadDirFS) Stat(path string) (os.FileInfo, error) {
-	if strings.Contains(path, "session-two") && filesystem.blocked.CompareAndSwap(false, true) {
-		close(filesystem.secondReadStarted)
-		<-filesystem.releaseSecondRead
-	}
-	return nil, os.ErrNotExist
-}
+// emptyProgressFS and blockingReadDirFS live in fsfault_test.go (Owner B).

@@ -1,6 +1,8 @@
 package push
 
 import (
+	"context"
+
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
@@ -17,11 +19,29 @@ type PipelineConfig struct {
 	// SourceProvider filters sessions to a single model_harness value (e.g. "claude").
 	SourceProvider string
 	// Visibility overrides config push.visibility for this run.
-	// Empty string means "use whatever is in config".
+	// Empty string means "use whatever is in config". A first publish opens at
+	// it; an update keeps the audience the transcript has on the village unless
+	// ChangeVisibility is set.
 	Visibility schema.Visibility
+	// ChangeVisibility says the caller asked for a visibility change, so an
+	// update also moves a transcript the village already holds to Visibility.
+	// An unchanged session gets the change as an owner update alone, sent
+	// whatever the local receipt says, because the receipt may be stale. Only
+	// an explicit request sets it (the --visibility flag), and it takes effect
+	// only with a Visibility to change to. A configured default, or the
+	// visibility the Share wizard opens a publication at, is not one: the
+	// owner may have shared the transcript with collectives on the village
+	// since, and nothing on this machine knows that.
+	ChangeVisibility bool
 	// License overrides config push.license for this run (--license flag).
-	// Empty string means "use whatever is in config".
+	// Empty string means "use whatever is in config". A first publish sends it;
+	// an update sends no license, so Village keeps the one the transcript has,
+	// unless ChangeLicense is set.
 	License schema.License
+	// ChangeLicense says the caller asked for a license change, so an update
+	// also sends License. Only an explicit request sets it (the --license flag),
+	// and it takes effect only with a License to send.
+	ChangeLicense bool
 	// Concurrency is the maximum number of parallel uploads.
 	// 0 means DefaultConcurrency.
 	Concurrency int
@@ -39,6 +59,18 @@ type PipelineConfig struct {
 	// FilterSessionIDs, when non-nil, restricts the push to only these session IDs.
 	// Set by the push wizard after user confirmation.
 	FilterSessionIDs []string
+	// PinnedSessionIDs, when non-nil, are the only sessions this run may send,
+	// even when it is empty. The auto-publish rules decide the audience of the
+	// sessions they matched before the run, so a session the run would
+	// otherwise pick up later, or one a rule holds back, is not sent.
+	PinnedSessionIDs map[string]bool
+	// UpdateHold, when set, is asked before the content of a session this
+	// account published to the Village before is sent again, and only then: a
+	// session the Village already holds unchanged is skipped before it is
+	// asked, and a first publication never reaches it. A non-empty answer
+	// holds the session: nothing is sent, the result is PushStatusHeld, and
+	// the answer is its HeldReason. The run's concurrent uploads call it.
+	UpdateHold func(ctx context.Context, sessionID string) string
 	// Selection, when non-nil, restricts the push to command-prepared decisions
 	// computed from the complete stored-session cohort. nil means no selection
 	// filter (push everything otherwise eligible).
@@ -92,13 +124,18 @@ type PushStatus int
 const (
 	// PushStatusNew means the session was uploaded for the first time (HTTP 201).
 	PushStatusNew PushStatus = iota
-	// PushStatusUpdated means the session was re-uploaded and the server already had it (HTTP 200).
+	// PushStatusUpdated means the village already had the session: it was
+	// uploaded again (HTTP 200), or, for an explicit visibility change to an
+	// unchanged session, changed by an owner update alone.
 	PushStatusUpdated
-	// PushStatusSkipped means the session was intentionally not uploaded.
+	// PushStatusSkipped means the session was not uploaded because the village
+	// already holds it unchanged. Annotation scoping relies on that: a skipped
+	// session is on the village.
 	PushStatusSkipped
 	// PushStatusError means the upload attempt failed.
 	PushStatusError
-	// PushStatusHeld means the session was held back (e.g. missing metrics).
+	// PushStatusHeld means the session was held back and nothing was sent:
+	// the run's UpdateHold refused to send an update, and HeldReason says why.
 	PushStatusHeld
 )
 
@@ -128,6 +165,8 @@ type SessionPushResult struct {
 	Status    PushStatus
 	// Error is non-nil when Status == PushStatusError.
 	Error error
+	// HeldReason says why a session with Status PushStatusHeld was held back.
+	HeldReason string
 	// RequiredCapabilities is the exact receiver capability inventory the
 	// session's durable payload requires, derived locally by the offline scan.
 	// It is populated on every path that reaches the scan — a dry-run forecast,

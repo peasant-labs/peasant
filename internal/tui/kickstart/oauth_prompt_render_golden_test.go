@@ -5,14 +5,13 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
 
@@ -57,17 +56,8 @@ type oauthPromptRenderDoc struct {
 
 func decodeOAuthPromptRenderDoc(data []byte) (oauthPromptRenderDoc, error) {
 	var doc oauthPromptRenderDoc
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/oauth_prompt_render.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("oauth_prompt_render.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != expectedOAuthPromptRenderCaseCount || len(doc.Cases) != expectedOAuthPromptRenderCaseCount {
 		return doc, fmt.Errorf("oauth prompt render cases: declared=%d actual=%d required=%d",
@@ -138,6 +128,7 @@ func bulletLines(view string) []string {
 // rather than clipped or left as one long unwrapped line. It also golden-pins
 // the full rendered screen so a human reviewer can see the structured result.
 func TestOAuthPromptRender_Structure(t *testing.T) {
+	t.Parallel()
 	doc := loadOAuthPromptRenderDoc(t)
 	for _, c := range doc.Cases {
 		c := c
@@ -180,6 +171,7 @@ func TestOAuthPromptRender_Structure(t *testing.T) {
 }
 
 func TestOAuthPromptRenderFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), oauthPromptRenderData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeOAuthPromptRenderDoc(mutated); err == nil {
 		t.Fatal("oauth prompt render fixture accepted an unknown field")
@@ -187,6 +179,7 @@ func TestOAuthPromptRenderFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestOAuthPromptRenderFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), oauthPromptRenderData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeOAuthPromptRenderDoc(mutated); err == nil {
 		t.Fatal("oauth prompt render fixture accepted a trailing document")
@@ -194,6 +187,7 @@ func TestOAuthPromptRenderFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestOAuthPromptRenderFixturePinsCaseCount(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedOAuthPromptRenderCaseCount))
 	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedOAuthPromptRenderCaseCount+1))
 	mutated := bytes.Replace(oauthPromptRenderData, declared, changed, 1)
@@ -210,6 +204,7 @@ func TestOAuthPromptRenderFixturePinsCaseCount(t *testing.T) {
 // prose block with literal newlines baked into the source string, which is the
 // exact defect peasant#138 reports.
 func TestOAuthPromptFacts_NoHardWrapBlock(t *testing.T) {
+	t.Parallel()
 	for _, facts := range [][]string{
 		kickstart.VillageContextBulletsForTest(),
 		kickstart.VisibilityContextBulletsForTest(),

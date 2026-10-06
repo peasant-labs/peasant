@@ -15,6 +15,7 @@ import {
 } from './testdata/helper-groups-fixture';
 import { readWireDecodeFixture, type WireDecodeCase } from './testdata/grouped-wire-cases';
 import { ShareWizardClient } from './ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import * as useMockConfig from '@/hooks/useMockConfig';
 
 vi.mock('@/hooks/useMockConfig');
@@ -146,7 +147,7 @@ describe('mounted Share chooser wire decoding', () => {
 
   it('mounts the chooser for the unmutated baseline payloads', async () => {
     installFetch(listBaseline(), membersBaseline());
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
     const region = await screen.findByRole('region', { name: `project ${owner.project}` });
     expect(region).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: `select session ${owner.id}` })).toBeInTheDocument();
@@ -155,7 +156,7 @@ describe('mounted Share chooser wire decoding', () => {
 
   it.each(decodeCases.filter((testCase) => testCase.base === 'list'))('stops the chooser for the $name list mutation', async (testCase) => {
     installFetch(applyWireCase(listBaseline(), testCase), membersBaseline());
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     expect(await screen.findByText(/could not read the grouped sessions response/)).toBeInTheDocument();
     expect(screen.getByText('Retry')).toBeInTheDocument();
@@ -167,7 +168,7 @@ describe('mounted Share chooser wire decoding', () => {
   it.each(decodeCases.filter((testCase) => testCase.base === 'members'))('stops the member disclosure for the $name member mutation', async (testCase) => {
     const user = userEvent.setup();
     installFetch(listBaseline(), applyWireCase(membersBaseline(), testCase));
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     await screen.findByRole('checkbox', { name: `select session ${owner.id}` });
     const group = document.querySelector(`[data-group-id="${owner.groups[0].groupId}"]`) as HTMLElement;

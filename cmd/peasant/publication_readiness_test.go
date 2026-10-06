@@ -9,7 +9,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/redact"
@@ -20,6 +19,7 @@ import (
 var publicationReadinessYAML []byte
 
 func TestPublicationWizardAndReportUseDatabaseReadiness(t *testing.T) {
+	t.Parallel()
 	var cases []struct {
 		Name   string `yaml:"name"`
 		Action string `yaml:"action"`
@@ -39,7 +39,7 @@ func TestPublicationWizardAndReportUseDatabaseReadiness(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			dir := t.TempDir()
 			seedUploadableSession(t, dir, testutil.TestSessionUUID)
-			db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+			db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 			if err != nil {
 				t.Fatal(err)
 			}

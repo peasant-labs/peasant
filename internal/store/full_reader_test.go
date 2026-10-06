@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,10 +11,11 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/full_read_budget_policy.yaml
@@ -57,8 +57,8 @@ func loadFullReadFixtures(t *testing.T, data []byte) fullReadFixture {
 
 func seedFullRead(t *testing.T, n, bytes int) (*store.Store, ingest.SessionID, []schema.SessionEntry, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "snapshot.db")
-	s, err := store.Open(path, store.WithPoolSize(1))
+	path := storetest.CopyGoldenDB(t)
+	s, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/artifact_ownership.yaml
@@ -39,14 +37,8 @@ func TestPipelineParentPublicationPreservesUnownedFiles(t *testing.T) {
 			HideChild   bool   `yaml:"hideChild"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(artifactOwnershipYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(artifactOwnershipYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("artifact ownership fixture requires one YAML document")
 	}
 	required := []string{"future-child-survives-parent-force", "retained-child-survives-parent-update"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {
@@ -88,7 +80,7 @@ func TestPipelineParentPublicationPreservesUnownedFiles(t *testing.T) {
 			config := makePipelineConfig(output)
 			config.StalenessThreshold = 0
 			filesystem := &ingest.OSFileSystem{}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -135,7 +127,7 @@ func TestPipelineParentPublicationPreservesUnownedFiles(t *testing.T) {
 			if !row.HideChild {
 				adapter.Sessions = append(adapter.Sessions, child)
 			}
-			pipeline, err = ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
+			pipeline, err = newTestPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
 			if err != nil {
 				t.Fatal(err)
 			}

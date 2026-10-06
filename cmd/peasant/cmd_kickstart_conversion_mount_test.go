@@ -267,6 +267,7 @@ func mountedLegacyExpectedSessionCount(groups []mountedLegacySessionsFixture) in
 }
 
 func TestMountedLegacyConversionFixtureRejectsUnknownStoredIdentityKey(t *testing.T) {
+	t.Parallel()
 	malformed := bytes.Replace(
 		mountedLegacyConversionFixtureData,
 		[]byte("gitWorktreePathKey:"),
@@ -285,6 +286,7 @@ func TestMountedLegacyConversionFixtureRejectsUnknownStoredIdentityKey(t *testin
 }
 
 func TestRunKickstartFlowLegacyAllRejectsUnreadableStoredEvidence(t *testing.T) {
+	t.Parallel()
 	dataHome := t.TempDir()
 	dbPath := defaults.ResolveDBFilePathWith(dataHome).String()
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
@@ -336,6 +338,7 @@ func TestRunKickstartFlowLegacyAllRejectsUnreadableStoredEvidence(t *testing.T) 
 // resolver, scanner, settings.Flow, and atomic user commit. The YAML corpus
 // keeps the identity combinations out of Go code.
 func TestRunKickstartFlowConvertsLegacyAllFromStoredEvidence(t *testing.T) {
+	t.Parallel()
 	document := loadMountedLegacyConversionDocument(t)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -444,7 +447,7 @@ func seedMountedLegacyStore(
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create mounted legacy data directory: %v", err)
 	}
-	db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := openPreparedStore(t, dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open mounted legacy store: %v", err)
 	}

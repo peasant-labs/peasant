@@ -1,14 +1,12 @@
 package ingest_test
 
 import (
-	"bytes"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,7 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/projection_layout.yaml
@@ -206,15 +203,9 @@ func (a *queueAllocator) NewSubmissionRef() (schema.SubmissionRef, error) {
 
 func loadProjectionCases(t *testing.T) []fixtureCase {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(projectionLayoutYAML))
-	decoder.KnownFields(true)
 	var document fixtureDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(projectionLayoutYAML, &document); err != nil {
 		t.Fatalf("decode projection layout fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("projection layout fixture must contain exactly one YAML document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(projectionLayoutManifestYAML, "projection layout")
 	if err != nil {

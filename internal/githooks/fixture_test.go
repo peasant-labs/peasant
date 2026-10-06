@@ -1,12 +1,10 @@
 package githooks_test
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 // decodeFixtureDocument decodes exactly one strictly-typed YAML document.
@@ -17,24 +15,11 @@ import (
 // ignored. path names the file so a failure points at the thing to edit.
 func decodeFixtureDocument[T any](data []byte, path string) (T, error) {
 	var document T
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf(
 			"fixture rule failed: typed YAML fields must match the document schema; unknown or malformed data invalidates "+
 				"the evidence this corpus is the only source of; where=%s loader=first-document decode; when=test fixture loading; "+
 				"impact=the behaviour these cases prove cannot be trusted; fix=remove unknown fields and match the typed schema: %w",
-			path, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found another YAML document")
-		}
-		return document, fmt.Errorf(
-			"fixture rule failed: exactly one YAML document is allowed; trailing data is silently ignored, so cases below it "+
-				"prove nothing; where=%s loader=end-of-document check; when=test fixture loading; "+
-				"impact=the behaviour these cases prove cannot be trusted; fix=remove the second document so the next decode returns EOF: %w",
 			path, err)
 	}
 	return document, nil

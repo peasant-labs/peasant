@@ -349,6 +349,7 @@ func TestVillageClient_GetPromptRequests_DecodesWaitingRequests(t *testing.T) {
 					"number": 216,
 					"state": "waiting",
 					"remote": "peasant-labs/village",
+					"head_remote": "author/village",
 					"requested_at": "2026-09-16T00:00:00Z"
 				}
 			]
@@ -382,6 +383,9 @@ func TestVillageClient_GetPromptRequests_DecodesWaitingRequests(t *testing.T) {
 	}
 	if request.Remote != "peasant-labs/village" {
 		t.Errorf("remote: got %q, want peasant-labs/village", request.Remote)
+	}
+	if request.HeadRemote != "author/village" {
+		t.Errorf("head remote: got %q, want author/village", request.HeadRemote)
 	}
 }
 

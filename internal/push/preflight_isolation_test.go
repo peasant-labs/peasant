@@ -3,13 +3,13 @@ package push_test
 import (
 	"bytes"
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -26,6 +26,7 @@ import (
 // than a message this test invented. Discovery is answered by the stub, so the
 // refusal reaches the preflight rather than stopping at the candidate query.
 func TestPreflightSeparatesRunWideFailureFromSessionRefusal(t *testing.T) {
+	t.Parallel()
 	closedStoreErr := closedStoreReadError(t)
 
 	t.Run("closed-database-stops-the-run", func(t *testing.T) {
@@ -92,7 +93,7 @@ func TestPreflightSeparatesRunWideFailureFromSessionRefusal(t *testing.T) {
 // database's actual failure rather than a hand-written message.
 func closedStoreReadError(t *testing.T) error {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

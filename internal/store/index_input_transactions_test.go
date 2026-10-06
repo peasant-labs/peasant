@@ -1,11 +1,9 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -15,10 +13,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/index_input_transactions.yaml
@@ -42,14 +39,8 @@ func loadIndexInputTransactionFixtures(t *testing.T) []indexInputTransactionCase
 		RequiredNames []string                    `yaml:"requiredNames"`
 		Cases         []indexInputTransactionCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexInputTransactionsYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexInputTransactionsYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatal("index input transactions require one fixture document")
 	}
 	names := make(map[string]bool)
 	for _, row := range document.Cases {
@@ -87,6 +78,7 @@ func TestIndexInputStateBatchAndConversionTransactions(t *testing.T) {
 				}
 				return result, err
 			}
+			// ast-grep-ignore: no-migrating-store-open-in-tests -- tests conditional conversion transactions with a fault-scoped handler and edge registered at open; requires migrations to run to create the schema they operate on.
 			db, err := store.Open(filepath.Join(t.TempDir(), "conditional.db"), store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{fault: row.Fault}), store.WithIndexFormatConversions(conversion))
 			if err != nil {
 				t.Fatal(err)

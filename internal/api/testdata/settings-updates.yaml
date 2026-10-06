@@ -1,0 +1,246 @@
+# PATCH /api/v1/settings requests and what each must do to config.yaml.
+#
+# setup is what stands at the configuration path before the request: file
+# (the text in file, the default), missing (nothing), directory (a directory),
+# or unreadable (the text in file, with no read permission). The default user
+# email a missing file starts from is settings-default@example.test.
+#
+# setup readonly-directory is the text in file, in a directory the server may
+# not write to.
+#
+# A 200 case names the key, the saved value and effective value as JSON, and
+# text the saved file must and must not hold. A GET after it must return the
+# same row, and the running server must apply the saved value. Any other
+# status is a refusal: it names the key and every text its reason must hold,
+# the configuration path must be exactly as it was, and the running server
+# must apply what it applied before.
+requiredNames:
+  - a valid write names the new value in config.yaml
+  - a structured write stores the custom patterns
+  - a null value unsets the key and the default applies
+  - turning off a field that defaults to on
+  - a write with no configuration file starts from the defaults
+  - an invalid value leaves config.yaml byte-identical
+  - a value of the wrong kind is refused
+  - a value outside the menu is refused
+  - a level this version raises is refused
+  - a level this version refuses is refused
+  - an unknown field inside a structured value is refused
+  - an unknown key is refused
+  - a write to village.connected is refused
+  - a write to the saved selection is refused
+  - a request with an undeclared field is refused
+  - a request that names no key is refused
+  - a write while the file is unreadable changes nothing
+  - a write while the configuration path is a directory changes nothing
+  - a write while the file is invalid changes nothing
+  - a write to a file of several YAML documents changes nothing
+  - a write the directory refuses keeps the file and the running configuration
+  - an integer write names the number
+  - a string write names the text
+  - a string list write names the list
+cases:
+  - name: a valid write names the new value in config.yaml
+    file: |
+      # written by hand
+      version: 1
+      push:
+        license: CC0-1.0
+        fields:
+          gitBranch: true
+    body: '{"key": "push.license", "value": "CC-BY-4.0"}'
+    status: 200
+    key: push.license
+    value: '"CC-BY-4.0"'
+    effective: '"CC-BY-4.0"'
+    fileContains: ["# written by hand", "license: CC-BY-4.0", "gitBranch: true"]
+    fileOmits: ["CC0-1.0"]
+  - name: a structured write stores the custom patterns
+    file: |
+      version: 1
+    body: '{"key": "redaction.custom_patterns", "value": [{"id": "ticket", "category": "project", "pattern": "TICKET-[0-9]+", "replacement": "[TICKET]"}]}'
+    status: 200
+    key: redaction.custom_patterns
+    value: '[{"id": "ticket", "category": "project", "pattern": "TICKET-[0-9]+", "replacement": "[TICKET]"}]'
+    effective: '[{"id": "ticket", "category": "project", "pattern": "TICKET-[0-9]+", "replacement": "[TICKET]"}]'
+    fileContains: ["custom_patterns:", "id: ticket", "pattern: TICKET-[0-9]+"]
+  - name: a null value unsets the key and the default applies
+    file: |
+      version: 1
+      push:
+        license: CC0-1.0 # chosen once
+        visibility: private
+    body: '{"key": "push.license", "value": null}'
+    status: 200
+    key: push.license
+    value: 'null'
+    effective: '""'
+    fileContains: ["visibility: private"]
+    fileOmits: ["license", "chosen once"]
+  - name: turning off a field that defaults to on
+    file: |
+      version: 1
+    body: '{"key": "push.fields.gitRemote", "value": false}'
+    status: 200
+    key: push.fields.gitRemote
+    value: 'false'
+    effective: 'false'
+    fileContains: ["gitRemote: false"]
+  - name: a write with no configuration file starts from the defaults
+    setup: missing
+    body: '{"key": "push.fields.gitBranch", "value": true}'
+    status: 200
+    key: push.fields.gitBranch
+    value: 'true'
+    effective: 'true'
+    fileContains: ["version: 1", "gitBranch: true", "claude-code:", "email: settings-default@example.test"]
+  - name: an invalid value leaves config.yaml byte-identical
+    file: |
+      version: 1
+      push:
+        method: all
+    body: '{"key": "push.method", "value": "by-source"}'
+    status: 400
+    key: push.method
+    errorContains: ['push.method is "by-source" but push.sources is empty', "Nothing was changed"]
+  - name: a value of the wrong kind is refused
+    file: |
+      version: 1
+    body: '{"key": "push.concurrency", "value": "four"}'
+    status: 400
+    key: push.concurrency
+    errorContains: ["push.concurrency refused the value", "Nothing was changed"]
+  - name: a value outside the menu is refused
+    file: |
+      version: 1
+    body: '{"key": "push.license", "value": "MIT"}'
+    status: 400
+    key: push.license
+    errorContains: ['"CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0"', "Nothing was changed"]
+  - name: a level this version raises is refused
+    file: |
+      version: 1
+    body: '{"key": "redaction.level", "value": "minimal"}'
+    status: 400
+    key: redaction.level
+    errorContains: ['Send one of "standard"', "Nothing was changed"]
+  - name: a level this version refuses is refused
+    file: |
+      version: 1
+    body: '{"key": "redaction.level", "value": "maximum"}'
+    status: 400
+    key: redaction.level
+    errorContains: ['Send one of "standard"', "Nothing was changed"]
+  - name: an unknown field inside a structured value is refused
+    file: |
+      version: 1
+    body: '{"key": "redaction.custom_patterns", "value": [{"id": "ticket", "category": "project", "pattern": "TICKET", "level": "maximum"}]}'
+    status: 400
+    key: redaction.custom_patterns
+    errorContains: ["field level not found", "Nothing was changed"]
+  - name: an unknown key is refused
+    file: |
+      version: 1
+    body: '{"key": "push.destination", "value": "public"}'
+    status: 400
+    key: push.destination
+    errorContains: ["push.destination is not a setting", "Nothing was changed"]
+  - name: a write to village.connected is refused
+    file: |
+      version: 1
+      village:
+        url: https://village.example.test
+    body: '{"key": "village.connected", "value": true}'
+    status: 400
+    key: village.connected
+    errorContains: ["changes when you sign in to village or sign out", "Nothing was changed"]
+  - name: a write to the saved selection is refused
+    file: |
+      version: 1
+    body: '{"key": "selection.mode", "value": "selected"}'
+    status: 400
+    key: selection.mode
+    errorContains: ["change it with peasant kickstart or peasant config", "Nothing was changed"]
+  - name: a request with an undeclared field is refused
+    file: |
+      version: 1
+    body: '{"key": "push.license", "value": "CC0-1.0", "visibility": "public"}'
+    status: 400
+    key: push.license
+    errorContains: ['unknown field "visibility"', "Nothing was changed"]
+  - name: a request that names no key is refused
+    file: |
+      version: 1
+    body: '{"value": true}'
+    status: 400
+    key: (none)
+    errorContains: ["key is empty", "Nothing was changed"]
+  - name: a write while the file is unreadable changes nothing
+    setup: unreadable
+    file: |
+      version: 1
+    body: '{"key": "push.license", "value": "CC0-1.0"}'
+    status: 500
+    key: push.license
+    errorContains: ["could not be read", "Nothing was changed"]
+  - name: a write while the configuration path is a directory changes nothing
+    setup: directory
+    body: '{"key": "push.license", "value": "CC0-1.0"}'
+    status: 500
+    key: push.license
+    errorContains: ["could not be read", "Nothing was changed"]
+  - name: a write while the file is invalid changes nothing
+    file: |
+      version: 1
+      push:
+        method: sideways
+    body: '{"key": "push.license", "value": "CC0-1.0"}'
+    status: 500
+    key: push.license
+    errorContains: ['unknown push.method "sideways"', "Nothing was changed"]
+  - name: a write to a file of several YAML documents changes nothing
+    file: |
+      version: 1
+      ---
+      version: 1
+      push:
+        license: CC0-1.0
+    body: '{"key": "push.license", "value": "CC-BY-4.0"}'
+    status: 500
+    key: push.license
+    errorContains: ["more than one YAML document", "Nothing was changed"]
+  - name: a write the directory refuses keeps the file and the running configuration
+    setup: readonly-directory
+    file: |
+      version: 1
+    body: '{"key": "push.license", "value": "CC0-1.0"}'
+    status: 500
+    key: push.license
+    errorContains: ["push.license could not be saved", "no file was changed"]
+  - name: an integer write names the number
+    file: |
+      version: 1
+    body: '{"key": "push.concurrency", "value": 4}'
+    status: 200
+    key: push.concurrency
+    value: '4'
+    effective: '4'
+    fileContains: ["concurrency: 4"]
+  - name: a string write names the text
+    file: |
+      version: 1
+    body: '{"key": "user.email", "value": "someone@example.test"}'
+    status: 200
+    key: user.email
+    value: '"someone@example.test"'
+    effective: '"someone@example.test"'
+    fileContains: ["email: someone@example.test"]
+  - name: a string list write names the list
+    file: |
+      version: 1
+    body: '{"key": "push.sources", "value": ["claude-code", "codex"]}'
+    status: 200
+    key: push.sources
+    value: '["claude-code", "codex"]'
+    effective: '["claude-code", "codex"]'
+    fileContains: ["sources:", "- claude-code", "- codex"]

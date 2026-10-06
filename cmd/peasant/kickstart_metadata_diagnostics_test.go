@@ -15,10 +15,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/kickstart_metadata_diagnostics.yaml
@@ -73,7 +72,7 @@ func TestKickstartLocalIngestForwardsMetadataDiagnostics(t *testing.T) {
 			if err != nil || first == nil || first.New != 1 {
 				t.Fatalf("seed real local ingestion: %+v %v", first, err)
 			}
-			db, err := store.Open(defaults.ResolveDBFilePathWith(root).String())
+			db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(root).String())
 			if err != nil {
 				t.Fatal(err)
 			}

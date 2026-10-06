@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useChannel } from "@/contexts/WebSocketContext";
 import { discoveryErrorMessage } from "@/lib/selectionGuidance";
 import { DiscoveryErrorCode, discoveryErrorCode } from "@/lib/api/errors";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   ProjectPicker,
   PickerExplainer,
@@ -18,34 +17,55 @@ import {
   projectListState,
 } from "@/components/picker/SelectionRecoveryPanel";
 import { ExplainerToggle, useExplainer } from "@/components/Explainer";
-import { Skeleton } from "@/lib/skeleton";
-import type { SessionsPayload, SessionSummary } from "@/types/messages";
+import { Skeleton, SkeletonList } from "@/lib/skeleton";
+import {
+  subscribe,
+  type DashboardPayload,
+  type QualityPayload,
+  type SessionsPayload,
+  type SessionSummary,
+  type TrendsPayload,
+} from "@/types/messages";
 import { cachedProjectSummaries, fetchProjectSummaries, type DecodedProjectSummariesPayload } from "@/lib/api/map";
-import { displayProject } from "@/lib/quality/utils";
 import { formatRelative } from "@/app/review/[[...segments]]/format";
 import {
+  Button,
   StatGrid,
   DataState,
   FeedbackPanel,
+  Input,
+  PublishStateLabel,
   TeachingEmptyState,
   type TileSpec,
 } from "@/lib/ft-ui";
-import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp, List } from "lucide-react";
+import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { AllSessions } from "@/components/sessions/AllSessions";
 import { GroupedSessionsSection } from "@/components/sessions/GroupedSessionsSection";
+import type { LocalSessionRow } from "@/lib/api/grouped";
+import { RootSessionList } from "@/components/home/RootSessionList";
+import { RootStats } from "@/components/home/RootStats";
+import { AutoPublishTip } from "@/components/home/AutoPublishTip";
 import { useSessionTitles } from "@/hooks/useSessionTitles";
+import { useRootSessions } from "@/hooks/useRootSessions";
+import { publishFilterCounts, rowPublishState, type RootSessionRow } from "@/lib/home/publishState";
+import { rootStatsItems, weeklySessions } from "@/lib/home/rootStats";
 
 const CHANNELS: ["sessions"] = ["sessions"];
 
+/** How long the search box waits after the last keystroke before it searches. */
+const SEARCH_DEBOUNCE_MS = 250;
+
 // ---------------------------------------------------------------------------
-// Projects home: `/` is the PROJECT PICKER, with every ingested session listed
-// beneath it.
-// The ledger line stays on top; one row per project (sessions · recorded
-// coverage · last work · open changes) from GET /api/v1/projects/summary,
-// falling back to sessions-channel grouping (stats unavailable) while the
-// fetch loads or fails. A row click lands on /sessions/{projectHash} — that
-// project's session list (the shared ProjectPicker, destination="sessions").
-// Every install renders this one shape — including a single-project install.
+// Home: `/` lists your sessions. A stats strip, a search box, and one row per
+// session with its publish state, filtered by publish state and project.
+//
+// The rows are the flat sync list joined with the publications read, which
+// says whether the saved selection shows each session, so the list, its
+// filter counts and its empty states come from one visible set. The earlier
+// home flows stay reachable under "more ways to browse": the project picker
+// with its aggregate cards (rows from GET /api/v1/projects/summary, falling
+// back to sessions-channel grouping), the grouped list with helper threads,
+// and the flat filter with its 25-row pager.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -122,11 +142,11 @@ function SelectionNotice({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="inline-flex items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
+        className="inline-flex items-center gap-2 border border-rule px-3 py-1.5 font-mono text-sm text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
       >
-        <EyeOff size={13} aria-hidden />
+        <EyeOff size={14} aria-hidden />
         <span className="tabular-nums">{summary}</span>
-        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+        {open ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
       </button>
 
       {open && (
@@ -135,7 +155,7 @@ function SelectionNotice({
             A saved project selection is limiting what&rsquo;s shown here.
             The data stays ingested and indexed — it is only hidden from this list.
           </p>
-          <p className="text-xs text-ink-3">
+          <p className="text-sm text-ink-3">
             Run <code className="font-mono">peasant kickstart</code> to review or widen the selection.
           </p>
         </div>
@@ -145,47 +165,161 @@ function SelectionNotice({
 }
 
 // ---------------------------------------------------------------------------
-// Flat all-sessions disclosure.
+// More ways to browse.
 //
-// The grouped list replaced the old flat table on Home, and with it the filter
-// over session identity fields (short id, harness, project) and the 25-row
-// top-level pager. Those are real flows, so they stay REACHABLE: a collapsed
-// disclosure mounts the unchanged AllSessions table over the same session set,
-// beside the grouped list rather than instead of it. The grouped list keeps its
-// own per-group disclosure/paging state; this table keeps the flat filter and
-// pager exactly as they were, and it is never widened by a helper membership.
+// The session list took over Home's body, and with it the project picker (with
+// its aggregate cards), the grouped list with saved helper threads, and the
+// flat filter over session identity fields with its 25-row pager. Those are
+// real flows, so they stay REACHABLE here, each behind its own disclosure and
+// mounted only when opened, over the same selected session set.
 // ---------------------------------------------------------------------------
 
-function AllSessionsDisclosure({
-  sessions,
-  titles,
+type BrowseView = "projects" | "grouped" | "flat";
+
+const BROWSE_LABELS: Readonly<Record<BrowseView, string>> = {
+  projects: "browse by project",
+  grouped: "sessions with their helper threads",
+  flat: "filter and page through every session",
+};
+
+function MoreWaysToBrowse({
+  views,
 }: {
-  sessions: SessionSummary[];
-  titles?: ReadonlyMap<string, string>;
+  views: Partial<Record<BrowseView, ReactNode>>;
 }) {
-  const [open, setOpen] = useState(false);
-  if (sessions.length === 0) return null;
+  const baseId = useId();
+  const [open, setOpen] = useState<ReadonlySet<BrowseView>>(() => new Set());
+  const available = (Object.keys(BROWSE_LABELS) as BrowseView[]).filter((view) => views[view] !== undefined);
+  if (available.length === 0) return null;
+  const toggle = (view: BrowseView) =>
+    setOpen((current) => {
+      const next = new Set(current);
+      if (next.has(view)) next.delete(view);
+      else next.add(view);
+      return next;
+    });
   return (
-    <div className="flex flex-col gap-2" data-flat-sessions-disclosure="true">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="inline-flex w-fit items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
-      >
-        <List size={13} aria-hidden />
-        <span className="tabular-nums">filter and page through every session</span>
-        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
-      </button>
-      {open && (
-        <AllSessions
-          sessions={sessions}
-          titles={titles}
-          title="every session"
-          subtitle="every ingested session across projects, filterable and paged."
-        />
+    <section aria-labelledby={`${baseId}-heading`} className="mx-0 flex w-full max-w-none flex-col gap-4 border-t border-rule px-0 pt-6">
+      <h2 id={`${baseId}-heading`} className="font-[family-name:var(--font-display)] text-lg font-semibold lowercase text-ink">
+        more ways to browse
+      </h2>
+      <div className="flex flex-wrap gap-2">
+        {available.map((view) => (
+          <Button
+            key={view}
+            variant="secondary"
+            size="sm"
+            iconRight={open.has(view) ? ChevronUp : ChevronDown}
+            aria-expanded={open.has(view)}
+            aria-controls={`${baseId}-${view}`}
+            onClick={() => toggle(view)}
+          >
+            {BROWSE_LABELS[view]}
+          </Button>
+        ))}
+      </div>
+      {available.map((view) =>
+        open.has(view) ? (
+          <div key={view} id={`${baseId}-${view}`} className="flex flex-col gap-4" data-browse-view={view}>
+            {views[view]}
+          </div>
+        ) : null,
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search box.
+//
+// Typing searches every selected session through the grouped search route
+// (the same `search` variant of the grouped list the palette's results use).
+// The list below is replaced by the results while a query is present.
+// ---------------------------------------------------------------------------
+
+function RootSearch({
+  value,
+  onChange,
+  selectionActive,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  selectionActive: boolean;
+}) {
+  const scopeId = useId();
+  return (
+    <div className="flex flex-col gap-2" role="search">
+      <div className="flex items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <Input
+            label="search transcripts"
+            type="search"
+            iconLeft={Search}
+            placeholder="search titles, prompts, tool output"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            aria-describedby={selectionActive ? scopeId : undefined}
+          />
+        </div>
+        {value !== "" && (
+          <Button variant="secondary" icon={X} onClick={() => onChange("")}>
+            clear search
+          </Button>
+        )}
+      </div>
+      {selectionActive && (
+        <p id={scopeId} className="m-0 text-base text-ink-2">
+          search covers the projects in your saved selection.
+        </p>
       )}
     </div>
+  );
+}
+
+/** The value, once it has held still for `delayMs`. */
+function useDebounced(value: string, delayMs: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (value === "") {
+      setSettled("");
+      return;
+    }
+    const timer = setTimeout(() => setSettled(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return settled;
+}
+
+/**
+ * A search result's detail: the first match the search route returned, as
+ * plain text, and the session's publish state when the list knows it.
+ */
+function SearchRowDetail({ row, published }: { row: LocalSessionRow; published?: RootSessionRow }) {
+  const match = row.matches?.[0];
+  const snippet = match?.snippet.replace(/\s+/g, " ").trim();
+  if (!snippet && !published) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      {snippet && (
+        <p className="m-0 border-l border-rule-strong pl-3 text-base text-ink-2 [overflow-wrap:anywhere]">
+          <span className="font-mono text-sm text-ink-3">{match?.role === "user" ? "you" : match?.role}: </span>
+          {snippet}
+        </p>
+      )}
+      {published && <PublishStateLabel state={rowPublishState(published)} />}
+    </div>
+  );
+}
+
+/** "38 of 1,284 published. the rest stay on this machine." */
+function PublishedLedger({ rows }: { rows: readonly RootSessionRow[] }) {
+  const counts = publishFilterCounts(rows);
+  return (
+    <p className="m-0 text-base text-ink-2">
+      <span className="tabular-nums">{counts.published.toLocaleString("en-US")}</span> of{" "}
+      <span className="tabular-nums">{counts.all.toLocaleString("en-US")}</span> published. the rest stay on this
+      machine.
+    </p>
   );
 }
 
@@ -370,35 +504,93 @@ export default function HomePage() {
     rows.length === 0 &&
     (connected || summaries !== null);
 
-  return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
-      <Breadcrumbs items={[{ label: "projects" }]} />
+  // The session list: the sync list joined with the publications read. It
+  // reads nothing while a selection failure or recovery state owns the page,
+  // and reads again when the set of sessions changes. A live session's growing
+  // turn count alone does not trigger a reread: that would reread the whole
+  // list every broadcast tick while an agent works.
+  const sessionSetKey = useMemo(() => sessions.map((session) => session.id).join("\n"), [sessions]);
+  const rootSessions = useRootSessions({
+    enabled: !sessionsError && !summariesSelectionFailed && !selectionRecovery,
+    invalidationKey: sessionSetKey,
+  });
+  const rootRows = groupedSectionVisible ? rootSessions.rows : null;
+  const publicationById = useMemo(
+    () => new Map((rootRows ?? []).map((row) => [row.sync.id, row])),
+    [rootRows],
+  );
+  const previews = useMemo(
+    () =>
+      new Map(
+        sessions
+          .filter((session) => session.preview?.trim())
+          .map((session) => [session.id, session.preview as string]),
+      ),
+    [sessions],
+  );
 
-      {/* Hero — title + the local-first ledger line. */}
-      <div data-tour="home">
-        <div className="flex items-start gap-2">
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink">
-            Your projects
-          </h1>
-          <ExplainerToggle explainer={explainer} />
-        </div>
-        {/* Bridges the nav label ("Changes") to this picker: you pick a project
-            to see its changes. */}
-        <p className="text-sm text-ink-3 mt-1">
-          Pick a project to see what&rsquo;s changed.
-          {totalSessions > 0 && (
-            <>
-              {" "}
-              <span className="font-mono tabular-nums">{totalSessions.toLocaleString()}</span>{" "}
-              AI conversation{totalSessions !== 1 ? "s" : ""}, on your machine. Nothing has left it.
-            </>
-          )}
-        </p>
+  // The stats strip: each pair from its own topic, left out until it loads.
+  const { data: dashboard } = useChannel<DashboardPayload>(subscribe.dashboard());
+  const { data: trends } = useChannel<TrendsPayload>(subscribe.trends());
+  const { data: quality } = useChannel<QualityPayload>(subscribe.quality());
+  const nowMs = Date.now();
+  const statsItems = groupedSectionVisible
+    ? rootStatsItems({
+        dashboardSessions: dashboard ? dashboard.totalSessions : null,
+        projects: summaries && !summariesFailed ? summaries.projects.length : null,
+        published: rootRows ? publishFilterCounts(rootRows).published : null,
+        trendDays: trends ? trends.days ?? [] : null,
+        qualityDurations: quality ? (quality.sessions ?? []).map((session) => session.durationMinutes) : null,
+        nowMs,
+      })
+    : [];
+  const weeklyCounts = groupedSectionVisible && trends ? weeklySessions(trends.days ?? [], nowMs) : null;
+  // Eight empty weeks draw no bars; the strip's "this week" already says 0.
+  const weekly = weeklyCounts && weeklyCounts.some((count) => count > 0) ? weeklyCounts : null;
+
+  const [query, setQuery] = useState("");
+  const searchQuery = useDebounced(query.trim(), SEARCH_DEBOUNCE_MS);
+
+  const projectBrowser = (
+    <>
+      <div className="flex items-start gap-2">
+        <h3 className="font-[family-name:var(--font-display)] text-base font-semibold lowercase text-ink">projects</h3>
+        <ExplainerToggle explainer={explainer} />
       </div>
-
-      {/* The "?" help box opens HERE — directly under the toggle that controls
+      {/* The "?" help box opens HERE, directly under the toggle that controls
           it, as a full-width row (returns null while collapsed). */}
       <PickerExplainer explainer={explainer} destination="sessions" />
+      {/* KPI grid: aggregate stats across all projects, above the picker. */}
+      {rows.length > 0 && <StatGrid tiles={kpiTiles} />}
+      {/* Explain a screen of "—": the per-project stats couldn't load. */}
+      {summariesFailed && rows.length > 0 && (
+        <p className="text-sm text-ink-3">
+          Per-project stats couldn&rsquo;t load, so coverage and unmerged-branch
+          counts show &ldquo;—&rdquo;. Session counts and last-work are still accurate.
+        </p>
+      )}
+      {/* statsPending until the summary fetch settles → the coverage +
+          unmerged cells shimmer instead of popping empty→value. */}
+      <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
+    </>
+  );
+
+  return (
+    <div className="mx-auto flex w-full max-w-[1184px] flex-col gap-6 px-6 pt-8 pb-12 animate-fade-up">
+      {/* Title and the local-first ledger line. */}
+      <header data-tour="home" className="flex flex-col gap-2">
+        <h1 className="m-0 font-[family-name:var(--font-display)] text-[length:var(--fs-xl)] font-bold leading-tight lowercase text-[color:var(--ink-strong)]">
+          your sessions
+        </h1>
+        {rootRows && rootRows.length > 0 ? (
+          <PublishedLedger rows={rootRows} />
+        ) : totalSessions > 0 ? (
+          <p className="m-0 text-base text-ink-2">
+            <span className="tabular-nums">{totalSessions.toLocaleString("en-US")}</span> session
+            {totalSessions !== 1 ? "s" : ""} on this machine.
+          </p>
+        ) : null}
+      </header>
 
       {/* A saved selection is narrowing this list and something is actually
           hidden right now. See SelectionNotice above for the presentation
@@ -431,26 +623,11 @@ export default function HomePage() {
         </p>
       )}
 
-      {/* KPI grid — aggregate stats across all projects.
-          StatGrid replaces the hand-rolled SummaryCard grid: responsive auto-fit
-          columns, mono eyebrow labels, tabular display numbers, optional sub lines. */}
-      {!loading && rows.length > 0 && (
-        <StatGrid tiles={kpiTiles} />
-      )}
-
-      {/* Explain a screen of "—": the per-project stats couldn't load. */}
-      {summariesFailed && rows.length > 0 && (
-        <p className="text-xs text-ink-3">
-          Per-project stats couldn&rsquo;t load, so coverage and unmerged-branch
-          counts show &ldquo;—&rdquo;. Session counts and last-work are still accurate.
-        </p>
-      )}
-
       {/* Body state machine via DataState (connection ≠ content principle):
           loading       → skeleton rows (DataState's built-in shimmer)
           disconnected  → calm lost-connection panel (not an empty state)
-          empty         → TeachingEmptyState — what to run and why
-          data present  → the project picker */}
+          empty         → the selection recovery panel, or TeachingEmptyState
+          data present  → stats, search, the session list, other views */}
       <DataState
         loading={loading}
         status={wsStatus}
@@ -468,31 +645,64 @@ export default function HomePage() {
         }
         skeletonRows={4}
       >
-        {/* statsPending until the summary fetch settles → the coverage +
-            unmerged cells shimmer instead of popping empty→value. */}
-        <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
+        {groupedSectionVisible && (
+          <div className="flex flex-col gap-6">
+            <RootStats items={statsItems} weekly={weekly} />
+            <AutoPublishTip />
+
+            <RootSearch
+              value={query}
+              onChange={setQuery}
+              selectionActive={summaries?.selection.active === true}
+            />
+
+            {searchQuery !== "" ? (
+              <GroupedSessionsSection
+                variant="search"
+                query={searchQuery}
+                titles={sessionTitles}
+                heading="search results"
+                emptyState={<p className="border-y border-rule py-6 text-base text-ink-2">no session matches this search.</p>}
+                rowDetail={(row) => <SearchRowDetail row={row} published={publicationById.get(row.session.id)} />}
+              />
+            ) : rootSessions.status === "error" ? (
+              <div className="flex flex-col items-start gap-3">
+                <FeedbackPanel variant="error">{discoveryErrorMessage(rootSessions.error)}</FeedbackPanel>
+                <Button variant="secondary" size="sm" onClick={rootSessions.reload}>
+                  retry the session list
+                </Button>
+              </div>
+            ) : rootRows === null ? (
+              <SkeletonList rows={6} label="Loading your sessions" />
+            ) : (
+              <RootSessionList rows={rootRows} titles={sessionTitles} previews={previews} />
+            )}
+
+            <MoreWaysToBrowse
+              views={{
+                projects: projectBrowser,
+                grouped: (
+                  <GroupedSessionsSection
+                    variant="sessions"
+                    invalidationKey={sessionsData}
+                    titles={sessionTitles}
+                    heading="all sessions"
+                  />
+                ),
+                flat:
+                  sessions.length > 0 ? (
+                    <AllSessions
+                      sessions={sessions}
+                      titles={sessionTitles}
+                      title="every session"
+                      subtitle="every ingested session across projects, filterable and paged."
+                    />
+                  ) : undefined,
+              }}
+            />
+          </div>
+        )}
       </DataState>
-
-      {/* Every ingested session, grouped by its saved helper threads, beneath
-          the picker. The list and its counts come from the SAME authorized,
-          selected route set, so grouping is server-driven rather than a
-          client-side cosmetic fold. Rendered outside DataState because it has
-          its own empty rule and must not replace the picker's teach/empty
-          state. */}
-      {groupedSectionVisible && (
-        <GroupedSessionsSection
-          variant="sessions"
-          invalidationKey={sessionsData}
-          titles={sessionTitles}
-          heading="all sessions"
-        />
-      )}
-
-      {/* The pre-existing cross-project filter and 25-row pager stay reachable
-          here, beside the grouped list. See AllSessionsDisclosure above. */}
-      {groupedSectionVisible && (
-        <AllSessionsDisclosure sessions={sessions} titles={sessionTitles} />
-      )}
     </div>
   );
 }

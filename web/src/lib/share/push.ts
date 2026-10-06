@@ -1,60 +1,58 @@
 /**
- * Real Contribute push client. POSTs to /api/v1/sync/push, which runs the SAME
- * push pipeline as `peasant village push` (redact → upload to the configured
- * village/commons), and returns real per-session results. This replaces a
- * simulated push whose fake progress, hardcoded 504, and fake success could
- * incorrectly tell the user that publication succeeded.
+ * The publish request both publish surfaces send to POST /api/v1/sync/push,
+ * which runs the same pipeline as `peasant village push` (redact, upload, then
+ * the collective steps) and returns one result per session.
+ *
+ * The request is typed and closed: the sessions, the redaction level, and the
+ * collectives to add and remove. It carries no visibility and no license; a
+ * first publication opens private, and an update keeps the audience the
+ * transcript has unless the request names a change. The answer is decoded
+ * against the schema contract in `publishSessions`.
  *
  * Honest failure: when the user isn't signed in, the server returns 401 with
- * "not authenticated — run 'peasant village login' first" — surfaced verbatim,
- * not faked.
+ * "not authenticated — run 'peasant village login' first", surfaced verbatim.
  */
 
-import { getApiBaseUrl } from '@/lib/api/base';
+import type { SyncPushRequest, SyncPushResponse } from '@peasant-labs/schema';
+import { publishSessions } from '@/lib/share/publishing';
 import type { SelectableRedactionLevel } from '@/lib/share/redactions';
 
-export type PushSessionStatus = 'new' | 'updated' | 'skipped' | 'error';
-
-export interface PushSessionResult {
-  sessionId: string;
-  status: PushSessionStatus;
-  title?: string;
-  error?: string;
-}
-
-export interface PushResult {
-  new: number;
-  updated: number;
-  skipped: number;
-  errors: number;
-  sessions: PushSessionResult[];
+/** A change of audience, by collective id. Empty lists change nothing. */
+export interface CollectiveChange {
+  add: readonly string[];
+  remove: readonly string[];
 }
 
 /**
- * Run the real push for the given sessions at the given redaction level. Throws
- * with the server's error message (e.g. the "run 'peasant village login' first"
- * 401) on failure.
+ * The push body: the sessions and the redaction level, and the collective
+ * change only when it names one, so a push without one keeps the audience.
  */
-export async function runPush(
+export function pushRequestBody(
+  sessionIds: string[],
+  redactionLevel: SelectableRedactionLevel,
+  change?: CollectiveChange,
+): SyncPushRequest {
+  const body: SyncPushRequest = { sessionIds, redactionLevel };
+  if (change && (change.add.length || change.remove.length)) {
+    body.collectives = {
+      ...(change.add.length ? { add: [...change.add] } : {}),
+      ...(change.remove.length ? { remove: [...change.remove] } : {}),
+    };
+  }
+  return body;
+}
+
+/**
+ * Publish the given sessions at the given redaction level with no change of
+ * audience (the multi-session wizard). Throws with the server's error message
+ * (for example the "run 'peasant village login' first" 401).
+ */
+export function runPush(
   sessionIds: string[],
   // Narrowed to the levels this version offers. The endpoint answers 400 for the
   // other two, so accepting them here only moved the refusal to a point where the
   // user has already committed to publishing.
   redactionLevel: SelectableRedactionLevel,
-): Promise<PushResult> {
-  const resp = await fetch(`${getApiBaseUrl()}/api/v1/sync/push`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionIds,
-      redactionLevel,
-      // The commons is public by design (the wizard frames it so).
-      visibility: 'public',
-    }),
-  });
-  if (!resp.ok) {
-    const body = (await resp.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error || `push failed (${resp.status})`);
-  }
-  return (await resp.json()) as PushResult;
+): Promise<SyncPushResponse> {
+  return publishSessions(pushRequestBody(sessionIds, redactionLevel));
 }

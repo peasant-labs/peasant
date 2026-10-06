@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -16,14 +17,21 @@ type ProjectedTarget struct {
 
 // Projection is the one fold result for local viewing and all outbound content.
 type Projection struct {
-	Turns          []ingest.Turn
-	NativeMetadata []schema.NativeMetadataRecord
-	UsageOwners    []schema.UsageDetail
-	SourceMap      map[string]ProjectedTarget
+	Diagnostics     *schema.InterpretationDiagnostics
+	RetainedUnknown []schema.RetainedUnknownRecord
+	Turns           []ingest.Turn
+	NativeMetadata  []schema.NativeMetadataRecord
+	UsageOwners     []schema.UsageDetail
+	SourceMap       map[string]ProjectedTarget
 }
 
 // ProjectionOptions can require carrier agreement with the session harness.
-type ProjectionOptions struct{ Harness schema.Harness }
+type ProjectionOptions struct {
+	Harness schema.Harness
+	// BoundedPreview preserves existing local viewing of older private captures.
+	// Never set this for export or publication: missing coordinates remain a refusal.
+	BoundedPreview bool
+}
 
 // EntriesToProjectionValidated reconstructs evidence after SQLite reopen.
 func EntriesToProjectionValidated(entries []schema.SessionEntry, opts ProjectionOptions) (Projection, error) {
@@ -32,6 +40,15 @@ func EntriesToProjectionValidated(entries []schema.SessionEntry, opts Projection
 
 func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, validate bool) (Projection, error) {
 	p := Projection{SourceMap: make(map[string]ProjectedTarget)}
+	var err error
+	p.RetainedUnknown, err = ingest.ProjectRetainedUnknown(entries, opts.Harness)
+	if opts.BoundedPreview && errors.Is(err, ingest.ErrUnknownPositionUnavailable) {
+		p.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
+		err = nil
+	}
+	if err != nil && validate {
+		return p, err
+	}
 	evidence := make(map[int]ingest.PiExtra)
 	indexes := make(map[int]bool)
 	for _, entry := range entries {
@@ -43,6 +60,9 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 			return p, projectionError("invalid carrier row")
 		}
 		if !pi {
+			if ingest.IsRetainedUnknownCarrier(entry) {
+				continue
+			}
 			if opts.Harness == schema.HarnessPi {
 				return p, projectionError("Pi session contains a row without typed source/usage evidence")
 			}
@@ -256,7 +276,13 @@ func SessionToDetailValidatedWithProjection(session *ingest.Session, p Projectio
 	copy := *session
 	copy.Turns = p.Turns
 	copy.NativeMetadata = p.NativeMetadata
-	return SessionToDetailValidated(&copy)
+	copy.RetainedUnknown = p.RetainedUnknown
+	copy.Diagnostics = p.Diagnostics
+	detail, err := SessionToDetailValidated(&copy)
+	if err != nil {
+		return nil, err
+	}
+	return detail, schema.ValidateRetainedUnknown(*detail)
 }
 
 func projectionError(reason string) error {

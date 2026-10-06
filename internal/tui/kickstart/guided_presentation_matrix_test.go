@@ -4,15 +4,14 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -20,10 +19,10 @@ import (
 )
 
 const (
-	requiredGuidedPresentationSections = 6
+	requiredGuidedPresentationSections = 7
 	requiredGuidedPresentationThemes   = 2
 	requiredGuidedPresentationSizes    = 2
-	requiredGuidedPresentationCases    = 24
+	requiredGuidedPresentationCases    = 28
 	requiredGuidedPrivacyMarkers       = 2
 )
 
@@ -57,17 +56,8 @@ var guidedPresentationFixtureData []byte
 
 func decodeGuidedPresentationDocument(data []byte) (guidedPresentationDocument, error) {
 	var document guidedPresentationDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("decode guided presentation matrix: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return document, fmt.Errorf("guided presentation matrix must contain exactly one document: %w", err)
 	}
 	if document.ExpectedSectionCount != requiredGuidedPresentationSections || len(document.Sections) != requiredGuidedPresentationSections {
 		return document, fmt.Errorf("guided presentation sections: declared=%d actual=%d required=%d",
@@ -86,6 +76,7 @@ func decodeGuidedPresentationDocument(data []byte) (guidedPresentationDocument, 
 	required := map[string]bool{
 		kickstart.SectionAutoIngest:  true,
 		kickstart.SectionPublication: true,
+		kickstart.SectionAutoPublish: true,
 		kickstart.SectionPrivacy:     true,
 		kickstart.SectionLicense:     true,
 		kickstart.SectionDestination: true,
@@ -219,6 +210,7 @@ func containingMountedLine(view, text string) int {
 }
 
 func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testing.T) {
+	t.Parallel()
 	document := loadGuidedPresentationDocument(t)
 	for _, row := range document.Cases {
 		row := row
@@ -310,7 +302,8 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 }
 
 func TestGuidedPresentationFixtureRejectsMissingCanonicalSection(t *testing.T) {
-	mutated := mutateGuidedPresentationFixture(t, guidedPresentationFixtureData, []byte("expectedSectionCount: 6"), []byte("expectedSectionCount: 5"))
+	t.Parallel()
+	mutated := mutateGuidedPresentationFixture(t, guidedPresentationFixtureData, []byte("expectedSectionCount: 7"), []byte("expectedSectionCount: 6"))
 	mutated = mutateGuidedPresentationFixture(t, mutated, []byte("  - key: retention\n    heading: how long claude code keeps its transcripts\n    control: '( ) 30 days'\n    intro: choose how long claude code keeps its source transcript files.\n"), nil)
 	if _, err := decodeGuidedPresentationDocument(mutated); err == nil {
 		t.Fatal("guided presentation fixture accepted removal of a canonical guided section")
@@ -318,6 +311,7 @@ func TestGuidedPresentationFixtureRejectsMissingCanonicalSection(t *testing.T) {
 }
 
 func TestGuidedPresentationFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), guidedPresentationFixtureData...), []byte("\nunknownField: true\n")...)
 	if bytes.Equal(mutated, guidedPresentationFixtureData) {
 		t.Fatal("guided-presentation unknown-field mutation did not alter the fixture")
@@ -328,6 +322,7 @@ func TestGuidedPresentationFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestGuidedPresentationFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), guidedPresentationFixtureData...), []byte("\n---\n{}\n")...)
 	if bytes.Equal(mutated, guidedPresentationFixtureData) {
 		t.Fatal("guided-presentation trailing-document mutation did not alter the fixture")

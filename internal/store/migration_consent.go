@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // MigrationV33 is the schema version that renames harness identifiers in the

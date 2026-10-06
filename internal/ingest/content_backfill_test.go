@@ -13,7 +13,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -23,6 +23,7 @@ import (
 var captureBackfillFixtureData []byte
 
 func TestRetainedContentBackfill(t *testing.T) {
+	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
@@ -52,10 +53,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			fs := testutil.NewMemFS()
-			database, err := store.Open(t.TempDir() + "/capture.db")
-			if err != nil {
-				t.Fatal(err)
-			}
+			database := storetest.OpenWith(t)
 			defer database.Close()
 			count := max(1, fixture.Count)
 			var ids []ingest.SessionID
@@ -72,6 +70,12 @@ func TestRetainedContentBackfill(t *testing.T) {
 			if fixture.Cursor {
 				data = []byte(fmt.Sprintf(`{"uuid":"stable_cursor_message","role":"assistant","content":%s}`, raw))
 			}
+			// Seed setup batches its store writes: one metadata commit and one
+			// entry write set for every session, instead of one transaction per
+			// session. The per-session reads below still observe the same rows;
+			// only the write batching changed, not what is stored.
+			var storeEntries []ingest.StoreEntry
+			var entryWrites []ingest.SessionEntryWrite
 			for i := 0; i < count; i++ {
 				id, err := ingest.NewSessionID(fmt.Sprintf("ses_backfill%03d", i))
 				if err != nil {
@@ -105,9 +109,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 					meta.ParentUUID = &parentID
 					dir = filepath.Join(dir, parentID.String(), "subagents")
 				}
-				if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
-					t.Fatal(err)
-				}
+				storeEntries = append(storeEntries, ingest.StoreEntry{Metadata: meta})
 				path := filepath.Join(dir, id.String(), id.String()+"--transcript.jsonl")
 				session := ingest.DiscoveredSession{SessionID: id, Harness: harness, SourcePath: ingest.ResolvedPath(path), SourceFormat: ingest.SourceFormatJSONL}
 				idx := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})[harness]
@@ -119,13 +121,40 @@ func TestRetainedContentBackfill(t *testing.T) {
 					value := `{"legacy":"anchor"}`
 					entries[0].Extra = &value
 				}
-				if err := database.IndexSessionEntries(ctx, id, entries); err != nil {
+				if fixture.Cursor && (entries[0].ContentPreview == nil || *entries[0].ContentPreview != "example") {
+					t.Fatal("tolerant Cursor preview shape changed")
+				}
+				// IndexSessionEntries is a single-write IndexSessionEntryBatch
+				// with these exact arguments; collect the identical write and
+				// commit one batch for all sessions below.
+				entryWrites = append(entryWrites, ingest.SessionEntryWrite{
+					SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+					Mode: ingest.SessionEntryWriteExplicitRebuild,
+				})
+				metadata, _ := json.Marshal(meta)
+				if err := fs.WriteFile(filepath.Join(dir, id.String(), id.String()+"--metadata.json"), metadata, 0600); err != nil {
 					t.Fatal(err)
 				}
+				content := data
+				if fixture.Corrupt && i == 0 {
+					content = []byte(`{"type":`)
+				}
+				if err := fs.WriteFile(path, content, 0600); err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, id)
+			}
+			if err := database.InsertSessions(ctx, storeEntries); err != nil {
+				t.Fatal(err)
+			}
+			results := database.IndexSessionEntryBatch(ctx, entryWrites)
+			for _, result := range results {
+				if result.Err != nil {
+					t.Fatal(result.Err)
+				}
+			}
+			for _, id := range ids {
 				if fixture.Cursor {
-					if entries[0].ContentPreview == nil || *entries[0].ContentPreview != "example" {
-						t.Fatal("tolerant Cursor preview shape changed")
-					}
 					annotator, err := database.GetAnnotatorIDByName(ctx, "frustration-classifier")
 					if err != nil {
 						t.Fatal(err)
@@ -148,24 +177,12 @@ func TestRetainedContentBackfill(t *testing.T) {
 					t.Fatal(err)
 				}
 				captures = append(captures, capture)
-				metadata, _ := json.Marshal(meta)
-				if err := fs.WriteFile(filepath.Join(dir, id.String(), id.String()+"--metadata.json"), metadata, 0600); err != nil {
-					t.Fatal(err)
-				}
-				content := data
-				if fixture.Corrupt && i == 0 {
-					content = []byte(`{"type":`)
-				}
-				if err := fs.WriteFile(path, content, 0600); err != nil {
-					t.Fatal(err)
-				}
-				ids = append(ids, id)
 			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex = true
 			cfg.Force = fixture.Force
 			adapters := map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -264,13 +281,11 @@ func TestRetainedContentBackfill(t *testing.T) {
 // nowhere but the content stage: reverting the content-stage hash compare makes
 // this go silent.
 func TestContentStageDetectsTornPair(t *testing.T) {
+	t.Parallel()
 	t.Run("content_stage_detects_torn_pair", func(t *testing.T) {
 		ctx := context.Background()
 		fs := testutil.NewMemFS()
-		database, err := store.Open(filepath.Join(t.TempDir(), "torn.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		database := storetest.OpenWith(t)
 		defer database.Close()
 
 		meta := makeMinimalMeta(t, "ses_tornpair00001")
@@ -344,7 +359,7 @@ func TestContentStageDetectsTornPair(t *testing.T) {
 		cfg := makePipelineConfig(testOutputDir)
 		cfg.Reindex = true // a plain reindex: the write path never reads a present row's pair here.
 		adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
-		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 			ingest.WithStore(database), ingest.WithMetricsStore(database))
 		if err != nil {

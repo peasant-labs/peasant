@@ -1,10 +1,8 @@
 package mdrender_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,8 +13,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/mdrender"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
@@ -57,17 +55,8 @@ type renderDoc struct {
 func loadRenderDoc(t *testing.T) renderDoc {
 	t.Helper()
 	var doc renderDoc
-	dec := yaml.NewDecoder(bytes.NewReader(renderData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(renderData, &doc); err != nil {
 		t.Fatalf("decode testdata/render.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("render.yaml must hold exactly one document: %v", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))

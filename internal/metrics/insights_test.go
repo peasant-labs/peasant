@@ -10,9 +10,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // TestComputeInsights_DailySummaryCreated verifies that Engine.ComputeInsights
@@ -24,7 +24,7 @@ func TestComputeInsights_DailySummaryCreated(t *testing.T) {
 
 	// Open a real SQLite store from the golden (pre-migrated) copy.
 	dbPath := storetest.CopyGoldenDB(t)
-	s, err := store.Open(dbPath)
+	s, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

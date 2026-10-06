@@ -35,6 +35,7 @@ import (
 // pass every project_resolution.yaml case unchanged — only this test
 // exercises the seam directly.
 func TestResolveProject_NotFoundPathsShareVisibilityQueryShape(t *testing.T) {
+	t.Parallel()
 	database := storetest.Open(t)
 
 	hiddenHash, err := schema.NewProjectHash("2223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")

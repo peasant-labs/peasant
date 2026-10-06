@@ -1,20 +1,18 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"reflect"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/artifact_seeds.yaml
@@ -79,14 +77,8 @@ func TestMetricsUsesRetainedSeedInsteadOfPriorComputedTokens(t *testing.T) {
 func loadArtifactSeedFixtures(t *testing.T) artifactSeedFixtures {
 	t.Helper()
 	var fixture artifactSeedFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(artifactSeedsYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(artifactSeedsYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("artifact seed fixture must contain exactly one YAML document")
 	}
 	required := []string{"computed-metrics-survive", "uncomputed-seeds-stay-uncomputed", "unknown-adapter-stays-unknown"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {

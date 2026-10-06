@@ -478,6 +478,7 @@ func sessionRowIn(t *testing.T, frame string) string {
 // case claim it reaches a conflict while configuring something that cannot
 // conflict; asserting only the first would not observe the wizard at all.
 func TestWizardExistingSelection_UsesCanonicalMatcher(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadPersistenceFixtures(t).SelectionCases {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -631,11 +632,10 @@ func pressSpaceOnSessionRow(t *testing.T, page *TreeSelectPage) {
 }
 
 func TestConfigSaveTo_ExactPathPreservesLoadedSettings(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadPersistenceFixtures(t).Cases {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
-			defaultHome := t.TempDir()
-			t.Setenv(defaults.EnvXDGConfigHome.String(), defaultHome)
 			exact := filepath.Join(t.TempDir(), "chosen", "settings.yaml")
 			loaded := config.BaseConfig()
 			loaded.User.Email = fixture.UserEmail
@@ -711,7 +711,7 @@ func TestConfigSaveTo_ExactPathPreservesLoadedSettings(t *testing.T) {
 }
 
 func TestWizardRestart_PreservesPersistenceAndSaves(t *testing.T) {
-	t.Setenv(defaults.EnvXDGConfigHome.String(), t.TempDir())
+	t.Parallel()
 	exact := filepath.Join(t.TempDir(), "chosen.yaml")
 	loaded := config.BaseConfig()
 	loaded.User.Email = "restart@example.test"
@@ -734,6 +734,7 @@ func TestWizardRestart_PreservesPersistenceAndSaves(t *testing.T) {
 }
 
 func TestWizardRestartPreservesJourneyRunnerWithoutExecutingIt(t *testing.T) {
+	t.Parallel()
 	runner := &restartJourneyRunner{}
 	restarted := NewWizard(WithJourneyRunner(runner)).restart()
 	if restarted.journeyRunner != runner {
@@ -745,6 +746,7 @@ func TestWizardRestartPreservesJourneyRunnerWithoutExecutingIt(t *testing.T) {
 }
 
 func TestWizardSkipsLegacyIngestionPageWithJourneyRunner(t *testing.T) {
+	t.Parallel()
 	wizard := NewWizard(WithJourneyRunner(&restartJourneyRunner{}), WithIngestRunner(func(context.Context, WizardAnswers) (*IngestResult, error) {
 		return &IngestResult{}, nil
 	}))
@@ -755,6 +757,7 @@ func TestWizardSkipsLegacyIngestionPageWithJourneyRunner(t *testing.T) {
 }
 
 func TestWizardStreamsIngestProgressThroughOrderedJourneyOnce(t *testing.T) {
+	t.Parallel()
 	progress := &synchronizedProgress{data: map[string]StageProgress{}}
 	ingestStarted := make(chan struct{})
 	releaseIngest := make(chan struct{})
@@ -795,6 +798,7 @@ func TestWizardStreamsIngestProgressThroughOrderedJourneyOnce(t *testing.T) {
 }
 
 func TestWizardRetryRejectsStaleProgressTick(t *testing.T) {
+	t.Parallel()
 	wizard := NewWizard(WithJourneyRunner(&restartJourneyRunner{}))
 	wizard.journeyProgressToken = 1
 	wizard.executing = true
@@ -824,6 +828,7 @@ func TestWizardRetryRejectsStaleProgressTick(t *testing.T) {
 }
 
 func TestWizardExecutionCancellationWaitsForMountedRunner(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadExecutionCancelFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			runner := blockedJourneyRunner{started: make(chan struct{})}

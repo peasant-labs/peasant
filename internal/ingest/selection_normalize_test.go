@@ -3,13 +3,11 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 // Fixture-backed coverage for the two selection-matching
@@ -50,28 +48,16 @@ type selectionNormalizeManifest struct {
 
 func loadSelectionNormalizeManifest(data []byte) (selectionNormalizeManifest, error) {
 	var manifest selectionNormalizeManifest
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &manifest); err != nil {
 		return selectionNormalizeManifest{}, fmt.Errorf("decode selection-normalize manifest: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return selectionNormalizeManifest{}, fmt.Errorf("selection-normalize manifest must contain exactly one YAML document: %v", err)
 	}
 	return manifest, nil
 }
 
 func loadSelectionNormalizeFixture(data []byte) (selectionNormalizeFixture, error) {
 	var fixture selectionNormalizeFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return selectionNormalizeFixture{}, fmt.Errorf("decode selection-normalize fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return selectionNormalizeFixture{}, fmt.Errorf("selection-normalize fixture must contain exactly one YAML document: %v", err)
 	}
 	if len(fixture.RemoteCases) == 0 || len(fixture.NameCases) == 0 {
 		return selectionNormalizeFixture{}, fmt.Errorf("selection-normalize fixture must have at least one remoteCases row and one nameCases row, got %d/%d", len(fixture.RemoteCases), len(fixture.NameCases))

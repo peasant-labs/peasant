@@ -164,7 +164,7 @@ func (idx *OpenCodeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, 
 	var ignored []IgnoredSourceRecord
 	for kind, count := range unknown {
 		if !isOpenCodeCaptureControl(kind) {
-			return TranscriptCaptureResult{}, captureFailure(s, 0, &UnrepresentedRecordError{Harness: HarnessOpenCode, Kind: kind})
+			continue
 		}
 		for range count {
 			ignored = append(ignored, IgnoredSourceRecord{Kind: kind, Reason: IgnoredRecordControl})
@@ -179,14 +179,33 @@ func (idx *OpenCodeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, 
 }
 
 func isOpenCodeCaptureControl(kind string) bool {
-	switch kind {
-	case "step-start", "step-finish", "snapshot", "patch":
-		return true
+	for _, control := range openCodeCaptureControlKinds() {
+		if kind == control {
+			return true
+		}
 	}
 	return false
 }
 
+// openCodeCaptureControlKinds is the closed set of OpenCode part types the
+// strict capture path ignores as control. It is the single source of truth
+// for isOpenCodeCaptureControl, and the vocabulary completeness check compares
+// it with the declaration.
+func openCodeCaptureControlKinds() []string {
+	return []string{
+		"step-start",
+		"step-finish",
+		"snapshot",
+		"patch",
+	}
+}
+
 func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s DiscoveredSession, messages []openCodeSemanticMessage) (TranscriptCaptureResult, error) {
+	var err error
+	messages, err = retainOpenCodeSemantic(s.SessionID, messages)
+	if err != nil {
+		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
+	}
 	var ignored []IgnoredSourceRecord
 	for m, message := range messages {
 		if err := ctx.Err(); err != nil {
@@ -248,7 +267,10 @@ func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s Disco
 	copy := *idx
 	copy.fullContent = true
 	copy.fullDepth = true
-	entries := copy.indexSemanticMessages(s.SessionID, messages)
+	entries, err := copy.indexSemanticMessages(s.SessionID, messages)
+	if err != nil {
+		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
+	}
 	// Expand inline arrays only after the historical shape/dedup decision. A
 	// longer parent must not remove or renumber an existing child anchor.
 	inline := make(map[string]string)
@@ -271,7 +293,8 @@ func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s Disco
 			}
 		}
 	}
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }
 
 // refuseOpenCodeProviderDatabase keeps the managed-projection reader off the

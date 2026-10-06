@@ -1,13 +1,11 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/write_path_guard.yaml
@@ -42,14 +39,8 @@ type writePathGuardFixture struct {
 func loadWritePathGuardFixture(t *testing.T) writePathGuardFixture {
 	t.Helper()
 	var fixture writePathGuardFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(writePathGuardYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(writePathGuardYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("write path guard fixture requires one YAML document")
 	}
 	forbidden := make(map[string]bool)
 	for _, row := range fixture.Forbidden {

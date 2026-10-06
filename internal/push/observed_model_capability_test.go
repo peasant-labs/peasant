@@ -5,8 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -16,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/observed_model_capability.yaml
@@ -44,15 +41,9 @@ type observedModelCapabilityFixture struct {
 
 func loadObservedModelCapabilityFixture(t *testing.T) observedModelCapabilityFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(observedModelCapabilityFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture observedModelCapabilityFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(observedModelCapabilityFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode observed model capability fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("observed model capability fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeSemanticManifest(observedModelCapabilityManifestYAML, "observed model capability")
 	if err != nil {
@@ -72,6 +63,7 @@ func loadObservedModelCapabilityFixture(t *testing.T) observedModelCapabilityFix
 }
 
 func TestPipelineObservedModelCapabilityGate(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadObservedModelCapabilityFixture(t).Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {

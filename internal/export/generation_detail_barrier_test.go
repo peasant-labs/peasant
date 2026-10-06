@@ -22,6 +22,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
@@ -268,6 +269,7 @@ func mustBarrierSessionID(t *testing.T, fixtureCase barrierCase) schema.SessionI
 // TestGenerationDetailBarrier drives every named corpus case through the real
 // generation-capable store and the production export exit.
 func TestGenerationDetailBarrier(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadGenerationDetailBarrierCorpus(t) {
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			switch fixtureCase.Operation {
@@ -286,10 +288,13 @@ func TestGenerationDetailBarrier(t *testing.T) {
 
 // attemptBarrierLocker delegates to the real per-session file locker and
 // observably signals when an exclusive attempt starts, so the test proves a
-// genuine flock contention rather than a scheduler pause.
+// genuine flock contention rather than a scheduler pause. It also stamps the
+// instant the real lock call returns, so a test can assert acquisition order
+// without a timing window.
 type attemptBarrierLocker struct {
 	store.SessionLocker
 	attempts chan struct{}
+	acquired chan time.Time
 }
 
 func (b *attemptBarrierLocker) LockExclusive(ctx context.Context, id schema.SessionID) (func() error, error) {
@@ -297,14 +302,21 @@ func (b *attemptBarrierLocker) LockExclusive(ctx context.Context, id schema.Sess
 	case b.attempts <- struct{}{}:
 	default:
 	}
-	return b.SessionLocker.LockExclusive(ctx, id)
+	release, err := b.SessionLocker.LockExclusive(ctx, id)
+	if err == nil && b.acquired != nil {
+		select {
+		case b.acquired <- time.Now():
+		default:
+		}
+	}
+	return release, err
 }
 
 // openBarrierGenerationStore opens a real generation-capable store with the
 // production artifact and lock implementations behind the attempt barrier. It
 // returns the owned-artifact root as well, so a test can reach the committed
 // blob files it must corrupt.
-func openBarrierGenerationStore(t *testing.T, attempts chan struct{}) (*store.Store, string) {
+func openBarrierGenerationStore(t *testing.T, attempts chan struct{}, acquired chan time.Time) (*store.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "artifacts")
@@ -316,11 +328,14 @@ func openBarrierGenerationStore(t *testing.T, attempts chan struct{}) (*store.St
 	if err != nil {
 		t.Fatal(err)
 	}
+	destPath := filepath.Join(dir, "generations.db")
+	storetest.CopyGoldenTo(t, destPath)
 	s, err := store.Open(
-		filepath.Join(dir, "generations.db"),
+		destPath,
+		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
-		store.WithGenerationArtifacts(artifacts, &attemptBarrierLocker{SessionLocker: locker, attempts: attempts}),
+		store.WithGenerationArtifacts(artifacts, &attemptBarrierLocker{SessionLocker: locker, attempts: attempts, acquired: acquired}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -335,6 +350,19 @@ func drainExclusiveAttempts(attempts chan struct{}) {
 	for {
 		select {
 		case <-attempts:
+			continue
+		default:
+			return
+		}
+	}
+}
+
+// drainAcquired clears the setup activations' lock-acquisition stamps so a
+// later acquisition-order assertion observes only the contended operations.
+func drainAcquired(acquired chan time.Time) {
+	for {
+		select {
+		case <-acquired:
 			continue
 		default:
 			return
@@ -450,21 +478,18 @@ func buildBarrierGeneration(t *testing.T, sid schema.SessionID, spec barrierGene
 
 func activateBarrierGeneration(t *testing.T, s *store.Store, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) error {
 	t.Helper()
-	return s.ActivateGeneration(context.Background(), store.GenerationActivation{
+	_, err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
 		Generation:     v2,
 		Blobs:          blobs,
 		IndexerVersion: 1,
 		IndexedAtMs:    1,
 	})
+	return err
 }
 
 func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label string) {
 	t.Helper()
-	select {
-	case <-attempts:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s never attempted the exclusive session lock", label)
-	}
+	testwait.Receive(t, attempts, label+" attempted the exclusive session lock")
 }
 
 // runBarrierLockLifetime drives the actual durable export boundary through the
@@ -477,6 +502,7 @@ func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label strin
 // held bytes and the later fresh read must be wholly the later generation.
 func runBarrierLockLifetime(t *testing.T, fixtureCase barrierCase) {
 	t.Helper()
+	ctx := testwait.Context(t)
 	sid := mustBarrierSessionID(t, fixtureCase)
 	heldText := fixtureCase.Held.Text.resolve()
 	heldToolInput := fixtureCase.Held.ToolInput.resolve()
@@ -485,7 +511,8 @@ func runBarrierLockLifetime(t *testing.T, fixtureCase barrierCase) {
 	laterToolInput := fixtureCase.Later.ToolInput.resolve()
 
 	attempts := make(chan struct{}, 8)
-	s, _ := openBarrierGenerationStore(t, attempts)
+	acquired := make(chan time.Time, 8)
+	s, _ := openBarrierGenerationStore(t, attempts, acquired)
 	storetest.SeedSession(t, s, string(sid))
 
 	// The baseline is committed and then superseded by the held generation, so
@@ -502,6 +529,7 @@ func runBarrierLockLifetime(t *testing.T, fixtureCase barrierCase) {
 	// The setup activations each took the exclusive lock; clear their signals so
 	// the waits below observe only the contended activation and cleanup.
 	drainExclusiveAttempts(attempts)
+	drainAcquired(acquired)
 
 	lifetime := &callbackLifetime{}
 	reader := lifetimeReader{inner: s, state: lifetime}
@@ -526,7 +554,7 @@ func runBarrierLockLifetime(t *testing.T, fixtureCase barrierCase) {
 	case observation = <-gate.entered:
 	case early := <-exportDone:
 		t.Fatalf("export boundary returned before hydrating captured content: err=%v payload=%+v", early.err, early.payload)
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("export boundary never began hydrating captured content")
 	}
 	if observation.generationID != fixtureCase.Expectations.HeldGenerationID {
@@ -549,44 +577,28 @@ func runBarrierLockLifetime(t *testing.T, fixtureCase barrierCase) {
 	go func() { activationDone <- activateBarrierGeneration(t, s, later, laterBlobs) }()
 	waitForExclusiveAttempt(t, attempts, "activation")
 
-	select {
-	case err := <-cleanupDone:
-		close(gate.release)
-		t.Fatalf("cleanup removed the inactive generation while the export boundary still held the shared lock (err=%v)", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-	select {
-	case err := <-activationDone:
-		close(gate.release)
-		t.Fatalf("activation completed while the export boundary still held the shared lock (err=%v)", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-
+	// The barrier signals before the real lock call, so an instantaneous check
+	// cannot prove the lock is held. Release the reader and assert instead that
+	// each contended operation acquired the exclusive lock only after that
+	// instant: both attempts above happened first, so a lock that was not held
+	// would have been acquired before releaseAt.
+	releaseAt := time.Now()
 	close(gate.release)
-	var materialized result
-	select {
-	case materialized = <-exportDone:
-		if materialized.err != nil {
-			t.Fatalf("export boundary: %v", materialized.err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("export boundary did not return after release")
+	materialized := testwait.Receive(t, exportDone, "the export boundary returned after the reader released the shared lock")
+	if materialized.err != nil {
+		t.Fatalf("export boundary: %v", materialized.err)
 	}
-	select {
-	case err := <-activationDone:
-		if err != nil {
-			t.Fatalf("activation after release: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("activation did not complete after the export boundary released the shared lock")
+	if err := testwait.Receive(t, activationDone, "activation completed after the export boundary released the shared lock"); err != nil {
+		t.Fatalf("activation after release: %v", err)
 	}
-	select {
-	case err := <-cleanupDone:
-		if err != nil {
-			t.Fatalf("cleanup after release: %v", err)
+	if err := testwait.Receive(t, cleanupDone, "cleanup completed after the export boundary released the shared lock"); err != nil {
+		t.Fatalf("cleanup after release: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		acquiredAt := testwait.Receive(t, acquired, "a contended operation acquired the exclusive session lock")
+		if acquiredAt.Before(releaseAt) {
+			t.Fatal("a contended operation acquired the exclusive session lock before the reader released the shared lock; the shared lock no longer spans content hydration")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("cleanup did not complete after the export boundary released the shared lock")
 	}
 
 	// Exact held output: the boundary materialized the full captured generation.
@@ -694,7 +706,7 @@ func corruptCommittedBlob(t *testing.T, root string, sid schema.SessionID, gener
 func runBarrierCorruptArtifact(t *testing.T, fixtureCase barrierCase) {
 	t.Helper()
 	sid := mustBarrierSessionID(t, fixtureCase)
-	s, root := openBarrierGenerationStore(t, make(chan struct{}, 4))
+	s, root := openBarrierGenerationStore(t, make(chan struct{}, 4), nil)
 	storetest.SeedSession(t, s, string(sid))
 	held, blobs := buildBarrierGeneration(t, sid, *fixtureCase.Held)
 	if err := activateBarrierGeneration(t, s, held, blobs); err != nil {
@@ -744,7 +756,7 @@ func seedSessionWithSource(t *testing.T, s *store.Store, sid schema.SessionID, s
 func runBarrierNativeDeletion(t *testing.T, fixtureCase barrierCase) {
 	t.Helper()
 	sid := mustBarrierSessionID(t, fixtureCase)
-	s, _ := openBarrierGenerationStore(t, make(chan struct{}, 4))
+	s, _ := openBarrierGenerationStore(t, make(chan struct{}, 4), nil)
 	sourcePath := filepath.Join(t.TempDir(), "native-session.jsonl")
 	if err := os.WriteFile(sourcePath, []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("write native source: %v", err)

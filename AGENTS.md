@@ -48,6 +48,11 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 
 ## Tests and fixtures
 
+The test gate itself — two passes, the no-race registry, the four-rule
+exactly-once screen, the run classes, and the committed budget — is documented in
+`TESTING.md` under **Test gate**. Run `make check` as usual; the gate is the entry
+point, not a wrapper you invoke by hand.
+
 - Use an integration test first for behavior that involves I/O, state, or more than one
   component.
 - Test the production path. Mock the dependencies, not the system under test.
@@ -57,6 +62,22 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 - Assert observable outcomes. Do not assert private implementation details.
 - Add a compile-time interface guard for each new interface implementation.
 - Use an external test package when `internal/testutil` would create an import cycle.
+- The shared test filesystem decorators (`GatedFS`, `BoundedFS`, and the existing
+  `CountingFS`) implement the contract in `internal/testkit/fsdecorator`. It is a
+  standard-library-only leaf package so both `internal/testutil` and a white-box
+  `package ingest` test can import it without an import cycle; do not move the
+  declaration into `internal/testutil`. `fsdecorator.FileSystem` mirrors
+  `ingest.FileSystem`, and a contract test keeps them identical.
+- The decorators have two owners. `internal/testutil` owns the non-white-box
+  decorators. The white-box `internal/ingest/fsfault_test.go` owns the decorators
+  that need the package's unexported internals. Neither owner declares the shared
+  contract; both implement it.
+- The coverage map that records each moved, deleted, retained, or deferred test
+  name — its `Inventory` and `CoverageMap` schema, the closed destination set,
+  and the validators — lives in `internal/testkit/coveragemap`. `TESTING.md` describes
+  the map and the decorator owners.
+- A test wait names its wake source or carries a deadline. Real waits stay on the keep list with a
+  reason. See `TESTING.md`.
 
 ## Types and boundaries
 
@@ -67,12 +88,36 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 - Keep reusable defaults in `internal/defaults`. Keep package-specific values local.
 - Keep dependencies injectable. Production wiring uses real dependencies. Tests may replace them.
 - Use atomic file operations for persisted data. Keep the existing XDG directory layout.
+- The gate's exported shapes (per-invocation record, report document, registry,
+  budget) and the shared stream library are frozen by contract tests. Change a
+  shape only as a deliberate contract change; the `contract_test.go` files in
+  `internal/testkit/testgate` and `internal/testkit/teststream` fail on a rename, removal, retype,
+  retag, or reorder of a frozen field.
 
 Run the ast-grep rules of the repository when you change Go types or literals:
 
 ```bash
 ast-grep scan --config sgconfig.yml .
 ```
+
+### Record-kind vocabulary
+
+- Each harness owns one co-located vocabulary declaration under `internal/ingest/*_vocabulary.go`. Those
+  declarations are the source of truth for the record and content-block kinds the parser recognizes.
+  Never hand-edit `internal/ingest/record_kinds.yaml` or `docs/record-kinds.md`; both are generated
+  output.
+- `internal/indexformat.Outcome` is the interpretation IR: text, tool call, tool result, control,
+  ignored, or opaque. Adapters declare only the outcome. The central lowering owns stored entry mode,
+  preview eligibility, payload shape, and coordinate requirements.
+- A well-formed valid kind that is absent from the vocabulary resolves to opaque retained evidence by
+  default. Malformed known data and failed retention remain validation failures. The registry is
+  reporting-only and never admits or refuses parser input.
+- Rendering is a Fairtrade consumer concern. Do not add visualization state, renderer names, or
+  viewer coverage to the registry or the harvest report.
+- Keep the exact per-adapter production-census and required-name tests green. Do not reintroduce the
+  retired AST scanner. After changing a vocabulary or its stored behavior, run `go generate
+  ./internal/ingest`, the registry/docgen tests, and bump the relevant indexer version when settled
+  sessions must be re-indexed.
 
 ## Data and contract invariants
 
@@ -171,15 +216,34 @@ the server serves the newly built assets before you trust a screenshot or a comp
   by itself.
 - Do not add a fail-closed gate on deep links. An earlier attempt was withdrawn as a misread of
   the user's intent. Do not reintroduce it without a new, explicit ratification.
-- Publishing is a separate, user-initiated action: the `/share` wizard. It never runs
-  automatically or in the background. It draws only from the sessions the user recorded. Pulled
-  transcripts are not re-pushable. Governance for re-sharing pulled sessions is a tracked
-  follow-up.
-- The consented publication paths are the `/share` wizard, the upload hook installed by
-  `peasant village hooks install`, and attaching the prompts behind a pull request. Attaching is
-  a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
+- Publishing is a separate, user-initiated action: the transcript publish popup or the multi-session `/share` wizard. Nothing is published
+  without an explicit act: a click, or a binding the developer set up. It draws only from the
+  sessions the user recorded. Pulled transcripts are not re-pushable. Governance for re-sharing
+  pulled sessions is a tracked follow-up.
+- The consented publication paths are the transcript publish popup, the `/share` wizard, the upload hook installed by
+  `peasant village hooks install`, the auto-publish hook, and attaching the prompts behind a pull
+  request. The auto-publish hook is the same managed hook, installed by `peasant village auto` or
+  by the settings install route, for a repository that an auto-publish rule in `hooks.yaml`
+  covers. The rule is the binding. `autopublish.Decide` is the one matcher of rules,
+  server-side; do not implement it again in React. `peasant village push`, which a managed hook
+  runs, applies it per session, to the repository the session was recorded in (a linked
+  worktree counts as its main repository). A gone directory is matched by its
+  recorded path and ancestors because its repository root is no longer known;
+  a deleted nested repository can inherit a containing folder rule. A push that sends a bound session publishes
+  collectives-only: private, no license, and each bound transcript is shared with its rule's
+  collectives, never with the public. A session a paused rule (no event) covers is not
+  published, a transcript that is public on Village is not updated, and a collective that
+  rejected or lost a transcript is not asked again. Kickstart's publication and the local web's
+  publish do not read the rules. A rule-installed hook requires an active matching binding; deleting or
+  pausing the last binding stops its publication while retaining its hook file.
+  Separately installed plain terminal hooks retain their independent consent.
+  A rule installs no hook by itself: `peasant village auto` and
+  the settings install route install one repository at a time, by an explicit act, and only in
+  a repository Peasant has recorded sessions in. Any managed hook applies the rules, including
+  one installed with `peasant village hooks install`, so saving a rule changes what an installed
+  hook publishes. Attaching is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
   transcripts already published. Do not add a path that publishes without one of these, and do
-  not make any of them automatic.
+  not create a binding for the developer.
 - One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
   user-facing lists show only the configured selection. An explicit session selection must not
   widen visibility to the sibling sessions of its project. Apply the boundary server-side.
@@ -194,19 +258,33 @@ the server serves the newly built assets before you trust a screenshot or a comp
   sessions annotate it. Keep bound and candidate/temporal associations distinct. Keep unattached
   sessions discoverable.
 - A wire change lands through the schema contract ceremony first.
-- The `changes` label and the `/review` routes stay in force until a user-ratified replacement
-  lands. Do not rename or delete them silently.
-- `/share` is the canonical share surface. The persistent top-nav action routes there. It stays
-  outside the fairtrade graph-section registry. `GRAPH_APP_SECTIONS` in fairtrade owns the
-  registry and fixes it to `analytics | changes | code map`. Do not add a `/push` alternate
-  route.
+- The `changes` label and the `/review` routes stay in force. In the home-first registry
+  `changes` is a route-only section (`inNav: false`): it keeps its id, label and routes, and
+  `home` leads the nav instead. Do not rename or delete the label or the routes silently.
+- `/share` is the canonical publish route: one-session links open the transcript popup;
+  multi-session and wizard-step links retain the wizard. It stays
+  outside the fairtrade section registry, and the local header does not link to it. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
+  `home | settings` in the nav, then `analytics | changes | code map` by route only.
+  `GRAPH_APP_SECTIONS` is its deprecated alias with the earlier three-entry value. Derive the nav
+  and routes from the registry (`web/src/lib/nav/sections.ts`) and fail loudly on an unmapped id.
+  A nav section this app has no page for stays out of the header until its page ships, so the
+  header never carries a dead link. Nothing in the header or the command palette links to a
+  route-only section; its routes still resolve by URL. Do not add a `/push` alternate route.
+- The local header is one row: the `peasant` home link, search (⌘K), the nav sections other than
+  home, and an icon-only theme toggle. It carries no connection indicator. When the local app is
+  unreachable (`GET /api/v1/health` fails or the WebSocket stays down), fairtrade's
+  `LocalOfflineBanner` shows at the top of the page under the header, with the start command and
+  `try again`. Its copy says the app on this computer is not running and that the internet is
+  fine; never replace it with copy that reads as an internet outage. `web/scripts/visual/testdata/shell-header.yaml` is the
+  required-name manifest for the header, and the component tests and the mounted shell gates
+  read it.
 - When you replace the share-bridge UI, keep these semantics: auto-scan of uncached selections;
   caching of success and of honest failure, keyed by `(level, session)`, across navigation;
   explicit re-scan; continuation disabled when any session failed; fail-closed behavior on a
   category inconsistency.
 - peasant-labs/fairtrade-design-system#3 tracks the official review, redaction, consent, and
   share composition. Per-category filtering in `RedactionReview` is
-  peasant-labs/fairtrade-design-system#4. Peasant owns the `/share` scan, cache, auth, and
+  peasant-labs/fairtrade-design-system#4. Peasant owns the transcript popup and `/share` scan, app-level cache, auth, and
   network orchestration, and the Village transport.
 - The code map is a known comprehension gap. Future work needs progressive, task-oriented
   disclosure and a real-project user acceptance test. Do not add more text around the same dense
@@ -219,3 +297,9 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - Generate the CLI reference pages with `make docs-cli`. Do not hand-edit generated CLI pages.
 - Never put credentials, private transcript content, personal filesystem paths, or private
   project history into issues, fixtures, logs, screenshots, or documentation.
+
+## Git staging and commits
+
+- Stage intended changes with `git add -- <path>...`; inspect `git diff --cached` before committing.
+- Never use `git add .`, `git add -A`, or wildcard staging.
+- Commit with `git agent-commit -m "..."`.

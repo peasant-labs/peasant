@@ -15,12 +15,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // TestPushCmd_SourceHarnessHelpDerived pins the --source-harness flag's help
@@ -153,7 +152,7 @@ func seedCrossBranchSessions(t *testing.T, dir string) (selectedID, otherID, rem
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
-	s, err := store.Open(dbPath)
+	s, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -230,7 +229,7 @@ func seedMultiProjectConflict(t *testing.T, dir string) (selectedID, excludedID,
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
-	s, err := store.Open(dbPath)
+	s, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -341,7 +340,7 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceHarnes
 		Sources:        cfg.Push.Sources,
 	}
 
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -491,7 +490,7 @@ func TestBuildPushWizardSessions_SelectionAware(t *testing.T) {
 	cfg.Output.BasePath = string(resolved)
 	matcher := cfg.SelectionMatcher()
 
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -855,7 +854,7 @@ push:
 output:
   basePath: %s
 `, syncBase))
-	db, openErr := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, openErr := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if openErr != nil {
 		t.Fatal(openErr)
 	}
@@ -1865,7 +1864,8 @@ func TestPushCmd_VisibilityPrecedence(t *testing.T) {
 }
 
 // TestPushCmd_RejectsAnUnknownVisibility proves the flag is validated against the
-// contract's closed set, the way --license already was. It used to accept any
+// visibilities this version can apply, the way --license is against its closed
+// set. It used to accept any
 // string: a typo was taken as a visibility, quietly resolved to the default, and
 // then reported as applied.
 func TestPushCmd_RejectsAnUnknownVisibility(t *testing.T) {
@@ -1877,7 +1877,7 @@ func TestPushCmd_RejectsAnUnknownVisibility(t *testing.T) {
 	if err == nil {
 		t.Fatalf("an unknown visibility must be refused, not silently resolved; output: %s", output)
 	}
-	for _, want := range []string{"bogus", string(config.VisibilityPrivate), string(config.VisibilityGroup), string(config.VisibilityPublic)} {
+	for _, want := range []string{"bogus", config.ImplementedVisibilityMenu()} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal must name %q so the user can see what is accepted; got: %v", want, err)
 		}

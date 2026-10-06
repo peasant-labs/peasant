@@ -1,0 +1,20 @@
+requiredNames:
+  - measured-zero-from-generation
+  - positive-count-from-generation
+  - stale-capture-mirrors-cleared
+  - legacy-absence-preserved
+cases:
+  - name: measured-zero-from-generation
+    managed: true
+    count: 0
+    graph: true
+  - name: positive-count-from-generation
+    managed: true
+    count: 3
+    graph: true
+  - name: stale-capture-mirrors-cleared
+    managed: true
+    staleCapture: true
+    count: 0
+  - name: legacy-absence-preserved
+    managed: false

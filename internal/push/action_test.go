@@ -3,6 +3,7 @@ package push
 import "testing"
 
 func TestPushAction_String(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		action PushAction
 		want   string

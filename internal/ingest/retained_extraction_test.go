@@ -28,13 +28,18 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(t.TempDir(), "managed")
-	filesystem := &OSFileSystem{}
+	proof := artifact.ArtifactHash
+	store := &serialIndexStore{states: map[SessionID]*SessionIndexState{
+		artifact.Metadata.SessionID: {SessionID: artifact.Metadata.SessionID, ArtifactHash: &proof, IndexedInputHash: &proof},
+	}}
+	filesystem := &preparedRetainedFS{OSFileSystem: &OSFileSystem{}, store: store, sid: artifact.Metadata.SessionID}
 	versions := maps.Clone(HarvesterVersionRegistry)
 	versions[HarnessClaudeCode] = HarvesterVersions{AdapterVersion: 2, IndexerVersion: versions[HarnessClaudeCode].IndexerVersion, IndexVersion: versions[HarnessClaudeCode].IndexVersion}
-	pipeline, err := NewPipeline(filesystem, nil, DefaultAdapterRegistry, PipelineConfig{OutputDir: ResolvedPath(output)}, WithHarvesterVersions(versions))
+	pipeline, err := NewPipeline(filesystem, nil, DefaultAdapterRegistry, PipelineConfig{OutputDir: ResolvedPath(output)}, WithHarvesterVersions(versions), WithArenaSizeBytes(testIngestArenaBytes))
 	if err != nil {
 		t.Fatal(err)
 	}
+	pipeline.metricsStore = store
 	session := DiscoveredSession{SessionID: artifact.Metadata.SessionID, Harness: artifact.Metadata.ModelHarness, SourceFormat: artifact.Metadata.Source.Format}
 	// Seed the saved pair by writing its files, the state a completed harvest
 	// leaves. The adapter refresh below reads it, extracts fresh metadata and
@@ -50,7 +55,9 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	if err := filesystem.WriteFile(path, artifact.MetadataJSON, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := pipeline.processRetainedSession(t.Context(), session, path)
+	lane := newStoreWriteLane(1)
+	defer lane.close()
+	result := pipeline.processRetainedSession(t.Context(), session, path, lane)
 	if result.result.Error != nil {
 		t.Fatal(result.result.Error)
 	}
@@ -77,3 +84,5 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 		t.Fatal("unknown metadata object changed")
 	}
 }
+
+// preparedRetainedFS lives in fsfault_test.go (Owner B).

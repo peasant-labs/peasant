@@ -15,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/store"
 )
 
 // countingRootResolver answers exactly like the production resolver and records
@@ -205,7 +204,7 @@ func TestPushRun_AScopeTimeoutStaysInTheScopePhase(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	seedPushableSession(t, dir)
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatal(err)
 	}

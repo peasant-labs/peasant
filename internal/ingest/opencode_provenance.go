@@ -69,9 +69,10 @@ type OpenCodeProvenanceAssistantPart struct {
 // populate it; the classifier never reparses native bytes itself, so the
 // envelope always names the evidence the decoder actually proved.
 type OpenCodeProvenanceMessage struct {
-	MessageID string
-	SessionID string
-	Shape     OpenCodeProvenanceShape
+	RetainedUnknown []RetainedUnknown `json:"retainedUnknown,omitempty"`
+	MessageID       string
+	SessionID       string
+	Shape           OpenCodeProvenanceShape
 	// NativeType is the current storage discriminator (user, assistant, shell,
 	// synthetic, system, skill, compaction, agent-switched, model-switched, or
 	// a newer value). Empty for legacy and semantic shapes, which have no
@@ -201,17 +202,36 @@ func ClassifyOpenCodeMessage(msg OpenCodeProvenanceMessage, attr OpenCodeMessage
 		msg.Shape != OpenCodeProvenanceLegacy && msg.Shape != OpenCodeProvenanceSemantic {
 		return nil, fmt.Errorf("ingest.ClassifyOpenCodeMessage: message %q shape %q is outside the closed set; the evidence strength is unknown; use current, v2, legacy, or semantic", msg.MessageID, msg.Shape)
 	}
+	var blocks []ClassifiedBlock
+	var err error
 	switch msg.Shape {
 	case OpenCodeProvenanceCurrent, OpenCodeProvenanceV2:
-		return classifyOpenCodeTypedMessage(msg, attr)
+		blocks, err = classifyOpenCodeTypedMessage(msg, attr)
 	default:
-		return classifyOpenCodeHistoricalMessage(msg, attr)
+		blocks, err = classifyOpenCodeHistoricalMessage(msg, attr)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if len(msg.RetainedUnknown) > 0 {
+		if err := validateOpenCodeUnknown(msg.RetainedUnknown); err != nil {
+			return nil, err
+		}
+		key, err := openCodeNativeKey(msg.Shape, msg.MessageID, "retained-unknown")
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, ClassifiedBlock{NativeKey: key, Uncertain: attr.UncertainCopy, Role: schema.RoleSystem, EntryType: schema.EntryTypeSystem, RetainedUnknown: msg.RetainedUnknown, TimestampMs: nonEmptyTimestamp(msg.TimeCreated), Provenance: &schema.ContentProvenance{Origin: schema.ContentOriginUnknown, Actor: schema.ActorOriginUnknown, Delivery: schema.DeliveryOriginUnknown, Ownership: attr.Ownership, Evidence: schema.EvidenceNativeTyped, InputModality: schema.InputModalityNone}})
+	}
+	return blocks, nil
 }
 
 // classifyOpenCodeTypedMessage applies the current-shape rows of the section
 // 3.2 table: explicit discriminators with sequence identity.
 func classifyOpenCodeTypedMessage(msg OpenCodeProvenanceMessage, attr OpenCodeMessageAttribution) ([]ClassifiedBlock, error) {
+	if len(msg.RetainedUnknown) > 0 && !knownOpenCodeCurrentRow(msg.NativeType) {
+		return nil, nil
+	}
 	switch msg.NativeType {
 	case "user":
 		return classifyOpenCodeTypedUser(msg, attr)

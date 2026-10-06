@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,10 +23,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/pi_projection_integrated.yaml
@@ -71,6 +69,7 @@ type piProjectionCase struct {
 }
 
 func TestPiProjectionSQLiteOutbound(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Cases         []piProjectionCase `yaml:"cases"`
 		InvalidExtras []struct {
@@ -78,14 +77,8 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			Extra string `yaml:"extra"`
 		} `yaml:"invalid_extras"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(piProjectionYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(piProjectionYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing fixture document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(piProjectionManifest, "Pi projection")
 	if err != nil {
@@ -106,7 +99,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			ctx := context.Background()
 			sid := schema.SessionID(testutil.TestSessionUUID)
 			path := storetest.CopyGoldenDB(t)
-			db, err := store.Open(path)
+			db, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +119,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(path)
+			db, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -22,7 +21,6 @@ import (
 	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/testcase"
 	testassert "github.com/peasant-labs/schema/testcase/assert"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/project_resolution.yaml
@@ -57,14 +55,8 @@ func decodeProjectResolutionCorpus(data []byte) (testcase.Corpus[projectResoluti
 		return testcase.Corpus[projectResolutionInput, projectResolutionExpected]{}, err
 	}
 	var corpus testcase.Corpus[projectResolutionInput, projectResolutionExpected]
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&corpus); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &corpus); err != nil {
 		return testcase.Corpus[projectResolutionInput, projectResolutionExpected]{}, fmt.Errorf("decode project resolution fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return testcase.Corpus[projectResolutionInput, projectResolutionExpected]{}, fmt.Errorf("project resolution fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(corpus.Cases))
 	actualNames := make([]string, 0, len(corpus.Cases))
@@ -103,6 +95,7 @@ func loadProjectResolutionCorpus(t *testing.T) testcase.Corpus[projectResolution
 }
 
 func TestProjectResolutionFixtureGuards(t *testing.T) {
+	t.Parallel()
 	corpus := loadProjectResolutionCorpus(t)
 	manifest, err := testutil.DecodeSemanticManifest(projectResolutionManifestYAML, "project resolution")
 	if err != nil {
@@ -145,6 +138,7 @@ func TestProjectResolutionFixtureGuards(t *testing.T) {
 }
 
 func TestResolveProject_CanonicalAndLegacyIdentity(t *testing.T) {
+	t.Parallel()
 	corpus := loadProjectResolutionCorpus(t)
 	for _, fixtureCase := range corpus.Cases {
 		fixtureCase := fixtureCase

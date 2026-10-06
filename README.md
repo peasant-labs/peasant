@@ -78,6 +78,7 @@ privacy boundaries, and recovery behavior.
 | `peasant ingest` | Run the data ingestion pipeline |
 | `peasant ingest verify` | Verify database schema integrity |
 | `peasant village push` | Push ingested transcripts + annotations to the Peasant village (incremental — server-manifest skip-gate + retraction; see [flags](#peasant-village-push-flags)) |
+| `peasant village auto` | Publish this repository's sessions on every `git push`, redacted and private, to the collectives you published to last: saves an auto-publish rule in `hooks.yaml` (see [the network reference](docs/NETWORK.md#6-hook-triggered-push)) and installs the pre-push hook here |
 | `peasant login` / `peasant logout` | Authenticate with / disconnect from the village |
 | `peasant models sync` | Fetch and sync model reference data from models.dev |
 | `peasant sessions context` | Print grep-C-style turns around a session turn (terminal-rendered) |
@@ -86,6 +87,7 @@ privacy boundaries, and recovery behavior.
 | `peasant metrics compute` | Compute session metrics from stored transcripts |
 | `peasant web start` | Start the web dashboard server (default port 8690) |
 | `peasant web stop` | Stop the web dashboard server |
+| `peasant open --session <id>` | Record one session with its commits and open its transcript in the web dashboard (see [output](#peasant-open-output)) |
 | `peasant tui` | Launch the terminal UI (deprecated; use `peasant web` and `peasant annotate`) |
 | `peasant kickstart` | Run the first-time setup wizard |
 | `peasant export sessions` | Export session transcripts as JSON |
@@ -107,7 +109,7 @@ For Village authentication (`peasant village login`, push, and pull), see
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Show what would be pushed (mirrors the real run exactly) without pushing |
-| `--visibility <v>` | Set visibility (`private` or `public`) |
+| `--visibility <v>` | Set visibility (`private` or `public`). Also changes every already-published session the run selects, including ones shared with collectives; without it an update keeps the visibility a transcript has on the Village |
 | `--timing` | Report per-phase timing (handshake/server split, redaction, annotation batches) to stderr + a per-upload JSONL under the state dir. Off by default. |
 | `--concurrency <n>` | Parallel uploads + HTTP connection-pool size (default `max(1, NumCPU/2)`; raise toward `~2×NumCPU` for a large cold push). |
 | `--annotation-id <ids>` / `--annotation-hash <hashes>` | Restrict the annotation push to specific annotations |
@@ -187,6 +189,52 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--no-browser` | Do not auto-open browser |
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
+
+The server listens on the loopback interface only: `127.0.0.1`, and `::1` when the host has an
+IPv6 loopback. Other machines cannot reach it. `peasant web start` exits with an error while
+another process already accepts connections on the port, including a dashboard that is already
+running, whether from this version or an earlier one. Open the running dashboard, or run
+`peasant web stop` and start it again, or choose another port with `--port`.
+
+Every request must name the server by a loopback `Host` (`localhost`, `127.0.0.1`, or `[::1]`),
+so a proxy or port forward that passes its own hostname as `Host` gets `403`.
+A state-changing request (any method other than `GET`, `HEAD`, or `OPTIONS`) and a WebSocket
+connection that carry an `Origin` header must come from the dashboard's own origin. Other
+requests get `403`. Local clients that send no `Origin` header are accepted, such as `curl`,
+`peasant web stop`, and the TUI. A browser request without an `Origin` whose `Sec-Fetch-Site`
+header says it came from another origin is still refused.
+
+### `peasant open` output
+
+`peasant open --session <id>` harvests that one session with commit detection, starts the web
+dashboard when it is not running, checks that the dashboard serves the session, opens the
+transcript in the browser, and prints two lines on stdout:
+
+```
+peasant: opened "<title>" · not published
+http://localhost:8690/projects/<project-hash>/<session-id>
+```
+
+The state reads `published` when the local store holds a Village publication receipt for the
+session. A session with no generated title prints `peasant: opened an untitled session`. The
+command opens the browser itself, so a caller must not open the address again.
+
+When a step fails, the command prints one line on stderr and exits 1:
+
+```
+peasant: <step> failed: <reason>; fix: <action>
+```
+
+The step is one of `session check`, `harvest`, `session lookup`, `dashboard start`, or
+`dashboard check`. A command in the fix carries whichever of `--config`, `--config-dir`,
+`--data-dir`, and `--state-dir` the run was given. The command never opens the dashboard root in place of the
+session.
+
+| Flag | Description |
+|------|-------------|
+| `--session <id>` | The session to record and open (required) |
+| `--port <n>` | Port of the web dashboard (default 8690, as for `peasant web start`) |
+| `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
 
 ### `peasant tui` flags (deprecated)
 
@@ -331,7 +379,9 @@ next harvest reads it from its source.
 
 See [docs/pipeline.md](docs/pipeline.md) for the ingest write flow, staging
 directory behavior, and the distinction between on-disk transcripts and the
-canonical `SessionDetailPayload` representation.
+canonical `SessionDetailPayload` representation. See
+[docs/architecture.md](docs/architecture.md) for C4 diagrams and call sequences of the
+whole system.
 
 ## Analytics schema
 
@@ -475,6 +525,13 @@ $XDG_CONFIG_HOME/peasant/config.yaml   # if XDG_CONFIG_HOME is set
 If no config file exists, Peasant uses built-in defaults and prints a notice directing you to
 `peasant kickstart`. CLI flags (`--source-harness`, `--source-path`, `--output`) override the
 config file for a single run.
+
+The web dashboard's settings page (`http://localhost:8690/settings`) shows every key. A change
+saves to `config.yaml` at once, one key per change. Keys that the dashboard reads only at startup,
+the saved selection (`peasant kickstart` edits it), and the Village sign-in are shown read-only.
+The page also lists the auto-publish rules in `hooks.yaml`. It installs their hooks in the
+repositories Peasant has recorded, only when you choose to. `peasant config` edits a subset of
+the keys. On the page, a key that `peasant config` cannot change is tagged "not in peasant config".
 
 ### Selection index
 
@@ -721,8 +778,9 @@ backed by an in-memory SQLite store. The WebSocket E2E pattern in `AGENTS.md` ex
 Some features are shelved in the default build and gated behind a flag: the
 `peasant memory` command group (Go build tag `-tags=experimental`), the
 `/review` page's real-data mode (env `NEXT_PUBLIC_EXPERIMENTAL_REVIEW=1`), and the
-code map's web navigation entry points (`peasant web start --experimental`, a
-discoverability gate that never removes the underlying `/map` routes). See
+code-map navigation capability (`peasant web start --experimental`, a
+discoverability gate that never removes the underlying `/map` routes; the local
+app's section registry currently keeps the code map route-only in every mode). See
 [EXPERIMENTAL.md](EXPERIMENTAL.md) for how to enable them, and
 [docs/memory.md](docs/memory.md) for the agent-memory reference.
 
@@ -758,7 +816,7 @@ go test -race ./internal/ingest/ -run TestPipeline_DryRun -v
 # Static analysis (ast-grep rules)
 ast-grep scan --config sgconfig.yml .
 
-# Full-stack end-to-end harness — podman: Postgres + MinIO + real village + real peasant CLI.
+# Full-stack end-to-end harness — podman: Postgres + RustFS + real village + real peasant CLI.
 # Build-tagged `e2e` (OUT of `make check`); needs podman + a village checkout.
 make e2e            # asserted: ingest fixture → push (skip-gate + retraction) → village secret-scan
 make demo           # same harness, verbose + unasserted ("watch it happen")

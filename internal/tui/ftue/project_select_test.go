@@ -67,6 +67,7 @@ func loadProjectSelectFixtures(raw []byte) ([]projectSelectFixture, error) {
 }
 
 func TestProjectSelectFixtureStrictLoader(t *testing.T) {
+	t.Parallel()
 	if _, err := loadProjectSelectFixtures(projectSelectFixtureBytes); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +80,7 @@ func TestProjectSelectFixtureStrictLoader(t *testing.T) {
 }
 
 func TestProjectFirstCatalogAndPage(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +120,7 @@ func TestProjectFirstCatalogAndPage(t *testing.T) {
 }
 
 func TestProjectSelectionDefaultsToEverySessionThenHarnessIntersects(t *testing.T) {
+	t.Parallel()
 	fixtures, _ := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	project := BuildProjectCatalog(fixtures[0].Sessions, nil)[0]
 	project.Selected = true
@@ -138,6 +141,7 @@ func TestProjectSelectionDefaultsToEverySessionThenHarnessIntersects(t *testing.
 }
 
 func TestProjectScopeHierarchyHasNoHarnessRoot(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +177,7 @@ func TestProjectScopeHierarchyHasNoHarnessRoot(t *testing.T) {
 }
 
 func TestMountedProjectScopeFrameKeepsPanesAligned(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +259,7 @@ func TestMountedProjectScopeFrameKeepsPanesAligned(t *testing.T) {
 }
 
 func TestMountedProjectScopeUsesMidpointBoundary(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -333,6 +339,7 @@ func mountedPaneRightCell(line string) string {
 }
 
 func TestProjectScopeHarnessDefaultsAndRehydration(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -350,6 +357,7 @@ func TestProjectScopeHarnessDefaultsAndRehydration(t *testing.T) {
 }
 
 func TestWizardProjectScopeChoicesSurviveProviderBackNavigation(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -390,6 +398,7 @@ func TestWizardProjectScopeChoicesSurviveProviderBackNavigation(t *testing.T) {
 }
 
 func TestExplicitSessionScopePersistsWithoutSiblingWidening(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -418,6 +427,7 @@ func TestExplicitSessionScopePersistsWithoutSiblingWidening(t *testing.T) {
 }
 
 func TestUncheckedHarnessExcludedFromMountedPersistence(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -454,13 +464,13 @@ func TestUncheckedHarnessExcludedFromMountedPersistence(t *testing.T) {
 }
 
 func TestMountedProjectSelectionPersistsStopAllWithoutWidening(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadProjectSelectFixtures(projectSelectFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture := fixtureNamed(t, fixtures, "explicit-stop-all-persists-empty-allowlist")
 	exact := filepath.Join(t.TempDir(), "chosen", "config.yaml")
-	t.Setenv(defaults.EnvXDGConfigHome.String(), t.TempDir())
 	loaded := config.BaseConfig()
 	loaded.User.Email = fixture.UserEmail
 	loaded.Selection = config.SelectionConfig{

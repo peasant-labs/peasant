@@ -40,24 +40,26 @@ import (
 // BuildPushCommand constructs the fully wired push cobra command.
 func BuildPushCommand() *cobra.Command {
 	var (
-		dryRun             bool
-		force              bool
-		sourceHarness      string
-		visibility         string
-		license            string
-		jsonOutput         bool
-		verbose            bool
-		quiet              bool
-		nonInteractiveFlag bool
-		yesFlag            bool
-		annotationIDs      []string
-		annotationHash     []string
-		timing             bool
-		profileOutput      string
-		profileTrace       string
-		concurrency        int
-		repository         string
-		timeout            time.Duration
+		dryRun                 bool
+		force                  bool
+		sourceHarness          string
+		visibility             string
+		license                string
+		jsonOutput             bool
+		verbose                bool
+		quiet                  bool
+		nonInteractiveFlag     bool
+		requireAutoPublishRule bool
+		autoPublishEvent       string
+		yesFlag                bool
+		annotationIDs          []string
+		annotationHash         []string
+		timing                 bool
+		profileOutput          string
+		profileTrace           string
+		concurrency            int
+		repository             string
+		timeout                time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -76,6 +78,11 @@ func BuildPushCommand() *cobra.Command {
 			"--concurrency to about 2x NumCPU to scale throughput up to the village's capacity; confirm\n" +
 			"with --timing. The default stays at max(1, NumCPU/2) — sufficient for the common\n" +
 			"steady-state re-push, where the manifest skip means little goes over the wire.)\n\n" +
+			"Auto-publish rules — when a rule in hooks.yaml in the config directory binds a session\n" +
+			"this push sends (matched against the repository the session was recorded in), the push\n" +
+			"publishes collectives-only: private, with no license, and each bound transcript it sent\n" +
+			"is shared with its rule's collectives. --visibility and --license are then refused. A\n" +
+			"session a paused rule covers, or whose transcript is already public, is not published.\n\n" +
 			"Exit status — a caller that branches on it, including a generated Git hook, needs the\n" +
 			"one distinction it cannot read out of prose: whether anything was published at all.\n\n" +
 			"  0  the run succeeded.\n" +
@@ -312,8 +319,19 @@ func BuildPushCommand() *cobra.Command {
 				// contract set. It used to accept any string, so a typo was taken as
 				// a visibility, silently resolved to the default, and reported as
 				// applied: a consent boundary answering a question nobody asked.
-				if visibility != "" && !schema.Visibility(visibility).IsValid() {
-					return fmt.Errorf("invalid --visibility %q (valid: %s)", visibility, config.VisibilityMenu())
+				// The flag also changes transcripts that are already published, so
+				// a value this version would downgrade is refused rather than
+				// applied as private: on a transcript shared with collectives that
+				// would take their access away, the opposite of what was asked.
+				// The pipeline refuses it too; this answers before any work.
+				if visibility != "" {
+					requested := schema.Visibility(visibility)
+					if !requested.IsValid() {
+						return fmt.Errorf("invalid --visibility %q (valid: %s)", visibility, config.ImplementedVisibilityMenu())
+					}
+					if refusal := config.VisibilityChangeRefusal(requested); refusal != nil {
+						return fmt.Errorf("invalid --visibility %q: %w", visibility, refusal)
+					}
 				}
 
 				runCfg := push.PipelineConfig{
@@ -322,11 +340,18 @@ func BuildPushCommand() *cobra.Command {
 					SourceProvider: sourceHarness,
 					Visibility:     schema.Visibility(visibility),
 					License:        schema.License(license),
-					JSONOutput:     jsonOutput,
-					Verbose:        verbose,
-					Quiet:          level == outputQuiet,
-					Concurrency:    resolvedConcurrency,
-					CommandBinding: run.binding,
+					// A flag is an explicit request, so it also changes a
+					// transcript the village already holds. Without one an update
+					// keeps the visibility and license the transcript has there;
+					// the configured defaults apply to a first publish only. A
+					// hook passes neither flag.
+					ChangeVisibility: visibility != "",
+					ChangeLicense:    license != "",
+					JSONOutput:       jsonOutput,
+					Verbose:          verbose,
+					Quiet:            level == outputQuiet,
+					Concurrency:      resolvedConcurrency,
+					CommandBinding:   run.binding,
 				}
 				if cmd.Flags().Changed("repository") {
 					// An empty --repository is rejected rather than ignored. The
@@ -413,12 +438,36 @@ func BuildPushCommand() *cobra.Command {
 					runCfg.FilterSessionIDs = wizardIDs
 				}
 
+				// The auto-publish rules the developer set up decide the audience
+				// of the sessions they bind: such a push publishes private, sends
+				// no license, and shares each transcript it sends with its rule's
+				// collectives. The sessions this push would send are matched
+				// here, after every narrowing, so the rules see what is sent.
+				event := schema.AutoPublishEvent(autoPublishEvent)
+				if event != "" && (!requireAutoPublishRule || !event.IsValid()) {
+					return fmt.Errorf("village push: --auto-publish-event requires --require-auto-publish-rule and a supported hook event; nothing was uploaded")
+				}
+				autoPublish, planErr := planAutoPublish(ctx, cmd, db, cfg, runCfg, requireAutoPublishRule, event)
+				if planErr != nil {
+					return planErr
+				}
+				runCfg.PinnedSessionIDs = autoPublish.pinned
+				if autoPublish.bound() {
+					if len(autoPublish.collectives) > 0 {
+						if flagErr := refuseAudienceFlagsUnderRules(cmd); flagErr != nil {
+							return flagErr
+						}
+					}
+					cfg, runCfg = push.CollectiveAudience(cfg, runCfg)
+					reportAutoPublishPlan(cmd.ErrOrStderr(), level == outputQuiet, autoPublish)
+				}
+
 				if redactionPolicy.Raised() {
 					fmt.Fprintln(cmd.ErrOrStderr(),
 						quietAware(level, redactionPolicy.Disclosure(), redactionPolicy.BriefDisclosure()))
 				}
 
-				visibilityPolicy := config.EffectiveVisibility(schema.Visibility(visibility), cfg)
+				visibilityPolicy := config.EffectiveVisibility(runCfg.Visibility, cfg)
 				effectiveVisibility := visibilityPolicy.Effective
 				if visibilityPolicy.Downgraded() {
 					fmt.Fprintln(cmd.ErrOrStderr(),
@@ -444,9 +493,7 @@ func BuildPushCommand() *cobra.Command {
 						// Narrowed exactly the way the pipeline narrows, through the
 						// same shared helpers, so the record describes what will be
 						// published rather than everything that might have been.
-						reportSessions = filterToSelectedSessions(reportSessions, runCfg.FilterSessionIDs)
-						reportSessions, _ = push.ApplySelection(reportSessions, runCfg.Selection)
-						reportSessions = push.ApplyRepositoryScope(reportSessions, runCfg.Repository)
+						reportSessions, _ = push.NarrowCandidates(reportSessions, runCfg)
 						// Nothing to publish is not a publication to keep a record
 						// of, and the empty-state line below already says what
 						// happened. A hook reaches that state on most commits.
@@ -485,6 +532,7 @@ func BuildPushCommand() *cobra.Command {
 						village.NewPooledHTTPClient(creds.VillageURL, resolvedConcurrency))
 				}
 				client.SetRequestObserver(run.markVillageRequest)
+				runCfg.UpdateHold = autoPublish.updateHold(db, creds, client)
 				pipeline, err := push.NewPipeline(db, client, creds, cfg, fs, runCfg, pushRedactor, cmd.ErrOrStderr())
 				if err != nil {
 					return fmt.Errorf("create push pipeline: %w", err)
@@ -525,7 +573,7 @@ func BuildPushCommand() *cobra.Command {
 				// to all push-eligible sessions). Annotations not tied to a session
 				// are unaffected. mode != selected => runCfg.Selection is nil => no
 				// session gate, so annotation behavior is unchanged.
-				if runCfg.Selection != nil || runCfg.Repository != nil {
+				if runCfg.Selection != nil || runCfg.Repository != nil || runCfg.PinnedSessionIDs != nil {
 					// AllPushableSessions (NOT the narrower unpushed session-push set):
 					// annotations push on their own cadence, so the gate must admit
 					// annotations for ALL selected sessions, including already-pushed
@@ -538,8 +586,7 @@ func BuildPushCommand() *cobra.Command {
 					if selErr != nil {
 						return fmt.Errorf("query sessions for annotation selection: %w", selErr)
 					}
-					keptForAnn, _ := push.ApplySelection(allRows, runCfg.Selection)
-					keptForAnn = push.ApplyRepositoryScope(keptForAnn, runCfg.Repository)
+					keptForAnn, _ := push.NarrowCandidates(allRows, runCfg)
 					sessIDs := make(map[string]bool, len(keptForAnn))
 					for _, s := range keptForAnn {
 						sessIDs[s.SessionID] = true
@@ -602,8 +649,9 @@ func BuildPushCommand() *cobra.Command {
 					func(ctx context.Context) (*push.PushResult, error) {
 						return pipeline.Run(ctx)
 					},
-					func(ctx context.Context) (*push.AnnotationPushSummary, error) {
-						return push.PushAnnotationsSelected(ctx, client, db, annSelection, dryRun, resolvedConcurrency)
+					func(ctx context.Context, published *push.PushResult) (*push.AnnotationPushSummary, error) {
+						selection := annotationSelectionForRun(annSelection, runCfg.FilterSessionIDs != nil || runCfg.PinnedSessionIDs != nil, published)
+						return push.PushAnnotationsSelected(ctx, client, db, selection, dryRun, resolvedConcurrency)
 					},
 				)
 				if annSummary != nil {
@@ -616,7 +664,23 @@ func BuildPushCommand() *cobra.Command {
 				// Recorded before any early return below, so a budget error can say
 				// what did and did not reach the village.
 				run.result = result
+				if result != nil {
+					for _, session := range result.Sessions {
+						if session.HeldReason != "" {
+							fmt.Fprintf(cmd.ErrOrStderr(), "auto-publish: session %s was not published: %s\n", session.SessionID, session.HeldReason)
+						}
+					}
+				}
 				run.annotationSummary = annSummary
+
+				// Under an auto-publish rule, each transcript the run sent is
+				// shared with its rule's collectives. Nothing is shared on a dry
+				// run, and a run that sent nothing shares nothing.
+				var shared []schema.SyncPushSessionResult
+				var shareErr error
+				if len(autoPublish.collectives) > 0 && !dryRun {
+					shared, shareErr = push.RuleShare{Store: db, Village: client, Creds: creds, Retry: run.repositoryCommand() + " --force"}.Run(runCtx, result, autoPublish.collectives)
+				}
 
 				// Close the profile run span over the measured stages. A failed
 				// stage marks the run failed; an empty run that reached no error
@@ -701,7 +765,13 @@ func BuildPushCommand() *cobra.Command {
 						return printPushJSON(cmd.OutOrStdout(), result, annSummary, annErr)
 					}
 					// EmptyReason is the final result line — kept even under --quiet.
-					fmt.Fprintln(cmd.OutOrStdout(), result.EmptyReason)
+					// When the rules held every session, the reasons were printed
+					// and --force would not change them, so the line says so.
+					if len(autoPublish.held) > 0 && len(autoPublish.pinned) == 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "auto-publish: nothing was published; the auto-publish rules held %d session(s) for the reasons printed above\n", len(autoPublish.held))
+					} else {
+						fmt.Fprintln(cmd.OutOrStdout(), result.EmptyReason)
+					}
 					if level != outputQuiet && (annSummary != nil || annErr != nil) {
 						printAnnotationSummary(cmd.OutOrStdout(), annSummary, annErr, dryRun)
 					} else if level == outputQuiet {
@@ -751,10 +821,14 @@ func BuildPushCommand() *cobra.Command {
 					}
 				}
 
-				// Return the first fatal error (transcript before annotation). The
-				// budget check below turns it into the budget's own explanation when
-				// the cap is what ended the run.
-				return firstPushStageError(transcErr, annErr)
+				// Share failures are printed here, so the budget explanation below
+				// cannot hide them.
+				shareFailure := reportAutoPublishShares(cmd.ErrOrStderr(), level == outputQuiet || jsonOutput, shared, shareErr)
+
+				// Return the fatal errors (transcript before annotation, then
+				// sharing). The budget check below turns them into the budget's own
+				// explanation when the cap is what ended the run.
+				return errors.Join(firstPushStageError(transcErr, annErr), shareFailure)
 			}(ctx)
 
 			// A budget that ran out is reported as itself: the raw "context
@@ -775,11 +849,13 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without uploading")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
 	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
-	cmd.Flags().StringVar(&visibility, "visibility", "", "Override visibility for this run (public, private, group)")
-	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s)", schema.LicenseMenu()))
+	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes every already-published session the run selects, including ones shared with collectives on the village, which otherwise keep the visibility they have there", config.ImplementedVisibilityMenu()))
+	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also relicenses every already-published session the run selects; a Creative Commons grant cannot be withdrawn. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt for this village account on this machine is sent the configured license", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")
+	cmd.Flags().StringVar(&autoPublishEvent, "auto-publish-event", "", "Require consent for this hook event (post-commit or pre-push)")
+	cmd.Flags().BoolVar(&requireAutoPublishRule, "require-auto-publish-rule", false, "Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)")
 	cmd.Flags().BoolVar(&nonInteractiveFlag, "non-interactive", false, "Run without the interactive wizard or public-consent prompt (for CI/scripts)")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "(alias for --non-interactive)")
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")
@@ -1343,11 +1419,23 @@ func raisedBudget(budget time.Duration) time.Duration {
 func runPushStages(
 	ctx context.Context,
 	transcriptStage func(context.Context) (*push.PushResult, error),
-	annotationStage func(context.Context) (*push.AnnotationPushSummary, error),
+	annotationStage func(context.Context, *push.PushResult) (*push.AnnotationPushSummary, error),
 ) (result *push.PushResult, transcriptErr error, annotationSummary *push.AnnotationPushSummary, annotationErr error) {
 	result, transcriptErr = transcriptStage(ctx)
-	annotationSummary, annotationErr = annotationStage(ctx)
+	annotationSummary, annotationErr = annotationStage(ctx, result)
 	return
+}
+
+// annotationSelectionForRun decides which annotations a CLI push publishes.
+// When the chooser narrowed the run to sessions picked one by one, annotations
+// go only with the ones the village now holds, exactly as they do from the
+// Share wizard. Otherwise the selection built from the configuration and flags
+// stands.
+func annotationSelectionForRun(selection push.AnnotationSelection, chooserNarrowed bool, published *push.PushResult) push.AnnotationSelection {
+	if chooserNarrowed {
+		return selection.WithinPublishedSessions(published)
+	}
+	return selection
 }
 
 // firstPushStageError retains the existing transcript-before-annotation error
@@ -2226,25 +2314,6 @@ func pushCandidates(
 	default:
 		return db.UnpushedSessions(ctx)
 	}
-}
-
-// filterToSelectedSessions narrows rows to an explicit session selection, which
-// is what the interactive wizard produces. An empty selection narrows nothing.
-func filterToSelectedSessions(sessions []ingest.PushSessionRow, selected []string) []ingest.PushSessionRow {
-	if len(selected) == 0 {
-		return sessions
-	}
-	keep := make(map[string]bool, len(selected))
-	for _, id := range selected {
-		keep[id] = true
-	}
-	kept := make([]ingest.PushSessionRow, 0, len(sessions))
-	for _, session := range sessions {
-		if keep[session.SessionID] {
-			kept = append(kept, session)
-		}
-	}
-	return kept
 }
 
 // configSourceDescription names where a configured value came from, so a refusal

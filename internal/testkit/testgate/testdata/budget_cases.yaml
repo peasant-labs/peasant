@@ -1,0 +1,60 @@
+# Budget enforcement cases for LoadBudget.
+#
+# enforcement is a closed set (blocking | warn) that decides what a budget miss
+# does to the gate. An absent field defaults to blocking so every fixture
+# written before the field existed keeps its meaning; any other value fails
+# closed so a typo cannot silently demote the gate. required_names is a
+# deletion-protection manifest, not a row count.
+required_names:
+  - default-blocking-when-absent
+  - explicit-blocking
+  - explicit-warn
+  - unknown-enforcement-rejected
+  - zero-seconds-still-rejected
+  - bad-version-still-rejected
+
+cases:
+  - name: default-blocking-when-absent
+    body: |
+      version: 1
+      seconds: 120
+      basis: reference-box wall
+    want_found: true
+    want_seconds: 120
+    want_enforcement: blocking
+  - name: explicit-blocking
+    body: |
+      version: 1
+      seconds: 120
+      basis: reference-box wall
+      enforcement: blocking
+    want_found: true
+    want_seconds: 120
+    want_enforcement: blocking
+  - name: explicit-warn
+    body: |
+      version: 1
+      seconds: 120
+      basis: reference-box wall
+      enforcement: warn
+    want_found: true
+    want_seconds: 120
+    want_enforcement: warn
+  - name: unknown-enforcement-rejected
+    body: |
+      version: 1
+      seconds: 120
+      enforcement: advisory
+    want_err_contains: enforcement
+  - name: zero-seconds-still-rejected
+    body: |
+      version: 1
+      seconds: 0
+      enforcement: warn
+    want_err_contains: seconds
+  - name: bad-version-still-rejected
+    body: |
+      version: 2
+      seconds: 120
+      enforcement: warn
+    want_err_contains: version

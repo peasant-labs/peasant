@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,11 +12,13 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
 func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	output := filepath.Join(directory, "managed")
 	native := filepath.Join(directory, "native")
@@ -23,7 +26,7 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +68,16 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 			t.Fatalf("dry-run %v: %v\n%s", args, err, &out)
 		}
 		if after := dryRunFileState(t, directory); !reflect.DeepEqual(before, after) {
+			for path, digest := range after {
+				if before[path] != digest {
+					t.Logf("changed: %s", path)
+				}
+			}
+			for path := range before {
+				if _, ok := after[path]; !ok {
+					t.Logf("removed: %s", path)
+				}
+			}
 			t.Fatalf("dry-run %v changed source, managed, database, sidecar or config files", args)
 		}
 		return out.String()
@@ -74,11 +87,37 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 	if !strings.Contains(forecast, string(session.ID)) {
 		t.Fatalf("dry-run lost the stored stale-session forecast: %s", forecast)
 	}
+	// The forecast must resolve the same managed-generation targets a real run
+	// uses. The store and its owned root exist, so a dry run that reported the
+	// retained baseline would contradict what harvest index actually does.
+	var document struct {
+		Summary struct {
+			HarvesterVersions map[string]ingest.HarvesterVersions
+		}
+	}
+	if err := json.Unmarshal([]byte(forecast), &document); err != nil {
+		t.Fatalf("decode dry-run forecast: %v\n%s", err, forecast)
+	}
+	nativeTarget, declared := ingest.NativeGenerationRepairTargets[ingest.HarnessOpenCode]
+	if !declared {
+		t.Fatal("fixture invariant: opencode declares no native generation target")
+	}
+	baseline, registered := ingest.HarvesterVersionRegistry[ingest.HarnessOpenCode]
+	if !registered || baseline == nativeTarget {
+		t.Fatalf("fixture invariant: baseline %+v equals native target %+v; the forecast cannot distinguish them", baseline, nativeTarget)
+	}
+	reported, ok := document.Summary.HarvesterVersions[string(ingest.HarnessOpenCode)]
+	if !ok {
+		t.Fatalf("dry-run forecast reports no opencode target: %s", forecast)
+	}
+	if reported != nativeTarget {
+		t.Fatalf("dry-run opencode target = %+v, want the managed-generation target %+v", reported, nativeTarget)
+	}
 	run("village", "push", "--dry-run", "--timing", "--json")
 
 	// A live WAL is a normal state, not something dry-run refuses: the read-only
 	// open participates in the -shm but never rewrites the database file.
-	db, err = store.Open(dbPath)
+	db, err = openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

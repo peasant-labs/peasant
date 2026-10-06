@@ -1,4 +1,3 @@
-expectedCaseCount: 3
 cases:
   - name: content-hash-mismatch
     mismatch: content

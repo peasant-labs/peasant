@@ -13,6 +13,7 @@ import (
 // kickstart listing, while a titled session keeps its title. Clearing the slug
 // fallback leaves the titleless session with an empty display name.
 func TestOpenCodeSlugFallbackReachesKickstartListing(t *testing.T) {
+	t.Parallel()
 	materialized := testfixture.MaterializeByName(t, "extended-attribution")
 	root := filepath.Dir(materialized.Path)
 	git := newMountedOpenCodeGitResolver()

@@ -20,12 +20,13 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	transcriptmodel "github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type legacySQLiteChannelMutation string
@@ -226,6 +227,7 @@ func mustLegacySQLiteRecoveryDocument(t testing.TB) legacySQLiteRecoveryDocument
 }
 
 func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.T) {
+	t.Parallel()
 	testCase := mustLegacySQLiteRecoveryDocument(t).FreshnessCases[0]
 	materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
 	writer := openMountedLegacyWALWriter(t, materialized.Path)
@@ -240,6 +242,14 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	outputRoot := filepath.Join(commandRoot, "managed")
 	args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 	initialArgs := append(append([]string(nil), args...), "--force", "--include-active")
+	// Prepare the database path the harvest opens with the pre-migrated
+	// golden copy, so the command's version check finds no pending
+	// migrations; the WAL-rerun harvest below reuses the same path.
+	mountedWALDBPath := defaults.ResolveDBFilePathWith(commandRoot).String()
+	if err := os.MkdirAll(filepath.Dir(mountedWALDBPath), 0o755); err != nil {
+		t.Fatalf("create mounted WAL data directory: %v", err)
+	}
+	storetest.CopyGoldenTo(t, mountedWALDBPath)
 	if output, err := executeHarvestCmd(t, commandRoot, initialArgs); err != nil {
 		t.Fatalf("initial mounted WAL harvest: %v\n%s", err, output)
 	}
@@ -250,7 +260,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	managedPath := findManagedTranscript(t, outputRoot, testCase.TargetSession)
 	initialManaged := mustReadFile(t, managedPath)
 	databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
-	initialStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+	initialStore, err := store.Open(databasePath, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open initial WAL freshness store: %v", err)
 	}
@@ -304,7 +314,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	if bytes.Equal(updatedManaged, initialManaged) || !bytes.Contains(updatedManaged, []byte(testCase.ExpectedContent)) {
 		t.Fatalf("WAL-only update did not change deterministic managed projection with %q", testCase.ExpectedContent)
 	}
-	updatedStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+	updatedStore, err := store.Open(databasePath, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open updated WAL freshness store: %v", err)
 	}
@@ -364,6 +374,13 @@ func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
+			// Prepared path for the harvest's version check; each candidate
+			// case harvests into its own fresh root exactly once.
+			mountedCandidateDBPath := defaults.ResolveDBFilePathWith(commandRoot).String()
+			if err := os.MkdirAll(filepath.Dir(mountedCandidateDBPath), 0o755); err != nil {
+				t.Fatalf("create mounted candidate data directory: %v", err)
+			}
+			storetest.CopyGoldenTo(t, mountedCandidateDBPath)
 			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
 			if err != nil {
 				t.Fatalf("harvest canonical eligible candidates: %v\n%s", err, output)
@@ -377,7 +394,7 @@ func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 					t.Fatalf("managed candidate artifact for %s contains evidence from a later candidate", sessionID)
 				}
 			}
-			localStore, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			localStore, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("open candidate-selection store: %v", err)
 			}
@@ -394,6 +411,7 @@ func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 }
 
 func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testing.T) {
+	t.Parallel()
 	document := mustLegacySQLiteRecoveryDocument(t)
 	for _, testCase := range document.RecoveryCases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -403,6 +421,13 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 			outputRoot := filepath.Join(commandRoot, "managed")
 			args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 			initialArgs := append(append([]string(nil), args...), "--force", "--include-active")
+			// Prepared path for the initial harvest's version check; the
+			// recovery rerun below reuses the same harvest-written path.
+			mountedRecoveryDBPath := defaults.ResolveDBFilePathWith(commandRoot).String()
+			if err := os.MkdirAll(filepath.Dir(mountedRecoveryDBPath), 0o755); err != nil {
+				t.Fatalf("create mounted recovery data directory: %v", err)
+			}
+			storetest.CopyGoldenTo(t, mountedRecoveryDBPath)
 			if output, err := executeHarvestCmd(t, commandRoot, initialArgs); err != nil {
 				t.Fatalf("initial mounted recovery harvest: %v\n%s", err, output)
 			}
@@ -440,7 +465,7 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 			if idErr != nil {
 				t.Fatalf("validate recovery target session: %v", idErr)
 			}
-			localStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			localStore, err := store.Open(databasePath, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("open recovered store: %v", err)
 			}
@@ -479,6 +504,7 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 }
 
 func TestLegacySQLiteRecoveryFixtureLoaderMutationsAreRejected(t *testing.T) {
+	t.Parallel()
 	unknownField := bytes.Replace(legacySQLiteRecoveryYAML, []byte("source_fixture:"), []byte("unknown_source_fixture:"), 1)
 	if _, err := loadLegacySQLiteRecoveryDocument(unknownField); err == nil {
 		t.Fatal("legacy SQLite recovery fixture accepted an unknown field mutation")

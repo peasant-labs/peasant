@@ -17,6 +17,7 @@ import (
 )
 
 func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
+	t.Parallel()
 	covered := make(map[ingest.Harness]bool)
 	for _, fixture := range loadIndexFormatOutputFixtures(t) {
 		if fixture.HealthyTranscript == "" {
@@ -28,10 +29,7 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 		covered[fixture.Harness] = true
 		t.Run(fixture.Name, func(t *testing.T) {
 			filesystem := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithPoolSize(1))
-			if err != nil {
-				t.Fatal(err)
-			}
+			database := storetest.OpenWith(t, store.WithPoolSize(1))
 			t.Cleanup(func() { _ = database.Close() })
 			badID, goodID := schema.SessionID(testutil.TestSessionUUID), schema.SessionID(testutil.TestSessionUUID2)
 			beforeInputs := make(map[string][]byte)
@@ -50,7 +48,7 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 				config.Sources = map[ingest.Harness]ingest.SourceConfig{fixture.Harness: {Enabled: true, Paths: []ingest.ResolvedPath{fixture.SourceRoot}}}
 			}
 			indexer := ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})[fixture.Harness]
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{fixture.Harness: makeStubAdapter(nil, nil)}, config,
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{fixture.Harness: makeStubAdapter(nil, nil)}, config,
 				ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database),
 				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{fixture.Harness: indexer}))
 			if err != nil {
@@ -179,6 +177,10 @@ func seedCompletionPeer(t *testing.T, filesystem *testutil.MemFS, database *stor
 	t.Helper()
 	metadata := makeReindexMeta(t, string(sessionID), "/synthetic/original.jsonl")
 	metadata.ModelHarness = harness
+	// Only the parser is stale in this fixture. An omitted adapter stamp means
+	// baseline revision 1 and would independently request metadata refresh.
+	adapterVersion := ingest.HarvesterVersionRegistry[harness].AdapterVersion
+	metadata.AdapterVersion = &adapterVersion
 	metadata.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if harness == ingest.HarnessOpenCode {
 		metadata.Source.Format = ingest.SourceFormatJSON

@@ -8,8 +8,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // TestCanonicalOpenCodeParentsEmittedBeforeChildren proves that discovery
@@ -75,7 +75,7 @@ func TestCanonicalOpenCodeParentsEmittedBeforeChildren(t *testing.T) {
 		DryRun:        true,
 		SessionFilter: selectedRoots,
 	}
-	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config)
+	pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config)
 	if err != nil {
 		t.Fatal(err)
 	}

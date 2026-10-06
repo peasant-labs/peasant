@@ -93,6 +93,10 @@ type harvestFlags struct {
 // BuildHarvestCommand constructs the harvest command with logs/index subcommands.
 // "ingest" is registered as a silent alias for backward compatibility.
 func BuildHarvestCommand() *cobra.Command {
+	return buildHarvestCommand(&ingest.OSFileSystem{})
+}
+
+func buildHarvestCommand(filesystem ingest.FileSystem) *cobra.Command {
 	var flags harvestFlags
 
 	cmd := &cobra.Command{
@@ -101,7 +105,7 @@ func BuildHarvestCommand() *cobra.Command {
 		Short:   "Harvest AI coding agent transcripts",
 		Long:    "Discover, normalize, and store AI coding agent transcripts from Claude Code, OpenCode, Codex, Cursor, Strike, and Pi.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHarvest(cmd, harvestAll, &flags)
+			return runHarvest(cmd, harvestAll, &flags, filesystem)
 		},
 	}
 
@@ -113,7 +117,7 @@ func BuildHarvestCommand() *cobra.Command {
 		Short: "Extract transcripts to peasant-sync/ (no database)",
 		Long:  "Discover and copy AI agent transcripts to the local peasant-sync/ directory without populating the analytics database.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHarvest(cmd, harvestLogsOnly, &flags)
+			return runHarvest(cmd, harvestLogsOnly, &flags, filesystem)
 		},
 	}
 	registerHarvestFlags(logsCmd, &flags, harvestLogsOnly)
@@ -127,7 +131,7 @@ func BuildHarvestCommand() *cobra.Command {
 			"By default, select sessions with stale indexer revisions. Use --source-harness, --session, and --since to narrow the selection, or --force to re-process matching current sessions.\n" +
 			"Use --all to rebuild a lost or damaged database from the files in peasant-sync/. --all clears these filters and implies --force. Saved discovery selection does not restrict stored-session maintenance. No --source-path is required.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHarvest(cmd, harvestIndexOnly, &flags)
+			return runHarvest(cmd, harvestIndexOnly, &flags, filesystem)
 		},
 	}
 	registerHarvestFlags(indexCmd, &flags, harvestIndexOnly)
@@ -212,7 +216,17 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 	return len(ingest.FailedIndexSessions(log))
 }
 
-func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error {
+func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem) error {
+	return runHarvestWith(cmd, mode, flags, filesystem, outputHarvest)
+}
+
+// harvestReport consumes one committed harvest execution. The harvest command
+// prints its summary; `peasant open` reads the outcome of its one session.
+type harvestReport func(cmd *cobra.Command, execution harvestExecution, options harvestOutputOptions) error
+
+// runHarvestWith runs one harvest through the production wiring and hands the
+// committed execution to report.
+func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem, report harvestReport) error {
 	signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
 	ctx, cancelOperation := context.WithCancel(signalCtx)
@@ -228,7 +242,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	configPath := resolveConfigPath(cmd)
 
 	// 1. Construct real dependencies.
-	fs := &ingest.OSFileSystem{}
+	fs := filesystem
 	git := &ingest.ExecGitResolver{}
 
 	// 2. Load config.
@@ -251,7 +265,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 
 	// Notify the user when no config file exists.
 	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
-		fmt.Fprintf(os.Stderr, "notice: no config found at %s — using defaults. Run 'peasant kickstart' to configure.\n", configPath)
+		fmt.Fprintf(cmd.ErrOrStderr(), "notice: no config found at %s — using defaults. Run 'peasant kickstart' to configure.\n", configPath)
 	}
 
 	// 3. An index selector does not override or discover native source paths.
@@ -309,7 +323,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	adapters := ingest.DefaultAdapterRegistry
 
 	// 5. Build source configs from config.
-	sources := buildSourceConfigs(cfg)
+	sources := buildSourceConfigsTo(cfg, cmd.ErrOrStderr())
 
 	// 6. Build pipeline config.
 	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
@@ -505,7 +519,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 	execution := executeHarvest(ctx, pipeline, progState, renderer)
 	stopProgress()
-	return outputHarvest(cmd, execution, harvestOutputOptions{
+	return report(cmd, execution, harvestOutputOptions{
 		flags: flags, outputDir: string(resolvedOutput), configPath: configPath,
 		sources: sources, customPatternCount: customPatternCount,
 		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
@@ -1174,6 +1188,12 @@ func resolveConfiguredSource(cfg *config.Config, harness defaults.Harness) (inge
 
 // buildSourceConfigs converts every registered provider's config into pipeline sources.
 func buildSourceConfigs(cfg *config.Config) map[defaults.Harness]ingest.SourceConfig {
+	return buildSourceConfigsTo(cfg, os.Stderr)
+}
+
+// buildSourceConfigsTo is buildSourceConfigs with its skipped-path warnings
+// written to warnings.
+func buildSourceConfigsTo(cfg *config.Config, warnings io.Writer) map[defaults.Harness]ingest.SourceConfig {
 	sources := map[defaults.Harness]ingest.SourceConfig{}
 	for harness := range ingest.DefaultAdapterRegistry {
 		source, issues, ok := resolveConfiguredSource(cfg, harness)
@@ -1181,7 +1201,7 @@ func buildSourceConfigs(cfg *config.Config) map[defaults.Harness]ingest.SourceCo
 			continue
 		}
 		for _, issue := range issues {
-			fmt.Fprintf(os.Stderr, "warning: skipping invalid %s source path %q: %v\n", harness, issue.path, issue.err)
+			fmt.Fprintf(warnings, "warning: skipping invalid %s source path %q: %v\n", harness, issue.path, issue.err)
 		}
 		sources[harness] = source
 	}
@@ -1262,6 +1282,25 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	return enc.Encode(out)
 }
 
+// printRecordKindsReport prints this run's retained and refused observations.
+// Retention counts occurrences and affected sessions separately; a retained
+// payload is never printed in the report.
+func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount, retained []ingest.RetainedUnknownKindCount) {
+	if len(refused) == 0 && len(retained) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "record kinds:")
+	for _, row := range retained {
+		fmt.Fprintf(w, "  retained, uninterpreted: %s/%s/%s: occurrences: %d; affected sessions: %d\n", row.Harness, row.Namespace, row.Kind, row.Occurrences, row.Sessions)
+	}
+	for _, row := range refused {
+		fmt.Fprintf(w, "  refused: %s/%s x%d\n", string(row.Harness), row.Kind, row.Count)
+	}
+	if len(refused) > 0 {
+		fmt.Fprintln(w, "  These captures stay incomplete; export and publication refuse them until a build represents the kinds.")
+	}
+}
+
 // printSummary outputs the human-readable pipeline summary.
 //
 // Default (no --verbose): path header + summary line + changed/error rows with provider and output path.
@@ -1333,6 +1372,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 			fmt.Fprintf(w, "  %s: adapter_version=%d indexer_version=%d index_version=%d\n", harness, versions.AdapterVersion, versions.IndexerVersion, versions.IndexVersion)
 		}
 	}
+	printRecordKindsReport(w, s.RefusedRecordKinds, s.RetainedUnknownKinds)
 	// The coverage breakdown replaces the bare attempt count whenever the
 	// run measured it. Each sentence is omitted at its own zero: a run
 	// whose failures all kept their entries says nothing about empty

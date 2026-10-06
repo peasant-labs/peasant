@@ -14,9 +14,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/index_format_queries.yaml
@@ -79,6 +79,7 @@ func loadIndexFormatQueryFixtures(t *testing.T) indexFormatQueryDocument {
 }
 
 func TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection(t *testing.T) {
+	t.Parallel()
 	document := loadIndexFormatQueryFixtures(t)
 	for _, row := range document.Cases {
 		t.Run(row.Name, func(t *testing.T) {
@@ -88,7 +89,12 @@ func TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection(t *testing.
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(dbPath, store.WithPoolSize(1))
+			// Seed the exact path the command opens from the pre-migrated
+			// golden copy, so the setup open and the command's own open find
+			// no pending migrations; the seeded sessions and annotations below
+			// are unchanged.
+			storetest.CopyGoldenTo(t, dbPath)
+			db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

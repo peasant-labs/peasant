@@ -1,4 +1,3 @@
-expectedCaseCount: 30
 requiredNames:
   - canonical map trailing slash
   - canonical transcript trailing slash
@@ -8,6 +7,8 @@ requiredNames:
   - scoped transcript round trip
   - retained history round trip
   - malformed retained history section
+  - publish popup round trip
+  - malformed publish value
   - ascii legacy label
   - reserved legacy label
   - unicode legacy label
@@ -37,6 +38,8 @@ cases:
   - {name: scoped transcript round trip, operation: transcript-scoped, pathname: '', search: '?turn=42&scope=file&scopeVal=src%2Fapi.ts&origin=Map&originNode=src%2Fapi.ts', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: sparse-session, branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/sparse-session?turn=42&scope=file&scopeVal=src%2Fapi.ts&origin=Map&originNode=src%2Fapi.ts'}
   - {name: retained history round trip, operation: transcript-history, pathname: '', search: '?turn=3&earlier=earlier-1&earlier=earlier-0&earlier=earlier-1', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: history-session, branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/history-session?turn=3&earlier=earlier-0&earlier=earlier-1'}
   - {name: malformed retained history section, operation: transcript-query-reject, pathname: '', search: '?earlier=history-0', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: rejected}
+  - {name: publish popup round trip, operation: transcript-publish, pathname: '', search: '?turn=4&publish=open', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: publish-session, branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/publish-session?turn=4&publish=open'}
+  - {name: malformed publish value, operation: transcript-query-reject, pathname: '', search: '?publish=yes', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: rejected}
   - {name: ascii legacy label, operation: legacy, pathname: '/map/alpha-project', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: alpha-project}
   - {name: reserved legacy label, operation: legacy, pathname: '/review/team%20alpha%3Fcopy', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: 'team alpha?copy'}
   - {name: unicode legacy label, operation: legacy, pathname: '/projects/%E9%9B%AA%E5%B1%B1/session', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: 雪山}

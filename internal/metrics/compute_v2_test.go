@@ -10,9 +10,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // openTestStore opens a Store backed by a copy of the golden (pre-migrated) DB.
@@ -484,7 +484,7 @@ func TestComputeInsights_StillWorks(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := storetest.CopyGoldenDB(t)
-	s, err := store.Open(dbPath)
+	s, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

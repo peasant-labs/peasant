@@ -342,6 +342,7 @@ func decodeConfigScreenFixture(name string, data []byte, destination any) error 
 }
 
 func TestConfigScreenFixtureDecoder_StrictAndSingleDocument(t *testing.T) {
+	t.Parallel()
 	var unknown configRetentionDocument
 	withUnknown := append([]byte("unexpectedField: true\n"), configRetentionFixtureYAML...)
 	if err := decodeConfigScreenFixture("retention.yaml", withUnknown, &unknown); err == nil || !strings.Contains(err.Error(), "field unexpectedField not found") {
@@ -356,6 +357,7 @@ func TestConfigScreenFixtureDecoder_StrictAndSingleDocument(t *testing.T) {
 }
 
 func TestConfigCommand_RetentionFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigRetentionFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -393,6 +395,7 @@ func TestConfigCommand_RetentionFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_AliasParityFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigAliasFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -412,6 +415,7 @@ func TestConfigCommand_AliasParityFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_ProductionRegistrationFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigAliasFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -435,6 +439,7 @@ func TestConfigCommand_ProductionRegistrationFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_SavePendingFreezesMountedModel(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigSaveOrderFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -449,7 +454,7 @@ func TestConfigCommand_SavePendingFreezesMountedModel(t *testing.T) {
 				if view := model.(*configScreenModel).screen.View(); !strings.Contains(view, fixture.SaveInstruction) {
 					t.Fatalf("mounted config screen missing save instruction %q", fixture.SaveInstruction)
 				}
-				model = world.editRetention(model)
+				model = world.editRetention(t, model)
 				model = world.editLicenseFromRetention(model)
 				model = configScreenUpdate(model, configScreenKey("tab"))
 				model = configScreenUpdate(model, configScreenKey("down"))
@@ -493,6 +498,7 @@ func TestConfigCommand_SavePendingFreezesMountedModel(t *testing.T) {
 }
 
 func TestConfigCommand_PartialSuccessIsActionable(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigPartialSuccessFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -527,6 +533,7 @@ func TestConfigCommand_PartialSuccessIsActionable(t *testing.T) {
 }
 
 func TestConfigCommand_SaveSemanticsFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigSaveSemanticsFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -590,6 +597,7 @@ func TestConfigCommand_SaveSemanticsFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_RetentionIOFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigRetentionIOFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -707,6 +715,7 @@ func TestConfigCommand_RetentionIOFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_AuthorityBoundaryFixture(t *testing.T) {
+	t.Parallel()
 	document := loadConfigAuthorityFixture(t)
 	source, err := os.ReadFile("cmd_config.go")
 	if err != nil {
@@ -916,7 +925,7 @@ func (w *configScreenWorld) dependencies(t *testing.T) configCommandDeps {
 			}
 			return &observedConfigRetentionFile{file: opened, world: w, t: t}, nil
 		},
-		run: w.run,
+		run: func(model tea.Model) (tea.Model, error) { return w.run(t, model) },
 	}
 }
 
@@ -948,7 +957,7 @@ func (f *observedConfigRetentionFile) WriteCleanupDays(days int) error {
 
 var _ configRetentionFile = (*observedConfigRetentionFile)(nil)
 
-func (w *configScreenWorld) run(model tea.Model) (tea.Model, error) {
+func (w *configScreenWorld) run(t *testing.T, model tea.Model) (tea.Model, error) {
 	w.runnerCalls++
 	model = configScreenDrain(model, model.Init())
 	model = configScreenUpdate(model, tea.WindowSizeMsg{Width: 100, Height: 28})
@@ -961,17 +970,17 @@ func (w *configScreenWorld) run(model tea.Model) (tea.Model, error) {
 		model = w.observe(model)
 		model = configScreenUpdate(model, configScreenKey("ctrl+s"))
 	case configRetentionDirty:
-		model = w.editRetention(model)
+		model = w.editRetention(t, model)
 		model = w.observe(model)
 	case configRetentionDiscard:
-		model = w.editRetention(model)
+		model = w.editRetention(t, model)
 		model = w.editLicenseFromRetention(model)
 		model = w.observe(model)
 		model = configScreenUpdate(model, configScreenKey("esc"))
 		model = configScreenUpdate(model, configScreenKey("left"))
 		model = configScreenUpdate(model, configScreenKey("enter"))
 	case configRetentionOrdered:
-		model = w.editRetention(model)
+		model = w.editRetention(t, model)
 		model = w.editLicenseFromRetention(model)
 		model = w.observe(model)
 		model = configScreenUpdate(model, configScreenKey("ctrl+s"))
@@ -980,7 +989,7 @@ func (w *configScreenWorld) run(model tea.Model) (tea.Model, error) {
 		model = configScreenUpdate(model, configScreenKey("ctrl+s"))
 		model = w.observeError(model)
 	case configRetentionDrift:
-		model = w.editRetention(model)
+		model = w.editRetention(t, model)
 		model = w.editLicenseFromRetention(model)
 		model = w.observe(model)
 		external := config.BaseConfig()
@@ -999,14 +1008,26 @@ func (w *configScreenWorld) run(model tea.Model) (tea.Model, error) {
 	return model, nil
 }
 
-func (w *configScreenWorld) editRetention(model tea.Model) tea.Model {
-	// Move the section cursor from selection down to retention. With an all-mode
-	// selection the visible sections are selection, publication, privacy, license,
-	// retention, so retention is four steps down.
-	model = configScreenUpdate(model, configScreenKey("down"))
-	model = configScreenUpdate(model, configScreenKey("down"))
-	model = configScreenUpdate(model, configScreenKey("down"))
-	model = configScreenUpdate(model, configScreenKey("down"))
+// configScreenSelectSection drives the real navigation and observes its cursor.
+// The bound makes a missing section fail before an unrelated field is edited.
+func configScreenSelectSection(t *testing.T, model tea.Model, title string) tea.Model {
+	t.Helper()
+	for step := 0; step < 16; step++ {
+		view := ansiPattern.ReplaceAllString(model.View().Content, "")
+		if strings.Contains(view, "▸ "+title) {
+			return model
+		}
+		model = configScreenUpdate(model, configScreenKey("down"))
+	}
+	t.Fatalf("mounted config navigation did not select %q:\n%s", title, ansiPattern.ReplaceAllString(model.View().Content, ""))
+	return model
+}
+
+func (w *configScreenWorld) editRetention(t *testing.T, model tea.Model) tea.Model {
+	t.Helper()
+	// Select the actual mounted section, independent of how many visible
+	// settings precede it. Editing a different radio cannot satisfy this world.
+	model = configScreenSelectSection(t, model, "claude retention")
 	model = configScreenUpdate(model, configScreenKey("enter"))
 	current := ftueCleanupIndex(w.initialRetention())
 	target := ftueCleanupIndex(w.selectedRetention)

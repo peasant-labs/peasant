@@ -1,6 +1,6 @@
 package store
 
-import "zombiezen.com/go/sqlite/sqlitemigration"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 
 // migrationV1 creates all 6 tables and indexes for the initial schema.
 // Each CREATE TABLE statement is separated by semicolons.

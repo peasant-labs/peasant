@@ -123,7 +123,7 @@ func TestAnnotatePrune_AssociationScopeDryRunAndDelete(t *testing.T) {
 	}
 	dataHome := t.TempDir()
 	seedTestSessionInto(t, dataHome, string(fixture.SelectedSessionID))
-	db, err := store.Open(defaults.ResolveDBFilePathWith(dataHome).String())
+	db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(dataHome).String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestAnnotatePrune_AssociationScopeDryRunAndDelete(t *testing.T) {
 	if err != nil || !strings.Contains(output, "would delete 1 annotation(s)") {
 		t.Fatalf("dry run: output=%q err=%v", output, err)
 	}
-	db, err = store.Open(defaults.ResolveDBFilePathWith(dataHome).String())
+	db, err = openPreparedStore(t, defaults.ResolveDBFilePathWith(dataHome).String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestAnnotatePrune_AssociationScopeDryRunAndDelete(t *testing.T) {
 	if err != nil || !strings.Contains(output, "deleted 1 annotation(s)") {
 		t.Fatalf("delete: output=%q err=%v", output, err)
 	}
-	db, err = store.Open(defaults.ResolveDBFilePathWith(dataHome).String())
+	db, err = openPreparedStore(t, defaults.ResolveDBFilePathWith(dataHome).String())
 	if err != nil {
 		t.Fatal(err)
 	}

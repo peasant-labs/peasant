@@ -13,6 +13,12 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// contentBackfillPageSize is how many incomplete-content targets one store
+// page returns. The recovery pass walks by exclusive keyset cursor, so this is
+// a per-page bound on a single listing round trip, not a cap on the work a run
+// can do: the next page resumes after the last identity of this one.
+const contentBackfillPageSize = 100
+
 // ContentCaptureResult is one retained-content capture, as the adapter that
 // parsed it reports it. The adapter declares its own completeness: Complete is
 // false whenever the adapter knows that rows were filtered or omitted, so a
@@ -135,7 +141,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 		if err := ctx.Err(); err != nil {
 			return recovered, stoppedOnBudget, remaining, err
 		}
-		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize)
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 			return recovered, stoppedOnBudget, remaining, cancelErr
 		}
@@ -262,7 +268,7 @@ func (p *Pipeline) countIncompleteContentWork(ctx context.Context, store Content
 		if err := ctx.Err(); err != nil {
 			return count, err
 		}
-		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize)
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 			return count, cancelErr
 		}
@@ -424,11 +430,28 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 // own completeness; every other strict parser either certifies the retained
 // bytes or refuses them. InputHash is the index input digest over the bytes
 // actually parsed, so an ordinary index run later recognizes the same input.
+//
+// The retained-batch route uses the same capture assessment as the ordinary
+// path: validated omission stand-ins in the immutable retained stream are the
+// omission evidence, not guessed original bytes. An invalid or unaccounted
+// candidate refuses before any counting or persistence.
 func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {
 	if capturer, ok := indexer.(RetainedContentCapturer); ok {
 		capture, err := capturer.CaptureRetainedContent(ctx, session)
 		if err != nil {
 			return ContentCaptureResult{}, err
+		}
+		unknown, err := retainedUnknownEntries(capture.Entries)
+		if err != nil {
+			return ContentCaptureResult{}, err
+		}
+		v1 := indexformat.V1{Entries: capture.Entries}
+		if assessment, assessErr := AssessCapture(V1CaptureFacts(
+			session.Harness, v1, true, session.ContentOmitted,
+		)); assessErr != nil {
+			return ContentCaptureResult{}, assessErr
+		} else if assessment.Coverage() != CaptureCoverageFull || len(unknown) > 0 || outputRecordsItsOmissions(v1) {
+			capture.Complete = false
 		}
 		capture.Authority = authority
 		return capture, nil
@@ -444,7 +467,19 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: true, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
+	unknown, err := retainedUnknownEntries(capture.Entries)
+	if err != nil {
+		return ContentCaptureResult{}, err
+	}
+	v1 := indexformat.V1{Entries: capture.Entries}
+	assessed, assessErr := AssessCapture(V1CaptureFacts(
+		session.Harness, v1, true, session.ContentOmitted,
+	))
+	if assessErr != nil {
+		return ContentCaptureResult{}, assessErr
+	}
+	complete := assessed.Coverage() == CaptureCoverageFull && len(unknown) == 0 && !outputRecordsItsOmissions(v1)
+	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: complete, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
 }
 
 func captureHarness(raw string) (Harness, error) {

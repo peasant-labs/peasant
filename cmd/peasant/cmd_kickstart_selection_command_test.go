@@ -395,6 +395,11 @@ func materializeSelectionCommandCase(t *testing.T, c *selectionCommandCase) {
 	if err := os.MkdirAll(clonePath, 0o755); err != nil {
 		t.Fatalf("create selection command clone path: %v", err)
 	}
+	physicalClone, err := ingest.NewPhysicalPathResolver().Resolve(clonePath)
+	if err != nil {
+		t.Fatalf("resolve selection command clone identity: %v", err)
+	}
+	clonePath = physicalClone.String()
 	materialized := append([]ftue.SessionListing(nil), c.Listings...)
 	for index := range materialized {
 		materialized[index].WorkingDir = clonePath
@@ -450,7 +455,7 @@ func seedSelectionCommandStoredEvidence(t *testing.T, dataHome string, listings 
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create selection command data directory: %v", err)
 	}
-	db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := openPreparedStore(t, dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open selection command store: %v", err)
 	}
@@ -538,6 +543,7 @@ func advanceSelectionCommandToConsent(t *testing.T, model tea.Model) tea.Model {
 }
 
 func TestKickstartCommandMountsNonEmptySelectionInteraction(t *testing.T) {
+	t.Parallel()
 	doc := loadSelectionCommand(t)
 	for _, c := range doc.Cases {
 		c := c
@@ -675,6 +681,7 @@ func (selectionCommandRetentionFile) WriteCleanupDays(int) error { return nil }
 var _ configRetentionFile = selectionCommandRetentionFile{}
 
 func TestConfigAndKickstartShareCanonicalSelectionInitialization(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadSelectionCommand(t).Cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
@@ -828,6 +835,7 @@ func TestSelectionCommands_RenderGolden(t *testing.T) {
 }
 
 func TestSelectionCommandFixtureMutationProbeRequiresToggle(t *testing.T) {
+	t.Parallel()
 	probes := 0
 	for _, c := range loadSelectionCommand(t).Cases {
 		if !c.MutationProbe {
@@ -861,6 +869,7 @@ func mutateSelectionCommandCount(t *testing.T, field string, expected int) []byt
 }
 
 func TestSelectionCommandFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionCommandData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeSelectionCommand(mutated); err == nil {
 		t.Fatal("selection command fixture accepted an unknown field")
@@ -868,6 +877,7 @@ func TestSelectionCommandFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestSelectionCommandFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionCommandData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeSelectionCommand(mutated); err == nil {
 		t.Fatal("selection command fixture accepted a trailing document")
@@ -875,6 +885,7 @@ func TestSelectionCommandFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestSelectionCommandFixturePinsCaseCount(t *testing.T) {
+	t.Parallel()
 	mutated := mutateSelectionCommandCount(t, "expectedCaseCount", expectedSelectionCommandCaseCount)
 	if _, err := decodeSelectionCommand(mutated); err == nil {
 		t.Fatal("selection command fixture accepted a changed case count")
@@ -882,6 +893,7 @@ func TestSelectionCommandFixturePinsCaseCount(t *testing.T) {
 }
 
 func TestSelectionCommandFixturePinsSessionCount(t *testing.T) {
+	t.Parallel()
 	mutated := mutateSelectionCommandCount(t, "expectedSessionCount", expectedSelectionCommandSessionCount)
 	if _, err := decodeSelectionCommand(mutated); err == nil {
 		t.Fatal("selection command fixture accepted a changed session count")

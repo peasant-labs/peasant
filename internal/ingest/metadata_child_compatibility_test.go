@@ -13,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/metadata_child_compatibility.yaml
@@ -35,9 +34,7 @@ func TestMetadataChildCompatibility(t *testing.T) {
 			WantIndexed   int    `yaml:"wantIndexed"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(metadataChildCompatibilityYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(metadataChildCompatibilityYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -50,7 +47,7 @@ func TestMetadataChildCompatibility(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
 			filesystem := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +99,7 @@ func TestMetadataChildCompatibility(t *testing.T) {
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex, cfg.Force = true, fixture.Force
 			cfg.AllowedSessionIDs = map[ingest.SessionID]bool{fixtures.ChildID: true}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, cfg,
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, cfg,
 				ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 			if err != nil {
 				t.Fatal(err)

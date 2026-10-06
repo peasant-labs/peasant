@@ -12,10 +12,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/generation_activation_provenance.yaml
@@ -261,7 +261,7 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 				activation.Capture = &ingest.PublicationCaptureWrite{Metadata: meta, CWDProvenance: kind}
 			}
 
-			activateErr := s.ActivateNativeGeneration(context.Background(), activation)
+			_, activateErr := s.ActivateNativeGeneration(context.Background(), activation)
 			if tc.WantRefused {
 				if activateErr == nil {
 					t.Fatal("activation with a publication capture that disagrees with the stored session was accepted; want refusal")
@@ -362,11 +362,11 @@ func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 	}
 
 	installRecoveryFault(t, s, "after-rename-before-db")
-	if err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
+	if _, err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
 		t.Fatal("activation across the staging seam succeeded; the crash must interrupt it")
 	}
 	clearRecoveryFault(t, s, "after-rename-before-db")
-	if err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
+	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
 		t.Fatalf("recover interrupted activation: %v", err)
 	}
 

@@ -29,6 +29,7 @@ type schemaParityCase struct {
 }
 
 func TestSchemaModuleParity(t *testing.T) {
+	t.Parallel()
 	fixture, err := decodeSchemaParityFixture(schemaParityFixtureBytes)
 	if err != nil {
 		t.Fatalf("schema parity: parse fixture: %v", err)
@@ -81,6 +82,7 @@ func decodeSchemaParityFixture(data []byte) (schemaParityFixture, error) {
 }
 
 func TestSchemaModuleParityFixtureStrictDecoding(t *testing.T) {
+	t.Parallel()
 	mutated := append([]byte("unexpected_fixture_field: true\n"), schemaParityFixtureBytes...)
 	if _, err := decodeSchemaParityFixture(mutated); err == nil || !strings.Contains(err.Error(), "field unexpected_fixture_field not found") {
 		t.Fatalf("unknown field error = %v, want strict field rejection", err)

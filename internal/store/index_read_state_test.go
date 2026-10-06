@@ -1,16 +1,13 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/index_read_state.yaml
@@ -67,14 +64,8 @@ type indexReadStateDocument struct {
 func loadIndexReadStateFixtures(t *testing.T) indexReadStateDocument {
 	t.Helper()
 	var document indexReadStateDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(indexReadStateYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexReadStateYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("index read state fixtures require one document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, row := range document.Cases {

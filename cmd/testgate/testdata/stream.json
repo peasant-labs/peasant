@@ -1,0 +1,20 @@
+{"Action":"run","Package":"example.com/x/internal/ingest","Test":"TestSecondExpensive","Time":"2026-09-25T10:00:00Z"}
+{"Action":"output","Package":"example.com/x/internal/ingest","Test":"TestSecondExpensive","Time":"2026-09-25T10:00:00Z","Output":"=== RUN   TestSecondExpensive\n"}
+{"Action":"pass","Package":"example.com/x/internal/ingest","Test":"TestSecondExpensive","Elapsed":2.5,"Time":"2026-09-25T10:00:02Z"}
+{"Action":"run","Package":"example.com/x/internal/ingest","Test":"TestFirstCheap","Time":"2026-09-25T10:00:02Z"}
+{"Action":"run","Package":"example.com/x/internal/ingest","Test":"TestFirstCheap/caseA","Time":"2026-09-25T10:00:02Z"}
+{"Action":"pass","Package":"example.com/x/internal/ingest","Test":"TestFirstCheap/caseA","Elapsed":0.4,"Time":"2026-09-25T10:00:02Z"}
+{"Action":"run","Package":"example.com/x/internal/ingest","Test":"TestFirstCheap/caseB","Time":"2026-09-25T10:00:02Z"}
+{"Action":"pass","Package":"example.com/x/internal/ingest","Test":"TestFirstCheap/caseB","Elapsed":0.6,"Time":"2026-09-25T10:00:03Z"}
+{"Action":"pass","Package":"example.com/x/internal/ingest","Test":"TestFirstCheap","Elapsed":1.0,"Time":"2026-09-25T10:00:03Z"}
+{"Action":"run","Package":"example.com/x/internal/ingest","Test":"TestThird","Time":"2026-09-25T10:00:03Z"}
+{"Action":"pass","Package":"example.com/x/internal/ingest","Test":"TestThird","Elapsed":0.5,"Time":"2026-09-25T10:00:03Z"}
+{"Action":"run","Package":"example.com/x/internal/ingest","Test":"TestFlaky","Time":"2026-09-25T10:00:03Z"}
+{"Action":"output","Package":"example.com/x/internal/ingest","Test":"TestFlaky","Time":"2026-09-25T10:00:03Z","Output":"    flaky_test.go:12: transient\n"}
+{"Action":"fail","Package":"example.com/x/internal/ingest","Test":"TestFlaky","Elapsed":0.3,"Time":"2026-09-25T10:00:04Z"}
+{"Action":"run","Package":"example.com/x/internal/ingest","Test":"TestFlaky","Time":"2026-09-25T10:00:04Z"}
+{"Action":"pass","Package":"example.com/x/internal/ingest","Test":"TestFlaky","Elapsed":0.4,"Time":"2026-09-25T10:00:04Z"}
+{"Action":"output","Package":"example.com/x/internal/ingest","Time":"2026-09-25T10:00:04Z","Output":"PASS\n"}
+{"Action":"pass","Package":"example.com/x/internal/ingest","Elapsed":4.4,"Time":"2026-09-25T10:00:04Z"}
+{"Action":"output","Package":"example.com/x/cmd/peasant","Time":"2026-09-25T10:00:04Z","Output":"ok  \texample.com/x/cmd/peasant\t1.9s\n"}
+{"Action":"pass","Package":"example.com/x/cmd/peasant","Elapsed":1.9,"Time":"2026-09-25T10:00:06Z"}

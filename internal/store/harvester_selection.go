@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 var (
@@ -60,6 +60,14 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 // proof was cleared, and a row whose current publication capture the index is
 // not yet bound to. Both settle in one ordinary harvest, so the next unchanged
 // harvest selects nothing. It is harness-scoped and reads no file.
+//
+// The publication half is deliberately the exact complement of the binding
+// predicate: it needs a capture at the row's current revision (the metadata row
+// EXISTS), a recovered provenance kind (the same guard publicationBindingSQL
+// applies), and an index revision that has not caught up. A row whose
+// provenance is not_recovered names no capture the index could bind to, so it
+// is never enumerated here; selecting it would read its pair on every harvest
+// for a repair the index write can never complete.
 func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
 	if len(targets) == 0 {
 		return nil, nil
@@ -81,6 +89,7 @@ WHERE s.model_harness IN (` + strings.Join(harnessPlaceholders, ",") + `)
    (s.artifact_hash IS NOT NULL AND s.indexed_input_hash IS NULL)
    OR (s.publication_capture_revision > 0
        AND s.indexed_publication_capture_revision <> s.publication_capture_revision
+       AND s.cwd_provenance_kind != 'not_recovered'
        AND EXISTS (SELECT 1 FROM session_publication_metadata p
                    WHERE p.session_id = s.session_id
                      AND p.capture_revision = s.publication_capture_revision))

@@ -115,7 +115,7 @@ func TestGenerationIDValidation(t *testing.T) {
 				if _, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.FailedID); err != nil {
 					t.Fatalf("intent-owned candidate manifest missing after refused cleanup: %v", err)
 				}
-				if err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
+				if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
 					t.Fatalf("recover intent-owned candidate: %v", err)
 				}
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
@@ -134,7 +134,7 @@ func TestGenerationIDValidation(t *testing.T) {
 				if err := (generationIndexFormat{}).Validate(filledCandidateForValidation(t, collision, collisionBlobs)); err != nil {
 					t.Fatalf("collision candidate is not otherwise valid: %v", err)
 				}
-				err := s.ActivateGeneration(context.Background(), GenerationActivation{
+				_, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 					Generation:     collision,
 					Blobs:          collisionBlobs,
 					IndexerVersion: 77,
@@ -152,7 +152,7 @@ func TestGenerationIDValidation(t *testing.T) {
 				}
 				// Recovery must not activate the old G1 bytes under the
 				// rejected envelope; G2 stays the read authority.
-				if err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
+				if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
 					t.Fatalf("recover after refused collision: %v", err)
 				}
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
@@ -272,21 +272,23 @@ func TestGenerationCompletenessTransition(t *testing.T) {
 
 			activateComplete := func(genID, suffix string, version int, at int64) error {
 				v2, blobs := buildTestGeneration(t, id, genID, "text "+suffix, "input "+suffix, "output "+suffix)
-				return s.ActivateGeneration(context.Background(), GenerationActivation{
+				_, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 					Generation:     v2,
 					Blobs:          blobs,
 					IndexerVersion: version,
 					IndexedAtMs:    at,
 				})
+				return err
 			}
 			activateIncomplete := func(genID, suffix string, version int, at int64) error {
 				v2, blobs := buildIncompleteGeneration(t, id, genID, "text "+suffix, "input "+suffix, "output "+suffix)
-				return s.ActivateGeneration(context.Background(), GenerationActivation{
+				_, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 					Generation:     v2,
 					Blobs:          blobs,
 					IndexerVersion: version,
 					IndexedAtMs:    at,
 				})
+				return err
 			}
 
 			switch tc.Name {
@@ -318,7 +320,7 @@ func TestGenerationCompletenessTransition(t *testing.T) {
 				if err := (generationIndexFormat{}).Validate(filledCandidateForValidation(t, overComplete, overCompleteBlobs)); err != nil {
 					t.Fatalf("incomplete candidate is not otherwise valid: %v", err)
 				}
-				overErr := s.ActivateGeneration(context.Background(), GenerationActivation{
+				_, overErr := s.ActivateGeneration(context.Background(), GenerationActivation{
 					Generation:     overComplete,
 					Blobs:          overCompleteBlobs,
 					IndexerVersion: 77,

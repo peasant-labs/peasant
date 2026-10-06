@@ -12,8 +12,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
 )
 
 //go:embed testdata/publication_full_capture.yaml
@@ -58,7 +58,7 @@ func loadPublicationFullCaptureFixtures(t *testing.T) []publicationFullCaptureCa
 func TestPublicationFullCaptureEligibilityAndBundle(t *testing.T) {
 	for _, tc := range loadPublicationFullCaptureFixtures(t) {
 		t.Run(tc.Name, func(t *testing.T) {
-			s, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
+			s, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

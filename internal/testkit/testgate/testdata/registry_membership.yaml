@@ -1,0 +1,44 @@
+# Required membership manifest for the committed no-race partition registry
+# (no-race-partition.yaml).
+#
+# Deletion protection uses required names, never a bare count: a count churns on
+# every addition and does not name what disappeared. registry_test.go asserts the
+# committed registry's membership against these lists in both directions, so
+# deleting a partition entry (which silently returns the test to the race pass)
+# fails a test, as does adding an entry without recording it here.
+#
+# Each name is "<package>|<test>" — the identity key the validator already uses.
+partition:
+  - internal/moduleboundary|TestRedactionModuleBoundary
+  - internal/moduleboundary|TestRedactionBoundaryFixtureStrictDecoding
+  - internal/moduleboundary|TestRedactionScannerHoldsALineAtTheRecordLimit
+  - internal/moduleboundary|TestRedactionEngineHandlesRecordOverTheOldLimit
+  - internal/e2e|TestPeasantBinSeamUnsetBuildsGoBinary
+  - cmd/peasant|TestWebCapabilitiesMatrix
+  - internal/transcript|TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback
+  - internal/ingest|TestResolveStoredOriginsWritesAVerdictIntoEveryRow
+  - cmd/peasant|TestMountedKickstartStoredGateAlignsViewerAndPush
+  - cmd/peasant|TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection
+  - internal/ingest|TestUnknownPrivateEncoding
+  - cmd/peasant|TestMountedLegacySelectedConversion_ConsentCancellationAndRerun
+  - cmd/peasant|TestPublicationWizardAndReportUseDatabaseReadiness
+  - cmd/peasant|TestModelsSync_500_StaticFallback
+  - internal/ingest|TestNativeCoverageMatrix
+  - cmd/peasant|TestKickstartRescan_FallsBackWithoutCompatibleDatabase
+  - internal/ingest|TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology
+  - internal/ingest|TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses
+  - internal/ingest|TestLargeRecordsAreHandledUniformlyAcrossHarnesses
+  - internal/ingest|TestPiCapturedAdmission
+  - internal/ingest|TestPublicationCaptureNormalIngestRecovery
+  - internal/ingest|TestNormalIngestStoresAuthoritativeContent
+  - internal/ingest|TestPiUnknownPersistence
+  - internal/ingest|TestOrdinaryHarvestSettlesStaleIndexSessions
+  - internal/ingest|TestRetainedContentBackfill
+  - internal/ingest|TestNativeUnknownSourceToPublication
+  - cmd/peasant|TestPiHarvestCommonModes
+  - internal/ingest|TestContentRecoveryScope
+  - internal/ingest|TestPipelineRetainedAdapterMaintenance
+  - internal/ingest|TestConcreteParserFailurePreservesOtherSessions
+  - internal/ingest|TestUnknownLocalRetentionBeyondTransferBudget
+protected:
+  - internal/ingest|TestOpenCodeNativeCLI

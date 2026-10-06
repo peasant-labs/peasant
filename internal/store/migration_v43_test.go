@@ -1,11 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,10 +10,10 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/migrations/v43_publications.yaml
@@ -27,6 +24,9 @@ type publicationFixtureFile struct {
 	Attempts   []publicationAttemptFixture   `yaml:"attempts"`
 	Rejections []publicationRejectionFixture `yaml:"rejections"`
 	Rollback   publicationRollbackFixture    `yaml:"rollback"`
+	// UnpublishedSibling is a session in the first record's project that holds
+	// no receipt.
+	UnpublishedSibling string `yaml:"unpublished_sibling"`
 }
 type publicationRejectionFixture struct {
 	Name                string                        `yaml:"name"`
@@ -57,15 +57,9 @@ type publicationAttemptFixture struct {
 
 func loadPublicationFixture(t *testing.T) publicationFixtureFile {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationFixture))
-	decoder.KnownFields(true)
 	var fixture publicationFixtureFile
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationFixture, &fixture); err != nil {
 		t.Fatalf("decode publication fixture: %v", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatalf("publication fixture must contain exactly one document: %v", err)
 	}
 	if len(fixture.Records) != 2 || len(fixture.Attempts) != len(store.AllPublicationAttemptStages) || len(fixture.Rejections) != 1 {
 		t.Fatalf("publication fixture rows = records:%d attempts:%d rejections:%d", len(fixture.Records), len(fixture.Attempts), len(fixture.Rejections))
@@ -120,6 +114,7 @@ func publicationRecordFromFixture(t *testing.T, row publicationFixtureRecord) st
 }
 
 func TestMigrationV43SQLiteCheckRejectsUnknownDiagnosticStage(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rejected := fixture.Records[0], fixture.Rejections[0]
 	dbPath := filepath.Join(t.TempDir(), "stage-check.db")
@@ -146,6 +141,7 @@ func TestMigrationV43SQLiteCheckRejectsUnknownDiagnosticStage(t *testing.T) {
 }
 
 func TestMigrationV43RejectsUnknownDiagnosticStage(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rejected := fixture.Records[0], fixture.Rejections[0]
 	s := openTestStore(t)
@@ -159,6 +155,7 @@ func TestMigrationV43RejectsUnknownDiagnosticStage(t *testing.T) {
 }
 
 func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rollback := fixture.Records[0], fixture.Rollback
 	dbPath := filepath.Join(t.TempDir(), "publication.db")
@@ -217,7 +214,42 @@ func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
 	}
 }
 
+// TestHasPublicationReadsTheReceiptOfTheSession checks the receipt read
+// `peasant open` reports: the session's own receipt counts, and a receipt of
+// another session in the same project does not.
+func TestHasPublicationReadsTheReceiptOfTheSession(t *testing.T) {
+	t.Parallel()
+	fixture := loadPublicationFixture(t)
+	s := openTestStore(t)
+	defer s.Close()
+	row := fixture.Records[0]
+	record := publicationRecordFromFixture(t, row)
+	storetest.SeedSessionInProject(t, s, row.SessionID, record.ProjectHash)
+	storetest.SeedSessionInProject(t, s, fixture.UnpublishedSibling, record.ProjectHash)
+	has := func(sessionID string) bool {
+		t.Helper()
+		found, err := s.HasPublication(context.Background(), sessionID)
+		if err != nil {
+			t.Fatalf("check receipt: %v", err)
+		}
+		return found
+	}
+	if has(row.SessionID) {
+		t.Fatal("a session with no receipt reads as published")
+	}
+	if err := s.SavePublication(context.Background(), record); err != nil {
+		t.Fatalf("save receipt: %v", err)
+	}
+	if !has(row.SessionID) {
+		t.Fatal("a session with a stored receipt reads as not published")
+	}
+	if has(fixture.UnpublishedSibling) {
+		t.Fatal("a receipt of one session reads as published for another session in the same project")
+	}
+}
+
 func TestMigrationV43PersistsOnlyCompleteAuthoritativeReceipts(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	s := openTestStore(t)
 	defer s.Close()
@@ -278,6 +310,7 @@ func TestMigrationV43PersistsOnlyCompleteAuthoritativeReceipts(t *testing.T) {
 }
 
 func TestMigrationV43ProjectIdentityCannotReadOrOverwritePublicationState(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	primary := publicationRecordFromFixture(t, fixture.Records[0])
 	wrongProject := publicationRecordFromFixture(t, fixture.Records[1])

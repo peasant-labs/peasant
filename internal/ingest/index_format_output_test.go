@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -17,10 +16,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/index_format_output.yaml
@@ -63,26 +61,29 @@ func (identity transcriptIdentity) expandSessionPlaceholder(text string, session
 }
 
 type indexFormatOutputCase struct {
-	Name                 string              `yaml:"name"`
-	DeclaredFormat       int                 `yaml:"declaredFormat"`
-	StoredFormat         int                 `yaml:"storedFormat"`
-	Versioned            bool                `yaml:"versioned"`
-	LogsOnly             bool                `yaml:"logsOnly"`
-	Payload              indexOutputPayload  `yaml:"payload"`
-	WantIndexed          bool                `yaml:"wantIndexed"`
-	WantLogError         string              `yaml:"wantLogError"`
-	WantConstructorError string              `yaml:"wantConstructorError"`
-	WantDiagnostic       bool                `yaml:"wantDiagnostic"`
-	RealIndexer          bool                `yaml:"realIndexer"`
-	Harness              ingest.Harness      `yaml:"harness"`
-	Transcript           string              `yaml:"transcript"`
-	EmptyTranscript      bool                `yaml:"emptyTranscript"`
-	SourceRoot           ingest.ResolvedPath `yaml:"sourceRoot"`
-	SourceFiles          map[string]string   `yaml:"sourceFiles"`
-	SourceDirectories    []string            `yaml:"sourceDirectories"`
-	HealthyTranscript    string              `yaml:"healthyTranscript"`
-	HealthySourceFiles   map[string]string   `yaml:"healthySourceFiles"`
-	TranscriptIdentity   transcriptIdentity  `yaml:"transcriptIdentity"`
+	Retained             []completionUnknownExpectation `yaml:"retained"`
+	VisibleTexts         []string                       `yaml:"visibleTexts"`
+	Name                 string                         `yaml:"name"`
+	DeclaredFormat       int                            `yaml:"declaredFormat"`
+	StoredFormat         int                            `yaml:"storedFormat"`
+	Versioned            bool                           `yaml:"versioned"`
+	LogsOnly             bool                           `yaml:"logsOnly"`
+	Payload              indexOutputPayload             `yaml:"payload"`
+	WantIndexed          bool                           `yaml:"wantIndexed"`
+	WantRetainedKind     string                         `yaml:"wantRetainedKind"`
+	WantLogError         string                         `yaml:"wantLogError"`
+	WantConstructorError string                         `yaml:"wantConstructorError"`
+	WantDiagnostic       bool                           `yaml:"wantDiagnostic"`
+	RealIndexer          bool                           `yaml:"realIndexer"`
+	Harness              ingest.Harness                 `yaml:"harness"`
+	Transcript           string                         `yaml:"transcript"`
+	EmptyTranscript      bool                           `yaml:"emptyTranscript"`
+	SourceRoot           ingest.ResolvedPath            `yaml:"sourceRoot"`
+	SourceFiles          map[string]string              `yaml:"sourceFiles"`
+	SourceDirectories    []string                       `yaml:"sourceDirectories"`
+	HealthyTranscript    string                         `yaml:"healthyTranscript"`
+	HealthySourceFiles   map[string]string              `yaml:"healthySourceFiles"`
+	TranscriptIdentity   transcriptIdentity             `yaml:"transcriptIdentity"`
 }
 
 func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
@@ -91,14 +92,8 @@ func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
 		RequiredNames []string                `yaml:"requiredNames"`
 		Cases         []indexFormatOutputCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexFormatOutputYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexFormatOutputYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("index output fixture needs one document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, row := range document.Cases {
@@ -219,7 +214,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			db, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithPoolSize(1))
+			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -286,7 +281,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			if !row.LogsOnly {
 				options = append(options, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, cfg, options...)
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, cfg, options...)
 			if row.WantConstructorError != "" {
 				if err == nil || !strings.Contains(err.Error(), row.WantConstructorError) {
 					t.Fatalf("constructor error=%v, want %q", err, row.WantConstructorError)
@@ -387,6 +382,39 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				t.Fatal(err)
 			}
 			if row.WantIndexed {
+				if len(row.Retained) > 0 {
+					assertCompletionUnknown(t, after, row.Retained, row.VisibleTexts)
+					capture, found, err := db.GetSessionContentCapture(ctx, sid)
+					if err != nil || !found || capture.Status != ingest.ContentCaptureIncomplete || capture.CaptureFormat != ingest.ContentCaptureFormatFull || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || !store.PublishableWithOmissions(capture) {
+						t.Fatalf("retained source was not certified as accounted partial/FULL: %+v %v", capture, err)
+					}
+					full, err := db.ReadSessionEntries(ctx, sid, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent})
+					if err != nil {
+						t.Fatal(err)
+					}
+					assertCompletionUnknown(t, full.Entries, row.Retained, row.VisibleTexts)
+					counts := result.Summary.RetainedUnknownKinds
+					if len(counts) != 1 || counts[0].Harness != harness || counts[0].Namespace != row.Retained[0].Namespace || counts[0].Kind != row.Retained[0].Kind || counts[0].Occurrences != len(row.Retained) || counts[0].Sessions != 1 {
+						t.Fatalf("successful retained accounting differs: %+v", counts)
+					}
+				}
+				if row.WantRetainedKind != "" {
+					var retained []ingest.RetainedUnknown
+					for _, entry := range after {
+						records, err := ingest.RetainedUnknownOf(entry)
+						if err != nil {
+							t.Fatal(err)
+						}
+						retained = append(retained, records...)
+					}
+					if len(retained) != 1 || retained[0].Kind != row.WantRetainedKind || retained[0].Position.Line != 2 {
+						t.Fatalf("unknown source evidence missing: %+v", retained)
+					}
+					capture, found, err := db.GetSessionContentCapture(ctx, sid)
+					if err != nil || !found || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || !store.PublishableWithOmissions(capture) {
+						t.Fatalf("projected evidence not certified: %+v %v", capture, err)
+					}
+				}
 				if row.Payload == indexOutputEmpty && len(after) != 0 {
 					t.Fatalf("empty success retained stale entries: %+v", after)
 				}

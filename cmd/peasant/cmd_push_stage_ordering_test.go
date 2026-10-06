@@ -230,6 +230,7 @@ func validPushStageErrorSource(source pushStageErrorSource) bool {
 }
 
 func TestPushStageOrderingFixtures_RejectMissingAnnotationTotal(t *testing.T) {
+	t.Parallel()
 	annotationTotalField := []byte("annotation_total: 1")
 	if !bytes.Contains(pushStageOrderingYAML, annotationTotalField) {
 		t.Fatal("push stage ordering fixture no longer contains the association_success annotation_total row to omit")
@@ -253,6 +254,7 @@ func TestPushStageOrderingFixtures_RejectMissingAnnotationTotal(t *testing.T) {
 }
 
 func TestPushStageOrderingFixtures_RejectNegativeAnnotationTotal(t *testing.T) {
+	t.Parallel()
 	annotationTotalField := []byte("annotation_total: 1")
 	negativeAnnotationTotalField := []byte("annotation_total: -1")
 	if !bytes.Contains(pushStageOrderingYAML, annotationTotalField) {
@@ -350,7 +352,11 @@ func TestRunPushStages(t *testing.T) {
 				return result, err
 			}
 
-			annotationStage := func(ctx context.Context) (*push.AnnotationPushSummary, error) {
+			// The result the annotation stage received; read only after the run
+			// returns, which orders it after the write.
+			var annotationSaw *push.PushResult
+			annotationStage := func(ctx context.Context, published *push.PushResult) (*push.AnnotationPushSummary, error) {
+				annotationSaw = published
 				select {
 				case <-transcriptReturned:
 				default:
@@ -409,6 +415,9 @@ func TestRunPushStages(t *testing.T) {
 
 			if annotationCalled.Load() != fixture.Expected.AnnotationRan {
 				t.Errorf("annotation stage called = %v, want %v", annotationCalled.Load(), fixture.Expected.AnnotationRan)
+			}
+			if annotationCalled.Load() && annotationSaw != result {
+				t.Errorf("the annotation stage received result %p, want the transcript stage's %p: it scopes a chooser run's annotations to the sessions that run published", annotationSaw, result)
 			}
 			if (result != nil) != fixture.Expected.TranscriptResult {
 				t.Errorf("transcript result present = %v, want %v", result != nil, fixture.Expected.TranscriptResult)

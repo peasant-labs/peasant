@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ const sqlPushSessionsBase = `SELECT
     CAST(m.duration_minutes * 60000 AS INTEGER),
     COALESCE(h.git_remote, ''),
     COALESCE(s.parent_id, ''),
-    COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, ''),
+    ` + sqlRecordedDirectory + `,
     s.session_origin
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
@@ -257,7 +257,7 @@ func getTitleContextOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) (schem
 	var projectPath string
 	found := false
 	err := sqlitex.ExecuteTransient(conn, `SELECT s.model_harness,
-COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, '')
+`+sqlRecordedDirectory+`
 FROM sessions s LEFT JOIN projects p ON p.project_hash = s.project_hash
 WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},

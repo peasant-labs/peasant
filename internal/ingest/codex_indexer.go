@@ -295,6 +295,8 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 
 	var entries []schema.SessionEntry
 	entryIndex := 0
+	var traversalPosition int64
+	previousLine := 0
 
 	for scanner.Scan() {
 		var placeholderErr error
@@ -307,9 +309,39 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		}
 		raw := scanner.Bytes()
 		trimmed := bytes.TrimSpace(raw)
+		traversalPosition += int64(max(0, scanner.Line()-previousLine-1))
+		previousLine = scanner.Line()
 		if len(trimmed) == 0 {
+			traversalPosition++
 			continue
 		}
+		position := UnknownSourcePosition{Line: scanner.Line(), Public: codexPublicPosition(sessionID.String(), scanner.Line(), traversalPosition)}
+		traversalPosition += int64(len(codexTraversalPointers(trimmed)))
+		prepared, unknown, prepareErr := prepareCodexRecord(raw, position, false)
+		if prepareErr != nil {
+			var retentionErr *codexEvidenceRetentionError
+			if completion != nil || errors.As(prepareErr, &retentionErr) {
+				return nil, prepareErr
+			}
+			// Slice-returning compatibility reads historically let the original
+			// envelope/response decoder below skip malformed shapes and preserve
+			// readable siblings. They do not authorize canonical replacement:
+			// versioned reads have completion above, and authoritative capture
+			// validates the complete source before calling this shared kernel.
+			prepared, unknown = raw, nil
+		}
+		if prepared == nil {
+			for _, evidence := range unknown {
+				entry, err := RetainedUnknownEntry(sessionID, entryIndex, evidence)
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, entry)
+				entryIndex++
+			}
+			continue
+		}
+		trimmed = prepared
 
 		var env codexRolloutLine
 		if completion != nil {
@@ -375,6 +407,12 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		entry, ok := codexResponseItemEntry(sessionID, entryIndex, env, len(trimmed), idx.fullContent, payload, decodeErr)
 		if !ok {
 			continue
+		}
+		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
+			return nil, err
+		}
+		if len(unknown) > 0 && entry.ContentPreview == nil && entry.ToolInput == nil && entry.ToolOutput == nil {
+			entry.Role, entry.EntryType, entry.HasThinking = RoleSystem, EntryTypeSystem, false
 		}
 		entries = append(entries, entry)
 		if completion != nil {

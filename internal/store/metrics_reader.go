@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // SQL constants for the metrics read path.
@@ -75,6 +75,10 @@ WHERE session_id = ? AND entry_index BETWEEN ? AND ?
 ORDER BY entry_index, key`
 
 	sqlMaxEntryIndex = `SELECT COALESCE(MAX(entry_index), -1) FROM session_entries WHERE session_id = ?`
+
+	// sqlFirstEntry reads only the opening turn of a session's entry stream:
+	// the lowest entry_index with its role, in one row.
+	sqlFirstEntry = `SELECT entry_index, role FROM session_entries WHERE session_id = ? ORDER BY entry_index LIMIT 1`
 )
 
 // LookupSessionLocation returns the host_slug and parent_id for a session.
@@ -340,6 +344,48 @@ func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (
 	return maxIdx, nil
 }
 
+// EntryHead is the minimal metadata of a session's first indexed entry: the
+// deep-link coordinate and display facet a single-result read needs, without
+// the rest of the transcript.
+type EntryHead struct {
+	EntryIndex int
+	Role       schema.Role
+}
+
+// FirstEntry returns the session's first indexed entry (lowest entry_index),
+// read with a bounded one-row query; nil when the session has no indexed
+// entries (empty session or session not found in DB). Single-result readers
+// that only need the opening turn's coordinates use this instead of
+// ListEntries to avoid materializing the whole transcript.
+func (s *Store) FirstEntry(ctx context.Context, sessionID schema.SessionID) (_ *EntryHead, retErr error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return nil, err
+	}
+
+	var head *EntryHead
+	err = sqlitex.ExecuteTransient(conn, sqlFirstEntry, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			head = &EntryHead{
+				EntryIndex: stmt.ColumnInt(0),
+				Role:       schema.Role(stmt.ColumnText(1)),
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: first entry for %s: %w", sessionID, err)
+	}
+	return head, nil
+}
+
 // mergeExtIntoExtra merges ext key-value pairs into the entry's Extra JSON string.
 func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) error {
 	extra, pi, err := ingest.DecodePiExtra(e.Extra)
@@ -354,15 +400,24 @@ func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) error {
 		}
 		return nil
 	}
-	var existing map[string]any
+	// Keep untouched fields as raw JSON. Decoding through interface{} would
+	// round large native integers and normalize number spellings in retained
+	// evidence when an unrelated extension (such as model_id) is restored.
+	var existing map[string]json.RawMessage
 	if e.Extra != nil {
-		_ = json.Unmarshal([]byte(*e.Extra), &existing)
+		if err := json.Unmarshal([]byte(*e.Extra), &existing); err != nil {
+			return fmt.Errorf("store: cannot merge entry extensions into invalid extra JSON; no entry was emitted; re-index the source to restore its evidence")
+		}
 	}
 	if existing == nil {
-		existing = make(map[string]any)
+		existing = make(map[string]json.RawMessage)
 	}
 	for k, v := range extKVs {
-		existing[k] = v
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("store: cannot encode an entry extension; no entry was emitted; repair the extension producer")
+		}
+		existing[k] = encoded
 	}
 	b, err := json.Marshal(existing)
 	if err != nil {

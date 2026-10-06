@@ -32,6 +32,7 @@ func (s *changedCandidateOriginStore) AllPushableSessions(ctx context.Context) (
 var _ push.PipelineStore = (*changedCandidateOriginStore)(nil)
 
 func TestPushRequiresCoherentDatabaseInput(t *testing.T) {
+	t.Parallel()
 	db := storetest.Open(t)
 	fs := testutil.NewMemFS()
 	sid := ingest.SessionID(testutil.TestSessionUUID)

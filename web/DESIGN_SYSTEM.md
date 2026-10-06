@@ -202,7 +202,16 @@ duration-200`). Respect `prefers-reduced-motion`. No decorative motion.
 
 ## 2. Information architecture (the lifecycle)
 
-The top nav is still the lifecycle, read left→right from "on your machine"
+> **Superseded for the header.** The local header is now one row — the
+> `peasant` home link, search (⌘K), the registry's nav sections other than home,
+> and an icon-only theme toggle — with no connection indicator and no share
+> action. The sections come from fairtrade's `LOCAL_APP_SECTIONS` through
+> `src/lib/nav/sections.ts`; analytics, changes and the code map are reached by
+> route only. A stopped local app is reported by fairtrade's
+> `LocalOfflineBanner` under the header. The table and rules below record the
+> earlier lifecycle nav.
+
+The top nav was the lifecycle, read left→right from "on your machine"
 outward: understand what's on your machine, review what's changing, then (and
 only then) choose what leaves. **3 items only:**
 
@@ -210,7 +219,7 @@ only then) choose what leaves. **3 items only:**
 |---|---|---|---|
 | 1 | **Map** | `/` (project picker when >1 project; the map otherwise) → `/map/[...]` per-project map | Learn the project. Structure + traceability + time: deterministic layered canvas, grain control, rail (project panel / node panel), time strip. |
 | 2 | **Review** | `/review` → `/review/[...]` change detail (branch via `?branch=` — branch names contain slashes) | Judge a change: branch-scoped slice of the map + the recorded work behind it. Caption, changed slice, work rail, footnotes. |
-| 3 | **Contribute** | `/share` (the route **keeps its path**; the nav label is **Contribute** — "Share" retires as a label) | The deliberate path out. Choose → Labels → Redact → Submit. |
+| 3 | **Contribute** | `/share` (the route **keeps its path**; the nav label is **Contribute** — "Share" retires as a label) | The retained multi-session publish path. The transcript popup is the primary action. Choose → Redact → Publish. |
 
 The **session viewer** keeps its deep-linkable route
 (`/projects/[name]/[id]`); it is not a nav item. Map and Review link into it
@@ -260,14 +269,10 @@ These are requirements, not flavor. Apply per surface.
   never a paragraph card. The values are expressed through the *design and
   defaults*, not walls of text.
 - **Visible steps, fast by default.** The Contribute flow shows its steps
-  explicitly so the user can step in and customize: **Choose → Labels →
-  Redact → Submit**. Steps are *visible and navigable*, not hidden behind
+  explicitly so the user can step in and customize: **Choose → Redact → Publish**. Steps are *visible and navigable*, not hidden behind
   disclosure. But sane defaults make the happy path fast — the user can
-  advance straight through (Labels is optional/skippable; Redact defaults to
-  **maximum** — every detected pattern stripped). Redaction is safe by
-  *default*, not by gate: Submit is reachable as soon as a non-empty selection
-  exists, and the user dials redaction *down* deliberately, never up under
-  pressure. "Easy" = good defaults + few clicks, **not** fewer visible steps.
+  advance straight through (Redact offers **standard**, the canonical policy). Redaction is safe by
+  *default*, not by gate: Publish stays disabled until the scan succeeds for every selected session. "Easy" = good defaults + few clicks, **not** fewer visible steps.
 - **Choose step starts empty.** Nothing is selected by default; the user opts
   in. Provide an explicit **Select all / Deselect all** control. (A
   `?sessionId=` deep-link still preselects exactly that one session.)
@@ -350,7 +355,7 @@ corporate. "Your work." "On your machine." "The commons." Short sentences.
   view diff, open in Map, Contribute sessions. **No verdicts, no
   accept/reject machinery, no safety claims.**
 - **Contribute (`/share` route, Contribute label):** §3 —
-  project-primary; visible steps **Choose → Labels → Redact → Submit**; fast
+  project-primary; visible steps **Choose → Redact → Publish**; fast
   by default; Choose starts empty + select-all; evidence-set deep link per §3
   (`?sessions=` filtered-not-preselected); redaction safe-by-default
   (maximum), Submit reachable once a selection exists.

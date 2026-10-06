@@ -13,6 +13,7 @@ import (
 )
 
 func TestPublicationListsNeverLoadTranscriptBundles(t *testing.T) {
+	t.Parallel()
 	row := ingest.PushSessionRow{SessionID: testutil.TestSessionUUID}
 	db := &testutil.StubPushStore{
 		Sessions:          []ingest.PushSessionRow{row},

@@ -6,7 +6,7 @@
 # The control case must certify complete and stay readable by the complete-
 # content readers export and publication use: a control record dropped or
 # stored incomplete would still preview, so only the durable read proves it.
-# The unknown-kind case must stay refused at the same boundaries.
+# Unknown evidence with source traversal coordinates is full but partial.
 required_names:
   - control-records-certify
   - unknown-record-refused
@@ -33,8 +33,9 @@ cases:
       {"sessionId":"SESSION_ID","type":"assistant","uuid":"entry-second","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"I will inspect the fixture now."}]}}
       {"sessionId":"SESSION_ID","type":"future-record","payload":"a record kind no shipped build represents","uuid":"entry-third","timestamp":"2026-01-01T00:00:02Z"}
     capture_status: incomplete
-    capture_format: preview_only
-    failure_code: strict_capture_refused
-    export_accepted: false
-    publication_ready: false
-    preflight_accepts: false
+    capture_format: full
+    failure_code: unknown_data_retained
+    retained_kind: future-record
+    export_accepted: true
+    publication_ready: true
+    preflight_accepts: true

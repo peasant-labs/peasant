@@ -9,8 +9,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // buildOpenCodeProjectAttributionDatabase writes a synthetic legacy OpenCode
@@ -108,7 +108,7 @@ func TestOpenCodeProjectTablesGroupSessionUnderProjectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve synthetic root: %v", err)
 	}
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
 	discovered, err := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
 	if err != nil {
 		t.Fatalf("run production discovery: %v", err)

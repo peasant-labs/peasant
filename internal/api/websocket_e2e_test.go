@@ -23,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 type wsMockProvider struct {
@@ -1868,17 +1867,8 @@ type selectionVisibilityWSRecoveryFixture struct {
 
 func decodeSelectionVisibilityWSRecoveryFixture(source []byte) (selectionVisibilityWSRecoveryFixture, error) {
 	var fixture selectionVisibilityWSRecoveryFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode selection visibility WS recovery fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fixture, fmt.Errorf("selection visibility WS recovery fixture contains more than one YAML document")
-		}
-		return fixture, fmt.Errorf("decode trailing selection visibility WS recovery fixture content: %w", err)
 	}
 	if fixture.ExpectedCaseCount != len(requiredSelectionVisibilityWSRecoveryCaseNames) || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.Cases) != fixture.ExpectedCaseCount {
 		return fixture, fmt.Errorf("selection visibility WS recovery fixture count mismatch: declared=%d names=%d cases=%d, want %d", fixture.ExpectedCaseCount, len(fixture.RequiredNames), len(fixture.Cases), len(requiredSelectionVisibilityWSRecoveryCaseNames))

@@ -1,0 +1,11 @@
+# Which sessions of a run carry their annotations to the Village when the push
+# is scoped to the sessions the run published (the Share wizard, and the CLI
+# chooser). A session is on the Village after the run when it was uploaded, or
+# was already there unchanged; a session that failed or was held back has
+# nothing there to annotate.
+#
+# Every push status must be listed exactly once: the driver checks the lists
+# against the complete set of statuses, so a new status fails until it is
+# placed.
+included: [new, updated, skipped]
+excluded: [error, held]

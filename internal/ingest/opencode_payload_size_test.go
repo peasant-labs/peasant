@@ -1,16 +1,12 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/opencode_payload_size.yaml
@@ -32,15 +28,9 @@ type openCodePayloadSizeDoc struct {
 
 func loadOpenCodePayloadSizeDoc(t *testing.T) openCodePayloadSizeDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodePayloadSizeData))
-	decoder.KnownFields(true)
 	var doc openCodePayloadSizeDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodePayloadSizeData, &doc); err != nil {
 		t.Fatalf("decode payload size fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("payload size fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("payload size fixture declares no required cases")
@@ -68,6 +58,7 @@ func loadOpenCodePayloadSizeDoc(t *testing.T) openCodePayloadSizeDoc {
 // would load. The probe drives the preview's decision to bound itself, so a
 // probe that disagreed with the paged read would bound the wrong sessions.
 func TestOpenCodeSessionPayloadSizeMatchesThePagedRows(t *testing.T) {
+	t.Parallel()
 	doc := loadOpenCodePayloadSizeDoc(t)
 	for _, testCase := range doc.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

@@ -264,6 +264,7 @@ func (combination canonicalPersistenceCombination) includesJSON() bool {
 }
 
 func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
+	t.Parallel()
 	fixture, err := loadCanonicalPersistenceFixture(canonicalPersistenceYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +293,7 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			database, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+			database, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -558,6 +559,7 @@ func mustCanonicalPersistenceSessionID(t testing.TB, raw string) ingest.SessionI
 }
 
 func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
+	t.Parallel()
 	fixture, err := loadCanonicalPersistenceFixture(canonicalPersistenceYAML)
 	if err != nil {
 		t.Fatal(err)

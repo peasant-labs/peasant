@@ -7,24 +7,24 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var (
-	_ ingest.NativeGenerationActivator   = (*Store)(nil)
-	_ ingest.NativeGenerationPriorReader = (*Store)(nil)
+	_ ingest.NativeGenerationActivator         = (*Store)(nil)
+	_ ingest.NativeGenerationStager            = (*Store)(nil)
+	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
+	_ ingest.NativeGenerationStaged            = (*PreparedGeneration)(nil)
+	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
 )
 
-// ActivateNativeGeneration adapts the ingest-owned activation envelope to the
-// store's own immutable activation. It stages and fsyncs the content files,
-// persists the opaque prior document, installs the generation, counts and
-// pointer in ONE transaction, repairs the exported metadata and clears the
-// intent. It reuses the same expected-state compare and success-stamp rules as
-// every other managed activation.
-func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) error {
-	return s.ActivateGeneration(ctx, GenerationActivation{
+// generationActivationFromNative mirrors the ingest-owned activation envelope
+// into the store's own immutable activation. Both entry points (pre-staging and
+// activation) share it so their preconditions cannot drift.
+func generationActivationFromNative(activation ingest.NativeGenerationActivation) GenerationActivation {
+	return GenerationActivation{
 		Generation:       activation.Generation,
 		Blobs:            activation.Blobs,
 		PriorEvidence:    activation.PriorEvidence,
@@ -35,8 +35,50 @@ func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.
 		CaptureRevision:  activation.CaptureRevision,
 		IndexedInputHash: activation.IndexedInputHash,
 		ArtifactIdentity: activation.ArtifactIdentity,
+		ExplicitRebuild:  activation.ExplicitRebuild,
 		Capture:          activation.Capture,
-	})
+	}
+}
+
+// ActivateNativeGeneration adapts the ingest-owned activation envelope to the
+// store's own immutable activation. It stages the content files and fsyncs the
+// manifest and the directory,
+// persists the opaque prior document, installs the generation, counts and
+// pointer in ONE transaction, repairs the exported metadata and clears the
+// intent. It reuses the same expected-state compare and success-stamp rules as
+// every other managed activation. The outcome carries the lock-derived
+// disposition for per-invocation counting; a post-commit repair failure
+// returns a GenerationRepairPendingError with committed authority.
+func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
+	outcome, err := s.ActivateGeneration(ctx, generationActivationFromNative(activation))
+	return outcome, err
+}
+
+// StageNativeGeneration prepares one managed generation's content files in an
+// owned temporary directory without recording an activation intent or
+// installing anything, so independent sessions can write in
+// parallel while only the install and commit stay on the serialized writer.
+// The returned handle is consumed by ActivateStagedNativeGeneration; a handle
+// that is dropped (for example after the caller refuses stale input) can
+// never be activated by recovery.
+func (s *Store) StageNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.NativeGenerationStaged, error) {
+	prepared, err := s.StageGeneration(ctx, generationActivationFromNative(activation))
+	if err != nil {
+		return nil, err
+	}
+	return prepared, nil
+}
+
+// ActivateStagedNativeGeneration activates one candidate, installing the
+// files a prior StageNativeGeneration prepared when the handle belongs to this
+// store and candidate. Any other handle is ignored and the candidate is
+// staged inline, exactly as ActivateNativeGeneration does.
+func (s *Store) ActivateStagedNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation, staged ingest.NativeGenerationStaged) (ingest.ActivationOutcome, error) {
+	generationActivation := generationActivationFromNative(activation)
+	if prepared, ok := staged.(*PreparedGeneration); ok {
+		generationActivation.Prepared = prepared
+	}
+	return s.ActivateGeneration(ctx, generationActivation)
 }
 
 // ReadNativeGenerationPrior loads the active generation's reusable evidence for

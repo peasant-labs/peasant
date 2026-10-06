@@ -71,6 +71,7 @@ func seedSessionEntries(t *testing.T, s *store.Store, sessionID string, n int) {
 // TestExportAnnotations_SessionAndEntryLevel verifies that ExportAnnotations returns
 // correctly mapped annotations for both session-level and entry-level targets.
 func TestExportAnnotations_SessionAndEntryLevel(t *testing.T) {
+	t.Parallel()
 	s := storetest.Open(t)
 	ctx := context.Background()
 
@@ -185,6 +186,7 @@ func TestExportAnnotations_SessionAndEntryLevel(t *testing.T) {
 // confidence or reason produce nil/empty values in the exported record (omitted
 // in JSON via omitempty).
 func TestExportAnnotations_OptionalFieldsNil(t *testing.T) {
+	t.Parallel()
 	s := storetest.Open(t)
 	ctx := context.Background()
 
@@ -239,6 +241,7 @@ func TestExportAnnotations_OptionalFieldsNil(t *testing.T) {
 // TestExportAnnotations_SupersededExcluded verifies that superseded annotations
 // are NOT returned by ExportAnnotations.
 func TestExportAnnotations_SupersededExcluded(t *testing.T) {
+	t.Parallel()
 	s := storetest.Open(t)
 	ctx := context.Background()
 
@@ -293,6 +296,7 @@ func TestExportAnnotations_SupersededExcluded(t *testing.T) {
 // TestExportAnnotations_EmptySession verifies that exporting annotations for a
 // session with no annotations returns an empty (non-nil) slice.
 func TestExportAnnotations_EmptySession(t *testing.T) {
+	t.Parallel()
 	s := storetest.Open(t)
 	ctx := context.Background()
 
@@ -314,6 +318,7 @@ func TestExportAnnotations_EmptySession(t *testing.T) {
 // TestExportAnnotations_JSONLRoundTrip writes exported annotations as JSONL,
 // reads them back line by line, and verifies the round-trip is lossless.
 func TestExportAnnotations_JSONLRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := storetest.Open(t)
 	ctx := context.Background()
 

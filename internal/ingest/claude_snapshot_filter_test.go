@@ -1,18 +1,14 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/claude_snapshot_filter.yaml
@@ -36,15 +32,9 @@ type claudeSnapshotFilterFile struct {
 
 func loadClaudeSnapshotFilterFixtures(t *testing.T) claudeSnapshotFilterFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(claudeSnapshotFilterYAML))
-	decoder.KnownFields(true)
 	var fixtures claudeSnapshotFilterFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(claudeSnapshotFilterYAML, &fixtures); err != nil {
 		t.Fatalf("decode Claude snapshot filter fixtures: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("Claude snapshot filter fixture must contain exactly one YAML document: %v", err)
 	}
 	const expectedCases = 6
 	if fixtures.DeclaredCases != expectedCases || len(fixtures.Cases) != expectedCases {

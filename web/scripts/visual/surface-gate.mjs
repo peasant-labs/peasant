@@ -27,9 +27,9 @@ import { createHash } from 'node:crypto'
 export const DEFAULT_MIN_BYTES = 16 * 1024 // a full-size background-only PNG is ~5.9KB; the smallest real full surface (scorecard) is ~35KB
 export const BYTE_FLOORS = {
   'txn-scrubber': 400, // sticky condensed header; small but real, so content signal matters more than byte size
-  'shell-changes': 900,
-  'shell-map': 900,
-  'shell-analytics': 900,
+  'offline-home-short': 8 * 1024, // a 320x256 frame (~6% of a desktop frame's pixels); real captures are ~14KB, a blank one ~1KB
+  'offline-transcript-short': 8 * 1024, // the same 320x256 frame, on the transcript
+  'offline-share-mobile': 8 * 1024, // a 320x568 frame (~14% of a desktop frame's pixels); a blank one ~2KB
 }
 export const MIN_NONBG_RATIO = 0.012 // blank = 0.00%; the least-busy real surface diverges from its background by >= 2.46%
 export const MIN_DISTINCT_COLORS = 6 // a flat fill resolves to 1 colour; the sparsest real surface (the scrubber) has 9
@@ -75,9 +75,11 @@ export class SurfaceGate {
     return { bytes: buf.length, md5: createHash('md5').update(buf).digest('hex'), ...m }
   }
 
-  /* enforce the gate for one surface; throws an actionable error on any blank/near-empty/duplicate.
+  /* enforce the gate for one surface; throws on blank/near-empty or unexpected duplicates.
+     equivalentSurfaces names fixture-declared identical outcomes reached by different actions;
+     it affects only uniqueness, never the content thresholds. Empty by default.
      `where` names the caller (e.g. "peasant-shoot.mjs") so the error points at the right place. */
-  async assert(name, file, { sel = '', where = 'surface-gate' } = {}) {
+  async assert(name, file, { sel = '', where = 'surface-gate', equivalentSurfaces = [] } = {}) {
     const r = await this.measure(file)
     const fail = (what, why, fix) => {
       throw new Error(
@@ -106,7 +108,7 @@ export class SurfaceGate {
       `only ${r.distinctColors} distinct colours (need >= ${MIN_DISTINCT_COLORS}).`,
       `a real surface (text, icons, borders) resolves to many colours; a flat fill resolves to a few.`,
       `confirm the surface rendered real UI, not an empty/placeholder state.`)
-    if (this.seen.has(r.md5)) fail(
+    if (this.seen.has(r.md5) && !equivalentSurfaces.includes(this.seen.get(r.md5))) fail(
       `byte-identical (md5 ${r.md5.slice(0, 12)}) to an already-captured surface "${this.seen.get(r.md5)}".`,
       `two distinct surfaces produced the exact same PNG — at least one captured the wrong (or a blank) view.`,
       `verify the navigation between "${this.seen.get(r.md5)}" and "${name}" actually changed what is on screen.`)

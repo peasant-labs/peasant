@@ -1,0 +1,6 @@
+# Required-name manifest for testdata/annotation_repository_scope.yaml.
+# Name-only: testutil.ValidateRequiredNames compares the name sets.
+requiredNames:
+  - a selection alone publishes everything it cannot attribute to a session
+  - a repository scope publishes only what it can attribute to that repository
+  - a sessions-only scope publishes only the annotations of the chosen sessions

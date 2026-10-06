@@ -283,6 +283,7 @@ func buildHydrationSnapshot(t *testing.T, fixtureCase snapshotHydrationCase) (in
 }
 
 func TestSnapshotToDetailValidated(t *testing.T) {
+	t.Parallel()
 	fixture := loadSnapshotHydrationFixture(t)
 	for _, fixtureCase := range fixture.Cases {
 		t.Run(fixtureCase.Name, func(t *testing.T) {
@@ -426,6 +427,7 @@ var _ indexformat.SnapshotReader = stubSnapshotReader{}
 // Callers therefore send or write owned bytes after the lock is released, with
 // no store access and no network inside the lock.
 func TestBuildSnapshotDetailBytes(t *testing.T) {
+	t.Parallel()
 	fixture := loadSnapshotHydrationFixture(t)
 	var section4 snapshotHydrationCase
 	for _, fixtureCase := range fixture.Cases {

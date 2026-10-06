@@ -46,6 +46,13 @@ web/.vite/
 # screenshots). Disposable per-round evidence — never commit the PNGs.
 review-capture/
 
+# Local test cache (storetest golden-template cache under .testcache/golden/).
+# Per checkout, rebuilt on demand — delete with `rm -rf .testcache/`.
+.testcache/
+
+# Interrupted topology tests leave copied build packages in the source tree.
+internal/ingest/.sqlite-topology-*/
+
 # Local-only raw Cursor bytes for fixture scrubbing (never commit)
 
 # Internal design docs (not for public release)

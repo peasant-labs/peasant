@@ -19,6 +19,12 @@ ceil(N / effective-concurrency) x the per-upload round-trip. For such a push set
 with --timing. The default stays at max(1, NumCPU/2) — sufficient for the common
 steady-state re-push, where the manifest skip means little goes over the wire.)
 
+Auto-publish rules — when a rule in hooks.yaml in the config directory binds a session
+this push sends (matched against the repository the session was recorded in), the push
+publishes collectives-only: private, with no license, and each bound transcript it sent
+is shared with its rule's collectives. --visibility and --license are then refused. A
+session a paused rule covers, or whose transcript is already public, is not published.
+
 Exit status — a caller that branches on it, including a generated Git hook, needs the
 one distinction it cannot read out of prose: whether anything was published at all.
 
@@ -38,22 +44,24 @@ peasant village push [flags]
 ```
       --annotation-hash stringArray   Only push annotations with these content hashes (repeatable; default: all).
       --annotation-id stringArray     Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.
+      --auto-publish-event string     Require consent for this hook event (post-commit or pre-push)
       --concurrency int               Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the village pool toward the <5s target.
       --dry-run                       Show what would be pushed without uploading
       --force                         Re-push all sessions (including already-pushed ones)
   -h, --help                          help for push
       --json                          Output as JSON instead of human-readable
-      --license string                Override the content license for this run (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0)
+      --license string                Override the content license for this run (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0). Also relicenses every already-published session the run selects; a Creative Commons grant cannot be withdrawn. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt for this village account on this machine is sent the configured license
       --non-interactive               Run without the interactive wizard or public-consent prompt (for CI/scripts)
       --profile-output string         Write a local JSON v1 push profile to this file (local diagnostic only, mode 0600). Parent directory must exist. Enables profiling; prints path and bottleneck hints to stderr unless --quiet. Works with --json and --timing.
       --profile-trace string          Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output and a distinct regular-file destination with an existing parent. JSON records an opaque trace reference, not the path; the actual path is printed to stderr unless --quiet.
       --quiet                         Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line
       --repository string             Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session
+      --require-auto-publish-rule     Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)
       --source-harness string         Filter to a specific harness (claude-code, gemini-cli, codex, opencode, cursor, strike, pi)
       --timeout duration              Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a village that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach the village. Default: no budget. Git hooks always pass one.
       --timing                        Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.
       --verbose                       Show per-session detail
-      --visibility string             Override visibility for this run (public, private, group)
+      --visibility string             Override visibility for this run (private, public). Also changes every already-published session the run selects, including ones shared with collectives on the village, which otherwise keep the visibility they have there
       --yes                           (alias for --non-interactive)
 ```
 
@@ -64,10 +72,11 @@ peasant village push [flags]
       --config-dir string   Override the config directory (default: $XDG_CONFIG_HOME or ~/.config); config lives under <config-dir>/peasant
       --data-dir string     Override the data directory (default: $XDG_DATA_HOME or ~/.local/share); the DB + peasant-sync live under <data-dir>/peasant
       --state-dir string    Override the state directory (default: $XDG_STATE_HOME or ~/.local/state); logs/PID live under <state-dir>/peasant
+  -v, --version             Print the version
 ```
 
 ### SEE ALSO
 
 * [peasant village](peasant_village.md)	 - Interact with the Peasant village
 
-###### Auto generated by spf13/cobra on 16-Sep-2026
+###### Auto generated by spf13/cobra on 1-Oct-2026

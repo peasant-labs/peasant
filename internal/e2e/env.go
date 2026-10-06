@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	envPeasantBin                 defaults.EnvVar = "PEASANT_BIN"
+	envPeasantBin                                 = defaults.EnvPeasantBin
 	envDatabaseURL                defaults.EnvVar = "DATABASE_URL"
 	envS3Endpoint                 defaults.EnvVar = "S3_ENDPOINT"
 	envS3Bucket                   defaults.EnvVar = "S3_BUCKET"

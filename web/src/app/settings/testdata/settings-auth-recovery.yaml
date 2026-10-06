@@ -1,0 +1,14 @@
+requiredNames: [service-failure, unavailable-service, logout-refresh-failure-does-not-revive-sign-in]
+cases:
+  - name: service-failure
+    afterLogout: false
+    status: 500
+    error: sign-in could not be read
+  - name: unavailable-service
+    afterLogout: false
+    status: 503
+    error: sign-in service unavailable
+  - name: logout-refresh-failure-does-not-revive-sign-in
+    afterLogout: true
+    status: 503
+    error: sign-in service unavailable after logout

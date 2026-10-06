@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pi_redaction_outbound.yaml
@@ -49,14 +47,8 @@ type piOutboundFixture struct {
 func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
 	t.Helper()
 	var f piOutboundFixture
-	d := yaml.NewDecoder(bytes.NewReader(piOutboundYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&f); err != nil {
+	if err := testutil.DecodeFixtureYAML(piOutboundYAML, &f); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing YAML: %v", err)
 	}
 	m, err := testutil.DecodeRequiredNamesManifest(piOutboundManifest, "Pi outbound")
 	if err != nil {
@@ -79,6 +71,7 @@ func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
 }
 
 func TestPiOutboundNamespaceRedaction(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiOutboundFixtures(t).Namespaces {
 		t.Run(c.Name, func(t *testing.T) {
 			entries, err := piOutboundEntries(`{"safe":true}`)
@@ -107,6 +100,7 @@ func TestPiOutboundNamespaceRedaction(t *testing.T) {
 }
 
 func TestPiOutboundMetadataRedaction(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiOutboundFixtures(t).Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			entries, err := piOutboundEntries(c.Data + strings.Repeat(" ", c.Padding))
@@ -141,6 +135,7 @@ func TestPiOutboundMetadataRedaction(t *testing.T) {
 }
 
 func TestPiPipelineCapabilityAndMultipartPreservation(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiOutboundFixtures(t).Capabilities {
 		t.Run(c.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()

@@ -47,7 +47,7 @@
       # Vendor hash for buildGoModule. Recompute when go.mod/go.sum changes:
       # set this to nixpkgs.lib.fakeHash, run `nix build`, copy the reported `got:`
       # hash back here.
-      vendorHash = "sha256-mGvzzvreaeVMY3pLFkDCwFJf8y6BjZwO7QKj8I5C8nA=";
+      vendorHash = "sha256-Ff1h18VZ2pNuPTDE3zjWNsoYbwUh/JZW0pKEatiCpqk=";
 
       # Extra CLI tools available in the dev shell
       devTools = pkgs: with pkgs; [
@@ -60,6 +60,7 @@
         sqlite # CLI for inspecting analytics store
         goreleaser # validate .goreleaser.yml (`goreleaser check`) + local --snapshot builds
         actionlint # lint GitHub Actions workflow YAML (.github/workflows/*.yml)
+        python3 # audit the SQLite source and owned import boundary
         charm-freeze # Go-native ANSI terminal screenshot renderer (binary: freeze)
         nodejs_26 # Node.js runtime for the web build and validation scripts
         pnpm # required package manager for the web dependency graph

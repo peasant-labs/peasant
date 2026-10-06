@@ -20,11 +20,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/publication_capture.yaml
@@ -63,9 +63,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 	var doc struct {
 		Cases []publicationCaptureCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationCaptureYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationCaptureYAML, &doc); err != nil {
 		t.Fatal(err)
 	}
 	required := map[string]bool{
@@ -106,6 +104,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 // The same real adapters, SQLite store, index writers and metrics engine used
 // by normal ingest repair legacy rows with no generated metadata file.
 func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPublicationCaptureCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx := t.Context()
@@ -148,8 +147,8 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			factory := publicationAdapterFactory(t, harness, environment)
 			indexer := publicationIndexer(t, harness, filesystem)
 			cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{harness: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}}}, OutputDir: ingest.ResolvedPath(t.TempDir()), Parallelism: 1}
-			dbPath := filepath.Join(t.TempDir(), "peasant.db")
-			database, err := store.Open(dbPath)
+			dbPath := storetest.CopyGoldenDB(t)
+			database, err := store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -213,7 +212,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			git.Remote = "https://example.com/changed/current.git"
 			run := func() *ingest.PipelineResult {
 				writer := &publicationReindexStore{Store: database, recapture: cfg.Reindex && c.ReindexConcurrentCapture, unreadableEntries: cfg.Reindex && c.ReindexUnreadableEntries}
-				pipeline, err := ingest.NewPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
+				pipeline, err := newTestPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
 					ingest.WithSalt(installationSalt), ingest.WithStore(writer), ingest.WithMetricsStore(writer),
 					ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 				if err != nil {
@@ -294,7 +293,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(dbPath)
+			database, err = store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -372,7 +371,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				if err := database.Close(); err != nil {
 					t.Fatal(err)
 				}
-				database, err = store.Open(dbPath)
+				database, err = store.Open(dbPath, store.WithSkipMigrations())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -479,7 +478,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(dbPath)
+			database, err = store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -530,6 +529,13 @@ type publicationReindexStore struct {
 
 var _ ingest.SessionEntryBatchStore = (*publicationReindexStore)(nil)
 var _ ingest.PublicationInputReader = (*publicationReindexStore)(nil)
+
+func (s *publicationReindexStore) WithCommittedPublicationInput(ctx context.Context, id ingest.SessionID, fn func(ingest.PublicationInputBundle) error) error {
+	if s.unreadableEntries {
+		return errors.New("old transcript entries are unavailable during rebuild; recover from the verified captured input")
+	}
+	return s.Store.WithCommittedPublicationInput(ctx, id, fn)
+}
 
 func (s *publicationReindexStore) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (ingest.PublicationInputBundle, error) {
 	if s.unreadableEntries {

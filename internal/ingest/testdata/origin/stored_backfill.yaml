@@ -36,12 +36,21 @@
 #     everything final fails every one of its rows
 
 required_case_names:
+  - leading_scaffolding_then_a_command_wrapper_resolves_user
+  - leading_scaffolding_then_a_teammate_brief_resolves_agent
+  - only_the_leading_scaffolding_run_is_skipped
+  - everything_scaffolding_resolves_unknown
+  - a_truncated_scaffolding_preview_is_still_recognised
+  - a_scaffolding_run_at_the_cap_is_read_through
+  - a_scaffolding_run_past_the_cap_stops_at_unknown
+  - a_harness_without_a_miner_keeps_its_first_stored_record
   - parent_linked_row_resolves_without_reading_any_transcript
   - cached_menu_origin_is_reused_without_reading_the_transcript
   - live_transcript_is_mined_in_full
   - missing_transcript_resolves_from_the_stored_first_user_message
   - a_degraded_row_stays_retryable_while_a_full_row_is_finalised
   - a_row_already_at_the_current_rule_version_is_skipped
+  - a_row_at_the_prior_rule_version_is_reclassified
   - a_settled_store_is_written_to_only_once
   - an_interrupted_pass_resumes_without_mis_marking
   - a_degraded_row_never_reaches_agent_on_unrecoverable_markers
@@ -50,6 +59,146 @@ required_case_names:
   - a_harness_with_no_origin_miner_is_not_left_retryable_forever
 
 cases:
+  # A single-preview fallback sees only the caveat and incorrectly says unknown.
+  # These are historical stored user rows, not raw-transcript parity: modern
+  # indexing reclassifies some wrappers out of the user-role projection.
+  - name: leading_scaffolding_then_a_command_wrapper_resolves_user
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000001
+        source_path: /claude/d0000000-0000-4000-8000-000000000001.jsonl
+        user_messages:
+          - <local-command-caveat>notice</local-command-caveat>
+          - <command-name>/review</command-name>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: false
+        written: true
+
+  # Skipping teammate-message as scaffolding would erase agent-authored evidence.
+  - name: leading_scaffolding_then_a_teammate_brief_resolves_agent
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000002
+        source_path: /claude/d0000000-0000-4000-8000-000000000002.jsonl
+        user_messages:
+          - <local-command-caveat>notice</local-command-caveat>
+          - <teammate-message>inspect tests</teammate-message>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000002
+        origin: agent
+        finalised: false
+        written: true
+
+  # Searching beyond the first real record lets later agent text override a command.
+  - name: only_the_leading_scaffolding_run_is_skipped
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000003
+        source_path: /claude/d0000000-0000-4000-8000-000000000003.jsonl
+        user_messages:
+          - <local-command-caveat>notice</local-command-caveat>
+          - <command-name>/review</command-name>
+          - <teammate-message>inspect tests</teammate-message>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000003
+        origin: user
+        finalised: false
+        written: true
+
+  # Exhaustion must not manufacture a verdict or finalise degraded evidence.
+  - name: everything_scaffolding_resolves_unknown
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000004
+        source_path: /claude/d0000000-0000-4000-8000-000000000004.jsonl
+        user_messages:
+          - <local-command-caveat>notice</local-command-caveat>
+          - <system-reminder>notice</system-reminder>
+          - <task-notification>notice</task-notification>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000004
+        origin: unknown
+        finalised: false
+        written: false
+
+  # Requiring the closing tag would fail after the real store's 40-rune read cap.
+  - name: a_truncated_scaffolding_preview_is_still_recognised
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000005
+        source_path: /claude/d0000000-0000-4000-8000-000000000005.jsonl
+        user_messages:
+          - <local-command-caveat>This notice extends well beyond forty runes before its closing tag.</local-command-caveat>
+          - <command-name>/review</command-name>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000005
+        origin: user
+        finalised: false
+        written: true
+
+  # A cap of one or an exclusive upper bound loses the command at record eight.
+  - name: a_scaffolding_run_at_the_cap_is_read_through
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000006
+        source_path: /claude/d0000000-0000-4000-8000-000000000006.jsonl
+        user_messages:
+          - <local-command-caveat>one</local-command-caveat>
+          - <system-reminder>two</system-reminder>
+          - <task-notification>three</task-notification>
+          - <local-command-stdout>four</local-command-stdout>
+          - <local-command-stderr>five</local-command-stderr>
+          - <environment_context>six</environment_context>
+          - <system-reminder>seven</system-reminder>
+          - <command-name>/review</command-name>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000006
+        origin: user
+        finalised: false
+        written: true
+
+  # An unbounded reader reaches a command outside the evidence budget.
+  - name: a_scaffolding_run_past_the_cap_stops_at_unknown
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000007
+        source_path: /claude/d0000000-0000-4000-8000-000000000007.jsonl
+        user_messages:
+          - <local-command-caveat>one</local-command-caveat>
+          - <system-reminder>two</system-reminder>
+          - <task-notification>three</task-notification>
+          - <local-command-stdout>four</local-command-stdout>
+          - <local-command-stderr>five</local-command-stderr>
+          - <environment_context>six</environment_context>
+          - <system-reminder>seven</system-reminder>
+          - <system-reminder>eight</system-reminder>
+          - <system-reminder>nine</system-reminder>
+          - <command-name>/review</command-name>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000007
+        origin: unknown
+        finalised: false
+        written: false
+
+  # Applying Claude's skip to every harness would incorrectly resolve user.
+  # The version advance still writes unknown, because this harness has no miner.
+  - name: a_harness_without_a_miner_keeps_its_first_stored_record
+    arm: leading-stored-records
+    rows:
+      - session_id: d0000000-0000-4000-8000-000000000008
+        harness: opencode
+        source_path: /opencode/d0000000-0000-4000-8000-000000000008.json
+        user_messages:
+          - <system-reminder>notice</system-reminder>
+          - <command-name>/review</command-name>
+    expected:
+      - session_id: d0000000-0000-4000-8000-000000000008
+        origin: unknown
+        finalised: true
+        written: true
+
   # Source one. The row already carries a parent, which is rule step one. There
   # is deliberately nothing else to resolve it from: no file, no cache row, no
   # stored message.
@@ -193,6 +342,26 @@ cases:
         finalised: true
         examined: false
         written: false
+
+  # A row judged by the previous rule must be listed again when the rule
+  # changes, even when its stored verdict is now wrong.
+  - name: a_row_at_the_prior_rule_version_is_reclassified
+    arm: prior-version
+    transcripts:
+      - path: /claude/65000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"65000000-0000-4000-8000-000000000001","type":"user","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    rows:
+      - session_id: 65000000-0000-4000-8000-000000000001
+        source_path: /claude/65000000-0000-4000-8000-000000000001.jsonl
+        stored_origin: agent
+        at_prior_rule_version: true
+    expected:
+      - session_id: 65000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: true
+        examined: true
+        written: true
 
   # Every arm runs the pass twice, but this one is named for it: once the
   # verdicts are right, a further pass persists nothing, including for the rows

@@ -1,0 +1,128 @@
+# GET /api/v1/publications on a running server with a real store and a Village
+# double. Two sessions are stored:
+#
+#   outside  a session of github.com/user/repo, which the saved selection leaves
+#            out of the local lists
+#   inside   a session of github.com/acme/tools, which the saved selection lists
+#
+# and "unknown" names no stored session.
+#
+# Each case names:
+#   published       sessions a publish from the local web published first, each
+#                   shared with platform
+#   villageShares   shares the transcript's owner made on Village since, by
+#                   collective alias and status
+#   failedAttempt   sessions with a failed publish attempt recorded after the
+#                   publish
+#   signedOut       the computer holds no Village credential when it reads
+#   villageDown     Village does not answer when it reads
+#   transcriptGone  the published transcript was deleted on Village
+#   query           sessionIds (aliases, comma-separated as sent) and include
+#   expect          the status and error code, or each returned row in order:
+#                   its state, outsideSelection, whether it names its
+#                   transcript and a failed attempt, and its audience
+#                   (omitted when not requested; {} for none)
+requiredNames:
+  - outside-selection-is-returned
+  - inside-selection-unpublished
+  - unknown-session-is-omitted
+  - signed-out-reads-unpublished
+  - failed-attempt-is-reported
+  - audience-lists-live-shares-only
+  - audience-is-an-empty-list
+  - audience-of-a-deleted-transcript
+  - audience-needs-village
+  - session-ids-required
+  - unknown-include-refused
+
+cases:
+  - name: outside-selection-is-returned
+    published: [outside]
+    query: {sessionIds: "outside,inside"}
+    expect:
+      status: 200
+      rows:
+        - {session: outside, state: published, outsideSelection: true, transcript: true}
+        - {session: inside, state: unpublished, outsideSelection: false}
+
+  - name: inside-selection-unpublished
+    query: {sessionIds: "inside"}
+    expect:
+      status: 200
+      rows:
+        - {session: inside, state: unpublished, outsideSelection: false}
+
+  - name: unknown-session-is-omitted
+    published: [inside]
+    query: {sessionIds: "unknown,inside,inside"}
+    expect:
+      status: 200
+      rows:
+        - {session: inside, state: published, outsideSelection: false, transcript: true}
+
+  - name: signed-out-reads-unpublished
+    published: [outside]
+    failedAttempt: [outside]
+    signedOut: true
+    query: {sessionIds: "outside", include: audience}
+    expect:
+      status: 200
+      rows:
+        - {session: outside, state: unpublished, outsideSelection: true}
+
+  - name: failed-attempt-is-reported
+    published: [inside]
+    failedAttempt: [inside, outside]
+    query: {sessionIds: "inside,outside"}
+    expect:
+      status: 200
+      rows:
+        - {session: inside, state: published, outsideSelection: false, transcript: true, lastAttempt: true}
+        - {session: outside, state: unpublished, outsideSelection: true, lastAttempt: true}
+
+  - name: audience-lists-live-shares-only
+    published: [inside]
+    villageShares: {review: pending, research: rejected}
+    query: {sessionIds: "inside,outside", include: audience}
+    expect:
+      status: 200
+      rows:
+        - {session: inside, state: published, outsideSelection: false, transcript: true, audience: {platform: approved, review: pending}}
+        - {session: outside, state: unpublished, outsideSelection: true}
+
+  - name: audience-is-an-empty-list
+    published: [inside]
+    villageShares: {platform: retracted}
+    query: {sessionIds: "inside", include: audience}
+    expect:
+      status: 200
+      rows:
+        - {session: inside, state: published, outsideSelection: false, transcript: true, audience: {}}
+
+  - name: audience-of-a-deleted-transcript
+    published: [inside]
+    transcriptGone: true
+    query: {sessionIds: "inside", include: audience}
+    expect:
+      status: 502
+      code: village_transcript_missing
+
+  - name: audience-needs-village
+    published: [inside]
+    villageDown: true
+    query: {sessionIds: "inside", include: audience}
+    expect:
+      status: 502
+      code: village_unreachable
+
+  - name: session-ids-required
+    query: {sessionIds: " , "}
+    expect:
+      status: 400
+      code: publications_session_ids_required
+
+  - name: unknown-include-refused
+    query: {sessionIds: "inside", include: collectives}
+    expect:
+      status: 400
+      code: publications_include_unknown

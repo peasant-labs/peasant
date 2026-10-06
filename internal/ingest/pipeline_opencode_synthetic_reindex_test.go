@@ -9,6 +9,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -73,7 +74,7 @@ func TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult(t *testing.T) 
 	meta.ModelHarness = schema.Harness(defaults.HarnessOpenCode)
 	session.ModTime = time.Now().Add(-1 * time.Hour)
 
-	database, err := store.Open(t.TempDir() + "/peasant.db")
+	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("open the analytics store: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult(t *testing.T) 
 
 	ingestConfig := makePipelineConfig(testOutputDir)
 	ingestConfig.Sources = sources
-	pipeline, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, ingestConfig,
+	pipeline, err := newTestPipeline(mfs, testutil.DefaultGitResolver(), adapters, ingestConfig,
 		indexers, ingest.WithStore(database), ingest.WithMetricsStore(database))
 	if err != nil {
 		t.Fatalf("build the ingest pipeline: %v", err)
@@ -122,7 +123,7 @@ func TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult(t *testing.T) 
 	reindexConfig.Sources = sources
 	reindexConfig.Reindex = true
 	reindexConfig.Force = true
-	reindexer, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, reindexConfig,
+	reindexer, err := newTestPipeline(mfs, testutil.DefaultGitResolver(), adapters, reindexConfig,
 		indexers, ingest.WithStore(database), ingest.WithMetricsStore(database))
 	if err != nil {
 		t.Fatalf("build the reindex pipeline: %v", err)

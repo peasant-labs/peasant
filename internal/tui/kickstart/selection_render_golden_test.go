@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,9 +12,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -165,17 +164,8 @@ func selectionRenderValuesPresent(values ...[]string) bool {
 
 func decodeSelectionRender(data []byte) (selectionRenderDoc, error) {
 	var doc selectionRenderDoc
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/selection_render.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("selection_render.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != expectedSelectionRenderCaseCount || len(doc.Cases) != expectedSelectionRenderCaseCount {
 		return doc, fmt.Errorf("selection render cases: declared=%d actual=%d required=%d",
@@ -436,6 +426,7 @@ func typeAndDrain(p kickstart.Program, value rune) kickstart.Program {
 // state, so the child-session counts, the imported/not-yet split, the facet
 // gutter, and the preview pane are all visible in the test artifact.
 func TestSelectionStep_RenderGolden(t *testing.T) {
+	t.Parallel()
 	doc := loadSelectionRenderDoc(t)
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -466,6 +457,7 @@ func assertSimplifiedSelectionRender(t *testing.T, view string) {
 // line exceeds its width. This is what keeps the gutter, the tree, and the
 // preview from silently stealing rows or columns from each other.
 func TestSelectionStep_RenderSizeInvariant(t *testing.T) {
+	t.Parallel()
 	doc := loadSelectionRenderDoc(t)
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -522,6 +514,7 @@ func requireEveryContentShapeAsserted(t *testing.T, doc selectionRenderDoc) {
 // the golden must contain - so a snapshot that drifts is a caught regression
 // rather than an accepted new baseline.
 func TestSelectionStep_RenderCarriesEachAnswer(t *testing.T) {
+	t.Parallel()
 	doc := loadSelectionRenderDoc(t)
 	byName := map[string]selectionRenderCase{}
 	for _, c := range doc.Cases {
@@ -561,6 +554,7 @@ func mutateSelectionRenderCount(t *testing.T, field string, expected int) []byte
 }
 
 func TestSelectionRenderFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionRenderData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeSelectionRender(mutated); err == nil {
 		t.Fatal("selection render fixture accepted an unknown field")
@@ -568,6 +562,7 @@ func TestSelectionRenderFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestSelectionRenderFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionRenderData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeSelectionRender(mutated); err == nil {
 		t.Fatal("selection render fixture accepted a trailing document")
@@ -575,6 +570,7 @@ func TestSelectionRenderFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestSelectionRenderFixturePinsCaseCount(t *testing.T) {
+	t.Parallel()
 	mutated := mutateSelectionRenderCount(t, "expectedCaseCount", expectedSelectionRenderCaseCount)
 	if _, err := decodeSelectionRender(mutated); err == nil {
 		t.Fatal("selection render fixture accepted a changed case-count declaration")
@@ -582,6 +578,7 @@ func TestSelectionRenderFixturePinsCaseCount(t *testing.T) {
 }
 
 func TestSelectionRenderFixturePinsSessionCount(t *testing.T) {
+	t.Parallel()
 	mutated := mutateSelectionRenderCount(t, "expectedSessionCount", expectedSelectionRenderSessionCount)
 	if _, err := decodeSelectionRender(mutated); err == nil {
 		t.Fatal("selection render fixture accepted a changed session-count declaration")
@@ -589,6 +586,7 @@ func TestSelectionRenderFixturePinsSessionCount(t *testing.T) {
 }
 
 func TestSelectionRenderFixturePinsHarnessCount(t *testing.T) {
+	t.Parallel()
 	mutated := mutateSelectionRenderCount(t, "expectedHarnessCount", expectedSelectionRenderHarnessCount)
 	if _, err := decodeSelectionRender(mutated); err == nil {
 		t.Fatal("selection render fixture accepted a changed harness-count declaration")
@@ -596,6 +594,7 @@ func TestSelectionRenderFixturePinsHarnessCount(t *testing.T) {
 }
 
 func TestSelectionRenderFixturePinsPreviewAssertionCount(t *testing.T) {
+	t.Parallel()
 	mutated := mutateSelectionRenderCount(t, "expectedRowCount", expectedSelectionRenderPreviewAssertionCount)
 	if _, err := decodeSelectionRender(mutated); err == nil {
 		t.Fatal("selection render fixture accepted a changed preview-assertion count")
@@ -603,6 +602,7 @@ func TestSelectionRenderFixturePinsPreviewAssertionCount(t *testing.T) {
 }
 
 func TestSelectionRenderFixturePinsTextAssertionCount(t *testing.T) {
+	t.Parallel()
 	// The first expectedRowCount belongs to renderAssertions; mutate it without
 	// changing the independent preview assertion declaration.
 	mutated := mutateSelectionRenderCount(t, "expectedRowCount", expectedSelectionRenderTextAssertionCount)
@@ -612,6 +612,7 @@ func TestSelectionRenderFixturePinsTextAssertionCount(t *testing.T) {
 }
 
 func TestSelectionRenderFixturePinsBothThemeStateCount(t *testing.T) {
+	t.Parallel()
 	mutated := mutateSelectionRenderCount(t, "expectedBothThemeStateCount", expectedSelectionRenderBothThemeStateCount)
 	if _, err := decodeSelectionRender(mutated); err == nil {
 		t.Fatal("selection render fixture accepted a changed both-theme state count")

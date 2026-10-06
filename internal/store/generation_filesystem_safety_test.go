@@ -102,11 +102,11 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 
 			seedGenerationSession(t, s, fixture.Session.ID)
 			complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, "fs text G1", "fs input G1", "fs output G1")
-			if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: complete, Blobs: completeBlobs}); err != nil {
+			if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: complete, Blobs: completeBlobs}); err != nil {
 				t.Fatalf("activate G1: %v", err)
 			}
 			old, oldBlobs := buildTestGeneration(t, id, fixture.Generation.InactiveID, "fs text old", "fs input old", "fs output old")
-			if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: old, Blobs: oldBlobs}); err != nil {
+			if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: old, Blobs: oldBlobs}); err != nil {
 				// A complete candidate must activate; a failure here is a
 				// production regression, never a reason to stage directly.
 				t.Fatalf("activate inactive candidate G2: %v", err)
@@ -119,7 +119,7 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 			// Ensure the complete generation is active: if the inactive won,
 			// reactivate the complete one.
 			if got := visibleGeneration(t, s, id); got == fixture.Generation.InactiveID {
-				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: complete, Blobs: completeBlobs}); err != nil {
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: complete, Blobs: completeBlobs}); err != nil {
 					t.Fatalf("reactivate G1: %v", err)
 				}
 			}

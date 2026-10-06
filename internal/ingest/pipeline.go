@@ -104,16 +104,17 @@ type PipelineResult struct {
 
 // PipelineSummary holds aggregate counts for a pipeline run.
 type PipelineSummary struct {
-	New               int
-	Updated           int
-	Unchanged         int
-	Active            int
-	Errors            int
-	Indexed           int                           // sessions successfully indexed into session_entries
-	Computed          int                           // sessions whose metrics were (re)computed
-	StoreError        error                         // non-nil if DB insert failed; pipeline continued normally
-	HarvesterVersions map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
-	MetadataVersion   int                           // CurrentSchemaVersion used this run
+	RetainedUnknownKinds []RetainedUnknownKindCount `json:"retained_unknown_kinds,omitempty"`
+	New                  int
+	Updated              int
+	Unchanged            int
+	Active               int
+	Errors               int
+	Indexed              int                           // sessions successfully indexed into session_entries
+	Computed             int                           // sessions whose metrics were (re)computed
+	StoreError           error                         // non-nil if DB insert failed; pipeline continued normally
+	HarvesterVersions    map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
+	MetadataVersion      int                           // CurrentSchemaVersion used this run
 	// ReminedEvidenceRecords is how many cached discovery evidence records this
 	// run had to mine again. It is greater than zero on the first run after an
 	// upgrade that added a field the cached records do not carry, and zero on
@@ -137,6 +138,10 @@ type PipelineSummary struct {
 	// and was skipped by the rebuild: a torn pair, or a valid pair whose bytes
 	// no longer match the recorded row. Their database rows are left untouched.
 	RebuildSkipped []SessionID `json:"rebuild_skipped,omitempty"`
+	// RefusedRecordKinds aggregates this run's strict-parser refusals by
+	// harness and kind: one row per refused kind with the sessions it
+	// refused. Empty when every session certified.
+	RefusedRecordKinds []RecordKindRefusalCount `json:"refused_record_kinds,omitempty"`
 }
 
 // SessionResult records the outcome of processing a single session.
@@ -247,6 +252,7 @@ type OrphanCleaner interface {
 // replaces asserted the reverse as settled fact, and that assertion - repeated
 // one layer downstream - is what got the outward safety-net re-redaction deleted.
 type indexedMeta struct {
+	retainedUnknown []RetainedUnknownKindCount
 	captureRevision int64
 	capturedSource  *captureFileSystem
 	// published reports that this run committed the artifact being indexed,
@@ -285,6 +291,12 @@ type Pipeline struct {
 	// contentRecoveries holds this run's completed retained-content repairs,
 	// keyed by session, so the index log and summary can report them.
 	contentRecoveries map[SessionID]contentRecovery
+	// pairRepairOwned names the candidates whose saved pair the pair-repair
+	// pass found missing or damaged. The ordinary index inventory skips them:
+	// their pair is not a readable index input, and the pair-repair pass owns
+	// the outcome, so re-attempting the index read only repeats an acquisition
+	// failure. Populated by appendPairRepairWork before the index inventory runs.
+	pairRepairOwned map[SessionID]bool
 	// contentCaptureStoppedOnBudget reports that the one-time full-content pass
 	// stopped this run on its byte budget, with sessions still to capture.
 	contentCaptureStoppedOnBudget bool
@@ -320,6 +332,14 @@ type Pipeline struct {
 	// the over-limit path can do it without building a record of production
 	// size and without mutating anything global.
 	maxJSONLRecordBytes int
+
+	// arenaSizeBytes is the staging-arena capacity (in bytes) for this
+	// pipeline's runs. Zero, the production value, keeps the environment
+	// default: the EnvArenaSizeBytes override when it parses as a positive
+	// integer, else DefaultArenaSizeBytes. A caller that must bound memory or
+	// exercise the arena-full path injects a size here instead of mutating the
+	// process environment for every test in the binary.
+	arenaSizeBytes int64
 
 	// originResolve and originResolveErr hold what the stored-origin pass did
 	// this run. They live on the pipeline rather than in Run because the report
@@ -467,6 +487,16 @@ func WithIndexers(idx map[Harness]TranscriptIndexer) PipelineOption {
 // and the indexers decide what they will certify.
 func WithMaxJSONLRecordBytes(limit int) PipelineOption {
 	return func(p *Pipeline) { p.maxJSONLRecordBytes = limit }
+}
+
+// WithArenaSizeBytes sets the staging-arena capacity (in bytes) for this
+// pipeline's runs. Zero, the production value, keeps the environment default:
+// the EnvArenaSizeBytes override when it parses as a positive integer, else
+// DefaultArenaSizeBytes. A test injects a small arena here instead of setting
+// the process environment, which would serialize every other test in the
+// binary that must also observe the same value.
+func WithArenaSizeBytes(size int64) PipelineOption {
+	return func(p *Pipeline) { p.arenaSizeBytes = size }
 }
 
 // WithMetricsStore injects a MetricsStore for session_entries persistence.
@@ -1029,9 +1059,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	workers := parallelWorkers(p.config)
 
 	// StagingBuffer holds completed workerResults until their parent is DB-committed.
-	// Capacity = number of sessions to process; arena defaults to 2 GiB, overridable
-	// via EnvArenaSizeBytes (tests set a few MiB — see resolveArenaSizeBytes).
-	staging := NewStagingBuffer(len(toProcessEntries)+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
+	// Capacity = number of sessions to process; the arena is the EnvArenaSizeBytes
+	// override when set, else 2 GiB (WithArenaSizeBytes injects a size directly).
+	staging := NewStagingBuffer(len(toProcessEntries)+1, p.stagingArenaSize())
 	for parentID := range externalParents {
 		// The parent is outside this batch, so DB insertion is the authority on
 		// whether it already exists. Mark it committed only for staging order.
@@ -1048,9 +1078,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// concurrently. StagingBuffer is MPMC: Add (workers) and Drain/Commit (main
 	// goroutine) must overlap so the ring buffer can recycle arena space.
 	// Running runParallel synchronously and draining after it returns would
-	// deadlock once the 2 GiB arena fills — workers spin in copyToArena waiting
-	// for arenaTail to advance, but drain only starts after runParallel returns.
-	var workersDone atomic.Bool
+	// deadlock once the 2 GiB arena fills — producers wait in copyToArena for
+	// arenaTail to advance, but drain only starts after runParallel returns.
+	//
+	// workersDone is closed once runParallel returns, so the drain loop wakes
+	// on the producers finishing instead of polling for them.
+	workersDone := make(chan struct{})
 	// Every session can independently fail reconciliation. The controller reads
 	// errors after workers finish, so reserve the complete bounded run's capacity
 	// rather than assuming full drain batches while producers run concurrently.
@@ -1072,6 +1105,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	var drainResults []SessionResult
 	var drainIndexed []indexedMeta
 	var drainIndexLogEntries []IndexLogEntry
+	var drainRefusedKinds []RecordKindRefusal
 	var drainDownstream streamedDownstreamResult
 
 	// Stage 4a: EXTRACT+WRITE workers goroutine.
@@ -1082,12 +1116,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		extractProfileStart := time.Now()
 		runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 			// Process root.
-			wr := p.processSession(ctx, entry)
+			wr := p.processSession(ctx, entry, writeLane)
 			wr.schedulingParentID = OperationalParentID(entry.Session)
 			wr.schedulingResolved = true
 			extractDoneAtomic.Add(1)
 			emitAdvance(prog, StageExtract, 1, toProcess)
-			staging.Add(wr)
+			staging.Add(ctx, wr)
 			// The root's heap payload must not outlive transfer to the arena,
 			// including while this worker walks a large descendant subtree.
 			wr.transcriptData = nil
@@ -1098,12 +1132,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				childID := queue[0]
 				queue = queue[1:]
 				childEntry := entryByID[childID]
-				cwr := p.processSession(ctx, childEntry)
+				cwr := p.processSession(ctx, childEntry, writeLane)
 				cwr.schedulingParentID = OperationalParentID(childEntry.Session)
 				cwr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, toProcess)
-				staging.Add(cwr)
+				staging.Add(ctx, cwr)
 				// Enqueue grandchildren (if any).
 				queue = append(queue, childrenOf[childID]...)
 			}
@@ -1117,7 +1151,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		extractDone := int(extractDoneAtomic.Load())
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageExtract, Done: extractDone, Total: toProcess})
 		p.recordIndexProfileStage(StageExtract, extractProfileStart, extractDone, toProcess)
-		workersDone.Store(true)
+		close(workersDone)
 	}()
 
 	// Stage 4b: Consumer goroutine — DB INSERT + INDEX coordination.
@@ -1128,7 +1162,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		dbInsertProfileStart := time.Now()
 		defer close(indexCh) // signal INDEX goroutine to stop when consumer exits
 		emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDBInsert, Total: len(toProcessEntries)})
-		drainResults = p.drainLoop(ctx, staging, &workersDone, indexCh, indexDoneCh, errCh, prog, len(toProcessEntries), writeLane)
+		drainResults = p.drainLoop(ctx, staging, workersDone, indexCh, indexDoneCh, errCh, prog, len(toProcessEntries), writeLane)
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: len(drainResults), Total: len(toProcessEntries)})
 		p.recordIndexProfileStage(StageDBInsert, dbInsertProfileStart, len(drainResults), len(toProcessEntries))
 	}()
@@ -1141,7 +1175,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		defer wg.Done()
 		defer close(downstreamCh)
 		indexProfileStart := time.Now()
-		drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, indexCh, indexDoneCh, prog, IndexOutcomeIndexed, "pipeline", downstreamCh, writeLane)
+		drainIndexed, drainIndexLogEntries, drainRefusedKinds = p.indexLoop(ctx, indexCh, indexDoneCh, prog, IndexOutcomeIndexed, "pipeline", downstreamCh, writeLane)
 		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), len(toProcessEntries))
 	}()
 
@@ -1209,14 +1243,41 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		// The ordinary index inventory is database-driven only: stale producer
 		// revisions, plus the sessions a crash between the two write commits can
 		// leave (the repair predicate). Neither reads the tree; each hit reads
-		// only its own pair when it is indexed.
-		candidates := append([]SessionID(nil), staleIDs...)
-		candidates = append(candidates, p.repairSessions(ctx)...)
+		// only its own pair when it is indexed. The two inventories select from
+		// the same table and are not disjoint, so the candidates are
+		// deduplicated before anything is counted or processed.
+		repairIDs := p.repairSessions(ctx)
+		candidates := make([]SessionID, 0, len(staleIDs)+len(repairIDs))
+		seenCandidates := make(map[SessionID]bool, len(staleIDs)+len(repairIDs))
+		for _, inventory := range [][]SessionID{staleIDs, repairIDs} {
+			for _, sid := range inventory {
+				if seenCandidates[sid] {
+					continue
+				}
+				seenCandidates[sid] = true
+				candidates = append(candidates, sid)
+			}
+		}
+		// Every candidate this pass does not index is counted so a stored
+		// session can never disappear into the run's unchanged total without a
+		// signal. The selection skip is the one the user can act on; the
+		// missing-input count names the sessions whose pair and recorded source
+		// are both unavailable.
+		var selectionSkipped, missingInput int
 		// A recovered session is content-repaired, not complete: it still gets
 		// the same adapter/indexer evaluation as every other eligible target. An
 		// already-current session sees an equal input hash and writes nothing.
 		for _, sid := range candidates {
 			if queued[sid] {
+				continue
+			}
+			// The session allowlist is the run's ingest scope, and it also gates
+			// retained-session maintenance here. Skip an out-of-scope session
+			// before reading its pair: the run must not reconstruct or report
+			// refusals for a session it was never going to upgrade, and the
+			// report names the count instead.
+			if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[sid] {
+				selectionSkipped++
 				continue
 			}
 
@@ -1233,13 +1294,38 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				// the original source but don't have peasant-sync metadata.
 				reconstructed, startMs, transcriptPath = p.reconstructFromSourceInfo(ctx, sid)
 				if reconstructed == nil {
+					missingInput++
 					continue
 				}
+			}
+			// The pair-repair pass owns a session whose saved pair is missing
+			// or damaged: its pair is not a readable index input, and that pass
+			// already re-ingested it from native input or reported the
+			// unavailable source once. Queueing it here would only read the same
+			// unreadable pair and repeat the acquisition failure.
+			if p.pairRepairOwned[sid] {
+				continue
 			}
 			queued[sid] = true
 			if p.indexTargetNeedsWork(ctx, reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}) {
 				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
 			}
+		}
+		if selectionSkipped > 0 {
+			p.reportDiagnostic(DiagnosticEntry{
+				ErrorType:   "stale_index_outside_selection",
+				Location:    "stored index maintenance",
+				Message:     fmt.Sprintf("%d stored session(s) outside this run's session selection still need index maintenance (an older indexer revision or an unfinished repair) and were not processed by this run", selectionSkipped),
+				Remediation: "Run peasant harvest index to process every stored session that needs index maintenance, or include these sessions' projects in the kickstart selection and run again.",
+			})
+		}
+		if missingInput > 0 {
+			p.reportDiagnostic(DiagnosticEntry{
+				ErrorType:   "stale_index_missing_input",
+				Location:    "stored index maintenance",
+				Message:     fmt.Sprintf("%d stored session(s) with pending index maintenance have neither a readable managed pair nor a recorded source and were not processed by this run", missingInput),
+				Remediation: "Restore each session's managed pair or its recorded native source, then run peasant harvest index to process them.",
+			})
 		}
 	}
 
@@ -1253,7 +1339,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.reconcileOrphanParentCaches(ctx, diffResult.Sessions, toProcessEntries)
 
 	// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with runReindex).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream, drainRefusedKinds)
 }
 
 // contentRecoveryReason labels a retained-content repair in the index log.
@@ -1294,11 +1380,17 @@ func (p *Pipeline) contentRecoveryLogEntries() []IndexLogEntry {
 //     every streamed session that belongs to the batch.
 //
 // Store errors are sent to errCh (buffered); the controller collects them after wg.Wait.
-// Bounded backoff (1ms sleep) is used when the buffer is empty but workers are still running.
+//
+// The loop blocks on events instead of polling: the ready signal wakes it when
+// a slot is published, workersDone when the producers finish, indexDoneCh when
+// the INDEX stage releases a drain batch, and ctx on cancellation. Option B:
+// on ctx.Done only the ctx arm is disabled; the loop keeps draining published
+// results and returns once the producers return, so a cancelled run keeps the
+// same per-session results and Summary.Errors it has today.
 func (p *Pipeline) drainLoop(
 	ctx context.Context,
 	staging *StagingBuffer,
-	workersDone *atomic.Bool,
+	workersDone <-chan struct{},
 	indexCh chan<- streamedIndexWork,
 	indexDoneCh <-chan DrainBatch,
 	errCh chan<- error,
@@ -1340,9 +1432,13 @@ func (p *Pipeline) drainLoop(
 		}
 	}
 
+	// ctxArm is set to nil once ctx ends, so the loop stops selecting on it
+	// without busy-looping on an already-closed channel (Option B).
+	ctxArm := ctx.Done()
+
 	for {
 		drainReadyAcks()
-		done := workersDone.Load()
+		done := isClosed(workersDone) // observed before Drain, as today
 		batch := staging.Drain()
 
 		if len(batch.Results) > 0 {
@@ -1400,10 +1496,36 @@ func (p *Pipeline) drainLoop(
 			waitForPendingAcks()
 			break
 		}
-		// Bounded backoff: avoid spinning when buffer is empty but workers still running.
-		time.Sleep(1 * time.Millisecond)
+		select {
+		case <-staging.ready:
+			// A slot was published; re-drain.
+		case <-workersDone:
+			// Producers finished; re-drain, then exit.
+		case batch := <-indexDoneCh:
+			// INDEX finished a batch. Blocked producers wait on this ack to
+			// free arena space, so the drainer must keep receiving it here.
+			ackBatch(batch)
+		case <-ctxArm:
+			// Cancelled. Keep today's accounting: stop selecting on ctx only
+			// (a closed ctx.Done would busy-loop), keep draining published
+			// results, and return once the producers return.
+			ctxArm = nil
+			continue
+		}
 	}
 	return sessionResults
+}
+
+// isClosed reports whether ch has been closed without consuming a value from a
+// still-open channel. It is the non-blocking observation the drain loop uses
+// for the producers-done broadcast.
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 type streamedIndexWork struct {
@@ -1465,7 +1587,7 @@ func (p *Pipeline) indexLoop(
 	logPrefix string,
 	downstreamCh chan<- indexedMeta,
 	writeLane *storeWriteLane,
-) (indexed []indexedMeta, logEntries []IndexLogEntry) {
+) (indexed []indexedMeta, logEntries []IndexLogEntry, refused []RecordKindRefusal) {
 	workers := parallelWorkers(p.config)
 	if workers < 1 {
 		workers = 1
@@ -1497,13 +1619,19 @@ func (p *Pipeline) indexLoop(
 	profileBatch := IndexProfileBatch{Source: logPrefix, QueueCapacity: cap(indexCh)}
 	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
 	flushPending := func(results []indexParseResult) {
-		flush := p.flushIndexParseResults(ctx, results, outcome, logPrefix, writeLane)
+		for _, result := range results {
+			if result.refusedKind != nil {
+				refused = append(refused, *result.refusedKind)
+			}
+		}
+		flush := p.flushIndexParseResultsWithProgress(ctx, results, outcome, logPrefix, writeLane, func() {
+			emitAdvance(prog, StageIndex, 1, 0)
+		})
 		for i, indexedResult := range flush.indexed {
 			indexed = append(indexed, indexedResult)
 			if flush.logEntries[i].SessionID != "" {
 				logEntries = append(logEntries, flush.logEntries[i])
 			}
-			emitAdvance(prog, StageIndex, 1, 0)
 			if indexedResult.indexed && downstreamCh != nil {
 				select {
 				case downstreamCh <- indexedResult:
@@ -1532,11 +1660,12 @@ func (p *Pipeline) indexLoop(
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 		p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	}
-	return indexed, logEntries
+	return indexed, logEntries, refused
 }
 
 type indexParseResult struct {
-	fullContent bool
+	retainedUnknown []RetainedUnknownKindCount
+	fullContent     bool
 	// partial reports that the strict parser refused the transcript and the
 	// tolerant projection was stored instead, as an incomplete capture whose
 	// recorded reason is strictRefusal. Previews show it; nothing certifies it.
@@ -1545,6 +1674,10 @@ type indexParseResult struct {
 	// refusalCode is why the strict parser refused, as the value the selector
 	// reads back to decide that re-trying cannot help.
 	refusalCode ContentCaptureFailureCode
+	// refusedKind names the harness record kind the strict parser refused, so
+	// the run report can aggregate refusals by kind. Nil unless the refusal is
+	// an unrepresented kind; omissions and corruption leave it unset.
+	refusedKind *RecordKindRefusal
 	// omissionsRecorded reports that the stored entries account for every
 	// record ingest left out, because a placeholder entry stands in each
 	// omitted record's position. Such a capture is incomplete but holds the
@@ -1552,9 +1685,16 @@ type indexParseResult struct {
 	// readable, exportable and publishable; a partial capture without that
 	// proof is written as the bounded preview it is.
 	omissionsRecorded bool
-	im                indexedMeta
-	input             *CapturedIndexInput
-	output            indexformat.Result
+	unknownRecorded   bool
+	// assessment is the one final write-selection authority for V1 captures.
+	// The flags above remain as parser inputs and diagnostics, but the flush
+	// paths derive the store write from this assessment, never from the flags
+	// alone. It is valid only when assessmentReady is true.
+	assessment      CaptureAssessment
+	assessmentReady bool
+	im              indexedMeta
+	input           *CapturedIndexInput
+	output          indexformat.Result
 	// nativeCandidate carries a validated managed-generation candidate with its
 	// captured content when the harness's declared output format is a managed
 	// generation. The write path stages and activates it instead of committing
@@ -1575,6 +1715,10 @@ type indexParseResult struct {
 // first: the strict parser stops at the omission before it can reach a record
 // it does not represent.
 func permanentRefusalCode(session DiscoveredSession, err error) ContentCaptureFailureCode {
+	var corruption *captureCorruptionError
+	if errors.As(err, &corruption) {
+		return ContentCaptureNoFailure
+	}
 	if session.ContentOmitted {
 		return ContentCaptureSourceRecordsOmitted
 	}
@@ -1706,18 +1850,19 @@ func indexResultWriteBytes(result indexformat.Result) int64 {
 }
 
 // indexBatch parses a batch, then serializes SQLite writes through one goroutine.
-func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string) ([]indexedMeta, []IndexLogEntry) {
+func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string) ([]indexedMeta, []IndexLogEntry, []RecordKindRefusal) {
 	indexed := make([]indexedMeta, 0, len(metas))
 	logs := make([]IndexLogEntry, 0, len(metas))
+	var refused []RecordKindRefusal
 	if len(metas) == 0 {
-		return indexed, logs
+		return indexed, logs, refused
 	}
 	if p.indexers == nil || p.metricsStore == nil {
 		for _, im := range metas {
 			indexed = append(indexed, indexedMeta{session: im.session, startMs: im.startMs})
 			logs = append(logs, IndexLogEntry{})
 		}
-		return indexed, logs
+		return indexed, logs, refused
 	}
 
 	var activeParses atomic.Int64
@@ -1741,6 +1886,11 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		flush := p.flushIndexParseResults(ctx, pending, outcome, logPrefix, nil)
 		indexed = append(indexed, flush.indexed...)
 		logs = append(logs, flush.logEntries...)
+		for _, result := range pending {
+			if result.refusedKind != nil {
+				refused = append(refused, *result.refusedKind)
+			}
+		}
 		for _, profileSession := range flush.profileSessions {
 			profileBatch.Entries += profileSession.Entries
 			profileBatch.Bytes += profileSession.Bytes
@@ -1776,7 +1926,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	flushPending()
 	profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
-	return indexed, logs
+	return indexed, logs, refused
 }
 
 func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activeParses *atomic.Int64, maxActiveParses *atomic.Int64, logPrefix string) (result indexParseResult) {
@@ -1883,6 +2033,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
 					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
 						result.partial, result.strictRefusal, result.refusalCode = true, err.Error(), code
+						if code == ContentCaptureStrictRefused {
+							var unrepresented *UnrepresentedRecordError
+							if errors.As(err, &unrepresented) {
+								result.refusedKind = &RecordKindRefusal{Harness: unrepresented.Harness, Kind: unrepresented.Kind}
+							}
+						}
 						// A session whose only gap is an omitted source record
 						// carries a placeholder entry in that record's place,
 						// so the tolerant projection still describes the whole
@@ -1902,10 +2058,79 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		}
 		input.transcript, input.tree = nil, nil
 	}
+	// Full local evidence needs valid payloads and capture-assigned coordinates.
+	// Public byte/depth budgets are checked later, at export/publication only.
+	if err == nil && parsed {
+		if v1, ok := output.(indexformat.V1); ok {
+			if outputRecordsItsOmissions(output) {
+				result.partial, result.omissionsRecorded = true, true
+				result.refusalCode = ContentCaptureSourceRecordsOmitted
+				result.strictRefusal = "oversized source records were omitted with positional placeholders"
+			}
+			var unknown []RetainedUnknown
+			unknown, err = retainedUnknownEntries(v1.Entries)
+			if err == nil && len(unknown) > 0 {
+				result.retainedUnknown = retainedUnknownCounts(unknown)
+				result.partial = true
+				if result.refusalCode == ContentCaptureSourceRecordsOmitted && result.omissionsRecorded {
+					// Mixed accounted case: the omission placeholders and the
+					// retained unknown evidence are both present. Preserve
+					// both facts internally with all counts; the stored code
+					// stays the existing omission code. Never overwrite one
+					// reason to erase the other.
+					if projected, projectErr := CollectRetainedUnknown(v1.Entries, im.session.Harness); projectErr == nil && len(projected) == len(unknown) {
+						result.unknownRecorded = true
+						result.strictRefusal = "oversized source records were omitted with positional placeholders; uninterpreted source data was retained with complete payload and source coordinates; interpretation is partial and outbound transfer limits apply"
+					} else {
+						result.strictRefusal += "; surviving unknown source data was retained privately, but its coordinates do not validate"
+					}
+				} else if result.refusalCode == ContentCaptureSourceRecordsOmitted && !result.omissionsRecorded {
+					result.strictRefusal += "; surviving unknown source data was retained privately, but the earlier source omission remains unaccounted"
+				} else {
+					result.refusalCode = ContentCaptureUnknownDataRetained
+					result.strictRefusal = "uninterpreted source data was retained locally; export and publication require an outbound evidence projection"
+					if projected, projectErr := CollectRetainedUnknown(v1.Entries, im.session.Harness); projectErr == nil && len(projected) == len(unknown) {
+						result.unknownRecorded = true
+						result.strictRefusal = "uninterpreted source data was retained with complete payload and source coordinates; interpretation is partial and outbound transfer limits apply"
+					}
+				}
+			}
+		}
+	}
 	// Only the strict format-1 capture path certifies complete content. A
 	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
 	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat && !result.partial
+	// One final write decision owns V1 admission. The flags above remain as
+	// parser inputs and diagnostics, but the flush paths derive the store
+	// write from this assessment. An assessment error refuses the candidate
+	// before any counting or persistence: no parse failure becomes successful
+	// retained accounting.
+	if err == nil && parsed {
+		// The assessment certifies only parses by a certifying parser. A
+		// successful parse by a non-authoritative indexer is stored through
+		// the flag-derived capture below (uncertified preview, no refusal
+		// code): assessing it would stamp a strict refusal no strict parser
+		// ever raised, and the settled-refusal selector would then treat the
+		// session as permanently resolved and skip the worker re-read that
+		// heals parent-cache moves and changed-pair mirrors on later
+		// harvests. Genuine refusals still flow through the assessment via
+		// their Unaccounted flag and validated evidence.
+		if _, isV1 := output.(indexformat.V1); isV1 && result.nativeCandidate == nil && authoritative {
+			strictAuthoritative := authoritative && declared == strictIndexFormat
+			if assessment, assessErr := AssessCapture(V1CaptureFacts(
+				im.session.Harness, output, strictAuthoritative, im.session.ContentOmitted,
+			)); assessErr != nil {
+				err = assessErr
+			} else {
+				result.assessment = assessment
+				result.assessmentReady = true
+				// Candidate counts come only from validated selected evidence.
+				// They stay candidates until the store outcome confirms commit.
+				result.retainedUnknown = assessment.CandidateCounts()
+			}
+		}
+	}
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
 	if err == nil && parsed {
@@ -1948,14 +2173,24 @@ type indexWriteFlush struct {
 }
 
 func (p *Pipeline) flushIndexParseResults(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) indexWriteFlush {
-	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
-	if !ok || len(results) == 0 {
-		return p.flushIndexParseResultsOneByOne(ctx, results, outcome, logPrefix, writeLane)
-	}
-	return p.flushIndexParseResultsBatch(ctx, results, batchStore, outcome, logPrefix, writeLane)
+	return p.flushIndexParseResultsWithProgress(ctx, results, outcome, logPrefix, writeLane, nil)
 }
 
-func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) indexWriteFlush {
+// flushIndexParseResultsWithProgress is flushIndexParseResults with an
+// optional per-result callback. emit runs exactly once for every result
+// position. Native candidates emit as soon as their own commit completes, not
+// when the whole batch does, so progress keeps moving while a slow candidate
+// is still preparing. Other result kinds carry no such promise: they may emit
+// only after the native candidates in the same batch drain.
+func (p *Pipeline) flushIndexParseResultsWithProgress(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
+	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
+	if !ok || len(results) == 0 {
+		return p.flushIndexParseResultsOneByOne(ctx, results, outcome, logPrefix, writeLane, emit)
+	}
+	return p.flushIndexParseResultsBatch(ctx, results, batchStore, outcome, logPrefix, writeLane, emit)
+}
+
+func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
 	flush := indexWriteFlush{
 		indexed:         make([]indexedMeta, 0, len(results)),
 		logEntries:      make([]IndexLogEntry, 0, len(results)),
@@ -1967,15 +2202,29 @@ func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results [
 		flush.logEntries = append(flush.logEntries, logEntry)
 		flush.profileSessions = append(flush.profileSessions, profileSession)
 		flush.writeDuration += profileSession.WriteDuration
+		if emit != nil {
+			emit()
+		}
 	}
 	return flush
 }
 
-func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []indexParseResult, batchStore SessionEntryBatchStore, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) indexWriteFlush {
+func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []indexParseResult, batchStore SessionEntryBatchStore, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
 	flush := indexWriteFlush{
 		indexed:         make([]indexedMeta, len(results)),
 		logEntries:      make([]IndexLogEntry, len(results)),
 		profileSessions: make([]IndexProfileSession, len(results)),
+	}
+	// record is the single place a result's final outcome is stored, and it
+	// emits the result's one progress advance, so no branch can store an
+	// outcome without reporting it.
+	record := func(position int, indexed indexedMeta, logEntry IndexLogEntry, profileSession IndexProfileSession) {
+		flush.indexed[position] = indexed
+		flush.logEntries[position] = logEntry
+		flush.profileSessions[position] = profileSession
+		if emit != nil {
+			emit()
+		}
 	}
 	writes := make([]SessionEntryWrite, 0, len(results))
 	writePositions := make([]int, 0, len(results))
@@ -1983,9 +2232,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	nowMs := time.Now().UnixMilli()
 	for i, result := range results {
 		if result.output == nil || p.metricsStore == nil {
-			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
-			flush.logEntries[i] = result.logEntry
-			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
+			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, 0))
 			continue
 		}
 		if result.nativeCandidate != nil {
@@ -2002,9 +2249,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			p.reportIndexRefusal(result.im.session.SessionID, err)
 			errMsg := err.Error()
 			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
-			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
-			flush.logEntries[i] = logEntry
-			flush.profileSessions[i] = p.makeIndexProfileSession(result, logEntry, 0)
+			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, logEntry, p.makeIndexProfileSession(result, logEntry, 0))
 			continue
 		}
 		capture := SessionContentCaptureWrite{}
@@ -2012,12 +2257,26 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		// certified-complete case AND the one incompleteness that still holds
 		// every entry, because a bounded preview may never be read whole,
 		// exported or published, and an omitted-records session must be.
+		// The assessment is the one final write decision for V1 captures;
+		// the flags above remain as parser inputs and diagnostics.
 		requireFullContent := result.fullContent
-		if result.fullContent {
+		if result.assessmentReady {
+			assessed, assessErr := result.assessment.ContentCapture(contentAuthorityFor(result), result.im.session.TranscriptOrigin, nowMs)
+			if assessErr != nil {
+				err := fmt.Errorf("%s: session %s assessment refused the store write; the stored index was preserved: %w", logPrefix, result.im.session.SessionID, assessErr)
+				p.reportIndexRefusal(result.im.session.SessionID, err)
+				errMsg := err.Error()
+				logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
+				record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, logEntry, p.makeIndexProfileSession(result, logEntry, 0))
+				continue
+			}
+			capture = assessed
+			requireFullContent = assessed.CaptureFormat == ContentCaptureFormatFull
+		} else if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		} else if result.partial {
 			format := ContentCaptureFormatPreviewOnly
-			if result.omissionsRecorded {
+			if result.omissionsRecorded || result.unknownRecorded {
 				format = ContentCaptureFormatFull
 				requireFullContent = true
 			}
@@ -2035,8 +2294,17 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			artifactIdentity = &identity
 		}
 		target := p.sessionVersionTarget(result.input.session)
+		// Operator-initiated rebuilds (harvest index --force, Reindex) carry
+		// explicit intent through the last-good guard on the same principle as
+		// a format conversion: accidental preview-over-full stays refused
+		// while deliberate downgrade-then-restore proceeds.
+		writeMode := SessionEntryWriteReplaceAll
+		if p.config.Force || p.config.Reindex || outcome == IndexOutcomeReindexed {
+			writeMode = SessionEntryWriteExplicitRebuild
+		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
+			Mode:               writeMode,
 			RequireFullContent: requireFullContent,
 			ContentCapture:     capture,
 			SessionID:          result.im.session.SessionID,
@@ -2098,13 +2366,14 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		flush.writeDuration = writeDuration
 	}
-	for _, position := range nativePositions {
-		indexed, logEntry, profileSession := p.activateNativeGenerationResult(ctx, results[position], outcome, logPrefix, writeLane)
-		flush.indexed[position] = indexed
-		flush.logEntries[position] = logEntry
-		flush.profileSessions[position] = profileSession
+	// Native candidates stage their content files before the serialized write
+	// lane, and each candidate commits through the lane as soon as its own
+	// staging completes: a slow candidate no longer delays the commits of the
+	// others, and every commit reports its own progress immediately.
+	p.stageAndCommitNativeGenerations(ctx, results, nativePositions, outcome, logPrefix, writeLane, func(position int, indexed indexedMeta, logEntry IndexLogEntry, profileSession IndexProfileSession) {
 		flush.writeDuration += profileSession.WriteDuration
-	}
+		record(position, indexed, logEntry, profileSession)
+	})
 	for i, writeResult := range writeResults {
 		perSessionWriteDuration := writeDurations[i]
 		flush.writeStats.Add(writeResult.Stats)
@@ -2122,16 +2391,22 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			slog.Warn(logPrefix+": store session entries", "session_id", result.im.session.SessionID, "error", writeErr)
 			errMsg := writeErr.Error()
 			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, result.entryCount, result.startedAt, nil, &errMsg)
-			flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
-			flush.logEntries[position] = logEntry
-			flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
+			record(position, indexedMeta{session: result.im.session, startMs: result.im.startMs}, logEntry, p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration))
 			continue
 		}
 		result.entryCount = writeResult.EntriesCount
 		logEntry := p.makeIndexLogEntry(result.im, outcome, result.entryCount, result.startedAt, nil, nil)
-		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true}
-		flush.logEntries[position] = logEntry
-		flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
+		indexed := indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true, retainedUnknown: result.retainedUnknown}
+		if len(result.retainedUnknown) > 0 {
+			remediation := "Keep the source capture; re-index with a position-aware adapter before exporting or publishing this session."
+			if result.unknownRecorded {
+				remediation = "Export within the public transfer limits, or publish to a receiver supporting retained_unknown_v1 within those limits; complete evidence remains stored locally and interpretation remains partial."
+			}
+			p.reportDiagnostic(DiagnosticEntry{ErrorType: "unknown_data_retained", Location: string(result.im.session.SessionID), Message: result.strictRefusal, Remediation: remediation})
+		} else if result.omissionsRecorded {
+			p.reportDiagnostic(permanentRefusalDiagnostic(result.im.session.SessionID, result.refusalCode, true, errors.New(result.strictRefusal)))
+		}
+		record(position, indexed, logEntry, p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration))
 	}
 	return flush
 }
@@ -2947,7 +3222,7 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 
 // processSession atomically writes the accepted capture and carries its bytes
 // and evidence into the existing store and streamed indexing path.
-func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) workerResult {
+func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, writeLane *storeWriteLane) workerResult {
 	session := entry.Session
 	result := SessionResult{
 		SessionID:  session.SessionID,
@@ -3320,7 +3595,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if err := p.fs.WriteFile(filepath.Join(tmpDir, metaFilename), metaJSON, defaults.PrivateFilePerm); err != nil {
 		return fail(errors.Join(fmt.Errorf("write metadata for %s: %w", session.SessionID, err), p.fs.RemoveAll(tmpDir)))
 	}
-	if err := p.replaceSessionDir(tmpDir, sessionDir, string(session.SessionID), metaFilename); err != nil {
+	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, string(session.SessionID), metaFilename, writeLane); err != nil {
 		return fail(errors.Join(err, p.fs.RemoveAll(tmpDir)))
 	}
 	if cleanupErr := p.fs.RemoveAll(tmpDir); cleanupErr != nil {
@@ -3889,6 +4164,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	outcome IndexOutcome,
 	logPrefix string,
 	priorDownstream *streamedDownstreamResult,
+	refusedKinds []RecordKindRefusal,
 ) (*PipelineResult, error) {
 	prog := p.config.Progress
 
@@ -3898,8 +4174,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 	indexed := 0
 	successfullyIndexed := make([]SessionID, 0, len(priorIndexed)+len(indexSessions))
 	remainingSuccessfullyIndexed := make([]SessionID, 0, len(indexSessions))
+	var retainedUnknown []RetainedUnknownKindCount
 	for _, im := range priorIndexed {
 		if im.indexed {
+			retainedUnknown = append(retainedUnknown, im.retainedUnknown...)
 			indexed++
 			successfullyIndexed = append(successfullyIndexed, im.session.SessionID)
 		}
@@ -3915,9 +4193,11 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	if p.indexers != nil && p.metricsStore != nil {
 		indexProfileStart := time.Now()
-		batchIndexed, batchLogs := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
+		batchIndexed, batchLogs, batchRefused := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
+		refusedKinds = append(refusedKinds, batchRefused...)
 		for i, result := range batchIndexed {
 			if result.indexed {
+				retainedUnknown = append(retainedUnknown, result.retainedUnknown...)
 				indexed++
 				successfullyIndexed = append(successfullyIndexed, result.session.SessionID)
 				remainingSuccessfullyIndexed = append(remainingSuccessfullyIndexed, result.session.SessionID)
@@ -4136,6 +4416,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	pipelineResult.Summary.RebuiltFromFiles = p.rebuiltFromFiles
 	pipelineResult.Summary.RebuildSkipped = p.rebuildStale
+	pipelineResult.Summary.RefusedRecordKinds = AggregateRecordKindRefusals(refusedKinds)
+	pipelineResult.Summary.RetainedUnknownKinds = aggregateRetainedUnknownCounts(retainedUnknown)
 	pipelineResult.IndexCoverage = p.resolveIndexCoverage(ctx, indexLogEntries, logPrefix)
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
@@ -4344,19 +4626,27 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 // Missing input returns (nil, 0, "", nil). Unreadable metadata returns an error
 // that prohibits fallback reconstruction from native source information.
 //
-// Optimization: queries the DB for host_slug and parent_id before scanning the
-// filesystem. If the DB has a location record, jumps directly to the session
-// directory. Falls back to full directory scan only when the session is not in
-// the DB (e.g. pre-DB ingestion data).
+// The database location is authoritative: when it records the session, only
+// that directory is read, and a missing metadata file there is missing input,
+// not a reason to search the tree. The full directory scan runs only when the
+// database has no location for the session (e.g. pre-DB ingestion data) or the
+// lookup itself failed.
 func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string, error) {
-	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
+	return p.reconstructFromMetadataIn(ctx, sid, nil)
+}
+
+// reconstructFromMetadataIn is reconstructFromMetadata answering stored
+// location reads from snap when it holds the session. It writes no shared
+// pipeline state, so maintenance passes call it from parallel workers.
+func (p *Pipeline) reconstructFromMetadataIn(ctx context.Context, sid SessionID, snap locationSnapshot) (*DiscoveredSession, int64, string, error) {
+	if err := p.checkStoredMetadataCompatibilityIn(ctx, sid, nil, snap); err != nil {
 		return nil, 0, "", err
 	}
 	outputDir := string(p.config.OutputDir)
 
 	// Fast path: query DB for the session's host_slug and parent_id.
 	if p.metricsStore != nil {
-		hostSlug, parentID, lookupErr := p.metricsStore.LookupSessionLocation(ctx, sid)
+		hostSlug, parentID, lookupErr := p.storedLocation(ctx, sid, snap)
 		if lookupErr != nil {
 			slog.Warn("pipeline: lookup session location", "session_id", sid, "error", lookupErr)
 			// Fall through to full scan below.
@@ -4382,7 +4672,9 @@ func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (
 					return &result.session, result.startMs, result.transcriptPath, nil
 				}
 			}
-			// DB had a record but the file was missing — fall through to full scan.
+			// The recorded location is authoritative: its metadata file is
+			// missing, so there is nothing to reconstruct from.
+			return nil, 0, "", nil
 		}
 	}
 
@@ -4829,6 +5121,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var indexLogEntries []IndexLogEntry
 	var drainIndexed []indexedMeta
 	var drainIndexLogEntries []IndexLogEntry
+	var drainRefusedKinds []RecordKindRefusal
 	extractTotal := len(entryByID) // all extractable sessions (roots + children)
 
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageExtract, Total: extractTotal + len(fallbackTargets)})
@@ -4836,14 +5129,16 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	workers := parallelWorkers(p.config)
 
 	if len(rootEntries) > 0 {
-		staging := NewStagingBuffer(extractTotal+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
+		staging := NewStagingBuffer(extractTotal+1, p.stagingArenaSize())
 		for parentID := range externalParents {
 			// The parent is outside this batch; DB insertion already stored it,
 			// so staging commits it for ordering only.
 			staging.Commit(parentID)
 		}
 
-		var reindexWorkersDone atomic.Bool
+		// workersDone is closed once runParallel returns, so the drain loop
+		// wakes on the producers finishing instead of polling for them.
+		reindexWorkersDone := make(chan struct{})
 		// Reserve every possible per-session reconciliation failure, as in Run.
 		reindexErrChSize := extractTotal + 1
 		if reindexErrChSize < 16 {
@@ -4868,31 +5163,31 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			extractProfileStart := time.Now()
 			runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
-				wr := p.processSession(ctx, entry)
+				wr := p.processSession(ctx, entry, reindexWriteLane)
 				wr.schedulingParentID = OperationalParentID(entry.Session)
 				wr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
-				staging.Add(wr)
+				staging.Add(ctx, wr)
 				// BFS over subtree: process children inline (same goroutine → no directory races).
 				queue := childrenOf[entry.Session.SessionID]
 				for len(queue) > 0 {
 					childID := queue[0]
 					queue = queue[1:]
 					childEntry := entryByID[childID]
-					cwr := p.processSession(ctx, childEntry)
+					cwr := p.processSession(ctx, childEntry, reindexWriteLane)
 					cwr.schedulingParentID = OperationalParentID(childEntry.Session)
 					cwr.schedulingResolved = true
 					extractDoneAtomic.Add(1)
 					emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
-					staging.Add(cwr)
+					staging.Add(ctx, cwr)
 					queue = append(queue, childrenOf[childID]...)
 				}
 				// Release heap transcript bytes — arena already has the copy.
 				wr.transcriptData = nil
 				return wr
 			})
-			reindexWorkersDone.Store(true)
+			close(reindexWorkersDone)
 			p.recordIndexProfileStage(StageExtract, extractProfileStart, int(extractDoneAtomic.Load()), extractTotal+len(fallbackTargets))
 		}()
 
@@ -4905,7 +5200,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			dbInsertProfileStart := time.Now()
 			defer close(reindexIndexCh)
-			reindexDrainResults := p.drainLoop(ctx, staging, &reindexWorkersDone, reindexIndexCh, reindexIndexDoneCh, reindexErrCh, prog, extractTotal, reindexWriteLane)
+			reindexDrainResults := p.drainLoop(ctx, staging, reindexWorkersDone, reindexIndexCh, reindexIndexDoneCh, reindexErrCh, prog, extractTotal, reindexWriteLane)
 			sessionResults = append(sessionResults, reindexDrainResults...)
 			emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: len(reindexDrainResults), Total: extractTotal})
 			p.recordIndexProfileStage(StageDBInsert, dbInsertProfileStart, len(reindexDrainResults), extractTotal)
@@ -4918,7 +5213,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			defer close(reindexDownstreamCh)
 			indexProfileStart := time.Now()
-			drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, reindexIndexCh, reindexIndexDoneCh, prog, IndexOutcomeReindexed, "reindex", reindexDownstreamCh, reindexWriteLane)
+			drainIndexed, drainIndexLogEntries, drainRefusedKinds = p.indexLoop(ctx, reindexIndexCh, reindexIndexDoneCh, prog, IndexOutcomeReindexed, "reindex", reindexDownstreamCh, reindexWriteLane)
 			p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), extractTotal)
 		}()
 
@@ -4963,7 +5258,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		p.recordIndexProfileStage(StageExtract, fallbackExtractProfileStart, len(fallbackTargets), len(fallbackTargets))
 
 		// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", &reindexDownstream)
+		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", &reindexDownstream, drainRefusedKinds)
 	}
 
 	// No extractable sessions — all are fallback. Process fallback sessions directly.
@@ -4994,7 +5289,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var storeErr error
 
 	// Steps 3e-end: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil, nil)
 }
 
 // forcedNativeRefreshUsable decides whether harvest index --force re-reads a

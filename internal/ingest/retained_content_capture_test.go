@@ -31,6 +31,7 @@ type retainedContentCaptureFixtures struct {
 }
 
 func TestRetainedContentCaptureProducers(t *testing.T) {
+	t.Parallel()
 	var fixtures retainedContentCaptureFixtures
 	if err := yaml.Unmarshal(retainedContentCaptureYAML, &fixtures); err != nil {
 		t.Fatal(err)

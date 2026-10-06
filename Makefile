@@ -13,14 +13,26 @@ set -e; \
 	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
 endef
 
-# The race detector for `make check`. On by default (local runs and, in CI, the
-# release PRs and post-merge pushes that must carry full race coverage). CI
-# feature PRs pass RACE=0 to skip it: the detector amplifies the suite ~3x-16x
-# for wall time the budget can't spend on every PR, and the concurrency it
-# guards is re-tested with -race on release PRs and post-merge. See the make
-# check step in .github/workflows/tests.yml.
-RACE ?= 1
+# The race detector for `make check`. Off by default, everywhere (CI and
+# local): the detector amplifies the suite ~3x-16x for wall time the gate's
+# budget can't spend, and the release-only race predicate that used to carry
+# release/post-merge race coverage is currently disabled (the race suite does
+# not fit the 30-minute gate budget; the re-enable note lives in the check
+# job of .github/workflows/tests.yml, pending #389). Opt in explicitly with
+# `make check RACE=1` — race pass on the gate, -race on the astgrep pass — or
+# run `go test -race ./...` directly. The gate still plans and screens under
+# -race=false. RACE is a make variable, not an environment contract: the gate
+# is driven by its -race flag, which this target passes explicitly, and the
+# astgrep pass below reads GORACE_FLAG from the same source.
+RACE ?= 0
 GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
+
+# Wall-clock start of `make check`, stamped immediately at parse time so the
+# gate's pre-test wall includes the fmt/lint/ast-grep/release-guard steps that
+# run before the test passes. `cmd/testgate run` reads it and reports
+# `test-start - CHECK_START_NS` as the pre-test wall, separate from the test
+# wall. `:=` forces the stamp now, before the prerequisites run.
+CHECK_START_NS := $(shell date +%s%N)
 
 all: build
 
@@ -78,28 +90,53 @@ lint: web-stub
 	# Running golangci-lint is deferred until its existing findings are resolved.
 	# Use go vet for now
 	# golangci-lint run ./...
-	go vet ./...
+	./scripts/vet-go.sh
 
-check: fmt lint
-	ast-grep scan --config sgconfig.yml .
-	# The key grep gate (internal/tui/gates/astrules/, enforced by
-	# keys_astgrep_test.go) shells out to ast-grep too, but is gated behind
-	# the "astgrep" build tag so a plain `go test ./...` never depends on the
-	# binary - ast-grep is ALREADY a hard `make check` dependency via the
-	# untagged scan above, so this adds no new external requirement here.
-	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...
-	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml
-	# One pass over every package. The race detector (GORACE_FLAG) is on by
-	# default and gated to RACE=0 on CI feature PRs; see the RACE variable above.
-	# The explicit timeout outlives Go's 10m default so a slow package gets the
-	# job's own budget instead of a mid-suite panic. cmd/peasant and internal/api
-	# exceed 10m when the race detector runs; local runs default to RACE=1.
-	go test -timeout=30m $(GORACE_FLAG) ./...
+check: fmt lint sqlite-source-audit
+	@set -e; \
+	export CHECK_START_NS="$(CHECK_START_NS)"; \
+	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
+	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
+	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
+	go run ./cmd/testgate run -race=$(RACE)
+	# The gate above replaces the single `go test` pass. It computes the run
+	# plan from `go test -list`, runs a race pass and a no-race pass (or one
+	# no-race pass when RACE=0), merges the streams, and applies the
+	# exactly-once screen. The key grep gate (internal/tui/gates/astrules/,
+	# enforced by keys_astgrep_test.go) runs as a pre-test step above because it
+	# is gated behind the "astgrep" build tag, so a plain `go test` never depends
+	# on the ast-grep binary; ast-grep is already a hard `make check` dependency
+	# via the untagged scan.
+	#
+	# That untagged scan runs with --error=unused-suppression: its config loads
+	# every ast-grep/ rule, so a suppression that no longer suppresses the code
+	# it names is an error there and fails this step. The key gate scans with
+	# only its own rules, so it cannot make that judgement - hence the flag is
+	# on the repo-wide scan, not on the key gate.
+	#
+	# The race detector is off by default everywhere (see the RACE variable
+	# above; RACE=1 opts in). The gate is driven by its
+	# -race flag, which the invocation passes explicitly; with RACE=0 it runs
+	# a single no-race pass but still plans and screens. cmd/peasant and
+	# internal/api exceed Go's 10m default under race, so the gate sets
+	# -timeout=0 and lets the job's own budget apply.
 
 # Explicit revisions keep the expensive cross-revision check out of ordinary builds.
 .PHONY: check-harvester-versions
 check-harvester-versions:
 	go run ./scripts/harvester-version-guard -base "$(BASE)" -candidate "$(or $(CANDIDATE),HEAD)"
+
+# The audited SQLite driver is part of the main module and its normal test plan.
+.PHONY: sqlite-source-audit sqlite-connection-test module-install-check
+sqlite-source-audit:
+	python3 scripts/check-sqlite-fork.py
+
+sqlite-connection-test: sqlite-source-audit
+	go test -race -count=1 ./third_party/zombiezen-sqlite/...
+
+# Real module ZIP distribution gate; deliberately separate from the unit plan.
+module-install-check: sqlite-source-audit
+	go run ./scripts/check-module-install
 
 # Local end-to-end skip-gate harness. Requires podman + a village
 # checkout (VILLAGE_REPO, default sibling) or VILLAGE_BIN+SETUP_DEMO_BIN.

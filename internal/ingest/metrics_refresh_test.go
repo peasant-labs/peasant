@@ -1,12 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
-	"io"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,9 +11,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/metrics_refresh.yaml
@@ -37,7 +34,7 @@ func (s *metricsRefreshStore) SaveMetricsForInput(ctx context.Context, input *in
 }
 
 func TestPersistentHarvestRetriesStoredDownstreamWithoutIndexing(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "metrics.db"), store.WithPoolSize(1))
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +55,7 @@ func TestPersistentHarvestRetriesStoredDownstreamWithoutIndexing(t *testing.T) {
 	// No native or retained files exist. Discovery selection excludes everything;
 	// previously stored sessions still receive the invoked downstream maintenance.
 	config.SessionFilter = func(ingest.DiscoveredSession) bool { return false }
-	pipeline, err := ingest.NewPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(),
+	pipeline, err := newTestPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(),
 		map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, config,
 		ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithAnalyzer(metrics.NewEngine(backing)), ingest.WithClassifier(classifier))
 	if err != nil {
@@ -112,14 +109,8 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 			WantDiagnostic string `yaml:"wantDiagnostic"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(metricsRefreshYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(metricsRefreshYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("metric refresh fixture requires one document")
 	}
 	required := []string{"current-index-refreshes-metrics", "failed-save-is-visible", "future-producer-refusal-is-visible"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {
@@ -134,7 +125,7 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 		seen[row.Name] = true
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
-			db, err := store.Open(filepath.Join(t.TempDir(), "metrics.db"), store.WithPoolSize(1))
+			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -160,7 +151,7 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 			}
 			config := makePipelineConfig(testOutputDir)
 			config.Reindex, config.Force = true, true
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, config,
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, config,
 				ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})),
 				ingest.WithAnalyzer(metrics.NewEngine(&metricsRefreshStore{Store: db, fail: row.FailSave})))
 			if err != nil {

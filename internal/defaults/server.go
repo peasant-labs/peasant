@@ -13,6 +13,14 @@ const (
 	ServerFlushDelay      = 100 * time.Millisecond
 	ServerClientTimeout   = 2 * time.Second
 	ServerWriteTimeout    = 10 * time.Second
+	// ServerPortReleaseWait bounds how long starting a server waits for another
+	// process to stop accepting connections on the requested port, so a server
+	// that `peasant web stop` just asked to shut down can release it first.
+	ServerPortReleaseWait = time.Second
+	// ServerPortProbeInterval is the pause between two checks of the port.
+	ServerPortProbeInterval = 100 * time.Millisecond
+	// ServerPortProbeTimeout bounds one connection attempt to a loopback address.
+	ServerPortProbeTimeout = 500 * time.Millisecond
 )
 
 // Server buffer sizes and limits.
@@ -55,8 +63,21 @@ const (
 	RouteSyncRedactions    Route = "/api/v1/sync/redactions"
 	RouteSyncPush          Route = "/api/v1/sync/push"
 	RouteSyncLogin         Route = "/api/v1/sync/login"
-	RouteSyncIngest        Route = "/api/v1/sync/ingest"
-	RouteSyncIngestStatus  Route = "/api/v1/sync/ingest/status"
+	RouteSyncLogout        Route = "/api/v1/sync/logout"
+	// RoutePublications reads the publication state of named sessions for the
+	// signed-in Village account, whatever the saved selection lists.
+	RoutePublications Route = "/api/v1/publications"
+	// RouteVillageCollectives lists the Village collectives the signed-in user
+	// belongs to, read with this computer's stored credential.
+	RouteVillageCollectives Route = "/api/v1/village/collectives"
+	// RouteAutoPublishRule saves (PUT) or removes (DELETE) one auto-publish
+	// rule of the settings page.
+	RouteAutoPublishRule Route = "/api/v1/settings/auto-publish/{id}"
+	// RouteAutoPublishInstall installs one rule's hooks in one recorded
+	// repository the rule covers.
+	RouteAutoPublishInstall Route = "/api/v1/settings/auto-publish/{id}/install"
+	RouteSyncIngest         Route = "/api/v1/sync/ingest"
+	RouteSyncIngestStatus   Route = "/api/v1/sync/ingest/status"
 
 	// Map / Review surfaces. Path params use Go 1.22 ServeMux
 	// {wildcard} syntax; commit/path/file/branch arrive as query params.
@@ -72,16 +93,14 @@ const (
 	// RouteSearch is global full-text transcript search (Cmd-K). Query in ?q=,
 	// optional ?limit=; no path param (search spans all projects).
 	RouteSearch Route = "/api/v1/search"
+
+	// RouteSettings reads every configuration key (GET) and changes one editable
+	// key in config.yaml (PATCH).
+	RouteSettings Route = "/api/v1/settings"
 )
 
 // DevProxy is the default dev-mode proxy address for the Next.js dev server.
 const DevProxy = "localhost:3000"
-
-// WSOriginPattern is a typed WebSocket origin pattern.
-type WSOriginPattern string
-
-// WSAllowedOrigins is the default set of allowed WebSocket origins.
-var WSAllowedOrigins = []WSOriginPattern{"*"}
 
 // Health check polling parameters for readiness probes.
 const (

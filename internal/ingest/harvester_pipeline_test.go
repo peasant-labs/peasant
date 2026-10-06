@@ -3,7 +3,6 @@ package ingest_test
 import (
 	_ "embed"
 	"maps"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
@@ -12,10 +11,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/harvester_pipeline.yaml
@@ -42,7 +40,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			ExpectedHarnesses []ingest.Harness `yaml:"expectedHarnesses"`
 		} `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(harvesterPipelineYAML, &fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(harvesterPipelineYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -55,7 +53,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
 			fs := testutil.NewMemFS()
-			db, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"))
+			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,7 +89,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex, cfg.Force, cfg.DryRun, cfg.Harness = fixture.Reindex, fixture.Force, fixture.DryRun, fixture.Scope
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithHarvesterVersions(versions))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithHarvesterVersions(versions))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -146,9 +144,19 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			}
 		})
 	}
+	required := make(map[string]bool)
 	for _, name := range fixtures.RequiredNames {
+		if name == "" || required[name] {
+			t.Fatalf("invalid required fixture name %q", name)
+		}
+		required[name] = true
 		if !names[name] {
 			t.Fatalf("missing required fixture %q", name)
+		}
+	}
+	for name := range names {
+		if !required[name] {
+			t.Errorf("unlisted harvester fixture %q", name)
 		}
 	}
 }

@@ -222,7 +222,7 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 		s := SessionSummary{
 			ID:            row.SessionID,
 			Harness:       defaults.Harness(row.ModelHarness),
-			StartTime:     time.UnixMilli(row.StartMs),
+			StartTime:     time.UnixMilli(row.StartMs).UTC(),
 			DurationMins:  row.DurationMinutes,
 			TotalTokens:   row.TokensTotal,
 			TurnCount:     row.TurnCount,
@@ -267,6 +267,28 @@ func (p *StoreDataProvider) sessionCandidate(row *store.SessionRow) sessionvisib
 		Origin:          sessionorigin.Origin(row.SessionOrigin),
 		ParentSessionID: ingest.SessionID(parent),
 	}
+}
+
+// SelectionScopeByID reports, for each named session stored on this computer,
+// whether the saved selection admits it into the local lists. It applies
+// selection scope only, through the same projection the lists use, and reads
+// exactly the named rows. An identifier that names no stored session is absent
+// from the map. The publication read uses it to say that a session it returns
+// is one the lists leave out; it is never a reason to withhold the session.
+func (p *StoreDataProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
+	rows, err := p.store.SessionsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: selection scope by id: %w", err)
+	}
+	selected := make(map[string]bool, len(rows))
+	for i := range rows {
+		visible, err := p.visibleSessionRow(&rows[i])
+		if err != nil {
+			return nil, fmt.Errorf("store adapter: selection scope of session %q: %w", rows[i].SessionID, err)
+		}
+		selected[rows[i].SessionID] = visible
+	}
+	return selected, nil
 }
 
 // visibleSessionRow applies SELECTION scope only. It backs the aggregate
@@ -369,12 +391,14 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness})
+	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness, BoundedPreview: !store.PublishableWithOmissions(snapshot.Capture)})
 	if validationErr != nil {
 		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}
 	s.Turns = projection.Turns
 	s.NativeMetadata = projection.NativeMetadata
+	s.RetainedUnknown = projection.RetainedUnknown
+	s.Diagnostics = projection.Diagnostics
 
 	return &s, nil
 }
@@ -390,7 +414,7 @@ func (p *StoreDataProvider) ChildSessionsForParent(ctx context.Context, parentID
 		remote := r.CanonicalRemote
 		refs[i] = ChildSessionRef{
 			ID:        r.SessionID,
-			StartTime: time.UnixMilli(r.StartMs),
+			StartTime: time.UnixMilli(r.StartMs).UTC(),
 			Project:   projectlabel.Label(remote, r.ProjectName),
 		}
 	}

@@ -8,12 +8,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitemigration"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // DefaultPoolSize is the SQLite connection-pool size used when neither
@@ -22,12 +23,17 @@ import (
 // many too, but the cost is amortized over the process lifetime.
 const DefaultPoolSize = 10
 
-// EnvPoolSize overrides the pool size. Each Open creates PoolSize connections
-// up front, and every connection re-parses the schema + runs the PRAGMAs — so
-// the test suite (which needs a single connection per Open across hundreds of
-// Opens) sets this to "1" to avoid opening DefaultPoolSize connections each
-// time. Mirrors the village backend's POOL_MAX_CONNS env knob. An explicit
-// WithPoolSize option takes precedence over this.
+// EnvPoolSize overrides the pool size. Each Open eagerly opens PoolSize
+// connections up front; the PRAGMAs run lazily, once per connection, on that
+// connection's first Take. The migration-state check runs once per Open, not
+// once per connection. The test suite opens hundreds of stores but takes only
+// one or two connections from each, so it sets this low to avoid opening
+// DefaultPoolSize connections every time. It is a consistency knob, not a
+// performance milestone: a measurement of 400 golden Opens put the
+// one-connection default within about 1% of the ten-connection pool — a
+// negligible share of the suite's CPU. Mirrors the village backend's
+// POOL_MAX_CONNS env knob. An explicit WithPoolSize option takes precedence
+// over this environment default.
 const EnvPoolSize = "PEASANT_DB_POOL_SIZE"
 
 // resolvePoolSize picks the pool size: an explicit WithPoolSize option wins,
@@ -269,6 +275,10 @@ type Store struct {
 	// index_coverage.go. Production leaves it nil, and SessionsWithoutEntries
 	// then runs the real SQLite query.
 	sessionMembershipChunk sessionMembershipChunkQuery
+	// reclaimSeam is a nil production hook a crash-recovery test sets to stop
+	// the reclaim after its row transaction commits and before any generation
+	// directory is removed. It proves the row-first ordering is crash-safe.
+	reclaimSeam func(stage string) error
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -314,10 +324,11 @@ func WithSkipMigrations() OpenOption {
 	return func(o *openOptions) { o.skipMigrations = true }
 }
 
-// WithPoolSize sets the SQLite connection-pool size for this Open. Use 1 for
-// single-threaded callers (e.g. tests, one-shot CLI commands) to avoid opening
-// DefaultPoolSize connections — each of which re-parses the schema and runs the
-// PRAGMAs. A value <= 0 falls back to the EnvPoolSize override / DefaultPoolSize.
+// WithPoolSize sets the SQLite connection-pool size for this Open. Use a small
+// value for callers that open many stores (e.g. tests, one-shot CLI commands)
+// to avoid eagerly opening DefaultPoolSize connections — only the connections
+// actually taken run their PRAGMAs. A value <= 0 falls back to the EnvPoolSize
+// override / DefaultPoolSize.
 func WithPoolSize(n int) OpenOption {
 	return func(o *openOptions) { o.poolSize = n }
 }
@@ -348,6 +359,33 @@ func WithGenerationArtifacts(artifacts GenerationArtifactStore, locker SessionLo
 // confirmation (legacy behavior; appropriate for fresh DBs and tests).
 func WithMigrationConsent(consent MigrationConsent) OpenOption {
 	return func(o *openOptions) { o.migrationConsent = consent }
+}
+
+// newSQLitePool opens the connection pool, retrying briefly when two first
+// opens of the same brand-new file race the write-ahead-log conversion. SQLite
+// returns SQLITE_BUSY when one connection tries to switch a database to WAL
+// while another is still converting it; the loser retries until the winner's
+// conversion is durable. Every other error, and the exhausted retry budget,
+// return unchanged.
+func newSQLitePool(dbPath string, opts sqlitex.PoolOptions) (*sqlitex.Pool, error) {
+	const maxAttempts = 40
+	for attempt := 0; ; attempt++ {
+		pool, err := sqlitex.NewPool(dbPath, opts)
+		if err == nil {
+			return pool, nil
+		}
+		if attempt == maxAttempts-1 || !isTransientOpenContention(err) {
+			return nil, err
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// isTransientOpenContention reports whether an open error is a lock that a
+// brief retry can clear.
+func isTransientOpenContention(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "database is locked") || strings.Contains(message, "SQLITE_BUSY")
 }
 
 // Open creates or opens the SQLite database at dbPath, applies migrations,
@@ -382,7 +420,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			return sqlitex.ExecuteTransient(conn, "PRAGMA wal_autocheckpoint = 0;", nil)
 		}
 	}
-	pool, err := sqlitex.NewPool(dbPath, sqlitex.PoolOptions{
+	pool, err := newSQLitePool(dbPath, sqlitex.PoolOptions{
 		PoolSize:    resolvePoolSize(o.poolSize),
 		PrepareConn: prepare,
 	})
@@ -404,6 +442,25 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			pool.Put(conn)
 			_ = pool.Close()
 			return nil, err
+		}
+		// A brand-new database is created at head from the committed baseline
+		// snapshot instead of replaying the 61-migration chain. The read-only
+		// probe is only an optimization: applyBaselineIfStillFresh re-checks the
+		// full predicate inside its immediate transaction and rolls back when the
+		// database stopped being fresh, so an existing (or foreign-identity)
+		// database falls through to the chain, which stays the only upgrade path.
+		fresh, err := databaseIsFresh(conn)
+		if err != nil {
+			pool.Put(conn)
+			_ = pool.Close()
+			return nil, fmt.Errorf("store: probe whether the database is fresh: %w", err)
+		}
+		if fresh {
+			if _, err := applyBaselineIfStillFresh(conn); err != nil {
+				pool.Put(conn)
+				_ = pool.Close()
+				return nil, err
+			}
 		}
 		if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
 			pool.Put(conn)

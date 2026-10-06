@@ -1,12 +1,10 @@
 package githooks_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -17,7 +15,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 func TestLifecycle_RefusesSharedAndLinkedHookPaths(t *testing.T) {
@@ -307,25 +305,12 @@ type lifecycleFixtureMutation struct {
 // content on a kind that cannot use it.
 func loadLifecycleFixture(data []byte) (lifecycleFixtureDocument, error) {
 	var document lifecycleFixtureDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf(
 			"hook lifecycle fixture rule failed: typed YAML fields must match the document schema; "+
 				"unknown or malformed data invalidates the mounted lifecycle evidence; where=%s loader=first-document decode; "+
 				"when=test fixture loading; impact=install/status/uninstall coverage cannot be trusted; "+
 				"fix=remove unknown fields and provide expectedCaseCount plus typed cases: %w",
-			lifecycleFixturePath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found another YAML document")
-		}
-		return document, fmt.Errorf(
-			"hook lifecycle fixture rule failed: exactly one YAML document is allowed; trailing data is silently ignored "+
-				"and invalidates the mounted lifecycle evidence; where=%s loader=end-of-document check; when=test fixture loading; "+
-				"impact=install/status/uninstall coverage cannot be trusted; fix=remove the second document so the next decode returns EOF: %w",
 			lifecycleFixturePath, err)
 	}
 	if len(document.Cases) == 0 || document.ExpectedCaseCount != len(document.Cases) {

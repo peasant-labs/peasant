@@ -17,10 +17,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/projection_commit_recovery.yaml
@@ -37,6 +38,7 @@ type projectionRecoveryFixture struct {
 	Generation struct {
 		CompleteID      string `yaml:"complete_id"`
 		FailedID        string `yaml:"failed_id"`
+		DiscardedID     string `yaml:"discarded_id"`
 		LongTextPadding int    `yaml:"long_text_padding"`
 	} `yaml:"generation"`
 	Cases []struct {
@@ -337,12 +339,13 @@ func visibleGeneration(t *testing.T, s *Store, sid schema.SessionID) string {
 
 func activateTestGeneration(t *testing.T, s *Store, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) error {
 	t.Helper()
-	return s.ActivateGeneration(context.Background(), GenerationActivation{
+	_, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 		Generation:     v2,
 		Blobs:          blobs,
 		IndexerVersion: 1,
 		IndexedAtMs:    1,
 	})
+	return err
 }
 
 // TestProjectionCommitRecovery drives the real activation through all six
@@ -397,7 +400,7 @@ func TestProjectionCommitRecovery(t *testing.T) {
 			clearRecoveryFault(t, s, tc.Seam)
 			switch tc.Recovery {
 			case "recover":
-				if err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
+				if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
 					t.Fatalf("recover after seam %s: %v", tc.Seam, err)
 				}
 			case "retry":
@@ -409,6 +412,19 @@ func TestProjectionCommitRecovery(t *testing.T) {
 				// renamed into place. Recovery must refuse it without changing
 				// the last-good read authority.
 				assertIntentDigestMismatchRefused(t, s, id, fixture)
+				return
+			case "discard-unverifiable":
+				// A staged blob was damaged after the candidate was renamed
+				// into place. Recovery must verify the bytes, discard the
+				// unverifiable candidate instead of wedging the session, and
+				// let a fresh candidate stage and activate.
+				assertUnverifiableCandidateDiscarded(t, s, root, id, fixture)
+				return
+			case "discard-undecodable-manifest":
+				// A staged manifest became undecodable after the candidate was
+				// renamed into place. Recovery must discard it for the same
+				// reason and let a fresh candidate stage and activate.
+				assertUndecodableManifestDiscarded(t, s, root, id, fixture)
 				return
 			default:
 				t.Fatalf("unknown recovery %q", tc.Recovery)
@@ -470,7 +486,7 @@ func assertIntentDigestMismatchRefused(t *testing.T, s *Store, id schema.Session
 	if err := s.generationArtifacts.WriteIntent(context.Background(), *intent); err != nil {
 		t.Fatalf("rewrite the mismatched durable intent: %v", err)
 	}
-	if err := s.RecoverGenerationActivation(context.Background(), id); err == nil {
+	if _, err := s.RecoverGenerationActivation(context.Background(), id); err == nil {
 		t.Fatal("recovery accepted a mismatched durable candidate binding; it must be refused")
 	}
 	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
@@ -496,6 +512,99 @@ func assertIntentDigestMismatchRefused(t *testing.T, s *Store, id schema.Session
 	}
 	if (before.IndexedAt == nil) != (after.IndexedAt == nil) || (before.IndexedAt != nil && *before.IndexedAt != *after.IndexedAt) {
 		t.Fatalf("refused recovery changed indexed_at from %v to %v", before.IndexedAt, after.IndexedAt)
+	}
+}
+
+// assertUnverifiableCandidateDiscarded damages one blob of a candidate that was
+// renamed into place with a pending intent, then replays it through the real
+// recovery path. A candidate whose bytes no longer verify can never replay, so
+// recovery must discard the pending intent instead of wedging the session: the
+// last-good generation stays visible, the damaged directory is retained for
+// cleanup, a fresh candidate stages and activates, and the damaged directory
+// becomes removable once it no longer owns the intent.
+func assertUnverifiableCandidateDiscarded(t *testing.T, s *Store, root string, id schema.SessionID, fixture projectionRecoveryFixture) {
+	t.Helper()
+	ref := schema.SourceEntryRef(fixture.CorruptArtifact.EntryRef)
+	damagedPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.FailedID, blobName(ref))
+	original, err := os.ReadFile(damagedPath)
+	if err != nil {
+		t.Fatalf("read staged blob: %v", err)
+	}
+	if len(original) == 0 {
+		t.Fatal("staged blob is empty; the fixture expects captured content")
+	}
+	damaged := append([]byte(nil), original...)
+	damaged[0] ^= 0xff
+	if err := os.WriteFile(damagedPath, damaged, 0o600); err != nil {
+		t.Fatalf("damage staged blob: %v", err)
+	}
+	before := readIndexStateForTest(t, s, id)
+	if _, err := s.RecoverGenerationActivation(context.Background(), id); !errors.Is(err, errGenerationCandidateDiscarded) {
+		t.Fatalf("recovery error = %v, want the discarded-candidate signal", err)
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
+		t.Fatalf("after discarded recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
+	}
+	after := readIndexStateForTest(t, s, id)
+	if after.IndexerVersion != before.IndexerVersion {
+		t.Fatalf("discarded recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
+	}
+	if pending, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || pending != nil {
+		t.Fatalf("discarded recovery left a pending intent: %+v (err %v)", pending, err)
+	}
+	if _, err := os.Stat(damagedPath); err != nil {
+		t.Fatalf("damaged candidate was not retained for cleanup: %v", err)
+	}
+	// A fresh candidate stages and activates; the discarded one never blocks it.
+	fresh, freshBlobs := buildTestGeneration(t, id, fixture.Generation.DiscardedID, "diag text G3", "diag input G3", "diag output G3")
+	if err := activateTestGeneration(t, s, fresh, freshBlobs); err != nil {
+		t.Fatalf("activate a fresh candidate after a discarded one: %v", err)
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.DiscardedID {
+		t.Fatalf("after fresh activation visible = %q, want %q", got, fixture.Generation.DiscardedID)
+	}
+	// With the intent gone, the damaged directory is removable.
+	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err != nil {
+		t.Fatalf("clean up the discarded candidate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(damagedPath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("discarded candidate directory survived cleanup: %v", err)
+	}
+}
+
+// assertUndecodableManifestDiscarded corrupts a staged candidate's manifest so
+// it cannot be decoded, then replays it through the real recovery path. A
+// manifest that cannot be read or decoded can never replay, so recovery must
+// discard the pending intent instead of wedging the session: the last-good
+// generation stays visible and a fresh candidate stages and activates. The
+// undecodable directory stays in place because ownership cannot be proven for
+// cleanup.
+func assertUndecodableManifestDiscarded(t *testing.T, s *Store, root string, id schema.SessionID, fixture projectionRecoveryFixture) {
+	t.Helper()
+	manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.FailedID, "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte("{not a generation manifest"), 0o600); err != nil {
+		t.Fatalf("corrupt staged manifest: %v", err)
+	}
+	before := readIndexStateForTest(t, s, id)
+	if _, err := s.RecoverGenerationActivation(context.Background(), id); !errors.Is(err, errGenerationCandidateDiscarded) {
+		t.Fatalf("recovery error = %v, want the discarded-candidate signal", err)
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
+		t.Fatalf("after discarded recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
+	}
+	after := readIndexStateForTest(t, s, id)
+	if after.IndexerVersion != before.IndexerVersion {
+		t.Fatalf("discarded recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
+	}
+	if pending, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || pending != nil {
+		t.Fatalf("discarded recovery left a pending intent: %+v (err %v)", pending, err)
+	}
+	fresh, freshBlobs := buildTestGeneration(t, id, fixture.Generation.DiscardedID, "diag text G3", "diag input G3", "diag output G3")
+	if err := activateTestGeneration(t, s, fresh, freshBlobs); err != nil {
+		t.Fatalf("activate a fresh candidate after a discarded one: %v", err)
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.DiscardedID {
+		t.Fatalf("after fresh activation visible = %q, want %q", got, fixture.Generation.DiscardedID)
 	}
 }
 
@@ -641,10 +750,12 @@ func assertDurableRecoveryOutcome(t *testing.T, root string, id schema.SessionID
 // signals when an exclusive lock attempt starts. It wraps the production
 // locker, so the test asserts against a genuine flock contention rather than a
 // sleep: the signal proves the waiter reached the lock boundary before the
-// test checks that it cannot complete.
+// test checks that it cannot complete. It also stamps the instant the real
+// lock call returns, for an acquisition-order assertion with no timing window.
 type lockAttemptBarrier struct {
 	SessionLocker
 	exclusiveAttempts chan struct{}
+	acquired          chan time.Time
 }
 
 func (b *lockAttemptBarrier) LockExclusive(ctx context.Context, id schema.SessionID) (func() error, error) {
@@ -652,7 +763,14 @@ func (b *lockAttemptBarrier) LockExclusive(ctx context.Context, id schema.Sessio
 	case b.exclusiveAttempts <- struct{}{}:
 	default:
 	}
-	return b.SessionLocker.LockExclusive(ctx, id)
+	release, err := b.SessionLocker.LockExclusive(ctx, id)
+	if err == nil && b.acquired != nil {
+		select {
+		case b.acquired <- time.Now():
+		default:
+		}
+	}
+	return release, err
 }
 
 // TestConcurrentReadAcrossActivation pauses a reader inside its snapshot
@@ -674,12 +792,17 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	longToolInput := "rg parser " + strings.Repeat("y", fixture.Generation.LongTextPadding)
 	longToolResult := "parser.go:12 " + strings.Repeat("z", fixture.Generation.LongTextPadding)
 	attempts := make(chan struct{}, 4)
-	s.sessionLocker = &lockAttemptBarrier{SessionLocker: s.sessionLocker, exclusiveAttempts: attempts}
+	acquired := make(chan time.Time, 4)
+	s.sessionLocker = &lockAttemptBarrier{SessionLocker: s.sessionLocker, exclusiveAttempts: attempts, acquired: acquired}
 
 	g1, g1Blobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText+" G1", longToolInput, longToolResult)
 	if err := activateTestGeneration(t, s, g1, g1Blobs); err != nil {
 		t.Fatalf("activate G1: %v", err)
 	}
+	// The setup activation above took the exclusive lock and left its signal
+	// and stamp buffered; clear them so the waits below observe only contention.
+	drainExclusiveAttempts(attempts)
+	drainAcquired(acquired)
 
 	wantG1 := map[schema.SourceEntryRef]string{
 		schema.SourceEntryRef(generationRefs[0]): longText + " G1",
@@ -707,37 +830,30 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 			return nil
 		})
 	}()
-	select {
-	case got := <-readerEntered:
-		if got != fixture.Generation.CompleteID {
-			t.Fatalf("reader entered with generation %q, want G1", got)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("reader did not enter its snapshot callback")
+	if got := testwait.Receive(t, readerEntered, "reader entered its snapshot callback"); got != fixture.Generation.CompleteID {
+		t.Fatalf("reader entered with generation %q, want G1", got)
 	}
 
 	g2, g2Blobs := buildTestGeneration(t, id, fixture.Generation.FailedID, longText+" G2", longToolInput, longToolResult)
 	activationDone := make(chan error, 1)
 	go func() { activationDone <- activateTestGeneration(t, s, g2, g2Blobs) }()
 	waitForExclusiveAttempt(t, attempts, "activation")
-	select {
-	case err := <-activationDone:
-		close(readerRelease)
-		t.Fatalf("activation completed while the reader held the shared lock (err=%v)", err)
-	case <-time.After(200 * time.Millisecond):
-	}
 
+	// The barrier signals before the real lock call, so a completion check
+	// cannot prove the lock is held. Release the reader and assert instead that
+	// the activation acquired the exclusive lock only after that instant; its
+	// attempt above happened first, so a lock that was not held would have been
+	// acquired before releaseAt.
+	activationReleaseAt := time.Now()
 	close(readerRelease)
-	if err := <-readerDone; err != nil {
+	if err := testwait.Receive(t, readerDone, "reader left its snapshot callback"); err != nil {
 		t.Fatalf("reader: %v", err)
 	}
-	select {
-	case err := <-activationDone:
-		if err != nil {
-			t.Fatalf("activation after reader release: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("activation did not complete after the reader released the shared lock")
+	if err := testwait.Receive(t, activationDone, "activation completed after the reader released the shared lock"); err != nil {
+		t.Fatalf("activation after reader release: %v", err)
+	}
+	if acquiredAt := testwait.Receive(t, acquired, "activation acquired the exclusive session lock"); acquiredAt.Before(activationReleaseAt) {
+		t.Fatal("activation acquired the exclusive session lock before the reader released the shared lock")
 	}
 	if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
 		t.Fatalf("after activation visible = %q, want G2", got)
@@ -756,33 +872,22 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 			return nil
 		})
 	}()
-	select {
-	case <-cleanupReaderEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("second reader did not enter its snapshot callback")
-	}
+	testwait.Receive(t, cleanupReaderEntered, "second reader entered its snapshot callback")
 	cleanupDone := make(chan error, 1)
 	go func() {
 		cleanupDone <- s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.CompleteID)
 	}()
 	waitForExclusiveAttempt(t, attempts, "cleanup")
-	select {
-	case err := <-cleanupDone:
-		close(cleanupReaderRelease)
-		t.Fatalf("cleanup removed the inactive generation while a reader held the shared lock (err=%v)", err)
-	case <-time.After(200 * time.Millisecond):
-	}
+	cleanupReleaseAt := time.Now()
 	close(cleanupReaderRelease)
-	if err := <-cleanupReaderDone; err != nil {
+	if err := testwait.Receive(t, cleanupReaderDone, "second reader left its snapshot callback"); err != nil {
 		t.Fatalf("second reader: %v", err)
 	}
-	select {
-	case err := <-cleanupDone:
-		if err != nil {
-			t.Fatalf("cleanup after reader release: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("cleanup did not complete after the reader released the shared lock")
+	if err := testwait.Receive(t, cleanupDone, "cleanup completed after the reader released the shared lock"); err != nil {
+		t.Fatalf("cleanup after reader release: %v", err)
+	}
+	if acquiredAt := testwait.Receive(t, acquired, "cleanup acquired the exclusive session lock"); acquiredAt.Before(cleanupReleaseAt) {
+		t.Fatal("cleanup acquired the exclusive session lock before the reader released the shared lock")
 	}
 	// Cleanup must never remove the active generation.
 	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err == nil {
@@ -795,9 +900,34 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 // rather than goroutine scheduling.
 func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label string) {
 	t.Helper()
-	select {
-	case <-attempts:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s never attempted the exclusive session lock", label)
+	testwait.Receive(t, attempts, label+" attempted the exclusive session lock")
+}
+
+// drainExclusiveAttempts clears the setup activation's exclusive-lock signal so
+// the converted waits observe only the contended operations. The attempt
+// barrier buffers that signal, and a converted wait would otherwise consume it
+// and lose the proof that activation and cleanup wait for a reader's shared
+// lock.
+func drainExclusiveAttempts(attempts chan struct{}) {
+	for {
+		select {
+		case <-attempts:
+			continue
+		default:
+			return
+		}
+	}
+}
+
+// drainAcquired clears the setup activation's lock-acquisition stamp for the
+// same reason.
+func drainAcquired(acquired chan time.Time) {
+	for {
+		select {
+		case <-acquired:
+			continue
+		default:
+			return
+		}
 	}
 }

@@ -3,8 +3,6 @@ package config_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/selection_policy.yaml
@@ -56,15 +53,9 @@ const (
 
 func loadSelectionPolicyFixtures(t *testing.T) selectionPolicyFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(selectionPolicyFixtureYAML))
-	decoder.KnownFields(true)
 	var fixtures selectionPolicyFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(selectionPolicyFixtureYAML, &fixtures); err != nil {
 		t.Fatalf("decode selection policy fixture with strict fields: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("selection policy fixture must contain exactly one YAML document: %v", err)
 	}
 	if fixtures.DeclaredRows != len(fixtures.Cases) || fixtures.DeclaredRows < 13 {
 		t.Fatalf("selection policy fixture row guard failed: declared=%d actual=%d minimum=13", fixtures.DeclaredRows, len(fixtures.Cases))

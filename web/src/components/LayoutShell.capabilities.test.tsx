@@ -1,13 +1,13 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, act, waitFor, within } from '@testing-library/react';
+import { render, screen, cleanup, act, within } from '@testing-library/react';
+import { capabilitiesResponse, UI_CAPABILITY_CASES, type CapabilityCase } from '@/test/fixtures/uiCapabilities';
 import {
-  parseStrictYAML,
-  requireExactRequiredFields,
-  requireRecord,
-  requireUniqueNames,
-} from '@/test/strictYaml';
+  headerFailures,
+  loadShellHeaderManifest,
+  paletteFailures,
+  shippedItems,
+} from '../../scripts/visual/shell-header-manifest.mjs';
+import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
 
@@ -23,17 +23,6 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push }),
 }));
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle: vi.fn() }) }));
-
-// A valid 64-hex project hash so the palette surfaces per-project jumps.
-const PROJECT_HASH = 'a'.repeat(64);
-const PROJECT = {
-  projectHash: PROJECT_HASH,
-  project: '/work/demo-project',
-  sessions: 1,
-  recordedFiles: 1,
-  totalFiles: 1,
-  openChanges: 0,
-};
 
 // ---------------------------------------------------------------------------
 // MockWebSocket — LayoutShell mounts the real WebSocketProvider, which opens a
@@ -55,32 +44,8 @@ class MockWebSocket {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Fixture: capability HTTP scenarios × expected code-map discoverability.
-// ---------------------------------------------------------------------------
-type CapabilityCase = {
-  name: string;
-  expectVisible: boolean;
-  pending?: boolean;
-  throw?: boolean;
-  status?: number;
-  body?: unknown;
-};
-
-const fixturePath = resolve(process.cwd(), 'src/components/testdata/ui_capabilities.yaml');
-const fixture = requireRecord(
-  parseStrictYAML(readFileSync(fixturePath, 'utf8'), 'ui capabilities fixture'),
-  'ui capabilities fixture',
-);
-requireExactRequiredFields(fixture, ['cases'], 'ui capabilities fixture');
-const cases = fixture.cases as CapabilityCase[];
-if (!Array.isArray(cases) || cases.length !== 10) {
-  throw new Error(`ui capabilities fixture must contain exactly 10 cases, got ${Array.isArray(cases) ? cases.length : 'non-array'}`);
-}
-requireUniqueNames(cases as unknown as Record<string, unknown>[], 'ui capabilities fixture.cases');
-if (cases.filter((c) => c.expectVisible).length !== 1) {
-  throw new Error('ui capabilities fixture must contain exactly one code-map-visible case');
-}
+const manifest = loadShellHeaderManifest();
+const shipped = shippedItems(manifest);
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let originalWebSocket: typeof globalThis.WebSocket;
@@ -101,42 +66,20 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-/** Wire the HTTP mock for one capability case (capabilities endpoint + the
- *  palette's own data endpoints). Everything else is an explicit test failure. */
+/** Wire the HTTP mock for one capability case. Everything else the shell may
+ *  ask is answered as a running app would; any other request fails the test. */
 function mockHttp(row: CapabilityCase): void {
   fetchMock.mockImplementation(async (input: string | URL) => {
     const url = new URL(String(input), 'http://localhost');
-    if (url.pathname === '/api/v1/config/capabilities') {
-      if (row.throw) throw new Error('network down');
-      if (row.pending) return new Promise<Response>(() => {}); // never resolves
-      const status = row.status ?? 200;
-      if (row.body === undefined) return new Response(null, { status });
-      return new Response(JSON.stringify(row.body), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    if (url.pathname === '/api/v1/projects/summary') return Response.json({ projects: [PROJECT] });
-    if (url.pathname === '/api/v1/search') return Response.json({ query: url.searchParams.get('q'), results: [] });
-    if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
+    if (url.pathname === '/api/v1/config/capabilities') return capabilitiesResponse(row);
+    if (url.pathname === '/api/v1/health') return Response.json({ status: 'ok' });
     throw new Error(`unexpected test request ${url.pathname}`);
   });
 }
 
-async function openPalette(): Promise<void> {
-  await act(async () => {
-    window.dispatchEvent(new Event(OPEN_COMMAND_PALETTE_EVENT));
-  });
-}
-
-function navLabels(): string[] {
-  const nav = screen.getByRole('navigation', { name: 'Main navigation' });
-  return Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
-}
-
-describe('LayoutShell — capability-gated code-map discoverability', () => {
-  it.each(cases.map((row) => [row.name, row] as const))(
-    'keeps the code map %s',
+describe('LayoutShell — the code map stays route-only whatever the server advertises', () => {
+  it.each(UI_CAPABILITY_CASES.map((row) => [row.name, row] as const))(
+    'keeps the code map out of the header and the palette: %s',
     async (_name, row) => {
       mockHttp(row);
       render(
@@ -144,31 +87,49 @@ describe('LayoutShell — capability-gated code-map discoverability', () => {
           <main>body</main>
         </LayoutShell>,
       );
+      // Let the capability request settle (or stay pending) before reading.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
 
-      // Open the palette and wait until its own data has loaded, so the
-      // capability fetch has had the same settling window: a fail-closed result
-      // must hide the map even with the palette fully populated.
-      await openPalette();
+      expect(headerFailures(manifest, { theme: 'light', shipped })).toEqual([]);
+      expect(screen.queryByRole('link', { name: 'code map' })).not.toBeInTheDocument();
+
+      await act(async () => {
+        window.dispatchEvent(new Event(OPEN_COMMAND_PALETTE_EVENT));
+      });
       const dialog = await screen.findByRole('dialog', { name: 'Command palette' });
-      await within(dialog).findByText('demo-project · changes');
-
-      if (row.expectVisible) {
-        // Nav shows the canonical three sections in analytics-first order…
-        await screen.findByRole('link', { name: 'code map' });
-        expect(navLabels()).toEqual(['home', 'analytics', 'code map']);
-        // …and, in the SAME render, the palette exposes both the section jump
-        // and the per-project map jump (simultaneity).
-        expect(within(dialog).getByText('go to code map')).toBeInTheDocument();
-        expect(within(dialog).getByText('demo-project · map')).toBeInTheDocument();
-      } else {
-        // Fail closed: no map tab, and no map commands in the palette.
-        expect(navLabels()).toEqual(['home', 'analytics']);
-        expect(screen.queryByRole('link', { name: 'code map' })).not.toBeInTheDocument();
-        expect(within(dialog).queryByText('go to code map')).not.toBeInTheDocument();
-        expect(within(dialog).queryByText('demo-project · map')).not.toBeInTheDocument();
-        // The palette still works — the home jump is present.
-        expect(within(dialog).getByText('go to home')).toBeInTheDocument();
-      }
+      expect(paletteFailures(manifest)).toEqual([]);
+      expect(within(dialog).getByText('go to home')).toBeInTheDocument();
+      expect(within(dialog).queryByText('go to code map')).not.toBeInTheDocument();
     },
   );
+});
+
+function CacheWriter() {
+  const store = usePublishState();
+  return <button onClick={() => store.updateRedactionCache((cache) => new Map(cache).set('standard:session', { status: 'failure', error: 'scan failed' }))}>save scan failure</button>;
+}
+function CacheReader() {
+  const store = usePublishState();
+  const entry = store.redactionCache.get('standard:session');
+  return <p>{entry?.status === 'failure' ? entry.error : 'no cached scan'}</p>;
+}
+it('shares the publish cache between consumers through the production shell', async () => {
+  mockHttp(UI_CAPABILITY_CASES[0]);
+  const view = render(<LayoutShell><CacheWriter /><CacheReader /></LayoutShell>);
+  await act(async () => { screen.getByRole('button', { name: 'save scan failure' }).click(); });
+  expect(screen.getByText('scan failed')).toBeInTheDocument();
+  view.rerender(<LayoutShell><CacheReader /></LayoutShell>);
+  expect(screen.getByText('scan failed')).toBeInTheDocument();
+});
+
+it('is the composition that supplies the publish provider: a consumer outside the shell fails', () => {
+  // The shell is the production mount for PublishProvider. A consumer without it
+  // must fail loudly rather than fall back to page-local publish state.
+  function BareConsumer() {
+    usePublishState();
+    return null;
+  }
+  expect(() => render(<BareConsumer />)).toThrow(/PublishProvider/);
 });

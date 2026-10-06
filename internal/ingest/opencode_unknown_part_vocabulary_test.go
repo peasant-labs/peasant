@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
-	"gopkg.in/yaml.v3"
 )
 
 type unknownTypeExpectation struct {
@@ -45,15 +42,9 @@ type unknownPartVocabularyDocument struct {
 var unknownPartVocabularyYAML []byte
 
 func loadUnknownPartVocabularyDocument(data []byte) (unknownPartVocabularyDocument, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var document unknownPartVocabularyDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, errors.New("expected exactly one YAML document")
 	}
 	presentVocab := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {
@@ -92,8 +83,8 @@ func newUnknownVocabularyAdapter(t *testing.T) *ingest.OpenCodeAdapter {
 // TestOpenCodeLegacyUnknownPartVocabularyTolerated proves that a well-formed
 // legacy part whose declared type is outside the known transcript set no longer
 // fails the session. The known text, reasoning, and tool parts keep their exact
-// rendering; a text-bearing unknown part becomes an inert system note; the
-// text-free step-start and file parts are dropped; and one diagnostic per
+// rendering; unknown parts retain full opaque evidence without display;
+// deliberately ignored control parts stay ignored; and one diagnostic per
 // distinct unknown type names the type and its row count.
 //
 // Mutation proof: restoring the closed-set failure in
@@ -140,7 +131,7 @@ func TestOpenCodeLegacyUnknownPartVocabularyTolerated(t *testing.T) {
 
 	byType := make(map[string]int)
 	for _, warning := range metadata.Diagnostics.Warnings {
-		if warning.ErrorType != string(ingest.OpenCodeUnknownPartType) {
+		if warning.ErrorType != string(ingest.ContentCaptureUnknownDataRetained) {
 			continue
 		}
 		for _, expected := range testCase.ExpectedUnknownTypes {
@@ -187,8 +178,26 @@ func TestOpenCodeLegacyUnknownPartVocabularyTolerated(t *testing.T) {
 			t.Errorf("rendered turns omit known marker %q", marker)
 		}
 	}
-	if !strings.Contains(rendered, testCase.ExpectedInertNote) {
-		t.Errorf("rendered turns omit the inert note %q from the text-bearing unknown part", testCase.ExpectedInertNote)
+	if strings.Contains(rendered, testCase.ExpectedInertNote) {
+		t.Fatal("opaque evidence became displayed conversation")
+	}
+	retained := map[string]int{}
+	for _, entry := range entries {
+		records, err := ingest.RetainedUnknownOf(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range records {
+			retained[record.Kind]++
+		}
+	}
+	for _, expected := range testCase.ExpectedUnknownTypes {
+		if expected.Type == "step-start" {
+			continue
+		}
+		if retained[expected.Type] != expected.Count {
+			t.Fatalf("retained counts: %+v", retained)
+		}
 	}
 	for _, forbidden := range testCase.ForbiddenMarkers {
 		if strings.Contains(rendered, forbidden) {

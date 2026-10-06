@@ -10,9 +10,14 @@
 # project-targeted one is published only when the project it names is the one in
 # scope. Without a repository scope, behaviour is exactly what it was.
 #
+# The Share wizard and the CLI chooser publish sessions the user chose one by
+# one, so they scope the annotation push to exactly those sessions
+# (sessions-only): an annotation with no target session is withheld, whatever
+# project it names.
+#
 # Every case must account for all five candidates: leaving one unlisted would let
-# a silent publish pass unnoticed.
-expectedCaseCount: 2
+# a silent publish pass unnoticed. Deleting a case fails
+# annotation_repository_scope.manifest.yaml, and every scope needs a case.
 cases:
   - name: a selection alone publishes everything it cannot attribute to a session
     scope: selection-only
@@ -31,5 +36,15 @@ cases:
       - scoped-project
     withheld:
       - other-session
+      - other-project
+      - unattributable
+
+  - name: a sessions-only scope publishes only the annotations of the chosen sessions
+    scope: sessions-only
+    published:
+      - selected-session
+    withheld:
+      - other-session
+      - scoped-project
       - other-project
       - unattributable

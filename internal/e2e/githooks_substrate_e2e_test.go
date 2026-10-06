@@ -56,7 +56,7 @@ func TestGitHooksSubstrate_SeedsRepositoryIdentity(t *testing.T) {
 	runPeasantInSandbox(t, peasantBinary, sandbox, "ingest", "--include-active")
 
 	dbPath := filepath.Join(sandbox.dataHome, string(defaults.AppName), "peasant.db")
-	db, err := store.Open(dbPath, store.WithPoolSize(1))
+	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatalf("open the disposable repository's seeded store at %s: %v", dbPath, err)
 	}

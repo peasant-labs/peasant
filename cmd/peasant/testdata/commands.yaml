@@ -85,6 +85,17 @@ commands:
         flags:
           - { name: port, type: int, default: "8690" }
 
+  - name: Open
+    use: open
+    flags:
+      - { name: session, type: string, default: "" }
+      - { name: port, type: int, default: "8690" }
+      - { name: hook, type: bool, default: "false" }
+    exit_cases:
+      - args: ["--help"]
+        expect_error: false
+        output_contains: ["open", "--session", "--hook", "--port"]
+
   - name: Push
     use: push
     flags:
@@ -106,6 +117,8 @@ commands:
       - { name: concurrency, type: int, default: "0" }
       - { name: repository, type: string, default: "" }
       - { name: timeout, type: duration, default: "0s" }
+      - { name: require-auto-publish-rule, type: bool, default: "false" }
+      - { name: auto-publish-event, type: string, default: "" }
     exit_cases:
       - args: ["--help"]
         expect_error: false

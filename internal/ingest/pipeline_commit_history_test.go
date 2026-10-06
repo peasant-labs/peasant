@@ -130,7 +130,7 @@ func TestPipeline_CommitHistoryCapture(t *testing.T) {
 				adapters := map[ingest.Harness]ingest.AdapterFactory{
 					ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta}),
 				}
-				pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), adapters, cfg,
+				pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()), ingest.WithStore(database))
 				if err != nil {
 					t.Fatal(err)

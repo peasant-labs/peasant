@@ -15,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -26,12 +25,13 @@ import (
 const doorSecret = "sk-ant-api03-CLIDOORKEY000000000000x"
 
 func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	const sessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
 	seedUploadableSession(t, dir, sessionID)
 	full := strings.Repeat("safe text ", 300) + "FULL-PREVIEW-TAIL " + doorSecret
 	seedEntryCarrying(t, dir, sessionID, full)
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func seedEntryCarrying(t *testing.T, dir, sessionID, content string) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

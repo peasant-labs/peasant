@@ -23,9 +23,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type mixedStoreSnapshot struct {
@@ -96,6 +96,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 			if row.Fault != mixedNoEdge {
 				options = append(options, store.WithIndexFormatConversions(mixedConversion(row.Fault)))
 			}
+			// ast-grep-ignore: no-migrating-store-open-in-tests -- tests persist/convert/rollback against custom index formats registered at open; requires migrations to run to create the schema.
 			db, err := store.Open(path, options...)
 			if err != nil {
 				t.Fatal(err)
@@ -153,7 +154,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}
-				db, err = store.Open(path, store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{}))
+				db, err = store.Open(path, store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{}), store.WithSkipMigrations())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -235,7 +236,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}
-				db, err = store.Open(path, store.WithPoolSize(1))
+				db, err = store.Open(path, store.WithPoolSize(1), store.WithSkipMigrations())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -455,7 +456,7 @@ func TestMixedIndexFormatRegistrationRejectsInvalidEdgesBeforeOpening(t *testing
 				edge.Convert = nil
 				options = append(options, store.WithIndexFormatConversions(edge))
 			}
-			db, err := store.Open(path, options...)
+			db, err := store.Open(path, append(options, store.WithSkipMigrations())...)
 			if err == nil {
 				db.Close()
 				t.Fatal("invalid registry opened a database")
@@ -507,6 +508,7 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 		}
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
+			// ast-grep-ignore: no-migrating-store-open-in-tests -- tests the pipeline upgrade for the declaring harness format; requires migrations to run to create the schema the upgrade rewrites.
 			db, err := store.Open(filepath.Join(t.TempDir(), "pipeline.db"), store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{}))
 			if err != nil {
 				t.Fatal(err)

@@ -1,10 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/api"
@@ -15,10 +13,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/index_format_reads.yaml
@@ -64,14 +61,8 @@ func loadIndexFormatReadFixtures(t *testing.T) []indexFormatReadCase {
 		RequiredOperations []string              `yaml:"requiredOperations"`
 		Cases              []indexFormatReadCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexFormatReadsYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexFormatReadsYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("index read fixtures require one document: %v", err)
 	}
 	names, operations := make(map[string]bool), make(map[string]bool)
 	for _, row := range document.Cases {

@@ -14,9 +14,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // executeAnnotateImportCmd runs the annotate command under a test root with
@@ -44,7 +44,7 @@ func executeAnnotateImportCmd(t *testing.T, dir string, args []string) (stdout, 
 func openTestDB(t *testing.T, dir string) *store.Store {
 	t.Helper()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := openPreparedStore(t, dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("openTestDB: %v", err)
 	}

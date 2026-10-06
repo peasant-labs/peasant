@@ -34,6 +34,7 @@ import (
 // longer needs to branch on redact.MaximumAvailable at all: the level never
 // reaches a redactor, which is the point.
 func TestMaximumConfigPath_IsRefusedNotSilentlyWeakened(t *testing.T) {
+	t.Parallel()
 	const yamlContent = "redaction:\n  level: maximum\n"
 
 	memfs := testutil.NewMemFS()

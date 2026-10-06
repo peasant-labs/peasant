@@ -27,14 +27,6 @@ import (
 // the connection and never answers costs one second and nothing else.
 const promptRequestLookupTimeout = time.Second
 
-// githubRemoteHost is the only host a prompt request can belong to.
-//
-// A waiting request names a GitHub pull request, so a remote on any other host
-// can never be the repository it was raised against. Requiring the host keeps a
-// mirror clone — a GitLab remote whose path happens to end in the same two
-// segments — from being told a GitHub request is waiting for it.
-const githubRemoteHost = "github.com"
-
 // reportWaitingPromptRequests asks the village which prompt requests are waiting
 // for the repository being pushed and prints one line per match.
 //
@@ -56,7 +48,7 @@ const githubRemoteHost = "github.com"
 func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, client *village.VillageClient, remote string) {
 	out := cmd.OutOrStdout()
 
-	pushedFullName := githubRepositoryFullName(remote)
+	pushedFullName := village.GitHubRepositoryFullName(remote)
 	if pushedFullName == "" {
 		return
 	}
@@ -108,70 +100,18 @@ func pushedRepositoryGit(ctx context.Context, repository string, scoped bool) (r
 }
 
 // printWaitingPromptRequests prints one line per request that names the
-// repository being pushed and is still waiting on its author, and returns how
-// many lines it printed.
+// repository being pushed, as the repository its pull request was opened against
+// or as the repository its head came from, and is still waiting on its author.
+// It returns how many lines it printed. village.WaitingPromptRequestsFor decides
+// which requests those are.
 //
-// A request for any other repository prints nothing: the caller is pushing this
-// repository, and a request raised against a different one is not theirs to act
-// on here. A request that is not waiting prints nothing either. The village's own
-// query already filters to waiting, so that check is defensive — a later server
-// that serves every state must not turn this line into a claim that something is
-// waiting when it has been attached, or is a preview nobody confirmed.
+// The line names the base, because that is where the pull request lives, even
+// when the match came through the head.
 func printWaitingPromptRequests(w io.Writer, requests []schema.VillagePromptRequest, pushedFullName string) int {
-	printed := 0
-	for _, request := range requests {
-		if request.State != schema.VillagePullRequestAttachmentWaiting {
-			continue
-		}
-		if !sameRepositoryFullName(request.Remote, pushedFullName) {
-			continue
-		}
+	waiting := village.WaitingPromptRequestsFor(requests, pushedFullName)
+	for _, request := range waiting {
 		fmt.Fprintf(w, "waiting: %s#%d — run 'peasant village push' to attach the prompts behind it\n",
 			request.Remote, request.Number)
-		printed++
 	}
-	return printed
-}
-
-// sameRepositoryFullName reports whether two "owner/name" repository names are
-// the same repository. GitHub resolves owner and repository case-insensitively,
-// and the village's own lookups compare them that way, so a remote that differs
-// from the request only in case is the same repository.
-func sameRepositoryFullName(left, right string) bool {
-	return left != "" && right != "" && strings.EqualFold(left, right)
-}
-
-// githubRepositoryFullName reduces a git remote URL to the "owner/name" form a
-// prompt request names, or returns "" when the remote cannot be one.
-//
-// The village serves a request's remote as GitHub's repository full_name —
-// "owner/name", with no host and no scheme — because that is what the App reads
-// out of the webhook. The remote on this machine is whatever the user cloned
-// from, in any of the forms git accepts, so it is normalized first (the same
-// normalization every other remote comparison in Peasant uses) and then reduced
-// to the same shape.
-//
-// The host must be github.com and a GitHub repository is exactly
-// "github.com/owner/name": three segments. Two repositories whose paths end in
-// the same two segments are different repositories, so anything longer is not
-// reduced — a GitLab subgroup is not a GitHub owner. A remote that names no host
-// at all is refused for the same reason: there is nothing to prove it is GitHub.
-// The cost is a false negative for a GitHub Enterprise host, for a remote
-// configured as a bare "owner/name" with no host, and for an SSH-config alias
-// such as "git@github-work:owner/repo" — the commonest local setup of the three,
-// and the one most likely to surprise. All stay silent rather than name a
-// request that may not exist.
-func githubRepositoryFullName(remote string) string {
-	// A trailing slash survives the shared normalizer's .git stripping, and
-	// "owner/repo.git/" would otherwise reduce to a repository named "repo.git".
-	remote = strings.TrimRight(strings.TrimSpace(remote), "/")
-	normalized := ingest.NormalizeRemoteForMatch(remote)
-	if normalized == "" {
-		return ""
-	}
-	segments := strings.Split(normalized, "/")
-	if len(segments) != 3 || !strings.EqualFold(segments[0], githubRemoteHost) {
-		return ""
-	}
-	return segments[1] + "/" + segments[2]
+	return len(waiting)
 }

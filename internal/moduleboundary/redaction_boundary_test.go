@@ -8,7 +8,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -18,8 +17,8 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -102,14 +101,8 @@ func loadBoundaryFixture(t *testing.T) boundaryFixture {
 
 func decodeBoundaryFixture(data []byte) (boundaryFixture, error) {
 	var fixture boundaryFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return boundaryFixture{}, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return boundaryFixture{}, fmt.Errorf("redaction boundary fixture must contain exactly one YAML document")
 	}
 	return fixture, nil
 }
@@ -410,9 +403,12 @@ func TestRedactionScannerHoldsALineAtTheRecordLimit(t *testing.T) {
 // ingested at all and its secrets never reached the redactor.
 //
 // Cost: the record has to be over the retired 10 MiB limit for the case to
-// mean anything, and redacting that much takes about half a second normally
-// and about six minutes under the race detector. The size is not negotiable,
-// so this is the price of proving the outcome on the real engine.
+// mean anything, and redacting that much takes about 24 seconds normally
+// (23.80 s as the minimum of five runs; 23.80-25.71 s spread). The race
+// detector adds roughly an order of magnitude: 346.7 s in an isolated run and
+// 438.6 s in an earlier, busier one, i.e. about 15-18x depending on machine
+// load. The size is not negotiable, so this is the price of proving the
+// outcome on the real engine.
 func TestRedactionEngineHandlesRecordOverTheOldLimit(t *testing.T) {
 	const oldScannerLimit = 10 << 20
 	const secret = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"

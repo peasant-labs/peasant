@@ -1,10 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"io"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -12,9 +10,10 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/refusal_churn.yaml
@@ -27,6 +26,7 @@ type refusalChurnCase struct {
 	SecondSourceReads int    `yaml:"second_source_reads"`
 	SecondUpdated     int    `yaml:"second_updated"`
 	SecondUnchanged   int    `yaml:"second_unchanged"`
+	SecondIndexed     int    `yaml:"second_indexed"`
 }
 
 // refusalChurnFixture is the whole-harvest view of the shared fixture document.
@@ -47,14 +47,8 @@ type refusalChurnFixture struct {
 func loadRefusalChurnFixture(t *testing.T) refusalChurnFixture {
 	t.Helper()
 	var fixture refusalChurnFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(refusalChurnYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(refusalChurnYAML, &fixture); err != nil {
 		t.Fatalf("decode the refusal churn fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("the refusal churn fixture must hold exactly one YAML document: %v", err)
 	}
 	if len(fixture.Required) == 0 {
 		t.Fatal("refusal churn fixture declares no required cases")
@@ -86,16 +80,16 @@ func TestSettledRefusalDoesNotChurn(t *testing.T) {
 	for _, testCase := range fixture.Cases {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
-			runSettledRefusalChurnCase(t, fixture, testCase.Name, testCase.Stored, testCase.Mutate, testCase.SecondSourceReads, testCase.SecondUpdated, testCase.SecondUnchanged)
+			runSettledRefusalChurnCase(t, fixture, testCase.Name, testCase.Stored, testCase.Mutate, testCase.SecondSourceReads, testCase.SecondUpdated, testCase.SecondUnchanged, testCase.SecondIndexed)
 		})
 	}
 }
 
-func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name, stored, mutate string, wantReads, wantUpdated, wantUnchanged int) {
+func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name, stored, mutate string, wantReads, wantUpdated, wantUnchanged, wantIndexed int) {
 	t.Helper()
 	ctx := context.Background()
 	fs := testutil.NewCountingFS(testutil.NewMemFS())
-	database, err := store.Open(filepath.Join(t.TempDir(), "churn.db"))
+	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +120,7 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 		t.Helper()
 		cfg := makePipelineConfig(testOutputDir)
 		adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(sessions, metaMap)}
-		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithStore(indexStore), ingest.WithMetricsStore(indexStore), ingest.WithIndexLogger(database),
 			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 			ingest.WithHarvesterVersions(versions))
@@ -151,8 +145,8 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 	}
 	switch stored {
 	case "refusal":
-		if capture.FailureCode != ingest.ContentCaptureStrictRefused {
-			t.Fatalf("first harvest did not record the strict refusal: %+v; diagnostics=%+v", capture, first.Diagnostics)
+		if capture.FailureCode != ingest.ContentCaptureUnknownDataRetained {
+			t.Fatalf("first harvest did not retain the unknown data: %+v; diagnostics=%+v", capture, first.Diagnostics)
 		}
 	case "legacy_preview":
 		// The migrated shape: a complete capture rewritten to the preview-only
@@ -193,8 +187,8 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 		t.Fatalf("%s: the second harvest reported updated=%d unchanged=%d, want updated=%d unchanged=%d; summary=%+v", name, second.Summary.Updated, second.Summary.Unchanged, wantUpdated, wantUnchanged, second.Summary)
 	}
 	indexed := indexStore.indexedSessions.Load()
-	if (indexed > 0) != (wantUpdated > 0) {
-		t.Fatalf("%s: the second harvest indexed %d session(s), want %s; a settled state must write no index and every other state must re-index", name, indexed, map[bool]string{true: "at least one", false: "none"}[wantUpdated > 0])
+	if indexed != int64(wantIndexed) || second.Summary.Indexed != wantIndexed {
+		t.Fatalf("%s: the second harvest indexed %d session(s), summary %d, want %d; index maintenance is independent of native metadata updates", name, indexed, second.Summary.Indexed, wantIndexed)
 	}
 }
 

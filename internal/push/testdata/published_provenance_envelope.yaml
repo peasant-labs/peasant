@@ -14,6 +14,8 @@
 # Closed-set axes (an unknown value fails the loader):
 #   path:          snapshot | legacy
 #   stats:         absent | zero | positive        (inputSubmissionCount)
+#   captureCount:  omitted | mirrored              (capture metadata; default omitted)
+#   omitCaptureGraph: true clears capture mirrors after constructing the generation
 #   relationships: none | known | known-retained | unknown
 #   rootIdentity:  present | absent
 #   purpose:       interaction | absent
@@ -35,6 +37,7 @@ cases:
   - name: relationships_with_public_anchors_publish
     path: snapshot
     stats: positive
+    captureCount: mirrored
     relationships: known
     rootIdentity: present
     purpose: interaction
@@ -113,6 +116,77 @@ cases:
       detail:
         inputSubmissionCount: 0
         rootSessionId: target
+
+  # Real captures can omit the count even though the generation measures zero.
+  # A different turnCount ensures publication does not recount rendered turns.
+  - name: measured_zero_generation_mirrors_omitted_capture_metadata
+    path: snapshot
+    stats: zero
+    captureCount: omitted
+    relationships: none
+    rootIdentity: present
+    purpose: interaction
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    generationTurnCount: 4
+    expect:
+      uploads: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      mirrors: true
+      detail:
+        turnCount: 4
+        inputSubmissionCount: 0
+        rootSessionId: target
+        purpose: interaction
+
+  - name: absent_count_stays_absent_with_omitted_capture_metadata
+    path: legacy
+    stats: absent
+    captureCount: omitted
+    relationships: none
+    rootIdentity: absent
+    purpose: absent
+    earlier: none
+    visibility: label-sent
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      requiredCapabilities: []
+      mirrors: true
+      detail:
+        inputSubmissionCountAbsent: true
+        rootSessionIdAbsent: true
+        purpose: ""
+        relationships: []
+        project: "github.com:acme/repo"
+        workingDirectory: ""
+
+  - name: generation_graph_mirrors_omitted_capture_metadata
+    path: snapshot
+    stats: positive
+    captureCount: omitted
+    omitCaptureGraph: true
+    relationships: known
+    rootIdentity: present
+    purpose: interaction
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      mirrors: true
+      detail:
+        inputSubmissionCount: 3
+        rootSessionId: target
+        purpose: interaction
 
   - name: positive_input_count_root_and_purpose_publish
     path: snapshot

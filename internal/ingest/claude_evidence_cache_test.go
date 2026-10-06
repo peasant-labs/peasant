@@ -1,12 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -14,8 +10,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/claude_evidence_cache.yaml
@@ -54,15 +50,9 @@ type claudeEvidenceExpectation struct {
 
 func loadClaudeEvidenceCacheFixtures(t *testing.T) claudeEvidenceCacheFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(claudeEvidenceCacheYAML))
-	decoder.KnownFields(true)
 	var fixtures claudeEvidenceCacheFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(claudeEvidenceCacheYAML, &fixtures); err != nil {
 		t.Fatalf("decode Claude evidence cache fixtures: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("Claude evidence cache fixture must contain exactly one YAML document: %v", err)
 	}
 	const expectedRows = 4
 	if fixtures.DeclaredRows != expectedRows || len(fixtures.Cases) != expectedRows {
@@ -72,10 +62,11 @@ func loadClaudeEvidenceCacheFixtures(t *testing.T) claudeEvidenceCacheFixtures {
 	return fixtures
 }
 
-// openEvidenceStore opens a local store and closes it when the test ends.
+// openEvidenceStore opens the local store at dbPath, preparing it from the
+// golden database when missing, and closes it when the test ends.
 func openEvidenceStore(t *testing.T, dbPath string) *store.Store {
 	t.Helper()
-	database, err := store.Open(dbPath)
+	database, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open the local store: %v", err)
 	}
@@ -108,7 +99,7 @@ func TestClaudeAdapter_EvidenceCacheSkipsUnchangedTranscripts(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
-			database := openEvidenceStore(t, filepath.Join(t.TempDir(), "peasant.db"))
+			database := openEvidenceStore(t, storetest.CopyGoldenDB(t))
 
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
 			writeClaudeEvidenceFiles(t, fs, fixture.Files)

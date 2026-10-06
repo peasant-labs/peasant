@@ -17,9 +17,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ func openStoreWithSession(t *testing.T) (s *store.Store, sessionID string) {
 	sessionID = uuid.New().String()
 	insertAnnotationTestSession(t, dbPath, sessionID)
 
-	s, err := store.Open(dbPath)
+	s, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("openStoreWithSession: store.Open: %v", err)
 	}

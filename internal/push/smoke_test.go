@@ -63,6 +63,7 @@ func loadPushWalkFixture(t *testing.T) []pushWalkScenario {
 }
 
 func TestPushWizard_ScriptedFourPageWalk(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range loadPushWalkFixture(t) {
 		t.Run(scenario.Name, func(t *testing.T) {
 			m := mountWizard(testSessions())

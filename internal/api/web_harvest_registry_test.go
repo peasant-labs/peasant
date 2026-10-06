@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"gopkg.in/yaml.v3"
@@ -25,6 +24,7 @@ var webHarvestRegistryYAML []byte
 // This drives the same runner the mounted ingest handler dispatches, with real
 // synthetic Codex input and SQLite. Codex was absent from the old web wiring.
 func TestWebHarvestCanonicalRegistry(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Harnesses  []ingest.Harness `yaml:"harnesses"`
 		SessionID  ingest.SessionID `yaml:"sessionID"`
@@ -35,10 +35,8 @@ func TestWebHarvestCanonicalRegistry(t *testing.T) {
 	if err := yaml.Unmarshal(webHarvestRegistryYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	hs := newTestXDGHomes(t)
 	root := t.TempDir()
-	t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(root, "data"))
-	t.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(root, "config"))
-	t.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(root, "state"))
 	cfg := config.BaseConfig()
 	cfg.Output.BasePath = filepath.Join(root, "managed")
 	for _, harness := range fixture.Harnesses {
@@ -71,7 +69,7 @@ func TestWebHarvestCanonicalRegistry(t *testing.T) {
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
 	}
-	handler := &syncHandler{config: cfg}
+	handler := hs.handler(nil, cfg)
 	handler.runIngestPipeline(ingest.NewProgressState())
 	if handler.ingestError != nil {
 		t.Fatalf("web ingest: %s", handler.ingestError)
@@ -79,7 +77,7 @@ func TestWebHarvestCanonicalRegistry(t *testing.T) {
 	if handler.ingestResult == nil || handler.ingestResult.Summary.Indexed != 1 || !maps.Equal(handler.ingestResult.Summary.HarvesterVersions, ingest.HarvesterVersionRegistry) {
 		t.Fatalf("populated web ingest result = %+v", handler.ingestResult)
 	}
-	db, err := store.Open(string(defaults.ResolveDBFilePath()))
+	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

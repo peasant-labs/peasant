@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,10 +24,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	transcriptmodel "github.com/peasant-labs/peasant/internal/transcript"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type legacySQLiteHarvestExpectation string
@@ -46,6 +47,9 @@ const (
 )
 
 type legacySQLiteMountCase struct {
+	ProjectionVersion         int                            `yaml:"projection_version"`
+	PriorProjectionVersion    int                            `yaml:"prior_projection_version"`
+	PriorProjectionSHA256     string                         `yaml:"prior_projection_sha256"`
 	Name                      string                         `yaml:"name"`
 	SourceFixture             string                         `yaml:"source_fixture"`
 	ExpectedKickstartSessions int                            `yaml:"expected_kickstart_sessions"`
@@ -109,6 +113,9 @@ func loadLegacySQLiteMountDocument(t testing.TB) legacySQLiteMountDocument {
 			t.Fatalf("legacy SQLite mounted expectation has duplicate name %q", testCase.Name)
 		}
 		seen[testCase.Name] = struct{}{}
+		if testCase.PriorProjectionSHA256 != "" && (testCase.PriorProjectionVersion < 1 || testCase.ProjectionVersion <= testCase.PriorProjectionVersion || testCase.ExpectedProjectionSHA256 == "") {
+			t.Fatalf("invalid projection version transition fixture %q", testCase.Name)
+		}
 		if testCase.ExpectedEntries != len(testCase.Entries) {
 			t.Fatalf("legacy SQLite mounted expectation %q entry row guard: declared=%d actual=%d", testCase.Name, testCase.ExpectedEntries, len(testCase.Entries))
 		}
@@ -164,6 +171,7 @@ func TestLegacyOpenCodeSQLiteKickstartEligibilityUsesTypedSessions(t *testing.T)
 }
 
 func TestLegacyOpenCodeMixedRootPreservesJSONBytes(t *testing.T) {
+	t.Parallel()
 	document := loadLegacySQLiteMountDocument(t)
 	for _, testCase := range document.Cases {
 		if testCase.Mutation != legacySQLiteMutationMixedJSON {
@@ -211,6 +219,7 @@ func assertNoOpenCodeSeqCursor(t *testing.T, cursors map[ingest.SessionID]int64,
 }
 
 func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t *testing.T) {
+	t.Parallel()
 	document := loadLegacySQLiteMountDocument(t)
 	for _, testCase := range document.Cases {
 		if testCase.Harvest == legacySQLiteHarvestSkip {
@@ -240,7 +249,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			}
 
 			databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
-			localStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			localStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("open mounted harvest store: %v", err)
 			}
@@ -295,6 +304,10 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				t.Fatal("managed transcript contains a SQLite header or is a raw database copy")
 			}
 			if testCase.ExpectedProjectionSHA256 != "" {
+				if testCase.PriorProjectionSHA256 != "" {
+					prior := assertLegacyProjectionVersionOnlyChange(t, testCase, managedBytes)
+					assertOpenCodeSemanticIndexParity(t, prior, sessionID)
+				}
 				hash := sha256.Sum256(managedBytes)
 				if got := hex.EncodeToString(hash[:]); got != testCase.ExpectedProjectionSHA256 {
 					t.Fatalf("managed projection SHA-256=%s, want %s; bytes=%s", got, testCase.ExpectedProjectionSHA256, managedBytes)
@@ -327,7 +340,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if !harvestSummaryHasCount(output, firstRows, "unchanged") {
 				t.Fatalf("first ordinary repeat did not skip captured sources:\n%s", output)
 			}
-			repeatedStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			repeatedStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("reopen repeated harvest store: %v", err)
 			}
@@ -355,7 +368,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if !harvestSummaryHasCount(output, 1, "updated") || !harvestSummaryHasCount(output, 1, "unchanged") {
 				t.Fatalf("selected SQLite session change did not isolate freshness from the unchanged sibling session:\n%s", output)
 			}
-			changedStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			changedStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("reopen changed-source store: %v", err)
 			}
@@ -457,7 +470,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if reindexErr != nil {
 				t.Fatalf("reindex managed legacy projection through mounted command: %v\n%s", reindexErr, reindexOutput)
 			}
-			reindexStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			reindexStore, err := openPreparedStore(t, databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("reopen reindexed store: %v", err)
 			}
@@ -468,6 +481,35 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			}
 		})
 	}
+}
+
+// Replacing only the managed envelope version must reproduce the prior pinned
+// bytes for this known-only source. Both versions must still decode to the same
+// semantic transcript; opaque-evidence changes cannot silently alter known rows.
+func assertLegacyProjectionVersionOnlyChange(t testing.TB, fixture legacySQLiteMountCase, current []byte) []byte {
+	t.Helper()
+	var envelope struct {
+		Format  string `json:"format"`
+		Version int    `json:"version"`
+	}
+	if err := json.Unmarshal(current, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Version != fixture.ProjectionVersion {
+		t.Fatalf("managed write version=%d, want %d", envelope.Version, fixture.ProjectionVersion)
+	}
+	prefix := []byte(fmt.Sprintf(`{"format":%q,"version":%d,`, envelope.Format, fixture.ProjectionVersion))
+	if !bytes.HasPrefix(current, prefix) {
+		t.Fatal("managed projection does not have its deterministic envelope prefix")
+	}
+	prior := append([]byte(fmt.Sprintf(`{"format":%q,"version":%d,`, envelope.Format, fixture.PriorProjectionVersion)), current[len(prefix):]...)
+	hash := sha256.Sum256(prior)
+	if hex.EncodeToString(hash[:]) != fixture.PriorProjectionSHA256 {
+		t.Fatal("known managed bytes changed beyond the declared version transition")
+	}
+	currentHash := sha256.Sum256(current)
+	t.Logf("source-generated managed v%d SHA-256=%x; restoring v%d reproduces pinned SHA-256=%x", fixture.ProjectionVersion, currentHash, fixture.PriorProjectionVersion, hash)
+	return prior
 }
 
 type mountedProjectionDocument struct {

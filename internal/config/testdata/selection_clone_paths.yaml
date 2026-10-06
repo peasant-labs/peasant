@@ -1,4 +1,3 @@
-declared_rows: 5
 cases:
   - name: legacy-selected-entry-without-clone-paths
     document: |

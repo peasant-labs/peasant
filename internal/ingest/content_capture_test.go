@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -43,6 +44,7 @@ func (a *captureFixtureAdapter) MaterializeTranscript(ctx context.Context, s ing
 }
 
 type captureFixture struct {
+	Unknown        bool           `yaml:"unknown"`
 	Text           string         `yaml:"text"`
 	Contains       bool           `yaml:"contains"`
 	ToolOutput     bool           `yaml:"tool_output"`
@@ -129,6 +131,7 @@ func loadCaptureFixtures(t *testing.T) []captureFixture {
 }
 
 func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()
@@ -151,6 +154,12 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 				}
 				if err != nil {
 					t.Fatal(err)
+				}
+				if fixture.Unknown {
+					if len(result.RetainedUnknown) == 0 {
+						t.Fatal("unknown payload was not retained")
+					}
+					return
 				}
 				if fixture.Control {
 					// Control records carry no conversation text; their entry
@@ -187,8 +196,9 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 }
 
 func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
-		if fixture.Reject || fixture.Control {
+		if fixture.Reject || fixture.Control || fixture.Unknown {
 			continue
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -204,8 +214,8 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			meta.ModelHarness = fixture.Harness
 			meta.Source.FilePath = session.SourcePath.String()
 			meta.Source.Format = session.SourceFormat
-			path := t.TempDir() + "/content.db"
-			database, err := store.Open(path)
+			path := storetest.CopyGoldenDB(t)
+			database, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -218,7 +228,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 					return &captureFixtureAdapter{SourceAdapter: base(fs, git, salt), fs: fs}
 				}
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -232,7 +242,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(path)
+			database, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -259,7 +269,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 				text = strings.Repeat("界", 1000) + "CHANGED_CAPTURE_TAIL"
 				captureFixtureSource(t, fixture, fs, text)
 				cfg.Force = true
-				pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+				pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -286,7 +296,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.Reindex = true
-			pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -321,6 +331,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 }
 
 func TestOpenCodeCapturePreservesPreviewAnchors(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	session := setupOpenCodeFixture(t, fs, testutil.TestOpenCodeSesID, "project")
 	text := strings.Repeat("界", 1000) + "SAFE_CAPTURE_TAIL"
@@ -348,7 +359,8 @@ func TestOpenCodeCapturePreservesPreviewAnchors(t *testing.T) {
 	}
 }
 
-func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
+func TestNativeOpenCodeUnknownSurvivesManagedProjection(t *testing.T) {
+	t.Parallel()
 	native := testfixture.MaterializeByName(t, "current-unknown-conversation-omission")
 	root, err := ingest.NewResolvedPath(filepath.Dir(native.Path))
 	if err != nil {
@@ -366,9 +378,9 @@ func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
 	}
 	data := materialized.Data
 	idx := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
-	// The artifact alone must refuse certification, even without its sidecar.
-	if _, err := idx.IndexTranscriptBytesForCapture(t.Context(), session, data); err == nil {
-		t.Fatal("native omitted row certified from bytes")
+	// Evidence survives the artifact without depending on a sidecar diagnostic.
+	if capture, err := idx.IndexTranscriptBytesForCapture(t.Context(), session, data); err != nil || len(capture.RetainedUnknown) == 0 {
+		t.Fatalf("native unknown row not retained from bytes: %+v %v", capture, err)
 	}
 	path := filepath.Join(t.TempDir(), "retained.json")
 	if err := os.WriteFile(path, data, 0600); err != nil {
@@ -378,8 +390,8 @@ func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := idx.IndexTranscriptForCapture(t.Context(), session); err == nil {
-		t.Fatal("native omitted row certified from retained file")
+	if capture, err := idx.IndexTranscriptForCapture(t.Context(), session); err != nil || len(capture.RetainedUnknown) == 0 {
+		t.Fatalf("native unknown row not retained from file: %+v %v", capture, err)
 	}
 }
 
@@ -387,6 +399,7 @@ func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
 // asserts the observable entry it produces: its provider kind, role, retained
 // payload and preview. The fixture declares one case per represented kind.
 func TestClaudeControlRecordEntryShape(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control {
 			continue
@@ -435,6 +448,7 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 // bound. The preview must obey the bound and the retained payload must fall
 // back to its identity object once it exceeds the payload cap.
 func TestClaudeControlRecordTolerantPreviewBound(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control || !fixture.Tolerant {
 			continue

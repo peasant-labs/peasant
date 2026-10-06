@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -236,6 +237,7 @@ func markJSONValue(value any) any {
 // --- Tests ---
 
 func TestDiffStatus_String(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		status ingest.DiffStatus
 		want   string
@@ -257,6 +259,7 @@ func TestDiffStatus_String(t *testing.T) {
 }
 
 func TestPipeline_EndToEnd(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -276,7 +279,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -322,7 +325,57 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestPipeline_RetainedUnknownKindsReachSummary(t *testing.T) {
+	t.Parallel()
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	content := []byte(`{"sessionId":"test","type":"unmapped-e2e-xyz","message":{"role":"user","content":"hi"},"timestamp":"2024-02-19T00:00:00Z"}` + "\n")
+	if err := mfs.WriteFile(sourcePath, content, 0644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", sourcePath, err)
+	}
+	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
+	meta := makeMinimalMeta(t, testSessionID)
+
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(
+			[]ingest.DiscoveredSession{session},
+			map[ingest.SessionID]*ingest.UnifiedMetadata{
+				session.SessionID: meta,
+			},
+		),
+	}
+
+	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, nil)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
+		ingest.WithStore(fixtureStore),
+		ingest.WithMetricsStore(fixtureStore),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})),
+	)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+	result, err := pipeline.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Unknown data is retained, not refused. Occurrences and affected sessions
+	// are separate counts, and only a committed capture may report them.
+	retained := result.Summary.RetainedUnknownKinds
+	if len(retained) != 1 {
+		t.Fatalf("RetainedUnknownKinds has %d rows, want 1: %+v", len(retained), retained)
+	}
+	row := retained[0]
+	if row.Harness != ingest.HarnessClaudeCode || row.Kind != "unmapped-e2e-xyz" || row.Occurrences != 1 || row.Sessions != 1 {
+		t.Errorf("RetainedUnknownKinds row is %+v, want claude-code/unmapped-e2e-xyz x1 occurrence in one session", row)
+	}
+}
+
 func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 	sessionIDs := []string{testSessionID, testSessionID2}
@@ -361,7 +414,7 @@ func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T
 			return prepared[session.SessionID]
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+	pipeline, err := newTestPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(sessions, metadata),
 	}, cfg)
 	if err != nil {
@@ -379,6 +432,7 @@ func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T
 }
 
 func TestPipeline_StopsWhenSessionFilterPreparationFails(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
@@ -393,7 +447,7 @@ func TestPipeline_StopsWhenSessionFilterPreparationFails(t *testing.T) {
 			return true
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+	pipeline, err := newTestPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{
 			session.SessionID: makeMinimalMeta(t, testSessionID),
 		}),
@@ -411,6 +465,7 @@ func TestPipeline_StopsWhenSessionFilterPreparationFails(t *testing.T) {
 }
 
 func TestPipeline_Incremental(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -435,7 +490,7 @@ func TestPipeline_Incremental(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run: should ingest as new.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -449,7 +504,7 @@ func TestPipeline_Incremental(t *testing.T) {
 
 	// Second run: source hasn't changed. Should be unchanged.
 	// The metadata written in run 1 has Ingested > modTime.
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -466,6 +521,7 @@ func TestPipeline_Incremental(t *testing.T) {
 }
 
 func TestPipeline_DryRun(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -487,7 +543,7 @@ func TestPipeline_DryRun(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.DryRun = true
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -513,6 +569,7 @@ func TestPipeline_DryRun(t *testing.T) {
 }
 
 func TestPipeline_Force(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -536,7 +593,7 @@ func TestPipeline_Force(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -552,7 +609,7 @@ func TestPipeline_Force(t *testing.T) {
 	cfgForce := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Force = true
 	})
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfgForce)
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfgForce)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -566,6 +623,7 @@ func TestPipeline_Force(t *testing.T) {
 }
 
 func TestPipeline_ActiveSessionIngestedByDefault(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -597,7 +655,7 @@ func TestPipeline_ActiveSessionIngestedByDefault(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 	// staleness threshold is 5 minutes; 30 seconds < 5 minutes, so it's active.
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -639,6 +697,7 @@ func TestPipeline_ActiveSessionIngestedByDefault(t *testing.T) {
 }
 
 func TestPipeline_IncludeActive(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -664,7 +723,7 @@ func TestPipeline_IncludeActive(t *testing.T) {
 		c.IncludeActive = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -698,6 +757,7 @@ func TestPipeline_IncludeActive(t *testing.T) {
 }
 
 func TestPipeline_ErrorResilience(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -736,7 +796,7 @@ func TestPipeline_ErrorResilience(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -788,6 +848,7 @@ func TestPipeline_ErrorResilience(t *testing.T) {
 }
 
 func TestPipeline_OrphanCleanup(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -810,7 +871,7 @@ func TestPipeline_OrphanCleanup(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -829,6 +890,7 @@ func TestPipeline_OrphanCleanup(t *testing.T) {
 }
 
 func TestPipeline_MultipleProviders(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -859,7 +921,7 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 		StalenessThreshold: 5 * time.Minute,
 	}
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -878,6 +940,7 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 }
 
 func TestPipeline_NoSessionsDiscovered(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -886,7 +949,7 @@ func TestPipeline_NoSessionsDiscovered(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -904,6 +967,7 @@ func TestPipeline_NoSessionsDiscovered(t *testing.T) {
 }
 
 func TestPipeline_OutputFileNaming(t *testing.T) {
+	t.Parallel()
 	// Verify that the pipeline writes metadata and transcript with correct naming conventions.
 	// NOTE: MemFS does not track permission bits, so actual file permission verification
 	// requires OSFileSystem. This test focuses on naming only.
@@ -924,7 +988,7 @@ func TestPipeline_OutputFileNaming(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -952,6 +1016,7 @@ func TestPipeline_OutputFileNaming(t *testing.T) {
 }
 
 func TestPipeline_IncrementalUpdated(t *testing.T) {
+	t.Parallel()
 	// Verify that a session is re-ingested when source is newer than last ingest.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -973,7 +1038,7 @@ func TestPipeline_IncrementalUpdated(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1022,7 +1087,7 @@ func TestPipeline_IncrementalUpdated(t *testing.T) {
 		),
 	}
 
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters2, cfg)
+	pipeline2, err := newTestPipeline(mfs, git, adapters2, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1036,6 +1101,7 @@ func TestPipeline_IncrementalUpdated(t *testing.T) {
 }
 
 func TestPipeline_Result_Duration(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1043,7 +1109,7 @@ func TestPipeline_Result_Duration(t *testing.T) {
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
 	}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1058,6 +1124,7 @@ func TestPipeline_Result_Duration(t *testing.T) {
 }
 
 func TestPipeline_MetadataContents(t *testing.T) {
+	t.Parallel()
 	// Verify that the written metadata JSON contains the expected fields.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1077,7 +1144,7 @@ func TestPipeline_MetadataContents(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1121,6 +1188,7 @@ func TestPipeline_MetadataContents(t *testing.T) {
 }
 
 func TestPipeline_SessionResultStatus(t *testing.T) {
+	t.Parallel()
 	// Verify that SessionResult.Status reflects the DiffStatus.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1141,7 +1209,7 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1163,6 +1231,7 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 }
 
 func TestPipeline_HostSlugFallback(t *testing.T) {
+	t.Parallel()
 	// When remote is empty, DeriveHostSlug uses the worktree path as fallback.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1187,7 +1256,7 @@ func TestPipeline_HostSlugFallback(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1231,6 +1300,7 @@ func TestPipeline_HostSlugFallback(t *testing.T) {
 }
 
 func TestPipeline_DiscoverPartialFailure(t *testing.T) {
+	t.Parallel()
 	// When one provider's Discover fails and another succeeds,
 	// the pipeline should process the successful provider's sessions.
 	mfs := testutil.NewMemFS()
@@ -1270,7 +1340,7 @@ func TestPipeline_DiscoverPartialFailure(t *testing.T) {
 		StalenessThreshold: 5 * time.Minute,
 	}
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1292,6 +1362,7 @@ func TestPipeline_DiscoverPartialFailure(t *testing.T) {
 }
 
 func TestPipeline_DiscoverAllProvidersFail(t *testing.T) {
+	t.Parallel()
 	// When ALL providers fail, the pipeline should return an error.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1323,7 +1394,7 @@ func TestPipeline_DiscoverAllProvidersFail(t *testing.T) {
 		StalenessThreshold: 5 * time.Minute,
 	}
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1337,6 +1408,7 @@ func TestPipeline_DiscoverAllProvidersFail(t *testing.T) {
 }
 
 func TestPipeline_SubagentNesting(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1380,7 +1452,7 @@ func TestPipeline_SubagentNesting(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1413,6 +1485,7 @@ func TestPipeline_SubagentNesting(t *testing.T) {
 }
 
 func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
+	t.Parallel()
 	// When Force=true AND IncludeActive=true AND the session is active,
 	// the session should be processed (not skipped).
 	// classifySession returns DiffActive for active+force, but the filter
@@ -1441,7 +1514,7 @@ func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
 		c.IncludeActive = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1477,6 +1550,7 @@ func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
 }
 
 func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
+	t.Parallel()
 	// When existing metadata predates the native-refresh compatibility boundary,
 	// the session should be classified as DiffUpdated on re-run.
 	mfs := testutil.NewMemFS()
@@ -1500,7 +1574,7 @@ func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run: ingest as new.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1533,7 +1607,7 @@ func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
 	}
 
 	// Second run: should detect schema version mismatch → DiffUpdated.
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1550,6 +1624,7 @@ func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
 }
 
 func TestPipeline_DebugFilesCopied(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1583,7 +1658,7 @@ func TestPipeline_DebugFilesCopied(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1623,7 +1698,8 @@ func TestPipeline_DebugFilesCopied(t *testing.T) {
 }
 
 func TestNewPipeline_EmptyAdapters(t *testing.T) {
-	_, err := ingest.NewPipeline(&testutil.MemFS{}, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{}, ingest.PipelineConfig{})
+	t.Parallel()
+	_, err := newTestPipeline(&testutil.MemFS{}, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{}, ingest.PipelineConfig{})
 	if err == nil {
 		t.Fatal("NewPipeline with empty adapters: expected error, got nil")
 	}
@@ -1635,6 +1711,7 @@ func TestNewPipeline_EmptyAdapters(t *testing.T) {
 // --- SessionStore integration tests ---
 
 func TestPipeline_WithStore_InsertsAfterWrite(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1653,7 +1730,7 @@ func TestPipeline_WithStore_InsertsAfterWrite(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1700,6 +1777,7 @@ func TestPipeline_WithStore_InsertsAfterWrite(t *testing.T) {
 }
 
 func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1722,7 +1800,7 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 	metricsStore.StaleIndexSessions = []ingest.SessionID{session.SessionID}
 	indexer := &recordingIndexer{kind: ingest.TranscriptSourceFile}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store), ingest.WithMetricsStore(metricsStore), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store), ingest.WithMetricsStore(metricsStore), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1763,6 +1841,7 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 }
 
 func TestPipeline_WithoutStore_SkipsDB(t *testing.T) {
+	t.Parallel()
 	// This is essentially the existing behavior: no store, no DB interaction, no panic.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1782,7 +1861,7 @@ func TestPipeline_WithoutStore_SkipsDB(t *testing.T) {
 
 	// No WithStore option — backward compatible path.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1808,6 +1887,7 @@ func TestPipeline_WithoutStore_SkipsDB(t *testing.T) {
 }
 
 func TestPipeline_WithStore_DryRun_SkipsDB(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1828,7 +1908,7 @@ func TestPipeline_WithStore_DryRun_SkipsDB(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.DryRun = true
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1853,6 +1933,7 @@ func TestPipeline_WithStore_DryRun_SkipsDB(t *testing.T) {
 }
 
 func TestPipeline_WithStore_MultipleSessionsInserted(t *testing.T) {
+	t.Parallel()
 	// Verify that multiple successfully processed sessions are all inserted.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1881,7 +1962,7 @@ func TestPipeline_WithStore_MultipleSessionsInserted(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1914,6 +1995,7 @@ func TestPipeline_WithStore_MultipleSessionsInserted(t *testing.T) {
 }
 
 func TestPipeline_WithStore_ErrorSession_NotInserted(t *testing.T) {
+	t.Parallel()
 	// When one session fails extraction, only the successful session is inserted into the store.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1953,7 +2035,7 @@ func TestPipeline_WithStore_ErrorSession_NotInserted(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1983,6 +2065,7 @@ func TestPipeline_WithStore_ErrorSession_NotInserted(t *testing.T) {
 // --- v2 analytics stage tests ---
 
 func TestPipeline_WithRedactor_RedactsMetadataOnDisk(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2001,7 +2084,7 @@ func TestPipeline_WithRedactor_RedactsMetadataOnDisk(t *testing.T) {
 
 	redactor := &testutil.StubRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2046,6 +2129,7 @@ func TestPipeline_WithRedactor_RedactsMetadataOnDisk(t *testing.T) {
 // TestPipeline_WithRedactor_SetsRedactionInfo verifies that when a redactor is wired,
 // the metadata on disk has RedactionInfo.Applied=true and a non-empty ContentHash.
 func TestPipeline_WithRedactor_SetsRedactionInfo(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2064,7 +2148,7 @@ func TestPipeline_WithRedactor_SetsRedactionInfo(t *testing.T) {
 
 	redactor := &testutil.StubRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2113,6 +2197,7 @@ func TestPipeline_WithRedactor_SetsRedactionInfo(t *testing.T) {
 // TestPipeline_NoRedactor_SetsRedactionInfoRaw verifies that without a redactor,
 // RedactionInfo.Applied=false and ContentHash/MetadataHash are still populated.
 func TestPipeline_NoRedactor_SetsRedactionInfoRaw(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2130,7 +2215,7 @@ func TestPipeline_NoRedactor_SetsRedactionInfoRaw(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg) // no WithRedactor
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg) // no WithRedactor
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2172,6 +2257,7 @@ func TestPipeline_NoRedactor_SetsRedactionInfoRaw(t *testing.T) {
 // TestPipeline_ContentHash_Deterministic verifies that the same transcript bytes
 // produce the same ContentHash across runs.
 func TestPipeline_ContentHash_Deterministic(t *testing.T) {
+	t.Parallel()
 	transcriptContent := `{"type":"user","content":"hello"}` + "\n"
 
 	var hashes [2]string
@@ -2193,7 +2279,7 @@ func TestPipeline_ContentHash_Deterministic(t *testing.T) {
 		}
 
 		cfg := makePipelineConfig(testOutputDir)
-		pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+		pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 		if err != nil {
 			t.Fatalf("NewPipeline: %v", err)
 		}
@@ -2227,6 +2313,7 @@ func TestPipeline_ContentHash_Deterministic(t *testing.T) {
 // TestPipeline_RedactsTranscript_MultiLineJSONL verifies that every valid JSONL line
 // in a multi-line transcript is redacted when a redactor is wired into the pipeline.
 func TestPipeline_RedactsTranscript_MultiLineJSONL(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2253,7 +2340,7 @@ func TestPipeline_RedactsTranscript_MultiLineJSONL(t *testing.T) {
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2294,6 +2381,7 @@ func TestPipeline_RedactsTranscript_MultiLineJSONL(t *testing.T) {
 
 // A completed malformed record must fail acquisition before redaction or writes.
 func TestPipeline_RedactsTranscript_RejectsMalformedCompleteJSONL(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2317,7 +2405,7 @@ func TestPipeline_RedactsTranscript_RejectsMalformedCompleteJSONL(t *testing.T) 
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2342,6 +2430,7 @@ func TestPipeline_RedactsTranscript_RejectsMalformedCompleteJSONL(t *testing.T) 
 // TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough verifies that a
 // .json source that is not valid JSON passes through unchanged when a redactor is wired.
 func TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2365,7 +2454,7 @@ func TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough(t *testing.T)
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2398,6 +2487,7 @@ func TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough(t *testing.T)
 // TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript verifies that a single
 // pipeline run with a redactor redacts BOTH metadata fields AND transcript content.
 func TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2419,7 +2509,7 @@ func TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript(t *testing.T) {
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2475,6 +2565,7 @@ func TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript(t *testing.T) {
 }
 
 func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2508,7 +2599,7 @@ func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -2538,6 +2629,7 @@ func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
 }
 
 func TestPipeline_WithAnalyzer_ComputesMetrics(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2567,7 +2659,7 @@ func TestPipeline_WithAnalyzer_ComputesMetrics(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -2637,7 +2729,7 @@ func TestPipeline_WithClassifier_AnnotatesNewSessions(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -2752,7 +2844,7 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 		c.Parallelism = 2
 	})
 	fixtureStore := newPipelineFixtureStore(t, nil, testutil.NewStubMetricsStore())
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -2787,6 +2879,7 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 }
 
 func TestPipeline_IndexError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2810,7 +2903,7 @@ func TestPipeline_IndexError_NonFatal(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -2847,6 +2940,7 @@ func TestPipeline_IndexError_NonFatal(t *testing.T) {
 }
 
 func TestPipeline_ComputeError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2876,7 +2970,7 @@ func TestPipeline_ComputeError_NonFatal(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -2907,6 +3001,7 @@ func TestPipeline_ComputeError_NonFatal(t *testing.T) {
 }
 
 func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2938,7 +3033,7 @@ func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 	cfg.IndexProfiler = profiler
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -2977,6 +3072,7 @@ func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
 }
 
 func TestPipeline_NilOptionalDeps_SkipsNewStages(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2995,7 +3091,7 @@ func TestPipeline_NilOptionalDeps_SkipsNewStages(t *testing.T) {
 
 	// No optional deps — backward-compatible mode.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3028,6 +3124,7 @@ func TestPipeline_NilOptionalDeps_SkipsNewStages(t *testing.T) {
 // with the correct days even when WithStore is NOT configured (p.store == nil).
 // This is the regression test for Fix A (day source) and Fix B (gate condition).
 func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3058,7 +3155,7 @@ func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
 	// Deliberately NOT using WithStore — p.store will be nil.
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3120,6 +3217,7 @@ func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
 // session whose metricsStore.IndexSessionEntries call fails is NOT included in
 // the session IDs passed to ComputeMetrics (Fix C).
 func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3171,7 +3269,7 @@ func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) 
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3205,6 +3303,7 @@ func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) 
 // --- AUDIT stage tests ---
 
 func TestPipeline_WithLogger_WritesAuditLog(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3223,7 +3322,7 @@ func TestPipeline_WithLogger_WritesAuditLog(t *testing.T) {
 
 	logger := &testutil.StubIngestLogger{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3257,6 +3356,7 @@ func TestPipeline_WithLogger_WritesAuditLog(t *testing.T) {
 }
 
 func TestPipeline_LoggerError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3276,7 +3376,7 @@ func TestPipeline_LoggerError_NonFatal(t *testing.T) {
 	// Logger that always fails.
 	logger := &testutil.StubIngestLogger{Err: errors.New("log write failed")}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3337,6 +3437,7 @@ func (m *wrappingRedactor) RuleSetVersion() string {
 // TextRedactor is wired, the JSONL transcript written to disk has its string
 // values redacted (T3, SourceFormatJSONL path).
 func TestPipeline_WithRedactor_RedactsJSONLTranscriptOnDisk(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3360,7 +3461,7 @@ func TestPipeline_WithRedactor_RedactsJSONLTranscriptOnDisk(t *testing.T) {
 
 	redactor := &wrappingRedactor{stub: &testutil.StubRedactor{}}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3400,6 +3501,7 @@ func TestPipeline_WithRedactor_RedactsJSONLTranscriptOnDisk(t *testing.T) {
 // TextRedactor is wired, the JSON transcript written to disk has its string
 // values redacted (T3, SourceFormatJSON path).
 func TestPipeline_WithRedactor_RedactsJSONTranscriptOnDisk(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3436,7 +3538,7 @@ func TestPipeline_WithRedactor_RedactsJSONTranscriptOnDisk(t *testing.T) {
 
 	redactor := &wrappingRedactor{stub: &testutil.StubRedactor{}}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3472,6 +3574,7 @@ func TestPipeline_WithRedactor_RedactsJSONTranscriptOnDisk(t *testing.T) {
 // TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim verifies that when no
 // redactor is wired, the transcript is written verbatim (backward compatibility).
 func TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3493,7 +3596,7 @@ func TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim(t *testing.T) {
 
 	// No WithRedactor option: redactor is nil.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3522,6 +3625,7 @@ func TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim(t *testing.T) {
 // NewRedactor(level, userPatterns) + WithRedactor(r) redact matching content in JSONL
 // transcripts written to disk. This is the end-to-end integration test for redaction output.
 func TestPipeline_WithRedactor_CustomPattern(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3560,7 +3664,7 @@ func TestPipeline_WithRedactor_CustomPattern(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(r))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(r))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3602,6 +3706,7 @@ func TestPipeline_WithRedactor_CustomPattern(t *testing.T) {
 // (via StubSessionStore) and ComputeInsights (via StubAnalyzer) are decoupled stages.
 // InsertSessions alone does not trigger daily_summary recomputation.
 func TestPipeline_InsertSessionsDoesNotRecomputeSummary(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3624,7 +3729,7 @@ func TestPipeline_InsertSessionsDoesNotRecomputeSummary(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// Run with both WithStore and WithAnalyzer to observe both stages.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(sessionStore),
 		ingest.WithAnalyzer(analyzer),
 	)
@@ -3661,7 +3766,7 @@ func TestPipeline_InsertSessionsDoesNotRecomputeSummary(t *testing.T) {
 	setupSourceFile(t, mfs2, sourcePath2)
 	sessionStore2 := &testutil.StubSessionStore{}
 
-	pipeline2, err := ingest.NewPipeline(mfs2, git, adapters, cfg,
+	pipeline2, err := newTestPipeline(mfs2, git, adapters, cfg,
 		ingest.WithStore(sessionStore2),
 		// Deliberately NO WithAnalyzer
 	)
@@ -3737,6 +3842,7 @@ func makeReindexMeta(t *testing.T, sessionIDStr, originalSourcePath string) *ing
 // TestPipeline_Reindex_DiscoversSessions verifies that --reindex scans the
 // peasant-sync output directory and discovers sessions from metadata files.
 func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3767,7 +3873,7 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3794,6 +3900,7 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 // TestPipeline_Reindex_ReExtractsWhenSourceExists verifies that when historical
 // metadata requires native refresh and source exists, reindex re-extracts it.
 func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3828,7 +3935,7 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3868,6 +3975,7 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 // source file is missing, reindex falls back to INDEX+COMPUTE from the existing
 // peasant-sync transcript and records a fallback IndexLogEntry.
 func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3898,7 +4006,7 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3953,6 +4061,7 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 // TestPipeline_Reindex_ForceTargetsAll verifies that --reindex --force targets
 // ALL sessions in peasant-sync, not just those with stale index_version.
 func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3994,7 +4103,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 	cfgNoForce := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Reindex = true
 	})
-	pipelineNoForce, err := ingest.NewPipeline(mfs, git, adapters, cfgNoForce,
+	pipelineNoForce, err := newTestPipeline(mfs, git, adapters, cfgNoForce,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4017,7 +4126,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 		c.Reindex = true
 		c.Force = true
 	})
-	pipelineForce, err := ingest.NewPipeline(mfs, git, adapters, cfgForce,
+	pipelineForce, err := newTestPipeline(mfs, git, adapters, cfgForce,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4039,6 +4148,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 // TestPipeline_Reindex_IndexLogPopulated verifies that PipelineResult.IndexLog is
 // populated with correct outcomes during reindex mode.
 func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4072,7 +4182,7 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4115,6 +4225,7 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 // TestPipeline_Reindex_DryRun verifies that --reindex --dry-run shows what would
 // be processed without actually doing anything.
 func TestPipeline_Reindex_DryRun(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4141,7 +4252,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 		c.DryRun = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
@@ -4169,6 +4280,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 // TestPipeline_Reindex_UpdatesIndexState verifies that after successful reindexing,
 // the pipeline calls UpdateIndexState with the harness indexer target.
 func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4194,7 +4306,7 @@ func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4256,6 +4368,7 @@ func setupPeasantSyncSubagentSession(t *testing.T, mfs *testutil.MemFS, outputDi
 // --dry-run path (which calls scanPeasantSyncSessions without needing a MetricsStore
 // stale-session filter).
 func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4295,7 +4408,7 @@ func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
 		c.DryRun = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
@@ -4339,6 +4452,7 @@ func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
 // can find a subagent session stored in the nested layout when the auto-detect stale
 // session mechanism in Run() looks it up.
 func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4389,7 +4503,7 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 	storetest.SeedManagedInput(t, fixtureStore.Store, mfs, testOutputDir, *parentMeta, parentBytes)
 	subagentContent := []byte(`{"type":"user","message":{"role":"user","content":"subagent hello"}}` + "\n")
 	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *subagentMeta, subagentContent)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4425,6 +4539,7 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 // ListStaleIndexSessions is called with the harness indexer target, the session is indexed,
 // and UpdateIndexState is called with the new version.
 func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4459,7 +4574,7 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	staleContent := []byte(`{"type":"user","message":{"role":"user","content":"hello"}}` + "\n")
 	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *meta, staleContent)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4506,6 +4621,7 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 // and repaired by `peasant harvest --force --session <id>`, never silently
 // re-indexed from source information on a plain harvest.
 func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4550,7 +4666,7 @@ func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
 	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: storedMeta}}); err != nil {
 		t.Fatal(err)
 	}
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4585,6 +4701,7 @@ func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
 // session, a subagent without a saved pair is a lost-metadata case left for
 // `harvest index`, never silently re-indexed from source information.
 func TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4636,7 +4753,7 @@ func TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed(t *testing.T) {
 	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: makeMinimalMeta(t, string(parentSid))}, {Metadata: storedMeta}}); err != nil {
 		t.Fatal(err)
 	}
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4696,6 +4813,7 @@ func readMetadataFromMemFS(t *testing.T, mfs interface{ ReadFile(string) ([]byte
 }
 
 func TestPipeline_CommitDetection_WrittenToMetadata(t *testing.T) {
+	t.Parallel()
 	// Verify that commits returned by GitDiffAnalyzer are written to the
 	// session's {sessionId}--metadata.json file under Git.Commits.
 	mfs := testutil.NewMemFS()
@@ -4720,7 +4838,7 @@ func TestPipeline_CommitDetection_WrittenToMetadata(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithGitDiffAnalyzer(gitAnalyzer))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithGitDiffAnalyzer(gitAnalyzer))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -4751,6 +4869,7 @@ func TestPipeline_CommitDetection_WrittenToMetadata(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_WrittenToDatabase(t *testing.T) {
+	t.Parallel()
 	// Verify that commits are persisted to the store via UpsertSessionCommits
 	// when both WithGitDiffAnalyzer and WithStore are configured.
 	mfs := testutil.NewMemFS()
@@ -4776,7 +4895,7 @@ func TestPipeline_CommitDetection_WrittenToDatabase(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -4806,6 +4925,7 @@ func TestPipeline_CommitDetection_WrittenToDatabase(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_WithNoMatchingCommits(t *testing.T) {
+	t.Parallel()
 	// When the git analyzer returns commits whose author email does not match
 	// the session user email, the metadata should have no commits and
 	// UpsertSessionCommits should not be called.
@@ -4839,7 +4959,7 @@ func TestPipeline_CommitDetection_WithNoMatchingCommits(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -4870,6 +4990,7 @@ func TestPipeline_CommitDetection_WithNoMatchingCommits(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_WithGitTimeout(t *testing.T) {
+	t.Parallel()
 	// When git log times out, the session still ingests and a diagnostic
 	// warning is recorded in metadata.Diagnostics.Warnings.
 	mfs := testutil.NewMemFS()
@@ -4894,7 +5015,7 @@ func TestPipeline_CommitDetection_WithGitTimeout(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -4932,6 +5053,7 @@ func TestPipeline_CommitDetection_WithGitTimeout(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_NotFatalOnGitFailure(t *testing.T) {
+	t.Parallel()
 	// When git log fails (e.g. repo not found), the session ingests with
 	// empty commits and a diagnostic warning — not a pipeline error.
 	mfs := testutil.NewMemFS()
@@ -4955,7 +5077,7 @@ func TestPipeline_CommitDetection_NotFatalOnGitFailure(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -4996,6 +5118,7 @@ func TestPipeline_CommitDetection_NotFatalOnGitFailure(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
+	t.Parallel()
 	// A second pipeline run for an unchanged session skips EXTRACT+WRITE,
 	// leaving the metadata (with commits) on disk from the first run intact.
 	// The store receives UpsertSessionCommits only on the first run.
@@ -5023,7 +5146,7 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -5092,6 +5215,7 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_StandardRepo_NoWorktree(t *testing.T) {
+	t.Parallel()
 	// BLOCKER-3 regression test: commit detection must work when meta.Git.Worktree
 	// is nil (standard repo — the common case). Project.FilePath is used as fallback.
 	mfs := testutil.NewMemFS()
@@ -5119,7 +5243,7 @@ func TestPipeline_CommitDetection_StandardRepo_NoWorktree(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -5145,6 +5269,7 @@ func TestPipeline_CommitDetection_StandardRepo_NoWorktree(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) {
+	t.Parallel()
 	// IMPORTANT-1 regression test: a --force re-ingest that finds 0 commits must
 	// call UpsertSessionCommits with an empty slice, deleting stale DB rows and
 	// keeping JSON metadata and DB in sync.
@@ -5171,7 +5296,7 @@ func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) 
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -5195,7 +5320,7 @@ func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) 
 	cfgForce := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Force = true
 	})
-	pipelineForce, err := ingest.NewPipeline(mfs, git, adapters, cfgForce,
+	pipelineForce, err := newTestPipeline(mfs, git, adapters, cfgForce,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -5227,6 +5352,7 @@ func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) 
 // (i.e., --detect-commits flag is OFF), commit detection never runs and
 // metadata.Git.Commits is nil in the written output.
 func TestPipeline_DetectCommitsFlag_OFF(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5245,7 +5371,7 @@ func TestPipeline_DetectCommitsFlag_OFF(t *testing.T) {
 
 	// No WithGitDiffAnalyzer — simulates --detect-commits flag OFF.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5271,6 +5397,7 @@ func TestPipeline_DetectCommitsFlag_OFF(t *testing.T) {
 // (not []CommitInfo{}) in the JSON when no commits match the author email.
 // This exercises the omitempty tag: an empty result must not appear in the JSON.
 func TestPipeline_DetectCommitsFlag_ON(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver() // email = testutil.TestEmail
 
@@ -5300,7 +5427,7 @@ func TestPipeline_DetectCommitsFlag_ON(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -5338,6 +5465,7 @@ func TestPipeline_DetectCommitsFlag_ON(t *testing.T) {
 // TestPipeline_Reindex_EmitsProgressEvents verifies that runReindex() drives
 // all 9 pipeline stages to completion via ProgressState.
 func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5366,7 +5494,7 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 		c.Progress = progState
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5404,6 +5532,7 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 // TestPipeline_Reindex_SummaryVersionFields verifies that PipelineSummary
 // includes per-harness targets and MetadataVersion after a reindex run.
 func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5428,7 +5557,7 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 		c.Reindex = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5454,6 +5583,7 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 // TestPipeline_NormalIngest_SummaryVersionFields verifies that PipelineSummary
 // includes per-harness targets and MetadataVersion after a normal (non-reindex) run.
 func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5483,7 +5613,7 @@ func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5509,6 +5639,7 @@ func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 // TestPipeline_Reindex_ParallelExtract verifies that when multiple sessions
 // have existing source files, reindex processes them via runParallel + StagingBuffer.
 func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5554,7 +5685,7 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5598,6 +5729,7 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 // The test also injects a store error to verify that errCh propagation reaches
 // Summary.StoreError without blocking any goroutine.
 func TestPipeline_GoroutineLifecycle_ParentChild(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5642,7 +5774,7 @@ func TestPipeline_GoroutineLifecycle_ParentChild(t *testing.T) {
 	// Inject a store error to exercise the errCh → StoreError propagation path.
 	store := &testutil.StubSessionStore{InsertErr: errors.New("db locked")}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5693,6 +5825,7 @@ func TestPipeline_GoroutineLifecycle_ParentChild(t *testing.T) {
 //
 // The test uses a brief timeout to confirm the pipeline returns in finite time.
 func TestPipeline_ContextCancellation_NoDeadlock(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5718,7 +5851,7 @@ func TestPipeline_ContextCancellation_NoDeadlock(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5758,6 +5891,7 @@ func TestPipeline_ContextCancellation_NoDeadlock(t *testing.T) {
 // This test also exercises the combined path: store error via errCh, correct
 // session counts in the log entry, and non-fatal error handling.
 func TestPipeline_AuditLog_PreservedThroughGoroutineRefactor(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5787,7 +5921,7 @@ func TestPipeline_AuditLog_PreservedThroughGoroutineRefactor(t *testing.T) {
 	logger := &testutil.StubIngestLogger{}
 	cfg := makePipelineConfig(testOutputDir)
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(store),
 		ingest.WithLogger(logger),
 	)
@@ -5841,6 +5975,7 @@ func TestPipeline_AuditLog_PreservedThroughGoroutineRefactor(t *testing.T) {
 // --- AllowedSessionIDs filter tests ---
 
 func TestPipeline_AllowedSessionIDs_NilAllowsAll(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5867,7 +6002,7 @@ func TestPipeline_AllowedSessionIDs_NilAllowsAll(t *testing.T) {
 
 	// nil AllowedSessionIDs → all sessions processed
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5888,6 +6023,7 @@ func TestPipeline_AllowedSessionIDs_NilAllowsAll(t *testing.T) {
 }
 
 func TestPipeline_AllowedSessionIDs_Subset(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5918,7 +6054,7 @@ func TestPipeline_AllowedSessionIDs_Subset(t *testing.T) {
 			session1.SessionID: true,
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5949,6 +6085,7 @@ func TestPipeline_AllowedSessionIDs_Subset(t *testing.T) {
 }
 
 func TestPipeline_AllowedSessionIDs_EmptyMap(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5972,7 +6109,7 @@ func TestPipeline_AllowedSessionIDs_EmptyMap(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.AllowedSessionIDs = map[ingest.SessionID]bool{}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5992,6 +6129,7 @@ func TestPipeline_AllowedSessionIDs_EmptyMap(t *testing.T) {
 }
 
 func TestPipeline_AllowedSessionIDs_NoOverlap(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6018,7 +6156,7 @@ func TestPipeline_AllowedSessionIDs_NoOverlap(t *testing.T) {
 			nonExistentID: true,
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6040,6 +6178,7 @@ func TestPipeline_AllowedSessionIDs_NoOverlap(t *testing.T) {
 // TestPipeline_CWD_StoredInMetadata verifies that the CWD field flows through
 // the pipeline and is persisted in the written metadata JSON file.
 func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
+	t.Parallel()
 	const testCWD = "/home/test/myproject"
 
 	mfs := testutil.NewMemFS()
@@ -6062,7 +6201,7 @@ func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6101,6 +6240,7 @@ func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
 // database: the database is the source of truth for every derived field, so the
 // file is written once as the commit point and never restamped from DB state.
 func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6119,7 +6259,7 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6158,6 +6298,7 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 // metadata.json is still written successfully but DerivedAt is nil (no DB INSERT,
 // so no derived timestamp).
 func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6176,7 +6317,7 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	// No WithStore — backward compatible path.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6214,6 +6355,7 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 // point and never restamped afterwards. The DB mirror observes a complete,
 // DerivedAt-free file at insert time, and the file is unchanged after the run.
 func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6247,7 +6389,7 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 		},
 	}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6285,6 +6427,7 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 // session record with a recent ingested_ms and current schema_version, the diff
 // stage classifies it as DiffUnchanged without needing to read metadata.json.
 func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
+	t.Parallel()
 	t.Skip("TODO: requires pipeline write-order inversion (DB INSERT before metadata.json write) — deferred")
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6308,7 +6451,7 @@ func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
 
 	// First run: ingest and write to DB+disk.
 	store := &testutil.StubSessionStore{}
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6333,7 +6476,7 @@ func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
 		},
 	}
 
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
 	if err != nil {
 		t.Fatalf("NewPipeline (2nd): %v", err)
 	}
@@ -6356,6 +6499,7 @@ func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
 // when the DB has no record for a session but metadata.json exists on disk,
 // the diff stage reads the file (old pre-migration behavior).
 func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
+	t.Parallel()
 	t.Skip("TODO: requires pipeline write-order inversion (DB INSERT before metadata.json write) — deferred")
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6378,7 +6522,7 @@ func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run without store: writes only metadata.json (no DB state).
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6397,7 +6541,7 @@ func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
 		LocationsByID: map[ingest.SessionID]ingest.SessionLocation{}, // empty — no DB record
 	}
 
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
 	if err != nil {
 		t.Fatalf("NewPipeline (2nd): %v", err)
 	}
@@ -6415,6 +6559,7 @@ func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
 // without a DerivedAt field still parses correctly (backward compat).
 // A v7 file should be classified as DiffUpdated (schema version mismatch).
 func TestPipeline_SchemaV8_V7MetadataParses(t *testing.T) {
+	t.Parallel()
 	// Construct a v7-style metadata JSON without derivedAt field.
 	v7JSON := `{
 		"schemaVersion": 7,
@@ -6451,5 +6596,131 @@ func TestPipeline_SchemaV8_V7MetadataParses(t *testing.T) {
 	// Ingested should still parse correctly.
 	if meta.Timestamp.Ingested == nil {
 		t.Error("Ingested is nil, want non-nil")
+	}
+}
+
+// TestPipelineFullArenaCompletesAndRecordsEverySession runs the ingest
+// orchestrator with an arena exactly one transcript long, so every session
+// after the first waits for the INDEX ack to free its bytes. It is the only
+// whole-pipeline coverage of the drain loop's INDEX-completion wake and its
+// final drain: without that arm the run deadlocks at the wait bound, and the
+// normal run must still record every session with INDEX progress complete.
+func TestPipelineFullArenaCompletesAndRecordsEverySession(t *testing.T) {
+	t.Parallel()
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+
+	sessionIDs := []string{
+		"11111111-1111-4111-8111-111111111111",
+		"22222222-2222-4222-8222-222222222222",
+		"33333333-3333-4333-8333-333333333333",
+	}
+
+	// Equal-length bodies: one record per session whose session ID is a
+	// 36-character UUID, so every seeded payload is exactly L bytes.
+	bodyFor := func(sessionID string) []byte {
+		return []byte(fmt.Sprintf(
+			`{"sessionId":%q,"type":"user","message":{"role":"user","content":"full-arena fixture"},"timestamp":"2024-02-19T00:00:00Z"}`+"\n",
+			sessionID,
+		))
+	}
+
+	modTime := time.Now().Add(-2 * time.Hour)
+	metadata := make(map[ingest.SessionID]*ingest.UnifiedMetadata, len(sessionIDs))
+	seeded := make([]ingest.DiscoveredSession, 0, len(sessionIDs))
+	transcriptLen := 0
+	for i, sessionID := range sessionIDs {
+		sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, sessionID)
+		body := bodyFor(sessionID)
+		if i == 0 {
+			transcriptLen = len(body)
+		}
+		if len(body) != transcriptLen {
+			t.Fatalf("seeded transcript %d is %d bytes, want %d: the arena is one transcript long", i, len(body), transcriptLen)
+		}
+		if err := mfs.WriteFile(sourcePath, body, 0644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", sourcePath, err)
+		}
+		session := makeDiscoveredSession(t, sessionID, sourcePath, modTime)
+		seeded = append(seeded, session)
+		metadata[session.SessionID] = makeMinimalMeta(t, sessionID)
+	}
+
+	// Fail-closed precondition: the read-back bytes must be exactly the arena
+	// length, or the test would measure a different (or no) backpressure wait.
+	for _, session := range seeded {
+		data, err := mfs.ReadFile(session.SourcePath.String())
+		if err != nil {
+			t.Fatalf("ReadFile(%q): %v", session.SourcePath, err)
+		}
+		if len(data) != transcriptLen {
+			t.Fatalf("seeded transcript %s is %d bytes, want %d", session.SessionID, len(data), transcriptLen)
+		}
+	}
+
+	progState := ingest.NewProgressState()
+	cfg := makePipelineConfig(testOutputDir)
+	cfg.Progress = progState
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(seeded, metadata),
+	}
+	// A real indexer and store are what make an indexed session observable:
+	// the INDEX stage's final Done counts sessions actually written, so with no
+	// store the count stays zero whatever the drain loop streamed.
+	entries := make(map[ingest.SessionID][]schema.SessionEntry, len(seeded))
+	for _, session := range seeded {
+		entries[session.SessionID] = []schema.SessionEntry{{
+			SessionID:  session.SessionID,
+			EntryIndex: 0,
+			Harness:    schema.HarnessClaudeCode,
+			Role:       ingest.RoleUser,
+			EntryType:  ingest.EntryTypeText,
+		}}
+	}
+	metricsStore := testutil.NewStubMetricsStore()
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
+		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
+			ingest.HarnessClaudeCode: &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile, Entries: entries},
+		}),
+		ingest.WithMetricsStore(fixtureStore),
+		ingest.WithArenaSizeBytes(int64(transcriptLen)),
+	)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+
+	type runOutcome struct {
+		result *ingest.PipelineResult
+		err    error
+	}
+	ctx := t.Context()
+	done := make(chan runOutcome, 1)
+	go func() {
+		result, err := pipeline.Run(ctx)
+		done <- runOutcome{result: result, err: err}
+	}()
+
+	out := testwait.Receive(t, done, "the full-arena ingest run to finish")
+	if out.err != nil {
+		t.Fatalf("Run: %v", out.err)
+	}
+	if got := len(out.result.Sessions); got != len(sessionIDs) {
+		t.Fatalf("run recorded %d sessions, want %d", got, len(sessionIDs))
+	}
+	seen := make(map[ingest.SessionID]bool, len(sessionIDs))
+	for _, sr := range out.result.Sessions {
+		if sr.Error != nil {
+			t.Fatalf("session %s failed: %v", sr.SessionID, sr.Error)
+		}
+		seen[sr.SessionID] = true
+	}
+	for _, session := range seeded {
+		if !seen[session.SessionID] {
+			t.Fatalf("session %s is missing from the run results", session.SessionID)
+		}
+	}
+	if got := progState.Snapshot()[ingest.StageIndex].Done; got != len(sessionIDs) {
+		t.Fatalf("INDEX progress done = %d, want %d", got, len(sessionIDs))
 	}
 }

@@ -1,10 +1,7 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"testing"
 
@@ -46,15 +43,9 @@ type openCodeSliceContinuationDoc struct {
 
 func loadOpenCodeSliceContinuationDoc(t *testing.T) openCodeSliceContinuationDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeSliceContinuationData))
-	decoder.KnownFields(true)
 	var doc openCodeSliceContinuationDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeSliceContinuationData, &doc); err != nil {
 		t.Fatalf("decode the slice-continuation fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("the slice-continuation fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("the slice-continuation fixture declares no required cases")
@@ -98,7 +89,7 @@ func TestOpenCodeSliceContinuation(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			materialized := testfixture.MaterializeByName(t, c.SourceFixture)
-			adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
+			adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
 			origin := ingest.TranscriptOriginOpenCodeLegacySQLite
 			if c.Origin == "current" {
 				origin = ingest.TranscriptOriginOpenCodeCurrentSQLite

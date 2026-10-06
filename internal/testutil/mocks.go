@@ -1206,8 +1206,13 @@ type StubPushStore struct {
 
 	UnpushedErr        error
 	SavePublicationErr error
-	InsertLogErr       error
-	HeldErr            error
+	// LatestPublicationAttemptErr is returned by
+	// LatestSessionPublicationAttempt when non-nil.
+	LatestPublicationAttemptErr error
+	// PublishedToVillageErr is returned by PublishedToVillage when non-nil.
+	PublishedToVillageErr error
+	InsertLogErr          error
+	HeldErr               error
 	// GetQualityMetricsErr is returned by GetQualityMetrics when non-nil.
 	GetQualityMetricsErr error
 	// ListEntriesErr is returned by ListEntries when non-nil.
@@ -1253,6 +1258,40 @@ func (s *StubPushStore) RecordPublicationAttempt(_ context.Context, diagnostic s
 	defer s.mu.Unlock()
 	s.PublicationAttempts = append(s.PublicationAttempts, diagnostic)
 	return nil
+}
+
+// PublishedToVillage reports whether a stored receipt belongs to the session
+// on this Village account, under any project identity.
+func (s *StubPushStore) PublishedToVillage(_ context.Context, origin, owner, sessionID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.PublishedToVillageErr != nil {
+		return false, s.PublishedToVillageErr
+	}
+	for _, record := range s.Publications {
+		if record.VillageOrigin == origin && record.OwnerUserID == owner && record.SessionID == sessionID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// LatestSessionPublicationAttempt returns the most recently recorded attempt
+// for the session on this Village account, under any project identity, or nil
+// when none was recorded.
+func (s *StubPushStore) LatestSessionPublicationAttempt(_ context.Context, origin, owner, sessionID string) (*store.PublicationAttemptDiagnostic, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.LatestPublicationAttemptErr != nil {
+		return nil, s.LatestPublicationAttemptErr
+	}
+	for i := len(s.PublicationAttempts) - 1; i >= 0; i-- {
+		attempt := s.PublicationAttempts[i]
+		if attempt.VillageOrigin == origin && attempt.OwnerUserID == owner && attempt.SessionID == sessionID {
+			return &attempt, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *StubPushStore) UnpushedSessions(_ context.Context) ([]ingest.PushSessionRow, error) {
@@ -1387,6 +1426,11 @@ type StubPublisher struct {
 	AuthoritativeCalls []schema.AuthoritativePublishRequest
 	ReceiptContentHash schema.TranscriptContentHash
 	ReceiptFingerprint schema.PublishRequestFingerprint
+	// ReceiptVisibility, when set, is the visibility the receipt reports the
+	// transcript at; unset reports private, where new content lands.
+	ReceiptVisibility schema.Visibility
+	// OwnerUpdates records every owner update request, in order.
+	OwnerUpdates []schema.OwnerTranscriptUpdateRequest
 
 	// Schema-version preflight double (push version-negotiation gate).
 	// SchemaVersionResp is returned by GetSchemaVersion; nil means the village
@@ -1463,9 +1507,16 @@ func (s *StubPublisher) PublishAuthoritative(ctx context.Context, request schema
 	if s.ReceiptFingerprint != "" {
 		response.RequestOperationFingerprint = s.ReceiptFingerprint
 	}
+	if s.ReceiptVisibility != "" {
+		response.Visibility = s.ReceiptVisibility
+		response.Applied.NormalizedValues.Visibility = s.ReceiptVisibility
+	}
 	return response, status, err
 }
 func (s *StubPublisher) UpdateOwner(_ context.Context, id schema.TranscriptID, request schema.OwnerTranscriptUpdateRequest) (schema.OwnerTranscriptUpdateResponse, int, error) {
+	s.mu.Lock()
+	s.OwnerUpdates = append(s.OwnerUpdates, request)
+	s.mu.Unlock()
 	visibility := schema.TranscriptUpdateVisibility(schema.VisibilityPrivate)
 	if request.Visibility != nil {
 		visibility = *request.Visibility

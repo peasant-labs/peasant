@@ -1,0 +1,305 @@
+# open-output.yaml - golden output of `peasant open` for each outcome.
+#
+# Each run builds a synthetic world: a Git repository with a base commit weeks
+# before the session and two commits inside it, one Claude Code transcript
+# whose cwd is that repository and that runs `git commit`, a config that
+# points the claude-code source at it, and a migrated empty database. The
+# command runs through the production harvest, store, and output path. Only
+# the web server fork and the browser are replaced; the health probe and the
+# served-session check are the production HTTP calls against a local test
+# server.
+#
+# Every run of every case also asserts the contract that holds for all
+# outcomes: at most two output lines, never the dashboard root, exit 0 with a
+# {"continue":false,"stopReason":...} object and empty stderr in hook mode,
+# success on stdout with empty stderr and a failure as one stderr line with a
+# non-zero exit in plain mode, the browser opened with the transcript address
+# only after the dashboard serves the session, and the forked server reading
+# this run's configuration and directories.
+#
+# Placeholders in expected output: {session_id}, {port}, {project_hash}, and
+# {peasant} (the peasant command with this run's --config, --config-dir,
+# --data-dir and --state-dir, as the command renders it).
+#
+# Case fields:
+#   session            known (the source holds the transcript) | unknown |
+#                      missing (no --session value)
+#   prompt             the first user prompt; the stored title is generated from it
+#   transcript         valid | malformed-record (its second record is broken JSON)
+#   recorded_before    harvest the session once before the measured run
+#   published          store a publication receipt before the measured run
+#   reattribute_after_publish
+#                      add an origin remote after publishing, so the measured
+#                      harvest records the session under a new project hash
+#   config             valid | invalid-source-path (the harvest warns about an
+#                      extra relative path) | refused-redaction-level
+#   server             running | starts | start-error | never-ready |
+#                      other-data (healthy, but does not serve the session)
+#   start_error        the error the replaced server start returns (start-error)
+#   modes              hook and/or plain; each mode runs in a fresh world
+#   want.failed        the run fails; lines then holds the one failure line
+#   want.lines         exact lines (the stopReason lines in hook mode)
+#   want.hook_stdout   exact hook-mode stdout without its trailing newline, when pinned
+#   want.plain_stdout  exact plain-mode stdout, when pinned
+#   want.commits       session_commits holds exactly the two session commits;
+#                      otherwise it holds none
+#   want.started       the command started the web server; a failed start
+#                      also removes the PID file it wrote
+
+# Every case is named here; a case missing from either list fails the load.
+requiredNames:
+  - new-session
+  - refreshed-session
+  - published-session
+  - published-then-reattributed
+  - title-with-quotes
+  - title-with-control-characters
+  - untitled-session
+  - noisy-harvest
+  - harvest-failure
+  - malformed-transcript
+  - server-start-failure
+  - server-never-ready
+  - server-on-other-data
+  - unknown-session
+  - missing-session
+  - hook-mode
+  - plain-mode
+
+# A complete Village receipt, stored as-is for the published cases.
+publication:
+  origin: https://api.village.example
+  owner: owner-1
+  receipt_json: '{"transcriptId":"99d59925-36bc-424c-a789-8be54d9702ba","transcriptUrl":"https://village.example/transcripts/99d59925-36bc-424c-a789-8be54d9702ba","visibility":"private","contentHash":"a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a","requestOperationFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","applied":{"license":null,"associations":[],"normalizedValues":{"rootHarness":"claude-code","entryHarnesses":[],"derivedTitle":null,"visibility":"private","schemaVersion":"9"}},"blobKey":"transcripts/x","blobSizeBytes":0,"publishedAt":1,"updatedAt":1,"created":true}'
+
+cases:
+  - name: new-session
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: starts
+    modes: [hook]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+      started: true
+
+  - name: refreshed-session
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    recorded_before: true
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: published-session
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    recorded_before: true
+    published: true
+    config: valid
+    server: running
+    modes: [hook]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: published-then-reattributed
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    recorded_before: true
+    published: true
+    reattribute_after_publish: true
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: title-with-quotes
+    session: known
+    prompt: 'Rename the "open" flag to "view" & back'
+    transcript: valid
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      lines:
+        - 'peasant: opened "Rename the "open" flag to "view" & back" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      hook_stdout: '{"continue":false,"stopReason":"peasant: opened \"Rename the \"open\" flag to \"view\" & back\" · not published\nhttp://localhost:{port}/projects/{project_hash}/{session_id}"}'
+      commits: true
+
+  - name: title-with-control-characters
+    session: known
+    prompt: "Fix the‮ login‬\tredirect\u001B[31m"
+    transcript: valid
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect [31m" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: untitled-session
+    session: known
+    prompt: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
+    transcript: valid
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened an untitled session · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: noisy-harvest
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: invalid-source-path
+    server: running
+    modes: [hook, plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: harvest-failure
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: refused-redaction-level
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `{peasant} harvest --session {session_id} --force --detect-commits` to see the full report'
+
+  - name: malformed-transcript
+    session: known
+    prompt: Fix the login redirect
+    transcript: malformed-record
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: harvest failed: record session {session_id}: capture transcript source for {session_id}: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry; fix: run `{peasant} harvest --session {session_id} --force --detect-commits` to see the full report'
+
+  - name: server-start-failure
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: start-error
+    start_error: 'failed to start background server: fork/exec peasant: permission denied'
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard start failed: failed to start background server: fork/exec peasant: permission denied; fix: run `{peasant} web start --foreground --port {port}` to see why, or pass --port with a free port'
+      commits: true
+
+  - name: server-never-ready
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: never-ready
+    modes: [hook]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard start failed: no Peasant server answered http://localhost:{port}/api/v1/health within 1s of the start, and another program may hold port {port}; fix: run `{peasant} web start --foreground --port {port}` to see why, or pass --port with a free port'
+      commits: true
+      started: true
+
+  - name: server-on-other-data
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: other-data
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard check failed: the dashboard on port {port} does not serve session {session_id}, so it reads another data directory or mock data; fix: stop it with `{peasant} web stop --port {port}` and run open again, or pass --port with a free port'
+      commits: true
+
+  - name: unknown-session
+    session: unknown
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: session lookup failed: session {session_id} is not recorded, and no configured source holds a transcript with that id; fix: check the id with `{peasant} sessions list`, or enable the harness that recorded it with `{peasant} kickstart`'
+
+  - name: missing-session
+    session: missing
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: session check failed: no session id was given; fix: pass the session to open as `peasant open --session <id>`'
+
+  - name: hook-mode
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: running
+    modes: [hook]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      hook_stdout: '{"continue":false,"stopReason":"peasant: opened \"Fix the login redirect\" · not published\nhttp://localhost:{port}/projects/{project_hash}/{session_id}"}'
+      commits: true
+
+  - name: plain-mode
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      plain_stdout: |
+        peasant: opened "Fix the login redirect" · not published
+        http://localhost:{port}/projects/{project_hash}/{session_id}
+      commits: true

@@ -1,0 +1,223 @@
+# Frozen shapes for the gate contract.
+#
+# This fixture is the authoritative expected shape of every exported type a
+# downstream consumer compiles against. contract_test.go reflects the
+# real types and compares field-for-field, in order, including struct tags. A
+# rename, removal, retype, retag, or reorder in the source fails the test with
+# the exact field named.
+#
+# required_names is a deletion-protection manifest, not a row count: adding a new
+# frozen shape never requires editing it; removing or renaming a required one
+# does. Every `type` string is the exact reflect.Type.String() value.
+required_names:
+  - testgate.Record
+  - testgate.Invocation
+  - testgate.Runner
+  - testgate.RunResult
+  - testgate.Report
+  - testgate.PassReport
+  - testgate.Calibration
+  - testgate.ReportRecord
+  - testgate.ReportTest
+  - testgate.ReportFinding
+  - testgate.ClassRow
+  - testgate.StepMeasurement
+  - testgate.PreTestCommand
+  - testgate.Cost
+  - testgate.Entry
+  - testgate.Registry
+  - testgate.Budget
+  - testgate.BudgetEnforcement
+  - testgate.Finding
+
+shapes:
+  # --- per-invocation record: {unit, class, wall, user, system} -------------
+  - name: testgate.Record
+    fields:
+      - { name: Unit,   type: string }
+      - { name: Class,  type: testgate.Class }
+      - { name: Pass,   type: testgate.PassMode }
+      - { name: Wall,   type: time.Duration }
+      - { name: User,   type: time.Duration }
+      - { name: System, type: time.Duration }
+
+  - name: testgate.Invocation
+    fields:
+      - { name: ImportPath, type: string }
+      - { name: Dir,        type: string }
+      - { name: Test,       type: string }
+      - { name: Pass,       type: testgate.PassMode }
+      - { name: Class,      type: testgate.Class }
+      - { name: Args,       type: "[]string" }
+      - { name: OutputDir,  type: string }
+      - { name: StreamPath, type: string }
+      - { name: ErrPath,    type: string }
+
+  - name: testgate.Runner
+    fields:
+      - { name: Root,        type: string }
+      - { name: OutDir,      type: string }
+      - { name: GoBin,       type: string }
+      - { name: Concurrency, type: int }
+      - { name: Env,         type: "[]string" }
+      - { name: SerialPassB, type: bool }
+
+  - name: testgate.RunResult
+    fields:
+      - { name: Records, type: "map[testgate.PassMode][]testgate.Record" }
+      - { name: Streams, type: "map[testgate.PassMode]map[string][]teststream.Record" }
+      - { name: Walls,   type: "map[testgate.PassMode]time.Duration" }
+      - { name: Errors,  type: "[]string" }
+      - { name: User,    type: time.Duration }
+      - { name: System,  type: time.Duration }
+
+  # --- report document schema (report.json) ---------------------------------
+  - name: testgate.Report
+    fields:
+      - { name: SchemaVersion,    type: int, tag: 'json:"schema_version"' }
+      - { name: Module,           type: string, tag: 'json:"module"' }
+      - { name: Race,             type: bool, tag: 'json:"race"' }
+      - { name: Concurrency,      type: int, tag: 'json:"concurrency"' }
+      - { name: GOMAXPROCS,       type: int, tag: 'json:"gomaxprocs"' }
+      - { name: ListWallMS,       type: int64, tag: 'json:"list_wall_ms"' }
+      - { name: PassA,            type: "*testgate.PassReport", tag: 'json:"pass_a,omitempty"' }
+      - { name: PassB,            type: "*testgate.PassReport", tag: 'json:"pass_b,omitempty"' }
+      - { name: CombinedWallMS,   type: int64, tag: 'json:"combined_test_wall_ms"' }
+      - { name: PreTestWallMS,    type: int64, tag: 'json:"pre_test_wall_ms,omitempty"' }
+      - { name: Calibration,      type: testgate.Calibration, tag: 'json:"calibration"' }
+      - { name: Records,          type: "[]testgate.ReportRecord", tag: 'json:"records"' }
+      - { name: Findings,         type: "[]testgate.ReportFinding", tag: 'json:"findings"' }
+      - { name: FailedTests,      type: "[]testgate.ReportTest", tag: 'json:"failed_tests"' }
+      - { name: InvocationErrors, type: "[]string", tag: 'json:"invocation_errors"' }
+      - { name: ClassTable,       type: "[]testgate.ClassRow", tag: 'json:"class_table"' }
+      - { name: PreTestSteps,     type: "[]testgate.ReportRecord", tag: 'json:"pre_test_steps,omitempty"' }
+      - { name: BudgetEnforcement, type: testgate.BudgetEnforcement, tag: 'json:"budget_enforcement,omitempty"' }
+      - { name: BudgetWarn,       type: bool, tag: 'json:"budget_warn,omitempty"' }
+
+  - name: testgate.PassReport
+    fields:
+      - { name: Name,     type: string, tag: 'json:"name"' }
+      - { name: WallMS,   type: int64, tag: 'json:"wall_ms"' }
+      - { name: Packages, type: int, tag: 'json:"packages"' }
+      - { name: Tests,    type: int, tag: 'json:"tests"' }
+      - { name: UserMS,   type: int64, tag: 'json:"user_ms"' }
+      - { name: SystemMS, type: int64, tag: 'json:"system_ms"' }
+      - { name: GapMS,    type: int64, tag: 'json:"gap_ms"' }
+
+  - name: testgate.Calibration
+    fields:
+      - { name: L,            type: float64, tag: 'json:"l"' }
+      - { name: ProbeMS,      type: int64, tag: 'json:"probe_ms"' }
+      - { name: ReferenceMS,  type: int64, tag: 'json:"reference_ms"' }
+      - { name: Inconclusive, type: bool, tag: 'json:"inconclusive"' }
+
+  - name: testgate.ReportRecord
+    fields:
+      - { name: Unit,     type: string, tag: 'json:"unit"' }
+      - { name: Class,    type: string, tag: 'json:"class"' }
+      - { name: Pass,     type: string, tag: 'json:"pass"' }
+      - { name: WallMS,   type: int64, tag: 'json:"wall_ms"' }
+      - { name: UserMS,   type: int64, tag: 'json:"user_ms"' }
+      - { name: SystemMS, type: int64, tag: 'json:"system_ms"' }
+
+  - name: testgate.ReportTest
+    fields:
+      - { name: Package, type: string, tag: 'json:"package"' }
+      - { name: Test,    type: string, tag: 'json:"test"' }
+
+  - name: testgate.ReportFinding
+    fields:
+      - { name: Rule,     type: string, tag: 'json:"rule"' }
+      - { name: Severity, type: string, tag: 'json:"severity"' }
+      - { name: What,     type: string, tag: 'json:"what"' }
+      - { name: Why,      type: string, tag: 'json:"why"' }
+      - { name: Where,    type: string, tag: 'json:"where"' }
+      - { name: When,     type: string, tag: 'json:"when"' }
+      - { name: Means,    type: string, tag: 'json:"means"' }
+      - { name: Fix,      type: string, tag: 'json:"fix"' }
+
+  # --- per-class decision table row -----------------------------------------
+  - name: testgate.ClassRow
+    fields:
+      - { name: Class,    type: string, tag: 'json:"class"' }
+      - { name: Units,    type: int, tag: 'json:"units"' }
+      - { name: WallMS,   type: int64, tag: 'json:"wall_ms"' }
+      - { name: UserMS,   type: int64, tag: 'json:"user_ms"' }
+      - { name: SystemMS, type: int64, tag: 'json:"system_ms"' }
+      - { name: GapMS,    type: int64, tag: 'json:"gap_ms"' }
+      - { name: Basis,    type: string, tag: 'json:"basis"' }
+
+  # --- one measured pre-test step -------------------------------------------
+  - name: testgate.StepMeasurement
+    fields:
+      - { name: Step,     type: testgate.PreTestStep }
+      - { name: Wall,     type: time.Duration }
+      - { name: User,     type: time.Duration }
+      - { name: System,   type: time.Duration }
+      - { name: ExitCode, type: int }
+      - { name: Failed,   type: bool }
+      - { name: LogPath,  type: string }
+
+  # --- one pre-test step and its Makefile source anchor ---------------------
+  - name: testgate.PreTestCommand
+    fields:
+      - { name: Step,     type: testgate.PreTestStep, tag: 'yaml:"step"' }
+      - { name: Program,  type: string, tag: 'yaml:"program"' }
+      - { name: Args,     type: "[]string", tag: 'yaml:"args"' }
+      - { name: Target,   type: string, tag: 'yaml:"target"' }
+      - { name: Fragment, type: string, tag: 'yaml:"fragment"' }
+
+  # --- registry schema (no-race-partition.yaml) -----------------------------
+  - name: testgate.Cost
+    fields:
+      - { name: WallMS, type: int64, tag: 'yaml:"wall_ms"' }
+      - { name: CPUMs,  type: int64, tag: 'yaml:"cpu_ms"' }
+
+  - name: testgate.Entry
+    fields:
+      - { name: Package,         type: string, tag: 'yaml:"package"' }
+      - { name: Test,            type: string, tag: 'yaml:"test"' }
+      - { name: Class,           type: testgate.Class, tag: 'yaml:"class"' }
+      - { name: Evidence,        type: string, tag: 'yaml:"evidence"' }
+      - { name: Justification,   type: string, tag: 'yaml:"justification"' }
+      - { name: Cost,            type: testgate.Cost, tag: 'yaml:"cost"' }
+      - { name: BuildFlags,      type: "*testgate.BuildFlags", tag: 'yaml:"build_flags,omitempty"' }
+      - { name: ExecCommandSite, type: string, tag: 'yaml:"exec_command_site,omitempty"' }
+
+  - name: testgate.Registry
+    fields:
+      - { name: Version,   type: int, tag: 'yaml:"version"' }
+      - { name: Partition, type: "[]testgate.Entry", tag: 'yaml:"partition"' }
+      - { name: Protected, type: "[]testgate.Entry", tag: 'yaml:"protected"' }
+
+  # --- budget schema (budget.yaml) ------------------------------------------
+  - name: testgate.Budget
+    fields:
+      - { name: Version,     type: int, tag: 'yaml:"version"' }
+      - { name: Seconds,     type: int, tag: 'yaml:"seconds"' }
+      - { name: Basis,       type: string, tag: 'yaml:"basis"' }
+      - { name: Enforcement, type: testgate.BudgetEnforcement, tag: 'yaml:"enforcement"' }
+
+  # --- Screen finding shape that drives the exit verdict --------------------
+  - name: testgate.Finding
+    fields:
+      - { name: Rule,     type: string }
+      - { name: Severity, type: testgate.Severity }
+      - { name: What,     type: string }
+      - { name: Why,      type: string }
+      - { name: Where,    type: string }
+      - { name: When,     type: string }
+      - { name: Means,    type: string }
+      - { name: Fix,      type: string }
+
+# Closed sets: membership and order are the contract. RegistryClasses is the
+# admission set and the report order; PreTestSteps is execution order.
+enums:
+  - name: testgate.RegistryClasses
+    members: [single-threaded-bytes, subprocess, static-analysis, toolchain]
+  - name: testgate.PreTestSteps
+    members: [fmt, lint, ast-grep-scan, ast-grep-gate-test, release-guard]
+  - name: testgate.PassModeValues
+    members: [race, no-race]
+  - name: testgate.BudgetEnforcement
+    members: [blocking, warn]

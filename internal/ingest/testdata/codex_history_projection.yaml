@@ -1228,10 +1228,10 @@ cases:
         expected:
           mode: paginated
           completeness: complete
-          inheritedRefs: [e_1, e_2, e_3]
-          mainRefs: [e_4]
+          inheritedRefs: [e_1, e_2, e_3, e_4]
+          mainRefs: [e_5]
           earlierRefs: []
-          diagnostics: [codex_record_malformed, codex_record_unknown]
+          diagnostics: [codex_record_malformed]
           nodes:
             - ref: e_1
               nativeKey: "codex|75757575-7575-4757-8757-757575757575|item|m1|message"
@@ -1256,6 +1256,14 @@ cases:
               ownership: inherited
               hasPayload: true
             - ref: e_3
+              nativeKey: "codex|75757575-7575-4757-8757-757575757575|opaque|phys-current|518"
+              segment: 0
+              ordinal: -1
+              line: 4
+              envelopeType: future_type
+              ownership: inherited
+              hasPayload: false
+            - ref: e_4
               nativeKey: "codex|75757575-7575-4757-8757-757575757575|item|m3|message"
               segment: 0
               ordinal: 3
@@ -1266,7 +1274,7 @@ cases:
               itemID: m3
               ownership: inherited
               hasPayload: true
-            - ref: e_4
+            - ref: e_5
               nativeKey: "codex|75757575-7575-4757-8757-757575757575|item|m4|message"
               segment: 0
               ordinal: 4

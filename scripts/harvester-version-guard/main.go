@@ -97,6 +97,14 @@ func run(base, candidate string) error {
 	if err := os.CopyFS(builder, os.DirFS(filepath.Join(candidateTree, "internal/ingest/testfixture"))); err != nil {
 		return err
 	}
+	// The shared builder returns database paths, never driver Conn/Stmt types.
+	// Older production keeps its original imports and module graph; only the
+	// candidate builder's otherwise-absent package support is supplied.
+	for _, tree := range []string{baseTree, candidateTree} {
+		if err := supplyFixtureDriver(tree, candidateTree); err != nil {
+			return err
+		}
+	}
 	nativeCorpora := make(map[string][]byte)
 	for _, corpus := range []string{baseTree, candidateTree} {
 		nativeCorpora[corpus], err = os.ReadFile(filepath.Join(corpus, "internal/ingest/testfixture/testdata/opencode_sqlite.yaml"))
@@ -128,6 +136,77 @@ func run(base, candidate string) error {
 		return fmt.Errorf("parser behavior changed without the affected revision increasing; bump the named registry field after reviewing the change")
 	}
 	fmt.Println("PASS: all observed adapter/indexer changes carry a version increase")
+	return nil
+}
+
+const fixtureDriverPath = "third_party/zombiezen-sqlite"
+
+func fixtureDriverFiles(root string) (map[string][]byte, error) {
+	files := make(map[string][]byte)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if relative != "LICENSE" && (!strings.HasSuffix(relative, ".go") || strings.HasSuffix(relative, "_test.go")) {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("fixture driver support is not regular: %s", relative)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[relative] = data
+		return nil
+	})
+	return files, err
+}
+
+func supplyFixtureDriver(tree, candidateTree string) error {
+	source := filepath.Join(candidateTree, fixtureDriverPath)
+	if _, err := os.Stat(source); os.IsNotExist(err) {
+		return nil // Earlier candidate builders use their original module dependency.
+	} else if err != nil {
+		return err
+	}
+	files, err := fixtureDriverFiles(source)
+	if err != nil {
+		return err
+	}
+	if _, ok := files["sqlite.go"]; !ok {
+		return fmt.Errorf("shared fixture driver lacks sqlite.go")
+	}
+	destination := filepath.Join(tree, fixtureDriverPath)
+	if _, err := os.Stat(destination); err == nil {
+		existing, err := fixtureDriverFiles(destination)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(existing, files) {
+			return fmt.Errorf("cannot replace historical production driver with shared fixture support in %s", filepath.Base(tree))
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	for relative, data := range files {
+		target := filepath.Join(destination, relative)
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, data, 0600); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("Supplied candidate SQLite support for shared fixture builder in %s; production imports and go.mod unchanged\n", filepath.Base(tree))
 	return nil
 }
 

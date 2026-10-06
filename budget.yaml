@@ -1,0 +1,26 @@
+# Whole-suite test budget (WARN-ONLY mode).
+#
+# `make check` runs the test gate against this value: the gate normalizes the
+# combined test wall by the calibration factor L (this box's probe wall over the
+# committed reference) and compares it to `seconds` below.
+#
+# `enforcement: warn` keeps the 120 s bar visible and measured, but a miss no
+# longer fails `make check` or CI. An over-budget full-suite run prints an
+# unmissable line of the form:
+#
+#   budget: 120s reference (...); normalized test wall ... -> WARN (non-blocking): over budget; gate stays green
+#
+# The line never reads as a budget PASS. The run exits 0 (absent any test
+# failure, screen finding, or invocation error, which still fail the gate).
+# `report.json` records the mode (`budget_enforcement: "warn"`) and the outcome
+# (`budget_warn: true` only when a miss was demoted to a warning).
+#
+# Path back to blocking: set `enforcement: blocking` (a one-line field change).
+# An absent `enforcement` field defaults to `blocking`; any other value fails
+# the gate closed, so a typo cannot silently demote it.
+#
+# The bar is a fixed target, not a value derived from the current measurement.
+version: 1
+seconds: 120
+basis: reference-box wall, 32-thread Linux amd64, Go 1.26.5 (L-normalized)
+enforcement: warn

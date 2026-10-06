@@ -15,6 +15,7 @@ import (
 var projectIdentityYAML []byte
 
 func TestProjectIdentityFixture(t *testing.T) {
+	t.Parallel()
 	if _, err := loadProjectIdentityFixtures(); err != nil {
 		t.Fatal(err)
 	}

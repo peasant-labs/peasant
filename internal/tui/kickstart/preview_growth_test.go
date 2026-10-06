@@ -1,17 +1,13 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -48,15 +44,9 @@ type previewGrowthDoc struct {
 
 func loadPreviewGrowthDoc(t *testing.T) previewGrowthDoc {
 	t.Helper()
-	dec := yaml.NewDecoder(bytes.NewReader(previewGrowthData))
-	dec.KnownFields(true)
 	var doc previewGrowthDoc
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewGrowthData, &doc); err != nil {
 		t.Fatalf("decode testdata/preview_growth.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("preview_growth.yaml must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("the preview-growth fixture declares no required cases")

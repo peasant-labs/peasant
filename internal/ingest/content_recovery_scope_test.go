@@ -15,11 +15,12 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/content_recovery_scope.yaml
@@ -146,6 +147,7 @@ func (s *unreadableRowStore) BulkLookupSessionLocations(ctx context.Context, ids
 }
 
 func TestContentRecoveryScope(t *testing.T) {
+	t.Parallel()
 	fixtures := loadContentRecoveryScopeFixtures(t)
 	for _, fixture := range fixtures.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -155,10 +157,7 @@ func TestContentRecoveryScope(t *testing.T) {
 			}
 			ctx := context.Background()
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
-			database, err := store.Open(filepath.Join(t.TempDir(), "scope.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			database := storetest.OpenWith(t)
 			defer database.Close()
 			id, err := ingest.NewSessionID("ses_scopetarget")
 			if err != nil {
@@ -234,7 +233,7 @@ func TestContentRecoveryScope(t *testing.T) {
 			if fixture.UnreadableRow {
 				sessionStore = &unreadableRowStore{Store: database, target: id}
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -247,7 +246,7 @@ func TestContentRecoveryScope(t *testing.T) {
 			var result *PipelineResult
 			for run := range runs {
 				if run > 0 {
-					pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+					pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 					if err != nil {
 						t.Fatal(err)
 					}

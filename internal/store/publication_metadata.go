@@ -9,9 +9,9 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ ingest.PublicationInputReader = (*Store)(nil)
@@ -294,7 +294,10 @@ func stampPublicationIndex(conn *sqlite.Conn, id ingest.SessionID, revision int6
 	return sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_publication_capture_revision=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{revision, string(id)}})
 }
 
-// LoadPublicationInput takes one deferred read transaction. Every constituent
+// LoadPublicationInput reads recorded capture evidence for ingest/repair and
+// diagnostics. Publication consumers use WithCommittedPublicationInput instead,
+// which includes the current generation's derived facts. This capture-only read
+// takes one deferred read transaction. Every constituent
 // reader uses this same connection, including extension rows and current metrics.
 // Missing/unsupported captures return needs_ingest. Corrupt or conflicting
 // evidence returns an error, never an approximation or a filesystem fallback.
@@ -305,14 +308,21 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 		return bundle, err
 	}
 	defer s.pool.Put(conn)
+	end := sqlitex.Transaction(conn)
+	defer end(&err)
+	return s.loadPublicationInputOnConn(ctx, conn, id)
+}
+
+// loadPublicationInputOnConn reads capture evidence and content on the caller's
+// transaction, so the committed-generation reader can include them in its read.
+func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
+	bundle.Readiness = ingest.PublicationNeedsIngest
 	defer func() {
 		if err != nil {
 			bundle.Readiness = ingest.PublicationNeedsIngest
 			bundle.Entries = nil
 		}
 	}()
-	end := sqlitex.Transaction(conn)
-	defer end(&err)
 	found := false
 	err = sqlitex.ExecuteTransient(conn, publicationMetadataSelect+` WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -334,7 +344,7 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 	if err = s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
 		return bundle, err
 	}
-	if err = sqlitex.ExecuteTransient(conn, `SELECT COALESCE(NULLIF(s.git_worktree,''),p.canonical_cwd,'') FROM sessions s JOIN projects p ON p.project_hash=s.project_hash WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { bundle.ProjectPath = stmt.ColumnText(0); return nil }}); err != nil {
+	if err = sqlitex.ExecuteTransient(conn, `SELECT `+sqlRecordedDirectory+` FROM sessions s JOIN projects p ON p.project_hash=s.project_hash WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { bundle.ProjectPath = stmt.ColumnText(0); return nil }}); err != nil {
 		return bundle, err
 	}
 	bundle.Entries, bundle.ContentCapture, err = loadFullSessionEntriesOnConn(ctx, conn, id, 0)
@@ -387,6 +397,20 @@ func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ing
 	}
 	return bundle, err
 }
+
+// readableMetadataSchemaVersions is the set form of the versions this build
+// reads as current. Publication readiness compares a stored capture's version
+// against this set, not against the current version exactly, so a declared
+// refresh-free schema bump does not make every stored capture read as needing a
+// re-ingest.
+var readableMetadataSchemaVersions = func() map[int]bool {
+	versions := ingest.ReadableMetadataSchemaVersions()
+	set := make(map[int]bool, len(versions))
+	for _, version := range versions {
+		set[version] = true
+	}
+	return set
+}()
 
 // Capture-state columns only: eligibility deliberately does not verify payload.
 //
@@ -448,7 +472,7 @@ func scanPublicationMetadataProof(stmt *sqlite.Stmt, id ingest.SessionID) (bundl
 			return publicationRepairError("invalid stored session origin")
 		}
 		bundle.CaptureRevision = stmt.ColumnInt64(2)
-		if stmt.ColumnType(9) == sqlite.TypeNull || stmt.ColumnInt(10) != ingest.CurrentSchemaVersion {
+		if stmt.ColumnType(9) == sqlite.TypeNull || !readableMetadataSchemaVersions[stmt.ColumnInt(10)] {
 			return nil
 		}
 		kind, parseErr := ingest.NewCWDProvenanceKind(stmt.ColumnText(5))

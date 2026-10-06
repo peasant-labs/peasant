@@ -5,28 +5,26 @@ import { EmptyState, FeedbackPanel } from "@/lib/ft-ui";
  * Peasant program. Before this, the same "disconnected" news was written three
  * different ways and leaked the word "WebSocket" to users. The model:
  *
- * - The **top-nav pill** (TopNavbar) is the single PERSISTENT, glanceable
- *   indicator — always on screen.
+ * - The **offline notice** (LocalOfflineNotice, under the header) is the one
+ *   app-level signal. It shows only while the app is unreachable — pinned where
+ *   the screen has room, scrolling with the page on a small or zoomed screen —
+ *   and gives the start command and `try again`; a live region announces the
+ *   change. A reachable app shows nothing.
  * - A page renders <Disconnected/> only when losing the connection is the
  *   reason its content area is empty (so the user isn't left staring at an
- *   endless skeleton). It's contextual, not a second copy of the nav pill.
+ *   endless skeleton). It's contextual, not a second copy of the notice.
  *
  * The connection is to a program on THIS computer — no internet — so the copy
  * leads with that, and stays plain.
  */
 
 export const CONNECTION = {
-  /** Top-nav pill text. */
-  liveLabel: "live · local",
-  connectingLabel: "connecting…",
-  /** Top-nav pill tooltips. */
-  liveTitle:
-    "Connected to the Peasant app running on this computer; no internet involved.",
+  /** Loading-panel body while the first connection is still being made. */
   connectingTitle: "Trying to reach the Peasant app on this computer…",
   /** Content-area copy when disconnection blocks a view (initial or dropped). */
   blockedTitle: "waiting for the peasant app",
   blockedBody:
-    "It runs on this computer; nothing has left your machine. This page comes back on its own.",
+    "It runs on this computer; nothing has left your machine. This page fills in again once the app is back.",
   /** One-line note when stale data is still on screen after a drop. */
   staleNote: "connection lost; showing the last loaded data.",
 } as const;
@@ -61,8 +59,9 @@ export function Disconnected({
 
 /**
  * A single, plain disconnected strip for pages whose body is a skeleton/list
- * (not a teach state) — e.g. the Changes list. Returns null while connected (the
- * nav pill is the steady-state indicator), so it never doubles up. One strip,
+ * (not a teach state) — e.g. the Changes list. Returns null while connected.
+ * While the app is stopped it sits under the page-level offline notice and
+ * speaks only for this page's data. One strip,
  * keyed on whether data ever loaded — replaces the old stacking
  * "Waiting for WebSocket connection…" + raw `wsError` strips.
  */

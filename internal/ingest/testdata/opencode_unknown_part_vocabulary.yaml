@@ -1,7 +1,7 @@
 # Expectations for the tolerated legacy part vocabulary case. A well-formed part
 # whose declared type is outside the known set no longer fails the session: a
-# text-bearing unknown part becomes an inert system note, a text-free one is
-# dropped, and one diagnostic per distinct unknown type names the type and how
+# unknown part is retained without display, and one diagnostic per distinct
+# unknown type names the type and how
 # many rows it covered. The known parts keep their exact prior rendering.
 # required_cases names the cases that must stay present. Removing one goes red
 # by name; adding a case need not appear here. The list, not a count, guards.

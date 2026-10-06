@@ -248,3 +248,62 @@ func TestMaxEntryIndex_SingleEntry(t *testing.T) {
 		t.Errorf("MaxEntryIndex = %d, want 0", max)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// C2: FirstEntry
+// ---------------------------------------------------------------------------
+
+// TestFirstEntry_ReturnsLowestIndex verifies FirstEntry reads the head of the
+// entry stream: the lowest entry_index with its role, from a multi-entry
+// session.
+func TestFirstEntry_ReturnsLowestIndex(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := storetest.Open(t)
+
+	const sid = "55555555-5555-5555-5555-222222222222"
+	storetest.SeedSession(t, s, sid)
+	sessionID := seedRangeEntries(t, s, sid, 5) // indices 0..4, all assistant
+
+	head, err := s.FirstEntry(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("FirstEntry: %v", err)
+	}
+	if head == nil {
+		t.Fatal("FirstEntry = nil, want the opening entry")
+	}
+	if head.EntryIndex != 0 {
+		t.Errorf("FirstEntry.EntryIndex = %d, want 0", head.EntryIndex)
+	}
+	if head.Role != schema.RoleAssistant {
+		t.Errorf("FirstEntry.Role = %q, want assistant", head.Role)
+	}
+}
+
+// TestFirstEntry_EmptyAndMissing verifies the not-found contract: nil, nil
+// error for a stored session with no indexed entries and for a session id
+// that is not in the DB at all.
+func TestFirstEntry_EmptyAndMissing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := storetest.Open(t)
+
+	const sid = "55555555-5555-5555-5555-333333333333"
+	storetest.SeedSession(t, s, sid)
+
+	head, err := s.FirstEntry(ctx, schema.SessionID(sid))
+	if err != nil {
+		t.Fatalf("FirstEntry(empty session): %v", err)
+	}
+	if head != nil {
+		t.Fatalf("FirstEntry(empty session) = %+v, want nil", head)
+	}
+
+	head, err = s.FirstEntry(ctx, schema.SessionID("99999999-9999-9999-9999-999999999999"))
+	if err != nil {
+		t.Fatalf("FirstEntry(unknown session): %v", err)
+	}
+	if head != nil {
+		t.Fatalf("FirstEntry(unknown session) = %+v, want nil", head)
+	}
+}

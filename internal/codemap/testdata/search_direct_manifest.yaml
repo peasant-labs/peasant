@@ -1,0 +1,13 @@
+requiredNames:
+  - valid_uuid_session_id
+  - valid_ses_prefixed_session_id
+  - valid_project_hash
+  - near_miss_63_hex_characters
+  - near_miss_65_hex_characters
+  - near_miss_ses_bare_prefix
+  - near_miss_sess_bare_prefix
+  - near_miss_uppercase_uuid
+  - near_miss_uppercase_project_hash
+  - plain_content_query
+  - id_with_surrounding_whitespace
+  - id_embedded_in_phrase

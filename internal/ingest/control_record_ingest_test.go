@@ -13,9 +13,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/control_record_ingest.yaml
@@ -33,6 +33,7 @@ type controlRecordIngestCase struct {
 	ExportAccepted      bool              `yaml:"export_accepted"`
 	PublicationReady    bool              `yaml:"publication_ready"`
 	PreflightAccepts    bool              `yaml:"preflight_accepts"`
+	RetainedKind        string            `yaml:"retained_kind"`
 }
 
 func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
@@ -41,7 +42,7 @@ func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
 		Required []string                  `yaml:"required_names"`
 		Cases    []controlRecordIngestCase `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(controlRecordIngestYAML, &document); err != nil {
+	if err := testutil.DecodeFixtureYAML(controlRecordIngestYAML, &document); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -65,6 +66,7 @@ func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
 // counterpart. The capture API alone cannot prove the ordinary path kept the
 // control fields or that export and publication accept the stored capture.
 func TestControlRecordIngestExportAndPublication(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadControlRecordIngestFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
@@ -78,8 +80,8 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			if err := os.WriteFile(sourcePath, []byte(transcript), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(root, "peasant.db")
-			db, err := store.Open(path)
+			path := storetest.CopyGoldenDB(t)
+			db, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,7 +93,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				OutputDir:   ingest.ResolvedPath(filepath.Join(root, "output")),
 				Parallelism: 1,
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+			pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
 				ingest.WithStore(db), ingest.WithMetricsStore(db),
 				ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 			if err != nil {
@@ -114,7 +116,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(path)
+			db, err = store.Open(path, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -145,27 +147,34 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				if !fixture.ExportAccepted {
 					t.Fatal("the complete-content reader accepted an incomplete capture")
 				}
-				entry := findControlIngestEntry(snapshot.Entries, fixture)
-				if entry == nil {
-					t.Fatalf("the stored session lost its %q control record", fixture.ControlPartType)
-				}
-				if entry.ContentPreview == nil || *entry.ContentPreview != fixture.ControlPreview {
-					t.Fatalf("stored control preview = %v, want %q", entry.ContentPreview, fixture.ControlPreview)
-				}
-				if entry.Extra == nil {
-					t.Fatal("stored control record lost its payload")
-				}
-				var extra map[string]json.RawMessage
-				if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
-					t.Fatalf("stored control payload is not JSON: %v", err)
-				}
-				for key, want := range fixture.ControlExtraMembers {
-					raw, ok := extra[key]
-					if !ok {
-						t.Fatalf("stored control payload lacks %q", key)
+				if fixture.RetainedKind != "" {
+					records, err := ingest.ProjectRetainedUnknown(snapshot.Entries, ingest.HarnessClaudeCode)
+					if err != nil || len(records) != 1 || records[0].Kind != fixture.RetainedKind {
+						t.Fatalf("retained evidence missing: %+v %v", records, err)
 					}
-					if got := canonicalJSONValue(t, string(raw)); got != canonicalJSONValue(t, want) {
-						t.Fatalf("stored control payload[%q] = %s, want %s", key, got, want)
+				} else {
+					entry := findControlIngestEntry(snapshot.Entries, fixture)
+					if entry == nil {
+						t.Fatalf("the stored session lost its %q control record", fixture.ControlPartType)
+					}
+					if entry.ContentPreview == nil || *entry.ContentPreview != fixture.ControlPreview {
+						t.Fatalf("stored control preview = %v, want %q", entry.ContentPreview, fixture.ControlPreview)
+					}
+					if entry.Extra == nil {
+						t.Fatal("stored control record lost its payload")
+					}
+					var extra map[string]json.RawMessage
+					if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
+						t.Fatalf("stored control payload is not JSON: %v", err)
+					}
+					for key, want := range fixture.ControlExtraMembers {
+						raw, ok := extra[key]
+						if !ok {
+							t.Fatalf("stored control payload lacks %q", key)
+						}
+						if got := canonicalJSONValue(t, string(raw)); got != canonicalJSONValue(t, want) {
+							t.Fatalf("stored control payload[%q] = %s, want %s", key, got, want)
+						}
 					}
 				}
 			}
@@ -175,12 +184,15 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				t.Fatalf("export accepted=%v, want %v (%v)", exportErr == nil, fixture.ExportAccepted, exportErr)
 			}
 			if fixture.ExportAccepted {
+				if fixture.RetainedKind != "" && (exported.Diagnostics == nil || !exported.Diagnostics.Partial || len(exported.RetainedUnknown) != 1) {
+					t.Fatal("export lost partial evidence")
+				}
 				if exported == nil || !strings.Contains(exportPayloadText(t, exported), fixture.ControlPreview) {
 					t.Fatalf("exported detail does not carry the control preview %q", fixture.ControlPreview)
 				}
 			}
 
-			bundle, err := push.LoadPublicationInput(ctx, db, testutil.TestSessionUUID)
+			bundle, _, err := push.LoadPublicationInput(ctx, db, testutil.TestSessionUUID)
 			if err != nil {
 				t.Fatalf("load the publication input: %v", err)
 			}

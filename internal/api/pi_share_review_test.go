@@ -68,7 +68,7 @@ func TestPiShareReviewProductionRoute(t *testing.T) {
 				t.Fatal(err)
 			}
 			testutil.SeedReadyPublication(t, db, meta, []schema.SessionEntry{entry})
-			handler := &syncHandler{store: db, config: config.BaseConfig()}
+			handler := &syncHandler{store: db, config: newLiveConfig(config.BaseConfig())}
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/sync/redactions?session_id="+string(sid), nil)
 			handler.handleSyncRedactions(response, request)
@@ -81,7 +81,7 @@ func TestPiShareReviewProductionRoute(t *testing.T) {
 				}
 				return
 			}
-			var result groupedRedactionResponse
+			var result schema.SyncRedactionsResponse
 			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}

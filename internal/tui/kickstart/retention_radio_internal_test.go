@@ -22,6 +22,7 @@ import (
 // committed-draft value reaches the writer (the draft->writer path) but seeds the
 // draft directly and so does not exercise the accessor.
 func TestRetentionRadio_SelectionWritesDraft(t *testing.T) {
+	t.Parallel()
 	// A registry holding ONLY the retention section, so the radio is the single
 	// active field and no step-order counting is needed.
 	full := BuildRegistry(Options{

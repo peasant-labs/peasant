@@ -5,8 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -24,7 +22,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/published_provenance_envelope.yaml
@@ -38,6 +35,7 @@ var publishedProvenanceEnvelopeManifestYAML []byte
 var (
 	ppePaths          = []string{"snapshot", "legacy"}
 	ppeStats          = []string{"absent", "zero", "positive"}
+	ppeCaptureCounts  = []string{"omitted", "mirrored"}
 	ppeRelationships  = []string{"none", "known", "known-retained", "unknown"}
 	ppeRootIdentities = []string{"present", "absent"}
 	ppePurposes       = []string{"interaction", "absent"}
@@ -70,19 +68,21 @@ type publishedProvenanceEnvelopeFixture struct {
 }
 
 type publishedProvenanceEnvelopeCase struct {
-	Name          string `yaml:"name"`
-	Path          string `yaml:"path"`
-	Stats         string `yaml:"stats"`
-	Relationships string `yaml:"relationships"`
-	RootIdentity  string `yaml:"rootIdentity"`
-	Purpose       string `yaml:"purpose"`
-	Earlier       string `yaml:"earlier"`
-	Visibility    string `yaml:"visibility"`
-	Advertisement string `yaml:"advertisement"`
-	Redaction     string `yaml:"redaction"`
-	Entries       string `yaml:"entries"`
-	Harness       string `yaml:"harness"`
-	BlobBytes     int    `yaml:"blobBytes"`
+	Name             string `yaml:"name"`
+	Path             string `yaml:"path"`
+	Stats            string `yaml:"stats"`
+	CaptureCount     string `yaml:"captureCount"`
+	OmitCaptureGraph bool   `yaml:"omitCaptureGraph"`
+	Relationships    string `yaml:"relationships"`
+	RootIdentity     string `yaml:"rootIdentity"`
+	Purpose          string `yaml:"purpose"`
+	Earlier          string `yaml:"earlier"`
+	Visibility       string `yaml:"visibility"`
+	Advertisement    string `yaml:"advertisement"`
+	Redaction        string `yaml:"redaction"`
+	Entries          string `yaml:"entries"`
+	Harness          string `yaml:"harness"`
+	BlobBytes        int    `yaml:"blobBytes"`
 	// GenerationTurnCount overrides the generation's durable turn mirror when
 	// set, so a case can prove the published turnCount is the captured mirror
 	// rather than len(Turns).
@@ -140,15 +140,9 @@ type ppeEarlierExpect struct {
 
 func loadPublishedProvenanceEnvelopeFixture(t *testing.T) publishedProvenanceEnvelopeFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(publishedProvenanceEnvelopeYAML))
-	decoder.KnownFields(true)
 	var fixture publishedProvenanceEnvelopeFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(publishedProvenanceEnvelopeYAML, &fixture); err != nil {
 		t.Fatalf("decode published provenance envelope fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("published provenance envelope fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(publishedProvenanceEnvelopeManifestYAML, "published provenance envelope")
 	if err != nil {
@@ -164,12 +158,16 @@ func loadPublishedProvenanceEnvelopeFixture(t *testing.T) publishedProvenanceEnv
 		if fixtureCase.Harness == "" {
 			fixtureCase.Harness = "claude-code"
 		}
+		if fixtureCase.CaptureCount == "" {
+			fixtureCase.CaptureCount = "omitted"
+		}
 		for label, pair := range map[string]struct {
 			value  string
 			closed []string
 		}{
 			"path":          {fixtureCase.Path, ppePaths},
 			"stats":         {fixtureCase.Stats, ppeStats},
+			"captureCount":  {fixtureCase.CaptureCount, ppeCaptureCounts},
 			"relationships": {fixtureCase.Relationships, ppeRelationships},
 			"rootIdentity":  {fixtureCase.RootIdentity, ppeRootIdentities},
 			"purpose":       {fixtureCase.Purpose, ppePurposes},
@@ -201,6 +199,7 @@ func loadPublishedProvenanceEnvelopeFixture(t *testing.T) publishedProvenanceEnv
 // real generation-capable store for every fixture case and asserts the emitted
 // envelope and metadata mirrors member-for-member.
 func TestPublishedProvenanceEnvelopeCarriage(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadPublishedProvenanceEnvelopeFixture(t).Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
@@ -250,8 +249,11 @@ func ppeOpenStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	destPath := filepath.Join(dir, "generations.db")
+	storetest.CopyGoldenTo(t, destPath)
 	db, err := store.Open(
-		filepath.Join(dir, "generations.db"),
+		destPath,
+		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),
@@ -309,7 +311,10 @@ func ppeBuild(t *testing.T, c publishedProvenanceEnvelopeCase) ppeBuilt {
 		positive := int64(3)
 		inputCount = &positive
 	}
-	meta.Stats.InputSubmissionCount = inputCount
+	// The generation measures the count; capture metadata may still omit it.
+	if c.CaptureCount == "mirrored" {
+		meta.Stats.InputSubmissionCount = inputCount
+	}
 
 	target := schema.SessionID(ppeTargetID)
 	previous := schema.SessionID(ppePreviousID)
@@ -326,6 +331,11 @@ func ppeBuild(t *testing.T, c publishedProvenanceEnvelopeCase) ppeBuilt {
 
 	built := ppeBuilt{meta: &meta, harness: harness}
 	ppeBuildPartitions(t, &built, c, inputCount)
+	if c.OmitCaptureGraph {
+		meta.RootSessionID = nil
+		meta.Purpose = ""
+		meta.Relationships = nil
+	}
 	built.legacyEntries = built.legacyMainEntries()
 	return built
 }

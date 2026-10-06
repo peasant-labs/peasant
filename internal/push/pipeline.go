@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -124,6 +125,8 @@ type PipelineStore interface {
 	Publication(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationRecord, error)
 	SavePublication(context.Context, store.PublicationRecord) error
 	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
+	PublishedToVillage(context.Context, string, string, string) (bool, error)
+	LatestSessionPublicationAttempt(context.Context, string, string, string) (*store.PublicationAttemptDiagnostic, error)
 }
 
 // NewPipeline creates a push Pipeline with the given dependencies.
@@ -221,9 +224,18 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 		rec.Count(perf.CounterPushConcurrencyHighWater, int64(tracker.HighWater()), perf.UnitCount, nil)
 	}()
 
-	// 1. Resolve effective visibility + content license (both uniform for the run).
+	// 1. Resolve effective visibility + content license (both uniform for the
+	// run). They are what a first publish opens at; an update keeps what the
+	// village holds unless the caller asked for a change (see pushSession).
 	visibility := p.resolveVisibility()
 	license := p.resolveLicense()
+	// An explicit change also moves published transcripts, so one this version
+	// would downgrade is refused before anything is read or sent.
+	if p.changesVisibility() {
+		if refusal := config.VisibilityChangeRefusal(p.runCfg.Visibility); refusal != nil {
+			return nil, fmt.Errorf("refuse the requested visibility change before any upload: %w", refusal)
+		}
+	}
 
 	// 2. Guard: individual mode is not yet implemented.
 	if p.cfg.Push.Method == config.PushMethodIndividual && p.runCfg.SourceProvider == "" {
@@ -417,13 +429,13 @@ func (p *Pipeline) countRunTotals(rec perf.Recorder, result *PushResult, selecte
 	rec.Count(perf.CounterPushSessionsSkipped, int64(skipped), perf.UnitCount, nil)
 }
 
-// resolveVisibility returns the visibility this run will actually publish at.
+// resolveVisibility returns the visibility this run publishes a first
+// publication at, and the one an explicit visibility change moves an update to.
 //
 // It defers to the shared resolver rather than repeating the precedence, so the
 // value the pipeline acts on can never differ from the value the command
-// disclosed to the user. That matters even while the publish contract carries no
-// visibility at all: the moment it does, this is the value that would go on the
-// wire, and it has to be the one that was announced.
+// disclosed to the user. An update the caller did not ask to change keeps the
+// audience the transcript has on the village instead.
 func (p *Pipeline) resolveVisibility() schema.Visibility {
 	return config.EffectiveVisibility(p.runCfg.Visibility, p.cfg).Effective
 }
@@ -432,12 +444,26 @@ func (p *Pipeline) resolveVisibility() schema.Visibility {
 // CLI flag (runCfg.License) takes precedence over the config default (chosen at
 // kickstart). Unlike visibility there is NO forced fallback: an unset license
 // returns "" so MapMetadata omits the field and the village stores NULL — peasant
-// never imposes a license the contributor did not choose.
+// never imposes a license the contributor did not choose. An update sends it only
+// when the caller asked for a license change.
 func (p *Pipeline) resolveLicense() schema.License {
 	if p.runCfg.License != "" {
 		return p.runCfg.License
 	}
 	return p.cfg.Push.License
+}
+
+// changesVisibility reports whether the caller asked for a visibility change,
+// which is what lets an update move a published transcript. The request names
+// its own value; a change flag without one would silently mean the configured
+// default, which is exactly what an update must not apply.
+func (p *Pipeline) changesVisibility() bool {
+	return p.runCfg.ChangeVisibility && p.runCfg.Visibility != ""
+}
+
+// changesLicense is changesVisibility for the content license.
+func (p *Pipeline) changesLicense() bool {
+	return p.runCfg.ChangeLicense && p.runCfg.License != ""
 }
 
 // getTargetSessions determines which sessions to push based on flags and config.
@@ -466,13 +492,8 @@ func (p *Pipeline) getTargetSessions(ctx context.Context, parentSpanID string) (
 	baseCount = len(base)
 
 	selectionSpan := rec.StartChildSpan(perf.StagePushSelection, parentSpanID, nil)
-	base = p.filterByWizardSelection(base)
-	kept, withheld := ApplySelection(base, p.runCfg.Selection)
-	kept = ApplyRepositoryScope(kept, p.runCfg.Repository)
-	// The withheld notice runs AFTER the repository narrowing, not before it: a
-	// hook firing in one repository must not report branch conflicts belonging
-	// to another one on every commit.
-	p.noticeWithheld(ApplyRepositoryScope(withheld, p.runCfg.Repository))
+	kept, withheld := NarrowCandidates(base, p.runCfg)
+	p.noticeWithheld(withheld)
 	selectionSpan.End(perf.OutcomeOK, nil)
 	return kept, baseCount, nil
 }
@@ -503,6 +524,40 @@ func orderForBudget(ctx context.Context, sessions []ingest.PushSessionRow) []ing
 		return ordered[i].SessionID < ordered[j].SessionID
 	})
 	return ordered
+}
+
+// NarrowCandidates narrows push candidates the way a run does, in the run's
+// order: to the wizard's choice, to the sessions the auto-publish rules
+// pinned, to the saved selection, then to the repository scope. Everything
+// that describes a run before it starts (the rules' plan and the redaction
+// record) narrows through it, so it describes what the run sends. withheld
+// are the sessions the selection kept out, within the repository scope: a
+// hook firing in one repository must not report branch conflicts belonging
+// to another one on every commit.
+func NarrowCandidates(sessions []ingest.PushSessionRow, runCfg PipelineConfig) (kept, withheld []ingest.PushSessionRow) {
+	if len(runCfg.FilterSessionIDs) > 0 {
+		chosen := make(map[string]bool, len(runCfg.FilterSessionIDs))
+		for _, id := range runCfg.FilterSessionIDs {
+			chosen[id] = true
+		}
+		sessions = keepSessions(sessions, chosen)
+	}
+	if runCfg.PinnedSessionIDs != nil {
+		sessions = keepSessions(sessions, runCfg.PinnedSessionIDs)
+	}
+	kept, withheld = ApplySelection(sessions, runCfg.Selection)
+	return ApplyRepositoryScope(kept, runCfg.Repository), ApplyRepositoryScope(withheld, runCfg.Repository)
+}
+
+// keepSessions returns the sessions keep names, in order, in a new slice.
+func keepSessions(sessions []ingest.PushSessionRow, keep map[string]bool) []ingest.PushSessionRow {
+	out := make([]ingest.PushSessionRow, 0, len(sessions))
+	for _, session := range sessions {
+		if keep[session.SessionID] {
+			out = append(out, session)
+		}
+	}
+	return out
 }
 
 // ApplyRepositoryScope narrows sessions to the canonical project identities one
@@ -832,25 +887,6 @@ func (p *Pipeline) noticeWithheld(withheld []ingest.PushSessionRow) {
 	}
 }
 
-// filterByWizardSelection applies the FilterSessionIDs whitelist if set.
-// When FilterSessionIDs is nil or empty, all sessions pass through.
-func (p *Pipeline) filterByWizardSelection(sessions []ingest.PushSessionRow) []ingest.PushSessionRow {
-	if len(p.runCfg.FilterSessionIDs) == 0 {
-		return sessions
-	}
-	allowed := make(map[string]struct{}, len(p.runCfg.FilterSessionIDs))
-	for _, id := range p.runCfg.FilterSessionIDs {
-		allowed[id] = struct{}{}
-	}
-	var out []ingest.PushSessionRow
-	for _, s := range sessions {
-		if _, ok := allowed[s.SessionID]; ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // pushSession publishes one coherent database capture without source file access.
 func (p *Pipeline) pushSession(
 	ctx context.Context,
@@ -883,7 +919,7 @@ func (p *Pipeline) pushSession(
 
 	stage := startProfileStage(rec, sessionSpan.ID(), subjectAttrs, perf.StagePushSessionLoad)
 	defer func() { stage.finish(sr.Error) }()
-	input, err := p.readPublicationInput(ctx, sess)
+	input, detail, err := p.readPublicationInput(ctx, sess)
 	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if err == nil {
 		err = ValidatePublicationInput(input)
@@ -911,15 +947,6 @@ func (p *Pipeline) pushSession(
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
 
-	// Keep the metadata publication mirrors exact. The receiver compares the
-	// input-submission count and the graph mirrors (root session, purpose,
-	// relationships) against the durable detail's values and refuses a
-	// disagreement, and a measured zero is distinct from an absent count. The
-	// durable detail is hydrated from the active generation snapshot, so mirror
-	// that same snapshot identity here, before the metadata part is assembled. A
-	// legacy session, or a store without the managed snapshot surface, keeps
-	// the capture metadata unchanged.
-	mirrorDurablePublicationIdentity(ctx, p.store, sess.SessionID, &meta)
 	stage.next(perf.StagePushSessionLoad)
 
 	metrics := input.Quality
@@ -975,6 +1002,42 @@ func (p *Pipeline) pushSession(
 
 	stage.next(perf.StagePushPayloadBuild)
 
+	// The committed input already pairs current metadata with its hydrated
+	// detail. Apply publication consent without re-reading the active generation.
+	content, err := BuildPublishTranscriptContent(detail, &meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
+	}
+
+	// 4c. An update sends no license unless the caller asked for one. Village
+	// then keeps the license the transcript has; a configured default is a
+	// choice for new publications, not an instruction to relicense published
+	// ones. Before the upload, a local receipt is the only evidence that the
+	// session was published. The exact receipt (this village account, the
+	// session's current project identity) is what the skip rule compares. The
+	// question "published before?" follows the village's own key instead, the
+	// account and the session under any project identity, because a harvest
+	// can re-attribute a session to a new project while the village keeps the
+	// same transcript. A receipt from another village or account does not
+	// count: there this upload is a first publication.
+	projectHash, hashErr := schema.NewProjectHash(string(input.ReceiptProjectHash))
+	if hashErr != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
+	}
+	previous, err := p.store.Publication(ctx, p.creds.VillageURL, p.creds.UserID, projectHash, sess.SessionID)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
+	}
+	publishedBefore := previous != nil
+	if !publishedBefore {
+		if publishedBefore, err = p.store.PublishedToVillage(ctx, p.creds.VillageURL, p.creds.UserID, sess.SessionID); err != nil {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
+		}
+	}
+	if publishedBefore && !p.changesLicense() {
+		license = ""
+	}
+
 	// 5. Map metadata to publishRequest JSON.
 	publishJSON, err := MapMetadata(MapOptions{
 		Meta:          &meta,
@@ -1017,17 +1080,6 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
-	// Stored origin belongs to the same database snapshot as metadata and entries.
-	//
-	// The envelope is built from the session's committed generation when the
-	// store supports the durable snapshot surface, so session-level provenance
-	// evidence and hydrated full tool bodies are published exactly as the local
-	// detail read serves them. A legacy V1 session keeps the preserved entries
-	// builder; a corrupt managed artifact fails this session whole.
-	content, err := BuildPublishTranscriptContent(ctx, p.store, sess.SessionID, &meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
-	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
-	}
 	// Derive the receiver capabilities this durable payload requires BEFORE
 	// anything can be uploaded. The scan is local (no network) and validates the
 	// exact content that will be uploaded; it neither consults nor caches any
@@ -1141,60 +1193,88 @@ func (p *Pipeline) pushSession(
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("fingerprint authoritative publication operation: %w", err)}
 	}
-	projectHash, hashErr := schema.NewProjectHash(string(input.ReceiptProjectHash))
-	if hashErr != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
-	}
-	previous, err := ledger.Publication(ctx, p.creds.VillageURL, p.creds.UserID, projectHash, sess.SessionID)
-	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
-	}
-	if !p.runCfg.Force && sess.PushedAt != nil && previous != nil && previous.Receipt.Validate() == nil &&
-		previous.Receipt.ContentHash == request.ContentHash &&
-		previous.Receipt.RequestOperationFingerprint == expectedFingerprint &&
-		schema.Visibility(previous.Receipt.Visibility) == visibility {
+	// The village already holds this operation's result. An explicit
+	// visibility change then needs no upload: the owner update below applies
+	// it, and is sent whatever the local receipt says, because the owner may
+	// have changed the transcript on the village since. An explicit license is
+	// part of the operation, so a held operation already carries it.
+	held := !p.runCfg.Force && sess.PushedAt != nil && previous != nil && alreadyHeld(previous.Receipt, operation, expectedFingerprint)
+	if held && !p.changesVisibility() {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusSkipped}
 	}
-	stage.next(perf.StagePushPublish)
-	receipt, statusCode, err := client.PublishAuthoritative(uploadCtx, request, bytes.NewReader(transcriptBytes), transcriptFilename)
-	if trace != nil {
-		rec.RecordUpload(trace.Sample(sess.SessionID))
-	}
-	if err != nil {
-		diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
-		defer cancelDiagnostic()
-		_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStagePublish, Message: err.Error()})
-		// Distinguish a transport failure (statusCode 0 / connection error) from
-		// a village rejection (non-2xx status) so the error-summary table groups
-		// them correctly. Both sentinels preserve the underlying message via %w,
-		// so the connection-abort heuristic (isConnectionError) still matches.
-		sentinel := ErrVillageRejected
-		if statusCode == 0 || isConnectionError(err) {
-			sentinel = ErrNetwork
-		}
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Title:     title,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("upload: %w: %w", sentinel, err),
+	// An update is asked about here, where the run knows it is one and has
+	// sent nothing yet, so a run asks once per session it updates and never
+	// for a session it skips as unchanged.
+	if !held && publishedBefore && p.runCfg.UpdateHold != nil {
+		if reason := p.runCfg.UpdateHold(ctx, sess.SessionID); reason != "" {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
 		}
 	}
-	stage.next(perf.StagePushReceiptPersist)
-	if receipt.ContentHash != request.ContentHash || receipt.RequestOperationFingerprint != expectedFingerprint {
-		err = fmt.Errorf("authoritative receipt mismatch: Village returned content hash %s and operation fingerprint %s, expected %s and %s from the exact request; local applied state was not changed", receipt.ContentHash, receipt.RequestOperationFingerprint, request.ContentHash, expectedFingerprint)
-		diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
-		defer cancelDiagnostic()
-		_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStageValidate, Message: err.Error()})
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: err}
+	var (
+		receipt    schema.AuthoritativePublishResponse
+		statusCode int
+	)
+	if held {
+		receipt, statusCode = previous.Receipt, http.StatusOK
+		receipt.Created = false
+	} else {
+		stage.next(perf.StagePushPublish)
+		receipt, statusCode, err = client.PublishAuthoritative(uploadCtx, request, bytes.NewReader(transcriptBytes), transcriptFilename)
+		if trace != nil {
+			rec.RecordUpload(trace.Sample(sess.SessionID))
+		}
+		if err != nil {
+			diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
+			defer cancelDiagnostic()
+			_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStagePublish, Message: err.Error()})
+			// Distinguish a transport failure (statusCode 0 / connection error) from
+			// a village rejection (non-2xx status) so the error-summary table groups
+			// them correctly. Both sentinels preserve the underlying message via %w,
+			// so the connection-abort heuristic (isConnectionError) still matches.
+			sentinel := ErrVillageRejected
+			if statusCode == 0 || isConnectionError(err) {
+				sentinel = ErrNetwork
+			}
+			return SessionPushResult{
+				SessionID: sess.SessionID,
+				HostSlug:  sess.HostSlug,
+				Title:     title,
+				Status:    PushStatusError,
+				Error:     fmt.Errorf("upload: %w: %w", sentinel, err),
+			}
+		}
+		stage.next(perf.StagePushReceiptPersist)
+		if receipt.ContentHash != request.ContentHash || receipt.RequestOperationFingerprint != expectedFingerprint {
+			err = fmt.Errorf("authoritative receipt mismatch: Village returned content hash %s and operation fingerprint %s, expected %s and %s from the exact request; local applied state was not changed", receipt.ContentHash, receipt.RequestOperationFingerprint, request.ContentHash, expectedFingerprint)
+			diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
+			defer cancelDiagnostic()
+			_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStageValidate, Message: err.Error()})
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: err}
+		}
 	}
-	if visibility == schema.VisibilityPrivate || visibility == schema.VisibilityPublic {
+	// A first publish opens at the requested visibility. An update keeps the
+	// audience the transcript has on the village, which its owner may have
+	// shared with collectives there, unless the caller asked for a visibility
+	// change. The village's own answer says which of the two this upload was;
+	// an upload it answered as an update can still be finishing a first
+	// publish an earlier attempt started (unfinishedFirstPublish).
+	firstPublish := receipt.Created
+	if !firstPublish && !publishedBefore && !p.changesVisibility() && schema.Visibility(receipt.Visibility) == schema.VisibilityPrivate {
+		firstPublish, err = p.unfinishedFirstPublish(ctx, sess.SessionID)
+		if err != nil {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publication content succeeded but its earlier attempts could not be read, so its visibility was not converged and no local terminal receipt was advanced; retry this session: %w", err)}
+		}
+	}
+	if (firstPublish || p.changesVisibility()) && (visibility == schema.VisibilityPrivate || visibility == schema.VisibilityPublic) {
 		desired := schema.TranscriptUpdateVisibility(visibility)
-		if schema.Visibility(receipt.Visibility) != visibility {
+		if held || schema.Visibility(receipt.Visibility) != visibility {
 			stage.next(perf.StagePushVisibilityUpdate)
 			updated, _, updateErr := client.UpdateOwner(uploadCtx, receipt.TranscriptID, schema.OwnerTranscriptUpdateRequest{Visibility: &desired})
 			if updateErr != nil {
-				primary := fmt.Errorf("publication content succeeded but visibility convergence failed; the remote resource remains at its authoritative access state and no local terminal receipt was advanced; retry this session to apply the current configuration: %w", updateErr)
+				primary := fmt.Errorf("publication content succeeded but visibility convergence failed; the remote resource remains at its authoritative access state and no local terminal receipt was advanced; retry this session to apply the requested visibility: %w", updateErr)
+				if held {
+					primary = fmt.Errorf("the village did not apply the requested visibility to a transcript this account already published; no content was sent and the local receipt is unchanged; if the transcript no longer exists on the village, rerun with --force choosing only this session, and with --license to license it again: %w", updateErr)
+				}
 				diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
 				defer cancelDiagnostic()
 				_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStageVisibility, Message: primary.Error()})
@@ -1202,6 +1282,9 @@ func (p *Pipeline) pushSession(
 			}
 			if schema.Visibility(updated.Visibility) != visibility || updated.TranscriptID != receipt.TranscriptID || updated.TranscriptURL != receipt.TranscriptURL {
 				primary := fmt.Errorf("owner update returned inconsistent authoritative identity or access state; local applied state was not changed; retry this session after verifying Village health")
+				if held {
+					primary = fmt.Errorf("owner update returned inconsistent authoritative identity or access state for a transcript this account already published; no content was sent and the local receipt is unchanged; after verifying Village health, rerun with --force choosing only this session to publish it again")
+				}
 				diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
 				defer cancelDiagnostic()
 				_ = ledger.RecordPublicationAttempt(diagnosticCtx, store.PublicationAttemptDiagnostic{VillageOrigin: p.creds.VillageURL, OwnerUserID: p.creds.UserID, SessionID: sess.SessionID, ProjectHash: projectHash, Stage: store.PublicationAttemptStageVisibility, Message: primary.Error()})
@@ -1244,6 +1327,61 @@ func (p *Pipeline) pushSession(
 	}
 }
 
+// alreadyHeld reports whether the village already holds what this operation
+// would leave it holding, so uploading it again would change nothing.
+// Visibility takes no part: an update leaves the audience alone, and a
+// receipt whose visibility differs from the configured default is no reason
+// to upload. An explicit visibility change on a held operation is sent as an
+// owner update alone.
+//
+// An operation that sends no license keeps the one the village holds. That
+// leaves the village exactly where the recorded operation left it when that
+// operation set the license the receipt reports, so the same operation with
+// that license counts as a match too. Without it every transcript first
+// published with a license would upload once more for nothing.
+func alreadyHeld(receipt schema.AuthoritativePublishResponse, operation schema.CanonicalPublishOperation, fingerprint schema.PublishRequestFingerprint) bool {
+	if receipt.Validate() != nil || receipt.ContentHash != operation.ContentHash {
+		return false
+	}
+	if receipt.RequestOperationFingerprint == fingerprint {
+		return true
+	}
+	if operation.License.Kind != schema.PublishOperationPreserve || receipt.Applied.License == nil {
+		return false
+	}
+	licensed := operation
+	licensed.License = schema.PublishLicenseOperation{Kind: schema.PublishOperationReplace, License: receipt.Applied.License}
+	recorded, err := schema.FingerprintPublishOperation(licensed)
+	return err == nil && recorded == receipt.RequestOperationFingerprint
+}
+
+// unfinishedFirstPublish reports whether an upload the village answered as an
+// update finishes a first publish an earlier attempt started. The village
+// created the transcript on that attempt, so it no longer says created. What
+// says so here is that this village account holds no receipt for the session,
+// while its latest attempt to publish it failed before the receipt: the upload
+// failed or its answer was lost, the answer did not match the request, or the
+// owner visibility update failed. A latest attempt that failed at the receipt
+// save does not count: by then the village had applied every change the
+// attempt owed, so the visibility it holds now is the owner's. The caller asks
+// only while the village still holds the transcript at the private visibility
+// new content lands at, so an owner who shared or widened it since keeps that
+// choice. Like the receipt read, the attempt is found by the village's key,
+// under any project identity.
+//
+// The read runs on a context of its own, like the receipt write: the upload
+// already happened, and losing this read to the upload budget would send the
+// same content again on the next run.
+func (p *Pipeline) unfinishedFirstPublish(ctx context.Context, sessionID string) (bool, error) {
+	readCtx, cancel := persistenceContext(ctx)
+	defer cancel()
+	attempt, err := p.store.LatestSessionPublicationAttempt(readCtx, p.creds.VillageURL, p.creds.UserID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return attempt != nil && attempt.Stage != store.PublicationAttemptStagePersistence, nil
+}
+
 // preflightOutcome separates the candidates a run may still publish from the
 // ones it has already refused. Both halves are reported: a refused candidate is
 // a result the user has to see, not a silent omission.
@@ -1273,7 +1411,7 @@ func (p *Pipeline) preflight(ctx context.Context, sessions []ingest.PushSessionR
 			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
 		}
 		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
-		input, readErr := p.readPublicationInput(ctx, sess)
+		input, _, readErr := p.readPublicationInput(ctx, sess)
 		if readErr == nil {
 			readErr = ValidatePublicationInput(input)
 		}

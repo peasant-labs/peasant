@@ -239,6 +239,8 @@ type ArtifactMirrorResult struct {
 // acquired native evidence in one transaction per page. That transaction is
 // the durability point of the write path.
 type ArtifactMirrorStore interface {
+	// PrepareArtifactInstall commits repair eligibility before any installed file changes.
+	PrepareArtifactInstall(context.Context, SessionID) error
 	MirrorArtifacts(context.Context, []ArtifactMirrorRequest) []ArtifactMirrorResult
 }
 

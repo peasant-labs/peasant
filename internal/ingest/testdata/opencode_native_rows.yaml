@@ -104,7 +104,7 @@ normalization_cases:
     expected_text: thinking
   - name: native_user_stream_clock_rejected
     rows: [{id: msg_native_user, row_type: user, data: '{"text":"request","time":{"created":1000,"streamed":2000}}'}]
-    error_contains: unknown field "streamed"
+    expected_text: request
   - name: native_tool_identity_empty
     rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"","name":"read","state":{"status":"pending","input":""},"time":{"created":1000}}],"time":{"created":1000}}'}]
     error_contains: assistant tool requires id

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // Package sentinel errors. Each error origin in pushSession wraps the matching

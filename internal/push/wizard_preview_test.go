@@ -329,6 +329,7 @@ const previewPaneWidth = 60
 // prose around them is intact, and nothing on the pane describes the stored
 // copy's redaction record.
 func TestWizardPreview_ShowsThePublishedTranscript(t *testing.T) {
+	t.Parallel()
 	doc := loadWizardPreviewDoc(t)
 	for _, row := range doc.Cases {
 		t.Run(row.Name, func(t *testing.T) {
@@ -351,6 +352,7 @@ func TestWizardPreview_ShowsThePublishedTranscript(t *testing.T) {
 // beside the transcript: the pane still says which session it is showing and
 // whether the push carries it.
 func TestWizardPreview_NamesTheSessionAndItsState(t *testing.T) {
+	t.Parallel()
 	screen := previewScreen(t, "sess-aaa-111")
 	for _, want := range []string{"session: sess-aaa-111", "project: my-project", previewSelectedNote} {
 		if !strings.Contains(screen, want) {
@@ -364,6 +366,7 @@ func TestWizardPreview_NamesTheSessionAndItsState(t *testing.T) {
 // is handed no redactor, so a preview built without one would draw exactly the
 // values this screen exists to show removed.
 func TestWizardPreview_FailsClosedWithoutARedactor(t *testing.T) {
+	t.Parallel()
 	published, err := NewPublishedTurns(previewFixtureEntries(), nil)("sess-aaa-111")
 	if err == nil {
 		t.Fatalf("a preview without a redactor must fail rather than render recorded text; got %d turns", len(published.Turns))
@@ -377,6 +380,7 @@ func TestWizardPreview_FailsClosedWithoutARedactor(t *testing.T) {
 // the pane as an error rather than as an empty transcript, which the pane would
 // otherwise report as a session with nothing stored.
 func TestWizardPreview_ReportsAFailedRead(t *testing.T) {
+	t.Parallel()
 	failing := StoredEntriesFunc(func(string) (StoredContent, error) {
 		return StoredContent{}, fmt.Errorf("the local store could not be read")
 	})
@@ -394,6 +398,7 @@ func TestWizardPreview_ReportsAFailedRead(t *testing.T) {
 // previewer to look at: they were asked to repair something they could not see.
 // Both now appear, note first, and the note still says nothing was uploaded.
 func TestWizardPreview_NeedsIngestShowsTheAvailableTranscript(t *testing.T) {
+	t.Parallel()
 	session := testSessions()[0]
 	session.NeedsIngest = true
 	preview := wizardPreviewSource([]PushWizardSession{session}, testPublishedTurns(), testTheme())

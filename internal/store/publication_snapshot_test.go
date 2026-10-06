@@ -8,9 +8,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
 )
 
 //go:embed testdata/publication_snapshot.yaml
@@ -33,12 +33,12 @@ func TestPublicationBundlePinsMetadataAndFullContentSnapshot(t *testing.T) {
 		t.Fatal("snapshot fixture must distinguish both metadata and content generations")
 	}
 	path := storetest.CopyGoldenDB(t)
-	reader, err := store.Open(path, store.WithPoolSize(1))
+	reader, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reader.Close() })
-	writer, err := store.Open(path, store.WithPoolSize(1))
+	writer, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

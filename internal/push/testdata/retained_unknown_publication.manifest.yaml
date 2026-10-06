@@ -1,0 +1,12 @@
+requiredNames:
+  - configured_secret_whole_record_label
+  - configured_secret_nested_block_label
+  - managed_partition_preserves_unknown
+  - earlier_history_restores_source_order
+  - full_record_between_known_records
+  - nested_large_payload_keeps_precision
+  - escaped_secret_is_redacted
+  - embedded_json_secret_is_redacted
+  - receiver_without_preservation_refuses
+  - missing_traversal_coordinate_refuses_write
+  - duplicate_location_refuses_write

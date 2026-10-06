@@ -75,7 +75,7 @@ every source-level publication gate:
   vendor hash.
 - `e2e` calls the reusable `.github/workflows/e2e.yml` full-stack harness on every
   release tag, not only rc tags. That harness builds Peasant and the village server
-  from source, provisions Postgres + MinIO with podman, drives ingest and
+  from source, provisions Postgres + RustFS with podman, drives ingest and
   `peasant village push`, verifies the skip-gate/retraction path, and asserts the
   village server-side secret scan.
 - `release-e2e` calls the reusable `.github/workflows/release-e2e.yml`

@@ -1,0 +1,23 @@
+# web-spawn-argv.yaml - the argv of the detached `web start --foreground`
+# server, for the root flags the forking command was given. The server must
+# read the configuration and data of the command that forked it, and receives
+# no directory flag that command did not set. Every case forks on port 9123.
+
+# Every case is named here; a case missing from either list fails the load.
+requiredNames:
+  - all-overrides
+  - no-overrides
+  - data-dir-only
+
+cases:
+  - name: all-overrides
+    args: [--config, /cfg/peasant/config.yaml, --data-dir, /data, --config-dir, /cfg, --state-dir, /state]
+    want: [web, start, --foreground, --port, "9123", --config, /cfg/peasant/config.yaml, --data-dir, /data, --config-dir, /cfg, --state-dir, /state]
+
+  - name: no-overrides
+    args: [--config, /cfg/peasant/config.yaml]
+    want: [web, start, --foreground, --port, "9123", --config, /cfg/peasant/config.yaml]
+
+  - name: data-dir-only
+    args: [--config, /cfg/peasant/config.yaml, --data-dir, /data]
+    want: [web, start, --foreground, --port, "9123", --config, /cfg/peasant/config.yaml, --data-dir, /data]

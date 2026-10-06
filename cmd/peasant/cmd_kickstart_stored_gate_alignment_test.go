@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 
 	"github.com/peasant-labs/peasant/internal/codegraph"
 	"github.com/peasant-labs/peasant/internal/codemap"
@@ -28,6 +28,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
@@ -395,6 +396,7 @@ func (o kickstartStoredGateOutcome) valid() bool {
 }
 
 func TestKickstartStoredGateFixtureRejectsUnknownStoreStateKey(t *testing.T) {
+	t.Parallel()
 	mutated := bytes.Replace(kickstartStoredGateFixture, []byte("storeState:"), []byte("storeStatus:"), 1)
 	if bytes.Equal(mutated, kickstartStoredGateFixture) {
 		t.Fatal("stored gate fixture has no storeState key to mutate")
@@ -436,7 +438,11 @@ func seedKickstartStoredGateWorld(t *testing.T, testCase kickstartStoredGateCase
 	if err := os.MkdirAll(filepath.Dir(world.DBPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create stored gate data directory: %v", err)
 	}
-	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
+	// Start from the pre-migrated golden copy: the seeded rows land in an
+	// at-head database, so neither this setup open nor the command under test
+	// replays the migration chain.
+	storetest.CopyGoldenTo(t, world.DBPath)
+	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database: %v", err)
 	}
@@ -584,6 +590,7 @@ func kickstartStoredGateListings(testCase kickstartStoredGateCase, paths map[str
 }
 
 func TestMountedKickstartStoredGateAlignsViewerAndPush(t *testing.T) {
+	t.Parallel()
 	document := loadKickstartStoredGateDocument(t)
 	for _, testCase := range document.Cases {
 		testCase := testCase
@@ -702,7 +709,7 @@ func assertKickstartStoredGateCandidates(
 	listings []ftue.SessionListing,
 ) {
 	t.Helper()
-	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database for candidate assertion: %v", err)
 	}
@@ -786,7 +793,7 @@ func assertKickstartStoredGateCrossSurfaces(t *testing.T, testCase kickstartStor
 	if err != nil {
 		t.Fatalf("build stored gate visibility policy: %v", err)
 	}
-	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database for cross-surface assertions: %v", err)
 	}

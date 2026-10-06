@@ -10,12 +10,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 const (
-	minioUser, minioPassword = "minioadmin", "minioadmin"
+	s3AccessKey, s3SecretKey = "peasant", "peasant"
 
 	e2eInfraNamePrefix = "peasant-e2e-"
 
@@ -33,21 +34,21 @@ type villageBinaries struct {
 }
 
 type harnessStack struct {
-	dsn           string
-	db            *sql.DB
-	minioEndpoint string
-	bucket        string
-	villageURL    string
-	village       *villageProcess
-	external      bool
+	dsn        string
+	db         *sql.DB
+	s3Endpoint string
+	bucket     string
+	villageURL string
+	village    *villageProcess
+	external   bool
 }
 
 type externalStackConfig struct {
-	dsn           string
-	minioEndpoint string
-	bucket        string
-	villageURL    string
-	engaged       bool
+	dsn        string
+	s3Endpoint string
+	bucket     string
+	villageURL string
+	engaged    bool
 }
 
 type villageProcess struct {
@@ -95,12 +96,35 @@ func buildPeasant(t *testing.T) string {
 	if raw := strings.TrimSpace(getenv(envPeasantBin)); raw != "" {
 		return validateInjectedPeasantBin(t, raw)
 	}
-	out := filepath.Join(t.TempDir(), "peasant")
-	if output, err := exec.Command("go", "build", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant").CombinedOutput(); err != nil {
-		t.Fatalf("e2e: build peasant: %v\n%s", err, output)
+	buildPeasantOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "peasant-e2e-bin-*")
+		if err != nil {
+			buildPeasantErr = fmt.Errorf("e2e: create temp dir for the peasant build: %w", err)
+			return
+		}
+		out := filepath.Join(dir, "peasant")
+		if output, err := exec.Command("go", "build", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant").CombinedOutput(); err != nil {
+			buildPeasantErr = fmt.Errorf("e2e: build peasant: %v\n%s", err, output)
+			return
+		}
+		buildPeasantPath = out
+	})
+	if buildPeasantErr != nil {
+		t.Fatalf("%v", buildPeasantErr)
 	}
-	return out
+	return buildPeasantPath
 }
+
+// buildPeasantOnce memoizes the default (PEASANT_BIN-unset) build so one test
+// binary performs exactly one `go build` even when several e2e tests ask for
+// the CLI. The output lives for the process; the OS temp reaper removes it after
+// exit. An injected PEASANT_BIN is resolved per call and never memoized, so the
+// seam tests keep observing their own command.
+var (
+	buildPeasantOnce sync.Once
+	buildPeasantPath string
+	buildPeasantErr  error
+)
 
 func validateInjectedPeasantBin(t *testing.T, raw string) string {
 	t.Helper()
@@ -217,22 +241,22 @@ func uniqueNameAt(kind string, pid int, ts time.Time) string {
 
 func externalStackFromEnv() (externalStackConfig, error) {
 	cfg := externalStackConfig{
-		dsn:           strings.TrimSpace(getenv(envDatabaseURL)),
-		minioEndpoint: strings.TrimSpace(getenv(envS3Endpoint)),
-		bucket:        strings.TrimSpace(getenv(envS3Bucket)),
-		villageURL:    strings.TrimSpace(getenv(envVillageURL)),
+		dsn:        strings.TrimSpace(getenv(envDatabaseURL)),
+		s3Endpoint: strings.TrimSpace(getenv(envS3Endpoint)),
+		bucket:     strings.TrimSpace(getenv(envS3Bucket)),
+		villageURL: strings.TrimSpace(getenv(envVillageURL)),
 	}
 	return validateExternalStackConfig(cfg)
 }
 
 func validateExternalStackConfig(cfg externalStackConfig) (externalStackConfig, error) {
 	cfg.dsn = strings.TrimSpace(cfg.dsn)
-	cfg.minioEndpoint = strings.TrimRight(strings.TrimSpace(cfg.minioEndpoint), "/")
+	cfg.s3Endpoint = strings.TrimRight(strings.TrimSpace(cfg.s3Endpoint), "/")
 	cfg.bucket = strings.TrimSpace(cfg.bucket)
 	cfg.villageURL = strings.TrimRight(strings.TrimSpace(cfg.villageURL), "/")
 
 	set := 0
-	for _, value := range []string{cfg.dsn, cfg.minioEndpoint, cfg.bucket, cfg.villageURL} {
+	for _, value := range []string{cfg.dsn, cfg.s3Endpoint, cfg.bucket, cfg.villageURL} {
 		if value != "" {
 			set++
 		}
@@ -242,12 +266,12 @@ func validateExternalStackConfig(cfg externalStackConfig) (externalStackConfig, 
 	}
 	if set != 4 {
 		return externalStackConfig{}, fmt.Errorf("partial external stack: %s set=%t, %s set=%t, %s set=%t, %s set=%t; all four must be set together or all must be unset",
-			envDatabaseURL, cfg.dsn != "", envS3Endpoint, cfg.minioEndpoint != "", envS3Bucket, cfg.bucket != "", envVillageURL, cfg.villageURL != "")
+			envDatabaseURL, cfg.dsn != "", envS3Endpoint, cfg.s3Endpoint != "", envS3Bucket, cfg.bucket != "", envVillageURL, cfg.villageURL != "")
 	}
 	if err := validatePostgresDSN(cfg.dsn); err != nil {
 		return externalStackConfig{}, fmt.Errorf("%s is invalid: %w", envDatabaseURL, err)
 	}
-	if err := validateHTTPURL(envS3Endpoint.String(), cfg.minioEndpoint); err != nil {
+	if err := validateHTTPURL(envS3Endpoint.String(), cfg.s3Endpoint); err != nil {
 		return externalStackConfig{}, err
 	}
 	if err := validateS3BucketName(cfg.bucket); err != nil {
@@ -305,8 +329,8 @@ func validateHTTPURL(name, raw string) error {
 }
 
 // bucketChecker is the minimal S3 capability externalStackBucketPreflight needs.
-// *minio.Client (built by newMinioClient) satisfies it in production; unit tests
-// inject a fake, so the preflight keeps DI unit coverage without a live MinIO.
+// *minio.Client (built by newS3Client) satisfies it in production; unit tests
+// inject a fake, so the preflight keeps DI unit coverage without a live object store.
 type bucketChecker interface {
 	BucketExists(ctx context.Context, bucketName string) (bool, error)
 }
@@ -321,18 +345,18 @@ func externalStackBucketPreflight(ctx context.Context, client bucketChecker, buc
 			where: "internal/e2e/skipgate_seams.go externalStackBucketPreflight",
 			when:  "checking injected external stack before running the harness",
 			means: "the harness might publish to or inspect a different bucket than the injected village server",
-			fix:   "check that the injected MinIO endpoint is reachable and the credentials can list buckets",
+			fix:   "check that the injected S3 endpoint is reachable and the credentials can list buckets",
 		}
 	}
 	if !exists {
 		return &actionableFailure{
 			title: "external stack bucket preflight failed",
-			what:  fmt.Sprintf("S3_BUCKET %s does not exist on the injected MinIO endpoint", bucket),
+			what:  fmt.Sprintf("S3_BUCKET %s does not exist on the injected S3 endpoint", bucket),
 			why:   "BucketExists returned false",
 			where: "internal/e2e/skipgate_seams.go externalStackBucketPreflight",
 			when:  "checking injected external stack before running the harness",
 			means: "the harness might publish to or inspect a different bucket than the injected village server",
-			fix:   fmt.Sprintf("create bucket %s on the injected MinIO endpoint, or pass the bucket used by the injected village server", bucket),
+			fix:   fmt.Sprintf("create bucket %s on the injected S3 endpoint, or pass the bucket used by the injected village server", bucket),
 		}
 	}
 	return nil
@@ -452,18 +476,18 @@ func (s *harnessStack) requireRefreshable(t *testing.T) {
 		fatalActionable(t, actionableFailure{
 			title: "refresh external stack failed",
 			what:  "refresh was requested for an injected external stack",
-			why:   "DATABASE_URL/S3_ENDPOINT/S3_BUCKET/VILLAGE_URL identify endpoints but do not provide the harness-owned database, MinIO, and Village process handles required for a deterministic reset",
+			why:   "DATABASE_URL/S3_ENDPOINT/S3_BUCKET/VILLAGE_URL identify endpoints but do not provide the harness-owned database, object store, and Village process handles required for a deterministic reset",
 			where: "internal/e2e/skipgate_seams.go harnessStack.requireRefreshable",
 			when:  "resetting the warm stack between distro iterations",
 			means: "the driver would leave stale village state between package installs",
 			fix:   "call refresh only on the provision-once stack returned by provisionHarnessStack with external-stack env unset",
 		})
 	}
-	if s.db == nil || s.minioEndpoint == "" || s.bucket == "" || s.village == nil {
+	if s.db == nil || s.s3Endpoint == "" || s.bucket == "" || s.village == nil {
 		fatalActionable(t, actionableFailure{
 			title: "refresh self-provisioned stack failed",
-			what:  "the stack descriptor is missing database, MinIO, or village handles",
-			why:   fmt.Sprintf("databaseSet=%t minioEndpoint=%q bucket=%q villageSet=%t", s.db != nil, s.minioEndpoint, s.bucket, s.village != nil),
+			what:  "the stack descriptor is missing database, object store, or village handles",
+			why:   fmt.Sprintf("databaseSet=%t s3Endpoint=%q bucket=%q villageSet=%t", s.db != nil, s.s3Endpoint, s.bucket, s.village != nil),
 			where: "internal/e2e/skipgate_seams.go harnessStack.requireRefreshable",
 			when:  "resetting the warm stack between distro iterations",
 			means: "the driver cannot prove the next distro starts from a clean baseline",

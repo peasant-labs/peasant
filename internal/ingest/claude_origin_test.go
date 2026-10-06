@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 	"testing"
@@ -68,14 +66,8 @@ type claudeOriginExpectation struct {
 // production closed menu.
 func LoadClaudeOriginFixtures(data []byte) (claudeOriginFixture, error) {
 	var fixture claudeOriginFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return claudeOriginFixture{}, fmt.Errorf("decode Claude origin fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return claudeOriginFixture{}, fmt.Errorf("Claude origin fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {
@@ -153,6 +145,7 @@ func discoverClaudeOriginCase(t *testing.T, tc claudeOriginCase) map[string]inge
 // TestClaudeDiscoveryDeclaresAnOrigin runs the real discovery over raw transcript
 // bytes and checks the origin it declares for each session.
 func TestClaudeDiscoveryDeclaresAnOrigin(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)
@@ -181,6 +174,7 @@ func TestClaudeDiscoveryDeclaresAnOrigin(t *testing.T) {
 // equality check against the literal agent, so the expected value is taken from
 // the rule itself: change step one and this assertion moves with it.
 func TestClaudeSubagentOriginAgreesWithTheRule(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)
@@ -253,6 +247,7 @@ func (c *fakeClaudeEvidenceCache) SaveClaudeEvidence(_ context.Context, upserts 
 // the round trip only. It does NOT prove that the stored form keeps the origin.
 // The SQL round trip is proven where the columns are.
 func TestClaudeMinedOriginSurvivesTheCacheContract(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)
@@ -314,6 +309,7 @@ func TestClaudeMinedOriginSurvivesTheCacheContract(t *testing.T) {
 }
 
 func TestLoadClaudeOriginFixturesRejectsADeletedCase(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)

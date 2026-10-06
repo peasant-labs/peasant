@@ -15,9 +15,9 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type convergenceRemoteState struct {
@@ -37,7 +37,7 @@ func TestPublicationConvergenceE2E(t *testing.T) {
 	peasantBin := buildPeasant(t)
 	stack := provisionHarnessStack(t, bins)
 	if stack.external {
-		t.Skip("publication convergence evidence requires harness-owned Village, Postgres, and MinIO")
+		t.Skip("publication convergence evidence requires harness-owned Village, Postgres, and RustFS")
 	}
 	sandbox := newDisposableSandbox(t, peasantBin)
 	controlRepo := sandbox.initRepository(t, "publication-control")
@@ -261,7 +261,7 @@ func assertExactAssociations(t *testing.T, surface string, got, want []schema.Pu
 }
 func openLocalPublicationStore(t *testing.T, path string) *store.Store {
 	t.Helper()
-	local, err := store.Open(path, store.WithPoolSize(1))
+	local, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

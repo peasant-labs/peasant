@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -28,6 +29,7 @@ var attributionProviderYAML []byte
 // This is ordinary source discovery and real SQLite persistence, not a forced
 // reindex or a resolver-only assertion. The child is absent from discovery.
 func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Name    string `yaml:"name"`
 		Initial string `yaml:"initial"`
@@ -38,10 +40,8 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	if fixture.Name != "active upstream snapshot explicit publication convergence" || fixture.Initial == "" {
 		t.Fatal("required source fixture missing")
 	}
+	hs := newTestXDGHomes(t)
 	home := t.TempDir()
-	t.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(home, "config"))
-	t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, "data"))
-	t.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, "state"))
 	repo := filepath.Join(home, "repo")
 	if err := os.MkdirAll(repo, 0o700); err != nil {
 		t.Fatal(err)
@@ -75,10 +75,11 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, sid.String()+".jsonl"), []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(string(defaults.ResolveDBFilePath())), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(hs.dbPath()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(string(defaults.ResolveDBFilePath()))
+	storetest.CopyGoldenTo(t, hs.dbPath())
+	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	cfg.Sources = config.SourcesConfig{}
 	cfg.Sources.ClaudeCode.Enabled = true
 	cfg.Sources.ClaudeCode.Paths = []string{filepath.Dir(source)}
-	handler := &syncHandler{store: db, config: cfg}
+	handler := hs.handler(db, cfg)
 	ingestNow := func() {
 		t.Helper()
 		handler.runIngestPipeline(ingest.NewProgressState())
@@ -205,14 +206,14 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 		_, _ = w.Write(receipt)
 	}))
 	defer village.Close()
-	writeSyncDoorCredentials(t, village.URL)
-	publish := func() pushResponse {
+	writeSyncDoorCredentials(t, hs.Config, village.URL)
+	publish := func() schema.SyncPushResponse {
 		t.Helper()
 		restoreSource := prepareSourceFreePublication(t, db, cfg.Output.BasePath, filepath.Join(source, id+".jsonl"), id, repo)
 		defer restoreSource()
 		response := httptest.NewRecorder()
-		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(`{"sessionIds":["`+id+`"],"visibility":"private"}`)))
-		var result pushResponse
+		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(`{"sessionIds":["`+id+`"]}`)))
+		var result schema.SyncPushResponse
 		if response.Code != http.StatusOK {
 			t.Fatalf("publish: %d %s", response.Code, response.Body.String())
 		}

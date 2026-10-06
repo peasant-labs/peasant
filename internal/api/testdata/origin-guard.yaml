@@ -1,0 +1,102 @@
+# Requests to the mounted local web server and the status each must get.
+#
+# Every case goes to a server that Listen bound on the loopback interface with
+# no store, over a real connection to its IPv4 loopback address. "{port}" in
+# host and origin is replaced with the port the server bound. An empty origin
+# sends no Origin header. An empty secFetchSite sends no Sec-Fetch-Site header.
+#
+# Write routes answer 503 when the request reaches the handler, because the
+# server has no store. So 503 means the guard allowed the write, and 403 with
+# a code means the guard refused it before the handler ran. A route that does
+# not exist for the method would answer 405 without the guard. An upgrade case
+# sends a WebSocket handshake. 101 means the connection opened.
+#
+# Every request, whatever its method, must name the server by a loopback Host:
+# a page served under another hostname has that hostname as its origin. The
+# Origin check applies to the methods that are not GET, HEAD, or OPTIONS and
+# to the WebSocket handshake.
+#
+# A write without an Origin is allowed only from a client that is not a
+# browser. A browser sends Origin on every state-changing request and every
+# WebSocket handshake, and the loopback bind limits other clients to this
+# machine. Such clients include `peasant web stop` and the TUI. A write
+# without an Origin that carries a Sec-Fetch-Site from another origin is
+# refused, because only a browser sends that header.
+requiredNames:
+  - dashboard write from its own origin is allowed
+  - dashboard write through localhost is allowed
+  - dashboard write through the IPv6 loopback name is allowed
+  - local client write without an origin is allowed
+  - local client shutdown without an origin is allowed
+  - same-origin browser write without an origin is allowed
+  - user-initiated browser write without an origin is allowed
+  - write from a foreign origin is refused
+  - write from another local port is refused
+  - write from a port that extends the server port is refused
+  - write from an opaque origin is refused
+  - write from an https origin on the same host is refused
+  - write with a foreign host is refused
+  - write with a foreign host and no origin is refused
+  - write with a loopback-prefixed foreign host is refused
+  - write with a loopback-address-prefixed foreign host is refused
+  - cross-site browser write without an origin is refused
+  - same-site browser write without an origin is refused
+  - delete from a foreign origin is refused
+  - put from a foreign origin is refused
+  - patch from a foreign origin is refused
+  - settings change from a foreign origin is refused
+  - shutdown from a foreign origin is refused
+  - sign-out from a foreign origin is refused
+  - auto-publish rule save from a foreign origin is refused
+  - auto-publish rule removal from a foreign origin is refused
+  - auto-publish hook install from a foreign origin is refused
+  - read from a foreign origin is unaffected
+  - head from a foreign origin is unaffected
+  - options from a foreign origin is unaffected
+  - read with a foreign host is refused
+  - dashboard page with a foreign host is refused
+  - dashboard websocket upgrade is accepted
+  - local client websocket upgrade without an origin is accepted
+  - websocket upgrade from a foreign origin is refused
+  - websocket upgrade from another local port is refused
+  - websocket upgrade with a foreign host is refused
+  - websocket upgrade with a loopback-prefixed foreign host is refused
+cases:
+  - {name: dashboard write from its own origin is allowed, method: POST, path: /api/v1/annotations, host: "127.0.0.1:{port}", origin: "http://127.0.0.1:{port}", status: 503}
+  - {name: dashboard write through localhost is allowed, method: POST, path: /api/v1/annotations, host: "localhost:{port}", origin: "http://localhost:{port}", status: 503}
+  - {name: dashboard write through the IPv6 loopback name is allowed, method: POST, path: /api/v1/annotations, host: "[::1]:{port}", origin: "http://[::1]:{port}", status: 503}
+  - {name: local client write without an origin is allowed, method: POST, path: /api/v1/annotations, host: "localhost:{port}", status: 503}
+  - {name: local client shutdown without an origin is allowed, method: POST, path: /api/v1/shutdown, host: "localhost:{port}", status: 200}
+  - {name: same-origin browser write without an origin is allowed, method: POST, path: /api/v1/annotations, host: "localhost:{port}", secFetchSite: same-origin, status: 503}
+  - {name: user-initiated browser write without an origin is allowed, method: POST, path: /api/v1/annotations, host: "localhost:{port}", secFetchSite: none, status: 503}
+  - {name: write from a foreign origin is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: write from another local port is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", origin: "http://localhost:3000", status: 403, code: request_origin_not_local}
+  - {name: write from a port that extends the server port is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", origin: "http://localhost:{port}0", status: 403, code: request_origin_not_local}
+  - {name: write from an opaque origin is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", origin: "null", status: 403, code: request_origin_not_local}
+  - {name: write from an https origin on the same host is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", origin: "https://localhost:{port}", status: 403, code: request_origin_not_local}
+  - {name: write with a foreign host is refused, method: POST, path: /api/v1/sync/push, host: "site.example:{port}", origin: "http://site.example:{port}", status: 403, code: request_host_not_local}
+  - {name: write with a foreign host and no origin is refused, method: POST, path: /api/v1/sync/push, host: "site.example:{port}", status: 403, code: request_host_not_local}
+  - {name: write with a loopback-prefixed foreign host is refused, method: POST, path: /api/v1/sync/push, host: "localhost.site.example:{port}", origin: "http://localhost.site.example:{port}", status: 403, code: request_host_not_local}
+  - {name: write with a loopback-address-prefixed foreign host is refused, method: POST, path: /api/v1/sync/push, host: "127.0.0.1.site.example:{port}", origin: "http://127.0.0.1.site.example:{port}", status: 403, code: request_host_not_local}
+  - {name: cross-site browser write without an origin is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", secFetchSite: cross-site, status: 403, code: request_origin_not_local}
+  - {name: same-site browser write without an origin is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", secFetchSite: same-site, status: 403, code: request_origin_not_local}
+  - {name: delete from a foreign origin is refused, method: DELETE, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: put from a foreign origin is refused, method: PUT, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: patch from a foreign origin is refused, method: PATCH, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: settings change from a foreign origin is refused, method: PATCH, path: /api/v1/settings, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: shutdown from a foreign origin is refused, method: POST, path: /api/v1/shutdown, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: sign-out from a foreign origin is refused, method: POST, path: /api/v1/sync/logout, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: auto-publish rule save from a foreign origin is refused, method: PUT, path: /api/v1/settings/auto-publish/work, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: auto-publish rule removal from a foreign origin is refused, method: DELETE, path: /api/v1/settings/auto-publish/work, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: auto-publish hook install from a foreign origin is refused, method: POST, path: /api/v1/settings/auto-publish/work/install, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: read from a foreign origin is unaffected, method: GET, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
+  - {name: head from a foreign origin is unaffected, method: HEAD, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
+  - {name: options from a foreign origin is unaffected, method: OPTIONS, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
+  - {name: read with a foreign host is refused, method: GET, path: /api/v1/health, host: "site.example:{port}", status: 403, code: request_host_not_local}
+  - {name: dashboard page with a foreign host is refused, method: GET, path: /, host: "site.example:{port}", origin: "http://site.example:{port}", status: 403, code: request_host_not_local}
+  - {name: dashboard websocket upgrade is accepted, method: GET, path: /api/v1/ws, upgrade: true, host: "localhost:{port}", origin: "http://localhost:{port}", status: 101}
+  - {name: local client websocket upgrade without an origin is accepted, method: GET, path: /api/v1/ws, upgrade: true, host: "127.0.0.1:{port}", status: 101}
+  - {name: websocket upgrade from a foreign origin is refused, method: GET, path: /api/v1/ws, upgrade: true, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: websocket upgrade from another local port is refused, method: GET, path: /api/v1/ws, upgrade: true, host: "localhost:{port}", origin: "http://localhost:3000", status: 403, code: request_origin_not_local}
+  - {name: websocket upgrade with a foreign host is refused, method: GET, path: /api/v1/ws, upgrade: true, host: "site.example:{port}", origin: "http://site.example:{port}", status: 403, code: request_host_not_local}
+  - {name: websocket upgrade with a loopback-prefixed foreign host is refused, method: GET, path: /api/v1/ws, upgrade: true, host: "localhost.site.example:{port}", origin: "http://localhost.site.example:{port}", status: 403, code: request_host_not_local}

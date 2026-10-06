@@ -22,6 +22,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -52,11 +53,9 @@ func TestHandleSyncRedactionsRefusesUnpublishableCapture(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(home, "config"))
-			t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, "data"))
-			t.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, "state"))
-			db := seedSyncDoorSession(t, testutil.TestSessionUUID, filepath.Join(home, "output"))
+			t.Parallel()
+			hs := newTestXDGHomes(t)
+			db := seedSyncDoorSession(t, hs.dbPath(), testutil.TestSessionUUID, filepath.Join(hs.Data, "output"))
 			defer db.Close()
 			input, err := db.LoadPublicationInput(t.Context(), testutil.TestSessionUUID)
 			if err != nil {
@@ -77,7 +76,7 @@ func TestHandleSyncRedactionsRefusesUnpublishableCapture(t *testing.T) {
 			default:
 				t.Fatalf("unknown fixture action %q", tc.Action)
 			}
-			handler := &syncHandler{store: db, config: config.BaseConfig()}
+			handler := hs.handler(db, config.BaseConfig())
 			response := httptest.NewRecorder()
 			handler.handleSyncRedactions(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncRedactions.String()+"?session_id="+testutil.TestSessionUUID, nil))
 			var failure map[string]string
@@ -106,6 +105,7 @@ func TestHandleSyncRedactionsRefusesUnpublishableCapture(t *testing.T) {
 // request, and sweeps EVERY part rather than the one called "metadata", because
 // the transcript text leaves in more than one of them.
 func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
+	t.Parallel()
 	captured := &syncCapturedPublish{parts: map[string]string{}}
 	var publications atomic.Int32
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,21 +131,18 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 	}))
 	t.Cleanup(village.Close)
 
-	home := t.TempDir()
-	t.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(home, "config"))
-	t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, "data"))
-	t.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, "state"))
-	writeSyncDoorCredentials(t, village.URL)
+	hs := newTestXDGHomes(t)
+	writeSyncDoorCredentials(t, hs.Config, village.URL)
 
 	const sessionID = "eeee5555-eeee-4eee-8eee-eeeeeeeeeeee"
-	basePath := filepath.Join(home, "peasant-sync")
-	db := seedSyncDoorSession(t, sessionID, basePath)
+	basePath := filepath.Join(hs.Data, "peasant-sync")
+	db := seedSyncDoorSession(t, hs.dbPath(), sessionID, basePath)
 	t.Cleanup(func() { _ = db.Close() })
 
 	cfg := config.BaseConfig()
 	cfg.Output.BasePath = basePath
 	ctx, cancel := context.WithCancel(context.Background())
-	server := NewServer(ServerConfig{Port: 0, Store: db, Config: cfg})
+	server := NewServer(hs.config(ServerConfig{Port: 0, Store: db, Config: cfg}))
 	if err := server.Listen(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +174,7 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 		t.Fatalf("registered scan missed stored entry: status=%d %s", scan.StatusCode, scanBody)
 	}
 
-	body, err := json.Marshal(pushRequest{SessionIDs: []string{sessionID}, Visibility: "private"})
+	body, err := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{sessionID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,9 +273,9 @@ func (c *syncCapturedPublish) snapshot() map[string]string {
 	return out
 }
 
-func writeSyncDoorCredentials(t *testing.T, villageURL string) {
+func writeSyncDoorCredentials(t *testing.T, configHome, villageURL string) {
 	t.Helper()
-	dir := string(defaults.ResolveConfigDirPath())
+	dir := string(defaults.ResolveConfigDirPathWith(configHome))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -298,13 +295,13 @@ func writeSyncDoorCredentials(t *testing.T, villageURL string) {
 	}
 }
 
-func seedSyncDoorSession(t *testing.T, sessionID, basePath string) *store.Store {
+func seedSyncDoorSession(t *testing.T, dbPath, sessionID, basePath string) *store.Store {
 	t.Helper()
-	dbPath := string(defaults.ResolveDBFilePath())
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	storetest.CopyGoldenTo(t, dbPath)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +331,7 @@ func seedSyncDoorSession(t *testing.T, sessionID, basePath string) *store.Store 
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = store.Open(dbPath)
+	db, err = store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

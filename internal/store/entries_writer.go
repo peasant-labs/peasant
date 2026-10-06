@@ -13,10 +13,10 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"golang.org/x/crypto/sha3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // SQL constants for session_entries write path.
@@ -80,6 +80,13 @@ ORDER BY entry_index`
 	sqlSelectSessionEntriesHash = `SELECT session_entries_hash FROM sessions WHERE session_id = ?`
 
 	sqlSetSessionEntriesHash = `UPDATE sessions SET session_entries_hash = ? WHERE session_id = ?`
+
+	// The durable full-content rows are written one row per entry and one row
+	// per 64 KiB chunk. The statements are prepared once per transaction in
+	// sessionEntryWriteStatements and re-bound per row, so a large session does
+	// not re-prepare the insert for every row.
+	sqlInsertSessionEntryFullContent      = `INSERT INTO session_entry_full_content VALUES(?,?,?,?,?,?,?,?,?)`
+	sqlInsertSessionEntryFullContentChunk = `INSERT INTO session_entry_full_content_chunks VALUES(?,?,?,?,?,?,?)`
 )
 
 type sessionEntryWriteOutcome struct {
@@ -103,6 +110,7 @@ type sessionEntryWriteOutcome struct {
 func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry) (err error) {
 	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 		SessionID: sessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+		Mode: ingest.SessionEntryWriteExplicitRebuild,
 	}})
 	return results[0].Err
 }
@@ -182,7 +190,9 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	// A forced retained-content repair replaces the projection, but still uses
 	// the same proven metadata/index revision as a content-only backfill. Resolve
 	// it inside this savepoint before replacement can invalidate the old proof.
-	if write.Mode == ingest.SessionEntryWriteReplaceAll && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+	// An explicit rebuild carries the same repair semantics as an ordinary
+	// replace when it certifies full snapshot authority.
+	if (write.Mode == ingest.SessionEntryWriteReplaceAll || write.Mode == ingest.SessionEntryWriteExplicitRebuild || write.Mode == "") && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
 		var err error
 		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
 		if err != nil {
@@ -887,6 +897,12 @@ type sessionEntryWriteStatements struct {
 	entryInsertStmts map[int]*sqlite.Stmt
 	extStmt          *sqlite.Stmt
 	commandStmt      *sqlite.Stmt
+	// fullContentStmt and fullContentChunkStmt back the per-entry durable prose
+	// rows. They are prepared once per transaction and re-bound per row: a
+	// large session writes one manifest row per entry plus one chunk row per
+	// 64 KiB, so re-preparing the statement for every row dominates the write.
+	fullContentStmt      *sqlite.Stmt
+	fullContentChunkStmt *sqlite.Stmt
 }
 
 func newSessionEntryWriteStatements(conn *sqlite.Conn) *sessionEntryWriteStatements {
@@ -918,6 +934,18 @@ func (stmts *sessionEntryWriteStatements) Close() error {
 			err = errors.Join(err, fmt.Errorf("finalize session_commands insert statement: %w", closeErr))
 		}
 		stmts.commandStmt = nil
+	}
+	if stmts.fullContentStmt != nil {
+		if closeErr := stmts.fullContentStmt.Finalize(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("finalize session_entry_full_content insert statement: %w", closeErr))
+		}
+		stmts.fullContentStmt = nil
+	}
+	if stmts.fullContentChunkStmt != nil {
+		if closeErr := stmts.fullContentChunkStmt.Finalize(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("finalize session_entry_full_content_chunks insert statement: %w", closeErr))
+		}
+		stmts.fullContentChunkStmt = nil
 	}
 	return err
 }
@@ -955,6 +983,37 @@ func (stmts *sessionEntryWriteStatements) SessionCommand() (*sqlite.Stmt, error)
 		return nil, err
 	}
 	stmts.commandStmt = stmt
+	return stmt, nil
+}
+
+// FullContent prepares the per-entry durable-prose manifest insert once per
+// transaction. A session writes one row per entry that carries content, so
+// re-preparing this statement per row is pure overhead on the serialized
+// writer.
+func (stmts *sessionEntryWriteStatements) FullContent() (*sqlite.Stmt, error) {
+	if stmts.fullContentStmt != nil {
+		return stmts.fullContentStmt, nil
+	}
+	stmt, _, err := stmts.conn.PrepareTransient(sqlInsertSessionEntryFullContent)
+	if err != nil {
+		return nil, err
+	}
+	stmts.fullContentStmt = stmt
+	return stmt, nil
+}
+
+// FullContentChunk prepares the durable-prose chunk insert once per
+// transaction. A large session writes many 64 KiB chunks, so this is the
+// hotter of the two full-content inserts.
+func (stmts *sessionEntryWriteStatements) FullContentChunk() (*sqlite.Stmt, error) {
+	if stmts.fullContentChunkStmt != nil {
+		return stmts.fullContentChunkStmt, nil
+	}
+	stmt, _, err := stmts.conn.PrepareTransient(sqlInsertSessionEntryFullContentChunk)
+	if err != nil {
+		return nil, err
+	}
+	stmts.fullContentChunkStmt = stmt
 	return stmt, nil
 }
 
@@ -996,6 +1055,17 @@ func insertSessionEntryChunk(stmts *sessionEntryWriteStatements, entries []schem
 		return fmt.Errorf("session_entry chunk [%d,%d]: %w", entries[0].EntryIndex, entries[len(entries)-1].EntryIndex, err)
 	}
 	return nil
+}
+
+// stepAndReset runs a reusable prepared statement once for the row currently
+// bound to it and returns the statement to its reusable state. Bind failures
+// surface from Step. Reset and ClearBindings always run, even after a failed
+// Step, so a later write in the same batch can safely reuse the statement.
+func stepAndReset(stmt *sqlite.Stmt) error {
+	_, stepErr := stmt.Step()
+	resetErr := stmt.Reset()
+	clearErr := stmt.ClearBindings()
+	return errors.Join(stepErr, resetErr, clearErr)
 }
 
 func buildSessionEntryInsertSQL(rowCount int) string {

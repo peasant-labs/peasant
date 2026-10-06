@@ -118,6 +118,7 @@ func requireEveryStringFieldPopulated(t *testing.T, what string, value any) {
 // free-text field carries its OWN planted secret, so a failure names the field
 // that leaked rather than reporting that something somewhere did.
 func TestPipeline_PublishedBodyIsRedacted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 	const hostSlug = testutil.TestHostSlug
@@ -375,6 +376,7 @@ func (s stubJSONRedactor) RuleSetVersion() string { return s.real.RuleSetVersion
 // That is the property worth pinning: relying on the net is how a seam that
 // stopped working goes unnoticed.
 func TestPipeline_RedactionFailureStopsTheSessionInsteadOfPublishing(t *testing.T) {
+	t.Parallel()
 	for _, seam := range outwardSeams {
 		t.Run(seam.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -491,6 +493,7 @@ func plantMetaSecret(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID, secr
 // a value that does not, so a test can reach what production cannot, which is
 // the whole reason the fail-closed wrapper is not dead weight.
 func TestPipeline_ARedactionThatCannotBeEncodedStopsTheSession(t *testing.T) {
+	t.Parallel()
 	for _, seam := range outwardSeams {
 		t.Run(seam.name, func(t *testing.T) {
 			ctx := context.Background()

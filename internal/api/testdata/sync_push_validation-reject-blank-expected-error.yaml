@@ -10,6 +10,5 @@ cases:
   - name: blank
     sessionIds: [99d59925-36bc-424c-a789-8be54d9702ba]
     redactionLevel: maximum
-    visibility: private
     expectedStatus: 400
     expectedError: ""

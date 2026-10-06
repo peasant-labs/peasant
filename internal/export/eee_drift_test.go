@@ -38,6 +38,7 @@ const eeeVendoredSchemaVersion = "0.2.1"
 // releases a new version and the file is updated without bumping this constant,
 // the test fails to prevent silent drift.
 func TestEEESchema_VendoredVersionMatches(t *testing.T) {
+	t.Parallel()
 	data := schema.EvalSchemaJSON
 
 	var schemaObj struct {
@@ -62,6 +63,7 @@ func TestEEESchema_VendoredVersionMatches(t *testing.T) {
 // If EEE removes or renames this constraint, the conformance test fixtures
 // and EEEMetricConfig.LowerIsBetter must be revisited.
 func TestEEEMetricConfig_RequiredContractField(t *testing.T) {
+	t.Parallel()
 	data := schema.EvalSchemaJSON
 
 	// Navigate to evaluation_results.items.properties.metric_config.required

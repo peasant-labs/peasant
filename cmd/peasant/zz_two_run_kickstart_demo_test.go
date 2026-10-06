@@ -14,12 +14,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	kit "github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 type demoRepoResolver struct{}
@@ -46,6 +45,7 @@ const (
 // run one wrote, and the two runs must agree on every visible row while
 // disagreeing on exactly one thing -- how much they had to mine.
 func TestTwoRunKickstartDemonstration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	workDir := filepath.Join(dataDir, "project")
@@ -82,7 +82,7 @@ func TestTwoRunKickstartDemonstration(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(dataDir, "peasant.db")
-	database, err := store.Open(dbPath)
+	database, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open the isolated store: %v", err)
 	}

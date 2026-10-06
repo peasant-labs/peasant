@@ -10,7 +10,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -52,7 +51,7 @@ func seedRedactTestSession(t *testing.T, dir string) {
 		t.Fatalf("seed: create data directory: %v", err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seed: open store: %v", err)
 	}
@@ -123,7 +122,7 @@ func seedRedactTestSession(t *testing.T, dir string) {
 func seedDBOnlySession(t *testing.T, dir, sessionID string) {
 	t.Helper()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seedDBOnlySession: open store: %v", err)
 	}
@@ -480,7 +479,7 @@ func seedIndexedRetainedSession(t *testing.T, dir, sessionID, hostSlug string) [
 		Source:    schema.SourceInfo{FilePath: "/test/indexed.jsonl", Format: schema.SourceFormatJSONL},
 	}
 
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seed indexed: open store: %v", err)
 	}
@@ -551,7 +550,7 @@ func TestRedactCommand_Redact_UpdatesRowAndNextHarvestReindexes(t *testing.T) {
 	// cleared so the next harvest re-indexes it.
 	dataDir := string(defaults.ResolveDataDirPathWith(dataHome))
 	dbPath := string(defaults.ResolveDBFilePathWith(dataHome))
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
@@ -618,7 +617,7 @@ func TestRedactCommand_MirrorFails_NamesCommand(t *testing.T) {
 	start := int64(1700003000000)
 	ingested := start + 120000
 	func() {
-		db, err := store.Open(dbPath)
+		db, err := openPreparedStore(t, dbPath)
 		if err != nil {
 			t.Fatalf("open store: %v", err)
 		}

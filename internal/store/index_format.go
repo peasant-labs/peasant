@@ -7,9 +7,9 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // IndexFormat persists a concrete representation using the caller's connection
@@ -145,7 +145,7 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*inges
 	var state *ingest.SessionIndexState
 	// One snapshot, one statement: the publication binding and the content
 	// capture status describe the same instant as the index columns.
-	err := sqlitex.ExecuteTransient(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
+	err := sqlitex.Execute(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
 s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
 `+publicationCaptureRevisionSQL+`,
 CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,
@@ -228,8 +228,9 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 	// An incomplete managed generation never carries a successful producer
 	// stamp: positive caller-supplied indexer revisions remain available only
 	// to complete candidates. Incomplete writes leave success and indexed-at
-	// unset so maintenance stays required.
-	if v2, ok := write.Result.(indexformat.V2); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+	// unset so maintenance stays required. Both V2 spellings are guarded; a
+	// nil *V2 carries no generation and is not a managed write.
+	if v2, ok := asV2Value(write.Result); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
 		if write.IndexerVersion > 0 || write.IndexedAtMs != 0 || write.IndexedInputHash != nil {
 			return nil, nil, fmt.Errorf("store: incomplete generation for session %s claims producer revision %d; replacement was refused and the prior generation is preserved; incomplete_new leaves success and indexed-at unset", write.SessionID, write.IndexerVersion)
 		}

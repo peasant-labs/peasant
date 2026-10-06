@@ -3,13 +3,12 @@ package push_test
 import (
 	"bytes"
 	_ "embed"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/title_mapping.yaml
@@ -27,15 +26,9 @@ type titleMappingFixture struct {
 
 func loadTitleMappingFixture(t *testing.T) titleMappingFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(titleMappingFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture titleMappingFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(titleMappingFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode title mapping fixture: %v", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatalf("title mapping fixture must contain one document: %v", err)
 	}
 	if fixture.Name == "" || fixture.CanonicalTitle == "" || fixture.CustomMatch == "" || fixture.XDGConfigHome == "" || len(fixture.ExpectedNonTitleFragments) != 2 {
 		t.Fatalf("title mapping fixture is incomplete: %#v", fixture)
@@ -44,6 +37,7 @@ func loadTitleMappingFixture(t *testing.T) titleMappingFixture {
 }
 
 func TestMapMetadata_RuntimeRulesCoverCanonicalTitle(t *testing.T) {
+	t.Parallel()
 	fixture := loadTitleMappingFixture(t)
 	redactor, err := redact.NewRedactor(redact.Standard, []redact.UserPattern{{
 		ID: "configured-project-name", Category: redact.CategoryProject,

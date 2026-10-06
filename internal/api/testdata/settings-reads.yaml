@@ -1,0 +1,137 @@
+# GET /api/v1/settings reads and what each must answer.
+#
+# setup is what stands at the configuration path, as in settings-updates.yaml:
+# file (the text in file, the default) or missing (nothing). The default user
+# email a missing file reads is settings-default@example.test.
+#
+# A 200 case names one key with the value the file names and the value that
+# applies, as JSON. The effective value {cpu-default} is the CPU-derived
+# upload concurrency of the machine the test runs on. A refusal names its status, its error code, and text its
+# reason must hold.
+requiredNames:
+  - a missing file reads every key unset with the defaults applied
+  - a raised level reads the level it applies
+  - an unset field that defaults to on reads as on
+  - an empty choice reads its default
+  - a visibility this version does not publish reads the one it does
+  - an unset project path reads as sent
+  - a concurrency of 0 reads the CPU-derived default
+  - an auto-publish intent beside a plan to publish applies
+  - an auto-publish intent beside keep local does not apply
+  - a refused level fails the read with its remedy
+  - a push method no push applies fails the read with its remedy
+  - an invalid file fails the read
+  - a start-only setting reports the running value after a file edit
+cases:
+  - name: a start-only setting reports the running value after a file edit
+    runningFile: |
+      version: 1
+      output:
+        basePath: /running/output
+    file: |
+      version: 1
+      output:
+        basePath: /edited/output
+    status: 200
+    key: output.basePath
+    value: '"/edited/output"'
+    effective: '"/running/output"'
+  - name: a missing file reads every key unset with the defaults applied
+    setup: missing
+    status: 200
+    key: user.email
+    value: 'null'
+    effective: '"settings-default@example.test"'
+  - name: a raised level reads the level it applies
+    file: |
+      version: 1
+      redaction:
+        level: minimal
+    status: 200
+    key: redaction.level
+    value: '"minimal"'
+    effective: '"standard"'
+  - name: an unset field that defaults to on reads as on
+    file: |
+      version: 1
+    status: 200
+    key: push.fields.gitRemote
+    value: 'null'
+    effective: 'true'
+  - name: an empty choice reads its default
+    file: |
+      version: 1
+      display:
+        theme: ""
+    status: 200
+    key: display.theme
+    value: '""'
+    effective: '"dark"'
+  - name: a visibility this version does not publish reads the one it does
+    file: |
+      version: 1
+      push:
+        visibility: group
+    status: 200
+    key: push.visibility
+    value: '"group"'
+    effective: '"private"'
+  - name: an unset project path reads as sent
+    file: |
+      version: 1
+    status: 200
+    key: push.fields.projectPath
+    value: 'null'
+    effective: 'true'
+  - name: a concurrency of 0 reads the CPU-derived default
+    file: |
+      version: 1
+      push:
+        concurrency: 0
+    status: 200
+    key: push.concurrency
+    value: '0'
+    effective: '{cpu-default}'
+  - name: an auto-publish intent beside a plan to publish applies
+    file: |
+      version: 1
+      push:
+        sharePreference: share-later
+        autoPublishIntent: true
+    status: 200
+    key: push.autoPublishIntent
+    value: 'true'
+    effective: 'true'
+  - name: an auto-publish intent beside keep local does not apply
+    file: |
+      version: 1
+      push:
+        autoPublishIntent: true
+    status: 200
+    key: push.autoPublishIntent
+    value: 'true'
+    effective: 'false'
+  - name: a refused level fails the read with its remedy
+    file: |
+      version: 1
+      redaction:
+        level: maximum
+    status: 500
+    code: settings_value_not_applied
+    errorContains: 'every command that redacts refuses it; set redaction.level to one of \"standard\"'
+  - name: a push method no push applies fails the read with its remedy
+    file: |
+      version: 1
+      push:
+        method: individual
+    status: 500
+    code: settings_value_not_applied
+    errorContains: 'every git hook push refuse it; set push.method to one of \"all\", \"by-source\"'
+  - name: an invalid file fails the read
+    file: |
+      version: 1
+      push:
+        method: sideways
+    status: 500
+    code: settings_unreadable
+    errorContains: 'unknown push.method \"sideways\"'

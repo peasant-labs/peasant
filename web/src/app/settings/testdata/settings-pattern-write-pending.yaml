@@ -1,0 +1,12 @@
+requiredNames: [a pending pattern removal serializes whole-list writes]
+cases:
+  - name: a pending pattern removal serializes whole-list writes
+    patterns:
+      - id: acme-host
+        category: project
+        pattern: '[a-z]+\.acme\.internal'
+        replacement: '<ACME_HOST>'
+      - id: private-token
+        category: secrets
+        pattern: 'secret_[a-z]+'
+        replacement: '<TOKEN>'

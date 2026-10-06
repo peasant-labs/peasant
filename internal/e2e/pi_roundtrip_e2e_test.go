@@ -52,7 +52,7 @@ func TestPiRoundTripE2E(t *testing.T) {
 				source = strings.Replace(source, replacement.From, replacement.To, 1)
 			}
 			beforeTranscripts := villageTableCount(t, stack.db, "transcripts")
-			beforeBlobs := transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket)
+			beforeBlobs := transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket)
 			sourcePath := filepath.Join(sandbox.root, "native.jsonl")
 			piNoError(t, os.WriteFile(sourcePath, []byte(source), 0600))
 			writeDisposableSandboxConfig(t, sandbox, fmt.Sprintf(`version: 1
@@ -81,7 +81,7 @@ push:
 			piEqual(t, 1, forecast.New, "dry run must forecast the actual ingested Pi session")
 			piEqual(t, before, requests.snapshot(), "dry run must make zero requests, including capability negotiation and upload")
 			piEqual(t, beforeTranscripts, villageTableCount(t, stack.db, "transcripts"))
-			piEqual(t, beforeBlobs, transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket))
+			piEqual(t, beforeBlobs, transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket))
 
 			result := runPeasantInSandbox(t, binary, sandbox, "village", "push", "--json", "--non-interactive")
 			var pushed pushJSON
@@ -174,12 +174,12 @@ push:
 					piNoError(t, err)
 					beforeRow := readLegacyStorageSnapshot(t, stack, remote.ID)
 					beforeAudit := villageTableCount(t, stack.db, "transcript_governance_events_audit")
-					beforeObjects := transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket)
+					beforeObjects := transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket)
 					status, _ := directPublish(t, proxy.URL, apiKey, badMetadata, bad)
 					piEqual(t, invalid.Status, status)
 					piEqual(t, beforeRow, readLegacyStorageSnapshot(t, stack, remote.ID), "invalid content must not mutate the transcript or encryption descriptor")
 					piEqual(t, beforeAudit, villageTableCount(t, stack.db, "transcript_governance_events_audit"))
-					piEqual(t, beforeObjects, transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket))
+					piEqual(t, beforeObjects, transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket))
 				})
 			}
 			original, err := os.ReadFile(sourcePath)
@@ -191,7 +191,7 @@ push:
 
 func piLocalDetail(t *testing.T, sandbox disposableSandbox, sessionID string) *schema.SessionDetailPayload {
 	t.Helper()
-	db, err := store.Open(filepath.Join(sandbox.dataHome, "peasant", "peasant.db"))
+	db, err := store.Open(filepath.Join(sandbox.dataHome, "peasant", "peasant.db"), store.WithSkipMigrations())
 	piNoError(t, err)
 	defer db.Close()
 	session, err := api.NewStoreDataProvider(db, sessionvisibility.All()).SessionByID(t.Context(), sessionID)
@@ -290,7 +290,7 @@ func assertPiCiphertext(t *testing.T, stack harnessStack, stored legacyStorageSn
 	t.Helper()
 	piCheck(t, len(stored.wrappedDataKey) > 0 && stored.keyVersion > 0, "encryption descriptor required")
 	piEqual(t, "aes-256-gcm-random-nonce-v1", stored.encryptionAlgorithm)
-	client, err := newMinioClient(stack.minioEndpoint)
+	client, err := newS3Client(stack.s3Endpoint)
 	piNoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), s3OpTimeout)
 	defer cancel()

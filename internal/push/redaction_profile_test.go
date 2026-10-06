@@ -24,7 +24,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/profile_redaction/cases.yaml
@@ -74,9 +73,7 @@ func loadRedactionProfileFixtures(t *testing.T) []redactionProfileFixture {
 	var document struct {
 		Cases []redactionProfileFixture `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(redactionProfileCases))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(redactionProfileCases, &document); err != nil {
 		t.Fatal(err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(redactionProfileManifest, "redaction profile")
@@ -156,6 +153,7 @@ func (c *redactionProfileClock) Now() time.Time {
 }
 
 func TestPipelineRedactionProfile(t *testing.T) {
+	t.Parallel()
 	shared, err := testutil.LoadProfileRedactionFixtures()
 	if err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { Harness, StopReason, ToolCallKind, type SessionDetailPayload } from '@peasant-labs/schema';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
@@ -73,6 +74,12 @@ vi.mock('./lib/useEntryLabels', () => ({
 
 vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'dark', setTheme: vi.fn(), toggle: vi.fn() }),
+}));
+
+// The publish bar and popup are not this suite's subject, and the fairtrade
+// barrel below is a minimal stand-in without their parts.
+vi.mock('./publish/useTranscriptPublish', () => ({
+  useTranscriptPublish: () => ({ bar: null, dialog: null }),
 }));
 
 vi.mock('@/lib/ft-ui', () => ({
@@ -236,7 +243,11 @@ function buildPayload(fixture: ContractCase): SessionDetailPayload & { gitContex
 function TestDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
   if (!routeQuery) throw new Error('schema contract route query must be valid');
-  return <SessionDetailV2 sessionId="sess-contract" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId="sess-contract" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 const fixtureSet = loadFixtures();
@@ -295,13 +306,16 @@ describe('mounted canonical schema contract', () => {
       if (fixture.expectedScorecardState === 'nullable-member') expect(analyticsScorecard?.m2TokenOutcomeRatio).toBeNull();
       else expect(analyticsScorecard).toBeUndefined();
 
+      // Touched files are plain text relative to the payload's own working
+      // directory; the code map is route-only, so nothing links into it.
       if (fixture.expectedFileNode) {
-        const link = screen.getByRole('link', { name: `Open ${fixture.expectedFileNode} on the Map` });
-        expect(link).toHaveAttribute('href', `/map/${PROJECT_HASH}?node=${encodeURIComponent(fixture.expectedFileNode)}`);
+        const files = screen.getByLabelText(/^Files touched in turn /);
+        expect(within(files).getByText(fixture.expectedFileNode).tagName).toBe('LI');
         expect(screen.queryByText(fixture.legacyWorkingDirectory)).not.toBeInTheDocument();
       } else {
-        expect(screen.queryByRole('link', { name: / on the Map$/ })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(/^Files touched in turn /)).not.toBeInTheDocument();
       }
+      expect(document.querySelector('a[href^="/map"]')).toBeNull();
     });
   }
 });

@@ -3,9 +3,7 @@ package config_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -117,15 +116,9 @@ func platformAbsoluteFixturePaths(document string) string {
 var fixtureClonePathPattern = regexp.MustCompile(`/workspace(?:/[A-Za-z0-9._-]+)+`)
 
 func decodeSelectionExclusionFixtures(data []byte) (selectionExclusionFixtures, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixtures selectionExclusionFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixtures); err != nil {
 		return selectionExclusionFixtures{}, fmt.Errorf("decode fixture fields: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return selectionExclusionFixtures{}, fmt.Errorf("fixture must contain exactly one YAML document: %v", err)
 	}
 	return fixtures, nil
 }

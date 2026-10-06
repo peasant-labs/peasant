@@ -1,20 +1,18 @@
 package metrics_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
-	"io"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/recompute.yaml
@@ -59,14 +57,8 @@ func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) 
 			WantError    bool   `yaml:"wantError"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(recomputeYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(recomputeYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("metric recomputation fixture requires one document")
 	}
 	required := []string{"current-version-recomputed", "future-producer-preserved", "failed-save-preserves-last-good"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {
@@ -80,11 +72,7 @@ func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) 
 		seen[row.Name] = true
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
-			db, err := store.Open(filepath.Join(t.TempDir(), "metrics.db"), store.WithPoolSize(1))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
+			db := storetest.OpenWith(t, store.WithPoolSize(1))
 			sid := mustSessionID(t, fixture.SessionID)
 			meta := ingest.NewUnifiedMetadata()
 			meta.SessionID, meta.ModelHarness = sid, ingest.HarnessClaudeCode

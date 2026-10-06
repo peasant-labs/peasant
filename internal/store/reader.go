@@ -9,9 +9,9 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // ---------------------------------------------------------------------------
@@ -687,12 +687,22 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	// Readiness is the publication binding plus a current metadata schema
-	// version. The binding half is shared, so it cannot drift from the binding
-	// that captured index state reports.
+	// Readiness is the publication binding plus a metadata schema this build
+	// reads as current. The binding half is shared, so it cannot drift from the
+	// binding that captured index state reports. The schema half binds the
+	// readable set rather than the current version exactly, so a declared
+	// refresh-free schema bump does not make every stored capture read as
+	// needing a re-ingest.
+	readableVersions := ingest.ReadableMetadataSchemaVersions()
+	schemaPlaceholders := make([]string, len(readableVersions))
+	schemaArgs := make([]any, len(readableVersions))
+	for i, version := range readableVersions {
+		schemaPlaceholders[i] = "?"
+		schemaArgs[i] = version
+	}
 	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version,
 s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
-CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version=? THEN 1 ELSE 0 END,
+CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version IN (` + strings.Join(schemaPlaceholders, ",") + `) THEN 1 ELSE 0 END,
 p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
 c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),s.adapter_version,
 s.index_version,s.indexed_input_hash
@@ -705,7 +715,7 @@ WHERE s.session_id IN (` +
 
 	result := make(map[ingest.SessionID]ingest.SessionLocation, len(sessionIDs))
 	err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
-		Args: append([]any{ingest.CurrentSchemaVersion}, args...),
+		Args: append(schemaArgs, args...),
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			id, parseErr := schema.NewSessionID(stmt.ColumnText(0))
 			if parseErr != nil {
@@ -1025,6 +1035,67 @@ WHERE role = 'user' AND depth = 0
 		})
 		if err != nil {
 			return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		}
+	}
+	return result, nil
+}
+
+// LeadingUserMessagesBulk returns at most perSession leading depth-zero user
+// previews per session, in entry_index order. Sessions without user entries are
+// omitted; NULL previews are empty elements, not missing records. Each element
+// is truncated to SessionPreviewMaxChars runes, like FirstUserMessage.
+func (s *Store) LeadingUserMessagesBulk(ctx context.Context, sessionIDs []string, perSession int) (_ map[string][]string, retErr error) {
+	if perSession < 1 {
+		return nil, fmt.Errorf("store: LeadingUserMessagesBulk cannot read leading previews with perSession=%d: a non-positive cap would discard all evidence while reporting success; no previews were read; pass a per-session cap of at least 1", perSession)
+	}
+	if len(sessionIDs) == 0 {
+		return map[string][]string{}, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: LeadingUserMessagesBulk take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, sessionIDs); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]string, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		placeholders := make([]string, len(selectedIDs))
+		args := make([]any, len(selectedIDs), len(selectedIDs)+1)
+		for i, id := range selectedIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		args = append(args, perSession)
+		q := `SELECT session_id, content_preview, rn FROM (
+  SELECT session_id, content_preview,
+    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY entry_index ASC) AS rn
+  FROM session_entries
+  WHERE session_id IN (` + strings.Join(placeholders, ", ") + `) AND role = 'user' AND depth = 0
+) WHERE rn <= ? ORDER BY session_id, rn`
+		err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				sid := stmt.ColumnText(0)
+				// Repeated requested IDs in later batches must not duplicate records.
+				if stmt.ColumnInt(2) == 1 {
+					result[sid] = nil
+				}
+				var preview string
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					preview = stmt.ColumnText(1)
+				}
+				result[sid] = append(result[sid], TruncateToRunes(preview, defaults.SessionPreviewMaxChars))
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: LeadingUserMessagesBulk query: %w", err)
 		}
 	}
 	return result, nil

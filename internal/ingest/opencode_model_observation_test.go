@@ -5,14 +5,11 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/opencode_model_observations.yaml
@@ -42,15 +39,9 @@ type openCodeModelObservationFixture struct {
 }
 
 func decodeOpenCodeModelObservationFixture(data []byte) (openCodeModelObservationFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture openCodeModelObservationFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return openCodeModelObservationFixture{}, fmt.Errorf("decode OpenCode model-observation fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return openCodeModelObservationFixture{}, fmt.Errorf("OpenCode model-observation fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, fixtureCase := range fixture.Cases {

@@ -1,0 +1,52 @@
+# Pre-test steps that `make check` runs before the test passes.
+#
+# The gate's per-class decision table charges the whole `make check`, so these
+# steps are inside the budget. The commands here mirror the `check` target's
+# execution; each step names the Makefile `target` that runs it and a literal
+# `fragment` of that target's recipe. A test resolves both against the
+# repository Makefile and asserts the steps run in this order, so a recipe that
+# drops, reorders, or renames a step fails loudly instead of the fixture
+# measuring a step the Makefile no longer runs. The fragment is the recipe's own
+# text, which may use Make variables (release-guard's line, for example, is
+# verbatim; ast-grep-gate-test's carries `$(GORACE_FLAG)`), so it cannot be
+# derived from `program` + `args`.
+#
+# Each step runs alone, under the outer getrusage(RUSAGE_CHILDREN) accumulator,
+# so its wall/user/system are exact.
+#
+# required_names is a deletion-protection manifest: it lists the five step names
+# the table must carry, in execution order. Adding a step never requires editing
+# it; removing one does.
+required_names:
+  - fmt
+  - lint
+  - ast-grep-scan
+  - ast-grep-gate-test
+  - release-guard
+
+steps:
+  - step: fmt
+    program: go
+    args: ["fmt", "./..."]
+    target: fmt
+    fragment: "go fmt ./..."
+  - step: lint
+    program: ./scripts/vet-go.sh
+    args: []
+    target: lint
+    fragment: "./scripts/vet-go.sh"
+  - step: ast-grep-scan
+    program: ast-grep
+    args: ["scan", "--error=unused-suppression", "--config", "sgconfig.yml", "."]
+    target: check
+    fragment: "ast-grep scan --error=unused-suppression --config sgconfig.yml ."
+  - step: ast-grep-gate-test
+    program: go
+    args: ["test", "-race", "-tags=astgrep", "./internal/tui/gates/..."]
+    target: check
+    fragment: "go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/..."
+  - step: release-guard
+    program: go
+    args: ["run", "github.com/peasant-labs/schema/cmd/release-guard", "check-workflow", "--policy", ".github/release-guard.policy.yml", "--release", ".github/workflows/release.yml"]
+    target: check
+    fragment: "go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml"

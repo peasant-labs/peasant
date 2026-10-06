@@ -1,0 +1,108 @@
+required_names:
+  - claude-record-traversal
+  - cursor-record-traversal
+  - strike-record-traversal
+  - claude-nested-block-traversal
+  - cursor-nested-block-traversal
+  - strike-nested-block-traversal
+  - claude-additive-known-only
+  - cursor-additive-known-only
+  - strike-additive-known-only
+payload: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "embedded":"{\"\\u0067hp_SECRET_BODY\":\"\\u0067hp_SECRET_BODY\"}" }'
+expected: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "embedded":"{\"\\u003cGITHUB_PAT\\u003e\":\"\\u003cGITHUB_PAT\\u003e\"}" }'
+sidecar: '{"sessionId":"SESSION_ID","model":"claude-sonnet-4-20250514","cwd":"/workspace","title":"synthetic retained evidence"}'
+corrupt:
+  claude-code: '{"type":"assistant","message":{"role":"assistant","content":[{"type":"future"},{"type":"text"}]}}'
+  cursor: '{"role":"assistant","content":[{"type":"future"},{"type":"text"}]}'
+  strike: '{"type":"assistant.text","data":{"text":42}}'
+cases:
+  - name: claude-additive-known-only
+    harness: claude-code
+    complete: true
+    source: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","future_field":{"present":true},"message":{"role":"user","content":"opening"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"closing","future_field":[1,2]}]}}
+  - name: cursor-additive-known-only
+    harness: cursor
+    complete: true
+    source: |
+      {"role":"user","timestamp":"2026-01-01T00:00:00Z","content":"opening","future_field":{"present":true}}
+      {"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"closing","future_field":[1,2]}]}}
+  - name: strike-additive-known-only
+    harness: strike
+    complete: true
+    source: |
+      {"type":"user.message","time":"2026-01-01T00:00:00Z","data":{"text":"opening","future_field":{"present":true}}}
+      {"type":"assistant.text","time":"2026-01-01T00:00:01Z","data":{"text":"closing","future_field":[1,2]}}
+  - name: claude-record-traversal
+    payload_prefix: " \t"
+    payload_suffix: "\t "
+    namespace: record
+    harness: claude-code
+    source: |
+      UNKNOWN
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","future_field":{"present":true},"message":{"role":"user","content":"opening"}}
+      UNKNOWN
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"closing"}]}}
+      UNKNOWN
+    record_indices: [0, 2, 4]
+    positions: [0, 2, 5]
+    pointers: ["", "", ""]
+  - name: cursor-record-traversal
+    payload_prefix: " \t"
+    payload_suffix: "\t "
+    namespace: record
+    harness: cursor
+    source: |
+      UNKNOWN
+      {"role":"user","timestamp":"2026-01-01T00:00:00Z","content":"opening","future_field":{"present":true}}
+      UNKNOWN
+      {"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"closing"}]}}
+      UNKNOWN
+    record_indices: [0, 2, 4]
+    positions: [0, 2, 5]
+    pointers: ["", "", ""]
+  - name: strike-record-traversal
+    payload_prefix: " \t"
+    payload_suffix: "\t "
+    namespace: record
+    harness: strike
+    source: |
+      UNKNOWN
+      {"type":"user.message","time":"2026-01-01T00:00:00Z","data":{"text":"opening","future_field":{"present":true}}}
+      UNKNOWN
+      {"type":"assistant.text","time":"2026-01-01T00:00:01Z","data":{"content":[{"type":"text","text":"closing"}]}}
+      UNKNOWN
+    record_indices: [0, 2, 4]
+    positions: [0, 2, 5]
+    pointers: ["", "", ""]
+  - name: claude-nested-block-traversal
+    namespace: content_block
+    harness: claude-code
+    source: |
+      {"type":"assistant","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"tool_use","id":"call_synthetic","name":"read_file","input":{}}]}}
+      {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_synthetic","content":[{"type":"text","text":"before"},UNKNOWN,{"type":"text","text":"after"}]},{"type":"text","text":"sibling"},UNKNOWN]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"closing"}]}}
+    record_indices: [1, 1]
+    positions: [5, 8]
+    pointers: [/message/content/0/content/1, /message/content/2]
+  - name: cursor-nested-block-traversal
+    namespace: content_block
+    harness: cursor
+    source: |
+      {"timestamp":"2026-01-01T00:00:00Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"tool_use","id":"call_synthetic","name":"read_file","input":{}}]}}
+      {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_synthetic","content":[{"type":"text","text":"before"},UNKNOWN,{"type":"text","text":"after"}]},{"type":"text","text":"sibling"},UNKNOWN]}
+      {"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"closing"}]}}
+    record_indices: [1, 1]
+    positions: [5, 8]
+    pointers: [/content/0/content/1, /content/2]
+  - name: strike-nested-block-traversal
+    namespace: content_block
+    harness: strike
+    source: |
+      {"type":"user.message","time":"2026-01-01T00:00:00Z","data":{"text":"opening"}}
+      {"type":"assistant.text","data":{"content":[{"type":"text","text":"before"},{"type":"tool_result","tool_use_id":"call_synthetic","content":[{"type":"text","text":"nested before"},UNKNOWN,{"type":"text","text":"nested after"}]},UNKNOWN]}}
+      {"type":"assistant.text","time":"2026-01-01T00:00:01Z","data":{"text":"closing"}}
+    record_indices: [1, 1]
+    positions: [5, 7]
+    pointers: [/data/content/1/content/1, /data/content/2]

@@ -14,7 +14,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -213,6 +212,7 @@ cases:
 // forever, with no error. Admitting those subdirectories must not admit a nested
 // repository, which is a separate repository that happens to live inside this one.
 func TestPushCmd_RepositoryScopeUsesCanonicalProjectHash(t *testing.T) {
+	t.Parallel()
 	document, err := loadPushRepositoryScopeFixtures(pushRepositoryScopeFixtureData)
 	if err != nil {
 		t.Fatal(err)
@@ -300,7 +300,7 @@ func seedRepositoryScopeWorld(t *testing.T) repositoryScopeWorld {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import YAML from 'yaml';
 import fixtureSource from './testdata/mounted-share.yaml?raw';
 import { buildGroupedSyncResponse } from './testdata/grouped-sync';
 import { ShareWizardClient } from './ShareWizardClient';
+import { PublishProvider } from '@/contexts/PublishContext';
 import * as useMockConfig from '@/hooks/useMockConfig';
 
 vi.mock('@/hooks/useMockConfig');
@@ -24,7 +25,7 @@ function loadFixture(): Fixture {
 }
 
 const fixture = loadFixture();
-const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
+const response = (body: unknown) => Response.json(body);
 
 function syncStatusFor(shareStatus: string): 'new' | 'updated' | 'synced' | 'held' {
   if (shareStatus === 'updated') return 'updated';
@@ -49,7 +50,7 @@ function groupedSyncPayload() {
   })));
 }
 
-function installFetch(items: unknown = fixture.items, annotationsGate: Promise<void> = Promise.resolve(), redactionsGate: Promise<void> = Promise.resolve()) {
+function installFetch(items: unknown = fixture.items, redactionsGate: Promise<void> = Promise.resolve()) {
   // Routed by EXACT path, never by containment. Containment dispatch is first
   // match wins, so a sessions-adjacent route would be swallowed by the sessions
   // arm and answered with the discovery list — and a test asserting the other
@@ -62,12 +63,9 @@ function installFetch(items: unknown = fixture.items, annotationsGate: Promise<v
         return response(groupedSyncPayload());
       case '/api/v1/web/discovery':
         return response({ items });
-      case '/api/v1/annotations':
-        await annotationsGate;
-        return response({ annotations: [] });
       case '/api/v1/sync/redactions':
         await redactionsGate;
-        return response({ categories: [] });
+        return response({ total: 0, categories: [] });
       case '/api/v1/sync/push':
         return response({ new: 4, updated: 0, skipped: 0, errors: 0, sessions: [] });
       default:
@@ -85,13 +83,11 @@ describe('mounted Share production boundary', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
   it('decodes, joins, groups, tri-state selects eligible IDs, and submits them through PushStep', async () => {
-    let releaseAnnotations!: () => void;
     let releaseRedactions!: () => void;
-    const annotationsGate = new Promise<void>((resolve) => { releaseAnnotations = resolve; });
     const redactionsGate = new Promise<void>((resolve) => { releaseRedactions = resolve; });
-    const fetchMock = installFetch(fixture.items, annotationsGate, redactionsGate);
+    const fetchMock = installFetch(fixture.items, redactionsGate);
     const user = userEvent.setup();
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
     const projects = await screen.findAllByRole('region', { name: 'project alpha' });
     expect(projects).toHaveLength(2);
     const project = projects.find((candidate) => within(candidate).queryByRole('checkbox', { name: 'select session sess-new' }))!;
@@ -130,13 +126,10 @@ describe('mounted Share production boundary', () => {
     const footer = document.querySelector('.swz-foot') as HTMLElement;
     expect(within(footer).getByRole('button', { name: 'Continue' })).toBeEnabled();
     expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
+    // Choose leads straight to Redact: there is no labels step to skip.
     await user.click(within(footer).getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled());
-    releaseAnnotations();
-    const skip = await within(footer).findByRole('button', { name: 'Skip' });
-    expect(screen.getAllByRole('button', { name: 'Skip' })).toHaveLength(1);
-    await user.click(skip);
-    await waitFor(() => expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled());
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
     releaseRedactions();
     const review = await screen.findByRole('region', { name: 'redaction review' });
     expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
@@ -149,10 +142,10 @@ describe('mounted Share production boundary', () => {
     });
     expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
     await user.click(continueRedaction);
-    expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded.') === true)).toBeInTheDocument();
+    expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded to village.') === true)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Submit' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/sync/push'), expect.objectContaining({ body: JSON.stringify({ sessionIds: ['sess-new', 'sess-updated', 'sess-repo-main', 'sess-repo-feature'], redactionLevel: 'standard', visibility: 'public' }) })));
-    expect(await screen.findByRole('link', { name: /View in the commons/i })).toHaveAttribute(
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/sync/push'), expect.objectContaining({ body: JSON.stringify({ sessionIds: ['sess-new', 'sess-updated', 'sess-repo-main', 'sess-repo-feature'], redactionLevel: 'standard' }) })));
+    expect(await screen.findByRole('link', { name: /open village/i })).toHaveAttribute(
       'href',
       'https://village.peasantlabs.org',
     );
@@ -168,7 +161,7 @@ describe('mounted Share production boundary', () => {
           ? operation === 'malformed' ? { ...row, locationLabel: 7 } : { ...row, selectionStatus: 'unknown' }
           : row);
     installFetch(items);
-    render(<ShareWizardClient />);
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
     expect(await screen.findByText(/discovery|metadata|duplicate|locationLabel/i)).toBeInTheDocument();
     expect(screen.getByText('Retry')).toBeInTheDocument();
   });

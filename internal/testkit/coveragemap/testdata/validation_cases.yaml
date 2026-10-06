@@ -1,0 +1,185 @@
+# Positive and negative cases for the coverage-map and inventory validators.
+# Each case is a whole document with one deliberate defect, or a valid control. required_names keeps a case from being deleted silently.
+required_names:
+  - destination-retained
+  - destination-moved
+  - destination-deleted
+  - destination-followup
+  - destination-unknown-kind
+  - destination-retained-with-ref
+  - destination-bare-kind
+  - destination-empty
+  - inventory-valid
+  - inventory-wrong-version
+  - inventory-no-frozen-from
+  - inventory-plan-time-frozen-from
+  - inventory-duplicate-name
+  - inventory-empty-name
+  - inventory-missing-where
+  - map-valid
+  - map-wrong-version
+  - map-missing-inventory-ref
+  - map-missing-destination
+  - map-unknown-name
+  - map-duplicate-name
+  - map-moved-target-missing
+
+destination_cases:
+  - { name: destination-retained,         value: "retained-in-place", want_error: "" }
+  - { name: destination-moved,            value: "moved:internal/testutil/counting_fs.go", want_error: "" }
+  - { name: destination-deleted,          value: "deleted:rationale-abc123", want_error: "" }
+  - { name: destination-followup,         value: "followup:task-abc123", want_error: "" }
+  - { name: destination-unknown-kind,     value: "teleported:somewhere", want_error: "unknown destination kind" }
+  - { name: destination-retained-with-ref, value: "retained-in-place:extra", want_error: "takes no ref" }
+  - { name: destination-bare-kind,        value: "moved", want_error: "requires a ref" }
+  - { name: destination-empty,            value: "", want_error: "destination is empty" }
+
+inventory_cases:
+  - name: inventory-valid
+    want_error: ""
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestFoo, kind: count-guard, where: internal/config/policy_test.go:66 }
+        - { name: seedBar, kind: seed-helper, where: internal/ingest/git_test.go:274 }
+  - name: inventory-wrong-version
+    want_error: "version = 2"
+    inventory:
+      version: 2
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestFoo, kind: count-guard, where: internal/config/policy_test.go:66 }
+  - name: inventory-no-frozen-from
+    want_error: "not a commit"
+    inventory:
+      version: 1
+      frozen_from: ""
+      names:
+        - { name: TestFoo, kind: count-guard, where: internal/config/policy_test.go:66 }
+  - name: inventory-plan-time-frozen-from
+    want_error: "not a commit"
+    inventory:
+      version: 1
+      frozen_from: "plan-time"
+      names:
+        - { name: TestFoo, kind: count-guard, where: internal/config/policy_test.go:66 }
+  - name: inventory-duplicate-name
+    want_error: "appears more than once"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestFoo, kind: count-guard, where: internal/config/policy_test.go:66 }
+        - { name: TestFoo, kind: count-guard, where: internal/config/policy_test.go:66 }
+  - name: inventory-empty-name
+    want_error: "empty name"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: "", kind: count-guard, where: internal/config/policy_test.go:66 }
+  - name: inventory-missing-where
+    want_error: "has no where"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestFoo, kind: count-guard, where: "" }
+
+map_cases:
+  - name: map-valid
+    want_error: ""
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestA, kind: count-guard, where: a.go:1 }
+        - { name: seedB, kind: seed-helper, where: b.go:2 }
+        - { name: deadC, kind: decorator, where: c.go:3 }
+        - { name: laterD, kind: decoder, where: d.go:4 }
+    map:
+      version: 1
+      inventory: testdata/pre-epoch-inventory.yaml
+      entries:
+        - { name: TestA, destination: "retained-in-place" }
+        - { name: seedB, destination: "moved:internal/testutil/counting_fs.go" }
+        - { name: deadC, destination: "deleted:rationale-abc123" }
+        - { name: laterD, destination: "followup:task-abc123" }
+  - name: map-wrong-version
+    want_error: "version = 2"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestA, kind: count-guard, where: a.go:1 }
+    map:
+      version: 2
+      inventory: testdata/pre-epoch-inventory.yaml
+      entries:
+        - { name: TestA, destination: "retained-in-place" }
+  - name: map-missing-inventory-ref
+    want_error: "must name the inventory"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestA, kind: count-guard, where: a.go:1 }
+    map:
+      version: 1
+      inventory: ""
+      entries:
+        - { name: TestA, destination: "retained-in-place" }
+  - name: map-missing-destination
+    want_error: "has no destination"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestA, kind: count-guard, where: a.go:1 }
+        - { name: TestB, kind: count-guard, where: b.go:2 }
+    map:
+      version: 1
+      inventory: testdata/pre-epoch-inventory.yaml
+      entries:
+        - { name: TestA, destination: "retained-in-place" }
+  - name: map-unknown-name
+    want_error: "is not in the inventory"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestA, kind: count-guard, where: a.go:1 }
+    map:
+      version: 1
+      inventory: testdata/pre-epoch-inventory.yaml
+      entries:
+        - { name: TestA, destination: "retained-in-place" }
+        - { name: TestZ, destination: "retained-in-place" }
+  - name: map-duplicate-name
+    want_error: "appears more than once"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestA, kind: count-guard, where: a.go:1 }
+        - { name: TestB, kind: count-guard, where: b.go:2 }
+    map:
+      version: 1
+      inventory: testdata/pre-epoch-inventory.yaml
+      entries:
+        - { name: TestA, destination: "retained-in-place" }
+        - { name: TestB, destination: "retained-in-place" }
+        - { name: TestB, destination: "moved:internal/testutil/counting_fs.go" }
+  - name: map-moved-target-missing
+    want_error: "does not exist"
+    inventory:
+      version: 1
+      frozen_from: 80b0ed58abc1234567890abcdef1234567890ab
+      names:
+        - { name: TestA, kind: count-guard, where: a.go:1 }
+    map:
+      version: 1
+      inventory: testdata/pre-epoch-inventory.yaml
+      entries:
+        - { name: TestA, destination: "moved:internal/nope/missing.go" }
