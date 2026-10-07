@@ -1,5 +1,7 @@
 package defaults
 
+import "time"
+
 // FileExt is a typed file extension.
 type FileExt string
 
@@ -65,6 +67,50 @@ const ContentPreviewLimit = 2000
 // FullContentWriteBatchBytes is a soft full-string budget for ingest flushes.
 // A single oversized session may occupy a batch without truncation.
 const FullContentWriteBatchBytes int64 = 32 << 20
+
+// SQLiteBusyTimeout is the open path's PRAGMA busy_timeout: another process
+// waits at most this long for the single SQLite writer. It mirrors the fixed
+// 5 s in internal/store (store.go and readonly.go). The write budgets derive
+// from it: a writer-lane hold must stay below it, so the hold target carries
+// a safety factor. If the PRAGMA ever becomes configurable, this constant and
+// the hold-target derivation move with it.
+const SQLiteBusyTimeout = 5 * time.Second
+
+// Write-budget defaults. Every value carries its derivation in the harmonized
+// content-model design (§0.5); the sandbox run re-derives them by measurement.
+// They are the values a WriteConfig resolves to when the user names no
+// write.* key.
+const (
+	// WriteDefaultHoldTarget is 0.8 × SQLiteBusyTimeout: any transaction's
+	// hold must stay below the open path's busy_timeout, and the safety
+	// factor leaves scheduling headroom.
+	WriteDefaultHoldTarget = SQLiteBusyTimeout * 4 / 5
+	// WriteDefaultActivationSessions is the hold target divided by the
+	// measured per-session commit cost; the legacy batch limit is the
+	// starting point. An oversized conversion commits alone.
+	WriteDefaultActivationSessions = 64
+	// WriteDefaultBatchBytes is the staging memory bound (the legacy drain's
+	// soft full-string budget). A session whose objects exceed it stages
+	// alone in budget-sized transactions.
+	WriteDefaultBatchBytes = FullContentWriteBatchBytes
+	// WriteDefaultBatchSessions is a convenience cap alongside the byte cap;
+	// the byte cap is the binding bound.
+	WriteDefaultBatchSessions = 64
+	// WriteDefaultBufferBytes is the per-worker pre-allocated buffer cap,
+	// fixed at run start and never grown. The estimate starts above the
+	// largest single prepared unit the sandbox measures.
+	WriteDefaultBufferBytes = 4 << 20
+	// WriteDefaultFlushIntervalMs bounds the write lane's idle wait before it
+	// commits a partial batch: the push-profiler and legacy ANNOTATE flush
+	// interval, re-derived per sandbox run.
+	WriteDefaultFlushIntervalMs = 500
+	// WriteDefaultSweepRows is the hold target divided by the measured
+	// delete rate (sandbox).
+	WriteDefaultSweepRows = 5000
+	// WriteDefaultHarvestTarget is half the measured warm-harvest baseline
+	// for the cohort, re-derived per sandbox run.
+	WriteDefaultHarvestTarget = 20 * time.Minute
+)
 
 // OrdinaryHarvestContentBudgetBytes bounds how many input bytes one ordinary
 // `peasant harvest` charges to the one-time full-content capture. The capture

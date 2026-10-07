@@ -179,6 +179,11 @@ type PipelineConfig struct {
 	// Parallelism controls the number of concurrent session workers.
 	// 0 means "use runtime.NumCPU()". Set to 1 for sequential (legacy) behavior.
 	Parallelism int
+	// Write carries the write.* budgets the pipeline enforces: batch bounds,
+	// per-worker buffers, staged-memory caps, and the flush interval. The zero
+	// value means every shipped default; the harvest command fills it from
+	// the user configuration. Resolved through writeConfig at the use sites.
+	Write WriteConfig
 	// IndexProfiler receives opt-in INDEX timing observations.
 	// Nil means no INDEX profiling.
 	IndexProfiler *IndexProfiler
@@ -552,6 +557,12 @@ func WithClassifier(c SessionClassifier) PipelineOption {
 func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFactory, cfg PipelineConfig, opts ...PipelineOption) (*Pipeline, error) {
 	if len(adapters) == 0 {
 		return nil, fmt.Errorf("NewPipeline: adapters map must not be empty")
+	}
+	// Fail closed on unusable write budgets before the first session is read.
+	// A zero Write resolves to the shipped defaults here; an explicit but
+	// invalid one refuses with the knob, the bound, and the fix.
+	if _, err := cfg.Write.validatedWithDefaults(parallelWorkers(cfg)); err != nil {
+		return nil, fmt.Errorf("NewPipeline: %w", err)
 	}
 	p := &Pipeline{
 		fs:       fs,
