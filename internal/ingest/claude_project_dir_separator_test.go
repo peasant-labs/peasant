@@ -56,7 +56,8 @@ func (alwaysDirInfo) Sys() any           { return nil }
 // consuming exactly one dash-split segment per directory level, so the
 // resulting decoded path is a direct, verifiable readout of where
 // decodeClaudeProjectDir cut "encoded" out of cwd — which is exactly the
-// boundary Task 1 touches. filepath.FromSlash(want) is used for comparison
+// segment boundary decodeClaudeProjectDir relies on. filepath.FromSlash(want)
+// is used for comparison
 // (never a literal separator) so the same assertion is meaningful on every
 // platform this test binary is built for.
 func TestDecodeClaudeProjectDir_UnixShaped_AlwaysDecodes(t *testing.T) {

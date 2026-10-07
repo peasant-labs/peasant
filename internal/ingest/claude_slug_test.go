@@ -118,31 +118,6 @@ func TestDecodeClaudeSlug(t *testing.T) {
 			dirs:    map[string]bool{},
 			want:    "",
 		},
-		{
-			name:    "windows drive-letter slug decodes from the drive root",
-			encoded: "C--Users-alice-project",
-			dirs: map[string]bool{
-				windowsSlugTestPath("C", "Users"):                     true,
-				windowsSlugTestPath("C", "Users", "alice"):            true,
-				windowsSlugTestPath("C", "Users", "alice", "project"): true,
-			},
-			want: windowsSlugTestPath("C", "Users", "alice", "project"),
-		},
-		{
-			// Claude's encoding only replaces path separators (and, on Windows,
-			// the drive colon) with dashes — it never touches spaces, so a
-			// space inside a directory name survives untouched inside a
-			// single dash-delimited segment rather than needing dash-merge
-			// resolution.
-			name:    "windows drive-letter slug with a space in a directory name",
-			encoded: "C--Users-alice-My Project",
-			dirs: map[string]bool{
-				windowsSlugTestPath("C", "Users"):                        true,
-				windowsSlugTestPath("C", "Users", "alice"):               true,
-				windowsSlugTestPath("C", "Users", "alice", "My Project"): true,
-			},
-			want: windowsSlugTestPath("C", "Users", "alice", "My Project"),
-		},
 	}
 
 	for _, tt := range tests {

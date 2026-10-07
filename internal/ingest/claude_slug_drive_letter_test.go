@@ -67,6 +67,9 @@ func loadClaudeSlugWindowsFixture(t *testing.T) claudeSlugWindowsFixture {
 		}
 		seen[c.Name] = struct{}{}
 	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("Windows project-slug fixture required_cases is empty, so no case is protected from deletion")
+	}
 	for _, required := range fixture.RequiredCases {
 		if _, ok := seen[required]; !ok {
 			t.Fatalf("required fixture case %q is missing; the rule it pins would stop being tested", required)

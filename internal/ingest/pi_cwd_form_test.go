@@ -1,9 +1,12 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -28,12 +31,21 @@ type piCWDFormsFixture struct {
 
 func loadPiCWDFormsFixture(t *testing.T) piCWDFormsFixture {
 	t.Helper()
+	decoder := yaml.NewDecoder(bytes.NewReader(piCWDFormsFixtureYAML))
+	decoder.KnownFields(true)
 	var fixture piCWDFormsFixture
-	if err := yaml.Unmarshal(piCWDFormsFixtureYAML, &fixture); err != nil {
-		t.Fatalf("decode testdata/pi_cwd_forms.yaml: %v", err)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode testdata/pi_cwd_forms.yaml with known fields: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		t.Fatalf("testdata/pi_cwd_forms.yaml must hold exactly one YAML document: %v", err)
 	}
 	if fixture.DeclaredRows != len(fixture.Cases) {
 		t.Fatalf("fixture declares %d rows but carries %d cases", fixture.DeclaredRows, len(fixture.Cases))
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("testdata/pi_cwd_forms.yaml required_cases is empty, so no case is protected from deletion")
 	}
 	for _, required := range fixture.RequiredCases {
 		if !slices.ContainsFunc(fixture.Cases, func(c piCWDFormCase) bool { return c.Name == required }) {
