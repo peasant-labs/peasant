@@ -56,3 +56,20 @@ func replaceExecutable(tempPath, path string) error {
 	_ = os.Remove(sidecar)
 	return nil
 }
+
+// sweepUpgradeSidecar removes a sidecar an earlier upgrade could not delete, so
+// the displaced executable does not linger until the next upgrade. Best-effort:
+// the running process cannot remove its own displaced image, and any error is
+// ignored. It runs once per invocation, before any command does work.
+func sweepUpgradeSidecar() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	sweepUpgradeSidecarAt(exe)
+}
+
+// sweepUpgradeSidecarAt removes the sidecar beside exe, best-effort.
+func sweepUpgradeSidecarAt(exe string) {
+	_ = os.Remove(exe + upgradeSidecarSuffix)
+}

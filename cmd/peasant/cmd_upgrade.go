@@ -284,7 +284,7 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, in io.Reader, opts up
 		}
 	}
 
-	archiveName, err := upgradeArchiveName(release.TagName, deps.GOOS, deps.GOARCH)
+	archiveName, err := upgradeAssetName(release.TagName, deps.GOOS, deps.GOARCH)
 	if err != nil {
 		return err
 	}
@@ -709,7 +709,7 @@ func (r upgradeRelease) asset(name string) (upgradeAsset, bool) {
 	return upgradeAsset{}, false
 }
 
-func upgradeArchiveName(tag, goos, goarch string) (string, error) {
+func upgradeAssetName(tag, goos, goarch string) (string, error) {
 	if goos != "linux" && goos != "darwin" && goos != "windows" {
 		return "", upgradeActionableError(
 			"this platform is not supported by Peasant release assets",
@@ -784,7 +784,7 @@ func checksumForUpgradeAsset(checksums []byte, assetName string) (string, error)
 // release asset.
 //
 // Linux and macOS publish a .tar.gz the binary is unpacked from. Windows
-// publishes the executable itself, and upgradeArchiveName selects that bare
+// publishes the executable itself, and upgradeAssetName selects that bare
 // .exe, so those bytes already ARE the binary and there is nothing to unpack.
 // Dispatch is on the asset NAME rather than on the host GOOS so that the same
 // selection runs under every platform's tests.

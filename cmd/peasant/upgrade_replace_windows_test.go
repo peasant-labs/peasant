@@ -85,3 +85,32 @@ func TestReplaceExecutableInstallsWhenTargetIsAbsent(t *testing.T) {
 		t.Fatalf("target = %q, want %q", got, "new")
 	}
 }
+
+func TestSweepUpgradeSidecarRemovesStrandedSidecar(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "peasant.exe")
+	sidecar := exe + upgradeSidecarSuffix
+	if err := os.WriteFile(sidecar, []byte("stranded by an earlier upgrade"), 0o644); err != nil {
+		t.Fatalf("seed stranded sidecar: %v", err)
+	}
+	sweepUpgradeSidecarAt(exe)
+	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+		t.Fatalf("sweepUpgradeSidecarAt left %s; stat error = %v", sidecar, err)
+	}
+}
+
+func TestSweepUpgradeSidecarIsANoOpWhenNoSidecarExists(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "peasant.exe")
+	if err := os.WriteFile(exe, []byte("current"), 0o644); err != nil {
+		t.Fatalf("seed executable: %v", err)
+	}
+	sweepUpgradeSidecarAt(exe)
+	got, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("read executable: %v", err)
+	}
+	if string(got) != "current" {
+		t.Fatalf("executable = %q, want %q", got, "current")
+	}
+}

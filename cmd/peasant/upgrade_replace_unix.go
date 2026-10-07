@@ -19,3 +19,7 @@ func replaceExecutable(tempPath, path string) error {
 	}
 	return nil
 }
+
+// sweepUpgradeSidecar is a no-op on unix: renaming over a running executable
+// leaves no sidecar behind.
+func sweepUpgradeSidecar() {}

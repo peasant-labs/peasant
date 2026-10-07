@@ -602,10 +602,10 @@ func TestUpgradeAssetNameFixtures(t *testing.T) {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
-			got, err := upgradeArchiveName(tc.Tag, tc.GOOS, tc.GOARCH)
+			got, err := upgradeAssetName(tc.Tag, tc.GOOS, tc.GOARCH)
 			if len(tc.ErrorContains) > 0 {
 				if err == nil {
-					t.Fatalf("upgradeArchiveName(%q, %q, %q) = %q, want an error", tc.Tag, tc.GOOS, tc.GOARCH, got)
+					t.Fatalf("upgradeAssetName(%q, %q, %q) = %q, want an error", tc.Tag, tc.GOOS, tc.GOARCH, got)
 				}
 				for _, want := range tc.ErrorContains {
 					if !strings.Contains(err.Error(), want) {
@@ -615,7 +615,7 @@ func TestUpgradeAssetNameFixtures(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("upgradeArchiveName(%q, %q, %q) returned error: %v", tc.Tag, tc.GOOS, tc.GOARCH, err)
+				t.Fatalf("upgradeAssetName(%q, %q, %q) returned error: %v", tc.Tag, tc.GOOS, tc.GOARCH, err)
 			}
 			if got != tc.WantAsset {
 				t.Fatalf("asset = %q, want %q", got, tc.WantAsset)
