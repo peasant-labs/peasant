@@ -1,0 +1,240 @@
+# Focused v62 migration cases: the stats and sweep backfills, the
+# annotation-target rebuild, and the reshaped-table shredding. Each named
+# entity is required by migration_v62.manifest.yaml. Stats documents use the
+# live-store shape (a Go-marshaled SessionStats under $.stats); metadataJson
+# values are compact single-line documents so seed_json equality is exact.
+statsCases:
+  - name: full-stats-backfilled
+    sessionId: s-v62-full
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{"schemaVersion":11,"sessionId":"s-v62-full","harness":"opencode","model":"m","version":"1","timestamp":{},"source":{},"git":{},"project":{},"hostSlug":"h","stats":{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30},"subagents":[],"diagnostics":{},"contentHash":"c","metadataHash":"m","redaction":{}}'
+        installedAtMs: 1699999999000
+        activatedAtMs: 1700000000000
+      - id: gen-old
+        metadataJson: '{}'
+        installedAtMs: 1699999990000
+        activatedAtMs: null
+    expected:
+      turnCount: 12
+      inputSubmissionCount: 3
+      toolCallCount: 7
+      subagentCount: 2
+      durationMs: 90000
+      tokensIn: 100
+      tokensOut: 200
+      thoughtTokens: 10
+      cachedReadTokens: 20
+      cachedWriteTokens: 30
+      seedJson: '{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30}'
+      source: harness
+      updatedAtMs: 1700000000000
+    expectedFlag: 1
+  - name: partial-stats-keep-null
+    sessionId: s-v62-partial
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{"schemaVersion":11,"stats":{"turnCount":5,"toolCallCount":2,"subagentCount":0,"durationMs":100,"tokensIn":10,"tokensOut":20}}'
+        installedAtMs: 1699999999000
+        activatedAtMs: null
+    expected:
+      turnCount: 5
+      inputSubmissionCount: null
+      toolCallCount: 2
+      subagentCount: 0
+      durationMs: 100
+      tokensIn: 10
+      tokensOut: 20
+      thoughtTokens: null
+      cachedReadTokens: null
+      cachedWriteTokens: null
+      seedJson: '{"turnCount":5,"toolCallCount":2,"subagentCount":0,"durationMs":100,"tokensIn":10,"tokensOut":20}'
+      source: harness
+      updatedAtMs: 1699999999000
+    expectedFlag: 0
+  - name: active-empty-stats-row-nulls
+    sessionId: s-v62-empty
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{}'
+        installedAtMs: 1699999998000
+        activatedAtMs: null
+    expected:
+      turnCount: null
+      inputSubmissionCount: null
+      toolCallCount: null
+      subagentCount: null
+      durationMs: null
+      tokensIn: null
+      tokensOut: null
+      thoughtTokens: null
+      cachedReadTokens: null
+      cachedWriteTokens: null
+      seedJson: null
+      source: harness
+      updatedAtMs: 1699999998000
+    expectedFlag: 0
+  - name: null-active-writes-no-stats-row
+    sessionId: s-v62-nullactive
+    activeGeneration: null
+    generations:
+      - id: gen-orphan
+        metadataJson: '{}'
+        installedAtMs: 1699999997000
+        activatedAtMs: 1699999997000
+    expected: null
+    expectedFlag: 1
+  - name: no-generations-no-row-no-flag
+    sessionId: s-v62-bare
+    activeGeneration: null
+    generations: []
+    expected: null
+    expectedFlag: 0
+  - name: active-only-unflagged
+    sessionId: s-v62-clean
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{}'
+        installedAtMs: 1699999996000
+        activatedAtMs: 1699999996000
+    expected:
+      turnCount: null
+      inputSubmissionCount: null
+      toolCallCount: null
+      subagentCount: null
+      durationMs: null
+      tokensIn: null
+      tokensOut: null
+      thoughtTokens: null
+      cachedReadTokens: null
+      cachedWriteTokens: null
+      seedJson: null
+      source: harness
+      updatedAtMs: 1699999996000
+    expectedFlag: 0
+# Rows the annotation-target rebuild must carry over verbatim. Seeded with
+# foreign keys off (their annotation parents are not seeded); the test
+# deletes them before the foreign_key_check gate.
+annotationRows:
+  - name: annotation-target-first
+    annotationId: ann-v62-aaa
+    sessionId: s-v62-full
+    entryIndex: 3
+    endIndex: 4
+  - name: annotation-target-second
+    annotationId: ann-v62-bbb
+    sessionId: s-v62-partial
+    entryIndex: 0
+    endIndex: 9
+# Relationship evidence rows: a full anchor, a NULL anchor, and an anchor
+# carrying only its kind. expectedAnchor* is null when the key is absent.
+evidenceRows:
+  - name: evidence-full-anchor
+    sessionId: s-v62-full
+    generationId: gen-active
+    kind: started_by
+    targetState: target_known
+    targetLocalId: parent-1
+    evidence: explicit
+    anchor: '{"kind":"parent","sourceEntryRef":"e_u1","sourceRevisionRef":"r2"}'
+    expectedAnchorKind: parent
+    expectedAnchorEntryRef: e_u1
+    expectedAnchorRevisionRef: r2
+  - name: evidence-null-anchor
+    sessionId: s-v62-partial
+    generationId: gen-active
+    kind: started_by
+    targetState: unknown
+    targetLocalId: null
+    evidence: inferred
+    anchor: null
+    expectedAnchorKind: null
+    expectedAnchorEntryRef: null
+    expectedAnchorRevisionRef: null
+  - name: evidence-kind-only-anchor
+    sessionId: s-v62-empty
+    generationId: gen-active
+    kind: continued_from
+    targetState: explicit_none
+    targetLocalId: null
+    evidence: explicit
+    anchor: '{"kind":"root"}'
+    expectedAnchorKind: root
+    expectedAnchorEntryRef: null
+    expectedAnchorRevisionRef: null
+# Context segments with their captured refs; expectedRefs lists the child
+# rows (ordinal, ref) the shred must produce.
+segmentCases:
+  - name: segment-two-refs
+    sessionId: s-v62-full
+    generationId: gen-active
+    segmentOrdinal: 0
+    logicalSessionId: null
+    physicalSourceId: phys-1
+    coordinateKind: entries
+    startCoordinate: 0
+    endExclusive: 4
+    decodedByteStart: 0
+    decodedByteEndExclusive: 128
+    inclusion: retained
+    capturedRefsJson: '["e_u1","e_call9"]'
+    expectedRefs:
+      - {ordinal: 0, ref: e_u1}
+      - {ordinal: 1, ref: e_call9}
+  - name: segment-no-refs
+    sessionId: s-v62-partial
+    generationId: gen-active
+    segmentOrdinal: 1
+    logicalSessionId: log-7
+    physicalSourceId: phys-1
+    coordinateKind: entries
+    startCoordinate: null
+    endExclusive: null
+    decodedByteStart: null
+    decodedByteEndExclusive: null
+    inclusion: inherited
+    capturedRefsJson: '[]'
+    expectedRefs: []
+# Projection sections with native metadata. The full record carries an
+# attachment, a custom type, and an object payload with escapable bytes;
+# the minimal record omits the optional keys and carries a null payload.
+# expectedData holds the exact stored payload bytes the -> operator keeps.
+sectionCases:
+  - name: section-mixed-metadata
+    sessionId: s-v62-full
+    generationId: gen-active
+    partitionId: 0
+    earlierState: null
+    nativeMetadata: '[{"id":"n1","kind":"pi.custom.data","source":{"entryRef":"e_u1","sourceType":"pi.custom","messageRole":"user"},"attachment":{"turnIndex":3,"toolCallId":"call-1"},"customType":"t","data":{"h":"a\u003cb\u003e\u0026\"q\"","note":"café \u003c3"}},{"id":"n2","kind":"pi.custom.data","source":{"entryRef":"e_u2","sourceType":"pi.custom"},"data":null}]'
+    expectedRecords:
+      - ordinal: 0
+        nativeId: n1
+        kind: pi.custom.data
+        sourceEntryRef: e_u1
+        sourceType: pi.custom
+        sourceMessageRole: user
+        attachmentTurnIndex: 3
+        attachmentToolCallId: call-1
+        customType: t
+        data: '{"h":"a\u003cb\u003e\u0026\"q\"","note":"café \u003c3"}'
+      - ordinal: 1
+        nativeId: n2
+        kind: pi.custom.data
+        sourceEntryRef: e_u2
+        sourceType: pi.custom
+        sourceMessageRole: null
+        attachmentTurnIndex: null
+        attachmentToolCallId: null
+        customType: null
+        data: 'null'
+  - name: section-null-metadata
+    sessionId: s-v62-partial
+    generationId: gen-active
+    partitionId: 0
+    earlierState: retained
+    nativeMetadata: null
+    expectedRecords: []
