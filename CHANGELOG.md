@@ -7,6 +7,43 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-07
+
+### Added
+- Native Windows support on amd64. Each release now publishes
+  `peasant_<version>_windows_amd64.zip` (the executable with its LICENSE, README
+  and third-party notices) and the bare `peasant_<version>_windows_amd64.exe`,
+  both listed in `checksums.txt`. Peasant discovers Claude Code desktop sessions
+  below `%USERPROFILE%\.claude\projects` and decodes their drive-letter project
+  names, serves the dashboard without opening a console window for each
+  subprocess it runs, and `peasant upgrade` replaces its own running executable
+  by moving it aside rather than writing over it. A `windows-latest` CI job and a
+  post-publish `windows-smoke` release job cover the platform. Installation is
+  documented in `docs/install/windows.md`; Windows arm64 is not published (#480).
+- `peasant reclaim` removes the managed generations a session no longer reads:
+  their rows in one transaction, then their blob directories through the
+  ownership-verified cleanup path. The active generation and any session with a
+  pending activation are left alone, and an interrupted run is safe to repeat
+  (#559).
+- A cross-platform support guide recording how Linux, macOS and Windows are
+  maintained from one module: the build-tag file split, the path-handling rules,
+  the Windows-specific behaviour, and a checklist for adding platform-specific
+  code (#563).
+
+### Changed
+- Durable full-content writes prepare their manifest and chunk inserts once per
+  transaction instead of once per row. One full-content write of a fresh
+  2,000-entry session dropped from 93.7 ms to 71.0 ms, and its allocations from
+  75,482 to 37,998 (#556).
+- The managed-generation install prepares each per-row insert once per install
+  instead of once per row, removing repeated statement parsing from the largest
+  tables in the database (#558).
+
+### Fixed
+- Publication repair no longer selects captures that were never recovered, and
+  pair-damaged sessions are handled by the pair-repair pass alone, so the two
+  repair paths no longer churn the same sessions (#557).
+
 ## [0.8.2] - 2026-10-04
 
 ### Changed
@@ -628,6 +665,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.9.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.9.0
 [0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
 [0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1
 [0.8.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.0
