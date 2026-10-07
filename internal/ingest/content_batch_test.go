@@ -456,7 +456,12 @@ type streamingBudgetFixtures struct {
 		PendingCount    int     `yaml:"pending_count"`
 		PendingFraction float64 `yaml:"pending_budget_fraction"`
 		NextFraction    float64 `yaml:"next_budget_fraction"`
-		WantFlush       bool    `yaml:"want_flush"`
+		// BatchSessions overrides the configured session cap for this case
+		// only; nil means the shipped default. ByteCapFraction scales the
+		// shipped byte budget into this case's cap; nil means unscaled.
+		BatchSessions   *int     `yaml:"batch_sessions"`
+		ByteCapFraction *float64 `yaml:"byte_cap_fraction"`
+		WantFlush       bool     `yaml:"want_flush"`
 	} `yaml:"predicate_cases"`
 	DrainRequired []string `yaml:"drain_required_names"`
 	DrainCases    []struct {
@@ -520,10 +525,22 @@ func TestIndexWriteBudgetPredicate(t *testing.T) {
 		present[fixture.Name] = true
 	}
 	requireFixtureNames(t, "index write budget predicate", fixtures.PredicateRequired, present)
+	// The predicate answers from the configured caps: the shipped defaults
+	// here, so the count cap (64) and the byte cap (32 MiB) in these cases
+	// are the configured values, not literals.
+	budget := DefaultWriteConfig(8)
 	for _, fixture := range fixtures.PredicateCases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
-			got := exceedsIndexWriteBudget(
+			cfg := budget
+			if fixture.BatchSessions != nil {
+				cfg.BatchSessions = *fixture.BatchSessions
+			}
+			if fixture.ByteCapFraction != nil {
+				cfg.BatchBytes = int64(float64(budget.BatchBytes) * *fixture.ByteCapFraction)
+			}
+			got := exceedsWriteBudget(
+				cfg,
 				fixture.PendingCount,
 				budgetFractionBytes(fixture.PendingFraction),
 				budgetFractionBytes(fixture.NextFraction),
@@ -556,6 +573,10 @@ func TestStreamingIndexDrainGroupsByBytes(t *testing.T) {
 		present[fixture.Name] = true
 	}
 	requireFixtureNames(t, "streaming index drain", fixtures.DrainRequired, present)
+	// The drain groups by the same configured caps the predicate answers
+	// from, so a call site that stopped asking is visible as well as a
+	// predicate that stopped answering.
+	budget := DefaultWriteConfig(8)
 	for _, fixture := range fixtures.DrainCases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
@@ -570,7 +591,7 @@ func TestStreamingIndexDrainGroupsByBytes(t *testing.T) {
 			}
 			close(parsedCh)
 			var groups [][]int
-			drainIndexParseResults(parsedCh, make([]indexParseResult, 0, indexWriteBatchLimit), func(results []indexParseResult) {
+			drainIndexParseResults(parsedCh, make([]indexParseResult, 0, budget.BatchSessions), budget, func(results []indexParseResult) {
 				group := make([]int, 0, len(results))
 				for _, result := range results {
 					entries := result.output.(indexformat.V1).Entries

@@ -39,7 +39,11 @@ const (
 )
 
 const (
-	indexWriteBatchLimit        = 64
+	// downstreamIndexBatchLimit bounds the compute/annotate grouping in the
+	// streamed downstream loop. It is not a write budget: the design's knob
+	// table governs the staging and activation batches through WriteConfig,
+	// and this grouping keeps its long-standing value unchanged.
+	downstreamIndexBatchLimit   = 64
 	annotationFlushSessionLimit = 256
 	annotationFlushWriteLimit   = 4096
 	annotationFlushInterval     = 500 * time.Millisecond
@@ -1628,7 +1632,10 @@ func (p *Pipeline) indexLoop(
 	profileEnabled := p.config.IndexProfiler != nil && p.indexers != nil && p.metricsStore != nil
 	profileSessions := []IndexProfileSession(nil)
 	profileBatch := IndexProfileBatch{Source: logPrefix, QueueCapacity: cap(indexCh)}
-	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
+	// The reusable batch buffer is pre-sized to the configured session cap:
+	// the drain never holds more than one bounded batch.
+	writeCfg := p.writeConfig()
+	pending := make([]indexParseResult, 0, writeCfg.BatchSessions)
 	flushPending := func(results []indexParseResult) {
 		for _, result := range results {
 			if result.refusedKind != nil {
@@ -1666,7 +1673,7 @@ func (p *Pipeline) indexLoop(
 			profileBatch.WriteStats.Add(flush.writeStats)
 		}
 	}
-	drainIndexParseResults(parsedCh, pending, flushPending)
+	drainIndexParseResults(parsedCh, pending, writeCfg, flushPending)
 	if profileEnabled && profileBatch.WorkItems > 0 {
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 		p.config.IndexProfiler.Record(profileBatch, profileSessions)
@@ -1780,24 +1787,25 @@ func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, o
 	return entry
 }
 
-// exceedsIndexWriteBudget reports whether the pending write batch must be
-// flushed BEFORE the next parsed result joins it.
+// exceedsWriteBudget reports whether the pending write batch must be flushed
+// BEFORE the next parsed result joins it. It is the one splitter: the single
+// home of the count and byte terms.
 //
 // Two sites group parsed results into SQLite writes: the streaming drain that
 // every session takes on an ordinary harvest and on a reindex, and indexBatch,
 // which groups the stale-session waves. Both bound the same thing for the same
 // reason, so they ask the same question here rather than each spelling it out:
-// a batch stops at indexWriteBatchLimit sessions, and a non-empty batch stops
-// before its full strings would exceed defaults.FullContentWriteBatchBytes.
+// a batch stops at the configured session cap, and a non-empty batch stops
+// before its full strings would exceed the configured byte cap.
 //
 // A single result larger than the whole budget is still written, alone: the
 // batch it would join is flushed first, and the empty-batch term then admits
 // it. Refusing it instead would lose the session.
-func exceedsIndexWriteBudget(pendingCount int, pendingBytes, nextBytes int64) bool {
-	if pendingCount >= indexWriteBatchLimit {
+func exceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextBytes int64) bool {
+	if pendingCount >= cfg.BatchSessions {
 		return true
 	}
-	return pendingCount > 0 && pendingBytes+nextBytes > defaults.FullContentWriteBatchBytes
+	return pendingCount > 0 && pendingBytes+nextBytes > cfg.BatchBytes
 }
 
 // drainIndexParseResults groups everything the parsers produce into write
@@ -1805,12 +1813,12 @@ func exceedsIndexWriteBudget(pendingCount int, pendingBytes, nextBytes int64) bo
 //
 // It takes results one at a time and then absorbs whatever else has already
 // arrived, so a burst of small sessions becomes one write rather than many.
-// The batch it accumulates is bounded by exceedsIndexWriteBudget, which is the
+// The batch it accumulates is bounded by exceedsWriteBudget, which is the
 // memory bound on the primary harvest path: without it a long run of large
 // transcripts is held in full, in memory, until the parsers stop.
 //
 // pending is the caller's reusable buffer; it is cleared before return.
-func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexParseResult, flush func([]indexParseResult)) {
+func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexParseResult, cfg WriteConfig, flush func([]indexParseResult)) {
 	for {
 		result, ok := <-parsedCh
 		if !ok {
@@ -1819,7 +1827,7 @@ func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexPar
 		pending = append(pending, result)
 		pendingBytes := indexResultWriteBytes(result.output)
 		parsedClosed := false
-		// No bound is restated here: exceedsIndexWriteBudget owns the split and
+		// No bound is restated here: exceedsWriteBudget owns the split and
 		// applies it below, before each result joins the batch, so the batch
 		// never grows past the limit or the budget however long this absorbs.
 		// A second copy of those terms would be one more place to miss.
@@ -1832,7 +1840,7 @@ func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexPar
 					break drainParsed
 				}
 				nextBytes := indexResultWriteBytes(next.output)
-				if exceedsIndexWriteBudget(len(pending), pendingBytes, nextBytes) {
+				if exceedsWriteBudget(cfg, len(pending), pendingBytes, nextBytes) {
 					flush(pending)
 					clear(pending)
 					pending = pending[:0]
@@ -1884,11 +1892,13 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 
 	workers := max(1, parallelWorkers(p.config))
 	// Retain at most one bounded parser wave, not every full session in a
-	// reindex invocation. The writer further splits each wave by full bytes.
-	waveSize := min(workers, indexWriteBatchLimit)
+	// reindex invocation. The wave is capped by the configured session cap,
+	// and the writer further splits each wave by full bytes.
+	writeCfg := p.writeConfig()
+	waveSize := min(workers, writeCfg.BatchSessions)
 	profileSessions := make([]IndexProfileSession, 0, len(metas))
 	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(metas), WorkItems: len(metas)}
-	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
+	pending := make([]indexParseResult, 0, writeCfg.BatchSessions)
 	var pendingBytes int64
 	flushPending := func() {
 		if len(pending) == 0 {
@@ -1927,7 +1937,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		}
 		for _, result := range parsed {
 			size := indexResultWriteBytes(result.output)
-			if exceedsIndexWriteBudget(len(pending), pendingBytes, size) {
+			if exceedsWriteBudget(writeCfg, len(pending), pendingBytes, size) {
 				flushPending()
 			}
 			pending = append(pending, result)
@@ -4114,7 +4124,9 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 		return true
 	}
 
-	pending := make([]indexedMeta, 0, indexWriteBatchLimit)
+	// The compute/annotate grouping below is not a write budget (see the const
+	// declaration), so it keeps its own bound rather than the write caps.
+	pending := make([]indexedMeta, 0, downstreamIndexBatchLimit)
 
 receiveLoop:
 	for {
@@ -4133,7 +4145,7 @@ receiveLoop:
 		}
 		pending = append(pending, im)
 	drainReady:
-		for len(pending) < indexWriteBatchLimit {
+		for len(pending) < downstreamIndexBatchLimit {
 			select {
 			case next, ok := <-indexedCh:
 				if !ok {

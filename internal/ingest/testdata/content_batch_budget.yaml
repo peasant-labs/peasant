@@ -49,6 +49,9 @@ predicate_required_names:
   - full-batch-flushes-before-counting-bytes
   - crossing-the-budget-flushes
   - staying-under-the-budget-does-not
+  - count-cap-two-flushes-early
+  - small-byte-cap-flushes
+  - large-byte-cap-holds
 predicate_cases:
   # An oversized result must still be written, so an empty batch never flushes.
   - name: empty-batch-admits-any-single-result
@@ -71,6 +74,29 @@ predicate_cases:
     pending_count: 1
     pending_budget_fraction: 0.2
     next_budget_fraction: 0.2
+    want_flush: false
+  # The caps are configured, not compiled in: a count cap of 2 flushes where
+  # the shipped 64 would hold, a byte cap of half the shipped budget flushes
+  # where the shipped budget would hold, and a doubled byte cap holds where
+  # the shipped budget would flush. Fractions below stay relative to the
+  # shipped budget; only the cap under test moves.
+  - name: count-cap-two-flushes-early
+    pending_count: 2
+    pending_budget_fraction: 0.0
+    next_budget_fraction: 0.000001
+    batch_sessions: 2
+    want_flush: true
+  - name: small-byte-cap-flushes
+    pending_count: 1
+    pending_budget_fraction: 0.3
+    next_budget_fraction: 0.3
+    byte_cap_fraction: 0.5
+    want_flush: true
+  - name: large-byte-cap-holds
+    pending_count: 1
+    pending_budget_fraction: 0.6
+    next_budget_fraction: 0.6
+    byte_cap_fraction: 2.0
     want_flush: false
 # The drain cases mirror the indexBatch cases above, so the two boundaries are
 # shown to group the same corpus the same way.
