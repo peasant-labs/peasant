@@ -1,8 +1,14 @@
 # Installing Peasant on WSL (Windows Subsystem for Linux)
 
-Peasant runs under **WSL2** with no Windows-specific build: WSL2 is a real Linux
-kernel, so the static Linux binaries run unmodified. Install exactly as you would on
-native Linux, then read the WSL-specific caveats below.
+Peasant runs under **WSL2** using its Linux binaries: WSL2 is a real Linux kernel, so
+they run unmodified. Install exactly as you would on native Linux, then read the
+WSL-specific caveats below.
+
+> **Not using WSL?** A native `peasant.exe` is published for Windows amd64 — see
+> [windows.md](windows.md). Prefer the native build when your agent sessions and
+> repositories live on the Windows filesystem; prefer WSL when they live inside the
+> WSL filesystem, for the reasons in
+> [Keep agent data inside the WSL filesystem](#3-keep-agent-data-inside-the-wsl-filesystem).
 
 ## Install
 

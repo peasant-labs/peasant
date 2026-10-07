@@ -129,7 +129,7 @@ func TestAnnotatePrune_AssociationScopeDryRunAndDelete(t *testing.T) {
 	}
 	defer db.Close()
 	now := time.Now().UnixMilli()
-	entry := ingest.StoreEntry{Metadata: &ingest.UnifiedMetadata{SchemaVersion: 1, SessionID: fixture.RetainedSessionID, ModelHarness: defaults.HarnessClaudeCode, Model: ingest.ModelID("claude-opus-4-6"), HostSlug: ingest.HostSlug("github.com--test--repo"), Timestamp: ingest.TimestampInfo{Start: now, End: now, Ingested: &now}, Project: ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "test-project", FilePath: "/test/path"}, Source: ingest.SourceInfo{Format: ingest.SourceFormatJSONL}}}
+	entry := ingest.StoreEntry{Metadata: &ingest.UnifiedMetadata{SchemaVersion: 1, SessionID: fixture.RetainedSessionID, ModelHarness: defaults.HarnessClaudeCode, Model: ingest.ModelID("claude-opus-4-6"), HostSlug: ingest.HostSlug("github.com--test--repo"), Timestamp: ingest.TimestampInfo{Start: now, End: now, Ingested: &now}, Project: ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "test-project", FilePath: testutil.PlatformAbsPath("/test/path")}, Source: ingest.SourceInfo{Format: ingest.SourceFormatJSONL}}}
 	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatal(err)
 	}

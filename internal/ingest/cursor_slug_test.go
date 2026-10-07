@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -16,69 +17,69 @@ func TestDecodeCursorSlug(t *testing.T) {
 			name:    "basic decode all segments exist",
 			encoded: "-Users-foo-Desktop-myrepo",
 			dirs: map[string]bool{
-				"/Users":                    true,
-				"/Users/foo":                true,
-				"/Users/foo/Desktop":        true,
-				"/Users/foo/Desktop/myrepo": true,
+				slugTestPath("Users"):                             true,
+				slugTestPath("Users", "foo"):                      true,
+				slugTestPath("Users", "foo", "Desktop"):           true,
+				slugTestPath("Users", "foo", "Desktop", "myrepo"): true,
 			},
-			wantMatched:   "/Users/foo/Desktop/myrepo",
+			wantMatched:   slugTestPath("Users", "foo", "Desktop", "myrepo"),
 			wantUnmatched: "",
 		},
 		{
 			name:    "underscore variant: dir has underscores",
 			encoded: "-Users-foo-my-project",
 			dirs: map[string]bool{
-				"/Users":                true,
-				"/Users/foo":            true,
-				"/Users/foo/my_project": true,
+				slugTestPath("Users"):                      true,
+				slugTestPath("Users", "foo"):               true,
+				slugTestPath("Users", "foo", "my_project"): true,
 			},
-			wantMatched:   "/Users/foo/my_project",
+			wantMatched:   slugTestPath("Users", "foo", "my_project"),
 			wantUnmatched: "",
 		},
 		{
 			name:    "space variant: dir has spaces",
 			encoded: "-Users-foo-My-Project",
 			dirs: map[string]bool{
-				"/Users":                true,
-				"/Users/foo":            true,
-				"/Users/foo/My Project": true,
+				slugTestPath("Users"):                      true,
+				slugTestPath("Users", "foo"):               true,
+				slugTestPath("Users", "foo", "My Project"): true,
 			},
-			wantMatched:   "/Users/foo/My Project",
+			wantMatched:   slugTestPath("Users", "foo", "My Project"),
 			wantUnmatched: "",
 		},
 		{
 			name:    "literal dash wins over underscore variant",
 			encoded: "-Users-foo-my-project",
 			dirs: map[string]bool{
-				"/Users":                true,
-				"/Users/foo":            true,
-				"/Users/foo/my-project": true,
-				"/Users/foo/my_project": true,
+				slugTestPath("Users"):                      true,
+				slugTestPath("Users", "foo"):               true,
+				slugTestPath("Users", "foo", "my-project"): true,
+				slugTestPath("Users", "foo", "my_project"): true,
 			},
-			wantMatched:   "/Users/foo/my-project",
+			wantMatched:   slugTestPath("Users", "foo", "my-project"),
 			wantUnmatched: "",
 		},
 		{
 			name:    "partial match: trailing segments become unmatched",
 			encoded: "-Users-foo-Desktop-peasant",
 			dirs: map[string]bool{
-				"/Users":             true,
-				"/Users/foo":         true,
-				"/Users/foo/Desktop": true,
+				slugTestPath("Users"):                   true,
+				slugTestPath("Users", "foo"):            true,
+				slugTestPath("Users", "foo", "Desktop"): true,
 				// "peasant" dir does not exist
 			},
-			wantMatched:   "/Users/foo/Desktop",
+			wantMatched:   slugTestPath("Users", "foo", "Desktop"),
 			wantUnmatched: "peasant",
 		},
 		{
 			name:    "multiple unmatched trailing segments",
 			encoded: "-Users-foo-myrepo-feature-branch",
 			dirs: map[string]bool{
-				"/Users":            true,
-				"/Users/foo":        true,
-				"/Users/foo/myrepo": true,
+				slugTestPath("Users"):                  true,
+				slugTestPath("Users", "foo"):           true,
+				slugTestPath("Users", "foo", "myrepo"): true,
 			},
-			wantMatched:   "/Users/foo/myrepo",
+			wantMatched:   slugTestPath("Users", "foo", "myrepo"),
 			wantUnmatched: "feature-branch",
 		},
 		{
@@ -101,6 +102,17 @@ func TestDecodeCursorSlug(t *testing.T) {
 			dirs:          map[string]bool{},
 			wantMatched:   "",
 			wantUnmatched: "Users-foo",
+		},
+		{
+			name:    "windows drive-letter workspace decodes from the drive root",
+			encoded: "C--Users-alice-project",
+			dirs: map[string]bool{
+				windowsSlugTestPath("C", "Users"):                     true,
+				windowsSlugTestPath("C", "Users", "alice"):            true,
+				windowsSlugTestPath("C", "Users", "alice", "project"): true,
+			},
+			wantMatched:   windowsSlugTestPath("C", "Users", "alice", "project"),
+			wantUnmatched: "",
 		},
 	}
 
@@ -157,47 +169,47 @@ func TestDecodeCursorWorkspace(t *testing.T) {
 	}{
 		{
 			name:      "full match: project name from filepath.Base",
-			root:      "/root",
+			root:      slugTestPath("root"),
 			workspace: "Users-foo-Desktop-myrepo",
 			dirs: map[string]bool{
-				"/Users":                    true,
-				"/Users/foo":                true,
-				"/Users/foo/Desktop":        true,
-				"/Users/foo/Desktop/myrepo": true,
+				slugTestPath("Users"):                             true,
+				slugTestPath("Users", "foo"):                      true,
+				slugTestPath("Users", "foo", "Desktop"):           true,
+				slugTestPath("Users", "foo", "Desktop", "myrepo"): true,
 			},
-			wantProjectDir:  "/Users/foo/Desktop/myrepo",
+			wantProjectDir:  slugTestPath("Users", "foo", "Desktop", "myrepo"),
 			wantProjectName: "myrepo",
 		},
 		{
 			name:      "partial match: unmatched suffix is project name",
-			root:      "/root",
+			root:      slugTestPath("root"),
 			workspace: "Users-foo-Desktop-peasant",
 			dirs: map[string]bool{
-				"/Users":             true,
-				"/Users/foo":         true,
-				"/Users/foo/Desktop": true,
+				slugTestPath("Users"):                   true,
+				slugTestPath("Users", "foo"):            true,
+				slugTestPath("Users", "foo", "Desktop"): true,
 			},
-			wantProjectDir:  "/Users/foo/Desktop",
+			wantProjectDir:  slugTestPath("Users", "foo", "Desktop"),
 			wantProjectName: "peasant",
 		},
 		{
 			name:            "no match: fallback to joined root path",
-			root:            "/root",
+			root:            slugTestPath("root"),
 			workspace:       "unknown-workspace",
 			dirs:            map[string]bool{},
-			wantProjectDir:  "/root/unknown-workspace",
+			wantProjectDir:  filepath.Join(slugTestPath("root"), "unknown-workspace"),
 			wantProjectName: "unknown-workspace",
 		},
 		{
 			name:      "underscore dir: name from filepath.Base",
-			root:      "/root",
+			root:      slugTestPath("root"),
 			workspace: "Users-foo-my-project",
 			dirs: map[string]bool{
-				"/Users":                true,
-				"/Users/foo":            true,
-				"/Users/foo/my_project": true,
+				slugTestPath("Users"):                      true,
+				slugTestPath("Users", "foo"):               true,
+				slugTestPath("Users", "foo", "my_project"): true,
 			},
-			wantProjectDir:  "/Users/foo/my_project",
+			wantProjectDir:  slugTestPath("Users", "foo", "my_project"),
 			wantProjectName: "my_project",
 		},
 	}

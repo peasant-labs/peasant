@@ -37,7 +37,7 @@ release.yml     ──▶ guard → nix vendorHash freshness gate → full-stack
    │                                                     ├──▶ release e2e (installed packages)
    │                                                     ▼
    │                                                  goreleaser → smoke
-   │                 builds 4 static targets, archives, checksums,
+   │                 builds 5 static targets, archives, checksums,
    │                 .deb/.rpm, and (after separate publisher enablement) AUR + cask
    ▼
 GitHub Release (prerelease for -rcN; full release for final)
@@ -244,13 +244,21 @@ success, so this incident record is not an executable redispatch procedure.
    - **release e2e** job: calls `.github/workflows/release-e2e.yml` and must produce
      a positive `--- PASS: TestReleasePerDistro` line. This proves installed package
      artifacts across the per-distro release paths before publication.
-   - **goreleaser** job (Blacksmith amd64, `CGO_ENABLED=0`): builds the 4 static
+   - **goreleaser** job (Blacksmith amd64, `CGO_ENABLED=0`): builds the 5 static
      targets, archives, `checksums.txt`, `.deb`/`.rpm`. Marks the GitHub Release as a
      **prerelease**. With `skip_upload: true`/`auto`, the AUR and tap are **untouched**.
    - **smoke** job (native amd64 + arm64): asserts the binary is static (`ldd`) and
      `peasant version` output contains the tag (substring check `grep -qF "${TAG#v}"`).
-5. Verify the prerelease on the Releases page: 4 archives + 2 `.deb` + 2 `.rpm` +
-   `checksums.txt`, and **nothing** pushed to AUR/tap.
+   - **windows-smoke** job (`windows-latest`, amd64): downloads both published Windows
+     assets, verifies each against `checksums.txt`, unpacks the zip and asserts it
+     carries `peasant.exe`, `LICENSE`, `README.md` and `THIRD_PARTY_NOTICES`, asserts
+     both binaries report the tag, then starts the dashboard, probes it over HTTP and
+     stops it. There is no `ldd` on Windows, so a runner carrying no Go toolchain and no
+     MinGW runtime stands in for the static-linkage check; that is weaker, which is why
+     this job starts the server rather than only reading `version`.
+5. Verify the prerelease on the Releases page: 4 `.tar.gz` + 1 Windows `.zip` +
+   1 bare Windows `.exe` + 2 `.deb` + 2 `.rpm` + `checksums.txt` (11 files,
+   `checksums.txt` included), and **nothing** pushed to AUR/tap.
 
 ---
 
@@ -270,8 +278,9 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
    publishes a **full** (non-prerelease) Release and pushes the Homebrew cask to the
    tap (`skip_upload: "auto"`). AUR remains untouched while its `skip_upload: "true"`
    safety setting stays in force. The smoke job re-checks static linkage +
-   `peasant version`, and the **macos-cask-smoke** job installs the just-published
-   cask and asserts its version.
+   `peasant version`, the **windows-smoke** job re-checks both Windows assets and the
+   dashboard, and the **macos-cask-smoke** job installs the just-published cask and
+   asserts its version.
 4. Verify the full Release and complete artifact set, including the cask pushed to the
    tap (the macOS cask-smoke job also asserts `brew install --cask peasant`). Verify
    AUR and nixpkgs only after their separate publication checklist items are approved
@@ -446,6 +455,12 @@ Consumed by AUR `source_*`, the cask `url`, the install docs, and any future
 curl-install script. **Do not change without updating every consumer.**
 
 - Archives: `peasant_{version}_{linux|darwin}_{amd64|arm64}.tar.gz`
+- Windows archive: `peasant_{version}_windows_amd64.zip` (amd64 only; same payload
+  as the tar.gz archives, license notices included)
+- Windows executable: `peasant_{version}_windows_amd64.exe` — the bare binary, for
+  a direct download and for `peasant upgrade`, which replaces the running binary
+  and so wants an executable rather than an archive. Carries no accompanying
+  files, which is why the `.zip` stays the documented install path.
 - Checksums: `checksums.txt` (SHA-256 of every artifact)
 - Debian: `peasant_{version}_linux_{amd64|arm64}.deb` (rc → `{x.y.z}~rcN`)
 - RPM: `peasant_{version}_linux_{amd64|arm64}.rpm` (nfpm uses goreleaser's

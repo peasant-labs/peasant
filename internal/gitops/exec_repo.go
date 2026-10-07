@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/proc"
 )
 
 const (
@@ -79,7 +81,9 @@ func (r *ExecGitRepository) runGit(ctx context.Context, args ...string) ([]byte,
 	ctx, cancel := context.WithTimeout(ctx, r.timeout())
 	defer cancel()
 	full := append([]string{"-C", r.repoPath}, args...)
-	out, err := exec.CommandContext(ctx, "git", full...).Output()
+	cmd := exec.CommandContext(ctx, "git", full...)
+	proc.HideConsoleWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git %s in %s: %w", strings.Join(args, " "), r.repoPath, err)
 	}
@@ -533,6 +537,7 @@ func (r *ExecGitRepository) FilesAtCommit(ctx context.Context, commit string, pa
 	}
 
 	cmd := exec.CommandContext(ctx, "git", "-C", r.repoPath, "cat-file", "--batch")
+	proc.HideConsoleWindow(cmd)
 	cmd.Stdin = strings.NewReader(input.String())
 	out, err := cmd.Output()
 	if err != nil {

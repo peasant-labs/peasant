@@ -38,6 +38,7 @@ const (
 	channelArchTarball  installGuideChannel = "arch-tarball"
 	channelNixProfile   installGuideChannel = "nix-profile"
 	channelWSLDistro    installGuideChannel = "wsl-distro"
+	channelWindowsZip   installGuideChannel = "windows-zip"
 )
 
 type installGuidanceFixture struct {
@@ -74,6 +75,7 @@ var validInstallChannels = map[installGuideChannel]struct{}{
 	channelArchTarball:  {},
 	channelNixProfile:   {},
 	channelWSLDistro:    {},
+	channelWindowsZip:   {},
 }
 
 const (

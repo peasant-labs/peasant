@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/mod/module"
@@ -275,8 +274,7 @@ func installOne(work, source, cache, originalCache, proxy string, c installCase)
 	command.Dir = work
 	// Kill the owned installer process group on timeout, including compiler
 	// children, before removing its temporary module cache and binary directory.
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	command.Cancel = func() error { return syscall.Kill(-command.Process.Pid, syscall.SIGKILL) }
+	ownProcessGroup(command)
 	command.WaitDelay = 5 * time.Second
 	oldProxy := os.Getenv("GOPROXY")
 	if oldProxy == "" {

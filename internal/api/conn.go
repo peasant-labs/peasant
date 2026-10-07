@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/coder/websocket"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -159,7 +158,7 @@ func isClientDisconnect(err error) bool {
 		}
 	}
 	// TCP-level reset: browser tore down connection before close handshake.
-	if errors.Is(err, syscall.ECONNRESET) {
+	if isConnReset(err) {
 		return true
 	}
 	// Catch wrapped "connection reset by peer" that doesn't unwrap to ECONNRESET.

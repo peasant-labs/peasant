@@ -1196,6 +1196,22 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 // claudeProjectsDirSegment is the path segment that identifies a directory as a
 // Claude project memory directory. Used to detect when the CWD fallback points
 // at a Claude internal directory rather than the actual project.
+//
+// The one supported Claude Code session root, on every platform, is the CLI's
+// own per-project memory tree: "~/.claude/projects" (unix / macOS) and, on
+// Windows, "%USERPROFILE%\.claude\projects" — os.UserHomeDir() resolves
+// USERPROFILE there, so the same "~/.claude/projects" default in
+// defaults.DefaultClaudePath expands correctly with no Windows-specific
+// default needed (see internal/defaults/config.go and
+// internal/ingest/types.go's NewResolvedPath). This constant is compared
+// against a slash-normalized cwd (see decodeClaudeProjectDir) so detection
+// works whether cwd arrived with "/" or "\" separators.
+//
+// Explicitly OUT OF SCOPE for this release: the Claude *desktop* app's
+// per-session sandbox roots under "%APPDATA%\Claude\local-agent-mode-sessions\...".
+// Those are a different product surface with their own ad-hoc layout; see the
+// public report anthropics/claude-code#84552. Nothing in this package scans
+// %APPDATA%, and no code should be added here to do so.
 const claudeProjectsDirSegment = "/.claude/projects/"
 
 // decodeClaudeProjectDir checks if cwd is under a Claude project memory directory
@@ -1209,17 +1225,32 @@ const claudeProjectsDirSegment = "/.claude/projects/"
 // method uses a greedy filesystem-based decoder: starting from root, it tries each
 // segment and checks if a directory exists. If not, it merges segments with dashes.
 //
+// cwd may use either "/" or "\" as its separator — on Windows the JSONL "cwd"
+// field and the session file's own directory both use native backslash paths
+// (e.g. "C:\Users\alice\.claude\projects\C--Users-alice-project"), so detection
+// normalizes a copy of cwd with filepath.ToSlash before matching against the
+// forward-slash claudeProjectsDirSegment constant and splitting out the encoded
+// segment. filepath.ToSlash is a no-op on unix (Separator is already "/"), so
+// unix behavior is byte-identical. The decoded path returned by DecodeClaudeSlug
+// is unaffected by this normalization: it is built by decodeProjectSlug via
+// filepath.Join/filepath.Clean, which already render in the build's native
+// separator regardless of the "/"-based root they start from — so callers that
+// hand this value to filesystem/git operations (ResolveGitRemote, a.git.Branch,
+// a.git.Worktree, a.git.WalkUpRemoteURL, filepath.Base) receive a native-form
+// path with no further conversion needed here.
+//
 // Returns the decoded path if it exists on the filesystem, or empty string if
 // decoding fails or the path does not exist.
 func (a *ClaudeAdapter) decodeClaudeProjectDir(cwd string) string {
-	idx := strings.Index(cwd, claudeProjectsDirSegment)
+	normalized := filepath.ToSlash(cwd)
+	idx := strings.Index(normalized, claudeProjectsDirSegment)
 	if idx < 0 {
 		return ""
 	}
 
 	// Extract the portion after "/.claude/projects/".
 	// cwd may be the project dir itself or a parent of the JSONL file.
-	after := cwd[idx+len(claudeProjectsDirSegment):]
+	after := normalized[idx+len(claudeProjectsDirSegment):]
 	if after == "" {
 		return ""
 	}

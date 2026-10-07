@@ -285,6 +285,146 @@ jobs:
             exit 1
           fi
 
+  # Post-publish Windows smoke. The native Windows build publishes TWO assets
+  # from one archive template: the zip (the documented install path) and the bare
+  # .exe (the direct download, and what `peasant upgrade` replaces in place).
+  # Both are exercised, because a release that publishes one but not the other
+  # silently breaks a documented install route.
+  #
+  # There is no `ldd` here to repeat the Linux job's static-linking assertion.
+  # What stands in for it is the runner: windows-latest carries no Go toolchain
+  # and no MinGW runtime, so a CGO_ENABLED=0 binary that starts and serves has no
+  # non-system DLL dependency. That is weaker than `ldd`, which is part of why
+  # this job also starts the dashboard rather than only reading `version`.
+  #
+  # Windows arm64 is deliberately unpublished (.goreleaser.yml ignores it), so
+  # there is no arch matrix.
+  windows-smoke:
+    name: windows smoke (amd64)
+    needs: release
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # A fresh directory per run keeps a same-version rerun and an older
+      # version's assets from making the download or the globs ambiguous.
+      - name: Stage a clean download directory
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $staging = Join-Path $env:RUNNER_TEMP ('release-smoke-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          "SMOKE_DIR=$staging" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PEASANT_VERSION=$($env:TAG -replace '^v', '')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Download the published Windows assets
+        working-directory: ${{ env.SMOKE_DIR }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:PEASANT_VERSION
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY `
+            --pattern "peasant_${version}_windows_amd64.zip" `
+            --pattern "peasant_${version}_windows_amd64.exe" `
+            --pattern "checksums.txt" `
+            --dir .
+          if ($LASTEXITCODE -ne 0) { throw "gh release download exited $LASTEXITCODE" }
+          Get-ChildItem | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+
+      # The install docs tell Windows users to verify against checksums.txt, so a
+      # published asset the file does not name is a broken documented install.
+      - name: Verify both assets against checksums.txt
+        working-directory: ${{ env.SMOKE_DIR }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $published = @{}
+          foreach ($line in Get-Content checksums.txt) {
+            $fields = ($line -split '\s+') | Where-Object { $_ -ne '' }
+            if ($fields.Count -ge 2) { $published[$fields[-1]] = $fields[0].ToLower() }
+          }
+          $assets = @(
+            "peasant_$($env:PEASANT_VERSION)_windows_amd64.zip",
+            "peasant_$($env:PEASANT_VERSION)_windows_amd64.exe"
+          )
+          foreach ($asset in $assets) {
+            if (-not $published.ContainsKey($asset)) {
+              throw "checksums.txt does not name $asset; the release published no checksum for a documented install asset"
+            }
+            $got = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLower()
+            if ($got -ne $published[$asset]) {
+              throw "$asset sha256 $got does not match the published $($published[$asset])"
+            }
+            Write-Host "checksum OK: $asset"
+          }
+
+      # LICENSE and THIRD_PARTY_NOTICES are required for binary redistribution,
+      # so a zip missing them is a licensing failure rather than a cosmetic one.
+      - name: Assert the zip carries the documented payload
+        working-directory: ${{ env.SMOKE_DIR }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Expand-Archive -Path "peasant_$($env:PEASANT_VERSION)_windows_amd64.zip" -DestinationPath zip -Force
+          $names = @(Get-ChildItem zip -Recurse -File | ForEach-Object { $_.Name })
+          foreach ($required in @('peasant.exe', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES')) {
+            if ($names -notcontains $required) {
+              throw "the zip is missing $required; it contains: $($names -join ', ')"
+            }
+          }
+          Write-Host "zip payload OK: $($names -join ', ')"
+
+      - name: Assert both binaries report the tag version
+        working-directory: ${{ env.SMOKE_DIR }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item "peasant_$($env:PEASANT_VERSION)_windows_amd64.exe" bare-peasant.exe
+          foreach ($exe in @('.\zip\peasant.exe', '.\bare-peasant.exe')) {
+            $got = (& $exe version | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "$exe version exited $LASTEXITCODE" }
+            if ($got -notlike "*$($env:PEASANT_VERSION)*") {
+              throw "$exe version '$got' does not contain '$($env:PEASANT_VERSION)'"
+            }
+            Write-Host "version OK: $exe -> $got"
+          }
+
+      # `peasant version` writes nothing and starts no process, so it passes
+      # while Windows-specific code is broken: every config write was once
+      # defeated by a POSIX directory fsync, and the detached `web start` spawn
+      # and its PID file are Windows-only code paths. Starting the dashboard
+      # exercises those and proves the published binary embeds the real web app
+      # rather than the stub the `web-stub` target writes.
+      - name: Start the dashboard, probe it, and stop it
+        working-directory: ${{ env.SMOKE_DIR }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $port = 8791
+          & .\zip\peasant.exe web start --no-browser --port $port
+          if ($LASTEXITCODE -ne 0) { throw "web start exited $LASTEXITCODE" }
+          try {
+            $deadline = (Get-Date).AddSeconds(90)
+            $body = $null
+            while ((Get-Date) -lt $deadline) {
+              try {
+                $body = (Invoke-WebRequest -Uri "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 5).Content
+                break
+              } catch {
+                Start-Sleep -Seconds 3
+              }
+            }
+            if (-not $body) { throw "the dashboard never answered on http://127.0.0.1:$port/" }
+            if ($body -match 'is not bundled in this build') {
+              throw "the published binary serves the stub dashboard instead of the built web app"
+            }
+            Write-Host "dashboard OK ($($body.Length) bytes served)"
+          } finally {
+            & .\zip\peasant.exe web stop --port $port
+            if ($LASTEXITCODE -ne 0) { Write-Host "::warning::web stop exited $LASTEXITCODE" }
+          }
+
   # Post-publish macOS smoke: on FINAL tags only, install the just-published cask
   # from the live tap and assert it runs + reports the tag version. This exercises
   # the real tap push end-to-end — homebrew_casks skip_upload:"auto" writes the

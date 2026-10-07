@@ -4,7 +4,10 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -88,6 +91,30 @@ func loadSelectionExclusionFixtures(t *testing.T) selectionExclusionFixtures {
 	return fixtures
 }
 
+// platformAbsoluteFixturePaths rewrites the POSIX-absolute clone paths the
+// fixture documents use so they are absolute on the running platform. On unix
+// the document is returned unchanged. On Windows a leading "/workspace/..." is
+// given the current volume, because filepath.IsAbs rejects a path with no volume
+// name there and the selection validator requires absolute, cleaned paths.
+//
+// The replacement only swaps the path separator (via filepath.FromSlash) rather
+// than fully filepath.Clean-ing the match: some fixture rows are deliberately
+// unclean (e.g. an embedded ".." segment, for unclean-clone-path-is-rejected),
+// and lexically resolving those before config.Parse sees them would silently
+// clean the path and defeat the case. A separator swap keeps already-clean
+// fixture paths clean and already-unclean fixture paths unclean.
+func platformAbsoluteFixturePaths(document string) string {
+	volume := filepath.VolumeName(os.TempDir())
+	if volume == "" {
+		return document
+	}
+	return fixtureClonePathPattern.ReplaceAllStringFunc(document, func(path string) string {
+		return volume + filepath.FromSlash(path)
+	})
+}
+
+var fixtureClonePathPattern = regexp.MustCompile(`/workspace(?:/[A-Za-z0-9._-]+)+`)
+
 func decodeSelectionExclusionFixtures(data []byte) (selectionExclusionFixtures, error) {
 	var fixtures selectionExclusionFixtures
 	if err := testutil.DecodeFixtureYAML(data, &fixtures); err != nil {
@@ -103,7 +130,7 @@ func TestSelectionExclusions_ValidateAndRoundTrip(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := config.Parse([]byte(fixture.Document))
+			cfg, err := config.Parse([]byte(platformAbsoluteFixturePaths(fixture.Document)))
 			if !fixture.Valid {
 				if err == nil {
 					t.Fatal("configuration unexpectedly accepted invalid exact exclusion evidence")
