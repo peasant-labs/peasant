@@ -794,10 +794,7 @@ jobs:
       # unlike the cross-compile lane's release-gated copy.
       - name: Typecheck Windows test files
         shell: bash
-        run: |
-          mapfile -t packages < <(go list ./... | grep -v '/third_party/zombiezen-sqlite$')
-          go vet "${packages[@]}"
-          go vet -unsafeptr=false github.com/peasant-labs/peasant/third_party/zombiezen-sqlite
+        run: ./scripts/vet-go.sh --skip-sqlite-audit
 
       # One `go test` command for every package: the default pwsh shell returns
       # the last command's exit code, so two commands here would discard the
@@ -805,7 +802,7 @@ jobs:
       # A single invocation reports every failing package and exits non-zero.
       - name: Run the Windows-specific tests
         run: |
-          go test ./internal/ingest/ ./internal/api/ ./cmd/peasant/ ./internal/store/ ./internal/testutil/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestDecodeClaudeProjectDir|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno|TestReplaceExecutable|TestTerminateProcessStopsAChild|TestPidFilePath|TestSessionLockAcrossProcesses|TestMemFS'
+          go test ./internal/ingest/ ./internal/api/ ./cmd/peasant/ ./internal/store/ ./internal/testutil/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestDecodeClaudeProjectDir|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno|TestReplaceExecutable|TestSweepUpgradeSidecar|TestTerminateProcessStopsAChild|TestPidFilePath|TestBackgroundProcAttr|TestSessionLockAcrossProcesses|TestMemFS'
 
       - name: Build peasant.exe and print its version
         run: |
