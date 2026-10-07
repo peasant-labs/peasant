@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -29,19 +30,19 @@ type ThinkingLevelEntryWarning struct {
 // Message renders the actionable what/why/where/when/meaning/fix diagnostic
 // for one dropped occurrence.
 func (w ThinkingLevelEntryWarning) Message() string {
-	return fmt.Sprintf("thinking-level stored evidence dropped\n  what: indexed entry %d (role %q) carries malformed thinking-level evidence level=%q raw=%q\n  why: %s\n  where: transcript.ThinkingLevelEntryWarnings during storage read\n  when: while folding stored entries into a projection, before local viewing, export, or publication\n  meaning: the malformed half is dropped and served absent, never guessed or normalized; a well-formed surviving half is still served, so this turn's level is unknown only when the canonical level was dropped. A non-string half fails the entry's typed decode and drops the whole pair with one warning for the entry, and evidence on a non-assistant entry is dropped entirely; the source must be repaired to restore it\n  fix: %s", w.EntryIndex, w.Role, w.Level, w.Raw, w.Why, w.Fix)
+	return fmt.Sprintf("thinking-level stored evidence dropped\n  what: indexed entry %d (role %q) carries malformed thinking-level evidence level=%q raw=%q\n  why: %s\n  where: transcript.ThinkingLevelEntryWarnings during storage read\n  when: while folding stored entries into a projection, before local viewing, export, or publication\n  meaning: the malformed half is dropped and served absent, never guessed or normalized; a well-formed surviving half is still served, so this turn's level is unknown only when the canonical level was dropped. An explicit JSON null is treated as omission and drops only that half, a non-string half fails the entry's typed decode and drops the whole pair, and evidence on a non-assistant entry is dropped entirely; any of these yields one warning for the entry, and the source must be repaired to restore it\n  fix: %s", w.EntryIndex, w.Role, w.Level, w.Raw, w.Why, w.Fix)
 }
 
 // ThinkingLevelEntryWarnings collects one warning per indexed entry whose
-// stored Extra carries malformed thinking-level evidence: a non-string
-// thinking_level/thinking_level_raw value, an out-of-set canonical level, an
-// invalid raw spelling, or non-assistant attribution. A non-string half yields
-// one warning and stops examining that entry, so an entry with two non-string
-// halves still yields exactly one warning. It is a pure collector: it never
-// mutates entries and never returns an error, because malformed stored evidence
-// is dropped rather than refused. The producer and wire boundaries still refuse
-// malformed turns (ValidateThinkingLevelTurnEvidence,
-// schema.ValidateSessionDetailPayload).
+// stored Extra carries malformed thinking-level evidence: an explicit JSON
+// null, a non-string thinking_level/thinking_level_raw value, an out-of-set
+// canonical level, an invalid raw spelling, or non-assistant attribution. A
+// malformed half yields one warning and stops examining that entry, so an entry
+// with two malformed halves (including two nulls) still yields exactly one
+// warning. It is a pure collector: it never mutates entries and never returns an
+// error, because malformed stored evidence is dropped rather than refused. The
+// producer and wire boundaries still refuse malformed turns
+// (ValidateThinkingLevelTurnEvidence, schema.ValidateSessionDetailPayload).
 func ThinkingLevelEntryWarnings(entries []schema.SessionEntry) []ThinkingLevelEntryWarning {
 	var warnings []ThinkingLevelEntryWarning
 	for _, entry := range entries {
@@ -59,6 +60,16 @@ func ThinkingLevelEntryWarnings(entries []schema.SessionEntry) []ThinkingLevelEn
 		}
 		var level schema.ThinkingLevel
 		if hasLevel {
+			if isStoredJSONNull(levelRaw) {
+				warnings = append(warnings, ThinkingLevelEntryWarning{
+					SessionID:  entry.SessionID,
+					EntryIndex: entry.EntryIndex,
+					Role:       entry.Role,
+					Why:        "thinking_level must be an exact canonical string, but the stored JSON value is null",
+					Fix:        "repair or re-index the source entry so thinking_level is an exact canonical string, or omit the field",
+				})
+				continue
+			}
 			var value string
 			if err := json.Unmarshal(levelRaw, &value); err != nil {
 				warnings = append(warnings, ThinkingLevelEntryWarning{
@@ -74,6 +85,16 @@ func ThinkingLevelEntryWarnings(entries []schema.SessionEntry) []ThinkingLevelEn
 		}
 		var raw schema.ThinkingLevelRaw
 		if hasRaw {
+			if isStoredJSONNull(rawRaw) {
+				warnings = append(warnings, ThinkingLevelEntryWarning{
+					SessionID:  entry.SessionID,
+					EntryIndex: entry.EntryIndex,
+					Role:       entry.Role,
+					Why:        "thinking_level_raw must be an exact bounded string, but the stored JSON value is null",
+					Fix:        "repair or re-index the source entry so thinking_level_raw is an exact bounded string, or omit the field",
+				})
+				continue
+			}
 			var value string
 			if err := json.Unmarshal(rawRaw, &value); err != nil {
 				warnings = append(warnings, ThinkingLevelEntryWarning{
@@ -100,6 +121,14 @@ func ThinkingLevelEntryWarnings(entries []schema.SessionEntry) []ThinkingLevelEn
 		}
 	}
 	return warnings
+}
+
+// isStoredJSONNull reports whether a present stored field's JSON value is the
+// literal null. A null decodes into the typed string as an empty value with no
+// error, so it must be detected on the raw JSON to be reported as a dropped
+// occurrence instead of silently reading as omission.
+func isStoredJSONNull(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
 // ValidateThinkingLevelTurnEvidence enforces the producer-only rule that

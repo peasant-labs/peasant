@@ -110,9 +110,11 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	}
 	// Thinking-level evidence is private stored evidence: a malformed value is
 	// dropped on read (transcript.ThinkingLevelEntryWarnings reports it) rather
-	// than refusing the row. A non-string half cannot decode into the typed
-	// PiExtra, so strip it before the strict decode; the out-of-contract halves
-	// are cleared after. Every other Pi field stays strict.
+	// than refusing the row. An explicit JSON null for either half is tolerated
+	// as omission by the presence walk (see piThinkingLevelNullOmissions) and
+	// clears only that half; a non-string half cannot decode into the typed
+	// PiExtra, so strip it before the strict decode and clear the pair after.
+	// Every other Pi field stays strict.
 	malformed := nonStringThinkingLevelKeys(fields)
 	decodeRaw := raw
 	if len(malformed) > 0 {
@@ -163,11 +165,12 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 		return value, true, piEvidenceError(fmt.Errorf("unknown Pi evidence kind"))
 	}
 	// The fold serves malformed thinking-level evidence absent, never refused
-	// (see transcript.thinkingLevelObservation): a non-string half fails the
-	// fold's typed decode and drops the whole pair, an out-of-set canonical
-	// level or an invalid raw spelling drops only that half. Mirror that here so
-	// the typed PiExtra agrees with the value the reader is served. The warning
-	// collector reads the original Extra and reports the occurrence.
+	// (see transcript.thinkingLevelObservation): a null half is served absent, a
+	// non-string half fails the fold's typed decode and drops the whole pair, and
+	// an out-of-set canonical level or an invalid raw spelling drops only that
+	// half. Mirror that here so the typed PiExtra agrees with the value the
+	// reader is served. The warning collector reads the original Extra and
+	// reports the occurrence.
 	if len(malformed) > 0 {
 		value.ThinkingLevel, value.ThinkingLevelRaw = "", ""
 	} else {
@@ -204,10 +207,12 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 }
 
 // nonStringThinkingLevelKeys names the present thinking-level keys whose stored
-// JSON value is not a string. Such a value cannot decode into the typed PiExtra,
-// so DecodePiExtra strips it before the strict decode and clears the pair. Null
-// is not named here: validatePiTypedPresence still refuses a null typed value
-// before the decode, so a stored null remains a strict refusal.
+// JSON value is not a string and is not null. Such a value cannot decode into
+// the typed PiExtra, so DecodePiExtra strips it before the strict decode and
+// clears the pair. Null is deliberately not named here: a stored null is
+// tolerated as omission and clears only its own half, so it must not trigger the
+// whole-pair clear. Every other field's null is refused by
+// validatePiTypedPresence.
 func nonStringThinkingLevelKeys(fields map[string]json.RawMessage) []string {
 	var keys []string
 	for _, key := range []string{ThinkingLevelExtraKey, ThinkingLevelRawExtraKey} {
@@ -350,11 +355,29 @@ func PiUsageFromRaw(sessionID, nativeID string, scope schema.UsageScope, raw jso
 	return usage, schema.ValidateUsageDetail(usage)
 }
 
+// piThinkingLevelNullOmissions names the private Pi evidence pointers where a
+// stored JSON null is treated as omission rather than refused. Only the
+// thinking-level pair is tolerated: a stored null for either half is dropped on
+// read like the other malformed shapes, and the entry must still decode so
+// transcript.ThinkingLevelEntryWarnings can report the occurrence. Every other
+// Pi field keeps the strict null refusal.
+var piThinkingLevelNullOmissions = map[string]bool{
+	"/" + ThinkingLevelExtraKey:    true,
+	"/" + ThinkingLevelRawExtraKey: true,
+}
+
 // Presence checks occur while raw fields still distinguish null from omission.
 // Arbitrary metadata data is validated by its own scanner, not this typed walk.
 func validatePiTypedPresence(raw json.RawMessage, path string) error {
+	return validatePiTypedPresenceAt(raw, path, piThinkingLevelNullOmissions)
+}
+
+func validatePiTypedPresenceAt(raw json.RawMessage, path string, nullOmissions map[string]bool) error {
 	raw = bytes.TrimSpace(raw)
 	if bytes.Equal(raw, []byte("null")) {
+		if nullOmissions[path] {
+			return nil
+		}
 		return fmt.Errorf("null is not a typed Pi evidence value at %s", path)
 	}
 	if len(raw) == 0 {
@@ -375,7 +398,7 @@ func validatePiTypedPresence(raw json.RawMessage, path string) error {
 			if key == "attachment" && strings.Contains(path, "metadata/") {
 				return fmt.Errorf("stored metadata must not preassign an attachment")
 			}
-			if err := validatePiTypedPresence(value, path+"/"+key); err != nil {
+			if err := validatePiTypedPresenceAt(value, path+"/"+key, nullOmissions); err != nil {
 				return err
 			}
 		}
@@ -385,7 +408,7 @@ func validatePiTypedPresence(raw json.RawMessage, path string) error {
 			return err
 		}
 		for i, value := range values {
-			if err := validatePiTypedPresence(value, fmt.Sprintf("%s/%d", path, i)); err != nil {
+			if err := validatePiTypedPresenceAt(value, fmt.Sprintf("%s/%d", path, i), nullOmissions); err != nil {
 				return err
 			}
 		}

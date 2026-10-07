@@ -36,9 +36,9 @@ func modelObservation(entry schema.SessionEntry) entryModelObservation {
 // a malformed or out-of-contract value is dropped rather than normalized: the
 // malformed half is served absent while a well-formed surviving half is still
 // served, so this turn's level is unknown only when the canonical level was
-// dropped. A non-string half fails the typed decode and drops the whole pair,
-// and ThinkingLevelEntryWarnings reports the drop so the source can be
-// repaired.
+// dropped. An explicit JSON null decodes to nil here and is served absent, a
+// non-string half fails the typed decode and drops the whole pair, and
+// ThinkingLevelEntryWarnings reports each drop so the source can be repaired.
 func thinkingLevelObservation(entry schema.SessionEntry) (schema.ThinkingLevel, schema.ThinkingLevelRaw) {
 	if entry.Role != schema.RoleAssistant || entry.Extra == nil {
 		return "", ""
