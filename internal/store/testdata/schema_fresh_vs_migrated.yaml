@@ -1,0 +1,13 @@
+# Fresh-install versus migrated-schema parity for the harmonized tables. A
+# fresh baseline install, a chain-migrated store, and the storetest golden
+# template must allocate the first body_id identically and carry identical
+# schemas, so writers behave the same wherever the database came from.
+cases:
+  - name: fresh-first-body-id
+    kind: fresh-body-id
+  - name: migrated-first-body-id
+    kind: migrated-body-id
+  - name: golden-template-body-insert
+    kind: golden-body-id
+  - name: fresh-equals-migrated-schema
+    kind: schema-equality

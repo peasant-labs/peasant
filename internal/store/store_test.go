@@ -200,7 +200,7 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	// + lessons from V28 + memory_injection_log from V30 + lesson_sources from
 	// V32 + pulled_transcripts/pulled_annotations from V34 + session_entries_fts
 	// and its FTS5 shadow tables from V35, plus the later projection, publication,
-	// annotation and V60 managed-generation tables. The required NAME set lives
+	// annotation, V60 managed-generation and V62 harmonized-content tables. The required NAME set lives
 	// in testdata/schema_catalog.yaml, so a rename, drop or undeclared addition
 	// fails loudly instead of being absorbed by a count.
 	catalog := loadSchemaCatalog(t)
@@ -217,8 +217,9 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	requireExactNameSet(t, "final schema tables", catalog.Tables, tables)
 
 	// Verify the index catalog by exact name as well (v1-v24 base + the later
-	// lesson/injection/annotation/association indexes + the V60 generation entry
-	// partition index + the V61 reverse logical-target lookup indexes).
+	// lesson/injection/annotation/association indexes + the V61 reverse
+	// logical-target lookup indexes + the V62 generation body/content and
+	// sweep-pending indexes; the V60 duplicate partition index is dropped).
 	indexes := map[string]struct{}{}
 	err = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {

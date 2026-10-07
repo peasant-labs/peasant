@@ -399,6 +399,8 @@ CREATE TABLE session_captured_stats (
 
 ALTER TABLE sessions ADD COLUMN content_sweep_pending INTEGER NOT NULL DEFAULT 0 CHECK(content_sweep_pending IN (0,1));
 
+CREATE INDEX idx_sessions_sweep_pending ON sessions(session_id) WHERE content_sweep_pending = 1;
+
 UPDATE sessions SET content_sweep_pending = 1
 WHERE EXISTS (
   SELECT 1 FROM session_projection_generations g

@@ -63,12 +63,11 @@ CREATE TABLE annotation_target_associations (
     association_id TEXT NOT NULL REFERENCES session_commit_associations(association_id)
 ) STRICT;
 
-CREATE TABLE annotation_target_entries (
+CREATE TABLE "annotation_target_entries" (
     annotation_id TEXT PRIMARY KEY REFERENCES annotations(id) ON DELETE CASCADE,
     session_id    TEXT NOT NULL,
     entry_index   INTEGER NOT NULL,
     end_index     INTEGER NOT NULL,
-    FOREIGN KEY (session_id, entry_index) REFERENCES session_entries(session_id, entry_index),
     CHECK (end_index > entry_index)
 ) STRICT;
 
@@ -390,6 +389,24 @@ CREATE TABLE scale_kinds (
     name TEXT NOT NULL UNIQUE
 ) STRICT;
 
+CREATE TABLE session_captured_stats (
+  session_id             TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+  turn_count             INTEGER,
+  input_submission_count INTEGER CHECK(input_submission_count IS NULL OR (input_submission_count BETWEEN 0 AND 9007199254740991)),
+  tool_call_count        INTEGER,
+  subagent_count         INTEGER,
+  duration_ms            INTEGER,
+  tokens_in              INTEGER,
+  tokens_out             INTEGER,
+  thought_tokens         INTEGER,
+  cached_read_tokens     INTEGER,
+  cached_write_tokens    INTEGER,
+  seed_json              TEXT CHECK(seed_json IS NULL OR json_valid(seed_json)),
+  source                 TEXT NOT NULL CHECK(source IN ('harness','derived')),
+  updated_at_ms          INTEGER NOT NULL CHECK(updated_at_ms >= 0),
+  overflow               TEXT
+) STRICT;
+
 CREATE TABLE session_commands (
     session_id   TEXT NOT NULL,
     entry_index  INTEGER NOT NULL,
@@ -421,6 +438,14 @@ CREATE TABLE session_commits (
     PRIMARY KEY (session_id, commit_hash)
 ) STRICT;
 
+CREATE TABLE session_content (
+  session_id  TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  digest      TEXT NOT NULL CHECK(length(digest) = 64),
+  byte_length INTEGER NOT NULL CHECK(byte_length >= 0),
+  chunk_count INTEGER GENERATED ALWAYS AS ((byte_length + 65535) / 65536) VIRTUAL,
+  PRIMARY KEY (session_id, digest)
+) STRICT, WITHOUT ROWID;
+
 CREATE TABLE session_content_captures (
  session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
  status TEXT NOT NULL CHECK(status IN ('complete','incomplete','failed')),
@@ -437,7 +462,27 @@ CREATE TABLE session_content_captures (
  CHECK(status != 'complete' OR (full_capture_sha256 IS NOT NULL AND failure_code IS NULL AND failure_message IS NULL))
 ) STRICT;
 
-CREATE TABLE session_context_segments (
+CREATE TABLE session_content_chunks (
+  session_id  TEXT NOT NULL,
+  digest      TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+  data        BLOB NOT NULL CHECK(length(data) BETWEEN 1 AND 65536),
+  UNIQUE (session_id, digest, chunk_index),
+  FOREIGN KEY (session_id, digest) REFERENCES session_content(session_id, digest) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE session_context_segment_refs (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  segment_ordinal INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  source_entry_ref TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, segment_ordinal, ordinal),
+  FOREIGN KEY (session_id, generation_id, segment_ordinal)
+    REFERENCES session_context_segments(session_id, generation_id, segment_ordinal) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE "session_context_segments" (
   session_id                TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id             TEXT NOT NULL,
   segment_ordinal           INTEGER NOT NULL CHECK(segment_ordinal >= 0),
@@ -449,7 +494,6 @@ CREATE TABLE session_context_segments (
   decoded_byte_start        INTEGER,
   decoded_byte_end_exclusive INTEGER,
   inclusion                 TEXT NOT NULL,
-  captured_refs_json        TEXT NOT NULL,
   PRIMARY KEY (session_id, generation_id, segment_ordinal)
 ) STRICT;
 
@@ -498,6 +542,51 @@ CREATE VIRTUAL TABLE session_entries_fts USING fts5(
     tokenize='unicode61 remove_diacritics 2'
 );
 
+CREATE TABLE session_entry_bodies (
+  body_id          INTEGER PRIMARY KEY CHECK(body_id >= 1125899906842624),
+  session_id       TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  body_digest      TEXT NOT NULL CHECK(length(body_digest) = 64),
+  entry_index      INTEGER NOT NULL CHECK(entry_index >= 0),
+  harness          TEXT NOT NULL,
+  entry_type       TEXT NOT NULL,
+  role             TEXT NOT NULL,
+  timestamp_ms     INTEGER,
+  content_preview  TEXT,
+  tokens_in        INTEGER,
+  tokens_out       INTEGER,
+  has_tool_use     INTEGER NOT NULL CHECK(has_tool_use IN (0,1)),
+  tool_kind        TEXT,
+  tool_names_csv   TEXT,
+  has_thinking     INTEGER NOT NULL CHECK(has_thinking IN (0,1)),
+  is_error         INTEGER NOT NULL CHECK(is_error IN (0,1)),
+  stop_reason      TEXT,
+  raw_byte_length  INTEGER,
+  tool_call_id     TEXT,
+  entry_id         TEXT,
+  parent_entry_id  TEXT,
+  depth            INTEGER NOT NULL,
+  parent_index     INTEGER,
+  tool_input       TEXT,
+  tool_output      TEXT,
+  model_id         TEXT,
+  tokens_reasoning INTEGER,
+  cache_read       INTEGER,
+  cache_write      INTEGER,
+  extra            TEXT,
+  extra_verbatim   TEXT,
+  part_type        TEXT,
+  source_entry_ref TEXT,
+  prov_origin      TEXT,
+  prov_actor       TEXT,
+  prov_delivery    TEXT,
+  prov_ownership   TEXT,
+  prov_evidence    TEXT,
+  prov_input_modality TEXT,
+  prov_submission_ref TEXT,
+  UNIQUE (session_id, body_digest),
+  CHECK (extra IS NULL OR extra_verbatim IS NULL)
+) STRICT;
+
 CREATE TABLE session_entry_full_content (
  session_id TEXT NOT NULL,
  entry_index INTEGER NOT NULL,
@@ -531,6 +620,126 @@ CREATE TABLE session_files (
     turn_count    INTEGER NOT NULL DEFAULT 0,
     human_turns   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, file_path)
+) STRICT;
+
+CREATE TABLE session_generation_associations (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  association_id TEXT NOT NULL,
+  observed_commit_hash TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, ordinal),
+  FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE session_generation_commits (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  hash TEXT NOT NULL,
+  message TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  author_email TEXT NOT NULL,
+  commit_time INTEGER NOT NULL,
+  author_time INTEGER NOT NULL,
+  PRIMARY KEY (session_id, generation_id, ordinal),
+  FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE session_generation_content (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  source_entry_ref TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, source_entry_ref),
+  FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE,
+  FOREIGN KEY (session_id, digest) REFERENCES session_content(session_id, digest)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE session_generation_diagnostics (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  error_type TEXT NOT NULL,
+  location TEXT NOT NULL,
+  message TEXT NOT NULL,
+  remediation TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, ordinal),
+  FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE session_generation_entries (
+  session_id       TEXT NOT NULL,
+  generation_id    TEXT NOT NULL,
+  partition_id     INTEGER NOT NULL CHECK(partition_id >= 0),
+  entry_index      INTEGER NOT NULL CHECK(entry_index >= 0),
+  source_entry_ref TEXT,
+  body_digest      TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, partition_id, entry_index),
+  FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE,
+  FOREIGN KEY (session_id, body_digest)   REFERENCES session_entry_bodies(session_id, body_digest)
+) STRICT;
+
+CREATE TABLE session_generation_subagents (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  subagent_session_id TEXT NOT NULL,
+  parent_uuid TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, ordinal),
+  FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE session_generation_title_refs (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  source_entry_ref TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, ordinal),
+  FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE session_generations (
+  session_id             TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  generation_id          TEXT NOT NULL,
+  schema_version         INTEGER NOT NULL,
+  harness                TEXT NOT NULL,
+  model                  TEXT NOT NULL,
+  version                TEXT NOT NULL,
+  ts_start               INTEGER NOT NULL,
+  ts_end                 INTEGER NOT NULL,
+  ts_ingested            INTEGER,
+  source_file_path       TEXT,
+  source_format          TEXT NOT NULL,
+  git_branch             TEXT,
+  git_remote             TEXT,
+  git_worktree           TEXT,
+  git_tracking           TEXT,
+  project_hash           TEXT NOT NULL,
+  project_file_path      TEXT,
+  project_name           TEXT NOT NULL,
+  host_slug              TEXT NOT NULL,
+  root_session_id        TEXT,
+  purpose                TEXT,
+  cwd                    TEXT,
+  derived_at             INTEGER,
+  content_hash           TEXT NOT NULL,
+  metadata_hash          TEXT NOT NULL CHECK(length(metadata_hash) = 64),
+  redaction_applied      INTEGER NOT NULL CHECK(redaction_applied IN (0,1)),
+  redaction_level        TEXT,
+  redaction_rule_set_version TEXT,
+  redaction_at_ms        INTEGER,
+  redaction_content_hash_at_redact TEXT,
+  adapter_version        INTEGER,
+  diagnostics_partial    INTEGER CHECK(diagnostics_partial IS NULL OR diagnostics_partial IN (0,1)),
+  completeness           TEXT NOT NULL CHECK(completeness IN ('complete','incomplete_new')),
+  source_evidence_digest TEXT NOT NULL CHECK(length(source_evidence_digest) = 64),
+  index_format_version   INTEGER NOT NULL CHECK(index_format_version = 2),
+  candidate_digest       TEXT NOT NULL CHECK(length(candidate_digest) = 64),
+  prior_evidence         BLOB,
+  installed_at_ms        INTEGER NOT NULL CHECK(installed_at_ms >= 0),
+  activated_at_ms        INTEGER CHECK(activated_at_ms IS NULL OR activated_at_ms >= 0),
+  PRIMARY KEY (session_id, generation_id)
 ) STRICT;
 
 CREATE TABLE session_metrics (
@@ -621,12 +830,11 @@ CREATE TABLE session_projection_generations (
   PRIMARY KEY (session_id, generation_id)
 ) STRICT;
 
-CREATE TABLE session_projection_sections (
+CREATE TABLE "session_projection_sections" (
   session_id     TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id  TEXT NOT NULL,
   partition_id   INTEGER NOT NULL CHECK(partition_id >= 0),
   earlier_state  TEXT,
-  native_metadata TEXT,
   PRIMARY KEY (session_id, generation_id, partition_id)
 ) STRICT;
 
@@ -658,7 +866,7 @@ CREATE TABLE session_publications (
   FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 ) STRICT;
 
-CREATE TABLE session_relationship_evidence (
+CREATE TABLE "session_relationship_evidence" (
   session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id   TEXT NOT NULL,
   kind            TEXT NOT NULL,
@@ -667,8 +875,38 @@ CREATE TABLE session_relationship_evidence (
      'conflicting_current_native_evidence')),
   target_local_id TEXT,
   evidence        TEXT,
-  anchor          TEXT,
+  anchor_kind TEXT,
+  anchor_source_entry_ref TEXT,
+  anchor_source_revision_ref TEXT,
   PRIMARY KEY (session_id, generation_id, kind)
+) STRICT;
+
+CREATE VIRTUAL TABLE session_search_fts USING fts5(
+  content_preview, tool_input, tool_output, session_id UNINDEXED, entry_index UNINDEXED,
+  content='session_search_source', content_rowid='rid', tokenize='unicode61 remove_diacritics 2');
+
+CREATE TABLE session_search_state (
+  id            INTEGER PRIMARY KEY CHECK(id = 1),
+  needs_rebuild INTEGER NOT NULL CHECK(needs_rebuild IN (0,1))
+) STRICT;
+
+CREATE TABLE session_section_native_metadata (
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  partition_id INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  native_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  source_entry_ref TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  source_message_role TEXT,
+  attachment_turn_index INTEGER,
+  attachment_tool_call_id TEXT,
+  custom_type TEXT,
+  data TEXT,
+  PRIMARY KEY (session_id, generation_id, partition_id, ordinal),
+  FOREIGN KEY (session_id, generation_id, partition_id)
+    REFERENCES session_projection_sections(session_id, generation_id, partition_id) ON DELETE CASCADE
 ) STRICT;
 
 CREATE TABLE sessions (
@@ -705,7 +943,7 @@ CREATE TABLE sessions (
     indexed_input_hash IS NULL OR (
         length(indexed_input_hash) = 64 AND indexed_input_hash NOT GLOB '*[^0-9a-f]*'
     )
-), active_generation_id TEXT, root_session_id TEXT, session_purpose TEXT, input_submission_count INTEGER CHECK(input_submission_count IS NULL OR (input_submission_count BETWEEN 0 AND 9007199254740991))) STRICT;
+), active_generation_id TEXT, root_session_id TEXT, session_purpose TEXT, input_submission_count INTEGER CHECK(input_submission_count IS NULL OR (input_submission_count BETWEEN 0 AND 9007199254740991)), content_sweep_pending INTEGER NOT NULL DEFAULT 0 CHECK(content_sweep_pending IN (0,1))) STRICT;
 
 CREATE TABLE target_kinds (
     id   INTEGER PRIMARY KEY,
@@ -762,6 +1000,10 @@ CREATE INDEX idx_daily_project_hash ON daily_summary_by_project(project_hash);
 
 CREATE INDEX idx_entries_ext_key ON session_entries_ext(key);
 
+CREATE INDEX idx_generation_content_digest ON session_generation_content(session_id, digest);
+
+CREATE INDEX idx_generation_entries_body ON session_generation_entries(session_id, body_digest);
+
 CREATE INDEX idx_index_log_outcome ON index_log(outcome);
 
 CREATE INDEX idx_index_log_session ON index_log(session_id);
@@ -812,9 +1054,6 @@ CREATE INDEX idx_session_entries_type ON session_entries(session_id, entry_type)
 
 CREATE INDEX idx_session_files_path ON session_files(file_path);
 
-CREATE INDEX idx_session_projection_entries_partition
-  ON session_projection_entries(session_id, generation_id, partition_id, entry_index);
-
 CREATE INDEX idx_session_publication_parent_uuid
   ON session_publication_metadata(json_extract(metadata_json, '$.parentUuid'))
   WHERE json_extract(metadata_json, '$.parentUuid') IS NOT NULL;
@@ -830,6 +1069,8 @@ CREATE INDEX idx_sessions_parent ON sessions(parent_id) WHERE parent_id IS NOT N
 CREATE INDEX idx_sessions_project ON sessions(project_hash);
 
 CREATE INDEX idx_sessions_start ON sessions(start_ms);
+
+CREATE INDEX idx_sessions_sweep_pending ON sessions(session_id) WHERE content_sweep_pending = 1;
 
 CREATE VIEW annotations_with_target AS
 SELECT
@@ -860,6 +1101,13 @@ FROM annotations a
     LEFT JOIN annotation_target_projects tp ON a.id = tp.annotation_id
     LEFT JOIN annotation_target_associations tsc ON a.id = tsc.annotation_id;
 
+CREATE VIEW session_search_source(rid, session_id, entry_index, content_preview, tool_input, tool_output) AS
+  SELECT rowid, session_id, entry_index, content_preview, tool_input, tool_output
+    FROM session_entries
+  UNION ALL
+  SELECT body_id, session_id, entry_index, content_preview, tool_input, tool_output
+    FROM session_entry_bodies;
+
 CREATE TRIGGER session_entries_ad AFTER DELETE ON session_entries BEGIN
     INSERT INTO session_entries_fts(session_entries_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
     VALUES ('delete', old.rowid, old.content_preview, old.tool_input, old.tool_output, old.session_id, old.entry_index);
@@ -875,6 +1123,28 @@ CREATE TRIGGER session_entries_au AFTER UPDATE ON session_entries BEGIN
     VALUES ('delete', old.rowid, old.content_preview, old.tool_input, old.tool_output, old.session_id, old.entry_index);
     INSERT INTO session_entries_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
     VALUES (new.rowid, new.content_preview, new.tool_input, new.tool_output, new.session_id, new.entry_index);
+END;
+
+CREATE TRIGGER session_entry_bodies_fts_ai AFTER INSERT ON session_entry_bodies BEGIN
+  INSERT INTO session_search_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
+    SELECT rid, content_preview, tool_input, tool_output, session_id, entry_index
+      FROM session_search_source WHERE rid = new.body_id;
+END;
+
+CREATE TRIGGER session_entry_bodies_fts_bd BEFORE DELETE ON session_entry_bodies BEGIN
+  INSERT INTO session_search_fts(session_search_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
+    SELECT 'delete', rid, content_preview, tool_input, tool_output, session_id, entry_index
+      FROM session_search_source WHERE rid = old.body_id;
+END;
+
+CREATE TRIGGER session_entry_bodies_immutable BEFORE UPDATE ON session_entry_bodies
+BEGIN
+  SELECT RAISE(ABORT, 'session_entry_bodies rows are immutable; insert a new entry instead');
+END;
+
+CREATE TRIGGER session_generations_immutable BEFORE UPDATE ON session_generations
+BEGIN
+  SELECT RAISE(ABORT, 'generation rows are immutable; a new generation gets a new row');
 END;
 
 CREATE TRIGGER sessions_publication_metadata_changed
@@ -937,6 +1207,7 @@ INSERT INTO "annotators" ("id", "kind_id", "name", "display_name", "description"
 INSERT INTO "scale_kinds" ("id", "name") VALUES (1, 'nominal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (2, 'ordinal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (3, 'continuous');
+INSERT INTO "session_search_state" ("id", "needs_rebuild") VALUES (1, 0);
 INSERT INTO "target_kinds" ("id", "name") VALUES (1, 'session');
 INSERT INTO "target_kinds" ("id", "name") VALUES (2, 'entry');
 INSERT INTO "target_kinds" ("id", "name") VALUES (3, 'annotation');
@@ -954,4 +1225,11 @@ DELETE FROM "session_entries_fts_data";
 INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 61;
+DELETE FROM "session_search_fts_config";
+INSERT INTO "session_search_fts_config" ("k", "v") VALUES ('version', 4);
+
+DELETE FROM "session_search_fts_data";
+INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
+INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
+
+PRAGMA user_version = 62;
