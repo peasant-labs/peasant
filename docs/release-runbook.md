@@ -257,8 +257,8 @@ success, so this incident record is not an executable redispatch procedure.
      MinGW runtime stands in for the static-linkage check; that is weaker, which is why
      this job starts the server rather than only reading `version`.
 5. Verify the prerelease on the Releases page: 4 `.tar.gz` + 1 Windows `.zip` +
-   1 bare Windows `.exe` + 2 `.deb` + 2 `.rpm` + `checksums.txt` (10 artifacts),
-   and **nothing** pushed to AUR/tap.
+   1 bare Windows `.exe` + 2 `.deb` + 2 `.rpm` + `checksums.txt` (11 files,
+   `checksums.txt` included), and **nothing** pushed to AUR/tap.
 
 ---
 
