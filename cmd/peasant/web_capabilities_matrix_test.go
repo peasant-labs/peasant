@@ -40,8 +40,9 @@ var webCapabilitiesMatrixYAML []byte
 
 // webCapabilityMatrixFixtures is the real-binary matrix corpus.
 type webCapabilityMatrixFixtures struct {
-	DeclaredRows int                       `yaml:"declared_rows"`
-	Cases        []webCapabilityMatrixCase `yaml:"cases"`
+	DeclaredRows  int                       `yaml:"declared_rows"`
+	RequiredCases []string                  `yaml:"required_cases"`
+	Cases         []webCapabilityMatrixCase `yaml:"cases"`
 }
 
 // webCapabilityMatrixCase is one invocation of the built binary and its expected
@@ -85,6 +86,9 @@ func loadWebCapabilityMatrixFixtures(t *testing.T) webCapabilityMatrixFixtures {
 			fixtures.DeclaredRows, len(fixtures.Cases), expectedWebCapabilityMatrixRows,
 		)
 	}
+	if len(fixtures.RequiredCases) == 0 {
+		t.Fatal("validate web-capabilities matrix fixtures: required_cases is empty, so no case is protected from deletion")
+	}
 	names := make(map[string]struct{}, len(fixtures.Cases))
 	for _, c := range fixtures.Cases {
 		if strings.TrimSpace(c.Name) == "" {
@@ -94,6 +98,13 @@ func loadWebCapabilityMatrixFixtures(t *testing.T) webCapabilityMatrixFixtures {
 			t.Fatalf("validate web-capabilities matrix fixtures: duplicate case %q", c.Name)
 		}
 		names[c.Name] = struct{}{}
+	}
+	// Named deletion protection: a count guard cannot say WHICH case vanished, and
+	// the case this file calls the forwarding proof is the one worth naming.
+	for _, required := range fixtures.RequiredCases {
+		if _, ok := names[required]; !ok {
+			t.Fatalf("validate web-capabilities matrix fixtures: required case %q is missing", required)
+		}
 	}
 	return fixtures
 }

@@ -249,6 +249,13 @@ success, so this incident record is not an executable redispatch procedure.
      **prerelease**. With `skip_upload: true`/`auto`, the AUR and tap are **untouched**.
    - **smoke** job (native amd64 + arm64): asserts the binary is static (`ldd`) and
      `peasant version` output contains the tag (substring check `grep -qF "${TAG#v}"`).
+   - **windows-smoke** job (`windows-latest`, amd64): downloads both published Windows
+     assets, verifies each against `checksums.txt`, unpacks the zip and asserts it
+     carries `peasant.exe`, `LICENSE`, `README.md` and `THIRD_PARTY_NOTICES`, asserts
+     both binaries report the tag, then starts the dashboard, probes it over HTTP and
+     stops it. There is no `ldd` on Windows, so a runner carrying no Go toolchain and no
+     MinGW runtime stands in for the static-linkage check; that is weaker, which is why
+     this job starts the server rather than only reading `version`.
 5. Verify the prerelease on the Releases page: 4 `.tar.gz` + 1 Windows `.zip` +
    1 bare Windows `.exe` + 2 `.deb` + 2 `.rpm` + `checksums.txt` (10 artifacts),
    and **nothing** pushed to AUR/tap.
@@ -271,8 +278,9 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
    publishes a **full** (non-prerelease) Release and pushes the Homebrew cask to the
    tap (`skip_upload: "auto"`). AUR remains untouched while its `skip_upload: "true"`
    safety setting stays in force. The smoke job re-checks static linkage +
-   `peasant version`, and the **macos-cask-smoke** job installs the just-published
-   cask and asserts its version.
+   `peasant version`, the **windows-smoke** job re-checks both Windows assets and the
+   dashboard, and the **macos-cask-smoke** job installs the just-published cask and
+   asserts its version.
 4. Verify the full Release and complete artifact set, including the cask pushed to the
    tap (the macOS cask-smoke job also asserts `brew install --cask peasant`). Verify
    AUR and nixpkgs only after their separate publication checklist items are approved
