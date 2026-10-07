@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/proc"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -386,6 +387,7 @@ func defaultUpgradeCommandOutput(ctx context.Context, name string, args ...strin
 	probeCtx, cancel := context.WithTimeout(ctx, upgradeProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(probeCtx, name, args...)
+	proc.HideConsoleWindow(cmd)
 	return cmd.CombinedOutput()
 }
 

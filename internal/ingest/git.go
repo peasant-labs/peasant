@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/peasant-labs/peasant/internal/proc"
 )
 
 // GitResolver resolves git metadata from a directory.
@@ -560,6 +562,7 @@ func sameDirectory(a, b string) bool {
 // non-zero exit.
 func runGit(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	proc.HideConsoleWindow(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
