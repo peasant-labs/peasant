@@ -564,8 +564,13 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 	}
 	// Fail closed on unusable write budgets before the first session is read.
 	// A zero Write resolves to the shipped defaults here; an explicit but
-	// invalid one refuses with the knob, the bound, and the fix.
-	if _, err := cfg.Write.validatedWithDefaults(parallelWorkers(cfg)); err != nil {
+	// invalid one refuses with the knob, the bound, and the fix. The capacity
+	// check runs at the effective worker count, which config load cannot know.
+	resolvedWrite, err := cfg.Write.validatedWithDefaults(parallelWorkers(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("NewPipeline: %w", err)
+	}
+	if err := resolvedWrite.checkCapacities(parallelWorkers(cfg)); err != nil {
 		return nil, fmt.Errorf("NewPipeline: %w", err)
 	}
 	p := &Pipeline{
@@ -1607,15 +1612,21 @@ func (p *Pipeline) indexLoop(
 	if workers < 1 {
 		workers = 1
 	}
+	// One pre-allocated buffer per parser, claimed by worker index: the
+	// partitions are mutually exclusive by construction, and each parse
+	// starts from a reset partition, so no item ever reads another's
+	// scratch. The serialize/hash scratch use arrives with the prepare lane.
+	bufs := p.newRunWorkerBuffers(workers)
 	parsedCh := make(chan indexParseResult, workers)
 	var activeParses atomic.Int64
 	var maxActiveParses atomic.Int64
 	var parserWG sync.WaitGroup
 	parserWG.Add(workers)
-	for range workers {
+	for i := range workers {
 		go func() {
 			defer parserWG.Done()
 			for work := range indexCh {
+				bufs.Reset(i)
 				result := p.parseIndexMeta(ctx, work.meta, &activeParses, &maxActiveParses, logPrefix)
 				if batch, complete := work.batch.completeWorkItem(); complete {
 					indexDoneCh <- batch
@@ -1886,11 +1897,23 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 
 	var activeParses atomic.Int64
 	var maxActiveParses atomic.Int64
-	parseOne := func(im indexedMeta) indexParseResult {
-		return p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
-	}
 
 	workers := max(1, parallelWorkers(p.config))
+	// The wave's items claim pool partitions exclusively for their duration:
+	// the slot channel hands each item a partition no other in-flight item
+	// holds, and the item resets it before parsing, so partitions stay
+	// mutually exclusive even though the wave fans out anonymously.
+	bufs := p.newRunWorkerBuffers(workers)
+	slots := make(chan int, workers)
+	for i := 0; i < workers; i++ {
+		slots <- i
+	}
+	parseOne := func(im indexedMeta) indexParseResult {
+		slot := <-slots
+		defer func() { slots <- slot }()
+		bufs.Reset(slot)
+		return p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
+	}
 	// Retain at most one bounded parser wave, not every full session in a
 	// reindex invocation. The wave is capped by the configured session cap,
 	// and the writer further splits each wave by full bytes.
