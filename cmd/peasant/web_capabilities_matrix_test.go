@@ -174,7 +174,10 @@ func TestWebCapabilitiesMatrix(t *testing.T) {
 		if !strings.Contains(string(out), "peasant web stop") || strings.Contains(string(out), "Usage:") {
 			t.Fatalf("background `peasant web start` output = %q, want the actionable refusal without usage text", out)
 		}
-		pidFile := filepath.Join(stateHome, "peasant", fmt.Sprintf("web:%d.pid", port))
+		// The name must track pidFilePath. It was renamed from "web:<port>.pid"
+		// because a colon is not a valid Windows path component, and an assertion
+		// left on the old name would pass even if a PID file were written.
+		pidFile := filepath.Join(stateHome, "peasant", fmt.Sprintf("web-%d.pid", port))
 		if _, statErr := os.Stat(pidFile); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("background `peasant web start` wrote %s for a server it did not start (stat error: %v)", pidFile, statErr)
 		}
