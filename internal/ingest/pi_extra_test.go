@@ -20,10 +20,12 @@ var piUsageManifest []byte
 //go:embed testdata/pi_thinking_level_extra.yaml
 var piThinkingLevelExtraYAML []byte
 
+//go:embed testdata/pi_thinking_level_extra.manifest.yaml
+var piThinkingLevelExtraManifest []byte
+
 func TestPiThinkingLevelExtraBoundaries(t *testing.T) {
 	var fixtures struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Cases         []struct {
+		Cases []struct {
 			Name      string `yaml:"name"`
 			Level     string `yaml:"level"`
 			Raw       string `yaml:"raw"`
@@ -35,12 +37,18 @@ func TestPiThinkingLevelExtraBoundaries(t *testing.T) {
 	if err := testutil.DecodeFixtureYAML(piThinkingLevelExtraYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
-	seen := make(map[string]bool)
+	manifest, err := testutil.DecodeRequiredNamesManifest(piThinkingLevelExtraManifest, "Pi thinking-level extra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, len(fixtures.Cases))
+	for i, c := range fixtures.Cases {
+		names[i] = c.Name
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "Pi thinking-level extra"); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range fixtures.Cases {
-		if c.Name == "" || seen[c.Name] {
-			t.Fatalf("duplicate or empty case %q", c.Name)
-		}
-		seen[c.Name] = true
 		t.Run(c.Name, func(t *testing.T) {
 			if c.RawBase64 != "" {
 				raw, err := base64.StdEncoding.DecodeString(c.RawBase64)
@@ -69,11 +77,6 @@ func TestPiThinkingLevelExtraBoundaries(t *testing.T) {
 				t.Fatalf("error = %v, want error %t", err, c.Error)
 			}
 		})
-	}
-	for _, name := range fixtures.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing required case %q", name)
-		}
 	}
 }
 
