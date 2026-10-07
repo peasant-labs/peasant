@@ -6,8 +6,12 @@ requiredNames:
   - invalid-canonical
   - edge-whitespace
   - invalid-utf8
-  - null-canonical
-  - null-raw
+  - null-level-cleared
+  - null-raw-cleared
+  - null-pair-cleared
+  - null-level-valid-raw-keeps-raw
+  - valid-level-null-raw-keeps-level
+  - null-other-field-refused
   - unknown-field
   - stored-canonical-cleared
   - stored-edge-whitespace-cleared

@@ -82,3 +82,15 @@ storedThinkingLevel:
     overlay: '{"thinking_level":7,"thinking_level_raw":"Deep"}'
   - name: stored_pair_non_string_reencoded_cleared
     overlay: '{"thinking_level":7,"thinking_level_raw":false}'
+  - name: stored_null_level_reencoded_cleared
+    overlay: '{"thinking_level":null}'
+  - name: stored_null_raw_reencoded_cleared
+    overlay: '{"thinking_level_raw":null}'
+  - name: stored_null_pair_reencoded_cleared
+    overlay: '{"thinking_level":null,"thinking_level_raw":null}'
+  - name: stored_null_level_valid_raw_reencoded_keeps_raw
+    overlay: '{"thinking_level":null,"thinking_level_raw":"Deep"}'
+    wantRaw: Deep
+  - name: stored_valid_level_null_raw_reencoded_keeps_level
+    overlay: '{"thinking_level":"high","thinking_level_raw":null}'
+    wantLevel: high

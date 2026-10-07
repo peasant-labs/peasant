@@ -8,8 +8,11 @@
 # A stored malformed thinking-level value is DROPPED on read, never refused: the
 # typed PiExtra must mirror the value the reader is served so publication can
 # re-encode the row instead of refusing it. A non-string half cannot decode into
-# the typed struct and drops the whole pair; an out-of-set canonical level or an
-# invalid raw spelling drops only that half. Every other Pi field stays strict.
+# the typed struct and drops the whole pair; a stored JSON null for either half
+# is treated as omission and clears only that half, so a well-formed surviving
+# half is still served; an out-of-set canonical level or an invalid raw spelling
+# drops only that half. Every other Pi field stays strict, including a null in
+# any other field.
 cases:
   - name: canonical
     level: ultra
@@ -28,11 +31,20 @@ cases:
   - name: invalid-utf8
     rawBase64: /w==
     error: true
-  - name: null-canonical
+  - name: null-level-cleared
     extra: '{"kind":"pi.state","harness":"pi","thinking_level":null}'
-    error: true
-  - name: null-raw
+  - name: null-raw-cleared
     extra: '{"kind":"pi.state","harness":"pi","thinking_level_raw":null}'
+  - name: null-pair-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":null,"thinking_level_raw":null}'
+  - name: null-level-valid-raw-keeps-raw
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":null,"thinking_level_raw":"Deep"}'
+    raw: Deep
+  - name: valid-level-null-raw-keeps-level
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":"high","thinking_level_raw":null}'
+    level: high
+  - name: null-other-field-refused
+    extra: '{"kind":"pi.state","harness":"pi","namespace":null}'
     error: true
   - name: unknown-field
     extra: '{"kind":"pi.state","harness":"pi","thinkingLevel":"high"}'
