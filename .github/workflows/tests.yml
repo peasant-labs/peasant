@@ -479,6 +479,16 @@ jobs:
       - name: Cross-compile for Windows
         run: nix develop -c env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
 
+      # `go build` does not typecheck _test.go files, so a Windows-only test file
+      # that stops compiling passes the step above unnoticed. That is how a store
+      # test referencing syscall.Stat_t - a type Windows does not have - reached
+      # this branch: it broke no build and ran in no job. `go vet` does typecheck
+      # test files, and the repository's own vet wrapper already keeps the
+      # vendored driver's audited uintptr conversions exempt, so it is reused
+      # here with the target set rather than reimplemented. About 17 seconds.
+      - name: Typecheck Windows test files
+        run: nix develop -c env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 ./scripts/vet-go.sh
+
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
   # ~15 minutes, so it gets its own job and its own budget in parallel with
@@ -766,8 +776,22 @@ jobs:
       - name: Build every package
         run: go build ./...
 
+      # internal/proc is the console-window helper and is green here in full.
       - name: Run focused tests
-        run: go test ./internal/defaults/... ./internal/config/...
+        run: go test ./internal/defaults/... ./internal/config/... ./internal/proc/...
+
+      # The Windows-specific behaviour this branch adds is named explicitly
+      # instead of running these packages whole. internal/ingest has pre-existing
+      # Windows failures unrelated to this work (80 at the time of writing, in the
+      # OpenCode and filesystem suites), so running all of it would report that
+      # unrelated breakage rather than guarding drive-letter slug decoding, the
+      # absolute-path form check, worktree containment and the debug/ prune. The
+      # typecheck step in the cross-compile job already covers whether every
+      # Windows test file still compiles.
+      - name: Run the Windows-specific tests
+        run: |
+          go test ./internal/ingest/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree'
+          go test ./internal/api/ -run 'TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno'
 
       - name: Build peasant.exe and print its version
         run: |
