@@ -32,7 +32,7 @@ type codexLexicalCase struct {
 	UnknownEvery     int      `yaml:"unknown_every"`
 }
 
-func loadCodexLexicalFixtures(t *testing.T) []codexLexicalCase {
+func loadCodexLexicalFixtures(t testing.TB) []codexLexicalCase {
 	t.Helper()
 	var fixture struct {
 		Required []string           `yaml:"required_names"`
