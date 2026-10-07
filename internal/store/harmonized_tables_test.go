@@ -3,6 +3,8 @@ package store
 import (
 	_ "embed"
 	"fmt"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -161,7 +163,7 @@ func insertHarmonizedGeneration(t *testing.T, db *harmonizedProbeDB, sid, gen st
 		"ts_start", "ts_end", "source_format", "project_hash", "project_name", "host_slug",
 		"content_hash", "metadata_hash", "redaction_applied", "completeness",
 		"source_evidence_digest", "index_format_version", "candidate_digest", "installed_at_ms"}
-	args := []any{sid, gen, 11, "opencode", "m", "v", 1, 2, "jsonl", "p", "pn", "h",
+	args := []any{sid, gen, 11, string(defaults.HarnessOpenCode), "m", "v", 1, 2, string(ingest.SourceFormatJSONL), "p", "pn", "h",
 		digest, digest, 0, "complete", digest, 2, digest, 1}
 	execHarmonizedInsert(t, db.conn, "session_generations", cols, args)
 }
@@ -170,7 +172,7 @@ func insertHarmonizedBody(t *testing.T, db *harmonizedProbeDB, sid string, bodyI
 	t.Helper()
 	execHarmonizedInsert(t, db.conn, "session_entry_bodies",
 		[]string{"body_id", "session_id", "body_digest", "entry_index", "harness", "entry_type", "role", "has_tool_use", "has_thinking", "is_error", "depth"},
-		[]any{bodyID, sid, digest, 0, "opencode", "text", "user", 0, 0, 0, 0})
+		[]any{bodyID, sid, digest, 0, string(defaults.HarnessOpenCode), "text", "user", 0, 0, 0, 0})
 }
 
 func execHarmonizedInsert(t *testing.T, conn *sqlite.Conn, table string, cols []string, args []any) error {
@@ -259,7 +261,7 @@ func harmonizedTemplate(t *testing.T, db *harmonizedProbeDB, table string, n int
 		set("session_id", sid)
 		set("body_digest", uniqDigest(n))
 		set("entry_index", 0)
-		set("harness", "opencode")
+		set("harness", string(defaults.HarnessOpenCode))
 		set("entry_type", "text")
 		set("role", "user")
 		set("timestamp_ms", 1)
@@ -309,14 +311,14 @@ func harmonizedTemplate(t *testing.T, db *harmonizedProbeDB, table string, n int
 		set("session_id", sid)
 		set("generation_id", fmt.Sprintf("gen-probe-%d", n))
 		set("schema_version", 11)
-		set("harness", "opencode")
+		set("harness", string(defaults.HarnessOpenCode))
 		set("model", "m")
 		set("version", "v")
 		set("ts_start", 1)
 		set("ts_end", 2)
 		set("ts_ingested", 1)
 		set("source_file_path", "x")
-		set("source_format", "jsonl")
+		set("source_format", string(ingest.SourceFormatJSONL))
 		set("git_branch", "b")
 		set("git_remote", "r")
 		set("git_worktree", "w")
