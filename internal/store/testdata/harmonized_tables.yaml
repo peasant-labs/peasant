@@ -1,0 +1,194 @@
+# Closed-set and nullability pins for the v62 harmonized tables, following
+# the generation_migration pattern: every CHECK is driven from typed named
+# cases (accepted and rejected at the SQL boundary), and every table's
+# nullable versus NOT NULL split is pinned column by column, so a widened
+# set or a flipped nullability fails loudly. All names are required by
+# harmonized_tables.manifest.yaml.
+checks:
+  - name: body-flags
+    column: has_tool_use
+    tables: [session_entry_bodies]
+    accepted: [0, 1]
+    rejected: [2, -1]
+  - name: body-thinking-flag
+    column: has_thinking
+    tables: [session_entry_bodies]
+    accepted: [0, 1]
+    rejected: [2, -1]
+  - name: body-error-flag
+    column: is_error
+    tables: [session_entry_bodies]
+    accepted: [0, 1]
+    rejected: [2, -1]
+  - name: body-id-base
+    column: body_id
+    tables: [session_entry_bodies]
+    accepted: [1125899906842624, 1125899906842625]
+    rejected: [1125899906842623, 0, -1]
+  - name: body-digest-length
+    column: body_digest
+    tables: [session_entry_bodies]
+    accepted: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+    rejected: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ""]
+  - name: body-entry-index
+    column: entry_index
+    tables: [session_entry_bodies]
+    accepted: [0, 9]
+    rejected: [-1]
+  - name: body-extra-verbatim-exclusion
+    column: extra_verbatim
+    tables: [session_entry_bodies]
+    also: {extra: '{"model":"m"}'}
+    accepted: [null]
+    rejected: ['{"model":"m"}']
+  - name: content-digest-length
+    column: digest
+    tables: [session_content]
+    accepted: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+    rejected: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+  - name: content-byte-length
+    column: byte_length
+    tables: [session_content]
+    accepted: [0, 65536]
+    rejected: [-1]
+  - name: chunks-index
+    column: chunk_index
+    tables: [session_content_chunks]
+    accepted: [0, 3]
+    rejected: [-1]
+  - name: chunks-data-bounds
+    column: data
+    tables: [session_content_chunks]
+    accepted: ["x", "yz"]
+    rejected: ["", null]
+  - name: generation-completeness
+    column: completeness
+    tables: [session_generations]
+    accepted: ["complete", "incomplete_new"]
+    rejected: ["partial", "COMPLETE", ""]
+  - name: generation-redaction-flag
+    column: redaction_applied
+    tables: [session_generations]
+    accepted: [0, 1]
+    rejected: [2, -1]
+  - name: generation-format-version
+    column: index_format_version
+    tables: [session_generations]
+    accepted: [2]
+    rejected: [1, 3]
+  - name: generation-metadata-hash
+    column: metadata_hash
+    tables: [session_generations]
+    accepted: ["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]
+    rejected: ["ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]
+  - name: generation-candidate-digest
+    column: candidate_digest
+    tables: [session_generations]
+    accepted: ["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]
+    rejected: ["ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]
+  - name: generation-diagnostics-partial
+    column: diagnostics_partial
+    tables: [session_generations]
+    accepted: [null, 0, 1]
+    rejected: [2, -1]
+  - name: generation-entry-partition
+    column: partition_id
+    tables: [session_generation_entries]
+    accepted: [0, 2]
+    rejected: [-1]
+  - name: child-ordinals
+    column: ordinal
+    tables: [session_generation_subagents, session_generation_commits, session_generation_associations, session_generation_diagnostics, session_generation_title_refs, session_context_segment_refs, session_section_native_metadata]
+    accepted: [0, 4]
+    rejected: [-1]
+  - name: stats-source
+    column: source
+    tables: [session_captured_stats]
+    accepted: ["harness", "derived"]
+    rejected: ["compute", "HARNESS", ""]
+  - name: stats-seed-json
+    column: seed_json
+    tables: [session_captured_stats]
+    accepted: [null, '{"turnCount":1}']
+    rejected: ["{bad", "plain"]
+  - name: stats-updated-at
+    column: updated_at_ms
+    tables: [session_captured_stats]
+    accepted: [0, 1700000000000]
+    rejected: [-1]
+  - name: stats-input-count
+    column: input_submission_count
+    tables: [session_captured_stats]
+    accepted: [null, 0, 1, 9007199254740991]
+    rejected: [-1, 9007199254740992, 1.5, not-a-number]
+  - name: search-state-flag
+    column: needs_rebuild
+    tables: [session_search_state]
+    accepted: [0, 1]
+    rejected: [2, -1]
+  - name: sweep-pending-flag
+    column: content_sweep_pending
+    tables: [sessions]
+    accepted: [0, 1]
+    rejected: [2, -1]
+# INTEGER PRIMARY KEY columns (session_entry_bodies.body_id) are excluded
+# from notNull pins: SQLite auto-assigns NULL there instead of refusing it,
+# so the pin would depend on table state. Their floor is pinned by the
+# body-id-base check instead.
+nullability:
+  - name: bodies-nullability
+    table: session_entry_bodies
+    nullable: [timestamp_ms, content_preview, tokens_in, tokens_out, tool_kind, tool_names_csv, stop_reason, raw_byte_length, tool_call_id, entry_id, parent_entry_id, parent_index, tool_input, tool_output, model_id, tokens_reasoning, cache_read, cache_write, extra, extra_verbatim, part_type, source_entry_ref, prov_origin, prov_actor, prov_delivery, prov_ownership, prov_evidence, prov_input_modality, prov_submission_ref]
+    notNull: [session_id, body_digest, entry_index, harness, entry_type, role, has_tool_use, has_thinking, is_error, depth]
+  - name: content-nullability
+    table: session_content
+    nullable: []
+    notNull: [session_id, digest, byte_length]
+  - name: chunks-nullability
+    table: session_content_chunks
+    nullable: []
+    notNull: [session_id, digest, chunk_index, data]
+  - name: generations-nullability
+    table: session_generations
+    nullable: [ts_ingested, source_file_path, git_branch, git_remote, git_worktree, git_tracking, project_file_path, root_session_id, purpose, cwd, derived_at, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, prior_evidence, activated_at_ms]
+    notNull: [session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, source_format, project_hash, project_name, host_slug, content_hash, metadata_hash, redaction_applied, completeness, source_evidence_digest, index_format_version, candidate_digest, installed_at_ms]
+  - name: generation-entries-nullability
+    table: session_generation_entries
+    nullable: [source_entry_ref]
+    notNull: [session_id, generation_id, partition_id, entry_index, body_digest]
+  - name: generation-content-nullability
+    table: session_generation_content
+    nullable: []
+    notNull: [session_id, generation_id, source_entry_ref, digest]
+  - name: stats-nullability
+    table: session_captured_stats
+    nullable: [turn_count, input_submission_count, tool_call_count, subagent_count, duration_ms, tokens_in, tokens_out, thought_tokens, cached_read_tokens, cached_write_tokens, seed_json, overflow]
+    notNull: [session_id, source, updated_at_ms]
+  - name: subagents-nullability
+    table: session_generation_subagents
+    nullable: []
+    notNull: [session_id, generation_id, ordinal, subagent_session_id, parent_uuid]
+  - name: segment-refs-nullability
+    table: session_context_segment_refs
+    nullable: []
+    notNull: [session_id, generation_id, segment_ordinal, ordinal, source_entry_ref]
+  - name: native-metadata-nullability
+    table: session_section_native_metadata
+    nullable: [source_message_role, attachment_turn_index, attachment_tool_call_id, custom_type, data]
+    notNull: [session_id, generation_id, partition_id, ordinal, native_id, kind, source_entry_ref, source_type]
+  - name: evidence-nullability
+    table: session_relationship_evidence
+    nullable: [target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref]
+    notNull: [session_id, generation_id, kind, target_state]
+  - name: segments-nullability
+    table: session_context_segments
+    nullable: [logical_session_id, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive]
+    notNull: [session_id, generation_id, segment_ordinal, physical_source_id, coordinate_kind, inclusion]
+  - name: sections-nullability
+    table: session_projection_sections
+    nullable: [earlier_state]
+    notNull: [session_id, generation_id, partition_id]
+  - name: annotation-targets-nullability
+    table: annotation_target_entries
+    nullable: []
+    notNull: [annotation_id, session_id, entry_index, end_index]
