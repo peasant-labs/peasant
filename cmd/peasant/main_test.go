@@ -2,8 +2,10 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -34,6 +36,16 @@ func TestMain(m *testing.M) {
 	home, err := os.MkdirTemp("", "peasant-cmdtest-home-*")
 	if err != nil {
 		panic("cmd/peasant TestMain: create temp HOME: " + err.Error())
+	}
+	// Preserve the developer's Go caches across the HOME redirect below: `go
+	// build` resolves GOMODCACHE/GOCACHE from HOME, so without this the matrix
+	// build re-downloads the module graph into the throwaway home. Capture the
+	// values while HOME still points at the real one.
+	if out, envErr := exec.Command("go", "env", "GOMODCACHE", "GOCACHE").Output(); envErr == nil {
+		if fields := strings.Fields(string(out)); len(fields) == 2 {
+			os.Setenv("GOMODCACHE", fields[0])
+			os.Setenv("GOCACHE", fields[1])
+		}
 	}
 	os.Setenv("HOME", home)
 	os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))

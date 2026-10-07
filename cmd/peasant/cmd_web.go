@@ -430,8 +430,17 @@ func stopWeb(port int) error {
 		fmt.Fprintf(os.Stderr, "HTTP shutdown failed: %v, falling back to %s\n", err, terminateActionName)
 	}
 
-	// Fallback: read the PID file and stop the process directly.
+	// Fallback: read the PID file and stop the process directly. A server
+	// started by a build older than the web-<port>.pid rename wrote
+	// web:<port>.pid; try that name before giving up.
 	data, readErr := os.ReadFile(pidFile)
+	if readErr != nil {
+		if legacy := legacyPIDFilePath(port); legacy != pidFile {
+			if legacyData, legacyErr := os.ReadFile(legacy); legacyErr == nil {
+				data, readErr, pidFile = legacyData, nil, legacy
+			}
+		}
+	}
 	if readErr != nil {
 		return fmt.Errorf("cannot contact server and no PID file at %s: %w", pidFile, readErr)
 	}
@@ -460,6 +469,13 @@ func stopWeb(port int) error {
 // find it.
 func pidFilePath(port int) string {
 	return filepath.Join(defaults.State.DirPath.String(), fmt.Sprintf("web-%d.pid", port))
+}
+
+// legacyPIDFilePath is the PID file name used before the web-<port>.pid rename
+// ("web:<port>.pid"). It is read only, so `web stop` can still stop a server
+// started by an older build; it is never written.
+func legacyPIDFilePath(port int) string {
+	return filepath.Join(defaults.State.DirPath.String(), fmt.Sprintf("web:%d.pid", port))
 }
 
 // configureVerboseLogging sets the default slog level to Debug,
