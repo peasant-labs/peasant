@@ -399,6 +399,11 @@ func TestExecGitResolver_Worktree_LinkedWorktreeSubdir(t *testing.T) {
 		t.Fatalf("Worktree from linked-worktree subdir: %v", err)
 	}
 	if got == "" {
+		// Capture the exact form git reports on the running platform so a
+		// mismatch in case, separator, or realpath is diagnosable from the log.
+		if listing, listErr := exec.Command("git", "-C", subdir, "worktree", "list", "--porcelain").CombinedOutput(); listErr == nil {
+			t.Logf("git worktree list --porcelain:\n%s", listing)
+		}
 		t.Fatalf("Worktree from linked-worktree subdir = %q, want the linked worktree root %q", got, wantWT)
 	}
 

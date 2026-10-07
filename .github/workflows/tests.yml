@@ -788,10 +788,13 @@ jobs:
       # absolute-path form check, worktree containment and the debug/ prune. The
       # typecheck step in the cross-compile job already covers whether every
       # Windows test file still compiles.
+      # One `go test` command for both packages: the default pwsh shell returns
+      # the last command's exit code, so two commands here would discard the
+      # first package's failure and let the job report green over a red test.
+      # A single invocation reports every failing package and exits non-zero.
       - name: Run the Windows-specific tests
         run: |
-          go test ./internal/ingest/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree'
-          go test ./internal/api/ -run 'TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno'
+          go test ./internal/ingest/ ./internal/api/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno'
 
       - name: Build peasant.exe and print its version
         run: |

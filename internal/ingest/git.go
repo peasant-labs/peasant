@@ -461,7 +461,7 @@ func (g *ExecGitResolver) Worktree(ctx context.Context, dir string) (string, err
 	var worktrees []string
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "worktree ") {
-			worktrees = append(worktrees, strings.TrimPrefix(line, "worktree "))
+			worktrees = append(worktrees, strings.TrimSpace(strings.TrimPrefix(line, "worktree ")))
 		}
 	}
 
@@ -476,21 +476,56 @@ func (g *ExecGitResolver) Worktree(ctx context.Context, dir string) (string, err
 		return "", nil
 	}
 
-	// Check if dir is within a non-main worktree.
+	// Compare the cleaned forms directly. filepath.Rel compares path elements
+	// case-insensitively on Windows and normalizes separators on every platform,
+	// so the native form of git's path is enough for the common case.
 	for _, wt := range worktrees[1:] { // skip main worktree (index 0)
 		cleanWt := filepath.Clean(wt)
-		// absDir and cleanWt are both native-separator paths (filepath.Abs and
-		// filepath.Clean normalize to filepath.Separator on every platform), so
-		// the containment prefix must use the native separator too. A hardcoded
-		// "/" never matches on Windows, where a directory below a linked
-		// worktree would otherwise fail to resolve to that worktree.
-		if strings.HasPrefix(absDir, cleanWt+string(filepath.Separator)) || absDir == cleanWt {
+		if pathWithin(absDir, cleanWt) {
+			return cleanWt, nil
+		}
+	}
+
+	// git reports a worktree's top level in its own resolved form, which need
+	// not be the string the caller walked down from. On Windows that realpath
+	// can differ from filepath.Abs across a junction, in case, or in the short
+	// (8.3) name form; on macOS /var is a symlink to /private/var. Resolve both
+	// sides before comparing so a subdirectory still binds to its worktree.
+	canonicalDir := canonicalWorktreePath(absDir)
+	for _, wt := range worktrees[1:] {
+		cleanWt := filepath.Clean(wt)
+		if pathWithin(canonicalDir, canonicalWorktreePath(cleanWt)) {
 			return cleanWt, nil
 		}
 	}
 
 	// dir is in the main worktree or not in any — return empty.
 	return "", nil
+}
+
+// pathWithin reports whether child is parent or a descendant of it. It compares
+// with filepath.Rel, which normalizes separators and, on Windows, compares path
+// elements case-insensitively.
+func pathWithin(child, parent string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// canonicalWorktreePath returns the form of p used to compare a directory with a
+// worktree top level. It resolves symlinks and junctions when p exists, because
+// git reports a worktree's top level in its realpath form; otherwise it falls
+// back to the cleaned absolute path.
+func canonicalWorktreePath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(resolved)
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(p)
 }
 
 func (g *ExecGitResolver) TrackingBranch(ctx context.Context, dir string) (string, error) {
