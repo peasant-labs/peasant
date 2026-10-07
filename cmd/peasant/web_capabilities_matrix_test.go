@@ -338,7 +338,10 @@ func runBackgroundCase(t *testing.T, bin string, env []string, port int, experim
 			t.Errorf("`web stop --port %d` failed: %v (output: %s)", port, err, out)
 			return
 		}
-		if stateHome := envValue(env, defaults.EnvXDGStateHome.String()); stateHome != "" {
+		stateHome := envValue(env, defaults.EnvXDGStateHome.String())
+		if stateHome == "" {
+			t.Errorf("the isolated env has no %s; the PID-file check cannot run", defaults.EnvXDGStateHome.String())
+		} else {
 			pidFile := filepath.Join(stateHome, "peasant", filepath.Base(pidFilePath(port)))
 			if _, statErr := os.Stat(pidFile); !errors.Is(statErr, os.ErrNotExist) {
 				t.Errorf("`web stop --port %d` left the PID file at %s (stat error: %v)", port, pidFile, statErr)

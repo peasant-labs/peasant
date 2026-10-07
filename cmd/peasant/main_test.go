@@ -40,11 +40,14 @@ func TestMain(m *testing.M) {
 	// Preserve the developer's Go caches across the HOME redirect below: `go
 	// build` resolves GOMODCACHE/GOCACHE from HOME, so without this the matrix
 	// build re-downloads the module graph into the throwaway home. Capture the
-	// values while HOME still points at the real one.
-	if out, envErr := exec.Command("go", "env", "GOMODCACHE", "GOCACHE").Output(); envErr == nil {
-		if fields := strings.Fields(string(out)); len(fields) == 2 {
-			os.Setenv("GOMODCACHE", fields[0])
-			os.Setenv("GOCACHE", fields[1])
+	// values while HOME still points at the real one. One `go env` call per
+	// variable: a single space-separated call cannot round-trip a path that
+	// contains a space.
+	for _, key := range []string{"GOMODCACHE", "GOCACHE"} {
+		if out, envErr := exec.Command("go", "env", key).Output(); envErr == nil {
+			if value := strings.TrimSpace(string(out)); value != "" {
+				os.Setenv(key, value)
+			}
 		}
 	}
 	os.Setenv("HOME", home)
