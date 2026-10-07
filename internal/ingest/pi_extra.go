@@ -108,6 +108,27 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return value, true, piEvidenceError(err)
 	}
+	// Thinking-level evidence is private stored evidence: a malformed value is
+	// dropped on read (transcript.ThinkingLevelEntryWarnings reports it) rather
+	// than refusing the row. A non-string half cannot decode into the typed
+	// PiExtra, so strip it before the strict decode; the out-of-contract halves
+	// are cleared after. Every other Pi field stays strict.
+	malformed := nonStringThinkingLevelKeys(fields)
+	decodeRaw := raw
+	if len(malformed) > 0 {
+		stripped := make(map[string]json.RawMessage, len(fields))
+		for key, field := range fields {
+			stripped[key] = field
+		}
+		for _, key := range malformed {
+			delete(stripped, key)
+		}
+		strippedJSON, err := json.Marshal(stripped)
+		if err != nil {
+			return value, true, piEvidenceError(err)
+		}
+		decodeRaw = strippedJSON
+	}
 	delete(fields, retainedUnknownKey)
 	typed, err := json.Marshal(fields)
 	if err != nil {
@@ -119,7 +140,7 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	if err := validatePiTypedPresence(raw, ""); err != nil {
 		return value, true, piEvidenceError(err)
 	}
-	d := json.NewDecoder(bytes.NewReader(raw))
+	d := json.NewDecoder(bytes.NewReader(decodeRaw))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&value); err != nil {
 		return value, true, piEvidenceError(err)
@@ -141,11 +162,21 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	default:
 		return value, true, piEvidenceError(fmt.Errorf("unknown Pi evidence kind"))
 	}
-	if !value.ThinkingLevel.IsValid() {
-		return value, true, piEvidenceError(fmt.Errorf("thinking_level %q is outside the canonical thinking-level set", value.ThinkingLevel))
-	}
-	if value.ThinkingLevelRaw != "" && !value.ThinkingLevelRaw.IsValid() {
-		return value, true, piEvidenceError(fmt.Errorf("thinking_level_raw must be non-empty valid UTF-8 within 128 bytes without edge whitespace"))
+	// The fold serves malformed thinking-level evidence absent, never refused
+	// (see transcript.thinkingLevelObservation): a non-string half fails the
+	// fold's typed decode and drops the whole pair, an out-of-set canonical
+	// level or an invalid raw spelling drops only that half. Mirror that here so
+	// the typed PiExtra agrees with the value the reader is served. The warning
+	// collector reads the original Extra and reports the occurrence.
+	if len(malformed) > 0 {
+		value.ThinkingLevel, value.ThinkingLevelRaw = "", ""
+	} else {
+		if !value.ThinkingLevel.IsValid() {
+			value.ThinkingLevel = ""
+		}
+		if value.ThinkingLevelRaw != "" && !value.ThinkingLevelRaw.IsValid() {
+			value.ThinkingLevelRaw = ""
+		}
 	}
 	if value.SourceRef != "" && !validPiRef(value.SourceRef) {
 		return value, true, piEvidenceError(fmt.Errorf("source reference is not a generated Pi public reference"))
@@ -170,6 +201,26 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 		}
 	}
 	return value, true, nil
+}
+
+// nonStringThinkingLevelKeys names the present thinking-level keys whose stored
+// JSON value is not a string. Such a value cannot decode into the typed PiExtra,
+// so DecodePiExtra strips it before the strict decode and clears the pair. Null
+// is not named here: validatePiTypedPresence still refuses a null typed value
+// before the decode, so a stored null remains a strict refusal.
+func nonStringThinkingLevelKeys(fields map[string]json.RawMessage) []string {
+	var keys []string
+	for _, key := range []string{ThinkingLevelExtraKey, ThinkingLevelRawExtraKey} {
+		value, present := fields[key]
+		if !present {
+			continue
+		}
+		var text string
+		if json.Unmarshal(value, &text) != nil {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // DecodePiEntryExtra also verifies the row's harness context. A Pi row without
