@@ -482,7 +482,7 @@ CREATE TABLE session_context_segment_refs (
     REFERENCES session_context_segments(session_id, generation_id, segment_ordinal) ON DELETE CASCADE
 ) STRICT;
 
-CREATE TABLE "session_context_segments" (
+CREATE TABLE session_context_segments (
   session_id                TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id             TEXT NOT NULL,
   segment_ordinal           INTEGER NOT NULL CHECK(segment_ordinal >= 0),
@@ -494,6 +494,7 @@ CREATE TABLE "session_context_segments" (
   decoded_byte_start        INTEGER,
   decoded_byte_end_exclusive INTEGER,
   inclusion                 TEXT NOT NULL,
+  captured_refs_json        TEXT NOT NULL,
   PRIMARY KEY (session_id, generation_id, segment_ordinal)
 ) STRICT;
 
@@ -830,11 +831,12 @@ CREATE TABLE session_projection_generations (
   PRIMARY KEY (session_id, generation_id)
 ) STRICT;
 
-CREATE TABLE "session_projection_sections" (
+CREATE TABLE session_projection_sections (
   session_id     TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id  TEXT NOT NULL,
   partition_id   INTEGER NOT NULL CHECK(partition_id >= 0),
   earlier_state  TEXT,
+  native_metadata TEXT,
   PRIMARY KEY (session_id, generation_id, partition_id)
 ) STRICT;
 
@@ -866,7 +868,7 @@ CREATE TABLE session_publications (
   FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 ) STRICT;
 
-CREATE TABLE "session_relationship_evidence" (
+CREATE TABLE session_relationship_evidence (
   session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id   TEXT NOT NULL,
   kind            TEXT NOT NULL,
@@ -875,9 +877,7 @@ CREATE TABLE "session_relationship_evidence" (
      'conflicting_current_native_evidence')),
   target_local_id TEXT,
   evidence        TEXT,
-  anchor_kind TEXT,
-  anchor_source_entry_ref TEXT,
-  anchor_source_revision_ref TEXT,
+  anchor          TEXT,
   PRIMARY KEY (session_id, generation_id, kind)
 ) STRICT;
 

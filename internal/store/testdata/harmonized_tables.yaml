@@ -176,18 +176,6 @@ nullability:
     table: session_section_native_metadata
     nullable: [source_message_role, attachment_turn_index, attachment_tool_call_id, custom_type, data]
     notNull: [session_id, generation_id, partition_id, ordinal, native_id, kind, source_entry_ref, source_type]
-  - name: evidence-nullability
-    table: session_relationship_evidence
-    nullable: [target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref]
-    notNull: [session_id, generation_id, kind, target_state]
-  - name: segments-nullability
-    table: session_context_segments
-    nullable: [logical_session_id, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive]
-    notNull: [session_id, generation_id, segment_ordinal, physical_source_id, coordinate_kind, inclusion]
-  - name: sections-nullability
-    table: session_projection_sections
-    nullable: [earlier_state]
-    notNull: [session_id, generation_id, partition_id]
   - name: annotation-targets-nullability
     table: annotation_target_entries
     nullable: []
