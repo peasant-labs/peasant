@@ -630,7 +630,7 @@ Requires either --session for a single session or --session-from-file for a batc
 
 			var succeeded, failed int
 			for _, sid := range sessionIDs {
-				exported, exportErr := export.ExportSession(ctx, db, fs, sid, cfg.Output.BasePath)
+				exported, exportErr := exportSessionTranscript(ctx, db, fs, sid, cfg.Output.BasePath)
 				if exportErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
 					failed++
