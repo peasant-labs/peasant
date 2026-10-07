@@ -785,16 +785,27 @@ jobs:
       # Windows failures unrelated to this work (80 at the time of writing, in the
       # OpenCode and filesystem suites), so running all of it would report that
       # unrelated breakage rather than guarding drive-letter slug decoding, the
-      # absolute-path form check, worktree containment and the debug/ prune. The
-      # typecheck step in the cross-compile job already covers whether every
-      # Windows test file still compiles.
-      # One `go test` command for both packages: the default pwsh shell returns
+      # absolute-path form check, worktree containment and the debug/ prune.
+      #
+      # `go build ./...` does not typecheck _test.go files, so a Windows test
+      # file that stops compiling would pass it unnoticed. `go vet` does typecheck
+      # test files; mirror scripts/vet-go.sh's one exemption for the vendored
+      # driver's audited uintptr conversions. This runs on every pull request,
+      # unlike the cross-compile lane's release-gated copy.
+      - name: Typecheck Windows test files
+        shell: bash
+        run: |
+          mapfile -t packages < <(go list ./... | grep -v '/third_party/zombiezen-sqlite$')
+          go vet "${packages[@]}"
+          go vet -unsafeptr=false github.com/peasant-labs/peasant/third_party/zombiezen-sqlite
+
+      # One `go test` command for every package: the default pwsh shell returns
       # the last command's exit code, so two commands here would discard the
       # first package's failure and let the job report green over a red test.
       # A single invocation reports every failing package and exits non-zero.
       - name: Run the Windows-specific tests
         run: |
-          go test ./internal/ingest/ ./internal/api/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno'
+          go test ./internal/ingest/ ./internal/api/ ./cmd/peasant/ ./internal/store/ ./internal/testutil/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestDecodeClaudeProjectDir|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno|TestReplaceExecutable|TestTerminateProcessStopsAChild|TestPidFilePath|TestSessionLockAcrossProcesses|TestMemFS'
 
       - name: Build peasant.exe and print its version
         run: |
