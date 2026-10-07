@@ -228,8 +228,10 @@ func resetAll(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("reset peasant-sync: %w", err)
 	}
 
-	// 5. State directory (PID files).
-	stateDir := string(defaults.State.DirPath)
+	// 5. State directory (PID files). Resolve at call time for the same reason
+	// as pidFilePath: a test that redirects XDG_STATE_HOME resets its own state,
+	// not the developer's.
+	stateDir := string(defaults.ResolveStateDirPath())
 	if err := removeAllIfExists(stateDir); err != nil {
 		return fmt.Errorf("reset state: %w", err)
 	}

@@ -1,0 +1,70 @@
+# hasAbsolutePathForm decides whether a pi session header's recorded working
+# directory is absolute, and it must decide from the STRING's own shape rather
+# than from the host OS. Pi records cwd on the machine that ran the session, and
+# peasant routinely reads that recording on a different machine: a Windows
+# recording copied to a Linux host, or the reverse. filepath.IsAbs answers only
+# for the running platform, so it would make a Windows recording unreadable on
+# Linux and a unix recording unreadable on Windows.
+#
+# Before this, the check was strings.HasPrefix(cwd, "/"), so every pi session
+# recorded on Windows was refused outright as "first nonempty record must be a
+# v3 session header with absolute cwd" and never ingested at all.
+#
+# Values are single-quoted so YAML keeps backslashes literal.
+declared_rows: 10
+required_cases:
+  - posix-absolute
+  - posix-root
+  - windows-drive-backslash
+  - windows-drive-forward-slash
+  - windows-lowercase-drive
+  - windows-unc-backslash
+  - windows-drive-relative-refused
+  - bare-drive-refused
+  - relative-refused
+  - empty-refused
+cases:
+  - name: posix-absolute
+    cwd: '/workspace/project'
+    absolute: true
+
+  - name: posix-root
+    cwd: '/'
+    absolute: true
+
+  # The form a Windows-recorded session actually carries.
+  - name: windows-drive-backslash
+    cwd: 'C:\Users\alice\work'
+    absolute: true
+
+  # Windows accepts forward slashes in an absolute path too, and some tools
+  # write them.
+  - name: windows-drive-forward-slash
+    cwd: 'C:/Users/alice/work'
+    absolute: true
+
+  - name: windows-lowercase-drive
+    cwd: 'd:\work'
+    absolute: true
+
+  - name: windows-unc-backslash
+    cwd: '\\fileserver\share\work'
+    absolute: true
+
+  # "C:work" is drive-RELATIVE: it means "the current directory on drive C",
+  # which does not anchor a path and must stay refused.
+  - name: windows-drive-relative-refused
+    cwd: 'C:work'
+    absolute: false
+
+  - name: bare-drive-refused
+    cwd: 'C:'
+    absolute: false
+
+  - name: relative-refused
+    cwd: 'work/project'
+    absolute: false
+
+  - name: empty-refused
+    cwd: ''
+    absolute: false

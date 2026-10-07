@@ -19,7 +19,7 @@ const (
 
 // benchGeneration builds one generation whose content records all have a
 // captured blob, shaped like the per-part generation a large OpenCode session
-// produces: many small files, each fsynced before the manifest and rename.
+// produces: many small files, each written before the manifest and rename.
 func benchGeneration(tb testing.TB, n int) (indexformat.Generation, map[schema.SourceEntryRef][]byte) {
 	tb.Helper()
 	payload := []byte(strings.Repeat("x", benchBlobBytes))

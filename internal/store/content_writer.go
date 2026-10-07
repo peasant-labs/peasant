@@ -296,6 +296,17 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	if err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
 		return out, err
 	}
+	// Prepare the two durable-prose inserts once and re-bind per row. A large
+	// session writes one manifest row per content-bearing entry and one chunk
+	// row per 64 KiB, so re-preparing per row would dominate this write.
+	manifestStmt, err := stmts.FullContent()
+	if err != nil {
+		return out, err
+	}
+	chunkStmt, err := stmts.FullContentChunk()
+	if err != nil {
+		return out, err
+	}
 	rows := 0
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
@@ -308,9 +319,25 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 		text := *e.ContentPreview
 		preview := contentPreview(text)
 		chunks := (len(text) + fullContentChunkBytes - 1) / fullContentChunkBytes
-		err = sqlitex.ExecuteTransient(conn, `INSERT INTO session_entry_full_content VALUES(?,?,?,?,?,?,?,?,?)`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID), e.EntryIndex, len(text), contentSHA(text), len(preview), contentSHA(preview), boolToInt(text == preview), chunks, c.CapturedAtMs}})
-		if err != nil {
-			return out, err
+		// A preview that equals the whole text hashes the same bytes; reuse the
+		// first digest rather than hashing twice.
+		textHash := contentSHA(text)
+		previewHash := textHash
+		textIsPreview := text == preview
+		if !textIsPreview {
+			previewHash = contentSHA(preview)
+		}
+		manifestStmt.BindText(1, string(w.SessionID))
+		manifestStmt.BindInt64(2, int64(e.EntryIndex))
+		manifestStmt.BindInt64(3, int64(len(text)))
+		manifestStmt.BindText(4, textHash)
+		manifestStmt.BindInt64(5, int64(len(preview)))
+		manifestStmt.BindText(6, previewHash)
+		manifestStmt.BindInt64(7, int64(boolToInt(textIsPreview)))
+		manifestStmt.BindInt64(8, int64(chunks))
+		manifestStmt.BindInt64(9, c.CapturedAtMs)
+		if err := stepAndReset(manifestStmt); err != nil {
+			return out, fmt.Errorf("store full content write: insert durable prose manifest for %s entry %d: %w", w.SessionID, e.EntryIndex, err)
 		}
 		for offset, idx := 0, 0; offset < len(text); idx++ {
 			if err := ctx.Err(); err != nil {
@@ -318,9 +345,15 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 			}
 			end := min(offset+fullContentChunkBytes, len(text))
 			chunk := text[offset:end]
-			err = sqlitex.ExecuteTransient(conn, `INSERT INTO session_entry_full_content_chunks VALUES(?,?,?,?,?,?,?)`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID), e.EntryIndex, idx, offset, len(chunk), contentSHA(chunk), []byte(chunk)}})
-			if err != nil {
-				return out, err
+			chunkStmt.BindText(1, string(w.SessionID))
+			chunkStmt.BindInt64(2, int64(e.EntryIndex))
+			chunkStmt.BindInt64(3, int64(idx))
+			chunkStmt.BindInt64(4, int64(offset))
+			chunkStmt.BindInt64(5, int64(len(chunk)))
+			chunkStmt.BindText(6, contentSHA(chunk))
+			chunkStmt.BindBytes(7, []byte(chunk))
+			if err := stepAndReset(chunkStmt); err != nil {
+				return out, fmt.Errorf("store full content write: insert durable prose chunk for %s entry %d chunk %d: %w", w.SessionID, e.EntryIndex, idx, err)
 			}
 			offset = end
 		}

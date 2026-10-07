@@ -60,7 +60,8 @@ type NativeGenerationActivation struct {
 }
 
 // NativeGenerationActivator stages and activates one managed generation in ONE
-// transaction after fsyncing its files, repairs the exported metadata, and
+// transaction after staging its files (content blobs written, the manifest and
+// the directory fsynced), repairs the exported metadata, and
 // reconciles any interrupted activation. The production store implements it.
 // The outcome distinguishes newly-committed, already-committed, and
 // not-committed invocations so per-invocation counts stay truthful; a
@@ -71,8 +72,9 @@ type NativeGenerationActivator interface {
 }
 
 // NativeGenerationStager prepares one managed generation's files ahead of the
-// activation, so independent sessions can write and fsync their content in
-// parallel while only the install and database commit stay on the serialized
+// activation, so independent sessions can write their content in
+// parallel while only the manifest fsync, the install and the database commit
+// stay on the serialized
 // writer. Preparation records no activation intent and installs nothing: the
 // returned handle is inert until passed to a NativeGenerationPreparedActivator,
 // so a candidate the pipeline later refuses can never be recovered into

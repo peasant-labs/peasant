@@ -476,6 +476,19 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Cross-compile for Windows
+        run: nix develop -c env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+
+      # `go build` does not typecheck _test.go files, so a Windows-only test file
+      # that stops compiling passes the step above unnoticed. That is how a store
+      # test referencing syscall.Stat_t - a type Windows does not have - reached
+      # this branch: it broke no build and ran in no job. `go vet` does typecheck
+      # test files, and the repository's own vet wrapper already keeps the
+      # vendored driver's audited uintptr conversions exempt, so it is reused
+      # here with the target set rather than reimplemented. About 17 seconds.
+      - name: Typecheck Windows test files
+        run: nix develop -c env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 ./scripts/vet-go.sh
+
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
   # ~15 minutes, so it gets its own job and its own budget in parallel with
@@ -737,3 +750,61 @@ jobs:
             exit 1
           fi
           echo "OK: real pnpm-built dashboard present at web/out/index.html"
+
+  windows:
+    name: windows-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build every package
+        run: go build ./...
+
+      # internal/proc is the console-window helper and is green here in full.
+      - name: Run focused tests
+        run: go test ./internal/defaults/... ./internal/config/... ./internal/proc/...
+
+      # The Windows-specific behaviour this branch adds is named explicitly
+      # instead of running these packages whole. internal/ingest has pre-existing
+      # Windows failures unrelated to this work (80 at the time of writing, in the
+      # OpenCode and filesystem suites), so running all of it would report that
+      # unrelated breakage rather than guarding drive-letter slug decoding, the
+      # absolute-path form check, worktree containment and the debug/ prune.
+      #
+      # `go build ./...` does not typecheck _test.go files, so a Windows test
+      # file that stops compiling would pass it unnoticed. `go vet` does typecheck
+      # test files; run the repository's own wrapper, which keeps the vendored
+      # driver's audited uintptr conversions exempt. This runs on every pull
+      # request, unlike the cross-compile lane's release-gated copy.
+      - name: Typecheck Windows test files
+        shell: bash
+        run: ./scripts/vet-go.sh --skip-sqlite-audit
+
+      # One `go test` command for every package: the default pwsh shell returns
+      # the last command's exit code, so two commands here would discard the
+      # first package's failure and let the job report green over a red test.
+      # A single invocation reports every failing package and exits non-zero.
+      - name: Run the Windows-specific tests
+        run: |
+          go test ./internal/ingest/ ./internal/api/ ./cmd/peasant/ ./internal/store/ ./internal/testutil/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestDecodeClaudeProjectDir|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno|TestReplaceExecutable|TestSweepUpgradeSidecar|TestTerminateProcessStopsAChild|TestPidFilePath|TestBackgroundProcAttr|TestSessionLockAcrossProcesses|TestMemFS|TestPlatformAbsPath'
+
+      - name: Build peasant.exe and print its version
+        run: |
+          go build -o peasant.exe ./cmd/peasant
+          ./peasant.exe version

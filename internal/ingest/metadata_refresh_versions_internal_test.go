@@ -116,6 +116,41 @@ func TestMetadataRefreshFollowsTheDeclaredVersionSet(t *testing.T) {
 	}
 }
 
+// TestReadableMetadataSchemaVersionsMatchTheRefreshRule pins the exported set
+// the store binds: it is exactly the versions this build reads as current, so a
+// store-side predicate cannot accept a version the refresh rule would rebuild,
+// or refuse one it would keep. A version this build does not write is never
+// current, even when it is declared refresh-free for a later build.
+func TestReadableMetadataSchemaVersionsMatchTheRefreshRule(t *testing.T) {
+	readable := ReadableMetadataSchemaVersions()
+	set := make(map[int]bool, len(readable))
+	for _, version := range readable {
+		set[version] = true
+	}
+	current := int(CurrentSchemaVersion)
+	for version := 1; version <= current; version++ {
+		recorded, err := newMetadataSchemaVersion(version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := !metadataNeedsRefresh(recorded, CurrentSchemaVersion)
+		if got := MetadataSchemaVersionIsCurrent(version); got != want {
+			t.Fatalf("version %d: predicate = %v, want %v (the refresh rule)", version, got, want)
+		}
+		if set[version] != want {
+			t.Fatalf("version %d: readable set = %v, want %v (the refresh rule)", version, set[version], want)
+		}
+	}
+	for _, version := range []int{-1, 0, current + 1} {
+		if MetadataSchemaVersionIsCurrent(version) {
+			t.Fatalf("version %d reads as current; only a version this build writes and reads as it stands may", version)
+		}
+		if set[version] {
+			t.Fatalf("version %d is in the readable set; only a version this build writes and reads as it stands may be", version)
+		}
+	}
+}
+
 // TestMetadataSchemaVersionRefusesAnImpossibleRecording pins the boundary: a
 // number no build ever wrote is refused where it enters, rather than comparing
 // as older than every version and quietly forcing a rebuild.

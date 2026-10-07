@@ -40,8 +40,9 @@ var webCapabilitiesMatrixYAML []byte
 
 // webCapabilityMatrixFixtures is the real-binary matrix corpus.
 type webCapabilityMatrixFixtures struct {
-	DeclaredRows int                       `yaml:"declared_rows"`
-	Cases        []webCapabilityMatrixCase `yaml:"cases"`
+	DeclaredRows  int                       `yaml:"declared_rows"`
+	RequiredCases []string                  `yaml:"required_cases"`
+	Cases         []webCapabilityMatrixCase `yaml:"cases"`
 }
 
 // webCapabilityMatrixCase is one invocation of the built binary and its expected
@@ -85,6 +86,9 @@ func loadWebCapabilityMatrixFixtures(t *testing.T) webCapabilityMatrixFixtures {
 			fixtures.DeclaredRows, len(fixtures.Cases), expectedWebCapabilityMatrixRows,
 		)
 	}
+	if len(fixtures.RequiredCases) == 0 {
+		t.Fatal("validate web-capabilities matrix fixtures: required_cases is empty, so no case is protected from deletion")
+	}
 	names := make(map[string]struct{}, len(fixtures.Cases))
 	for _, c := range fixtures.Cases {
 		if strings.TrimSpace(c.Name) == "" {
@@ -94,6 +98,13 @@ func loadWebCapabilityMatrixFixtures(t *testing.T) webCapabilityMatrixFixtures {
 			t.Fatalf("validate web-capabilities matrix fixtures: duplicate case %q", c.Name)
 		}
 		names[c.Name] = struct{}{}
+	}
+	// Named deletion protection: a count guard cannot say WHICH case vanished, and
+	// the case this file calls the forwarding proof is the one worth naming.
+	for _, required := range fixtures.RequiredCases {
+		if _, ok := names[required]; !ok {
+			t.Fatalf("validate web-capabilities matrix fixtures: required case %q is missing", required)
+		}
 	}
 	return fixtures
 }
@@ -174,7 +185,11 @@ func TestWebCapabilitiesMatrix(t *testing.T) {
 		if !strings.Contains(string(out), "peasant web stop") || strings.Contains(string(out), "Usage:") {
 			t.Fatalf("background `peasant web start` output = %q, want the actionable refusal without usage text", out)
 		}
-		pidFile := filepath.Join(stateHome, "peasant", fmt.Sprintf("web:%d.pid", port))
+		// Track pidFilePath's base name so a future rename cannot leave this
+		// assertion checking a path nothing writes. Join the child's stateHome
+		// with that base name rather than calling pidFilePath, which reads this
+		// test process's state dir.
+		pidFile := filepath.Join(stateHome, "peasant", filepath.Base(pidFilePath(port)))
 		if _, statErr := os.Stat(pidFile); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("background `peasant web start` wrote %s for a server it did not start (stat error: %v)", pidFile, statErr)
 		}
@@ -195,9 +210,9 @@ var (
 // built once per test binary (through the shared peasantCLIOnce) so the matrix
 // drives the real production entry point rather than an in-process server.
 //
-// The existing PEASANT_BIN seam is honored first: when a caller (or the gate)
-// has already produced a CLI, that path is used instead of building, so a suite
-// that pre-builds once pays for the build once, not once per test binary.
+// The existing PEASANT_BIN seam is honored first: when a caller has already
+// produced a CLI, that path is used instead of building, so a suite that
+// pre-builds once pays for the build once, not once per test binary.
 func buildPeasantMatrixBinary(t *testing.T) string {
 	t.Helper()
 	if injected := strings.TrimSpace(os.Getenv(defaults.EnvPeasantBin.String())); injected != "" {
@@ -213,8 +228,10 @@ func buildPeasantMatrixBinary(t *testing.T) string {
 		// -race=false is explicit: the matrix asserts the advertised
 		// capabilities of the production binary, not race coverage of it. The
 		// build flag is resolved by the no-race partition registry against this
-		// exec site.
-		cmd := exec.Command("go", "build", "-race=false", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant")
+		// exec site. -buildvcs=false keeps the build from stamping VCS, which
+		// mis-resolves in a linked worktree whose .git is a file; the matrix
+		// asserts advertised capabilities, not build provenance.
+		cmd := exec.Command("go", "build", "-race=false", "-buildvcs=false", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant")
 		if output, err := cmd.CombinedOutput(); err != nil {
 			peasantCLIErr = fmt.Errorf(
 				"build peasant binary for the web capabilities matrix failed.\n"+
@@ -316,8 +333,51 @@ func runBackgroundCase(t *testing.T, bin string, env []string, port int, experim
 	t.Cleanup(func() {
 		stop := exec.Command(bin, "web", "stop", "--port", strconv.Itoa(port))
 		stop.Env = env
-		_ = stop.Run()
+		out, err := stop.CombinedOutput()
+		if err != nil {
+			t.Errorf("`web stop --port %d` failed: %v (output: %s)", port, err, out)
+			return
+		}
+		stateHome := envValue(env, defaults.EnvXDGStateHome.String())
+		if stateHome == "" {
+			t.Errorf("the isolated env has no %s; the PID-file check cannot run", defaults.EnvXDGStateHome.String())
+		} else {
+			pidFile := filepath.Join(stateHome, "peasant", filepath.Base(pidFilePath(port)))
+			if _, statErr := os.Stat(pidFile); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("`web stop --port %d` left the PID file at %s (stat error: %v)", port, pidFile, statErr)
+			}
+		}
+		if !waitPortClosed(port) {
+			t.Errorf("`web stop --port %d` left the server answering on 127.0.0.1:%d", port, port)
+		}
 	})
+}
+
+// envValue returns the value of key in a KEY=VALUE environment slice.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, kv := range env {
+		if value, ok := strings.CutPrefix(kv, prefix); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+// waitPortClosed reports whether nothing answers on the loopback port within a
+// bounded retry.
+func waitPortClosed(port int) bool {
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
+		if err != nil {
+			return true
+		}
+		_ = conn.Close()
+		time.Sleep(200 * time.Millisecond)
+	}
+	return false
 }
 
 // capabilitiesResponse captures the observable result of one capabilities fetch.

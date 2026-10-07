@@ -109,14 +109,14 @@ jobs:
         run: make e2e-schema-parity
 
       # Pin/assert the CI podman version for local<->CI parity. The pinned amd64
-      # Blacksmith runner ships podman 4.9.x (apt on ubuntu-24.04). The stderr
-      # object-count regression and the status=dead filter break are both
-      # 4.9.x-shaped, and local podman 5.x does NOT reproduce them — so a
-      # runner-image bump that changes podman must fail loudly here and force a
-      # lockstep update of docs/e2e.md's local repro.
+      # Blacksmith runner now ships podman 5.8.x. The stderr object-count
+      # regression and the status=dead filter break were both shaped by the older
+      # 4.9.x runner image (see docs/e2e.md); the real fixes are version-immune,
+      # but a runner-image bump that changes podman must still fail loudly here
+      # and force a lockstep update of docs/e2e.md's local repro.
       - name: Verify and pin podman version (local<->CI parity)
         env:
-          EXPECTED_PODMAN_MAJOR_MINOR: "4.9"
+          EXPECTED_PODMAN_MAJOR_MINOR: "5.8"
         run: |
           set -euo pipefail
           podman --version
@@ -132,7 +132,7 @@ jobs:
       # Status set is TERMINAL + NON-RACY: `exited` + `stopped` are the podman
       # terminal states a finished sibling lands in. `created` (a sibling's brief
       # created-window) and `running` (a live sibling) are deliberately EXCLUDED.
-      # NB: do NOT use `status=dead` — it is a Docker state that podman 4.9.3
+      # NB: do NOT use `status=dead` — it is a Docker state that podman
       # REJECTS ("unknown container state: dead"), which broke this cleanup step
       # (the piped command erred → no-op → stale containers were never reaped).
       - name: Clean up stale e2e podman containers

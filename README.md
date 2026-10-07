@@ -8,8 +8,9 @@ them through a web API.
 ## Installation
 
 Peasant ships a single statically linked binary (no runtime dependencies) for
-**linux** and **macOS** on **amd64** and **arm64**. Every release attaches
-`.tar.gz` archives, `.deb`/`.rpm` packages, and a `checksums.txt` to its
+**linux** and **macOS** on **amd64** and **arm64**, and for **Windows** on
+**amd64**. Every release attaches `.tar.gz` archives, a Windows `.zip` and a bare
+Windows `.exe`, `.deb`/`.rpm` packages, and a `checksums.txt` to its
 [GitHub Release](https://github.com/peasant-labs/peasant/releases).
 
 | Platform | Quickest path | Guide |
@@ -20,6 +21,7 @@ Peasant ships a single statically linked binary (no runtime dependencies) for
 | Arch Linux | GitHub release tarball (`linux`) | [docs/install/arch.md](docs/install/arch.md) |
 | macOS | GitHub release tarball (`darwin`) | [docs/install/macos.md](docs/install/macos.md) |
 | Nix | `nix profile install github:peasant-labs/peasant#peasant` | [docs/install/nix.md](docs/install/nix.md) |
+| Windows | `Expand-Archive peasant_<ver>_windows_amd64.zip` (or the bare `.exe`) | [docs/install/windows.md](docs/install/windows.md) |
 | WSL | install as the underlying distro, then read the caveats | [docs/install/wsl.md](docs/install/wsl.md) |
 
 Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against

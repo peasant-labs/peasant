@@ -316,7 +316,7 @@ func seedTestSession(t *testing.T, ctx context.Context, s *store.Store, sessionI
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/session.jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/session.jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}

@@ -207,6 +207,14 @@ func (a readOnlyGenerationArtifacts) ReadPriorEvidence(ctx context.Context, id s
 	return a.inner.ReadPriorEvidence(ctx, id, generationID)
 }
 
+func (a readOnlyGenerationArtifacts) GenerationSize(ctx context.Context, id schema.SessionID, generationID string) (GenerationFootprint, error) {
+	return a.inner.GenerationSize(ctx, id, generationID)
+}
+
+func (a readOnlyGenerationArtifacts) ListGenerationDirectories(ctx context.Context, id schema.SessionID) ([]string, error) {
+	return a.inner.ListGenerationDirectories(ctx, id)
+}
+
 // prepareReadOnlyConn pins the read-only guarantees on every pooled connection.
 // It deliberately omits the write-side PRAGMAs (journal_mode, synchronous,
 // mmap_size) that preparePragmas sets for the read-write store.

@@ -146,10 +146,20 @@ func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, m
 		if err != nil {
 			return err
 		}
+		// filepath.Rel yields native separators from the real filesystem
+		// (backslash on Windows) but forward slashes from the MemFS test double
+		// this package's tests use, so the "under debug/" containment test is
+		// made on a normalized copy. rel itself stays native, because `wanted`
+		// is keyed by the native rel produced by the staging walk above and
+		// `stale` carries real filesystem paths for RemoveAll. Without this, a
+		// real Windows walk yields "debug\<name>", the prefix never matches,
+		// every file below debug/ takes the not-parent-owned branch, and
+		// obsolete debug artifacts are never pruned.
+		relSlash := filepath.ToSlash(rel)
 		if rel == defaults.DirSubagents.String() {
 			return fs.SkipDir
 		}
-		if rel != "." && !strings.HasPrefix(rel, sessionID+"--") && rel != defaults.DirDebug.String() && !strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
+		if rel != "." && !strings.HasPrefix(rel, sessionID+"--") && rel != defaults.DirDebug.String() && !strings.HasPrefix(relSlash, defaults.DirDebug.String()+"/") {
 			if entry.IsDir() {
 				return fs.SkipDir
 			}

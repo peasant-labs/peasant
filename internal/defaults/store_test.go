@@ -33,10 +33,10 @@ func TestResolveOutputBasePath_HonorsXDGDataHome(t *testing.T) {
 // change from the previous hardcoded default).
 func TestResolveOutputBasePath_DefaultsToHome(t *testing.T) {
 	t.Setenv(defaults.EnvXDGDataHome.String(), "")
-	t.Setenv("HOME", "/home/example")
+	home := setTestHome(t)
 
 	got := string(defaults.ResolveOutputBasePath())
-	want := filepath.Join("/home/example", ".local", "share", string(defaults.AppName), defaults.OutputSyncSubdir)
+	want := filepath.Join(home, ".local", "share", string(defaults.AppName), defaults.OutputSyncSubdir)
 	if got != want {
 		t.Errorf("ResolveOutputBasePath() with XDG unset = %q, want %q", got, want)
 	}

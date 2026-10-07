@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -58,11 +57,11 @@ func inodeOf(t *testing.T, path string) uint64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
+	ino, ok := fileIdentity(info)
 	if !ok {
 		t.Skip("inode identity is unavailable on this platform")
 	}
-	return stat.Ino
+	return ino
 }
 
 func requireNoIntent(t *testing.T, s *Store, sid schema.SessionID) {

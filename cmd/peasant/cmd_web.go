@@ -292,9 +292,7 @@ func spawnWebServer(spawn webServerSpawn) (pid int, pidFile string, err error) {
 	cmd := exec.Command(exe, spawn.args()...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true, // detach from terminal
-	}
+	cmd.SysProcAttr = backgroundProcAttr()
 
 	if err := cmd.Start(); err != nil {
 		return 0, "", fmt.Errorf("failed to start background server: %w", err)
@@ -410,8 +408,9 @@ func webStartCancellationError(url string, err error) error {
 	return fmt.Errorf("web start canceled while waiting for the server at %s to answer its health check: %w; the server keeps running in the background - stop it with 'peasant web stop' or open %s when it is ready", url, err, url)
 }
 
-// stopWeb sends a shutdown request to the running server.
-// Falls back to SIGTERM via PID file if the HTTP request fails.
+// stopWeb sends a shutdown request to the running server. If the HTTP request
+// fails it falls back to stopping the process named by the PID file directly,
+// by whichever mechanism the platform offers (see terminateProcess).
 func stopWeb(port int) error {
 	pidFile := pidFilePath(port)
 
@@ -426,13 +425,22 @@ func stopWeb(port int) error {
 			os.Remove(pidFile)
 			return nil
 		}
-		fmt.Fprintf(os.Stderr, "Unexpected response: %d, falling back to SIGTERM\n", resp.StatusCode)
+		fmt.Fprintf(os.Stderr, "Unexpected response: %d, falling back to %s\n", resp.StatusCode, terminateActionName)
 	} else {
-		fmt.Fprintf(os.Stderr, "HTTP shutdown failed: %v, falling back to SIGTERM\n", err)
+		fmt.Fprintf(os.Stderr, "HTTP shutdown failed: %v, falling back to %s\n", err, terminateActionName)
 	}
 
-	// Fallback: read PID file and send SIGTERM
+	// Fallback: read the PID file and stop the process directly. A server
+	// started by a build older than the web-<port>.pid rename wrote
+	// web:<port>.pid; try that name before giving up.
 	data, readErr := os.ReadFile(pidFile)
+	if readErr != nil {
+		if legacy := legacyPIDFilePath(port); legacy != pidFile {
+			if legacyData, legacyErr := os.ReadFile(legacy); legacyErr == nil {
+				data, readErr, pidFile = legacyData, nil, legacy
+			}
+		}
+	}
 	if readErr != nil {
 		return fmt.Errorf("cannot contact server and no PID file at %s: %w", pidFile, readErr)
 	}
@@ -445,17 +453,35 @@ func stopWeb(port int) error {
 		os.Remove(pidFile)
 		return fmt.Errorf("process %d not found: %w", pid, findErr)
 	}
-	if sigErr := proc.Signal(syscall.SIGTERM); sigErr != nil {
+	if sigErr := terminateProcess(proc); sigErr != nil {
 		os.Remove(pidFile)
-		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, sigErr)
+		return fmt.Errorf("failed to send %s to PID %d: %w", terminateActionName, pid, sigErr)
 	}
-	fmt.Printf("Sent SIGTERM to PID %d\n", pid)
+	fmt.Printf("Sent %s to PID %d\n", terminateActionName, pid)
 	os.Remove(pidFile)
 	return nil
 }
 
+// pidFilePath names the file holding the backgrounded server's process id. The
+// port is separated by a dash rather than a colon: Windows forbids a colon in a
+// path component, where it instead opens an NTFS alternate data stream, so a
+// colon here left `web start` unable to write the file and `web stop` unable to
+// find it.
+//
+// The state directory is resolved at call time, not from the package-init
+// defaults.State: production resolves identically, and a test that redirects
+// XDG_STATE_HOME (TestMain) gets a hermetic path instead of the developer's real
+// state directory.
 func pidFilePath(port int) string {
-	return filepath.Join(defaults.State.DirPath.String(), fmt.Sprintf("web:%d.pid", port))
+	return filepath.Join(defaults.ResolveStateDirPath().String(), fmt.Sprintf("web-%d.pid", port))
+}
+
+// legacyPIDFilePath is the PID file name used before the web-<port>.pid rename
+// ("web:<port>.pid"). It is read only, so `web stop` can still stop a server
+// started by an older build; it is never written. The state directory is
+// resolved at call time for the same reason as pidFilePath.
+func legacyPIDFilePath(port int) string {
+	return filepath.Join(defaults.ResolveStateDirPath().String(), fmt.Sprintf("web:%d.pid", port))
 }
 
 // configureVerboseLogging sets the default slog level to Debug,

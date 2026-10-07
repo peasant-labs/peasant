@@ -2,8 +2,20 @@
 # Keep every analyzer for owned code and the driver's higher-level packages.
 # The native driver retains upstream's audited modernc uintptr conversions,
 # which Go's unsafeptr analyzer cannot distinguish from Go heap pointers.
+#
+# --skip-sqlite-audit runs only the go vet passes. Callers on a host without
+# python3 (the Windows CI runner) use it; the SQLite source audit is covered by
+# the Linux gate.
 set -euo pipefail
-python3 scripts/check-sqlite-fork.py
+
+skip_sqlite_audit=false
+if [ "${1:-}" = "--skip-sqlite-audit" ]; then
+  skip_sqlite_audit=true
+fi
+
+if [ "${skip_sqlite_audit}" = false ]; then
+  python3 scripts/check-sqlite-fork.py
+fi
 native_package='github.com/peasant-labs/peasant/third_party/zombiezen-sqlite'
 listed="$(go list ./...)"
 default_packages=()

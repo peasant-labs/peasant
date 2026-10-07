@@ -275,6 +275,10 @@ type Store struct {
 	// index_coverage.go. Production leaves it nil, and SessionsWithoutEntries
 	// then runs the real SQLite query.
 	sessionMembershipChunk sessionMembershipChunkQuery
+	// reclaimSeam is a nil production hook a crash-recovery test sets to stop
+	// the reclaim after its row transaction commits and before any generation
+	// directory is removed. It proves the row-first ordering is crash-safe.
+	reclaimSeam func(stage string) error
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,

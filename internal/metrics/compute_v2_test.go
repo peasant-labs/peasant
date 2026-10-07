@@ -401,7 +401,7 @@ func seedSession(t *testing.T, ctx context.Context, s *store.Store, sessionID st
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/session.jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/session.jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}
@@ -451,7 +451,7 @@ func seedSessionWithDate(t *testing.T, ctx context.Context, s *store.Store, sess
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/session.jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/session.jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}

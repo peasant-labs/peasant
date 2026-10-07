@@ -401,6 +401,9 @@ func (p *Pipeline) queuedForNativeChange(session DiscoveredSession) bool {
 // a newer clock on a row with no stored fingerprint that could overrule it.
 // Selection does not read the pair for those.
 func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry, discovered []DiscoveredSession) []DiffEntry {
+	// A fresh set each run: the index inventory reads it to skip candidates
+	// this pass owns, and a reused pipeline must not carry stale entries.
+	p.pairRepairOwned = make(map[SessionID]bool)
 	if p.metricsStore == nil {
 		return entries
 	}
@@ -423,6 +426,11 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	})
 	var repaired []SessionID
 	for i, outcome := range outcomes {
+		if outcome.damaged {
+			// The pair is not a readable index input. Record it so the index
+			// inventory does not re-read it and repeat the acquisition failure.
+			p.pairRepairOwned[ids[i]] = true
+		}
 		switch outcome.kind {
 		case pairRepairMarkQueued:
 			entries[outcome.queuedIndex].pairRepair = true
@@ -455,6 +463,12 @@ type pairRepairOutcome struct {
 	queuedIndex  int
 	metadataPath string
 	entry        DiffEntry
+	// damaged reports that the candidate's saved pair is missing or damaged,
+	// whether or not this pass found a native source to repair it from. The
+	// index inventory must not re-attempt such a candidate: its pair is not a
+	// readable index input, and the pair-repair pass owns it (re-ingesting from
+	// native when a source is available, reporting it once when not).
+	damaged bool
 }
 
 // pairRepairDecision decides one repair candidate. It only reads entries, the
@@ -479,7 +493,7 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		// damage verdict onto the existing entry so a database-first no-op
 		// cannot leave the damaged pair behind.
 		metadataPath, _ := p.storedMetadataPath(ctx, sid, snap)
-		return pairRepairOutcome{kind: pairRepairMarkQueued, queuedIndex: i, metadataPath: metadataPath}
+		return pairRepairOutcome{kind: pairRepairMarkQueued, queuedIndex: i, metadataPath: metadataPath, damaged: true}
 	}
 	if !p.pairNeedsRepairIn(ctx, sid, snap) {
 		return pairRepairOutcome{}
@@ -490,22 +504,22 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
 		if reconstructed == nil {
 			p.reportPairRepairUnavailable(sid, "")
-			return pairRepairOutcome{}
+			return pairRepairOutcome{damaged: true}
 		}
 		session = *reconstructed
 		if !p.pairRepairInScope(session, startMs) {
-			return pairRepairOutcome{}
+			return pairRepairOutcome{damaged: true}
 		}
 	} else if !p.pairRepairInScope(session, 0) {
-		return pairRepairOutcome{}
+		return pairRepairOutcome{damaged: true}
 	}
 	if !p.pairSourceAvailable(session) {
 		p.reportPairRepairUnavailable(sid, session.SourcePath.String())
-		return pairRepairOutcome{}
+		return pairRepairOutcome{damaged: true}
 	}
 	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
 		Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
-	}}
+	}, damaged: true}
 }
 
 // pairRepairTargets returns reindex targets for stored sessions whose saved

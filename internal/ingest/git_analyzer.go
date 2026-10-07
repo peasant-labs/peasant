@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/proc"
 )
 
 // Default streaming parameters for ExecGitDiffAnalyzer.
@@ -74,6 +76,7 @@ func (g *ExecGitDiffAnalyzer) maxCommits() int {
 func (g *ExecGitDiffAnalyzer) GetFileAtCommit(ctx context.Context, repoPath, file, commit string) ([]byte, error) {
 	ref := commit + ":" + file
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "show", ref)
+	proc.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git show %s in %s: %w", ref, repoPath, err)
@@ -89,14 +92,16 @@ func (g *ExecGitDiffAnalyzer) GetSessionCommits(ctx context.Context, repoPath st
 	ctx, cancel := context.WithTimeout(ctx, logTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx,
+	listCmd := exec.CommandContext(ctx,
 		"git", "-C", repoPath, "log",
 		"--since="+since.Format(time.RFC3339),
 		"--until="+until.Format(time.RFC3339),
 		"--diff-filter=M",
 		"--pretty=format:%H",
 		"--reverse",
-	).Output()
+	)
+	proc.HideConsoleWindow(listCmd)
+	out, err := listCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git log (hashes) in %s: %w", repoPath, err)
 	}
@@ -138,6 +143,7 @@ func (g *ExecGitDiffAnalyzer) GetSessionCommitsWithMetadata(ctx context.Context,
 		"--pretty=format:%H%n%an%n%ae%n%aI%n%cI%n%s%n---",
 		"--reverse",
 	)
+	proc.HideConsoleWindow(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

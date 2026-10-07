@@ -7,6 +7,32 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-04
+
+### Changed
+- Managed-generation staging writes content blobs without a per-file sync and
+  verifies every blob when a binding re-reads it, while the manifest and the
+  directory stay durable. Staging a 1000-blob generation dropped from 1.40 s to
+  0.067 s at 16 writers (19.09 s to 0.078 s at one writer), and a blob torn by
+  a power loss refuses recovery instead of activating unservable content (#554).
+
+### Fixed
+- `peasant harvest index --dry-run` resolves the same managed-generation
+  harness targets a real run uses. On a store upgraded to managed generations
+  the forecast previously reported the retained baseline, planned a different
+  set of sessions than the real run, and emitted false "stored producer
+  revision is newer than this indexer's revision" refusals (#551).
+- The stale-index pass at the end of a harvest reports the stored sessions the
+  run's session selection left at an older index, or with an unfinished repair,
+  with the remedy. A selected-mode kickstart run previously left thousands of
+  stored sessions behind while the report showed only an "unchanged" total
+  (#552).
+- Publication readiness compares a stored capture's metadata schema version
+  against the declared refresh-free set instead of exact equality, so a schema
+  bump that adds no required field no longer marks every bound capture as
+  needing a re-ingest. An ordinary harvest previously re-extracted and
+  re-indexed thousands of unchanged sessions after the 10→11 bump (#555).
+
 ## [0.8.1] - 2026-10-04
 
 ### Changed
@@ -602,6 +628,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
 [0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1
 [0.8.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.0
 [0.7.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.7.0-rc1
