@@ -828,6 +828,17 @@ See [docs/e2e.md](docs/e2e.md) for the harness walkthrough,
 meta-tests in `make check`, and this podman harness). The always-on fixture
 meta-tests DO run inside `make check`.
 
+### Cross-platform builds
+
+Peasant builds one module for Linux, macOS, and Windows. The build-tag split, the path rules,
+and the Windows-specific behavior are in [`docs/cross-platform.md`](docs/cross-platform.md).
+Check a Windows build from a Linux workstation before you push:
+
+```bash
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 ./scripts/vet-go.sh
+```
+
 ### Web build & lockfiles
 
 `web/package.json` is the source of truth for web dependencies, and
