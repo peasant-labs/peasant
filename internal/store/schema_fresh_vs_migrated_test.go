@@ -2,8 +2,8 @@ package store
 
 import (
 	"bytes"
-	_ "embed"
 	"context"
+	_ "embed"
 	"fmt"
 	"path/filepath"
 	"strings"

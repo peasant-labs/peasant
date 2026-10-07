@@ -23,10 +23,10 @@ var migrationV62YAML []byte
 var migrationV62ManifestYAML []byte
 
 type v62GenerationSeed struct {
-	ID            string  `yaml:"id"`
-	MetadataJSON  string  `yaml:"metadataJson"`
-	InstalledAtMs int64   `yaml:"installedAtMs"`
-	ActivatedAtMs *int64  `yaml:"activatedAtMs"`
+	ID            string `yaml:"id"`
+	MetadataJSON  string `yaml:"metadataJson"`
+	InstalledAtMs int64  `yaml:"installedAtMs"`
+	ActivatedAtMs *int64 `yaml:"activatedAtMs"`
 }
 
 type v62ExpectedStats struct {
@@ -63,16 +63,16 @@ type v62AnnotationRow struct {
 }
 
 type v62EvidenceRow struct {
-	Name                     string  `yaml:"name"`
-	SessionID                string  `yaml:"sessionId"`
-	GenerationID             string  `yaml:"generationId"`
-	Kind                     string  `yaml:"kind"`
-	TargetState              string  `yaml:"targetState"`
-	TargetLocalID            *string `yaml:"targetLocalId"`
-	Evidence                 string  `yaml:"evidence"`
-	Anchor                   *string `yaml:"anchor"`
-	ExpectedAnchorKind       *string `yaml:"expectedAnchorKind"`
-	ExpectedAnchorEntryRef   *string `yaml:"expectedAnchorEntryRef"`
+	Name                      string  `yaml:"name"`
+	SessionID                 string  `yaml:"sessionId"`
+	GenerationID              string  `yaml:"generationId"`
+	Kind                      string  `yaml:"kind"`
+	TargetState               string  `yaml:"targetState"`
+	TargetLocalID             *string `yaml:"targetLocalId"`
+	Evidence                  string  `yaml:"evidence"`
+	Anchor                    *string `yaml:"anchor"`
+	ExpectedAnchorKind        *string `yaml:"expectedAnchorKind"`
+	ExpectedAnchorEntryRef    *string `yaml:"expectedAnchorEntryRef"`
 	ExpectedAnchorRevisionRef *string `yaml:"expectedAnchorRevisionRef"`
 }
 
@@ -82,43 +82,43 @@ type v62ExpectedRef struct {
 }
 
 type v62SegmentCase struct {
-	Name                 string           `yaml:"name"`
-	SessionID            string           `yaml:"sessionId"`
-	GenerationID         string           `yaml:"generationId"`
-	SegmentOrdinal       int              `yaml:"segmentOrdinal"`
-	LogicalSessionID     *string          `yaml:"logicalSessionId"`
-	PhysicalSourceID     string           `yaml:"physicalSourceId"`
-	CoordinateKind       string           `yaml:"coordinateKind"`
-	StartCoordinate      *int64           `yaml:"startCoordinate"`
-	EndExclusive         *int64           `yaml:"endExclusive"`
-	DecodedByteStart     *int64           `yaml:"decodedByteStart"`
-	DecodedByteEndExclusive *int64        `yaml:"decodedByteEndExclusive"`
-	Inclusion            string           `yaml:"inclusion"`
-	CapturedRefsJSON     string           `yaml:"capturedRefsJson"`
-	ExpectedRefs         []v62ExpectedRef `yaml:"expectedRefs"`
+	Name                    string           `yaml:"name"`
+	SessionID               string           `yaml:"sessionId"`
+	GenerationID            string           `yaml:"generationId"`
+	SegmentOrdinal          int              `yaml:"segmentOrdinal"`
+	LogicalSessionID        *string          `yaml:"logicalSessionId"`
+	PhysicalSourceID        string           `yaml:"physicalSourceId"`
+	CoordinateKind          string           `yaml:"coordinateKind"`
+	StartCoordinate         *int64           `yaml:"startCoordinate"`
+	EndExclusive            *int64           `yaml:"endExclusive"`
+	DecodedByteStart        *int64           `yaml:"decodedByteStart"`
+	DecodedByteEndExclusive *int64           `yaml:"decodedByteEndExclusive"`
+	Inclusion               string           `yaml:"inclusion"`
+	CapturedRefsJSON        string           `yaml:"capturedRefsJson"`
+	ExpectedRefs            []v62ExpectedRef `yaml:"expectedRefs"`
 }
 
 type v62ExpectedRecord struct {
-	Ordinal               int     `yaml:"ordinal"`
-	NativeID              string  `yaml:"nativeId"`
-	Kind                  string  `yaml:"kind"`
-	SourceEntryRef        string  `yaml:"sourceEntryRef"`
-	SourceType            string  `yaml:"sourceType"`
-	SourceMessageRole     *string `yaml:"sourceMessageRole"`
-	AttachmentTurnIndex   *int    `yaml:"attachmentTurnIndex"`
-	AttachmentToolCallID  *string `yaml:"attachmentToolCallId"`
-	CustomType            *string `yaml:"customType"`
-	Data                  *string `yaml:"data"`
+	Ordinal              int     `yaml:"ordinal"`
+	NativeID             string  `yaml:"nativeId"`
+	Kind                 string  `yaml:"kind"`
+	SourceEntryRef       string  `yaml:"sourceEntryRef"`
+	SourceType           string  `yaml:"sourceType"`
+	SourceMessageRole    *string `yaml:"sourceMessageRole"`
+	AttachmentTurnIndex  *int    `yaml:"attachmentTurnIndex"`
+	AttachmentToolCallID *string `yaml:"attachmentToolCallId"`
+	CustomType           *string `yaml:"customType"`
+	Data                 *string `yaml:"data"`
 }
 
 type v62SectionCase struct {
-	Name             string              `yaml:"name"`
-	SessionID        string              `yaml:"sessionId"`
-	GenerationID     string              `yaml:"generationId"`
-	PartitionID      int                 `yaml:"partitionId"`
-	EarlierState     *string             `yaml:"earlierState"`
-	NativeMetadata   *string             `yaml:"nativeMetadata"`
-	ExpectedRecords  []v62ExpectedRecord `yaml:"expectedRecords"`
+	Name            string              `yaml:"name"`
+	SessionID       string              `yaml:"sessionId"`
+	GenerationID    string              `yaml:"generationId"`
+	PartitionID     int                 `yaml:"partitionId"`
+	EarlierState    *string             `yaml:"earlierState"`
+	NativeMetadata  *string             `yaml:"nativeMetadata"`
+	ExpectedRecords []v62ExpectedRecord `yaml:"expectedRecords"`
 }
 
 type v62Fixtures struct {

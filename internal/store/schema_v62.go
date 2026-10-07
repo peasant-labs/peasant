@@ -36,6 +36,7 @@ const BodyRowIDBase = 1 << 50
 //     round-trip).
 //   - annotation_target_entries is rebuilt without its session_entries
 //     foreign key; the insert-time existence check replaces the key.
+//
 // The v61 relationship-evidence target index is recreated after its table
 // rebuild, and the annotations_with_target view is recreated in its v41 form.
 //
@@ -52,6 +53,7 @@ const BodyRowIDBase = 1 << 50
 //     pointer counts every generation as non-active). Pending intents and
 //     staged directories are files, so the flag does not claim them; peasant
 //     migrate Phase 1 drains them.
+//
 // The new search index starts empty on purpose: bodies index through their
 // triggers going forward, and search consolidation rebuilds over the union
 // view once every session is converted.
