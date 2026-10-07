@@ -22,9 +22,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// defaultDBPath returns the default SQLite database path.
+// defaultDBPath returns the default SQLite database path. The state directory
+// is resolved at call time, so a test that redirects XDG_STATE_HOME gets a
+// hermetic path, matching pidFilePath.
 func defaultDBPath() string {
-	return filepath.Join(defaults.State.DirPath.String(), store.DefaultDBFileName)
+	return filepath.Join(defaults.ResolveStateDirPath().String(), store.DefaultDBFileName)
 }
 
 // buildDBCmd constructs the `peasant db` command tree.
