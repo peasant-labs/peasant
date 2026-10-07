@@ -30,6 +30,7 @@ type sourceHarnessFlagFixture struct {
 	StoredSession       string   `yaml:"stored_session"`
 	OtherSession        string   `yaml:"other_session"`
 	OtherTranscript     string   `yaml:"other_transcript"`
+	OtherSourceInConfig bool     `yaml:"other_source_in_config"`
 	DatabaseAbsent      bool     `yaml:"database_absent"`
 }
 
@@ -66,6 +67,7 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 				t.Setenv("HOME", dir)
 			}
 			source := filepath.Join(dir, "source")
+			otherRoot := filepath.Join(dir, "other-source")
 			if err := os.CopyFS(source, os.DirFS(filepath.Join("testdata", "strike"))); err != nil {
 				t.Fatalf("copy synthetic source fixture: %v", err)
 			}
@@ -77,7 +79,12 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 			}
 			output := filepath.Join(dir, "managed")
 			configPath := writeTestConfigFile(t, dir)
-			replace := strings.NewReplacer("{source}", source, "{output}", output, "{home}", dir)
+			replace := strings.NewReplacer(
+				"{source}", source,
+				"{other}", otherRoot,
+				"{output}", output,
+				"{home}", dir,
+			)
 			if fixture.ConfigYAML != "" {
 				if err := os.WriteFile(configPath, []byte(replace.Replace(fixture.ConfigYAML)), 0600); err != nil {
 					t.Fatalf("write fixture config: %v", err)
@@ -85,7 +92,6 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 			}
 			var otherPath string
 			if fixture.OtherSession != "" {
-				otherRoot := filepath.Join(dir, "other-source")
 				otherPath = filepath.Join(otherRoot, "-fixture-project", fixture.OtherSession+".jsonl")
 				if err := os.MkdirAll(filepath.Dir(otherPath), 0700); err != nil {
 					t.Fatal(err)
@@ -93,18 +99,20 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 				if err := os.WriteFile(otherPath, []byte(fixture.OtherTranscript), 0600); err != nil {
 					t.Fatal(err)
 				}
-				cfg, err := loadConfig(configPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				cfg.Sources.ClaudeCode.Enabled = true
-				cfg.Sources.ClaudeCode.Paths = []string{otherRoot}
-				data, err := yaml.Marshal(cfg)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(configPath, data, 0600); err != nil {
-					t.Fatal(err)
+				if !fixture.OtherSourceInConfig {
+					cfg, err := loadConfig(configPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg.Sources.ClaudeCode.Enabled = true
+					cfg.Sources.ClaudeCode.Paths = []string{otherRoot}
+					data, err := yaml.Marshal(cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(configPath, data, 0600); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			args := []string{"--config", configPath, "--data-dir", dir, "--config-dir", dir, "--state-dir", dir}
