@@ -467,15 +467,21 @@ func stopWeb(port int) error {
 // path component, where it instead opens an NTFS alternate data stream, so a
 // colon here left `web start` unable to write the file and `web stop` unable to
 // find it.
+//
+// The state directory is resolved at call time, not from the package-init
+// defaults.State: production resolves identically, and a test that redirects
+// XDG_STATE_HOME (TestMain) gets a hermetic path instead of the developer's real
+// state directory.
 func pidFilePath(port int) string {
-	return filepath.Join(defaults.State.DirPath.String(), fmt.Sprintf("web-%d.pid", port))
+	return filepath.Join(defaults.ResolveStateDirPath().String(), fmt.Sprintf("web-%d.pid", port))
 }
 
 // legacyPIDFilePath is the PID file name used before the web-<port>.pid rename
 // ("web:<port>.pid"). It is read only, so `web stop` can still stop a server
-// started by an older build; it is never written.
+// started by an older build; it is never written. The state directory is
+// resolved at call time for the same reason as pidFilePath.
 func legacyPIDFilePath(port int) string {
-	return filepath.Join(defaults.State.DirPath.String(), fmt.Sprintf("web:%d.pid", port))
+	return filepath.Join(defaults.ResolveStateDirPath().String(), fmt.Sprintf("web:%d.pid", port))
 }
 
 // configureVerboseLogging sets the default slog level to Debug,

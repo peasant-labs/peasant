@@ -789,9 +789,9 @@ jobs:
       #
       # `go build ./...` does not typecheck _test.go files, so a Windows test
       # file that stops compiling would pass it unnoticed. `go vet` does typecheck
-      # test files; mirror scripts/vet-go.sh's one exemption for the vendored
-      # driver's audited uintptr conversions. This runs on every pull request,
-      # unlike the cross-compile lane's release-gated copy.
+      # test files; run the repository's own wrapper, which keeps the vendored
+      # driver's audited uintptr conversions exempt. This runs on every pull
+      # request, unlike the cross-compile lane's release-gated copy.
       - name: Typecheck Windows test files
         shell: bash
         run: ./scripts/vet-go.sh --skip-sqlite-audit
@@ -802,7 +802,7 @@ jobs:
       # A single invocation reports every failing package and exits non-zero.
       - name: Run the Windows-specific tests
         run: |
-          go test ./internal/ingest/ ./internal/api/ ./cmd/peasant/ ./internal/store/ ./internal/testutil/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestDecodeClaudeProjectDir|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno|TestReplaceExecutable|TestSweepUpgradeSidecar|TestTerminateProcessStopsAChild|TestPidFilePath|TestBackgroundProcAttr|TestSessionLockAcrossProcesses|TestMemFS'
+          go test ./internal/ingest/ ./internal/api/ ./cmd/peasant/ ./internal/store/ ./internal/testutil/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestDecodeClaudeProjectDir|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno|TestReplaceExecutable|TestSweepUpgradeSidecar|TestTerminateProcessStopsAChild|TestPidFilePath|TestBackgroundProcAttr|TestSessionLockAcrossProcesses|TestMemFS|TestPlatformAbsPath'
 
       - name: Build peasant.exe and print its version
         run: |
