@@ -42,6 +42,12 @@ type piOutboundFixture struct {
 		Namespace string `yaml:"namespace"`
 		Want      string `yaml:"want"`
 	} `yaml:"namespaces"`
+	StoredThinkingLevel []struct {
+		Name      string `yaml:"name"`
+		Overlay   string `yaml:"overlay"`
+		WantLevel string `yaml:"wantLevel"`
+		WantRaw   string `yaml:"wantRaw"`
+	} `yaml:"storedThinkingLevel"`
 }
 
 func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
@@ -62,6 +68,9 @@ func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
 		names = append(names, c.Name)
 	}
 	for _, c := range f.Namespaces {
+		names = append(names, c.Name)
+	}
+	for _, c := range f.StoredThinkingLevel {
 		names = append(names, c.Name)
 	}
 	if err := testutil.ValidateRequiredNames(m, names, "Pi outbound"); err != nil {
@@ -97,6 +106,53 @@ func TestPiOutboundNamespaceRedaction(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPiOutboundStoredThinkingLevelReencode(t *testing.T) {
+	t.Parallel()
+	for _, c := range loadPiOutboundFixtures(t).StoredThinkingLevel {
+		t.Run(c.Name, func(t *testing.T) {
+			entries, err := piOutboundEntries(`{"safe":true}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries[0].Extra = piOutboundExtraWithOverlay(t, entries[0].Extra, c.Overlay)
+			entries, err = push.RedactEntries(piRewriteRedactor{}, entries)
+			if err != nil {
+				t.Fatalf("stored malformed thinking-level evidence must re-encode, not refuse publication: %v", err)
+			}
+			extra, pi, err := ingest.DecodePiExtra(entries[0].Extra)
+			if err != nil || !pi {
+				t.Fatalf("decode re-encoded evidence: error=%v pi=%t", err, pi)
+			}
+			if string(extra.ThinkingLevel) != c.WantLevel || string(extra.ThinkingLevelRaw) != c.WantRaw {
+				t.Fatalf("re-encoded level=%q raw=%q, want level=%q raw=%q", extra.ThinkingLevel, extra.ThinkingLevelRaw, c.WantLevel, c.WantRaw)
+			}
+		})
+	}
+}
+
+// piOutboundExtraWithOverlay merges the fixture's overlay JSON onto an encoded
+// typed Pi row, modeling stored evidence corrupted after indexing.
+func piOutboundExtraWithOverlay(t *testing.T, extra *string, overlay string) *string {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(*extra), &fields); err != nil {
+		t.Fatal(err)
+	}
+	var corrupt map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(overlay), &corrupt); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range corrupt {
+		fields[key] = value
+	}
+	merged, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := string(merged)
+	return &result
 }
 
 func TestPiOutboundMetadataRedaction(t *testing.T) {
