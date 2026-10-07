@@ -46,6 +46,14 @@ goldens and a successful PNG generation are not a visual self-review. Dirty capt
 development evidence only. An interface-changing PR needs clean-revision screenshots and durable
 GitHub-hosted review evidence. Generated PNGs stay untracked.
 
+### Performance work
+
+Every performance-critical change follows
+[`.claude/skills/design-performance/SKILL.md`](.claude/skills/design-performance/SKILL.md). This
+includes the hot paths (harvest, ingest, the store write lane, search, migration, reclaim), every
+performance claim and budget, and the design of the parallel work and the memory layout. The live
+store stays read-only for agents; measure on a sandbox copy.
+
 ## Tests and fixtures
 
 The test gate itself — two passes, the no-race registry, the four-rule
