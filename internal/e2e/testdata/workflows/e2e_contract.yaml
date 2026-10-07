@@ -40,7 +40,7 @@ e2e:
     - status=stopped
   cleanup_forbidden_statuses:
     - value: status=dead
-      reason: podman 4.9 rejects the Docker-only dead state
+      reason: podman rejects the Docker-only dead state
     - value: status=created
       reason: a newly created sibling stack may still be starting
     - value: status=running

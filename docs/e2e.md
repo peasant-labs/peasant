@@ -196,9 +196,9 @@ detects content-only changes even when file size and modification time match.
 > **Counter regression note.** An earlier version of this
 > doc claimed "per-run **uniqueness** — not the reaper — is the flake fix." That
 > was **wrong**. The actual failure was a **counter bug**: the seeded-baseline
-> S3 count line-counted `mc`'s `CombinedOutput()` (stdout **+ stderr**), and CI
-> podman 4.9.3 emits ~8 cgroup-manager stderr warnings per `podman run`, so an
-> empty bucket counted as 8 and `assertSeededBaselineBeforePush` failed (want 0).
+> S3 count line-counted `mc`'s `CombinedOutput()` (stdout **+ stderr**), and the
+> then-CI podman 4.9.3 emitted ~8 cgroup-manager stderr warnings per `podman run`,
+> so an empty bucket counted as 8 and `assertSeededBaselineBeforePush` failed (want 0).
 > It was fixed by counting via the in-process **S3 client** (typed
 > `ObjectInfo`, no text parsing) — see [Podman version parity](#podman-version-parity-local--ci).
 > Per-run uniqueness, the Go reaper, and the Pdeathsig/killpg village teardown are
@@ -224,7 +224,7 @@ the run that created them, while an unrelated live run can briefly create a
 same-prefix container.
 
 The bash workflow cleanup intentionally implements only its terminal
-`exited`/`stopped` branch (NOT `dead` — podman 4.9.3 rejects that Docker-only
+`exited`/`stopped` branch (NOT `dead` — podman rejects that Docker-only
 state, which broke the cleanup; see Podman version parity below). Duplicating the
 Go reaper's timestamp and PID policy in bash would create a second cleanup
 contract.
@@ -239,42 +239,43 @@ garbage, but they do not risk deleting an active sibling run.
 ### Podman version parity (local ↔ CI)
 
 The CI driver is pinned to the amd64 Blacksmith runner
-(`blacksmith-4vcpu-ubuntu-2404`, Ubuntu 24.04), which runs **podman 4.9.x**. It is
+(`blacksmith-4vcpu-ubuntu-2404`, Ubuntu 24.04), which runs **podman 5.8.x**. It is
 deliberately **not** routed to the self-hosted container pool the other x86_64
 jobs use: rootless podman and the disposable Village stack do not come up inside
 those pool containers, so a pool landing leaves the harness `t.Skip()`ing and the
 fail-closed assertion step blocking the gate with no coverage. The e2e workflow
 **pins** podman with a `Verify and pin podman version` step that hard-fails if the
-runner's podman major.minor drifts from `4.9` — forcing a lockstep update of this
+runner's podman major.minor drifts from `5.8` — forcing a lockstep update of this
 doc when the runner image changes. The warm stack is amd64-only, so the pinned
 label must never be an arm64 one.
 
-Parity matters because the counter bug was **only**
-reproducible under podman 4.9.x: that build emits ~8 cgroup-manager **stderr**
-warning lines per `podman run` (rootless, no systemd user session). The original
+The counter bug and the `status=dead` filter break were both shaped by the older
+runner image: podman 4.9.x emitted ~8 cgroup-manager **stderr** warning lines per
+`podman run` (rootless, no systemd user session). The original
 `transcriptBucketObjectCount` line-counted `mc`'s `CombinedOutput()` (stdout **+
 stderr**), so an empty bucket counted as 8 and the seeded baseline failed (want 0).
-**Local podman 5.x emits none of those lines**, so it counted 0 and passed — the
-exact false-confidence (10× green locally) that hid the bug. The same 4.9.x-vs-5.x
-gap hid the `status=dead` filter break. The real fix is the in-process **S3 client**
-(typed `ObjectInfo`, no text parsing); parity is the backstop so a future CI-only
-divergence is reproducible locally instead of only on a view-only Blacksmith console.
+Podman 5.x emits none of those lines, so it counted 0 and passed — the exact
+false-confidence (10× green locally) that hid the bug, and the reason the CI podman
+major.minor is pinned rather than assumed. The real fixes are version-immune: the
+count is the in-process **S3 client** (typed `ObjectInfo`, no text parsing) and the
+cleanup uses only terminal `exited`/`stopped`. The pin is the backstop so a future
+CI-only divergence is reproducible locally instead of only on a view-only Blacksmith
+console.
 
 **One-command local repro at CI parity** (run from the repo root; substitute your
-village checkout). It fails fast if your local podman is not 4.9.x — a 5.x box will
-NOT reproduce the cgroup-stderr shape:
+village checkout). It fails fast if your local podman is not 5.8.x:
 
 ```bash
-podman version --format '{{.Client.Version}}' | grep -q '^4\.9\.' \
+podman version --format '{{.Client.Version}}' | grep -q '^5\.8\.' \
   && VILLAGE_REPO=/path/to/village make e2e \
-  || echo "local podman is not 4.9.x; install podman 4.9.x (e.g. an Ubuntu 24.04 box/VM) to reproduce the CI podman shape"
+  || echo "local podman is not 5.8.x; install podman 5.8.x to match the CI podman shape"
 ```
 
-To obtain a matching podman without a 24.04 host, run the suite on an Ubuntu 24.04
-VM/container (whose apt `podman` is 4.9.x). The in-process S3 count is
-stderr-immune regardless of podman version, so on a 4.9.x box the focused
-`TestTranscriptBucketObjectCountMatchesKnownPuts` and the seeded baseline both stay
-green with the fix and (the baseline) RED without it.
+Install a matching podman with your distribution packages or a container image; 5.8.x
+is the shape the pinned runner ships. The in-process S3 count is stderr-immune
+regardless of podman version, so the focused
+`TestTranscriptBucketObjectCountMatchesKnownPuts` and the seeded baseline stay green
+on any supported podman.
 
 ### Memory budget
 
