@@ -119,6 +119,17 @@ ast-grep scan --config sgconfig.yml .
   ./internal/ingest`, the registry/docgen tests, and bump the relevant indexer version when settled
   sessions must be re-indexed.
 
+## Cross-platform code
+
+Peasant builds one module for Linux, macOS, and Windows. Platform-specific code lives in
+build-tagged sibling files (`//go:build unix` / `//go:build windows`, or `unix` / `!unix`) with
+identical signatures; the shared file stays platform-neutral, and the unix side must not change
+behavior. A shared file must never reference a type that exists on only one target.
+[`docs/cross-platform.md`](docs/cross-platform.md) records the split, the path rules, the
+Windows-specific behavior, and the CI and release gates. When you add platform-specific code, add
+a build-tagged test per side and add any Windows-only test name to the `windows` job's `-run` set
+so it actually runs.
+
 ## Data and contract invariants
 
 - Produce `SessionDetailPayload` through one conversion path:
