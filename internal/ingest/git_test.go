@@ -394,25 +394,37 @@ func TestExecGitResolver_Worktree_LinkedWorktreeSubdir(t *testing.T) {
 	g := &ExecGitResolver{}
 	ctx := context.Background()
 
+	// logWorktreeList records the exact form git reports on the running platform
+	// so a mismatch in case, separator, or realpath is diagnosable from the log.
+	logWorktreeList := func() {
+		if listing, listErr := exec.Command("git", "-C", subdir, "worktree", "list", "--porcelain").CombinedOutput(); listErr == nil {
+			t.Logf("git worktree list --porcelain:\n%s", listing)
+		}
+	}
+
 	got, err := g.Worktree(ctx, subdir)
 	if err != nil {
 		t.Fatalf("Worktree from linked-worktree subdir: %v", err)
 	}
 	if got == "" {
-		// Capture the exact form git reports on the running platform so a
-		// mismatch in case, separator, or realpath is diagnosable from the log.
-		if listing, listErr := exec.Command("git", "-C", subdir, "worktree", "list", "--porcelain").CombinedOutput(); listErr == nil {
-			t.Logf("git worktree list --porcelain:\n%s", listing)
-		}
+		logWorktreeList()
 		t.Fatalf("Worktree from linked-worktree subdir = %q, want the linked worktree root %q", got, wantWT)
 	}
 
-	gotResolved, err := filepath.EvalSymlinks(got)
+	// os.SameFile compares identity, so a Windows case difference or a
+	// symlink/junction between the two forms cannot fail the assertion.
+	gotInfo, err := os.Stat(got)
 	if err != nil {
-		t.Fatalf("EvalSymlinks(got): %v", err)
+		logWorktreeList()
+		t.Fatalf("Stat resolved worktree %q: %v", got, err)
 	}
-	if filepath.Clean(gotResolved) != wantWT {
-		t.Errorf("Worktree from linked-worktree subdir = %q, want %q", gotResolved, wantWT)
+	wantInfo, err := os.Stat(wtPath)
+	if err != nil {
+		t.Fatalf("Stat worktree %q: %v", wtPath, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		logWorktreeList()
+		t.Errorf("Worktree from linked-worktree subdir = %q, want %q", got, wantWT)
 	}
 }
 

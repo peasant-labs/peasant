@@ -461,7 +461,9 @@ func (g *ExecGitResolver) Worktree(ctx context.Context, dir string) (string, err
 	var worktrees []string
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "worktree ") {
-			worktrees = append(worktrees, strings.TrimSpace(strings.TrimPrefix(line, "worktree ")))
+			// Trim only the line terminator: a path may legitimately contain
+			// leading or trailing spaces, which TrimSpace would corrupt.
+			worktrees = append(worktrees, strings.TrimRight(strings.TrimPrefix(line, "worktree "), "\r\n"))
 		}
 	}
 
@@ -481,7 +483,7 @@ func (g *ExecGitResolver) Worktree(ctx context.Context, dir string) (string, err
 	// so the native form of git's path is enough for the common case.
 	for _, wt := range worktrees[1:] { // skip main worktree (index 0)
 		cleanWt := filepath.Clean(wt)
-		if pathWithin(absDir, cleanWt) {
+		if isWithinWorktree(absDir, cleanWt) {
 			return cleanWt, nil
 		}
 	}
@@ -494,7 +496,7 @@ func (g *ExecGitResolver) Worktree(ctx context.Context, dir string) (string, err
 	canonicalDir := canonicalWorktreePath(absDir)
 	for _, wt := range worktrees[1:] {
 		cleanWt := filepath.Clean(wt)
-		if pathWithin(canonicalDir, canonicalWorktreePath(cleanWt)) {
+		if isWithinWorktree(canonicalDir, canonicalWorktreePath(cleanWt)) {
 			return cleanWt, nil
 		}
 	}
@@ -503,10 +505,10 @@ func (g *ExecGitResolver) Worktree(ctx context.Context, dir string) (string, err
 	return "", nil
 }
 
-// pathWithin reports whether child is parent or a descendant of it. It compares
-// with filepath.Rel, which normalizes separators and, on Windows, compares path
-// elements case-insensitively.
-func pathWithin(child, parent string) bool {
+// isWithinWorktree reports whether child is parent or a descendant of it. It
+// compares with filepath.Rel, which normalizes separators and, on Windows,
+// compares path elements case-insensitively.
+func isWithinWorktree(child, parent string) bool {
 	rel, err := filepath.Rel(parent, child)
 	if err != nil {
 		return false
