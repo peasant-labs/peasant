@@ -24,10 +24,11 @@ import (
 // K is DERIVED from the actual successful PutObject results — never hardcoded (the
 // hardcoded "8" coincidence is exactly what misled the original diagnosis). The
 // count comes from typed ObjectInfo, so it is structurally immune to any stderr a
-// container runtime emits; there is no env-dependent RED toggle here (on local
-// podman 5.8.2 the OLD mc path was ALSO green — a 5.8.2 "RED demo" would falsely
-// pass). The meaningful pre-fix RED proof is the baseline canary run under CI-shape
-// podman 4.9.3 (see docs/e2e.md one-command repro).
+// container runtime emits; there is no env-dependent RED toggle here (on the current
+// podman 5.8.x shape the OLD mc path was ALSO green — a 5.8.x "RED demo" would
+// falsely pass). The meaningful pre-fix RED proof is the baseline canary run under
+// the historical podman 4.9.x shape, which is no longer the CI shape (see
+// docs/e2e.md, Podman version parity).
 func TestTranscriptBucketObjectCountMatchesKnownPuts(t *testing.T) {
 	reapStaleE2EInfra(t)
 
