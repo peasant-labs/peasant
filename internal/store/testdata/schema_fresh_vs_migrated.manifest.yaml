@@ -1,0 +1,6 @@
+# Required-name manifest for schema_fresh_vs_migrated: deletion protection by NAME, never by count.
+requiredNames:
+  - fresh-first-body-id
+  - migrated-first-body-id
+  - fresh-equals-migrated-schema
+  - golden-template-body-insert

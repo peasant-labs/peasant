@@ -1,0 +1,18 @@
+# session_captured_stats — scaffolding for the harmonized session content model
+# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 16).
+# No cases are filled yet; each entry below is a name placeholder so the
+# required-names manifest protects the case inventory from the start.
+# Later issues extend the case shape and the loader struct field-for-field.
+cases:
+  - name: capture-upsert
+  - name: resume-latest-wins
+  - name: null-is-unknown
+  - name: derived-source-overwrite
+  - name: mirror-in-same-transaction
+  - name: overflow-new-kind
+  - name: partial-update-merges
+  - name: older-update-ignored
+  - name: list-detail-stats-source
+  - name: seed-unknown-for-compute-only-row
+  - name: seed-json-survives-derived-update
+  - name: seed-unknown-after-partial-harness-update

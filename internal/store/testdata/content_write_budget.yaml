@@ -1,0 +1,18 @@
+# content_write_budget — scaffolding for the harmonized session content model
+# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 16).
+# No cases are filled yet; each entry below is a name placeholder so the
+# required-names manifest protects the case inventory from the start.
+# Later issues extend the case shape and the loader struct field-for-field.
+cases:
+  - name: splitter-single-home
+  - name: staging-batch-commits-once
+  - name: activation-batch-commits-once
+  - name: oversized-session-stages-alone
+  - name: skip-commits-nothing
+  - name: state-read-commits-nothing
+  - name: commit-count-budget
+  - name: hold-under-busy-timeout
+  - name: batch-under-configured-caps
+  - name: buffers-preallocated-partitioned
+  - name: staged-memory-under-cap
+  - name: flush-on-interval

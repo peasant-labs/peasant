@@ -1,0 +1,14 @@
+# Required-name manifest for generation_skip: deletion protection by NAME, never by count.
+requiredNames:
+  - identical
+  - adapter-only
+  - read-visible-metadata
+  - one-entry-changed
+  - alias-changed
+  - segment-changed
+  - completeness-differs
+  - pointer-moved-fallback
+  - incomplete-new-never-skips
+  - file-backed-never-skips
+  - stats-only-change-updates-in-place
+  - metadata-hash-stats-excluded

@@ -1,0 +1,21 @@
+# Required-name manifest for search_recall: deletion protection by NAME, never by count.
+requiredNames:
+  - term-in-tool-output
+  - term-in-tool-input
+  - term-in-text-head
+  - term-beyond-2000-in-text-found
+  - term-beyond-2000-in-tool-output-found
+  - preview-only-capture-parity
+  - preview-only-dedup-parity
+  - dedup-no-longer-hides-full-preview-difference
+  - tool-row-preview-differs-beyond-2000-found
+  - pi-carrier-excluded
+  - superseded-only-term
+  - earlier-partition-body-not-returned
+  - non-native-term
+  - non-native-indexed-text-unchanged
+  - delete-then-match-returns-nothing
+  - union-view-rowid-pushdown
+  - transition-window-match-set
+  - transition-window-fallback-filter
+  - rowid-space-guard

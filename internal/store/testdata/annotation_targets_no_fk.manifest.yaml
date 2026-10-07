@@ -1,0 +1,13 @@
+# Required-name manifest for annotation_targets_no_fk: deletion protection by NAME, never by count.
+requiredNames:
+  - create-annotation-in-range
+  - create-annotation-out-of-range-refused
+  - create-and-supersede-out-of-range-refused
+  - classifier-insert-out-of-range-refused
+  - batch-create-out-of-range-refused
+  - restore-out-of-range-refused
+  - remap-after-reindex
+  - unresolved-kept
+  - prune-cascade
+  - v1-unchanged
+  - file-backed-native-checked-against-mirror

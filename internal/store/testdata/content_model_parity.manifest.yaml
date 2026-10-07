@@ -1,0 +1,20 @@
+# Required-name manifest for content_model_parity: deletion protection by NAME, never by count.
+requiredNames:
+  - opencode-text
+  - opencode-tools
+  - opencode-omitted-placeholder
+  - codex-history
+  - codex-earlier-partition
+  - retained-unknown-carrier
+  - non-emitted-ref
+  - empty-content-ref
+  - unicode-preview-boundary
+  - ext-keys-merge
+  - pi-carrier-v1
+  - preview-only-capture-unbounded-shim
+  - tool-row-preview-differs-stored-verbatim
+  - tool-row-preview-absent-stays-absent
+  - extra-keys-promotion-parity
+  - extra-verbatim-residue-preserved
+  - html-escapes-round-trip
+  - file-backed-dual-read
