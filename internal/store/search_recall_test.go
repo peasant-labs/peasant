@@ -641,12 +641,12 @@ func recallRowidGuard(t *testing.T, c searchRecallCase) {
 	if maxMirror >= BodyRowIDBase {
 		t.Fatalf("max(session_entries.rowid) = %d reaches the body base", maxMirror)
 	}
-	if err := s.CheckSessionEntriesRowidCeiling(context.Background()); err != nil {
+	if _, err := s.VerifyContent(context.Background(), false); err != nil {
 		t.Fatalf("ceiling check refuses a healthy store: %v", err)
 	}
 	if c.WantCeilingRefused {
 		recallExec(t, s, `INSERT INTO session_entries(rowid, session_id, entry_index, provider, entry_type, role, depth) VALUES (?, ?, 0, 'claude-code', 'text', 'user', 0)`, int64(BodyRowIDBase), string(sid))
-		if err := s.CheckSessionEntriesRowidCeiling(context.Background()); err == nil {
+		if _, err := s.VerifyContent(context.Background(), false); err == nil {
 			t.Fatal("ceiling check allows max(session_entries.rowid) at the body base")
 		}
 	}

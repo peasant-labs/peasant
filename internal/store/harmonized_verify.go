@@ -15,7 +15,8 @@ import (
 // The content verification and repair marking (design §5): `harvest
 // verify --content` lists the harmonized sessions whose stored objects
 // fail self-verification and reports the search index health with its
-// size ratio; `--repair` clears the consumed-input proof of each damaged
+// size ratio, rebuilding a flagged search index on entry; `--repair` clears
+// the consumed-input proof of each damaged
 // session, so the repair predicate selects it and its next activation
 // runs in repair mode (§4.6): it bypasses the identical-refresh skip,
 // inserts no new generation row, and rewrites the failing entry rows,
@@ -40,12 +41,18 @@ type ContentDamage struct {
 // size ratio, and — with --repair — the sessions marked for the repair
 // activation.
 type ContentVerifyReport struct {
-	SessionsChecked int64
-	Damaged         []ContentDamage
-	NeedsRebuild    bool
-	Size            SearchSizeReport
-	Repaired        []schema.SessionID
-	IndexRebuilt    bool
+	SessionsChecked         int64
+	Damaged                 []ContentDamage
+	NeedsRebuild            bool
+	Size                    SearchSizeReport
+	Repaired                []schema.SessionID
+	IndexRebuilt            bool
+	OrphanBodies            int64
+	OrphanBlobs             int64
+	OrphanBytes             int64
+	OrphanOwnedDirs         int64
+	OrphanOwnedBytes        int64
+	UnflaggedOrphanSessions []schema.SessionID
 }
 
 // VerifyContent checks every harmonized session's mapped objects with
@@ -53,13 +60,24 @@ type ContentVerifyReport struct {
 // canonical text, blob bytes hashed in chunk order against the
 // descriptor digest with the summed lengths against the header length,
 // and the capture proof over the shim entries — and reports the search
-// index health with its size ratio. With repair it clears the
+// index health with its size ratio. Every invocation rebuilds a flagged
+// search index on entry. With repair it clears the
 // consumed-input proof of each damaged session (the ordinary marking the
-// drain and the migration rollbacks share) and rebuilds the search index
-// when the rebuild flag is set. Verify never rewrites content itself:
+// drain and the migration rollbacks share). Verify never rewrites content itself:
 // healing runs through the repair activation on the next harvest.
 func (s *Store) VerifyContent(ctx context.Context, repair bool) (ContentVerifyReport, error) {
 	var report ContentVerifyReport
+	if err := s.CheckSessionEntriesRowidCeiling(ctx); err != nil {
+		return report, err
+	}
+	rebuilt, err := s.EnsureSearchIndexHealthy(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.IndexRebuilt = rebuilt
+	if err := s.collectContentOrphans(ctx, &report); err != nil {
+		return report, err
+	}
 	sessions, err := s.migrateHarmonizedSessions(ctx)
 	if err != nil {
 		return report, err
@@ -150,7 +168,7 @@ func (s *Store) verifyContentSession(ctx context.Context, sessionID schema.Sessi
 // refuses here, the way a full read refuses.
 func verifyContentBodiesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, active string) *ContentDamage {
 	var digests []string
-	_ = sqlitex.ExecuteTransient(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	_ = sqlitex.Execute(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), active},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digests = append(digests, stmt.ColumnText(0))
@@ -160,7 +178,7 @@ func verifyContentBodiesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, ac
 	for _, digest := range digests {
 		found := false
 		failing := false
-		_ = sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+		_ = sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				found = true
@@ -191,7 +209,7 @@ func verifyContentBlobsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, act
 		ref    string
 		digest string
 	}
-	_ = sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref, digest FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	_ = sqlitex.Execute(conn, `SELECT source_entry_ref, digest FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), active},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			refs = append(refs, struct {
@@ -204,7 +222,7 @@ func verifyContentBlobsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, act
 	for _, descriptor := range refs {
 		var byteLength int64
 		header := false
-		_ = sqlitex.ExecuteTransient(conn, `SELECT byte_length FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+		_ = sqlitex.Execute(conn, `SELECT byte_length FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), descriptor.digest},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				header = true
@@ -218,7 +236,7 @@ func verifyContentBlobsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, act
 		hasher := sha256.New()
 		var total, chunks int64
 		contiguous := true
-		_ = sqlitex.ExecuteTransient(conn, `SELECT chunk_index, data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
+		_ = sqlitex.Execute(conn, `SELECT chunk_index, data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), descriptor.digest},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				if stmt.ColumnInt64(0) != chunks {

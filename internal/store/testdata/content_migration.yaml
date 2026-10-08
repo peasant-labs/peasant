@@ -22,6 +22,34 @@
 # conversion still proceeds.
 # expect: converted, rolled-back, halted, skipped.
 cases:
+  - name: drain-intent-only-session
+    ownedBy: conversion
+    profile: drain
+    drain: intent
+    drainRow: true
+    drainIntent: true
+  - name: drain-directory-only-session
+    ownedBy: conversion
+    profile: drain
+    drain: directory
+  - name: drain-tmp-only-session
+    ownedBy: conversion
+    profile: drain
+    drain: temporary
+    drainRow: true
+  - name: drain-flag-set-before-destructive-step
+    ownedBy: conversion
+    profile: drain
+    drain: intent
+    drainRow: true
+    drainIntent: true
+  - name: drain-crash-after-intent-clear
+    ownedBy: conversion
+    profile: drain
+    drain: intent
+    drainRow: true
+    drainIntent: true
+    drainCrash: true
 
   - name: native-clean
     ownedBy: conversion

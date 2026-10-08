@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -52,6 +56,11 @@ func BuildMigrateCommand() *cobra.Command {
 			"Run with --dry-run first: it reports the per-phase counts and changes\n" +
 			"nothing.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			previousContext := cmd.Context()
+			cmd.SetContext(ctx)
+			defer cmd.SetContext(previousContext)
 			cfgPath := resolveConfigPath(cmd)
 			cfg, err := loadConfig(cfgPath)
 			if err != nil {
@@ -69,13 +78,20 @@ func BuildMigrateCommand() *cobra.Command {
 			}
 			defer closeStore()
 
-			ctx := cmd.Context()
 			if dryRun {
 				plan, err := db.PlanMigration(ctx)
 				if err != nil {
 					return fmt.Errorf("plan migration: %w", err)
 				}
 				return writeMigratePlan(cmd, plan, jsonOutput)
+			}
+			plan, err := db.PlanMigration(ctx)
+			if err != nil {
+				return fmt.Errorf("plan migration: %w", err)
+			}
+			writeMigratePreflight(cmd.ErrOrStderr(), plan)
+			if err := plan.CheckDisk(); err != nil {
+				return err
 			}
 
 			if !confirm {
@@ -94,10 +110,16 @@ func BuildMigrateCommand() *cobra.Command {
 				Limit:    limit,
 				Progress: tracker.report(cmd),
 			})
+			if writeErr := writeMigrateResult(cmd, result, jsonOutput, dbPath); writeErr != nil {
+				return errors.Join(err, writeErr)
+			}
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return fmt.Errorf("migration stopped at a resume boundary: %w; the partial report is above; re-run `peasant migrate --confirm` to resume idempotently", err)
+				}
 				return fmt.Errorf("migrate: %w", err)
 			}
-			return writeMigrateResult(cmd, result, jsonOutput, dbPath)
+			return nil
 		},
 	}
 
@@ -154,7 +176,7 @@ func confirmMigrate(cmd *cobra.Command) (bool, error) {
 	if !isFile || !term.IsTerminal(int(file.Fd())) {
 		return false, fmt.Errorf("non-interactive terminal: `peasant migrate` refused to prompt for consent to convert sessions in place because its standard input is not a terminal; nothing was converted; re-run with --confirm to proceed without a prompt, or run the command from an interactive shell")
 	}
-	fmt.Fprint(cmd.ErrOrStderr(), "\nConvert file-backed sessions to the harmonized content model? [y/N]: ")
+	fmt.Fprint(cmd.ErrOrStderr(), "\nWith no other writer running (stop any harvest), convert file-backed sessions in place? [y/N]: ")
 	var response string
 	fmt.Fscanln(file, &response)
 	return response == "y" || response == "Y", nil
@@ -263,8 +285,10 @@ func writeMigratePlan(cmd *cobra.Command, plan store.MigratePlan, jsonOutput boo
 				"mismatched_refs":   plan.SampledMismatchedRefs,
 			},
 			"disk": map[string]any{
-				"free_bytes": plan.DiskFreeBytes,
-				"ok":         plan.DiskFreeOK,
+				"free_bytes":     plan.DiskFreeBytes,
+				"required_bytes": plan.DiskRequiredBytes,
+				"store_bytes":    plan.StoreBytes,
+				"ok":             plan.DiskFreeOK,
 			},
 			"advisory": plan.Advisory,
 		})
@@ -292,18 +316,22 @@ func writeMigratePlan(cmd *cobra.Command, plan store.MigratePlan, jsonOutput boo
 	fmt.Fprintf(out, "Phase 4 cleanup: sweep flagged sessions and evaluate the retirement preconditions\n")
 	fmt.Fprintf(out, "Phase 5 offline: optimize + VACUUM (documented, never run here)\n")
 	fmt.Fprintf(out, "estimated owned-tree bytes to free: %s\n", formatMigrateBytes(plan.EstimatedBytes))
+	writeMigratePreflight(out, plan)
+	fmt.Fprintln(out, "dry run: nothing was converted and nothing was deleted; re-run without --dry-run to migrate")
+	return nil
+}
+
+func writeMigratePreflight(out io.Writer, plan store.MigratePlan) {
 	if plan.DiskFreeBytes >= 0 {
 		status := "OK"
 		if !plan.DiskFreeOK {
-			status = "BELOW the 25 GB floor: free space before running"
+			status = "INSUFFICIENT: free space before running"
 		}
-		fmt.Fprintf(out, "free disk: %s (%s)\n", formatMigrateBytes(plan.DiskFreeBytes), status)
+		fmt.Fprintf(out, "free disk: %s (%s); required %s (60%% of the %s peasant database)\n", formatMigrateBytes(plan.DiskFreeBytes), status, formatMigrateBytes(plan.DiskRequiredBytes), formatMigrateBytes(plan.StoreBytes))
 	} else {
-		fmt.Fprintln(out, "free disk: unknown on this platform; the 25 GB floor could not be checked")
+		fmt.Fprintf(out, "free disk: unknown on this platform; required %s (60%% of the peasant database); check available space before continuing\n", formatMigrateBytes(plan.DiskRequiredBytes))
 	}
 	fmt.Fprintf(out, "advisory: %s\n", plan.Advisory)
-	fmt.Fprintln(out, "dry run: nothing was converted and nothing was deleted; re-run without --dry-run to migrate")
-	return nil
 }
 
 // writeMigratePlanSessions lists the sessions with conversion work,
@@ -377,6 +405,8 @@ func writeMigrateResult(cmd *cobra.Command, result store.MigrateResult, jsonOutp
 	}
 	if result.SearchConsolidated {
 		fmt.Fprintln(out, "search index consolidated: triggers retargeted, index rebuilt, retired index dropped")
+	} else {
+		fmt.Fprintln(out, "search index not yet consolidated: re-run peasant migrate --confirm to resume")
 	}
 	if len(result.Preconditions) > 0 {
 		if result.ReadyForNextRelease {

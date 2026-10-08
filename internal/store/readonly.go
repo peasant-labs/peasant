@@ -222,6 +222,14 @@ func (a readOnlyGenerationArtifacts) ListGenerationDirectories(ctx context.Conte
 	return a.inner.ListGenerationDirectories(ctx, id)
 }
 
+func (a readOnlyGenerationArtifacts) ListOwnedSessionIDs(ctx context.Context) ([]schema.SessionID, error) {
+	return a.inner.ListOwnedSessionIDs(ctx)
+}
+
+func (a readOnlyGenerationArtifacts) OrphanGenerationFootprint(ctx context.Context, id schema.SessionID, keep string) (int64, GenerationFootprint, error) {
+	return a.inner.OrphanGenerationFootprint(ctx, id, keep)
+}
+
 func (a readOnlyGenerationArtifacts) RemoveReservedStagingDirs(context.Context, schema.SessionID) (int, error) {
 	return 0, errReadOnlyGenerationWrite
 }

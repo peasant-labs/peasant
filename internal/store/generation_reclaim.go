@@ -320,6 +320,9 @@ func (s *Store) ReclaimSupersededGenerations(ctx context.Context, limit int) (Re
 	if err := s.requireGenerationSupport(); err != nil {
 		return result, err
 	}
+	if _, err := s.EnsureSearchIndexHealthy(ctx); err != nil {
+		return result, err
+	}
 	candidates, err := s.reclaimCandidateSessions(ctx)
 	if err != nil {
 		return result, err
@@ -552,7 +555,8 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 	}
 	_ = orphanRelease()
 
-	outcome.didWork = deleted.Total() > 0 || outcome.directoriesRemoved > 0 || bodies > 0 || blobs > 0
+	deletedContent := bodies > 0 || blobs > 0
+	outcome.didWork = deleted.Total() > 0 || outcome.directoriesRemoved > 0 || deletedContent
 	return outcome, nil
 }
 
@@ -609,7 +613,7 @@ func deleteSupersededBatch(conn *sqlite.Conn, table string, sessionID schema.Ses
 	if table == "session_generation_content" {
 		statement = `DELETE FROM session_generation_content WHERE (session_id, generation_id, source_entry_ref) IN (SELECT session_id, generation_id, source_entry_ref FROM session_generation_content WHERE session_id = ? AND generation_id IS NOT ? LIMIT ?)`
 	}
-	if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), active, int64(limit)},
 	}); err != nil {
 		return 0, fmt.Errorf("store: reclaim superseded generation rows for session %s in %s: %w; the committed batches stay deleted and the next pass completes the sweep", sessionID, table, err)
@@ -629,7 +633,7 @@ func (s *Store) reclaimRowCounts(ctx context.Context, sessionID schema.SessionID
 	defer s.pool.Put(conn)
 	counts := make(map[string]ReclaimTableCounts)
 	for _, table := range reclaimTableNames {
-		err := sqlitex.ExecuteTransient(conn, `SELECT generation_id, COUNT(*) FROM `+table+` WHERE session_id = ? GROUP BY generation_id`, &sqlitex.ExecOptions{
+		err := sqlitex.Execute(conn, `SELECT generation_id, COUNT(*) FROM `+table+` WHERE session_id = ? GROUP BY generation_id`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID)},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				generationID := stmt.ColumnText(0)
@@ -663,7 +667,7 @@ func (s *Store) reclaimCommittedGenerationIDs(ctx context.Context, sessionID sch
 	}
 	defer s.pool.Put(conn)
 	var ids []string
-	err = sqlitex.ExecuteTransient(conn, `SELECT generation_id FROM session_projection_generations WHERE session_id = ? UNION SELECT generation_id FROM session_generations WHERE session_id = ? ORDER BY generation_id`, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, `SELECT generation_id FROM session_projection_generations WHERE session_id = ? UNION SELECT generation_id FROM session_generations WHERE session_id = ? ORDER BY generation_id`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ids = append(ids, stmt.ColumnText(0))

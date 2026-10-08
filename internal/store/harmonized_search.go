@@ -2,12 +2,16 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // SearchState is the store-global search index health (design §3.5): exactly
@@ -29,7 +33,7 @@ const searchFreshBuildFactor = 0.39
 // caller's connection.
 func searchStateReadOnConn(conn *sqlite.Conn) (SearchState, error) {
 	var state SearchState
-	if err := sqlitex.ExecuteTransient(conn, `SELECT needs_rebuild FROM session_search_state WHERE id = 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT needs_rebuild FROM session_search_state WHERE id = 1`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			state.NeedsRebuild = stmt.ColumnInt64(0) == 1
 			return nil
@@ -54,7 +58,7 @@ func SearchStateSetNeedsRebuild(ctx context.Context, conn *sqlite.Conn) error {
 	if conn == nil {
 		return fmt.Errorf("store: flag the search index for rebuild with no connection: pass the deleting transaction's connection; nothing was flagged; retry with the caller's *sqlite.Conn")
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
 		return fmt.Errorf("store: flag the search index for rebuild: %w; the stale postings are still indexed and search refuses until the flag is set; retry the delete", err)
 	}
 	return nil
@@ -69,7 +73,28 @@ func verifyBodyForDelete(row EntryRecord) bool {
 	if row.BodyDigest == "" {
 		return false
 	}
-	return string(bodyDigestForRecord(row)) == row.BodyDigest
+	data, err := json.Marshal(entryFromRow(row))
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]) == row.BodyDigest
+}
+
+// trustBodyForDelete owns missing-row and digest semantics for every delete
+// path. Missing or unserializable bodies are untrusted, never assumed safe.
+func trustBodyForDelete(conn *sqlite.Conn, sid schema.SessionID, digest string) (found, trusted bool, err error) {
+	err = sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id=? AND body_digest=?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), digest}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			trusted = verifyBodyForDelete(scanEntryRecord(stmt))
+			return nil
+		},
+	})
+	if err != nil {
+		return false, false, fmt.Errorf("store: verify body %s of session %s before delete: %w; nothing was deleted; retry the operation", digest, sid, err)
+	}
+	return found, trusted, nil
 }
 
 // SearchState returns the store-global search index health.
@@ -246,7 +271,7 @@ var UnifiedSearchSQL = fmt.Sprintf(
 // search refuses instead of serving postings that may be stale.
 func SearchUnifiedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]UnifiedSearchHit, error) {
 	var hits []UnifiedSearchHit
-	if err := sqlitex.ExecuteTransient(conn, UnifiedSearchSQL, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, UnifiedSearchSQL, &sqlitex.ExecOptions{
 		Args: []any{match, limit, offset},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			hits = append(hits, UnifiedSearchHit{
@@ -312,9 +337,12 @@ LIMIT ? OFFSET ?`
 // searchTableExists reports whether a table exists on the caller's connection.
 func searchTableExists(conn *sqlite.Conn, table string) bool {
 	found := false
-	_ = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, &sqlitex.ExecOptions{
-		Args:       []any{table},
-		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	_ = sqlitex.Execute(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, &sqlitex.ExecOptions{
+		Args: []any{table},
+		ResultFunc: func(*sqlite.Stmt) error {
+			found = true
+			return nil
+		},
 	})
 	return found
 }
@@ -380,7 +408,7 @@ func SearchMergedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]U
 
 func searchLegacyOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]UnifiedSearchHit, error) {
 	var hits []UnifiedSearchHit
-	if err := sqlitex.ExecuteTransient(conn, LegacyMirrorSearchSQL, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, LegacyMirrorSearchSQL, &sqlitex.ExecOptions{
 		Args: []any{match, limit, offset},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			hits = append(hits, UnifiedSearchHit{
@@ -521,7 +549,7 @@ func verifyBodiesForDeleteOnConn(conn *sqlite.Conn, sessionIDs []string) (bool, 
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	query := `SELECT ` + sqlSelectBodyColumns + ` FROM session_entry_bodies WHERE session_id IN (` + strings.Join(placeholders, `,`) + `)`
+	query := `SELECT session_id, body_digest FROM session_entry_bodies WHERE session_id IN (` + strings.Join(placeholders, `,`) + `)`
 	mismatch := false
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,
@@ -529,8 +557,15 @@ func verifyBodiesForDeleteOnConn(conn *sqlite.Conn, sessionIDs []string) (bool, 
 			if mismatch {
 				return nil
 			}
-			record := scanEntryRecord(stmt)
-			if !verifyBodyForDelete(record) {
+			sid, err := schema.NewSessionID(stmt.ColumnText(0))
+			if err != nil {
+				return err
+			}
+			_, trusted, err := trustBodyForDelete(conn, sid, stmt.ColumnText(1))
+			if err != nil {
+				return err
+			}
+			if !trusted {
 				mismatch = true
 			}
 			return nil
@@ -539,7 +574,7 @@ func verifyBodiesForDeleteOnConn(conn *sqlite.Conn, sessionIDs []string) (bool, 
 		return false, fmt.Errorf("store: verify %d sessions' bodies before delete: %w; nothing was deleted", len(sessionIDs), err)
 	}
 	if mismatch {
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
+		if err := SearchStateSetNeedsRebuild(context.Background(), conn); err != nil {
 			return true, fmt.Errorf("store: flag the search index for rebuild after an untrusted delete: %w; the row was verified but the flag is not set — retry the delete", err)
 		}
 	}

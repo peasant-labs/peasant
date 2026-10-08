@@ -13,14 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Fixture scaffolding for the harmonized session content model CLI surface
-// (design llm/peasant--harmonized-content-model.md section 10, ratified
-// revision 17). The command and flag inventory lives in
-// testdata/cli/content_cli_surface.yaml with its required-name manifest in
-// testdata/cli/content_cli_surface.manifest.yaml: deletion protection by
-// required NAME, never by bare count. No cases are filled yet; every entry is
-// a name placeholder so the manifest guards the inventory from the start. The
-// later issues extend the case shape and this loader field-for-field.
+// Command flags and report assertions use the production command tree and
+// printers. Required names protect the fixture inventory from deletion.
 
 //go:embed testdata/cli/content_cli_surface.yaml
 var contentCLISurfaceYAML []byte
@@ -32,12 +26,15 @@ var contentCLISurfaceManifestYAML []byte
 // plus, for the migration cases, the production command path and the
 // flags the runner resolves from the live command tree. The JSON cases
 // also carry the output keys the machine-readable shapes must contain.
-// Cases without a command stay name placeholders their owners fill.
+// Every case names a mounted command; an empty name fails the inventory gate.
 type contentCLISurfaceCase struct {
-	Name     string   `yaml:"name"`
-	Command  string   `yaml:"command,omitempty"`
-	Flags    []string `yaml:"flags,omitempty"`
-	JSONKeys []string `yaml:"jsonKeys,omitempty"`
+	Name          string   `yaml:"name"`
+	Command       string   `yaml:"command,omitempty"`
+	Flags         []string `yaml:"flags,omitempty"`
+	JSONKeys      []string `yaml:"jsonKeys,omitempty"`
+	TextContains  []string `yaml:"textContains,omitempty"`
+	NeedsOptimize bool     `yaml:"needsOptimize,omitempty"`
+	Repair        bool     `yaml:"repair,omitempty"`
 }
 
 type contentCLISurfaceFixture struct {
@@ -104,7 +101,18 @@ func assertCLISurfaceJSONKeys(t *testing.T, c contentCLISurfaceCase) {
 			t.Fatalf("decode migrate JSON: %v\n%s", err, buf.String())
 		}
 	default:
-		t.Fatalf("no JSON renderer for case %q", c.Name)
+		if c.Command != "reclaim" {
+			t.Fatalf("no JSON renderer for case %q", c.Name)
+		}
+		cmd := BuildReclaimCommand()
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		if err := writeReclaimResult(cmd, store.ReclaimResult{}, true, "/tmp/peasant.db"); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, key := range c.JSONKeys {
 		if _, ok := decoded[key]; !ok {
@@ -123,12 +131,12 @@ func assertCLISurfaceJSONKeys(t *testing.T, c contentCLISurfaceCase) {
 func TestContentCLISurfaceInventory(t *testing.T) {
 	t.Parallel()
 	for _, c := range loadContentCLISurfaceFixture(t) {
-		if c.Command == "" {
-			continue
-		}
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
+			if c.Command == "" {
+				t.Fatal("fixture command must not be empty")
+			}
 			root := buildRootCommand()
 			target, _, err := root.Find(strings.Split(c.Command, " "))
 			if err != nil || target == nil {
@@ -145,6 +153,19 @@ func TestContentCLISurfaceInventory(t *testing.T) {
 			}
 			if len(c.JSONKeys) > 0 {
 				assertCLISurfaceJSONKeys(t, c)
+			}
+			if len(c.TextContains) > 0 {
+				var buf bytes.Buffer
+				target.SetOut(&buf)
+				report := store.ContentVerifyReport{IndexRebuilt: true, Size: store.SearchSizeReport{IndexBytes: 780, TextBytes: 1000, LiveDocs: 2, FreshEstimateBytes: 390, Ratio: 2, NeedsOptimize: c.NeedsOptimize}}
+				if err := writeVerifyContentReport(target, report, c.Repair); err != nil {
+					t.Fatal(err)
+				}
+				for _, text := range c.TextContains {
+					if !strings.Contains(buf.String(), text) {
+						t.Errorf("report misses %q: %s", text, buf.String())
+					}
+				}
 			}
 		})
 	}

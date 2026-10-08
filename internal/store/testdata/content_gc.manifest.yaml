@@ -1,5 +1,8 @@
 # Required-name manifest for content_gc: deletion protection by NAME, never by count.
 requiredNames:
+  - verify-reports-orphan-bytes
+  - verify-flags-unflagged-orphan-session
+  - verify-rowid-ceiling-refuses
   - active-only
   - superseded-only
   - shared-active-superseded

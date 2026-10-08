@@ -37,6 +37,10 @@ func TestContentMigrationConversion(t *testing.T) {
 		}
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
+			if c.Drain != "" {
+				runMigrateDrainCase(t, c)
+				return
+			}
 			if c.Driver != "" {
 				runMigrateDriverCase(t, c)
 				return
@@ -727,13 +731,17 @@ func armMigrateSeamOnce(t *testing.T, which string, hook func(conn *sqlite.Conn,
 	case "shadow":
 		previous := migrateShadowSeam
 		migrateShadowSeam = fire
-		t.Cleanup(func() { migrateShadowSeam = previous })
+		t.Cleanup(func() {
+			migrateShadowSeam = previous
+		})
 	case "stage":
 		previous := migrateStageSeam
 		migrateStageSeam = func(stage string) error {
 			return fire(nil, stage)
 		}
-		t.Cleanup(func() { migrateStageSeam = previous })
+		t.Cleanup(func() {
+			migrateStageSeam = previous
+		})
 	default:
 		t.Fatalf("unknown migrate seam %q", which)
 	}
@@ -780,7 +788,7 @@ func rewriteMigrateFullText(t *testing.T, s *Store, sid schema.SessionID, entryI
 		}
 		chunk := text[offset:end]
 		chunkSum := sha256.Sum256([]byte(chunk))
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_entry_full_content_chunks(session_id, entry_index, chunk_index, byte_offset, byte_length, chunk_sha256, data) VALUES (?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_entry_full_content_chunks(session_id, entry_index, chunk_index, byte_offset, byte_length, chunk_sha256, data) VALUES (?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{
 			Args: []any{string(sid), entryIndex, index, offset, len(chunk), hex.EncodeToString(chunkSum[:]), []byte(chunk)},
 		}); err != nil {
 			t.Fatalf("rewrite full chunk %d: %v", index, err)
@@ -800,7 +808,8 @@ func runMigrateConvertCase(t *testing.T, c contentMigrationCase, index int) {
 	genID := "gen_migrate_case"
 	v2, _ := seedMigrateProfile(t, s, root, sid, c.Profile, genID)
 	var skipBefore, sessionBefore string
-	if c.Profile == "settled-refusal" || c.Profile == "non-native-full" || c.Profile == "non-native-preview-only" || c.AssertSkipState {
+	nonNative := c.Profile == "non-native-full" || c.Profile == "non-native-preview-only"
+	if c.Profile == "settled-refusal" || nonNative || c.AssertSkipState {
 		skipBefore, sessionBefore = snapshotMigrateSkipState(t, s, sid)
 	}
 	var restore func()
@@ -1042,9 +1051,12 @@ func assertMigrateProfile(t *testing.T, s *Store, _ string, sid schema.SessionID
 			}
 			for _, entry := range want.Content.Entries {
 				mapped := 0
-				if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generation_entries m JOIN session_entry_bodies b ON b.session_id=m.session_id AND b.body_digest=m.body_digest WHERE m.session_id=? AND m.generation_id=? AND m.partition_id=? AND m.entry_index=? AND m.source_entry_ref=? AND b.content_preview=?`, &sqlitex.ExecOptions{
-					Args:       []any{string(sid), genID, i + 1, entry.EntryIndex, string(entry.SourceEntryRef), *entry.ContentPreview},
-					ResultFunc: func(*sqlite.Stmt) error { mapped++; return nil },
+				if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generation_entries m JOIN session_entry_bodies b ON b.session_id=m.session_id AND b.body_digest=m.body_digest WHERE m.session_id=? AND m.generation_id=? AND m.partition_id=? AND m.entry_index=? AND m.source_entry_ref=? AND b.content_preview=?`, &sqlitex.ExecOptions{
+					Args: []any{string(sid), genID, i + 1, entry.EntryIndex, string(entry.SourceEntryRef), *entry.ContentPreview},
+					ResultFunc: func(*sqlite.Stmt) error {
+						mapped++
+						return nil
+					},
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -1321,7 +1333,7 @@ func runMigrateConsolidateCase(t *testing.T, c contentMigrationCase) {
 		}
 		for _, trigger := range []string{"session_entries_ai", "session_entries_ad", "session_entries_au"} {
 			found := false
-			if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?`, &sqlitex.ExecOptions{
+			if err := sqlitex.Execute(conn, `SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?`, &sqlitex.ExecOptions{
 				Args: []any{trigger},
 				ResultFunc: func(*sqlite.Stmt) error {
 					found = true
