@@ -13,8 +13,8 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// TestGenerationInstallRowRoundTrip proves the reused per-row install
-// statements write exactly the rows the generation describes. It installs a
+// TestGenerationInstallRowRoundTrip proves the harmonized activation writes
+// exactly the rows the generation describes. It installs a
 // multi-partition generation that carries projection entries, an earlier
 // section, context segments, content records, native aliases and relationship
 // evidence, then reads every family back from durable rows. The generation

@@ -44,8 +44,8 @@ func (p *Pipeline) sweepCommittedSession(ctx context.Context, session SessionID,
 // commits anything, so a crash between staging and commit recovers by
 // re-harvest even when the input is unchanged. Per-session failures are
 // warnings (those sessions keep their flag for the next pass); only a
-// listing failure aborts the harvest. The search-index health gate runs
-// before this pass once the search change lands it.
+// listing failure aborts the harvest. The harvest command runs the
+// search-index health gate before this pass.
 func (p *Pipeline) sweepFlaggedSessionsAtStart(ctx context.Context) error {
 	sweeper, ok := p.metricsStore.(ContentSweeper)
 	if !ok {
