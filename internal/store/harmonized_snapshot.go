@@ -88,6 +88,11 @@ func harmonizedReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.Sessio
 	if err != nil {
 		return fail(err)
 	}
+	// A preview-only generation cannot serve a full transcript. Leave its
+	// fields unverified so the detail boundary can select the explicit preview
+	// exit on incompleteness instead of mistaking preview damage for full-read
+	// authority. Complete generations verify before any callback can run.
+	authoritative = authoritative && completeness == indexformat.GenerationCompletenessComplete
 	partitions, content, err := harmonizedPartitionsModeOnConn(conn, sessionID, generationID, authoritative)
 	if err != nil {
 		return fail(err)
@@ -447,13 +452,16 @@ WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.Exec
     b.prov_origin, b.prov_actor, b.prov_delivery, b.prov_ownership,
     b.prov_evidence, b.prov_input_modality, b.prov_submission_ref
 FROM session_generation_entries m
-JOIN session_entry_bodies b
+LEFT JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 WHERE m.session_id = ? AND m.generation_id = ?
 ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			partitionID := stmt.ColumnInt(0)
+			if stmt.ColumnType(1) == sqlite.TypeNull {
+				return fmt.Errorf("store: a mapped body for session %s generation %s partition %d is missing during snapshot read; no partial transcript was emitted; run harvest verify --content and re-index the session to repair", sessionID, generationID, partitionID)
+			}
 			row, err := scanBodyRow(stmt, 1)
 			if err != nil {
 				return err
