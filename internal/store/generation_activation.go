@@ -84,6 +84,9 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 	if err := validateGenerationID(requestedID); err != nil {
 		return notCommitted(err)
 	}
+	if err := validateActivationBlobSupplies(activation); err != nil {
+		return notCommitted(err)
+	}
 	sessionID := activation.Generation.Generation.Metadata.SessionID
 	if activation.Generation.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
 		activation.IndexerVersion = 0
@@ -434,6 +437,9 @@ func (p *PreparedGeneration) discardUnlessInstalled() {
 // whose generation support is not configured refuses here, and activation
 // stages inline instead.
 func (s *Store) StageGeneration(ctx context.Context, activation GenerationActivation) (*PreparedGeneration, error) {
+	if err := validateActivationBlobSupplies(activation); err != nil {
+		return nil, err
+	}
 	requestedID := activation.Generation.Generation.ID
 	if err := s.requireGenerationSupport(); err != nil {
 		return nil, err

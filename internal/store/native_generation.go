@@ -14,6 +14,8 @@ import (
 )
 
 var (
+	_ ingest.NativeGenerationBatchStager       = (*Store)(nil)
+	_ ingest.NativeGenerationBatchActivator    = (*Store)(nil)
 	_ ingest.NativeGenerationActivator         = (*Store)(nil)
 	_ ingest.NativeGenerationStager            = (*Store)(nil)
 	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
@@ -21,6 +23,37 @@ var (
 	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
 	_ ingest.ContentSweeper                    = (*Store)(nil)
 )
+
+func (s *Store) StageNativeGenerations(ctx context.Context, native []ingest.NativeGenerationActivation) ([]ingest.NativeGenerationStaged, []error) {
+	activations := make([]GenerationActivation, len(native))
+	for i, a := range native {
+		activations[i] = generationActivationFromNative(a)
+	}
+	handles, errs := s.StageGenerationBatch(ctx, activations)
+	staged := make([]ingest.NativeGenerationStaged, len(handles))
+	for i, h := range handles {
+		if h != nil {
+			staged[i] = h
+		}
+	}
+	return staged, errs
+}
+
+func (s *Store) ActivateStagedNativeGenerations(ctx context.Context, native []ingest.NativeGenerationActivation, staged []ingest.NativeGenerationStaged) []ingest.NativeActivationResult {
+	activations := make([]GenerationActivation, len(native))
+	for i, a := range native {
+		activations[i] = generationActivationFromNative(a)
+		if i < len(staged) {
+			activations[i].Prepared, _ = staged[i].(*PreparedGeneration)
+		}
+	}
+	results := s.ActivateGenerationBatch(ctx, activations)
+	adapted := make([]ingest.NativeActivationResult, len(results))
+	for i, r := range results {
+		adapted[i] = ingest.NativeActivationResult{Outcome: r.Outcome, Err: r.Err}
+	}
+	return adapted
+}
 
 // generationActivationFromNative mirrors the ingest-owned activation envelope
 // into the store's own immutable activation. Both entry points (pre-staging and
@@ -239,7 +272,7 @@ func serializedMetadataToUnified(gen GenerationRecord, children GenerationChildr
 // started_by target when it names a stored session, else NULL.
 func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) *schema.SessionID {
 	var parent *schema.SessionID
-	_ = sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	_ = sqlitex.Execute(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) != sqlite.TypeNull {
@@ -256,7 +289,7 @@ func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) *sch
 // entries from their body rows in index order.
 func readHarmonizedMainEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SessionEntry, error) {
 	var entries []schema.SessionEntry
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entries = append(entries, entryFromRow(scanEntryRecord(stmt)))
@@ -277,7 +310,7 @@ func readGenerationPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, ge
 	var metadataJSON string
 	var completeness string
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT metadata_json, completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT metadata_json, completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -324,7 +357,7 @@ func readGenerationPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, ge
 
 func readGenerationAliasesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]indexformat.NativeAlias, error) {
 	var aliases []indexformat.NativeAlias
-	if err := sqlitex.ExecuteTransient(conn, `SELECT native_key, source_entry_ref FROM session_projection_aliases WHERE session_id = ? AND generation_id = ? ORDER BY native_key`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT native_key, source_entry_ref FROM session_projection_aliases WHERE session_id = ? AND generation_id = ? ORDER BY native_key`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			aliases = append(aliases, indexformat.NativeAlias{NativeKey: stmt.ColumnText(0), Ref: schema.SourceEntryRef(stmt.ColumnText(1))})
@@ -338,7 +371,7 @@ func readGenerationAliasesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 
 func readGenerationAliasEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SessionEntry, error) {
 	entries := make([]schema.SessionEntry, 0)
-	if err := sqlitex.ExecuteTransient(conn, `SELECT entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			var entry schema.SessionEntry

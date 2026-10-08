@@ -353,8 +353,9 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 		}
 	}
 	if err := reportHarmonizedWriterSeam(harmonizedSeamMidActivationBatch); err != nil {
-		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
-		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		// Simulated process loss aborts the outer transaction. Ordinary
+		// validation refusals above still isolate their session savepoint.
+		return sessionEntryWriteOutcome{}, err, true
 	}
 	if err := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil); err != nil {
 		return outcome, fmt.Errorf("store: release session entry savepoint for %s: %w", write.SessionID, err), true

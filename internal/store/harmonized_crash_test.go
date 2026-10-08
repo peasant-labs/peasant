@@ -21,15 +21,20 @@ var contentCrashSeamsYAML []byte
 var contentCrashSeamsManifestYAML []byte
 
 type contentCrashSeamCase struct {
-	Name                 string `yaml:"name"`
-	Seam                 string `yaml:"seam,omitempty"`
-	BatchBytes           int64  `yaml:"batch_bytes,omitempty"`
-	ExpectedSweepFlag    *bool  `yaml:"expected_sweep_flag,omitempty"`
-	ExpectedStagedBodies *int64 `yaml:"expected_staged_bodies,omitempty"`
+	Name                   string `yaml:"name"`
+	Seam                   string `yaml:"seam,omitempty"`
+	BatchBytes             int64  `yaml:"batch_bytes,omitempty"`
+	ExpectedSweepFlag      *bool  `yaml:"expected_sweep_flag,omitempty"`
+	ExpectedStagedBodies   *int64 `yaml:"expected_staged_bodies,omitempty"`
+	ExpectedBatchCommitted *bool  `yaml:"expected_batch_committed,omitempty"`
 }
 
 type contentCrashSeamFixtures struct {
-	Cases []contentCrashSeamCase `yaml:"cases"`
+	AbandonedMarker  string                 `yaml:"abandonedMarker"`
+	RecoveryMarker   string                 `yaml:"recoveryMarker"`
+	BatchSessionIDs  []string               `yaml:"batchSessionIDs"`
+	EarlierSessionID string                 `yaml:"earlierSessionID"`
+	Cases            []contentCrashSeamCase `yaml:"cases"`
 }
 
 func loadContentCrashSeamFixtures(t *testing.T) contentCrashSeamFixtures {
@@ -80,7 +85,7 @@ func TestContentCrashSeams(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			switch tc.Name {
 			case "mid-activation-batch":
-				runCrashMidActivationBatch(t)
+				runCrashMidActivationBatch(t, fixtures, tc)
 				return
 			case "savepoint-isolation":
 				runCrashSavepointIsolation(t)
@@ -113,7 +118,7 @@ func TestContentCrashSeams(t *testing.T) {
 			before := readIndexStateForTest(t, s, sid)
 
 			installHarmonizedFault(t, tc.Seam)
-			g2, g2Blobs := crashCandidate(t, sid, "gen_crash_g2", "G2")
+			g2, g2Blobs := crashCandidate(t, sid, "gen_crash_g2", fixtures.AbandonedMarker)
 			interrupted := activateTestGeneration(t, s, g2, g2Blobs)
 			clearHarmonizedFault()
 			if interrupted == nil {
@@ -152,34 +157,46 @@ func TestContentCrashSeams(t *testing.T) {
 				}
 			}
 
-			if tc.Name == "after-commit-before-sweep" {
-				if err := s.deleteConvertedMirrorRows(context.Background(), sid); err != nil {
-					t.Fatalf("complete after commit: %v", err)
-				}
-			} else if err := activateTestGeneration(t, s, g2, g2Blobs); err != nil {
+			recovered, recoveredBlobs := crashCandidate(t, sid, "gen_crash_g2b", fixtures.RecoveryMarker)
+			if err := activateTestGeneration(t, s, recovered, recoveredBlobs); err != nil {
 				t.Fatalf("retry after seam %s: %v", tc.Seam, err)
 			}
-			if got := visibleGeneration(t, s, sid); got != "gen_crash_g2" {
-				t.Fatalf("after recovery visible = %q, want G2", got)
+			if got := visibleGeneration(t, s, sid); got != "gen_crash_g2b" {
+				t.Fatalf("after recovery visible = %q, want the different recovery candidate", got)
 			}
-			assertHarmonizedContent(t, s, sid, "gen_crash_g2", g2, g2Blobs)
-			if _, err := s.SweepSession(context.Background(), sid); err != nil {
+			assertHarmonizedContent(t, s, sid, "gen_crash_g2b", recovered, recoveredBlobs)
+			if _, warnings, err := s.SweepFlaggedSessionsForHarvest(context.Background()); err != nil || len(warnings) != 0 {
 				t.Fatalf("recover flagged sweep: %v", err)
 			}
 			if readSweepFlag(t, s, sid) {
 				t.Fatal("recovery sweep left its flag set")
 			}
+			if orphanContentCount(t, s, sid) != 0 {
+				t.Fatal("recovery left unreferenced bodies or blobs")
+			}
+			assertSearchIndexMatchesNothing(t, s, "after different-candidate crash recovery", fixtures.AbandonedMarker)
 		})
 	}
 }
 
-// runCrashMidActivationBatch proves one batch commit isolates its sessions:
-// the first session commits while the seam fails the second inside its own
-// savepoint, and the outer commit persists exactly the first.
-func runCrashMidActivationBatch(t *testing.T) {
+// runCrashMidActivationBatch proves process loss aborts the outer batch:
+// neither session commits, while a previously committed batch remains intact.
+func runCrashMidActivationBatch(t *testing.T, fixtures contentCrashSeamFixtures, tc contentCrashSeamCase) {
 	t.Helper()
 	s, _ := openGenerationStore(t)
 	ctx := context.Background()
+	missingExpectation := tc.ExpectedBatchCommitted == nil || tc.ExpectedSweepFlag == nil
+	if missingExpectation {
+		t.Fatal("outer rollback fixture needs batch-commit and sweep-flag expectations")
+	}
+	if *tc.ExpectedBatchCommitted || len(fixtures.BatchSessionIDs) < 2 {
+		t.Fatal("outer rollback fixture needs at least two session IDs and expected_batch_committed false")
+	}
+	earlierID := gcSession(t, s, fixtures.EarlierSessionID)
+	earlier, earlierBlobs := crashCandidate(t, earlierID, "gen_earlier", "earlierstable")
+	if err := activateTestGeneration(t, s, earlier, earlierBlobs); err != nil {
+		t.Fatal(err)
+	}
 	var calls atomic.Int64
 	harmonizedWriterSeam = func(stage string) error {
 		if stage == harmonizedSeamMidActivationBatch && calls.Add(1) == 2 {
@@ -189,43 +206,53 @@ func runCrashMidActivationBatch(t *testing.T) {
 	}
 	defer clearHarmonizedFault()
 	sessions := make([]schema.SessionID, 0, 2)
-	writes := make([]ingest.SessionEntryWrite, 0, 2)
-	for i, raw := range []string{
-		"e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e4",
-		"f5f5f5f5-f5f5-45f5-85f5-f5f5f5f5f5f5",
-	} {
+	activations := make([]GenerationActivation, 0, len(fixtures.BatchSessionIDs))
+	for i, raw := range fixtures.BatchSessionIDs {
 		sid, err := schema.NewSessionID(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
 		seedGenerationSession(t, s, string(sid))
-		v2, blobs := crashCandidate(t, sid, "gen_batch", "S"+string(rune('1'+i)))
+		v2, blobs := crashCandidate(t, sid, "gen_batch", fixtures.AbandonedMarker+" "+string(rune('1'+i)))
 		filled := filledCandidateForValidation(t, v2, blobs)
 		if _, err := s.StageGeneration(ctx, GenerationActivation{Generation: filled, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1}); err != nil {
 			t.Fatalf("stage session %d: %v", i, err)
 		}
 		sessions = append(sessions, sid)
-		writes = append(writes, ingest.SessionEntryWrite{
-			SessionID: sid, Result: filled, IndexVersion: 2,
-			IndexerVersion: 1, IndexedAtMs: 1,
-		})
+		activations = append(activations, GenerationActivation{Generation: filled, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1})
 	}
-	results := s.IndexSessionEntryBatch(ctx, writes)
-	if len(results) != 2 {
-		t.Fatalf("batch results = %d, want 2", len(results))
+	results := s.ActivateGenerationBatch(ctx, activations)
+	if len(results) != len(activations) {
+		t.Fatalf("batch results = %d, want %d", len(results), len(activations))
 	}
-	if results[0].Err != nil || !results[0].Written {
-		t.Fatalf("first batch write: %+v", results[0])
+	for i, sid := range sessions {
+		if results[i].Err == nil || results[i].Outcome.Disposition != ingest.ActivationNotCommitted {
+			t.Fatalf("crashed batch session %d reported a commit: %+v", i, results[i])
+		}
+		if got := visibleGeneration(t, s, sid); got != "" {
+			t.Fatalf("crashed batch session visible=%s; the outer transaction must roll back", got)
+		}
+		if readSweepFlag(t, s, sid) != *tc.ExpectedSweepFlag || orphanContentCount(t, s, sid) == 0 {
+			t.Fatal("crashed batch lost its flag or durable staged orphans")
+		}
 	}
-	if results[1].Err == nil {
-		t.Fatal("second batch write succeeded; the seam must fail it")
+	assertHarmonizedContent(t, s, earlierID, "gen_earlier", earlier, earlierBlobs)
+	clearHarmonizedFault()
+	for _, sid := range sessions {
+		v2, blobs := crashCandidate(t, sid, "gen_batch_recovered", fixtures.RecoveryMarker)
+		if err := activateTestGeneration(t, s, v2, blobs); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if got := visibleGeneration(t, s, sessions[0]); got != "gen_batch" {
-		t.Fatalf("first session visible = %q, want its generation", got)
+	if _, warnings, err := s.SweepFlaggedSessionsForHarvest(ctx); err != nil || len(warnings) != 0 {
+		t.Fatalf("crashed batch recovery: %v %v", err, warnings)
 	}
-	if got := visibleGeneration(t, s, sessions[1]); got != "" {
-		t.Fatalf("failed session visible = %q, want nothing committed", got)
+	for _, sid := range sessions {
+		if orphanContentCount(t, s, sid) != 0 || readSweepFlag(t, s, sid) {
+			t.Fatal("crashed batch recovery did not clear all orphans and flags")
+		}
 	}
+	assertSearchIndexMatchesNothing(t, s, "after outer-batch rollback and recovery", fixtures.AbandonedMarker)
 }
 
 // runCrashSavepointIsolation proves a hostile session rolls back to its own

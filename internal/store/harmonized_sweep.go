@@ -93,6 +93,12 @@ func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.Session
 	if limit < 1 {
 		limit = 1
 	}
+	if bounded, applied, err := s.sweepBoundedSession(ctx, sessionID, active, limit); applied || err != nil {
+		return bounded, err
+	}
+	if err := reportContentSweepSeam(contentSweepSeamFirstWrite); err != nil {
+		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; free disk space and retry harvest or reclaim", sessionID, err)
+	}
 
 	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, active)
 	if err != nil {
@@ -462,7 +468,7 @@ func (s *Store) SweepFlaggedSessions(ctx context.Context) (SweepFlaggedReport, e
 		return report, fmt.Errorf("store: take connection to list flagged sessions for the harvest-start sweep: %w; no session was swept", err)
 	}
 	var flagged []schema.SessionID
-	listErr := sqlitex.ExecuteTransient(conn, `SELECT session_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
+	listErr := sqlitex.Execute(conn, `SELECT session_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			flagged = append(flagged, schema.SessionID(stmt.ColumnText(0)))
 			return nil

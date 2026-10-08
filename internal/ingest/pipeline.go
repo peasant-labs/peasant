@@ -1619,22 +1619,18 @@ func (p *Pipeline) indexLoop(
 	if workers < 1 {
 		workers = 1
 	}
-	// One pre-allocated buffer per parser, claimed by worker index: the
-	// partitions are mutually exclusive by construction, and each parse
-	// starts from a reset partition, so no item ever reads another's
-	// scratch. The serialize/hash scratch use arrives with the prepare lane.
-	bufs := p.newRunWorkerBuffers(workers)
+	gate := newStagedBytesGate(p.writeConfig().StagedMemoryBytes)
 	parsedCh := make(chan indexParseResult, workers)
 	var activeParses atomic.Int64
 	var maxActiveParses atomic.Int64
 	var parserWG sync.WaitGroup
 	parserWG.Add(workers)
-	for i := range workers {
+	for range workers {
 		go func() {
 			defer parserWG.Done()
 			for work := range indexCh {
-				bufs.Reset(i)
 				result := p.parseIndexMeta(ctx, work.meta, &activeParses, &maxActiveParses, logPrefix)
+				result = p.admitNativeResult(ctx, result, gate)
 				if batch, complete := work.batch.completeWorkItem(); complete {
 					indexDoneCh <- batch
 				}
@@ -1691,7 +1687,8 @@ func (p *Pipeline) indexLoop(
 			profileBatch.WriteStats.Add(flush.writeStats)
 		}
 	}
-	drainIndexParseResults(parsedCh, pending, writeCfg, flushPending)
+	drainIndexParseResultsWithGate(parsedCh, pending, writeCfg, flushPending, gate.blocked, p.config.IndexProfiler)
+	p.config.IndexProfiler.RecordStagedPeak(gate.Peak())
 	if profileEnabled && profileBatch.WorkItems > 0 {
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 		p.config.IndexProfiler.Record(profileBatch, profileSessions)
@@ -1700,6 +1697,7 @@ func (p *Pipeline) indexLoop(
 }
 
 type indexParseResult struct {
+	releaseStaged   func()
 	retainedUnknown []RetainedUnknownKindCount
 	fullContent     bool
 	// partial reports that the strict parser refused the transcript and the
@@ -1823,8 +1821,12 @@ func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, o
 // A single result larger than the whole budget is still written, alone: the
 // batch it would join is flushed first, and the empty-batch term then admits
 // it. Refusing it instead would lose the session.
-func ExceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextBytes int64) bool {
-	if pendingCount >= cfg.BatchSessions {
+func ExceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextBytes int64, sessionCaps ...int) bool {
+	cap := cfg.BatchSessions
+	if len(sessionCaps) > 0 {
+		cap = sessionCaps[0]
+	}
+	if pendingCount >= cap {
 		return true
 	}
 	return pendingCount > 0 && pendingBytes+nextBytes > cfg.BatchBytes
@@ -1841,53 +1843,24 @@ func ExceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextByt
 //
 // pending is the caller's reusable buffer; it is cleared before return.
 func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexParseResult, cfg WriteConfig, flush func([]indexParseResult)) {
-	for {
-		result, ok := <-parsedCh
-		if !ok {
-			break
-		}
-		pending = append(pending, result)
-		pendingBytes := indexResultWriteBytes(result.output)
-		parsedClosed := false
-		// No bound is restated here: ExceedsWriteBudget owns the split and
-		// applies it below, before each result joins the batch, so the batch
-		// never grows past the limit or the budget however long this absorbs.
-		// A second copy of those terms would be one more place to miss.
-	drainParsed:
-		for {
-			select {
-			case next, ok := <-parsedCh:
-				if !ok {
-					parsedClosed = true
-					break drainParsed
-				}
-				nextBytes := indexResultWriteBytes(next.output)
-				if ExceedsWriteBudget(cfg, len(pending), pendingBytes, nextBytes) {
-					flush(pending)
-					clear(pending)
-					pending = pending[:0]
-					pendingBytes = 0
-				}
-				pending = append(pending, next)
-				pendingBytes += nextBytes
-			default:
-				break drainParsed
-			}
-		}
-		flush(pending)
-		clear(pending)
-		pending = pending[:0]
-		if parsedClosed {
-			break
-		}
-	}
+	drainIndexParseResultsWithGate(parsedCh, pending, cfg, flush, nil)
 }
 
 func indexResultWriteBytes(result indexformat.Result) int64 {
 	if v1, ok := result.(indexformat.V1); ok {
 		return fullEntryWriteBytes(v1.Entries)
 	}
+	if v2, ok := result.(indexformat.V2); ok {
+		return nativeCandidateWriteBytes(&NativeGenerationCandidate{Result: v2})
+	}
 	return 0
+}
+
+func indexParseWriteBytes(result indexParseResult) int64 {
+	if result.nativeCandidate != nil {
+		return nativeCandidateWriteBytes(result.nativeCandidate)
+	}
+	return indexResultWriteBytes(result.output)
 }
 
 // indexBatch parses a batch, then serializes SQLite writes through one goroutine.
@@ -1910,30 +1883,14 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	var maxActiveParses atomic.Int64
 
 	workers := max(1, parallelWorkers(p.config))
-	// The wave's items claim pool partitions exclusively for their duration:
-	// the slot channel hands each item a partition no other in-flight item
-	// holds, and the item resets it before parsing, so partitions stay
-	// mutually exclusive even though the wave fans out anonymously.
-	bufs := p.newRunWorkerBuffers(workers)
-	slots := make(chan int, workers)
-	for i := 0; i < workers; i++ {
-		slots <- i
-	}
-	parseOne := func(im indexedMeta) indexParseResult {
-		slot := <-slots
-		defer func() { slots <- slot }()
-		bufs.Reset(slot)
-		return p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
-	}
 	// Retain at most one bounded parser wave, not every full session in a
 	// reindex invocation. The wave is capped by the configured session cap,
 	// and the writer further splits each wave by full bytes.
 	writeCfg := p.writeConfig()
-	waveSize := min(workers, writeCfg.BatchSessions)
+	gate := newStagedBytesGate(writeCfg.StagedMemoryBytes)
 	profileSessions := make([]IndexProfileSession, 0, len(metas))
 	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(metas), WorkItems: len(metas)}
 	pending := make([]indexParseResult, 0, writeCfg.BatchSessions)
-	var pendingBytes int64
 	flushPending := func() {
 		if len(pending) == 0 {
 			return
@@ -1959,26 +1916,33 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		profileBatch.WriteStats.Add(flush.writeStats)
 		clear(pending)
 		pending = pending[:0]
-		pendingBytes = 0
 	}
-	for start := 0; start < len(metas); start += waveSize {
-		end := min(start+waveSize, len(metas))
-		var parsed []indexParseResult
-		if workers > 1 && end-start > 1 {
-			parsed = runParallel(func() error { return nil }, metas[start:end], workers, parseOne)
-		} else {
-			parsed = []indexParseResult{parseOne(metas[start])}
-		}
-		for _, result := range parsed {
-			size := indexResultWriteBytes(result.output)
-			if ExceedsWriteBudget(writeCfg, len(pending), pendingBytes, size) {
-				flushPending()
+	parsed := make(chan indexParseResult, workers)
+	work := make(chan indexedMeta)
+	var parsers sync.WaitGroup
+	for range workers {
+		parsers.Add(1)
+		go func() {
+			defer parsers.Done()
+			for im := range work {
+				result := p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
+				parsed <- p.admitNativeResult(ctx, result, gate)
 			}
-			pending = append(pending, result)
-			pendingBytes += size
-		}
+		}()
 	}
-	flushPending()
+	go func() {
+		for _, im := range metas {
+			work <- im
+		}
+		close(work)
+		parsers.Wait()
+		close(parsed)
+	}()
+	drainIndexParseResultsWithGate(parsed, pending, writeCfg, func(batch []indexParseResult) {
+		pending = batch
+		flushPending()
+	}, gate.blocked, p.config.IndexProfiler)
+	p.config.IndexProfiler.RecordStagedPeak(gate.Peak())
 	profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	return indexed, logs, refused
@@ -2084,7 +2048,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// publication carry it with its partial flag. Every other refusal
 			// stores a bounded preview, and export and publication stay refused
 			// until a complete capture exists.
-			if _, strict := indexer.(AuthoritativeTranscriptIndexer); err != nil && strict && declared == strictIndexFormat && ctx.Err() == nil {
+			_, strict := indexer.(AuthoritativeTranscriptIndexer)
+			canRetryTolerantly := err != nil && strict && declared == strictIndexFormat
+			if canRetryTolerantly && ctx.Err() == nil {
 				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
 					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
 						result.partial, result.strictRefusal, result.refusalCode = true, err.Error(), code
@@ -2155,7 +2121,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	// Only the strict format-1 capture path certifies complete content. A
 	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
-	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat && !result.partial
+	strictCompleteParse := err == nil && parsed && declared == strictIndexFormat
+	result.fullContent = authoritative && strictCompleteParse && !result.partial
 	// One final write decision owns V1 admission. The flags above remain as
 	// parser inputs and diagnostics, but the flush paths derive the store
 	// write from this assessment. An assessment error refuses the candidate
@@ -2253,6 +2220,9 @@ func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results [
 	}
 	for _, result := range results {
 		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix, writeLane)
+		if result.releaseStaged != nil {
+			result.releaseStaged()
+		}
 		flush.indexed = append(flush.indexed, indexedMeta)
 		flush.logEntries = append(flush.logEntries, logEntry)
 		flush.profileSessions = append(flush.profileSessions, profileSession)
@@ -2274,6 +2244,9 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	// emits the result's one progress advance, so no branch can store an
 	// outcome without reporting it.
 	record := func(position int, indexed indexedMeta, logEntry IndexLogEntry, profileSession IndexProfileSession) {
+		if results[position].releaseStaged != nil {
+			results[position].releaseStaged()
+		}
 		flush.indexed[position] = indexed
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = profileSession
@@ -2757,7 +2730,10 @@ func pipelineCancellation(ctx context.Context, err error) error {
 // identityMatchesLocation compares the complete adapter-derived project
 // identity. An empty remote still carries a meaningful path-derived identity.
 func identityMatchesLocation(meta *UnifiedMetadata, loc SessionLocation) bool {
-	if meta == nil || string(meta.HostSlug) != loc.HostSlug || (loc.ProjectHash != "" && meta.Project.Hash != loc.ProjectHash) {
+	if meta == nil || string(meta.HostSlug) != loc.HostSlug {
+		return false
+	}
+	if loc.ProjectHash != "" && meta.Project.Hash != loc.ProjectHash {
 		return false
 	}
 	remote := ""
@@ -2831,7 +2807,9 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 	// Extraction from retained input preserves an unknown acquisition clock.
 	// Once its adapter revision is current, a discovered native file still needs acquisition: no
 	// previous ingest time proves that its content was already consumed.
-	if existingMeta != nil && !session.ModTime.IsZero() && (existingMeta.Timestamp.Ingested == nil || *existingMeta.Timestamp.Ingested <= 0) {
+	unknownAcquisition := existingMeta != nil &&
+		(existingMeta.Timestamp.Ingested == nil || *existingMeta.Timestamp.Ingested <= 0)
+	if unknownAcquisition && !session.ModTime.IsZero() {
 		if isActive {
 			return DiffActive, nil
 		}
@@ -2856,7 +2834,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			freshness.PublicationReadiness = PublicationReady
 		}
 		status := ClassifyAgainstStore(session, freshness, p.config.StalenessThreshold)
-		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest && loc.CaptureRevision > 0 {
+		needsPublicationRepair := loc.PublicationReadiness == PublicationNeedsIngest && loc.CaptureRevision > 0
+		if captured == nil && status == DiffUpdated && needsPublicationRepair {
 			// Publication readiness is a repair hint, not change evidence.
 			// Before any capture it re-reads native input only for a session
 			// that has no retained artifact to hold its input: a legacy row
@@ -2904,9 +2883,11 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		// session is left alone: no native read, no stat. The first capture any
 		// clock, schema or force reason triggers acquires the evidence. After a
 		// capture, a row that still holds no fingerprint records what it read.
-		if status == DiffUnchanged && supportsSessionCapture(session) &&
-			(captured == nil && !refusalSettled && (!loc.SourceEvidenceSupported || len(loc.SourceFingerprint) > 0) ||
-				captured != nil && loc.SourceEvidenceSupported && len(loc.SourceFingerprint) == 0) {
+		needsCapture := captured == nil && !refusalSettled &&
+			(!loc.SourceEvidenceSupported || len(loc.SourceFingerprint) > 0)
+		needsFingerprint := captured != nil && loc.SourceEvidenceSupported && len(loc.SourceFingerprint) == 0
+		needsEvidence := needsCapture || needsFingerprint
+		if status == DiffUnchanged && supportsSessionCapture(session) && needsEvidence {
 			if isActive {
 				return DiffActive, nil
 			}
@@ -3009,7 +2990,9 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		want := append(fileCaptureEvidence(captured), digest[:]...)
 		transcriptPath := filepath.Join(filepath.Dir(metaPath), fmt.Sprintf("%s--transcript.%s", session.SessionID, session.SourceFormat))
 		transcript, transcriptErr := p.fs.ReadFile(transcriptPath)
-		if readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want) && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript) {
+		matchingEvidence := readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want)
+		matchingCapture := matchingEvidence && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript)
+		if matchingCapture {
 			return DiffUnchanged, nil
 		}
 		return DiffUpdated, nil
@@ -4331,7 +4314,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 		n, storedChecked, storedAnnotated, refreshedDays = p.refreshStoredMetrics(ctx)
 		computed += n
 	}
-	if p.analyzer != nil && (len(indexSessions) > 0 || len(priorIndexed) > 0 || len(refreshedDays) > 0) {
+	hasComputeWork := len(indexSessions) > 0 || len(priorIndexed) > 0 || len(refreshedDays) > 0
+	if p.analyzer != nil && hasComputeWork {
 		computeTargets := successfullyIndexed
 		if priorDownstream != nil {
 			computeTargets = remainingSuccessfullyIndexed

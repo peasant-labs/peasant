@@ -139,9 +139,8 @@ func (s *Store) stageHarmonizedBatch(ctx context.Context, prepared []*preparedHa
 		units := stageUnits(candidate)
 		var bytes int64
 		for _, unit := range units {
-			if unit.blob != nil && unit.blob.data == nil {
-				return fmt.Errorf("store: blob %s of session %s carries no bytes to stage; stage the candidate with its content bytes instead", unit.blob.digest, candidate.sessionID)
-			}
+			// Preparation proves presence and digest before staging. A supplied
+			// empty object may have a nil copy; it still needs its header row.
 			bytes += unit.bytes
 		}
 		if bytes > cfg.BatchBytes {

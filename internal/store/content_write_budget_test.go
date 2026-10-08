@@ -30,12 +30,8 @@ var contentWriteBudgetYAML []byte
 //go:embed testdata/content_write_budget.manifest.yaml
 var contentWriteBudgetManifestYAML []byte
 
-// contentWriteBudgetCase is one content_write_budget case: the section-10 name
-// plus, for the cases this change owns, the typed expectations its runner
-// asserts. Cases owned by the writer change carry ownedBy-free placeholders:
-// a case with no typed fields is a placeholder the writer change fills later,
-// following the content_migration convention; the loader's manifest check
-// still protects its name.
+// contentWriteBudgetCase carries configured budgets and executable
+// expectations. Required-name membership protects the fixture inventory.
 type contentWriteBudgetCase struct {
 	Name             string `yaml:"name"`
 	Action           string `yaml:"action,omitempty"`
@@ -53,8 +49,11 @@ type contentWriteBudgetCase struct {
 // isPlaceholder reports whether the case carries no typed expectations, in
 // which case the runner logs it and asserts nothing.
 func (c contentWriteBudgetCase) isPlaceholder() bool {
-	return c.Action == "" && c.Sessions == 0 && c.WantCommits == nil && c.WantMaxCommits == nil &&
-		len(c.Workers) == 0 && c.BatchBytes == nil && c.BatchSessions == nil && c.StagedMemory == nil &&
+	noAction := c.Action == "" && c.Sessions == 0 &&
+		c.WantCommits == nil && c.WantMaxCommits == nil
+	noBudgets := len(c.Workers) == 0 && c.BatchBytes == nil &&
+		c.BatchSessions == nil && c.StagedMemory == nil
+	return noAction && noBudgets &&
 		len(c.FlushIntervalsMs) == 0 && c.MinSites == nil
 }
 
@@ -124,8 +123,8 @@ func TestContentWriteBudgetFamily(t *testing.T) {
 				runWriteBudgetSplitterSingleHome(t, c)
 			case "batch-under-configured-caps":
 				runWriteBudgetBatchUnderConfiguredCaps(t, c)
-			case "buffers-preallocated-partitioned":
-				runWriteBudgetBuffersPreallocatedPartitioned(t, c)
+			case "worker-headroom-derived":
+				runWriteBudgetWorkerHeadroom(t, c)
 			case "staged-memory-under-cap":
 				runWriteBudgetStagedMemoryUnderCap(t, c)
 			case "flush-on-interval":
@@ -139,6 +138,8 @@ func TestContentWriteBudgetFamily(t *testing.T) {
 			case "staging-batch-commits-once":
 				runWriteBudgetStagingBatchCommitsOnce(t, fixtures, c)
 			case "activation-batch-commits-once":
+				runWriteBudgetActivationBatchCommitsOnce(t, fixtures, c)
+			case "activation-batch-api-commits-once":
 				runWriteBudgetActivationBatchCommitsOnce(t, fixtures, c)
 			case "oversized-session-stages-alone":
 				runWriteBudgetOversizedStagesAlone(t, fixtures, c)
@@ -226,7 +227,8 @@ func runWriteBudgetSplitterSingleHome(t *testing.T, c contentWriteBudgetCase) {
 // its staged-memory total from the same knob.
 func runWriteBudgetBatchUnderConfiguredCaps(t *testing.T, c contentWriteBudgetCase) {
 	t.Helper()
-	if c.BatchBytes == nil || c.BatchSessions == nil || c.StagedMemory == nil || len(c.Workers) == 0 {
+	missingBudget := c.BatchBytes == nil || c.BatchSessions == nil || c.StagedMemory == nil
+	if missingBudget || len(c.Workers) == 0 {
 		t.Fatal("batch-under-configured-caps needs batchBytes, batchSessions, stagedMemoryBytes, and workers")
 	}
 	for _, workers := range c.Workers {
@@ -253,66 +255,37 @@ func runWriteBudgetBatchUnderConfiguredCaps(t *testing.T, c contentWriteBudgetCa
 	}
 }
 
-// runWriteBudgetBuffersPreallocatedPartitioned holds the run-start allocation
-// through the exported pool: one zero-length, full-capacity buffer per worker,
-// pairwise disjoint, each capped at the configured per-worker cap.
-func runWriteBudgetBuffersPreallocatedPartitioned(t *testing.T, c contentWriteBudgetCase) {
+// runWriteBudgetWorkerHeadroom preserves the per-worker scratch
+// term in the derived budget without allocating a separate unused buffer pool.
+func runWriteBudgetWorkerHeadroom(t *testing.T, c contentWriteBudgetCase) {
 	t.Helper()
 	if len(c.Workers) == 0 {
-		t.Fatal("buffers-preallocated-partitioned needs workers")
+		t.Fatal("worker-headroom-derived needs workers")
 	}
 	for _, workers := range c.Workers {
 		cfg := ingest.DefaultWriteConfig(workers)
-		bufs, err := ingest.NewWorkerBuffers(cfg, workers)
-		if err != nil {
-			t.Fatalf("workers=%d: %v", workers, err)
-		}
-		if bufs.Workers() != workers {
-			t.Fatalf("workers=%d: pool holds %d, want one buffer per worker", workers, bufs.Workers())
-		}
-		if bufs.PerBufferBytes() != cfg.BufferBytes {
-			t.Fatalf("workers=%d: PerBufferBytes()=%d, want the configured cap %d", workers, bufs.PerBufferBytes(), cfg.BufferBytes)
-		}
-		for i := 0; i < workers; i++ {
-			if got := len(bufs.Bytes(i)); got != 0 {
-				t.Fatalf("workers=%d buffer %d starts with length %d, want zero: pre-allocated means capacity, not contents", workers, i, got)
-			}
-			if got := int64(cap(bufs.Bytes(i))); got != cfg.BufferBytes {
-				t.Fatalf("workers=%d buffer %d has capacity %d, want the full per-worker cap %d", workers, i, got, cfg.BufferBytes)
-			}
-			if _, ok := bufs.Append(i, []byte{byte(i)}); !ok {
-				t.Fatalf("workers=%d buffer %d refuses a one-byte stage", workers, i)
-			}
-		}
-		for i := 0; i < workers; i++ {
-			got := bufs.Bytes(i)
-			if len(got) != 1 || got[0] != byte(i) {
-				t.Fatalf("workers=%d buffer %d holds %v, want only its own marker: partitions are mutually exclusive", workers, i, got)
-			}
+		if cfg.StagedMemoryBytes != 2*cfg.BatchBytes+int64(workers)*cfg.BufferBytes {
+			t.Fatalf("workers=%d: staged budget must retain per-worker parser headroom", workers)
 		}
 	}
 }
 
-// runWriteBudgetStagedMemoryUnderCap asserts the total gate across the worker
-// counts a run can take: what the pool reserves never exceeds the configured
-// total cap, and buffers that alone would breach it refuse the allocation.
+// runWriteBudgetStagedMemoryUnderCap checks configured worker headroom.
+// Live native admission and release are covered by the ingest fixture family.
 func runWriteBudgetStagedMemoryUnderCap(t *testing.T, c contentWriteBudgetCase) {
 	t.Helper()
 	if len(c.Workers) == 0 {
 		t.Fatal("staged-memory-under-cap needs workers")
 	}
 	for _, workers := range c.Workers {
-		bufs, err := ingest.NewWorkerBuffers(ingest.DefaultWriteConfig(workers), workers)
-		if err != nil {
-			t.Fatalf("workers=%d: %v", workers, err)
-		}
-		if bufs.ReservedBytes() > bufs.StagedMemoryBytes() {
-			t.Fatalf("workers=%d: reserved %d bytes past the staged cap %d", workers, bufs.ReservedBytes(), bufs.StagedMemoryBytes())
+		cfg := ingest.DefaultWriteConfig(workers)
+		if int64(workers)*cfg.BufferBytes > cfg.StagedMemoryBytes {
+			t.Fatalf("workers=%d: parser headroom exceeds the staged-memory budget", workers)
 		}
 	}
 	cfg := ingest.DefaultWriteConfig(2)
 	cfg.StagedMemoryBytes = cfg.BufferBytes
-	if _, err := ingest.NewWorkerBuffers(cfg, 2); err == nil {
+	if err := cfg.Validate(); err == nil {
 		t.Fatal("buffers reserving past the staged-memory cap must refuse the allocation, not run uncapped")
 	}
 }
@@ -428,36 +401,41 @@ func runWriteBudgetStateReadCommitsNothing(t *testing.T, fixtures contentWriteBu
 	}
 }
 
-// runWriteBudgetCommitCountBudget proves the ordinary-refresh contract: a
-// harvest refresh of one seeded session — re-mirror, state read, one entry
-// batch — commits at most the fixture's wantMaxCommits frames.
+// runWriteBudgetCommitCountBudget checks the native refresh contract through
+// activation and sweep, counting every real WAL commit frame.
 func runWriteBudgetCommitCountBudget(t *testing.T, fixtures contentWriteBudgetFixtures, c contentWriteBudgetCase) {
 	t.Helper()
 	if c.Action != "refresh" || c.Sessions < 1 || c.WantMaxCommits == nil {
 		t.Fatal("commit-count-budget needs action refresh, sessions, and wantMaxCommits")
 	}
-	db, dbPath, requests := writeBudgetSeed(t, fixtures, c.Sessions)
+	dbPath := storetest.CopyGoldenDB(t)
+	db := openWriteBudgetHarmonized(t, dbPath)
 	ctx := t.Context()
+	sid := seedWriteBudgetSession(t, ctx, db, "88888888-8888-4888-8888-888888888888", fixtures)
+	g1, blobs1 := writeBudgetV2(t, sid, "gen_budget_before", []string{"before"})
+	if _, err := db.ActivateGeneration(ctx, writeBudgetActivation(g1, blobs1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SweepSession(ctx, sid); err != nil {
+		t.Fatal(err)
+	}
 	before, err := storetest.CountWALCommitFrames(dbPath)
 	if err != nil {
 		t.Fatal(err)
-	}
-	sid := requests[0].Artifact.Metadata.SessionID
-	for _, result := range db.MirrorArtifacts(ctx, requests[:1]) {
-		if result.Err != nil || !result.Mirrored {
-			t.Fatalf("refresh mirror %s: %v", result.SessionID, result.Err)
-		}
 	}
 	state, err := db.ReadIndexState(ctx, sid)
 	if err != nil || state == nil {
 		t.Fatalf("read refreshed index state: %v", err)
 	}
-	results := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
-		SessionID: sid, Result: indexformat.V1{Entries: []schema.SessionEntry{}}, IndexVersion: 1,
-		IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000001000, ExpectedState: state,
-	}})
-	if len(results) != 1 || results[0].Err != nil || !results[0].Written {
+	g2, blobs2 := writeBudgetV2(t, sid, "gen_budget_after", []string{"after"})
+	a := writeBudgetActivation(g2, blobs2)
+	a.ExpectedState = state
+	results := db.ActivateGenerationBatch(ctx, []store.GenerationActivation{a})
+	if len(results) != 1 || results[0].Err != nil || results[0].Outcome.Disposition != ingest.ActivationCommittedNow {
 		t.Fatalf("refresh entry batch: %+v", results)
+	}
+	if _, err := db.SweepSession(ctx, sid); err != nil {
+		t.Fatal(err)
 	}
 	after, err := storetest.CountWALCommitFrames(dbPath)
 	if err != nil {
@@ -609,37 +587,32 @@ func runWriteBudgetStagingBatchCommitsOnce(t *testing.T, fixtures contentWriteBu
 // serves the whole batch.
 func runWriteBudgetActivationBatchCommitsOnce(t *testing.T, fixtures contentWriteBudgetFixtures, c contentWriteBudgetCase) {
 	t.Helper()
-	if c.Action != "activate-batch" || c.Sessions != 2 || c.WantCommits == nil {
-		t.Fatal("activation-batch-commits-once needs action activate-batch, sessions 2, and wantCommits")
+	if c.Action != "activate-batch" || c.Sessions < 2 || c.WantCommits == nil {
+		t.Fatal("activation batch needs action activate-batch, at least two sessions, and wantCommits")
 	}
 	dbPath := storetest.CopyGoldenDB(t)
 	db := openWriteBudgetHarmonized(t, dbPath)
 	ctx := t.Context()
-	writes := make([]ingest.SessionEntryWrite, 0, c.Sessions)
+	activations := make([]store.GenerationActivation, 0, c.Sessions)
 	for i := 0; i < c.Sessions; i++ {
 		id := fmt.Sprintf("%08x-0000-4000-8000-%012x", i+1, i+1)
 		sid := seedWriteBudgetSession(t, ctx, db, id, fixtures)
 		v2, blobs := writeBudgetV2(t, sid, fmt.Sprintf("gen_active_%d", i), []string{fmt.Sprintf("activation batch %d", i)})
-		if _, err := db.StageGeneration(ctx, writeBudgetActivation(v2, blobs)); err != nil {
+		a := writeBudgetActivation(v2, blobs)
+		handle, err := db.StageGeneration(ctx, a)
+		if err != nil {
 			t.Fatal(err)
 		}
-		writes = append(writes, ingest.SessionEntryWrite{
-			SessionID: sid, Result: v2, IndexVersion: 2,
-			IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000001000,
-			RequireFullContent: true,
-			ContentCapture: ingest.SessionContentCaptureWrite{
-				Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
-				TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 1700000001000,
-			},
-		})
+		a.Prepared = handle
+		activations = append(activations, a)
 	}
 	before, err := storetest.CountWALCommitFrames(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	results := db.IndexSessionEntryBatch(ctx, writes)
+	results := db.ActivateGenerationBatch(ctx, activations)
 	for _, result := range results {
-		if result.Err != nil || !result.Written {
+		if result.Err != nil || result.Outcome.Disposition != ingest.ActivationCommittedNow {
 			t.Fatalf("activation batch write: %+v", results)
 		}
 	}

@@ -36,11 +36,11 @@ type WriteConfig struct {
 	// BatchSessions is a convenience cap alongside the byte cap; the byte
 	// cap is the binding bound. YAML: batchSessions.
 	BatchSessions int `yaml:"batchSessions"`
-	// BufferBytes is the per-worker pre-allocated buffer cap, fixed at run
-	// start and never grown. YAML: bufferBytes.
+	// BufferBytes is per-worker parser scratch headroom in the derived staged
+	// budget. It does not allocate a separate buffer pool. YAML: bufferBytes.
 	BufferBytes int64 `yaml:"bufferBytes"`
-	// StagedMemoryBytes caps total staged memory — live buffers plus queued
-	// prepared objects. Zero means derive: 2×BatchBytes (the staging and
+	// StagedMemoryBytes bounds admitted native candidates. Parser scratch has
+	// separate per-worker headroom. Zero means derive: 2×BatchBytes (staging and
 	// activation lanes' in-flight bounded batches) plus one BufferBytes per
 	// effective worker. The prepare side blocks at the cap. YAML:
 	// stagedMemoryBytes (omitted when derived).
@@ -244,7 +244,7 @@ func (w WriteConfig) Validate() error {
 		return fmt.Errorf("ingest: write.batchSessions must be at least 1, got %d; a batch must admit a session before it can bound anything; set batchSessions to a positive session count", w.BatchSessions)
 	}
 	if w.BufferBytes < 1 {
-		return fmt.Errorf("ingest: write.bufferBytes must be at least 1, got %d; workers pre-allocate one buffer each at run start and the hot path allocates nothing per item; set bufferBytes to a positive byte count", w.BufferBytes)
+		return fmt.Errorf("ingest: write.bufferBytes must be at least 1, got %d; parser workers need bounded scratch headroom; set bufferBytes to a positive byte count", w.BufferBytes)
 	}
 	minStaged := 2*w.BatchBytes + w.BufferBytes
 	if w.StagedMemoryBytes < minStaged {

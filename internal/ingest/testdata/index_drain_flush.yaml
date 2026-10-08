@@ -1,0 +1,11 @@
+required_names: [gap-below-interval-one-batch, gap-above-interval-flushes, filling-batch-never-early]
+cases:
+  - name: gap-below-interval-one-batch
+    mode: below
+    batches: [2]
+  - name: gap-above-interval-flushes
+    mode: above
+    batches: [1, 1]
+  - name: filling-batch-never-early
+    mode: filling
+    batches: [3]
