@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -180,9 +181,11 @@ func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID)
 	row := snapshotSessionRow{sessionID: sessionID}
 	found := false
 	if err := sqlitex.ExecuteTransient(conn, `SELECT s.model_harness, s.parent_id, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
- COALESCE(m.turn_count, 0), COALESCE(m.tool_calls, 0)
- FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
- WHERE s.session_id = ?`, &sqlitex.ExecOptions{
+ COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
+ COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
+  FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
+  LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
+  WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -283,6 +286,15 @@ func generationReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	completenessValue, err := indexformat.NewGenerationCompleteness(completeness)
 	if err != nil {
 		return indexformat.ReadSnapshot{}, err
+	}
+	// Native sessions read their wire stats from the captured stats row, not
+	// the capture-time document: resume and derived updates land there. A
+	// session without a stats row keeps its document stats; that row should
+	// always exist past the backfill.
+	if captured, statsErr := readCapturedStatsOnConn(conn, sessionID); statsErr == nil {
+		metadata.Stats = capturedStatsToWire(captured)
+	} else if !errors.Is(statsErr, ErrNoCapturedStats) {
+		return indexformat.ReadSnapshot{}, statsErr
 	}
 	var titleRefs []schema.SourceEntryRef
 	if err := json.Unmarshal([]byte(titleRefsJSON), &titleRefs); err != nil {

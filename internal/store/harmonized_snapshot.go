@@ -25,26 +25,40 @@ import (
 
 // harmonizedActiveOnConn reports whether the session's active generation row
 // lives in the harmonized catalog. A session with no active generation is
-// legacy; an active row outside the harmonized catalog is file-backed.
+// legacy; an active row outside the harmonized catalog is file-backed. A
+// session with no metadata row at all is not an error here: the mirror
+// reads below return empty for unknown sessions, and the dispatch must
+// preserve that.
 func harmonizedActiveOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (active string, harmonized bool, err error) {
-	activeID, err := readActiveGenerationOnConn(conn, sessionID)
-	if err != nil {
-		return "", false, err
+	var activeID *string
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				value := stmt.ColumnText(0)
+				activeID = &value
+			}
+			return nil
+		},
+	}); err != nil {
+		return "", false, fmt.Errorf("store: read active generation for session %s: %w; no generation read was authorized", sessionID, err)
 	}
-	if activeID == nil {
+	if !found || activeID == nil {
 		return "", false, nil
 	}
-	found := false
+	located := false
 	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), *activeID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			found = true
+			located = true
 			return nil
 		},
 	}); err != nil {
 		return "", false, fmt.Errorf("store: locate active generation %s for session %s: %w; no snapshot was built", *activeID, sessionID, err)
 	}
-	return *activeID, found, nil
+	return *activeID, located, nil
 }
 
 // harmonizedReadSnapshotOnConn builds the read snapshot for a harmonized

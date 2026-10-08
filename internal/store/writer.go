@@ -9,6 +9,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // deriveOpaqueHostID computes HMAC-SHA256(salt, hashInput) for a host_slugs row.
@@ -140,17 +141,18 @@ SELECT
     date(s.start_ms / 1000, 'unixepoch') AS date_utc,
     COUNT(*)                              AS session_count,
     COALESCE(SUM(m.input_tokens), 0)     AS tokens_in,
-    COALESCE(SUM(m.output_tokens), 0)    AS tokens_out,
-    COALESCE(SUM(m.input_tokens + m.output_tokens), 0) AS tokens_total,
-    COALESCE(AVG(m.duration_minutes) * 60000.0, 0) AS avg_duration_ms,
-    COALESCE(AVG(m.turn_count), 0)       AS avg_turns,
-    COALESCE(SUM(m.tool_calls), 0)       AS tool_call_count,
+    COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0) AS tokens_out,
+    COALESCE(SUM(m.input_tokens), 0) + COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0) AS tokens_total,
+    COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END) * 60000.0, 0) AS avg_duration_ms,
+    COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END), 0) AS avg_turns,
+    COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END), 0) AS tool_call_count,
     SUM(m.cost_total_usd)                AS total_cost_usd,
     SUM(m.cost_total_usd) / NULLIF(COUNT(*), 0) AS avg_cost_per_session_usd,
     CAST(SUM(CASE WHEN m.outcome = 'resolved' THEN 1 ELSE 0 END) AS REAL)
       / NULLIF(COUNT(*), 0)              AS acceptance_rate
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 WHERE date(s.start_ms / 1000, 'unixepoch') = ?
 GROUP BY date_utc`
 
@@ -165,13 +167,14 @@ SELECT
     s.model_harness,
     COUNT(*)                              AS session_count,
     COALESCE(SUM(m.input_tokens), 0),
-    COALESCE(SUM(m.output_tokens), 0),
-    COALESCE(SUM(m.input_tokens + m.output_tokens), 0),
-    COALESCE(AVG(m.duration_minutes) * 60000.0, 0),
-    COALESCE(AVG(m.turn_count), 0),
-    COALESCE(SUM(m.tool_calls), 0)
+    COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0),
+    COALESCE(SUM(m.input_tokens), 0) + COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0),
+    COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END) * 60000.0, 0),
+    COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END), 0),
+    COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END), 0)
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 WHERE date(s.start_ms / 1000, 'unixepoch') = ?
 GROUP BY date_utc, s.model_harness`
 
@@ -191,9 +194,9 @@ SELECT
     s.project_hash,
     MAX(p.canonical_cwd)                                     AS project_path,
     COUNT(*)                                                  AS session_count,
-    COALESCE(SUM(m.input_tokens + m.output_tokens), 0)       AS total_tokens,
-    COALESCE(SUM(m.tool_calls), 0)                           AS total_tool_calls,
-    COALESCE(SUM(m.duration_minutes), 0)                     AS total_duration_minutes,
+    COALESCE(SUM(m.input_tokens), 0) + COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0) AS total_tokens,
+    COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END), 0) AS total_tool_calls,
+    COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END), 0) AS total_duration_minutes,
     SUM(CASE WHEN m.outcome = 'resolved' THEN 1 ELSE 0 END) AS resolved_count,
     SUM(CASE WHEN m.outcome = 'failed'   THEN 1 ELSE 0 END) AS failed_count,
     SUM(CASE WHEN m.outcome = 'partial'  THEN 1 ELSE 0 END) AS partial_count,
@@ -203,6 +206,7 @@ SELECT
     SUM(m.cost_total_usd)                                    AS total_cost_usd
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 LEFT JOIN projects p ON s.project_hash = p.project_hash
 WHERE date(s.start_ms / 1000, 'unixepoch') = ?
 GROUP BY date_utc, s.project_hash`
@@ -313,6 +317,19 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 				return fmt.Errorf("store: encode retained metric seeds for session %s before metadata insertion: %w; prior metadata and computed metrics are unchanged", m.SessionID, seedErr)
 			}
 			seedJSON = string(encoded)
+		}
+		// Writer retirement: a session that already owns an active generation
+		// reads its measurements from the captured stats row. Ingest stops
+		// writing the retired seed home for it here — the upsert below then
+		// carries NULL, so a stale document cannot stick — and skips the
+		// metrics placeholder seeding further down. Sessions without one
+		// keep both, bridging the window before their first activation.
+		native, err := isNativeSessionOnConn(conn, schema.SessionID(m.SessionID))
+		if err != nil {
+			return fmt.Errorf("store: resolve representation for session %s before metadata insertion: %w", m.SessionID, err)
+		}
+		if native {
+			seedJSON = nil
 		}
 		var adapterVersion any
 		if m.AdapterVersion != nil {
@@ -455,9 +472,15 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			return fmt.Errorf("store: insert session %s: %w", m.SessionID, err)
 		}
 
+		// Writer retirement: a session with an active generation reads its
+		// measurements from the captured stats row, so ingest stops seeding
+		// measurements for it (the placeholder insert still runs with NULLs,
+		// exactly like a statless write, preserving the analysis row's
+		// membership for joined readers). Sessions without one keep the
+		// seeding, bridging the window before their first activation.
 		// 5. Insert session metrics.
 		metricArgs := []any{string(m.SessionID), nil, nil, nil, nil, nil, nil}
-		if retainStats {
+		if retainStats && !native {
 			metricArgs = []any{string(m.SessionID),
 				m.Stats.TurnCount,
 				m.Stats.SubagentCount,

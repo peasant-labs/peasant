@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -102,6 +103,15 @@ func nullableInt64Col(stmt *sqlite.Stmt, col int) *int64 {
 		return nil
 	}
 	v := stmt.ColumnInt64(col)
+	return &v
+}
+
+// nullableText reads one nullable TEXT column, preserving NULL against empty.
+func nullableText(stmt *sqlite.Stmt, col int) *string {
+	if stmt.ColumnType(col) == sqlite.TypeNull {
+		return nil
+	}
+	v := stmt.ColumnText(col)
 	return &v
 }
 
@@ -227,9 +237,26 @@ func upsertCapturedStatsOnConn(conn *sqlite.Conn, stats CapturedStats) (bool, er
 	if err := syncInputSubmissionMirrorOnConn(conn, stats.SessionID); err != nil {
 		return false, err
 	}
+	if err := clearLegacySeedOnConn(conn, stats.SessionID); err != nil {
+		return false, err
+	}
 	return applied, nil
 }
 
+// clearLegacySeedOnConn clears the retired sessions seed column once a
+// native session owns a captured stats row: the harness-only seed home
+// carries the evidence from here on, and the retired column must not keep a
+// stale document beside it. Sessions without an active generation are never
+// touched; their seed still serves the legacy path.
+func clearLegacySeedOnConn(conn *sqlite.Conn, id schema.SessionID) error {
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET metric_seed_json = NULL
+WHERE session_id = ? AND active_generation_id IS NOT NULL AND metric_seed_json IS NOT NULL`, &sqlitex.ExecOptions{
+		Args: []any{string(id)},
+	}); err != nil {
+		return fmt.Errorf("store: clear retired metric seed for session %s: %w", id, err)
+	}
+	return nil
+}
 // syncInputSubmissionMirrorOnConn repoints the sessions mirror at the merged
 // row, so list and grouping paths keep serving one narrow row. The mirror is
 // a copy of the row's current value: an update that reports no count leaves
@@ -262,6 +289,42 @@ func nullableStr(p *string) any {
 		return nil
 	}
 	return *p
+}
+
+// upsertActivationStatsOnConn records one activation's harness measurements
+// in the captured stats row: every reported field wins, the capture's stats
+// document becomes the seed, and the sessions input-submission mirror moves
+// in the same transaction. The writer slice owns the full activation
+// bookkeeping (C4); this bridge feeds the moved readers until it lands, and
+// the merge replaces it with the full bookkeeping call.
+func upsertActivationStatsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, stats schema.SessionStats) (bool, error) {
+	seed, err := json.Marshal(stats)
+	if err != nil {
+		return false, fmt.Errorf("store: encode activation stats seed for session %s: %w; no measurements were merged", sessionID, err)
+	}
+	seedDoc := string(seed)
+	turnCount := stats.TurnCount
+	toolCallCount := stats.ToolCallCount
+	subagentCount := stats.SubagentCount
+	durationMs := stats.DurationMs
+	tokensIn := stats.TokensIn
+	tokensOut := stats.TokensOut
+	return upsertCapturedStatsOnConn(conn, CapturedStats{
+		SessionID:            sessionID,
+		TurnCount:            &turnCount,
+		InputSubmissionCount: stats.InputSubmissionCount,
+		ToolCallCount:        &toolCallCount,
+		SubagentCount:        &subagentCount,
+		DurationMs:           &durationMs,
+		TokensIn:             &tokensIn,
+		TokensOut:            &tokensOut,
+		ThoughtTokens:        stats.ThoughtTokens,
+		CachedReadTokens:     stats.CachedReadTokens,
+		CachedWriteTokens:    stats.CachedWriteTokens,
+		SeedJSON:             &seedDoc,
+		Source:               StatsSourceHarness,
+		UpdatedAtMs:          time.Now().UnixMilli(),
+	})
 }
 
 // ReadMetricSeed returns the harness-captured adapter statistics for one

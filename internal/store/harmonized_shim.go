@@ -33,11 +33,25 @@ func shimmedOnConn(conn *sqlite.Conn, sessionID string) (bool, error) {
 
 // shimmedIDsOnConn partitions one batch of session IDs by representation in
 // a single query, so bulk reads issue one dispatch instead of one per
-// session.
+// session. Long batches chunk below the variable limit, mirroring the bulk
+// readers' own batching.
 func shimmedIDsOnConn(conn *sqlite.Conn, sessionIDs []string) (map[string]bool, error) {
 	shimmed := make(map[string]bool, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		end := start + indexFormatReadBatchSize
+		if end > len(sessionIDs) {
+			end = len(sessionIDs)
+		}
+		if err := shimmedIDsChunkOnConn(conn, sessionIDs[start:end], shimmed); err != nil {
+			return nil, err
+		}
+	}
+	return shimmed, nil
+}
+
+func shimmedIDsChunkOnConn(conn *sqlite.Conn, sessionIDs []string, shimmed map[string]bool) error {
 	if len(sessionIDs) == 0 {
-		return shimmed, nil
+		return nil
 	}
 	placeholders := make([]string, len(sessionIDs))
 	args := make([]any, len(sessionIDs))
@@ -57,9 +71,9 @@ WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id)`
 			return nil
 		},
 	}); err != nil {
-		return nil, fmt.Errorf("store: partition sessions by representation: %w", err)
+		return fmt.Errorf("store: partition sessions by representation: %w", err)
 	}
-	return shimmed, nil
+	return nil
 }
 
 // shimBoundedOnConn reports whether the shim bounds previews for a session:
@@ -194,23 +208,17 @@ func shimFirstUserPreviewBulk(conn *sqlite.Conn, sessionIDs []string) (map[strin
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	query := `SELECT m.session_id, b.content_preview FROM session_generation_entries m
-JOIN session_entry_bodies b
-  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
-JOIN sessions s ON s.session_id = m.session_id
-WHERE m.partition_id = 0 AND b.role = 'user' AND b.depth = 0
-AND m.generation_id = s.active_generation_id
-AND (m.session_id, m.entry_index) IN (
-  SELECT m2.session_id, MIN(m2.entry_index)
-  FROM session_generation_entries m2
-  JOIN sessions s2 ON s2.session_id = m2.session_id
-  JOIN session_entry_bodies b2
-    ON b2.session_id = m2.session_id AND b2.body_digest = m2.body_digest
-  WHERE m2.session_id IN (` + strings.Join(placeholders, ",") + `)
-  AND m2.partition_id = 0 AND b2.role = 'user' AND b2.depth = 0
-  AND m2.generation_id = s2.active_generation_id
-  GROUP BY m2.session_id
-)`
+	query := `SELECT session_id, content_preview FROM (
+  SELECT m.session_id AS session_id, b.content_preview AS content_preview,
+    ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.entry_index ASC) AS rn
+  FROM session_generation_entries m
+  JOIN session_entry_bodies b
+    ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+  JOIN sessions s ON s.session_id = m.session_id
+  WHERE m.session_id IN (` + strings.Join(placeholders, ",") + `)
+  AND m.partition_id = 0 AND b.role = 'user' AND b.depth = 0
+  AND m.generation_id = s.active_generation_id
+) WHERE rn = 1`
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {

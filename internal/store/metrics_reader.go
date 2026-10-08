@@ -20,11 +20,15 @@ JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 WHERE s.session_id = ? LIMIT 1`
 
 	sqlGetMetrics = `SELECT
-    session_id, turn_count, subagent_count,
+    m.session_id,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.subagent_count ELSE m.subagent_count END,
     title, outcome,
-    total_tokens, input_tokens, output_tokens,
-    tool_calls, files_touched, lines_changed,
-    duration_minutes,
+    total_tokens, input_tokens,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
+    files_touched, lines_changed,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END,
     retry_loops, retry_tokens_wasted, within_session_reverts,
     signal_density, spec_quality_score, exploration_ratio,
     scope_breadth, discovery_turns,
@@ -38,7 +42,10 @@ WHERE s.session_id = ? LIMIT 1`
     cost_input_usd, cost_output_usd, cost_reasoning_usd,
     cost_cache_read_usd, cost_cache_write_usd, cost_total_usd, cost_model_id,
     scope, input_hash, output_hash
-FROM session_metrics WHERE session_id = ?`
+FROM session_metrics m
+JOIN sessions s ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = m.session_id
+WHERE m.session_id = ?`
 
 	sqlMetricsExist = `SELECT compute_version FROM session_metrics WHERE session_id = ?`
 

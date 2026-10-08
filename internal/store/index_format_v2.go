@@ -614,6 +614,14 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	}}); err != nil {
 		return fmt.Errorf("store: derive turn_count mirror for session %s generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 	}
+	// The captured stats row carries the session's mutable measurements from
+	// here on. The writer slice owns the full activation bookkeeping (C4);
+	// this bridge keeps the moved readers fed with the same capture values
+	// until it lands, so no activation leaves a native session without its
+	// stats row.
+	if _, err := upsertActivationStatsOnConn(conn, sessionID, generation.Metadata.Stats); err != nil {
+		return fmt.Errorf("store: capture stats for session %s generation %s: %w; no generation was activated", sessionID, generation.ID, err)
+	}
 	return nil
 }
 

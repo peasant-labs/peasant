@@ -155,11 +155,13 @@ func runAnnotateSample(cmd *cobra.Command, _ []string) (retErr error) {
 	selectCols := `s.session_id, COALESCE(p.canonical_cwd, p.project_hash),
 		(SELECT COUNT(*) FROM session_entries se WHERE se.session_id = s.session_id AND se.role = 'user' AND se.depth = 0) as user_turns,
 		(SELECT COUNT(*) FROM session_entries se WHERE se.session_id = s.session_id) as total_turns,
-		COALESCE(m.input_tokens,0)+COALESCE(m.output_tokens,0) as tokens,
-		m.duration_minutes, m.tool_calls`
+		COALESCE(m.input_tokens,0)+COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,0) as tokens,
+		CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END,
+		CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END`
 
 	joinClause := `FROM sessions s
 		JOIN session_metrics m ON s.session_id = m.session_id
+		LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 		JOIN projects p ON s.project_hash = p.project_hash`
 
 	// SQLite evaluates WHERE before LIMIT, so filtering happens before sampling —
