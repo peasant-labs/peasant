@@ -1,0 +1,40 @@
+# content_migration — the section-10 backfill cases this migration owns, under
+# their required names (each required by content_migration.manifest.yaml).
+# native-stats-backfilled aliases the migration_v62 full-stats-backfilled
+# scenario: the stats row and sweep flag backfilled from the active
+# generation's metadata_json. Stats documents use the live-store shape (a
+# Go-marshaled SessionStats under $.stats); metadataJson values are compact
+# single-line documents so seed_json equality is exact.
+# native-extra-keys-promoted is owned by the conversion command: extra-key
+# promotion runs at conversion time, so this migration carries the keys
+# through untouched and asserts nothing for them here.
+cases:
+  - name: native-stats-backfilled
+    sessionId: s-v62-full
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{"schemaVersion":11,"sessionId":"s-v62-full","harness":"opencode","model":"m","version":"1","timestamp":{},"source":{},"git":{},"project":{},"hostSlug":"h","stats":{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30},"subagents":[],"diagnostics":{},"contentHash":"c","metadataHash":"m","redaction":{}}'
+        installedAtMs: 1699999999000
+        activatedAtMs: 1700000000000
+      - id: gen-old
+        metadataJson: '{}'
+        installedAtMs: 1699999990000
+        activatedAtMs: null
+    expected:
+      turnCount: 12
+      inputSubmissionCount: 3
+      toolCallCount: 7
+      subagentCount: 2
+      durationMs: 90000
+      tokensIn: 100
+      tokensOut: 200
+      thoughtTokens: 10
+      cachedReadTokens: 20
+      cachedWriteTokens: 30
+      seedJson: '{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30}'
+      source: harness
+      updatedAtMs: 1700000000000
+    expectedFlag: 1
+  - name: native-extra-keys-promoted
+    ownedBy: conversion

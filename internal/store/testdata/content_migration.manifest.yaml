@@ -1,0 +1,4 @@
+# Required-name manifest for content_migration: deletion protection by NAME, never by count.
+requiredNames:
+  - native-stats-backfilled
+  - native-extra-keys-promoted
