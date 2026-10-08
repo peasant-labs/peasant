@@ -90,14 +90,15 @@ func loadMigrationV62Fixtures(t *testing.T) v62Fixtures {
 }
 
 // TestMigrationV62Backfills proves the v62 migration carries its backfills and
-// rebuilds over a populated predecessor: stats rows and seed documents from
-// the active generation metadata, the sweep flag, the annotation targets
-// without their foreign key, and the shredded generation-keyed tables.
+// the annotation-target rebuild over a populated predecessor: stats rows and
+// seed documents from the active generation metadata, the sweep flag, and the
+// annotation targets carried over without their foreign key.
 //
 // A V61 database is seeded from the typed fixture, then migrated to V62. The
 // migration must preserve every seeded row, extract the stats the live store
-// shape carries, and shred the JSON columns so the structured rows reassemble
-// byte-identically through the schema package.
+// shape carries, and leave the JSON columns of the three generation-keyed
+// tables byte-identical: their reshape lands with the harmonized writer, not
+// with this migration or the conversion command.
 func TestMigrationV62Backfills(t *testing.T) {
 	t.Parallel()
 	fixtures := loadMigrationV62Fixtures(t)
@@ -147,7 +148,7 @@ func TestMigrationV62Backfills(t *testing.T) {
 }
 
 // seedV62Predecessor populates a V61 database with the fixture sessions,
-// generations, evidence, segments, sections, and annotation targets. Foreign
+// generations, and annotation targets. Foreign
 // keys stay off during seeding: the annotation rows deliberately carry no
 // parents, and the migration itself runs with foreign keys off.
 func seedV62Predecessor(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures) {
@@ -379,11 +380,6 @@ func assertV62AnnotationRebuild(t *testing.T, conn *sqlite.Conn, fixtures v62Fix
 	if sql := v62ObjectSQL(t, conn, "index", "idx_ann_target_entry"); !strings.Contains(sql, "annotation_target_entries") {
 		t.Errorf("idx_ann_target_entry missing or misplaced after rebuild: %s", sql)
 	}
-	views := 0
-	queryV62Row(t, conn, `SELECT COUNT(*) FROM annotations_with_target`, nil, func(stmt *sqlite.Stmt) {
-		views = int(stmt.ColumnInt64(0))
-	})
-	_ = views
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO annotation_target_entries(annotation_id, session_id, entry_index, end_index) VALUES('ann-v62-check','s-v62-full',5,5)`, nil); err == nil {
 		t.Errorf("rebuilt annotation_target_entries admits end_index <= entry_index; the CHECK must hold")
 	} else {

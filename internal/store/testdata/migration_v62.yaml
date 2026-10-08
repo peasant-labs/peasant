@@ -1,6 +1,7 @@
-# Focused v62 migration cases: the stats and sweep backfills, the
-# annotation-target rebuild, and the reshaped-table shredding. Each named
-# entity is required by migration_v62.manifest.yaml. Stats documents use the
+# Focused v62 migration cases: the stats and sweep backfills and the
+# annotation-target rebuild. The JSON columns of the three generation-keyed
+# tables stay untouched here; their reshape lands with the harmonized writer.
+# Each named entity is required by migration_v62.manifest.yaml. Stats documents use the
 # live-store shape (a Go-marshaled SessionStats under $.stats); metadataJson
 # values are compact single-line documents so seed_json equality is exact.
 statsCases:

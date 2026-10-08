@@ -15,9 +15,9 @@ const BodyRowIDBase = 1 << 50
 // entity, the digest-addressed content store, the immutable generation
 // catalog with its ordered metadata children, the mutable per-session stats
 // row, and the unified search store. It backfills the stats row and the
-// sweep flag from the file-backed catalog, rebuilds the reshaped
-// generation-keyed tables and the annotation targets, and drops the
-// duplicate partition index. No entry content moves inside this migration:
+// sweep flag from the file-backed catalog, rebuilds the annotation targets
+// without their session_entries foreign key, and drops the duplicate
+// partition index. No entry content moves inside this migration:
 // conversion runs later in peasant migrate.
 //
 // The migration is SQL-only and runs at open. The annotation-target rebuild
@@ -27,8 +27,8 @@ const BodyRowIDBase = 1 << 50
 // session_context_segments.captured_refs_json,
 // session_projection_sections.native_metadata) are NOT reshaped here: the
 // current writer and readers still use those columns, so reshaping them in
-// v62 would break the write path halfway through the epoch. The conversion
-// reshapes them once the writer speaks the new shape. v62 only creates the
+// v62 would break the write path until the harmonized writer lands. That
+// writer change reshapes them once it speaks the new shape. v62 only creates the
 // two ordered child tables (session_context_segment_refs,
 // session_section_native_metadata), which stay empty until the conversion
 // fills them alongside the reshaped parents. annotation_target_entries is

@@ -388,6 +388,6 @@ var dbSchema = sqlitemigration.Schema{
 		{DisableForeignKeys: true}, // V59: rebuild session_content_captures for the closed capture-format set
 		nil,                        // V60: managed-generation catalog (new tables, no data rewrite)
 		nil,                        // V61: reverse logical-target lookup indexes (additive, no data rewrite)
-		{DisableForeignKeys: true}, // V62: rebuilds reshaped tables and annotation targets (FKs off for drop/rename)
+		{DisableForeignKeys: true}, // V62: rebuilds annotation targets (FKs off for drop/rename); the JSON generation-keyed tables stay untouched for the harmonized writer
 	},
 }
