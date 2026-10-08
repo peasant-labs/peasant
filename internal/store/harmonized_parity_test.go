@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 )
+
 // parityEntry builds one entry with every text column populated: the
 // worst case for the row mapping, because every field must survive the
 // round trip with its presence and value intact. The timestamp is set so
