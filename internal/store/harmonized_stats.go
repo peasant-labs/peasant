@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -319,42 +318,6 @@ func nullableStr(p *string) any {
 		return nil
 	}
 	return *p
-}
-
-// upsertActivationStatsOnConn records one activation's harness measurements
-// in the captured stats row: every reported field wins, the capture's stats
-// document becomes the seed, and the sessions input-submission mirror moves
-// in the same transaction. The writer slice owns the full activation
-// bookkeeping (C4); this bridge feeds the moved readers until it lands, and
-// the merge replaces it with the full bookkeeping call.
-func upsertActivationStatsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, stats schema.SessionStats) (bool, error) {
-	seed, err := json.Marshal(stats)
-	if err != nil {
-		return false, fmt.Errorf("store: encode activation stats seed for session %s: %w; no measurements were merged", sessionID, err)
-	}
-	seedDoc := string(seed)
-	turnCount := stats.TurnCount
-	toolCallCount := stats.ToolCallCount
-	subagentCount := stats.SubagentCount
-	durationMs := stats.DurationMs
-	tokensIn := stats.TokensIn
-	tokensOut := stats.TokensOut
-	return upsertCapturedStatsOnConn(conn, CapturedStats{
-		SessionID:            sessionID,
-		TurnCount:            &turnCount,
-		InputSubmissionCount: stats.InputSubmissionCount,
-		ToolCallCount:        &toolCallCount,
-		SubagentCount:        &subagentCount,
-		DurationMs:           &durationMs,
-		TokensIn:             &tokensIn,
-		TokensOut:            &tokensOut,
-		ThoughtTokens:        stats.ThoughtTokens,
-		CachedReadTokens:     stats.CachedReadTokens,
-		CachedWriteTokens:    stats.CachedWriteTokens,
-		SeedJSON:             &seedDoc,
-		Source:               StatsSourceHarness,
-		UpdatedAtMs:          time.Now().UnixMilli(),
-	})
 }
 
 // ReadMetricSeed returns the harness-captured adapter statistics for one
