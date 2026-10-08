@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
@@ -185,5 +188,158 @@ func TestHarmonizedRepair(t *testing.T) {
 	}
 	if restored.IndexedInputHash == nil || *restored.IndexedInputHash != proof {
 		t.Fatalf("repair input proof = %v, want the re-indexed input", restored.IndexedInputHash)
+	}
+}
+
+// blobStoredDigest hashes one blob's bytes the way staging addresses them:
+// the descriptor digest the repair gate verifies chunk bytes against.
+func blobStoredDigest(t *testing.T, data []byte) string {
+	t.Helper()
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// readBlobBytes concatenates one stored blob's chunks in chunk order: the
+// byte string the repair gate hashes.
+func readBlobBytes(t *testing.T, s *Store, sid schema.SessionID, digest string) []byte {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	var out []byte
+	if err := sqlitex.ExecuteTransient(conn, `SELECT data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), digest},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			n := stmt.ColumnLen(0)
+			chunk := make([]byte, n)
+			stmt.ColumnBytes(0, chunk)
+			out = append(out, chunk...)
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// flipBlobChunkByte corrupts one stored chunk byte directly, the way a torn
+// write or a bit flip below SQLite would: the header digest still names the
+// old bytes, so only a byte-verifying reader sees the damage. The chunk
+// tables carry no immutability trigger, so the corrupt write runs directly.
+func flipBlobChunkByte(t *testing.T, s *Store, sid schema.SessionID, digest string) {
+	t.Helper()
+	data := readBlobBytes(t, s, sid, digest)
+	if len(data) == 0 {
+		t.Fatal("no stored chunk bytes to corrupt")
+	}
+	data[0] ^= 0xff
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_content_chunks SET data = ? WHERE session_id = ? AND digest = ? AND chunk_index = 0`, &sqlitex.ExecOptions{
+		Args: []any{data, string(sid), digest},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// activateRepairCandidate activates one candidate generation over the
+// session's current index state, returning its disposition. Every repair
+// round re-reads the state first: each activation advances the stamps the
+// compare-and-swap guards.
+func activateRepairCandidate(t *testing.T, s *Store, sid schema.SessionID, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte, identity, proof string) ingest.ActivationOutcome {
+	t.Helper()
+	state, err := s.ReadIndexState(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := s.ActivateGeneration(context.Background(), GenerationActivation{
+		Generation:       filledCandidateForValidation(t, v2, blobs),
+		Blobs:            blobs,
+		IndexerVersion:   1,
+		IndexedAtMs:      200,
+		ExpectedState:    state,
+		ArtifactIdentity: &identity,
+		IndexedInputHash: &proof,
+	})
+	if err != nil {
+		t.Fatalf("repair-round activation: %v", err)
+	}
+	return outcome
+}
+
+// TestHarmonizedRepairRewritesByteFlippedBlob proves the repair gate
+// verifies blob bytes, not just blob structure. A verify-marked session
+// whose descriptor blob has one flipped chunk byte takes the repair path
+// on an unchanged-input re-index — rewriting the blob in place with no new
+// generation row — while the healthy control, predicate set and bytes
+// intact, still skips.
+func TestHarmonizedRepairRewritesByteFlippedBlob(t *testing.T) {
+	sid, err := schema.NewSessionID("f5f5f5f5-f5f5-45f5-85f5-f5f5f5f5f5f5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := openGenerationStore(t)
+	seedGenerationSession(t, s, string(sid))
+	retained := schema.SourceEntryRef("e_retained_repair")
+	blobBytes := []byte("retained repair blob bytes")
+	v2, blobs := buildTestGeneration(t, sid, "gen_repair_blob_g1", "repair blob text", "repair blob input", "repair blob output")
+	v2.Generation.Segments = []indexformat.ContextSegment{{
+		Ordinal:          0,
+		PhysicalSourceID: "repair-source",
+		Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
+		Inclusion:        indexformat.SegmentInclusionInherited,
+		CapturedRefs:     []schema.SourceEntryRef{retained},
+	}}
+	v2.Generation.Content = append(v2.Generation.Content, indexformat.ContentRecord{Ref: retained})
+	blobs[retained] = blobBytes
+	digest := blobStoredDigest(t, blobBytes)
+	identity := strings.Repeat("c", 64)
+	proof := strings.Repeat("d", 64)
+	if outcome := activateRepairCandidate(t, s, sid, v2, blobs, identity, proof); outcome.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("base activation disposition = %v, want the committed generation", outcome.Disposition)
+	}
+	if got := blobStoredDigest(t, readBlobBytes(t, s, sid, digest)); got != digest {
+		t.Fatal("stored blob bytes do not verify right after the commit")
+	}
+	// Healthy control: the predicate is set but every object verifies, so
+	// the unchanged-input re-index skips instead of repairing.
+	clearInputProof(t, s, sid)
+	refreshed, _ := buildTestGeneration(t, sid, "gen_repair_blob_g2", "repair blob text", "repair blob input", "repair blob output")
+	refreshed.Generation.Segments = v2.Generation.Segments
+	refreshed.Generation.Content = v2.Generation.Content
+	if outcome := activateRepairCandidate(t, s, sid, refreshed, blobs, identity, proof); outcome.Disposition != ingest.ActivationSkipped {
+		t.Fatalf("healthy control disposition = %v, want the unchanged-input skip", outcome.Disposition)
+	}
+	if got := countSessionGenerations(t, s, sid); got != 1 {
+		t.Fatalf("control wrote %d generation rows, want exactly the one", got)
+	}
+	// Damage: one flipped chunk byte under an intact header and chunk
+	// count. Structure still verifies; only bytes fail.
+	flipBlobChunkByte(t, s, sid, digest)
+	if got := blobStoredDigest(t, readBlobBytes(t, s, sid, digest)); got == digest {
+		t.Fatal("flipped blob still verifies; the corruption is invisible")
+	}
+	// Verify-marked re-index of the same content: the gate sees failing
+	// bytes and takes the repair path, rewriting the blob in place.
+	clearInputProof(t, s, sid)
+	repaired, _ := buildTestGeneration(t, sid, "gen_repair_blob_g3", "repair blob text", "repair blob input", "repair blob output")
+	repaired.Generation.Segments = v2.Generation.Segments
+	repaired.Generation.Content = v2.Generation.Content
+	if outcome := activateRepairCandidate(t, s, sid, repaired, blobs, identity, proof); outcome.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("byte-flip repair disposition = %v, want committed repair work", outcome.Disposition)
+	}
+	if got := visibleGeneration(t, s, sid); got != "gen_repair_blob_g1" {
+		t.Fatalf("visible = %q after blob repair, want the unchanged generation", got)
+	}
+	if got := countSessionGenerations(t, s, sid); got != 1 {
+		t.Fatalf("blob repair wrote %d generation rows, want exactly the one", got)
+	}
+	if got := blobStoredDigest(t, readBlobBytes(t, s, sid, digest)); got != digest {
+		t.Fatal("repaired blob bytes still fail verification")
 	}
 }
