@@ -25,6 +25,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -320,6 +321,17 @@ func openBarrierGenerationStore(t *testing.T, attempts chan struct{}, acquired c
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "artifacts")
+	destPath := filepath.Join(dir, "generations.db")
+	storetest.CopyGoldenTo(t, destPath)
+	return openBarrierStoreWithRoot(t, root, destPath, attempts, acquired), root
+}
+
+// openBarrierStoreWithRoot opens the barrier store over a caller-seeded
+// database: the file-backed cases seed their session row, projection rows,
+// manifests, and blobs before this open, so the store under test never
+// writes the baseline it contends over.
+func openBarrierStoreWithRoot(t *testing.T, root, destPath string, attempts chan struct{}, acquired chan time.Time) *store.Store {
+	t.Helper()
 	artifacts, err := store.NewOSGenerationArtifactStore(root)
 	if err != nil {
 		t.Fatal(err)
@@ -328,8 +340,6 @@ func openBarrierGenerationStore(t *testing.T, attempts chan struct{}, acquired c
 	if err != nil {
 		t.Fatal(err)
 	}
-	destPath := filepath.Join(dir, "generations.db")
-	storetest.CopyGoldenTo(t, destPath)
 	s, err := store.Open(
 		destPath,
 		store.WithSkipMigrations(),
@@ -341,7 +351,33 @@ func openBarrierGenerationStore(t *testing.T, attempts chan struct{}, acquired c
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	return s, root
+	return s
+}
+
+// seedBarrierFileBackedSession seeds one session row plus every listed
+// generation into the file-backed storage the barrier's file-based steps
+// require: the projection catalog rows, the owned generation directories
+// with their manifests and blobs, and the active pointer on the last
+// generation seeded. Everything lands before the store under test opens,
+// so no setup activation takes a session lock the test must drain.
+func seedBarrierFileBackedSession(t *testing.T, dbPath, root string, sid schema.SessionID, specs []barrierGenerationSpec) {
+	t.Helper()
+	func() {
+		conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
+		if err != nil {
+			t.Fatalf("open barrier database: %v", err)
+		}
+		defer conn.Close()
+		execPayloadSQL(t, conn, `
+INSERT INTO host_slugs(opaque_id, host_slug) VALUES('barrier-host','barrier-host');
+INSERT INTO projects(project_hash, canonical_cwd) VALUES('barrier-project','/synthetic/barrier');
+INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, schema_version, active_generation_id)
+VALUES(`+quotePayloadLiteral(string(sid))+`,'opencode','barrier-model','barrier-host','barrier-project',1,2,3,'/synthetic/barrier.jsonl','jsonl',11,NULL);`)
+	}()
+	for _, spec := range specs {
+		v2, blobs := buildBarrierGeneration(t, sid, spec)
+		seedFileBackedPayloadGeneration(t, dbPath, root, sid, v2, blobs)
+	}
 }
 
 // drainExclusiveAttempts clears the setup activations' exclusive-lock signals
@@ -512,20 +548,16 @@ func runBarrierLockLifetime(t *testing.T, fixtureCase barrierCase) {
 
 	attempts := make(chan struct{}, 8)
 	acquired := make(chan time.Time, 8)
-	s, _ := openBarrierGenerationStore(t, attempts, acquired)
-	storetest.SeedSession(t, s, string(sid))
-
-	// The baseline is committed and then superseded by the held generation, so
-	// it is a real inactive generation that cleanup can remove while the
-	// boundary holds the lock.
-	baseline, baselineBlobs := buildBarrierGeneration(t, sid, *fixtureCase.Baseline)
-	if err := activateBarrierGeneration(t, s, baseline, baselineBlobs); err != nil {
-		t.Fatalf("activate baseline: %v", err)
-	}
-	held, heldBlobs := buildBarrierGeneration(t, sid, *fixtureCase.Held)
-	if err := activateBarrierGeneration(t, s, held, heldBlobs); err != nil {
-		t.Fatalf("activate held generation: %v", err)
-	}
+	dir := t.TempDir()
+	root := filepath.Join(dir, "artifacts")
+	destPath := filepath.Join(dir, "generations.db")
+	storetest.CopyGoldenTo(t, destPath)
+	// The baseline is committed and then superseded by the held generation
+	// through the file-backed storage, so it is a real inactive generation
+	// with a catalog row and an owned directory that cleanup can remove
+	// while the boundary holds the lock.
+	seedBarrierFileBackedSession(t, destPath, root, sid, []barrierGenerationSpec{*fixtureCase.Baseline, *fixtureCase.Held})
+	s := openBarrierStoreWithRoot(t, root, destPath, attempts, acquired)
 	// The setup activations each took the exclusive lock; clear their signals so
 	// the waits below observe only the contended activation and cleanup.
 	drainExclusiveAttempts(attempts)
@@ -706,12 +738,12 @@ func corruptCommittedBlob(t *testing.T, root string, sid schema.SessionID, gener
 func runBarrierCorruptArtifact(t *testing.T, fixtureCase barrierCase) {
 	t.Helper()
 	sid := mustBarrierSessionID(t, fixtureCase)
-	s, root := openBarrierGenerationStore(t, make(chan struct{}, 4), nil)
-	storetest.SeedSession(t, s, string(sid))
-	held, blobs := buildBarrierGeneration(t, sid, *fixtureCase.Held)
-	if err := activateBarrierGeneration(t, s, held, blobs); err != nil {
-		t.Fatalf("activate held generation: %v", err)
-	}
+	dir := t.TempDir()
+	root := filepath.Join(dir, "artifacts")
+	destPath := filepath.Join(dir, "generations.db")
+	storetest.CopyGoldenTo(t, destPath)
+	seedBarrierFileBackedSession(t, destPath, root, sid, []barrierGenerationSpec{*fixtureCase.Held})
+	s := openBarrierStoreWithRoot(t, root, destPath, make(chan struct{}, 4), nil)
 	corruptCommittedBlob(t, root, sid, fixtureCase.Held.ID, schema.SourceEntryRef(fixtureCase.Corruption.Ref), fixtureCase.Corruption.ReplacementFill)
 
 	payload, err := export.ExportSnapshotPayload(context.Background(), s, s, sid)
