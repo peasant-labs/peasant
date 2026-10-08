@@ -67,10 +67,14 @@ type preparedBlob struct {
 func prepareHarmonizedCandidate(sessionID schema.SessionID, generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte) (*preparedHarmonized, error) {
 	emitted := emittedRefs(generation)
 	if blobs != nil {
+		// The candidate must arrive self-contained: every content record
+		// carries its bytes, emitted or not. Emitted refs never reach the
+		// blob store (classification routes them inline), but the binding
+		// assumes the whole candidate, so a real blob integrity failure
+		// still cannot replace the previous generation: missing bytes
+		// refuse the candidate before anything is staged, under the one
+		// fixed category for this seam.
 		for _, record := range generation.Content {
-			if _, ok := emitted[record.Ref]; ok {
-				continue
-			}
 			if _, ok := blobs[record.Ref]; !ok {
 				return nil, fmt.Errorf("store: a content record of session %s names no emitted entry and carries no staged bytes; no generation was prepared; supply the ref bytes or drop the record", sessionID)
 			}
