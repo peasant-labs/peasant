@@ -87,7 +87,7 @@ VALUES (?, ?, ?, ?)`
     adapter_version, metric_seed_json, source_fingerprint, artifact_hash
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
-    parent_id = excluded.parent_id,
+    parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
     opaque_host_id = excluded.opaque_host_id,
     project_hash = excluded.project_hash,
     model_harness = excluded.model_harness,
@@ -114,7 +114,7 @@ ON CONFLICT(session_id) DO UPDATE SET
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
-    parent_id=excluded.parent_id, model_harness=excluded.model_harness,
+    parent_id=COALESCE(excluded.parent_id, sessions.parent_id), model_harness=excluded.model_harness,
     model_id=excluded.model_id, opaque_host_id=excluded.opaque_host_id,
     project_hash=excluded.project_hash, start_ms=excluded.start_ms,
     end_ms=excluded.end_ms, ingested_ms=excluded.ingested_ms,

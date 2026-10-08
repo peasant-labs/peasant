@@ -17,9 +17,9 @@
 # Damages (each corrupts exactly one dimension of the seeded input or of
 # the conversion's derived output): field-blob, missing-blob,
 # damaged-blob, serialization, shim, aux-json, full-shape, capture-hash,
-# session-hash, null-hash, detail-bytes. stale-hash is not a corruption:
-# it backdates the stored hash the way live resumes do, and the conversion
-# still proceeds.
+# session-hash, null-hash, detail-bytes, unknown-key. stale-hash is not a
+# corruption: it backdates the stored hash the way live resumes do, and the
+# conversion still proceeds.
 # expect: converted, rolled-back, halted, skipped.
 cases:
 
@@ -86,6 +86,15 @@ cases:
     ownedBy: conversion
     profile: rich-metadata
     expect: converted
+  - name: native-parent-only-metadata-heals-row
+    ownedBy: conversion
+    profile: parent-only-metadata
+    expect: converted
+  - name: native-parent-divergence-rolls-back
+    ownedBy: conversion
+    profile: parent-row-wins
+    expect: rolled-back
+    expectDimension: metadata-document
   - name: native-field-blob-mismatch-rolls-back-and-marks
     ownedBy: conversion
     profile: clean
@@ -145,6 +154,12 @@ cases:
     profile: clean
     expect: converted
     damage: stale-hash
+  - name: native-unknown-key-rolls-back
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: unknown-key
+    expectDimension: metadata-document
   - name: native-detail-bytes-mismatch-halts
     ownedBy: conversion
     profile: clean

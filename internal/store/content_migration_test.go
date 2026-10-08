@@ -30,7 +30,8 @@ type contentMigrationCase struct {
 	// Profile names the file-backed seed the runner builds: clean,
 	// superseded, pending-intent, non-emitted, extra-keys, newer-stats,
 	// rich-metadata, annotated, preview-only, non-native-full,
-	// non-native-preview-only, settled-refusal.
+	// non-native-preview-only, settled-refusal, parent-only-metadata,
+	// parent-row-wins.
 	Profile string `yaml:"profile,omitempty"`
 	// Expect is the conversion disposition: converted, rolled-back,
 	// halted, skipped.
@@ -38,8 +39,13 @@ type contentMigrationCase struct {
 	// Damage corrupts exactly one dimension of the seeded input or of
 	// the conversion's derived output: field-blob, missing-blob,
 	// damaged-blob, serialization, shim, aux-json, full-shape,
-	// capture-hash, session-hash, null-hash, detail-bytes.
+	// capture-hash, session-hash, null-hash, detail-bytes, unknown-key.
+	// stale-hash is not a corruption: it backdates the stored hash the
+	// way live resumes do, and the conversion still proceeds.
 	Damage string `yaml:"damage,omitempty"`
+	// ExpectDimension pins the rollback dimension for damages that must
+	// refuse at one exact check.
+	ExpectDimension string `yaml:"expectDimension,omitempty"`
 	// Count seeds that many identical sessions for the driver-level
 	// threshold case.
 	Count int `yaml:"count,omitempty"`
