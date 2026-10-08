@@ -15,7 +15,10 @@ import (
 )
 
 // GenerationActivation is one immutable V2 candidate plus the content
-// bytes its non-emitted records address. No file is written anywhere: the
+// bytes every content record addresses. The candidate must arrive
+// self-contained: every content record carries its bytes, emitted or not
+// (emitted refs never reach the blob store, but the binding assumes the
+// whole candidate). No file is written anywhere: the
 // candidate stages digest-addressed objects without a lock, and the commit
 // installs the generation rows, the count mirrors and the active pointer
 // together in one transaction. An incomplete_new candidate leaves success
