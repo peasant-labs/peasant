@@ -144,11 +144,18 @@ func runCorruptionRepairCase(t *testing.T, c contentCorruptionCase) {
 		t.Fatalf("verify after repair: %v", err)
 	} else if len(report.Damaged) != 0 {
 		t.Fatalf("damage after repair = %+v; want none", report.Damaged)
+	} else if !report.IndexRebuilt {
+		t.Fatal("verify after repair did not rebuild the flagged search index")
 	}
 	if rebuilt, err := s.EnsureSearchIndexHealthy(ctx); err != nil {
-		t.Fatalf("rebuild after repair: %v", err)
-	} else if !rebuilt {
-		t.Fatal("repair did not flag the search index for rebuild")
+		t.Fatalf("health gate after verify: %v", err)
+	} else if rebuilt {
+		t.Fatal("health gate rebuilt an index already healed by verify")
+	}
+	if report, err := s.VerifyContent(ctx, false); err != nil {
+		t.Fatalf("second verify after repair: %v", err)
+	} else if report.IndexRebuilt || len(report.Damaged) != 0 {
+		t.Fatalf("second verify was not a clean no-op: %+v", report)
 	}
 	assertRepairMatch(t, s, "durable")
 }
@@ -162,7 +169,7 @@ func corruptionInheritedDigest(t *testing.T, s *Store, sid schema.SessionID) str
 	}
 	defer s.pool.Put(conn)
 	var digest string
-	if err := sqlitex.ExecuteTransient(conn, `SELECT digest FROM session_generation_content WHERE session_id = ? AND source_entry_ref = 'e_repair_inherited'`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT digest FROM session_generation_content WHERE session_id = ? AND source_entry_ref = 'e_repair_inherited'`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digest = stmt.ColumnText(0)
@@ -198,7 +205,7 @@ func applyCorruptionDamage(t *testing.T, s *Store, sid schema.SessionID, damage 
 		if damage == "header-length" {
 			query = `UPDATE session_content SET byte_length = byte_length + 1 WHERE session_id = ? AND digest = ?`
 		}
-		if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: []any{string(sid), digest}}); err != nil {
+		if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{string(sid), digest}}); err != nil {
 			t.Fatal(err)
 		}
 		return digest
@@ -213,14 +220,14 @@ func applyCorruptionDamage(t *testing.T, s *Store, sid schema.SessionID, damage 
 		defer s.pool.Put(conn)
 		exec := func(script string) {
 			t.Helper()
-			if err := sqlitex.ExecuteTransient(conn, script, nil); err != nil {
+			if err := sqlitex.Execute(conn, script, nil); err != nil {
 				t.Fatalf("corrupt descriptor: %v", err)
 			}
 		}
 		exec(`PRAGMA foreign_keys=OFF`)
 		defer exec(`PRAGMA foreign_keys=ON`)
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE session_generation_content SET digest = '`+strings.Repeat("b", 64)+`' WHERE session_id = ? AND source_entry_ref = 'e_repair_inherited'`, &sqlitex.ExecOptions{
-			Args: []any{string(sid)},
+		if err := sqlitex.Execute(conn, `UPDATE session_generation_content SET digest = ? WHERE session_id = ? AND source_entry_ref = 'e_repair_inherited'`, &sqlitex.ExecOptions{
+			Args: []any{strings.Repeat("b", 64), string(sid)},
 		}); err != nil {
 			t.Fatalf("corrupt descriptor: %v", err)
 		}
@@ -240,7 +247,7 @@ func corruptionInputProof(t *testing.T, s *Store, sid schema.SessionID) *string 
 	}
 	defer s.pool.Put(conn)
 	var proof *string
-	if err := sqlitex.ExecuteTransient(conn, `SELECT indexed_input_hash FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT indexed_input_hash FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) != sqlite.TypeNull {
@@ -265,7 +272,7 @@ func assertRepairMatch(t *testing.T, s *Store, term string) {
 	}
 	defer s.pool.Put(conn)
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_search_fts WHERE session_search_fts MATCH ? LIMIT 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_search_fts WHERE session_search_fts MATCH ? LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{term},
 		ResultFunc: func(*sqlite.Stmt) error {
 			found = true
