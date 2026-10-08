@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -17,10 +20,8 @@ import (
 // in generation_snapshot.go stays untouched for Release N; the dispatch key
 // is the active generation row's location.
 //
-// Digest verification happens on full reads through the content records: each
-// emitted ref carries the mapped body's stored digest, and the resolver
-// recomputes it from the row before serving bytes. Preview builders never
-// hydrate, so they never verify.
+// Authoritative reads verify every mapped body in that read transaction, before
+// releasing the connection. Preview and migration-shadow reads do not verify.
 
 // harmonizedActiveOnConn reports whether the session's active generation row
 // lives in the harmonized catalog. A session with no active generation is
@@ -64,9 +65,14 @@ func harmonizedActiveOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (acti
 // session: the generation's flattened columns plus its ordered children,
 // main and earlier partitions from the mapping and body rows, the captured
 // stats row as the wire stats, and one content record per emitted ref. The
-// records carry the stored body digest (not a file path): the resolver
-// serves the entry's own field bytes after re-verifying that digest.
+// records carry the stored body digest (not a file path). This entry point is
+// the unverified migration-shadow read; production full reads select verified
+// mode through the dispatched builder.
 func harmonizedReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (indexformat.ReadSnapshot, error) {
+	return harmonizedReadSnapshotModeOnConn(conn, sessionID, generationID, false)
+}
+
+func harmonizedReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, authoritative bool) (indexformat.ReadSnapshot, error) {
 	fail := func(err error) (indexformat.ReadSnapshot, error) {
 		return indexformat.ReadSnapshot{}, fmt.Errorf("store: read harmonized generation %s for session %s: %w; the snapshot cannot be built", generationID, sessionID, err)
 	}
@@ -82,20 +88,21 @@ func harmonizedReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	if err != nil {
 		return fail(err)
 	}
-	partitions, content, err := harmonizedPartitionsOnConn(conn, sessionID, generationID)
+	partitions, content, err := harmonizedPartitionsModeOnConn(conn, sessionID, generationID, authoritative)
 	if err != nil {
 		return fail(err)
 	}
 	return indexformat.ReadSnapshot{
-		Session:      session,
-		Metadata:     metadata,
-		TitleRefs:    titleRefs,
-		GenerationID: generationID,
-		Completeness: completeness,
-		IndexVersion: 2,
-		Main:         partitions.main,
-		Earlier:      partitions.earlier,
-		Content:      content,
+		Session:             session,
+		Metadata:            metadata,
+		TitleRefs:           titleRefs,
+		GenerationID:        generationID,
+		Completeness:        completeness,
+		IndexVersion:        2,
+		Main:                partitions.main,
+		Earlier:             partitions.earlier,
+		Content:             content,
+		FullContentVerified: authoritative,
 	}, nil
 }
 
@@ -406,6 +413,10 @@ func harmonizedCompletenessOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 // Each record carries its mapped body's stored digest so the resolver can
 // re-verify the row before serving a byte.
 func harmonizedPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (generationPartitions, []indexformat.ContentRecord, error) {
+	return harmonizedPartitionsModeOnConn(conn, sessionID, generationID, false)
+}
+
+func harmonizedPartitionsModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, authoritative bool) (generationPartitions, []indexformat.ContentRecord, error) {
 	partitions := generationPartitions{}
 	type section struct {
 		partitionID int
@@ -446,6 +457,11 @@ ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
 			row, err := scanBodyRow(stmt, 1)
 			if err != nil {
 				return err
+			}
+			if authoritative {
+				if err := verifySnapshotBody(row); err != nil {
+					return err
+				}
 			}
 			// A mapped body without a source ref is retained evidence the
 			// producer never addressed (a carrier row): it hydrates as an
@@ -494,6 +510,28 @@ ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
 		partitions.earlier = append(partitions.earlier, indexformat.EarlierPartition{State: state, Content: partition})
 	}
 	return partitions, content, nil
+}
+
+// serializeEntryChecked keeps corrupt structured content on the error path,
+// never on serializeEntry's writer-side panic path.
+func serializeEntryChecked(row EntryRecord) ([]byte, error) {
+	encoded, err := json.Marshal(entryFromRow(row))
+	if err != nil {
+		return nil, fmt.Errorf("store: serialize entry %d for session %s during full read: %w; no partial transcript was emitted; re-index the session to repair", row.EntryIndex, row.SessionID, err)
+	}
+	return encoded, nil
+}
+
+func verifySnapshotBody(row EntryRecord) error {
+	encoded, err := serializeEntryChecked(row)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(encoded)
+	if hex.EncodeToString(sum[:]) != row.BodyDigest {
+		return fmt.Errorf("store: entry at index %d for session %s fails digest verification during full snapshot read; stored columns do not match the captured digest; no partial transcript was emitted; run harvest verify --content and re-index the session to repair", row.EntryIndex, row.SessionID)
+	}
+	return nil
 }
 
 // harmonizedMappedEntry is one emitted entry with its stored body digest.
@@ -717,8 +755,8 @@ func readHarmonizedContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 	if err != nil {
 		return nil, err
 	}
-	if digest := SerializeEntryDigest(row); digest != record.Digest {
-		return nil, fmt.Errorf("store: entry at index %d for session %s fails digest verification; stored bytes do not match the captured digest; no partial transcript was emitted; run harvest verify --content and re-index the session to repair", row.EntryIndex, sessionID)
+	if err := verifySnapshotBody(row); err != nil {
+		return nil, err
 	}
 	field := harmonizedContentField(entryFromRow(row))
 	if int64(len(field)) != record.ByteLength {

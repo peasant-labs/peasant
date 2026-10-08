@@ -16,8 +16,9 @@ import (
 // Compile-time guards: the production Store is the concrete SnapshotReader and
 // ContentResolver consumed by the transcript hydration and export layers.
 var (
-	_ indexformat.SnapshotReader  = (*Store)(nil)
-	_ indexformat.ContentResolver = (*Store)(nil)
+	_ indexformat.SnapshotReader        = (*Store)(nil)
+	_ indexformat.ContentResolver       = (*Store)(nil)
+	_ indexformat.PreviewSnapshotReader = (*Store)(nil)
 )
 
 // GenerationSnapshotsSupported reports whether this store was opened with the
@@ -31,9 +32,9 @@ func (s *Store) GenerationSnapshotsSupported() bool {
 // WithSessionSnapshot loads ONE immutable read snapshot for a session.
 //
 // A harmonized session reads from one SQLite read transaction with no
-// session lock: its bodies are immutable and content-addressed, and the
-// sweep can never delete a referenced row, so a concurrent writer cannot
-// disturb the read. A file-backed or legacy session keeps the shared
+// session lock: every body is loaded and verified inside that transaction,
+// including ref-less evidence, so later activation and sweep cannot disturb
+// hydration. A file-backed or legacy session keeps the shared
 // per-session OS lock from before the SQLite read transaction through the
 // callback, because its blobs live on disk and cleanup could retire them.
 //
@@ -48,6 +49,16 @@ func (s *Store) GenerationSnapshotsSupported() bool {
 // LegacySource names the retained transcript; the caller uses the unchanged
 // legacy callback and never falls back to mutable native data for a V2 read.
 func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) (retErr error) {
+	return s.withSessionSnapshot(ctx, sessionID, true, fn)
+}
+
+// WithSessionPreviewSnapshot reads display fields without digest verification.
+// Only preview consumers opt in; authoritative reads use WithSessionSnapshot.
+func (s *Store) WithSessionPreviewSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) error {
+	return s.withSessionSnapshot(ctx, sessionID, false, fn)
+}
+
+func (s *Store) withSessionSnapshot(ctx context.Context, sessionID schema.SessionID, authoritative bool, fn func(indexformat.ReadSnapshot) error) (retErr error) {
 	if s.sessionLocker == nil {
 		return fmt.Errorf("store: managed generation support is not configured; a coherent session snapshot cannot be taken; open the store with WithGenerationArtifacts")
 	}
@@ -69,7 +80,7 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	}
 
 	endSnapshot := sqlitex.Save(conn)
-	snapshot, readErr := buildReadSnapshotOnConn(conn, sessionID)
+	snapshot, readErr := buildReadSnapshotModeOnConn(conn, sessionID, authoritative)
 	endSnapshot(&readErr)
 	// The snapshot is fully materialized in memory; return the pool connection
 	// before invoking the callback while retaining the shared OS lock.
@@ -132,6 +143,10 @@ func isHarmonizedSession(ctx context.Context, s *Store, sessionID schema.Session
 }
 
 func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (indexformat.ReadSnapshot, error) {
+	return buildReadSnapshotModeOnConn(conn, sessionID, true)
+}
+
+func buildReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, authoritative bool) (indexformat.ReadSnapshot, error) {
 	row, err := readSnapshotSessionRowOnConn(conn, sessionID)
 	if err != nil {
 		return indexformat.ReadSnapshot{}, err
@@ -159,7 +174,7 @@ func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (ind
 		return indexformat.ReadSnapshot{}, fmt.Errorf("store: locate active generation %s for session %s: %w; no snapshot was built", *active, sessionID, err)
 	}
 	if harmonized {
-		return harmonizedReadSnapshotOnConn(conn, sessionID, *active)
+		return harmonizedReadSnapshotModeOnConn(conn, sessionID, *active, authoritative)
 	}
 	return generationReadSnapshotOnConn(conn, sessionID, *active, row)
 }
