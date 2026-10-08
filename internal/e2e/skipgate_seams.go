@@ -107,12 +107,23 @@ func buildPeasant(t *testing.T) string {
 			buildPeasantErr = fmt.Errorf("e2e: build peasant: %v\n%s", err, output)
 			return
 		}
+		buildPeasantDir = dir
 		buildPeasantPath = out
 	})
 	if buildPeasantErr != nil {
 		t.Fatalf("%v", buildPeasantErr)
 	}
 	return buildPeasantPath
+}
+
+// removePeasantBuildDir deletes the memoized CLI build dir the Once created,
+// if any. TestMain calls it after the run: without this the peasant-e2e-bin-*
+// directory leaks into /tmp on every e2e run.
+func removePeasantBuildDir() {
+	if buildPeasantDir != "" {
+		_ = os.RemoveAll(buildPeasantDir)
+		buildPeasantDir = ""
+	}
 }
 
 // buildPeasantOnce memoizes the default (PEASANT_BIN-unset) build so one test
@@ -123,6 +134,7 @@ func buildPeasant(t *testing.T) string {
 var (
 	buildPeasantOnce sync.Once
 	buildPeasantPath string
+	buildPeasantDir  string
 	buildPeasantErr  error
 )
 
