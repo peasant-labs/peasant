@@ -399,6 +399,8 @@ func writeMigrateResult(cmd *cobra.Command, result store.MigrateResult, jsonOutp
 	}
 	if result.SearchConsolidated {
 		fmt.Fprintln(out, "search index consolidated: triggers retargeted, index rebuilt, retired index dropped")
+	} else {
+		fmt.Fprintln(out, "search index not yet consolidated: re-run peasant migrate --confirm to resume")
 	}
 	if len(result.Preconditions) > 0 {
 		if result.ReadyForNextRelease {
