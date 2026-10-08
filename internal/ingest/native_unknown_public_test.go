@@ -79,7 +79,15 @@ func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
 	names := map[string]bool{}
 	var actualNames []string
 	for _, c := range doc.Cases {
-		if c.Name == "" || names[c.Name] || len(c.Positions) == 0 || len(c.Positions) != len(c.RecordIndices) || len(c.Positions) != len(c.Pointers) {
+		nameMissing := c.Name == ""
+		nameRepeated := names[c.Name]
+		noPositions := len(c.Positions) == 0
+		recordIndicesMismatch := len(c.Positions) != len(c.RecordIndices)
+		pointerCountMismatch := len(c.Positions) != len(c.Pointers)
+		invalidName := nameMissing || nameRepeated
+		invalidCoordinates := noPositions || recordIndicesMismatch || pointerCountMismatch
+		invalidFixture := invalidName || invalidCoordinates
+		if invalidFixture {
 			t.Fatalf("invalid fixture %q", c.Name)
 		}
 		names[c.Name] = true
@@ -287,7 +295,10 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			}
 			capture, found, err := db.GetSessionContentCapture(t.Context(), sid)
 			if c.Unaccounted {
-				if err != nil || !found || capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted || capture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly {
+				captureUnavailable := err != nil || !found
+				wrongFailureCode := capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted
+				wrongFormat := capture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly
+				if captureUnavailable || wrongFailureCode || wrongFormat {
 					t.Fatalf("unaccounted omission falsely certified: %+v %v", capture, err)
 				}
 				if _, err := export.ExportSession(t.Context(), db, fs, string(sid)); err == nil {
@@ -295,11 +306,24 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !found || capture.Status != ingest.ContentCaptureIncomplete || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || capture.CaptureFormat != ingest.ContentCaptureFormatFull {
+			captureUnavailable := err != nil || !found
+			notIncomplete := capture.Status != ingest.ContentCaptureIncomplete
+			wrongFailureCode := capture.FailureCode != ingest.ContentCaptureUnknownDataRetained
+			wrongFormat := capture.CaptureFormat != ingest.ContentCaptureFormatFull
+			invalidCapture := captureUnavailable || notIncomplete ||
+				wrongFailureCode || wrongFormat
+			if invalidCapture {
 				t.Fatalf("unaccounted native status: %+v %v", capture, err)
 			}
 			counts := result.Summary.RetainedUnknownKinds
-			if len(counts) != 1 || counts[0].Namespace != c.Namespace || counts[0].Occurrences != len(c.Positions) || counts[0].Sessions != 1 {
+			if len(counts) != 1 {
+				t.Fatalf("successful occurrence/session accounting: %+v", counts)
+			}
+			count := counts[0]
+			namespaceMismatch := count.Namespace != c.Namespace
+			occurrencesMismatch := count.Occurrences != len(c.Positions)
+			sessionCountMismatch := count.Sessions != 1
+			if namespaceMismatch || occurrencesMismatch || sessionCountMismatch {
 				t.Fatalf("successful occurrence/session accounting: %+v", counts)
 			}
 			if len(c.KnownTexts) > 0 {
@@ -397,7 +421,14 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 					t.Fatal("receiver without retention capability received a stripped upload")
 				}
 				failure := nativePublicationFailure(t, refused, sid)
-				if doc.MissingCapabilityReason == "" || !strings.Contains(failure.Error(), doc.MissingCapabilityReason) || !slices.Contains(refused.Sessions[0].RequiredCapabilities, schema.ContentCapabilityRetainedUnknownV1) || len(publisher.AuthoritativeCalls) != 0 {
+				reasonMissing := doc.MissingCapabilityReason == ""
+				reasonNotNamed := !strings.Contains(failure.Error(), doc.MissingCapabilityReason)
+				if reasonMissing || reasonNotNamed {
+					t.Fatalf("publication did not refuse the exact missing retention capability: %v", failure)
+				}
+				capabilityRequired := slices.Contains(refused.Sessions[0].RequiredCapabilities, schema.ContentCapabilityRetainedUnknownV1)
+				authoritativeRetained := len(publisher.AuthoritativeCalls) != 0
+				if !capabilityRequired || authoritativeRetained {
 					t.Fatalf("publication did not refuse the exact missing retention capability: %v", failure)
 				}
 			}
@@ -477,7 +508,14 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 
 func nativePublicationFailure(t *testing.T, result *push.PushResult, sid schema.SessionID) error {
 	t.Helper()
-	if result == nil || result.Errors != 1 || len(result.Sessions) != 1 || result.Sessions[0].SessionID != string(sid) || result.Sessions[0].Status != push.PushStatusError || result.Sessions[0].Error == nil {
+	if result == nil || result.Errors != 1 || len(result.Sessions) != 1 {
+		t.Fatalf("expected one source-specific publication failure: %+v", result)
+	}
+	session := result.Sessions[0]
+	sessionIDMismatch := session.SessionID != string(sid)
+	statusMismatch := session.Status != push.PushStatusError
+	errorMissing := session.Error == nil
+	if sessionIDMismatch || statusMismatch || errorMissing {
 		t.Fatalf("expected one source-specific publication failure: %+v", result)
 	}
 	return result.Sessions[0].Error
@@ -485,12 +523,26 @@ func nativePublicationFailure(t *testing.T, result *push.PushResult, sid schema.
 
 func checkNativeUnknownPublic(t *testing.T, c nativeUnknownPublicCase, expected string, detail *schema.SessionDetailPayload) {
 	t.Helper()
-	if detail == nil || detail.Diagnostics == nil || !detail.Diagnostics.Partial || len(detail.RetainedUnknown) != len(c.Positions) {
+	if detail == nil || detail.Diagnostics == nil {
+		t.Fatalf("public opaque evidence missing: %+v", detail)
+	}
+	notPartial := !detail.Diagnostics.Partial
+	retainedCountMismatch := len(detail.RetainedUnknown) != len(c.Positions)
+	if notPartial || retainedCountMismatch {
 		t.Fatalf("public opaque evidence missing: %+v", detail)
 	}
 	source := ""
 	for i, record := range detail.RetainedUnknown {
-		if record.Namespace != c.Namespace || record.Kind != "future" || record.RecordIndex != c.RecordIndices[i] || record.Position != c.Positions[i] || record.Pointer != c.Pointers[i] || record.Payload != expected {
+		namespaceMismatch := record.Namespace != c.Namespace
+		kindMismatch := record.Kind != "future"
+		recordIndexMismatch := record.RecordIndex != c.RecordIndices[i]
+		positionMismatch := record.Position != c.Positions[i]
+		pointerMismatch := record.Pointer != c.Pointers[i]
+		payloadMismatch := record.Payload != expected
+		invalidKind := namespaceMismatch || kindMismatch
+		invalidCoordinates := recordIndexMismatch || positionMismatch || pointerMismatch
+		invalidRecord := invalidKind || invalidCoordinates || payloadMismatch
+		if invalidRecord {
 			t.Fatalf("public evidence differs: namespace=%s record=%d position=%d pointer=%s payload=%.200s", record.Namespace, record.RecordIndex, record.Position, record.Pointer, record.Payload)
 		}
 		if source != "" && source != record.SourceRef {

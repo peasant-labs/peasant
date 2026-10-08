@@ -145,9 +145,15 @@ func TestNativeStagedBytesCap(t *testing.T) {
 			var wg sync.WaitGroup
 			for _, r := range results {
 				wg.Add(1)
-				go func() { defer wg.Done(); ch <- p.admitNativeResult(ctx, r, gate) }()
+				go func() {
+					defer wg.Done()
+					ch <- p.admitNativeResult(ctx, r, gate)
+				}()
 			}
-			go func() { wg.Wait(); close(ch) }()
+			go func() {
+				wg.Wait()
+				close(ch)
+			}()
 			if c.Cancel {
 				cancel()
 			}
@@ -187,6 +193,7 @@ func TestIndexDrainFlushInterval(t *testing.T) {
 			armed := make(chan struct{}, 3)
 			flushed := make(chan int, 3)
 			done := make(chan struct{})
+			profiler := &IndexProfiler{}
 			cfg := WriteConfig{BatchSessions: 3, BatchBytes: 1 << 20, FlushIntervalMs: 50}.WithDefaults(1)
 			newTimer := func(d time.Duration) indexDrainTimer {
 				if d != cfg.FlushInterval() {
@@ -206,7 +213,9 @@ func TestIndexDrainFlushInterval(t *testing.T) {
 			}
 			go func() {
 				defer close(done)
-				drainIndexWithTimer(ch, nil, cfg, func(b []indexParseResult) { flushed <- len(b) }, nil, newTimer)
+				drainIndexWithTimer(ch, nil, cfg, func(b []indexParseResult) {
+					flushed <- len(b)
+				}, nil, newTimer, profiler)
 			}()
 			select {
 			case <-armed:
@@ -248,6 +257,13 @@ func TestIndexDrainFlushInterval(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, c.Batches) {
 				t.Fatalf("batches=%v, want %v", got, c.Batches)
+			}
+			profile := profiler.Snapshot()
+			if c.Mode == "filling" && profile.FlushWaitCount != 0 {
+				t.Fatal("ready input was counted as a partial-batch wait")
+			}
+			if c.Mode == "above" && profile.FlushWaitCount == 0 {
+				t.Fatal("observed timer wait was not recorded")
 			}
 		})
 	}

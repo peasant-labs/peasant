@@ -9,18 +9,24 @@ type indexDrainTimer struct {
 
 func newIndexDrainTimer(interval time.Duration) indexDrainTimer {
 	timer := time.NewTimer(interval)
-	return indexDrainTimer{c: timer.C, stop: func() { timer.Stop() }}
+	return indexDrainTimer{c: timer.C, stop: func() {
+		timer.Stop()
+	}}
 }
 
-func drainIndexParseResultsWithGate(ch <-chan indexParseResult, pending []indexParseResult, cfg WriteConfig, flush func([]indexParseResult), blocked <-chan struct{}) {
-	drainIndexWithTimer(ch, pending, cfg, flush, blocked, newIndexDrainTimer)
+func drainIndexParseResultsWithGate(ch <-chan indexParseResult, pending []indexParseResult, cfg WriteConfig, flush func([]indexParseResult), blocked <-chan struct{}, profilers ...*IndexProfiler) {
+	drainIndexWithTimer(ch, pending, cfg, flush, blocked, newIndexDrainTimer, profilers...)
 }
 
 // drainIndexWithTimer checks the interval only when no parsed result is ready.
 // Busy input fills the batch even if its timer expired during a previous write.
 // Byte-admission pressure wakes this wait and flushes the partial batch, so a
 // parser never waits for bytes owned by a drain waiting for that parser.
-func drainIndexWithTimer(ch <-chan indexParseResult, pending []indexParseResult, cfg WriteConfig, flush func([]indexParseResult), blocked <-chan struct{}, newTimer func(time.Duration) indexDrainTimer) {
+func drainIndexWithTimer(ch <-chan indexParseResult, pending []indexParseResult, cfg WriteConfig, flush func([]indexParseResult), blocked <-chan struct{}, newTimer func(time.Duration) indexDrainTimer, profilers ...*IndexProfiler) {
+	var profiler *IndexProfiler
+	if len(profilers) > 0 {
+		profiler = profilers[0]
+	}
 	var bytes int64
 	var timer indexDrainTimer
 	flushPending := func() {
@@ -67,16 +73,20 @@ func drainIndexWithTimer(ch <-chan indexParseResult, pending []indexParseResult,
 			admit(result)
 			continue
 		}
+		waitStart := time.Now()
 		select {
 		case result, ok := <-ch:
+			profiler.RecordFlushWait(time.Since(waitStart))
 			if !ok {
 				flushPending()
 				return
 			}
 			admit(result)
 		case <-timer.c:
+			profiler.RecordFlushWait(time.Since(waitStart))
 			flushPending()
 		case <-blocked:
+			profiler.RecordFlushWait(time.Since(waitStart))
 			flushPending()
 		}
 	}

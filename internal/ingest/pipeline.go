@@ -1687,7 +1687,8 @@ func (p *Pipeline) indexLoop(
 			profileBatch.WriteStats.Add(flush.writeStats)
 		}
 	}
-	drainIndexParseResultsWithGate(parsedCh, pending, writeCfg, flushPending, gate.blocked)
+	drainIndexParseResultsWithGate(parsedCh, pending, writeCfg, flushPending, gate.blocked, p.config.IndexProfiler)
+	p.config.IndexProfiler.RecordStagedPeak(gate.Peak())
 	if profileEnabled && profileBatch.WorkItems > 0 {
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 		p.config.IndexProfiler.Record(profileBatch, profileSessions)
@@ -1937,7 +1938,11 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		parsers.Wait()
 		close(parsed)
 	}()
-	drainIndexParseResultsWithGate(parsed, pending, writeCfg, func(batch []indexParseResult) { pending = batch; flushPending() }, gate.blocked)
+	drainIndexParseResultsWithGate(parsed, pending, writeCfg, func(batch []indexParseResult) {
+		pending = batch
+		flushPending()
+	}, gate.blocked, p.config.IndexProfiler)
+	p.config.IndexProfiler.RecordStagedPeak(gate.Peak())
 	profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	return indexed, logs, refused
@@ -2043,7 +2048,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// publication carry it with its partial flag. Every other refusal
 			// stores a bounded preview, and export and publication stay refused
 			// until a complete capture exists.
-			if _, strict := indexer.(AuthoritativeTranscriptIndexer); err != nil && strict && declared == strictIndexFormat && ctx.Err() == nil {
+			_, strict := indexer.(AuthoritativeTranscriptIndexer)
+			canRetryTolerantly := err != nil && strict && declared == strictIndexFormat
+			if canRetryTolerantly && ctx.Err() == nil {
 				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
 					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
 						result.partial, result.strictRefusal, result.refusalCode = true, err.Error(), code
@@ -2114,7 +2121,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	// Only the strict format-1 capture path certifies complete content. A
 	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
-	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat && !result.partial
+	strictCompleteParse := err == nil && parsed && declared == strictIndexFormat
+	result.fullContent = authoritative && strictCompleteParse && !result.partial
 	// One final write decision owns V1 admission. The flags above remain as
 	// parser inputs and diagnostics, but the flush paths derive the store
 	// write from this assessment. An assessment error refuses the candidate
@@ -2722,7 +2730,10 @@ func pipelineCancellation(ctx context.Context, err error) error {
 // identityMatchesLocation compares the complete adapter-derived project
 // identity. An empty remote still carries a meaningful path-derived identity.
 func identityMatchesLocation(meta *UnifiedMetadata, loc SessionLocation) bool {
-	if meta == nil || string(meta.HostSlug) != loc.HostSlug || (loc.ProjectHash != "" && meta.Project.Hash != loc.ProjectHash) {
+	if meta == nil || string(meta.HostSlug) != loc.HostSlug {
+		return false
+	}
+	if loc.ProjectHash != "" && meta.Project.Hash != loc.ProjectHash {
 		return false
 	}
 	remote := ""
@@ -2796,7 +2807,9 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 	// Extraction from retained input preserves an unknown acquisition clock.
 	// Once its adapter revision is current, a discovered native file still needs acquisition: no
 	// previous ingest time proves that its content was already consumed.
-	if existingMeta != nil && !session.ModTime.IsZero() && (existingMeta.Timestamp.Ingested == nil || *existingMeta.Timestamp.Ingested <= 0) {
+	unknownAcquisition := existingMeta != nil &&
+		(existingMeta.Timestamp.Ingested == nil || *existingMeta.Timestamp.Ingested <= 0)
+	if unknownAcquisition && !session.ModTime.IsZero() {
 		if isActive {
 			return DiffActive, nil
 		}
@@ -2821,7 +2834,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			freshness.PublicationReadiness = PublicationReady
 		}
 		status := ClassifyAgainstStore(session, freshness, p.config.StalenessThreshold)
-		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest && loc.CaptureRevision > 0 {
+		needsPublicationRepair := loc.PublicationReadiness == PublicationNeedsIngest && loc.CaptureRevision > 0
+		if captured == nil && status == DiffUpdated && needsPublicationRepair {
 			// Publication readiness is a repair hint, not change evidence.
 			// Before any capture it re-reads native input only for a session
 			// that has no retained artifact to hold its input: a legacy row
@@ -2869,9 +2883,11 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		// session is left alone: no native read, no stat. The first capture any
 		// clock, schema or force reason triggers acquires the evidence. After a
 		// capture, a row that still holds no fingerprint records what it read.
-		if status == DiffUnchanged && supportsSessionCapture(session) &&
-			(captured == nil && !refusalSettled && (!loc.SourceEvidenceSupported || len(loc.SourceFingerprint) > 0) ||
-				captured != nil && loc.SourceEvidenceSupported && len(loc.SourceFingerprint) == 0) {
+		needsCapture := captured == nil && !refusalSettled &&
+			(!loc.SourceEvidenceSupported || len(loc.SourceFingerprint) > 0)
+		needsFingerprint := captured != nil && loc.SourceEvidenceSupported && len(loc.SourceFingerprint) == 0
+		needsEvidence := needsCapture || needsFingerprint
+		if status == DiffUnchanged && supportsSessionCapture(session) && needsEvidence {
 			if isActive {
 				return DiffActive, nil
 			}
@@ -2974,7 +2990,9 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		want := append(fileCaptureEvidence(captured), digest[:]...)
 		transcriptPath := filepath.Join(filepath.Dir(metaPath), fmt.Sprintf("%s--transcript.%s", session.SessionID, session.SourceFormat))
 		transcript, transcriptErr := p.fs.ReadFile(transcriptPath)
-		if readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want) && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript) {
+		matchingEvidence := readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want)
+		matchingCapture := matchingEvidence && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript)
+		if matchingCapture {
 			return DiffUnchanged, nil
 		}
 		return DiffUpdated, nil
@@ -4296,7 +4314,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 		n, storedChecked, storedAnnotated, refreshedDays = p.refreshStoredMetrics(ctx)
 		computed += n
 	}
-	if p.analyzer != nil && (len(indexSessions) > 0 || len(priorIndexed) > 0 || len(refreshedDays) > 0) {
+	hasComputeWork := len(indexSessions) > 0 || len(priorIndexed) > 0 || len(refreshedDays) > 0
+	if p.analyzer != nil && hasComputeWork {
 		computeTargets := successfullyIndexed
 		if priorDownstream != nil {
 			computeTargets = remainingSuccessfullyIndexed

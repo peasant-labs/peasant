@@ -489,10 +489,12 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 			var err error
 			if staged := prepared.staged; staged != nil {
 				if preparedActivator, ok := p.metricsStore.(NativeGenerationPreparedActivator); ok {
+					p.config.IndexProfiler.RecordActivationSize(1)
 					activationOutcome, err = preparedActivator.ActivateStagedNativeGeneration(ctx, prepared.activation, staged)
 					return err
 				}
 			}
+			p.config.IndexProfiler.RecordActivationSize(1)
 			activationOutcome, err = activator.ActivateNativeGeneration(ctx, prepared.activation)
 			return err
 		})

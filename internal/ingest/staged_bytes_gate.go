@@ -26,7 +26,11 @@ func newStagedBytesGate(cap int64) *stagedBytesGate {
 func (g *stagedBytesGate) acquire(ctx context.Context, n int64) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	stop := context.AfterFunc(ctx, func() { g.mu.Lock(); g.cond.Broadcast(); g.mu.Unlock() })
+	stop := context.AfterFunc(ctx, func() {
+		g.mu.Lock()
+		g.cond.Broadcast()
+		g.mu.Unlock()
+	})
 	defer stop()
 	for g.used != 0 && (n > g.cap-g.used) {
 		if err := ctx.Err(); err != nil {
@@ -55,7 +59,11 @@ func (g *stagedBytesGate) release(n int64) {
 	g.mu.Unlock()
 }
 
-func (g *stagedBytesGate) Peak() int64 { g.mu.Lock(); defer g.mu.Unlock(); return g.peak }
+func (g *stagedBytesGate) Peak() int64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.peak
+}
 
 func nativeCandidateWriteBytes(candidate *NativeGenerationCandidate) int64 {
 	if candidate == nil {
@@ -94,6 +102,10 @@ func (p *Pipeline) admitNativeResult(ctx context.Context, result indexParseResul
 		return result
 	}
 	var once sync.Once
-	result.releaseStaged = func() { once.Do(func() { gate.release(n) }) }
+	result.releaseStaged = func() {
+		once.Do(func() {
+			gate.release(n)
+		})
+	}
 	return result
 }

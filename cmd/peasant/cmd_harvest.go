@@ -389,7 +389,8 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 
 	// 6d. Saved selection scopes native discovery, not stored maintenance.
 	var selectionConflicts *selectionConflictRecorder
-	if mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected {
+	implicitSelection := mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0
+	if implicitSelection && cfg.Selection.Mode == config.SelectionModeSelected {
 		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
 		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
 		pipelineCfg.SessionFilter = selectionFilter.Match
@@ -622,6 +623,18 @@ func harvestCancellationError(err error) error {
 }
 
 func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
+	fmt.Fprintf(w, "  partial-batch flush waits: count=%d p50=%s max=%s\n", profile.FlushWaitCount, profile.FlushWaitP50, profile.FlushWaitMax)
+	fmt.Fprintf(w, "  staged-memory peak: %d bytes\n", profile.StagedPeakBytes)
+	activationSizes := make([]int, 0, len(profile.ActivationSizes))
+	for size := range profile.ActivationSizes {
+		activationSizes = append(activationSizes, size)
+	}
+	sort.Ints(activationSizes)
+	var activationHistogram []string
+	for _, size := range activationSizes {
+		activationHistogram = append(activationHistogram, fmt.Sprintf("%dx%d", size, profile.ActivationSizes[size]))
+	}
+	fmt.Fprintf(w, "  activation batch sizes: %s\n", strings.Join(activationHistogram, ", "))
 	if len(profile.Batches) == 0 {
 		fmt.Fprintln(w, "INDEX profile: no INDEX batches ran")
 		printIndexProfileStages(w, profile.Stages)
@@ -794,7 +807,9 @@ func printIndexProfileWriteStats(w io.Writer, stats ingest.SessionEntryWriteStat
 	fmt.Fprintf(w, "    annotation targets unresolved: %d\n", stats.AnnotationTargetsUnresolved)
 	fmt.Fprintf(w, "    annotation targets superseded: %d\n", stats.AnnotationTargetsSuperseded)
 	fmt.Fprintf(w, "    annotation target repair errors: %d\n", stats.AnnotationTargetRepairErrors)
-	if stats.AnnotationTargetReadTime != 0 || stats.AnnotationTargetMatchTime != 0 || stats.AnnotationTargetRestoreTime != 0 || stats.AnnotationTargetAnchorUpsertTime != 0 {
+	hasTargetTiming := stats.AnnotationTargetReadTime != 0 || stats.AnnotationTargetMatchTime != 0 ||
+		stats.AnnotationTargetRestoreTime != 0 || stats.AnnotationTargetAnchorUpsertTime != 0
+	if hasTargetTiming {
 		fmt.Fprintln(w, "  annotation target repair timing:")
 		fmt.Fprintf(w, "    read targets: %s\n", stats.AnnotationTargetReadTime)
 		fmt.Fprintf(w, "    match anchors: %s\n", stats.AnnotationTargetMatchTime)

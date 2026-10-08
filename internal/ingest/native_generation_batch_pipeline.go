@@ -10,7 +10,9 @@ import (
 // the common splitter, with their own configured session caps.
 func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []indexParseResult, positions []int, outcome IndexOutcome, prefix string, lane *storeWriteLane, record func(int, indexedMeta, IndexLogEntry, IndexProfileSession), stager NativeGenerationBatchStager, activator NativeGenerationBatchActivator) {
 	ctx = WithWriteAdvisoryReporter(ctx, p.reportDiagnostic)
-	jobs := runParallel(func() error { return nil }, positions, parallelWorkers(p.config), func(position int) nativeGenerationCommitJob {
+	jobs := runParallel(func() error {
+		return nil
+	}, positions, parallelWorkers(p.config), func(position int) nativeGenerationCommitJob {
 		return nativeGenerationCommitJob{position: position, commit: p.prepareNativeGenerationResult(results[position], outcome, prefix)}
 	})
 	var ready []nativeGenerationCommitJob
@@ -41,7 +43,9 @@ func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []in
 			activations[i] = job.commit.prepared.activation
 		}
 		var staged []NativeGenerationStaged
-		p.runStoreWrite(lane, func() { staged, _ = stager.StageNativeGenerations(ctx, activations) })
+		p.runStoreWrite(lane, func() {
+			staged, _ = stager.StageNativeGenerations(ctx, activations)
+		})
 		for i := range window {
 			if i < len(staged) {
 				window[i].commit.prepared.staged = staged[i]
@@ -77,6 +81,7 @@ func (p *Pipeline) commitNativeBatch(ctx context.Context, jobs []nativeGeneratio
 		guard = func(i int) {
 			if i == len(jobs) {
 				if len(activations) > 0 {
+					p.config.IndexProfiler.RecordActivationSize(len(activations))
 					outcomes = activator.ActivateStagedNativeGenerations(ctx, activations, staged)
 				}
 				return
