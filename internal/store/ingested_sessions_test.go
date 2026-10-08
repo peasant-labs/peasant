@@ -20,12 +20,14 @@ const (
 	ingestedSessionWithMetrics    = "50000000-0000-0000-0000-000000000001"
 	ingestedSessionWithoutMetrics = "50000000-0000-0000-0000-000000000002"
 
-	allIngestedSessionsFixturePath      = "internal/store/testdata/reader/all_ingested_sessions.yaml"
-	allIngestedSessionsFixtureCaseCount = 2
+	allIngestedSessionsFixturePath = "internal/store/testdata/reader/all_ingested_sessions.yaml"
 )
 
 //go:embed testdata/reader/all_ingested_sessions.yaml
 var allIngestedSessionsFixtureData []byte
+
+//go:embed testdata/reader/all_ingested_sessions.manifest.yaml
+var allIngestedSessionsManifestData []byte
 
 type allIngestedSessionsFixtures struct {
 	Cases []allIngestedSessionFixture `yaml:"cases"`
@@ -62,8 +64,16 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 	default:
 		return nil, fmt.Errorf("decode trailing YAML content in committed fixture %s: %w; remove or repair the trailing YAML document", allIngestedSessionsFixturePath, err)
 	}
-	if len(fixtures.Cases) != allIngestedSessionsFixtureCaseCount {
-		return nil, fmt.Errorf("committed fixture %s defines %d cases, want exactly %d store read scenarios; add or remove cases and keep the row-count guard current", allIngestedSessionsFixturePath, len(fixtures.Cases), allIngestedSessionsFixtureCaseCount)
+	manifest, err := decodeRecoveryRequiredNames(allIngestedSessionsManifestData)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, c := range fixtures.Cases {
+		names = append(names, c.Name)
+	}
+	if err := validateRecoveryRequiredNames(manifest, names, "all ingested sessions"); err != nil {
+		return nil, err
 	}
 
 	seenNames := make(map[string]struct{}, len(fixtures.Cases))
@@ -112,8 +122,8 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 	if !hasPopulatedColumns || !hasEmptyColumns {
 		return nil, fmt.Errorf("committed fixture %s must include one populated row and one empty-compatible row; keep both read behaviors covered", allIngestedSessionsFixturePath)
 	}
-	if len(seenHarnesses) != allIngestedSessionsFixtureCaseCount {
-		return nil, fmt.Errorf("committed fixture %s defines %d distinct harnesses, want exactly %d; use a different harness per row so harness readback cannot pass with a fixed value", allIngestedSessionsFixturePath, len(seenHarnesses), allIngestedSessionsFixtureCaseCount)
+	if len(seenHarnesses) != len(fixtures.Cases) {
+		return nil, fmt.Errorf("committed fixture %s must use a different harness per row so harness readback cannot pass with a fixed value", allIngestedSessionsFixturePath)
 	}
 	return fixtures.Cases, nil
 }
