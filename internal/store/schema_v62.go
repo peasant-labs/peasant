@@ -30,8 +30,8 @@ const BodyRowIDBase = 1 << 50
 // v62 would break the write path until the harmonized writer lands. That
 // writer change reshapes them once it speaks the new shape. v62 only creates the
 // two ordered child tables (session_context_segment_refs,
-// session_section_native_metadata), which stay empty until the conversion
-// fills them alongside the reshaped parents. annotation_target_entries is
+// session_section_native_metadata), which stay empty until the harmonized
+// writer and the conversion fill them alongside the reshaped parents. annotation_target_entries is
 // rebuilt without its session_entries foreign key; the insert-time existence
 // check replaces the key.
 //

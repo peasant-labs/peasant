@@ -200,34 +200,6 @@ func escapeV62Literal(t *testing.T, s string) string {
 	return s
 }
 
-func quoteV62Literal(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-func nullableV62Literal(s *string) string {
-	if s == nil {
-		return "NULL"
-	}
-	return quoteV62Literal(*s)
-}
-
-func nullableV62JSON(s *string) string {
-	if s == nil {
-		return "NULL"
-	}
-	if strings.Contains(*s, "'") {
-		return quoteV62Literal(*s)
-	}
-	return "'" + *s + "'"
-}
-
-func nullableV62Int(v *int64) string {
-	if v == nil {
-		return "NULL"
-	}
-	return fmt.Sprintf("%d", *v)
-}
-
 func execV62SQL(t *testing.T, conn *sqlite.Conn, script string) {
 	t.Helper()
 	if err := sqlitex.ExecuteScript(conn, script, nil); err != nil {
@@ -385,13 +357,6 @@ func assertV62AnnotationRebuild(t *testing.T, conn *sqlite.Conn, fixtures v62Fix
 	} else {
 		_ = sqlitex.ExecuteTransient(conn, `DELETE FROM annotation_target_entries WHERE annotation_id='ann-v62-check'`, nil)
 	}
-}
-
-func v62NullableText(stmt *sqlite.Stmt, col int) any {
-	if stmt.ColumnType(col) == sqlite.TypeNull {
-		return nil
-	}
-	return stmt.ColumnText(col)
 }
 
 func assertV62SearchStore(t *testing.T, conn *sqlite.Conn) {
