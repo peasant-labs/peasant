@@ -49,8 +49,11 @@ type contentWriteBudgetCase struct {
 // isPlaceholder reports whether the case carries no typed expectations, in
 // which case the runner logs it and asserts nothing.
 func (c contentWriteBudgetCase) isPlaceholder() bool {
-	return c.Action == "" && c.Sessions == 0 && c.WantCommits == nil && c.WantMaxCommits == nil &&
-		len(c.Workers) == 0 && c.BatchBytes == nil && c.BatchSessions == nil && c.StagedMemory == nil &&
+	noAction := c.Action == "" && c.Sessions == 0 &&
+		c.WantCommits == nil && c.WantMaxCommits == nil
+	noBudgets := len(c.Workers) == 0 && c.BatchBytes == nil &&
+		c.BatchSessions == nil && c.StagedMemory == nil
+	return noAction && noBudgets &&
 		len(c.FlushIntervalsMs) == 0 && c.MinSites == nil
 }
 
@@ -224,7 +227,8 @@ func runWriteBudgetSplitterSingleHome(t *testing.T, c contentWriteBudgetCase) {
 // its staged-memory total from the same knob.
 func runWriteBudgetBatchUnderConfiguredCaps(t *testing.T, c contentWriteBudgetCase) {
 	t.Helper()
-	if c.BatchBytes == nil || c.BatchSessions == nil || c.StagedMemory == nil || len(c.Workers) == 0 {
+	missingBudget := c.BatchBytes == nil || c.BatchSessions == nil || c.StagedMemory == nil
+	if missingBudget || len(c.Workers) == 0 {
 		t.Fatal("batch-under-configured-caps needs batchBytes, batchSessions, stagedMemoryBytes, and workers")
 	}
 	for _, workers := range c.Workers {

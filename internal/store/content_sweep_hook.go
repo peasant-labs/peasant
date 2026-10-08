@@ -15,6 +15,8 @@ package store
 // itself; this file only names the stages and the hook so the branches compile
 // against one seam.
 const (
+	// contentSweepSeamFirstWrite runs immediately before the first delete.
+	contentSweepSeamFirstWrite = "first-sweep-write"
 	// contentSweepSeamAfterCommit is reported after the session's catalog
 	// transaction commits and before the sweep deletes anything.
 	contentSweepSeamAfterCommit = "after-commit-before-sweep"

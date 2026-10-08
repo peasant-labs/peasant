@@ -93,6 +93,12 @@ func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.Session
 	if limit < 1 {
 		limit = 1
 	}
+	if bounded, applied, err := s.sweepBoundedSession(ctx, sessionID, active, limit); applied || err != nil {
+		return bounded, err
+	}
+	if err := reportContentSweepSeam(contentSweepSeamFirstWrite); err != nil {
+		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; free disk space and retry harvest or reclaim", sessionID, err)
+	}
 
 	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, active)
 	if err != nil {
@@ -198,7 +204,7 @@ func (s *Store) unreferencedBodyDigests(ctx context.Context, sessionID schema.Se
 	}
 	defer s.pool.Put(conn)
 	var digests []string
-	err = sqlitex.ExecuteTransient(conn, `SELECT b.body_digest FROM session_entry_bodies b WHERE b.session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_entries m WHERE m.session_id = b.session_id AND m.body_digest = b.body_digest) LIMIT ?`, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, `SELECT b.body_digest FROM session_entry_bodies b WHERE b.session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_entries m WHERE m.session_id = b.session_id AND m.body_digest = b.body_digest) LIMIT ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), int64(limit)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digests = append(digests, stmt.ColumnText(0))
@@ -244,7 +250,7 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 				return deleted, txnErr
 			}
 		}
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: delete body %s for session %s: %w; the batch rolled back and every body row is unchanged (a referenced body refuses through its foreign key: the sweep never deletes live content)", digest, sessionID, err)
@@ -267,7 +273,7 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 func sweepVerifyBodyForDelete(conn *sqlite.Conn, sessionID schema.SessionID, digest string) (bool, error) {
 	found := false
 	trusted := false
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), digest},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -307,7 +313,7 @@ func (s *Store) unreferencedBlobDigests(ctx context.Context, sessionID schema.Se
 	}
 	defer s.pool.Put(conn)
 	var digests []string
-	err = sqlitex.ExecuteTransient(conn, `SELECT c.digest FROM session_content c WHERE c.session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_content d WHERE d.session_id = c.session_id AND d.digest = c.digest) LIMIT ?`, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, `SELECT c.digest FROM session_content c WHERE c.session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_content d WHERE d.session_id = c.session_id AND d.digest = c.digest) LIMIT ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), int64(limit)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digests = append(digests, stmt.ColumnText(0))
@@ -339,7 +345,7 @@ func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.Se
 			txnErr = err
 			return deleted, txnErr
 		}
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: delete blob %s for session %s: %w; the batch rolled back and every blob is unchanged (a referenced blob refuses through its foreign key: the sweep never deletes live content)", digest, sessionID, err)
@@ -362,7 +368,7 @@ func (s *Store) rebuildSearchIndexWhenFlagged(ctx context.Context, sessionID sch
 	}
 	defer s.pool.Put(conn)
 	needsRebuild := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT needs_rebuild FROM session_search_state WHERE id = 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT needs_rebuild FROM session_search_state WHERE id = 1`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			needsRebuild = stmt.ColumnInt64(0) == 1
 			return nil
@@ -456,7 +462,7 @@ func (s *Store) clearSweepFlag(ctx context.Context, sessionID schema.SessionID) 
 	}
 	defer s.pool.Put(conn)
 	flagged := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			flagged = stmt.ColumnInt64(0) == 1
@@ -468,7 +474,7 @@ func (s *Store) clearSweepFlag(ctx context.Context, sessionID schema.SessionID) 
 	if !flagged {
 		return nil
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET content_sweep_pending = 0 WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET content_sweep_pending = 0 WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: clear the sweep flag for session %s: %w; the flag stays set and the next pass resumes the sweep", sessionID, err)
@@ -492,7 +498,7 @@ func (s *Store) SweepFlaggedSessions(ctx context.Context) (SweepFlaggedReport, e
 		return report, fmt.Errorf("store: take connection to list flagged sessions for the harvest-start sweep: %w; no session was swept", err)
 	}
 	var flagged []schema.SessionID
-	listErr := sqlitex.ExecuteTransient(conn, `SELECT session_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
+	listErr := sqlitex.Execute(conn, `SELECT session_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			flagged = append(flagged, schema.SessionID(stmt.ColumnText(0)))
 			return nil

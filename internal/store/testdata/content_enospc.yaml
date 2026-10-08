@@ -9,8 +9,17 @@
 # placeholders their owners fill.
 cases:
   - name: stage-full
+    owner: harvest
+    step: stage
+    batchBytes: 64
+    textBytes: 65536
   - name: commit-full
+    owner: harvest
+    step: commit
+    entries: 1500
   - name: sweep-full
+    owner: harvest
+    step: sweep
   - name: migrate-body-subtxn-full
     owner: migration
     step: body-subtxn

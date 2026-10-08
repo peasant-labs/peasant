@@ -25,9 +25,12 @@ var contentEnospcManifestYAML []byte
 // the section-10 name plus the migration step the runner drives under a
 // real SQLITE_FULL.
 type contentEnospcMigrationCase struct {
-	Name  string `yaml:"name"`
-	Owner string `yaml:"owner,omitempty"`
-	Step  string `yaml:"step,omitempty"`
+	Name       string `yaml:"name"`
+	Owner      string `yaml:"owner,omitempty"`
+	Step       string `yaml:"step,omitempty"`
+	BatchBytes int64  `yaml:"batchBytes,omitempty"`
+	TextBytes  int    `yaml:"textBytes,omitempty"`
+	Entries    int    `yaml:"entries,omitempty"`
 }
 
 // loadContentEnospcMigrationCases strictly decodes the disk-full family
@@ -59,13 +62,14 @@ func loadContentEnospcMigrationCases(t *testing.T) []contentEnospcMigrationCase 
 	if err := validateRecoveryRequiredNames(manifest, actual, "content disk-full"); err != nil {
 		t.Fatal(err)
 	}
-	var owned []contentEnospcMigrationCase
 	for _, c := range fixture.Cases {
-		if c.Owner == "migration" {
-			owned = append(owned, c)
+		switch c.Owner + "/" + c.Step {
+		case "migration/body-subtxn", "migration/catalog", "migration/search-consolidation", "harvest/stage", "harvest/commit", "harvest/sweep":
+		default:
+			t.Fatalf("disk-full case %s has no registered runner: owner=%s step=%s", c.Name, c.Owner, c.Step)
 		}
 	}
-	return owned
+	return fixture.Cases
 }
 
 // TestContentMigrationENOSPC runs the migration-owned disk-full cases: a
@@ -73,6 +77,10 @@ func loadContentEnospcMigrationCases(t *testing.T) []contentEnospcMigrationCase 
 // with orphans flagged, and the error carries the actionable parts.
 func TestContentMigrationENOSPC(t *testing.T) {
 	for _, c := range loadContentEnospcMigrationCases(t) {
+		if c.Owner == "harvest" {
+			// The loader validates its route; TestContentHarvestENOSPC executes it.
+			continue
+		}
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			switch c.Step {
@@ -356,15 +364,20 @@ func emptySearchIndex(t *testing.T, s *Store) {
 // assertSearchIndexMatchesNothing proves a MATCH query finds no rows:
 // the observable emptiness of an external-content index. It names the
 // stage so a failure says which step left postings behind.
-func assertSearchIndexMatchesNothing(t *testing.T, s *Store, stage string) {
+func assertSearchIndexMatchesNothing(t *testing.T, s *Store, stage string, terms ...string) {
 	t.Helper()
+	term := "big"
+	if len(terms) > 0 {
+		term = terms[0]
+	}
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.pool.Put(conn)
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT session_id FROM session_search_fts WHERE session_search_fts MATCH 'big' LIMIT 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT session_id FROM session_search_fts WHERE session_search_fts MATCH ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{term},
 		ResultFunc: func(*sqlite.Stmt) error {
 			found = true
 			return nil
