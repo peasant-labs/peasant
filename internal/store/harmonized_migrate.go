@@ -774,6 +774,15 @@ func (s *Store) EvaluateRetirementPreconditions(ctx context.Context) ([]Retireme
 		return nil, fmt.Errorf("store: take connection to evaluate the retirement preconditions: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return evaluateRetirementPreconditionsOnConn(ctx, conn)
+}
+
+// evaluateRetirementPreconditionsOnConn evaluates the five guards on the
+// caller's connection, so a caller that goes on to write (the retired-table
+// drop, and later the next release's schema migration) shares one
+// connection for the check and the change instead of opening a window for
+// a concurrent writer between them.
+func evaluateRetirementPreconditionsOnConn(ctx context.Context, conn *sqlite.Conn) ([]RetirementPreconditionStatus, error) {
 	counts := []struct {
 		table string
 		name  RetirementPrecondition

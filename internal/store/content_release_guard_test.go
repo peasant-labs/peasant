@@ -380,6 +380,46 @@ func assertReleaseGuardDualIndex(t *testing.T, s *Store) {
 	}
 }
 
+// TestEvaluateRetirementPreconditionsOnConn proves the shared-connection
+// evaluation the drop runs on: one caller-held connection yields all five
+// preconditions in AllRetirementPreconditions order, so the check and the
+// change never span two checkouts.
+func TestEvaluateRetirementPreconditionsOnConn(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _ := openGenerationStore(t)
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	statuses, err := evaluateRetirementPreconditionsOnConn(ctx, conn)
+	if err != nil {
+		t.Fatalf("evaluate on the caller-held connection: %v", err)
+	}
+	if len(statuses) != len(AllRetirementPreconditions) {
+		t.Fatalf("evaluated %d preconditions, want %d", len(statuses), len(AllRetirementPreconditions))
+	}
+	for i, status := range statuses {
+		if status.Name != AllRetirementPreconditions[i] {
+			t.Fatalf("evaluation %d is %q, want %q", i, status.Name, AllRetirementPreconditions[i])
+		}
+	}
+	// A fresh store holds the dual-index state: everything passes except
+	// the retired-index guard.
+	for _, status := range statuses {
+		if status.Name == RetirementPreconditionSessionEntriesFTSAbsent {
+			if status.Passed {
+				t.Fatalf("%q passed on a fresh store; want the consolidation refusal", status.Name)
+			}
+			continue
+		}
+		if !status.Passed {
+			t.Fatalf("%q fails on a fresh store (%s); want it to hold", status.Name, status.Detail)
+		}
+	}
+}
+
 // runReleaseGuardNewerSchema stamps user_version past this build and
 // proves both the read-write and the read-only opens refuse with the
 // newer-release fix, changing nothing.

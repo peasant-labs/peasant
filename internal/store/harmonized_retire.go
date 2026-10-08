@@ -23,7 +23,12 @@ import (
 // retirementDropStatements are the exact statements the next release's
 // schema migration runs behind the guard: the three file-backed projection
 // tables go; session_entry_full_content and its chunks stay (they still
-// serve non-native sessions until the later move).
+// serve non-native sessions until the later move). That migration must run
+// them on its own migration connection, in its own transaction, after
+// evaluating the guard on that same connection (CheckRetirementReady over
+// evaluateRetirementPreconditionsOnConn): taking a second pooled checkout
+// inside a migration risks deadlock on a pool of one, and a check on
+// another connection would not share the migration's transaction.
 const retirementDropStatements = `
 DROP TABLE IF EXISTS session_projection_generations;
 DROP TABLE IF EXISTS session_projection_entries;
@@ -74,8 +79,11 @@ func CheckRetirementReady(statuses []RetirementPreconditionStatus) error {
 }
 
 // DropRetiredProjectionTables removes the three file-backed projection
-// tables behind the five Release N+1 preconditions (design §7.1). While
-// any precondition fails it changes nothing and returns a
+// tables behind the five Release N+1 preconditions (design §7.1). This is
+// the command and test path: it checks out one connection, evaluates the
+// guard on it, and runs the drop on that same connection, so no concurrent
+// writer can invalidate a precondition between the check and the change.
+// While any precondition fails it changes nothing and returns a
 // RetirementNotReadyError naming the failing condition, its row count, why
 // it blocks the upgrade, and the fix (run peasant migrate with this
 // release, then upgrade). When all hold it drops the tables in one
@@ -84,18 +92,18 @@ func CheckRetirementReady(statuses []RetirementPreconditionStatus) error {
 // whose tables are already gone evaluates to all-passed and the IF EXISTS
 // statements change nothing.
 func (s *Store) DropRetiredProjectionTables(ctx context.Context) error {
-	statuses, err := s.EvaluateRetirementPreconditions(ctx)
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return fmt.Errorf("store: take connection to drop the retired projection tables: %w; the tables are unchanged", err)
+	}
+	defer s.pool.Put(conn)
+	statuses, err := evaluateRetirementPreconditionsOnConn(ctx, conn)
 	if err != nil {
 		return err
 	}
 	if err := CheckRetirementReady(statuses); err != nil {
 		return err
 	}
-	conn, err := s.pool.Take(ctx)
-	if err != nil {
-		return fmt.Errorf("store: take connection to drop the retired projection tables: %w; the tables are unchanged", err)
-	}
-	defer s.pool.Put(conn)
 	txnErr := error(nil)
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
