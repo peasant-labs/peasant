@@ -148,8 +148,8 @@ func buildHarvestCommand(filesystem ingest.FileSystem) *cobra.Command {
 		},
 	}
 	verifyCmd.Flags().BoolVar(&verifyVerbose, "verbose", false, "Show sample data from each table")
-	verifyCmd.Flags().BoolVar(&verifyContent, "content", false, "Verify session content objects and the search index (harmonized content model; not yet implemented)")
-	verifyCmd.Flags().BoolVar(&verifyRepair, "repair", false, "Repair content corruptions found by --content (requires --content; not yet implemented)")
+	verifyCmd.Flags().BoolVar(&verifyContent, "content", false, "Verify session content objects and the search index")
+	verifyCmd.Flags().BoolVar(&verifyRepair, "repair", false, "Mark content corruptions found by --content for the repair activation (requires --content)")
 	cmd.AddCommand(verifyCmd)
 
 	return cmd
@@ -853,7 +853,7 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
 	}
 	if content {
-		return fmt.Errorf("harvest verify: --content is not implemented yet: content verification lands with the harmonized content model; nothing was checked and nothing changed; run `peasant harvest verify` without --content for the schema check")
+		return runVerifyContent(cmd, repair)
 	}
 	ctx := cmd.Context()
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))

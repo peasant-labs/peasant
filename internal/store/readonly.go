@@ -215,6 +215,14 @@ func (a readOnlyGenerationArtifacts) ListGenerationDirectories(ctx context.Conte
 	return a.inner.ListGenerationDirectories(ctx, id)
 }
 
+func (a readOnlyGenerationArtifacts) RemoveReservedStagingDirs(context.Context, schema.SessionID) (int, error) {
+	return 0, errReadOnlyGenerationWrite
+}
+
+func (a readOnlyGenerationArtifacts) RemoveConvertedSessionFiles(context.Context, schema.SessionID) (GenerationFootprint, error) {
+	return GenerationFootprint{}, errReadOnlyGenerationWrite
+}
+
 // prepareReadOnlyConn pins the read-only guarantees on every pooled connection.
 // It deliberately omits the write-side PRAGMAs (journal_mode, synchronous,
 // mmap_size) that preparePragmas sets for the read-write store.
