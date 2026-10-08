@@ -936,6 +936,14 @@ func nullableColumnInt(stmt *sqlite.Stmt, col int) *int {
 	return &v
 }
 
+func nullableColumnInt64(stmt *sqlite.Stmt, col int) *int64 {
+	if stmt.ColumnType(col) == sqlite.TypeNull {
+		return nil
+	}
+	v := stmt.ColumnInt64(col)
+	return &v
+}
+
 func nullableColumnFloat(stmt *sqlite.Stmt, col int) *float64 {
 	if stmt.ColumnType(col) == sqlite.TypeNull {
 		return nil

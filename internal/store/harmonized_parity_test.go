@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
 
 // parityEntry builds one entry with every text column populated: the
 // worst case for the row mapping, because every field must survive the
-// round trip with its presence and value intact.
+// round trip with its presence and value intact. The timestamp is set so
+// the digest binding covers it: a scanner that drops timestamp_ms
+// recomputes a different digest for this entry.
 func parityEntry(sid schema.SessionID, index int) schema.SessionEntry {
 	preview := "preview bytes"
 	input := `{"tool":"input"}`
@@ -36,6 +40,8 @@ func parityEntry(sid schema.SessionID, index int) schema.SessionEntry {
 	}
 	tokensIn, tokensOut := 10, 20
 	entry.TokensIn, entry.TokensOut = &tokensIn, &tokensOut
+	timestampMs := int64(1700000000123)
+	entry.TimestampMs = &timestampMs
 	entry.ToolNamesCSV = strPtr("read,grep")
 	rawLen := 1234
 	entry.RawByteLength = &rawLen
@@ -171,6 +177,68 @@ func TestSerializeEntryParity(t *testing.T) {
 		}
 		if got := string(contentOf(textRecord)); got != "preview bytes" {
 			t.Fatalf("text content = %q, want the preview", got)
+		}
+	})
+	t.Run("timestamped-scan-digest", func(t *testing.T) {
+		// The production row scanner must round-trip the timestamp: a
+		// scan that drops timestamp_ms recomputes a different digest,
+		// which the sweep and search verification would flag as
+		// untrusted. The probe mirrors the session_entry_bodies shape
+		// the shared column list selects from.
+		entry := parityEntry(sid, 10)
+		record, err := entryRecordFromEntry(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn, err := sqlite.OpenConn(":memory:", sqlite.OpenReadWrite|sqlite.OpenCreate)
+		if err != nil {
+			t.Fatalf("open probe: %v", err)
+		}
+		defer conn.Close()
+		if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE session_entry_bodies (
+			body_id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, body_digest TEXT NOT NULL,
+			entry_index INTEGER NOT NULL, harness TEXT NOT NULL, entry_type TEXT NOT NULL,
+			role TEXT NOT NULL, timestamp_ms INTEGER, content_preview TEXT,
+			tokens_in INTEGER, tokens_out INTEGER, has_tool_use INTEGER NOT NULL,
+			tool_kind TEXT, tool_names_csv TEXT, has_thinking INTEGER NOT NULL,
+			is_error INTEGER NOT NULL, stop_reason TEXT, raw_byte_length INTEGER,
+			tool_call_id TEXT, entry_id TEXT, parent_entry_id TEXT,
+			depth INTEGER NOT NULL, parent_index INTEGER, tool_input TEXT,
+			tool_output TEXT, model_id TEXT, tokens_reasoning INTEGER,
+			cache_read INTEGER, cache_write INTEGER, extra TEXT,
+			extra_verbatim TEXT, part_type TEXT, source_entry_ref TEXT,
+			prov_origin TEXT, prov_actor TEXT, prov_delivery TEXT,
+			prov_ownership TEXT, prov_evidence TEXT, prov_input_modality TEXT,
+			prov_submission_ref TEXT, UNIQUE (session_id, body_digest)
+		) STRICT`, nil); err != nil {
+			t.Fatalf("create probe: %v", err)
+		}
+		if err := insertStagedBodyOnConn(conn, sid, &record); err != nil {
+			t.Fatal(err)
+		}
+		var scanned EntryRecord
+		found := false
+		if err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(sid)},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				scanned = scanEntryRecord(stmt)
+				found = true
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read probe: %v", err)
+		}
+		if !found {
+			t.Fatal("staged body not found")
+		}
+		if scanned.TimestampMs == nil || *scanned.TimestampMs != *record.TimestampMs {
+			t.Fatalf("scanned timestamp = %v, want %d", scanned.TimestampMs, *record.TimestampMs)
+		}
+		if got := string(bodyDigestForRecord(scanned)); got != string(bodyDigestForRecord(record)) {
+			t.Fatal("scanned row recomputes a different digest; the scanner lost a digest-covered field")
+		}
+		if got := string(bodyDigestForRecord(scanned)); got != scanned.BodyDigest {
+			t.Fatal("scanned row digest differs from the stored body_digest")
 		}
 	})
 	t.Run("unicode-boundary", func(t *testing.T) {

@@ -478,6 +478,7 @@ func scanEntryRecord(stmt *sqlite.Stmt) EntryRecord {
 		SessionID:       schema.SessionID(stmt.ColumnText(1)),
 		BodyDigest:      stmt.ColumnText(2),
 		EntryIndex:      int(stmt.ColumnInt64(3)),
+		TimestampMs:     nullableColumnInt64(stmt, 7),
 		ContentPreview:  nullableColumnText(stmt, 8),
 		TokensIn:        nullableColumnInt(stmt, 9),
 		TokensOut:       nullableColumnInt(stmt, 10),
