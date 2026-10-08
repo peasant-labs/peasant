@@ -380,6 +380,9 @@ func verifyShimCaptureProjection(ctx context.Context, conn *sqlite.Conn, id inge
 	if err := validateUnknownCapture(evidenceEntries, c.Status, c.FailureCode); err != nil {
 		return nil, err
 	}
+	for i := range shaped {
+		shaped[i] = mirrorShape(records[i], false)
+	}
 	return shaped, nil
 }
 

@@ -153,7 +153,12 @@ func verifyShimRecords(records []EntryRecord) error {
 func shimListEntries(records []EntryRecord, bounded bool) ([]schema.SessionEntry, error) {
 	entries := make([]schema.SessionEntry, 0, len(records))
 	for _, record := range records {
-		entry := legacyShape(record, bounded)
+		entry := mirrorShape(record, bounded)
+		if ext := promotedExtKVs(record); len(ext) > 0 {
+			if err := mergeExtIntoExtra(&entry, ext); err != nil {
+				return nil, err
+			}
+		}
 		if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
 			return nil, err
 		}

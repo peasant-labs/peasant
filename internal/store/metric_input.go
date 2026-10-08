@@ -8,6 +8,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 var _ ingest.MetricInputStore = (*Store)(nil)
@@ -40,7 +41,7 @@ func (s *Store) readMetricInputOnConn(conn *sqlite.Conn, sid ingest.SessionID, i
 	if len(input.Entries) == 0 && (input.IndexState.IndexedAt == nil || input.IndexState.IndexerVersion <= 0 || input.IndexState.IndexVersion == nil || input.IndexState.SessionEntriesHash == nil) {
 		return nil, fmt.Errorf("read metric input for session %s: empty entries have no completed index; prior metrics were preserved; index the session before retrying", sid)
 	}
-	input.Seed, err = getMetricSeedOnConn(conn, sid)
+	input.Seed, err = readMetricSeedOnConn(conn, schema.SessionID(sid))
 	if err != nil {
 		return nil, err
 	}

@@ -590,6 +590,22 @@ func contentBackfillPublicationRevision(conn *sqlite.Conn, id ingest.SessionID) 
 	return revision, err
 }
 
+// sessionEntriesHashDomain retains the mirror writer's hash domain: full
+// captures hash bounded previews; preview-only captures hash raw entries.
+func sessionEntriesHashDomain(entries []schema.SessionEntry, fullCapture bool) (string, error) {
+	if !fullCapture {
+		return computeSessionEntriesHash(entries)
+	}
+	bounded := append([]schema.SessionEntry(nil), entries...)
+	for i := range bounded {
+		if bounded[i].ContentPreview != nil {
+			preview := contentPreview(*bounded[i].ContentPreview)
+			bounded[i].ContentPreview = &preview
+		}
+	}
+	return computeSessionEntriesHash(bounded)
+}
+
 // writeHarmonizedContentOnConn persists the capture certificate for a V2
 // harmonized write (design §6.1): it computes fullCaptureHash over the
 // generation's main entries and writes the capture row. It writes no mirror
@@ -637,7 +653,7 @@ func writeHarmonizedContentOnConn(ctx context.Context, conn *sqlite.Conn, w inge
 			return out, readErr
 		}
 	}
-	hash, err := computeSessionEntriesHash(entries)
+	hash, err := sessionEntriesHashDomain(entries, w.RequireFullContent)
 	if err != nil {
 		return out, fmt.Errorf("store: compute session_entries_hash for %s: %w", w.SessionID, err)
 	}

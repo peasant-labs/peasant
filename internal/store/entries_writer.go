@@ -327,6 +327,11 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
+	} else if batchPrepared != nil && write.IndexerVersion == 0 {
+		if err := setSessionEntriesHashOnConn(conn, string(write.SessionID), outcome.sessionEntriesHash); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
 	} else if conversion == nil && write.Mode != ingest.SessionEntryWriteContentBackfill && write.Mode != ingest.SessionEntryWriteFormatConversion {
 		// An entry-only replacement keeps historical parser stamps but cannot
 		// certify the input, even when the canonical rows happen to match. A

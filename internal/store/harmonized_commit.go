@@ -1319,6 +1319,7 @@ type skipStamps struct {
 	stats              schema.SessionStats
 	seedJSON           string
 	updatedAtMs        int64
+	fullCapture        bool
 }
 
 // stampHarmonizedBookkeeping runs the C4 bookkeeping inside the caller's
@@ -1391,7 +1392,7 @@ func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHar
 		txnErr = errSkipPointerMoved
 		return txnErr
 	}
-	hash, err := computeSessionEntriesHash(prepared.mainEntries)
+	hash, err := sessionEntriesHashDomain(prepared.mainEntries, stamps.fullCapture)
 	if err != nil {
 		txnErr = fmt.Errorf("store: hash main entries for the skip bookkeeping of session %s: %w", prepared.sessionID, err)
 		return txnErr
@@ -1624,7 +1625,7 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 		txnErr = fmt.Errorf("store: flag the search index for rebuild after the repair of session %s: %w", prepared.sessionID, err)
 		return txnErr
 	}
-	hash, err := computeSessionEntriesHash(prepared.mainEntries)
+	hash, err := sessionEntriesHashDomain(prepared.mainEntries, stamps.fullCapture)
 	if err != nil {
 		txnErr = fmt.Errorf("store: hash main entries for the repair of session %s: %w", prepared.sessionID, err)
 		return txnErr
@@ -1718,7 +1719,7 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 		if stored != prepared.binding {
 			return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is already installed with a different candidate binding; immutable identifiers cannot be reused; the installed generation is unchanged", v2.Generation.ID, write.SessionID)
 		}
-		hash, err := computeSessionEntriesHash(prepared.mainEntries)
+		hash, err := sessionEntriesHashDomain(prepared.mainEntries, write.RequireFullContent)
 		if err != nil {
 			return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: hash main entries for the idempotent retry of session %s: %w", write.SessionID, err)
 		}

@@ -296,6 +296,7 @@ func activationStamps(activation GenerationActivation, prepared *preparedHarmoni
 		stats:              prepared.generation.Metadata.Stats,
 		seedJSON:           seedJSONForStats(prepared.generation.Metadata.Stats),
 		updatedAtMs:        activation.IndexedAtMs,
+		fullCapture:        captureRequiresFullContent(activation.ContentCapture),
 	}
 }
 
