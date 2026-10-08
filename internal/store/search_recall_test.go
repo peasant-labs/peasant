@@ -70,7 +70,7 @@ func runSearchRecallCase(t *testing.T, c searchRecallCase) {
 	case "transition-window-match-set":
 		recallTransitionWindow(t, c)
 	case "transition-window-fallback-filter":
-		recallTransitionWindow(t, c)
+		recallTransitionFallback(t, c)
 	case "rowid-space-guard":
 		recallRowidGuard(t, c)
 	default:
@@ -556,6 +556,48 @@ func recallTransitionWindow(t *testing.T, c searchRecallCase) {
 	// side, so the unpaginated match set carries the pair exactly once.
 	recallExec(t, s, `INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, content_preview, depth) VALUES (?, 0, 'claude-code', 'text', 'user', ?, 0)`, string(sid), "transition text "+c.Query)
 	assertRecallHits(t, c, recallProduction(t, s, c.Query))
+}
+
+func recallTransitionFallback(t *testing.T, c searchRecallCase) {
+	t.Helper()
+	if !c.FallbackDualSource {
+		t.Fatalf("%s: the fallback case needs its dual-source window; set fallbackDualSource", c.Name)
+	}
+	s, _ := openGenerationStore(t)
+	sid := recallSID(c.Name)
+	seedGenerationSession(t, s, string(sid))
+	prefix := strings.ReplaceAll(c.Name, "-", "")
+	e0 := withPreview(recallEntry(sid, 0, recallRef(prefix, 0)), "transition text "+c.Query)
+	activateRecallEntries(t, s, sid, "gen-"+prefix, []schema.SessionEntry{e0}, nil)
+	// The per-session-commit fallback shortens the dual window to one
+	// session at a time, but a stale leftover can still sit beside a
+	// genuine mirror hit from another session. Seed both: the leftover for
+	// the converted session and a real mirror row elsewhere sharing the
+	// term. The filter must drop the stale side and keep both live hits,
+	// so a fallback path that filters the wrong side fails the count and
+	// one that skips filtering fails the pair check.
+	recallExec(t, s, `INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, content_preview, depth) VALUES (?, 0, 'claude-code', 'text', 'user', ?, 0)`, string(sid), "transition text "+c.Query)
+	mirrorSID := recallSID(c.Name + "-mirror")
+	seedGenerationSession(t, s, string(mirrorSID))
+	mirrorEntry := withPreview(recallEntry(mirrorSID, 0, recallRef(prefix+"-mirror", 0)), "transition text "+c.Query)
+	if err := s.IndexSessionEntries(context.Background(), mirrorSID, []schema.SessionEntry{mirrorEntry}); err != nil {
+		t.Fatalf("index genuine mirror row: %v", err)
+	}
+	hits := recallProduction(t, s, c.Query)
+	assertRecallHits(t, c, hits)
+	sessions := map[string]int{}
+	for _, hit := range hits {
+		sessions[hit.SessionID]++
+		if hit.EntryIndex != 0 {
+			t.Fatalf("%s: hit entry = %d, want the index-0 pair on both sides", c.Name, hit.EntryIndex)
+		}
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("%s: %d distinct sessions, want the converted session and the genuine mirror session", c.Name, len(sessions))
+	}
+	if sessions[string(sid)] != 1 || sessions[string(mirrorSID)] != 1 {
+		t.Fatalf("%s: per-session hits = %v, want exactly one pair per side", c.Name, sessions)
+	}
 }
 
 func recallRowidGuard(t *testing.T, c searchRecallCase) {

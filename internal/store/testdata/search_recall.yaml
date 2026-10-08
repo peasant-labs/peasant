@@ -82,9 +82,9 @@ cases:
     wantNoDuplicates: true
   - name: transition-window-fallback-filter
     query: recallfallbacksierra
-    wantCount: 1
-    wantEntryIndexes: [0]
+    wantCount: 2
     wantNoDuplicates: true
+    fallbackDualSource: true
   - name: rowid-space-guard
     query: recallrowidtango
     wantCount: 1

@@ -380,13 +380,28 @@ func TestPruneVerifiesBodies(t *testing.T) {
 		if _, err := s.PruneSessions(context.Background(), []ingest.SessionID{sid}); err != nil {
 			t.Fatalf("prune: %v", err)
 		}
+		// The corrupt delete sets the flag mid-transaction and prune
+		// rebuilds through the one path before committing, so the flag is
+		// clear and no stale postings survive.
 		if state, err := s.SearchState(context.Background()); err != nil {
 			t.Fatalf("read search state: %v", err)
-		} else if !state.NeedsRebuild {
-			t.Fatal("corrupt prune leaves the rebuild flag clear")
+		} else if state.NeedsRebuild {
+			t.Fatal("prune leaves the rebuild flag set after its gated rebuild")
 		}
-		if _, err := s.EnsureSearchIndexHealthy(context.Background()); err != nil {
-			t.Fatalf("rebuild after corrupt prune: %v", err)
+		conn, err := s.pool.Take(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.pool.Put(conn)
+		var n int
+		if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
+			Args:       []any{`"prune corrupt text"`},
+			ResultFunc: func(stmt *sqlite.Stmt) error { n = int(stmt.ColumnInt64(0)); return nil },
+		}); err != nil {
+			t.Fatalf("raw MATCH after corrupt prune: %v", err)
+		}
+		if n != 0 {
+			t.Fatalf("raw MATCH after corrupt prune = %d, want 0", n)
 		}
 	})
 }

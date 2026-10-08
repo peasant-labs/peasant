@@ -347,6 +347,7 @@ type searchRecallCase struct {
 	WantReverseEntryIndexes []int  `yaml:"wantReverseEntryIndexes,omitempty"`
 	WantFirstBodyID         *int64 `yaml:"wantFirstBodyID,omitempty"`
 	WantCeilingRefused      bool   `yaml:"wantCeilingRefused,omitempty"`
+	FallbackDualSource      bool   `yaml:"fallbackDualSource,omitempty"`
 }
 
 type searchRecallFixtures struct {
