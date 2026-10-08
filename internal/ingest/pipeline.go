@@ -1797,21 +1797,25 @@ func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, o
 	return entry
 }
 
-// exceedsWriteBudget reports whether the pending write batch must be flushed
+// ExceedsWriteBudget reports whether the pending write batch must be flushed
 // BEFORE the next parsed result joins it. It is the one splitter: the single
-// home of the count and byte terms.
+// home of the count and byte terms, exported so every grouping site can ask
+// it — including the store-side staging and activation lanes and the
+// migration's body sub-transactions (design section 0.5), which must not
+// re-implement these terms.
 //
-// Two sites group parsed results into SQLite writes: the streaming drain that
-// every session takes on an ordinary harvest and on a reindex, and indexBatch,
-// which groups the stale-session waves. Both bound the same thing for the same
-// reason, so they ask the same question here rather than each spelling it out:
-// a batch stops at the configured session cap, and a non-empty batch stops
-// before its full strings would exceed the configured byte cap.
+// Two sites in this package group parsed results into SQLite writes: the
+// streaming drain that every session takes on an ordinary harvest and on a
+// reindex, and indexBatch, which groups the stale-session waves. Both bound
+// the same thing for the same reason, so they ask the same question here
+// rather than each spelling it out: a batch stops at the configured session
+// cap, and a non-empty batch stops before its full strings would exceed the
+// configured byte cap.
 //
 // A single result larger than the whole budget is still written, alone: the
 // batch it would join is flushed first, and the empty-batch term then admits
 // it. Refusing it instead would lose the session.
-func exceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextBytes int64) bool {
+func ExceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextBytes int64) bool {
 	if pendingCount >= cfg.BatchSessions {
 		return true
 	}
@@ -1823,7 +1827,7 @@ func exceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextByt
 //
 // It takes results one at a time and then absorbs whatever else has already
 // arrived, so a burst of small sessions becomes one write rather than many.
-// The batch it accumulates is bounded by exceedsWriteBudget, which is the
+// The batch it accumulates is bounded by ExceedsWriteBudget, which is the
 // memory bound on the primary harvest path: without it a long run of large
 // transcripts is held in full, in memory, until the parsers stop.
 //
@@ -1837,7 +1841,7 @@ func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexPar
 		pending = append(pending, result)
 		pendingBytes := indexResultWriteBytes(result.output)
 		parsedClosed := false
-		// No bound is restated here: exceedsWriteBudget owns the split and
+		// No bound is restated here: ExceedsWriteBudget owns the split and
 		// applies it below, before each result joins the batch, so the batch
 		// never grows past the limit or the budget however long this absorbs.
 		// A second copy of those terms would be one more place to miss.
@@ -1850,7 +1854,7 @@ func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexPar
 					break drainParsed
 				}
 				nextBytes := indexResultWriteBytes(next.output)
-				if exceedsWriteBudget(cfg, len(pending), pendingBytes, nextBytes) {
+				if ExceedsWriteBudget(cfg, len(pending), pendingBytes, nextBytes) {
 					flush(pending)
 					clear(pending)
 					pending = pending[:0]
@@ -1959,7 +1963,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		}
 		for _, result := range parsed {
 			size := indexResultWriteBytes(result.output)
-			if exceedsWriteBudget(writeCfg, len(pending), pendingBytes, size) {
+			if ExceedsWriteBudget(writeCfg, len(pending), pendingBytes, size) {
 				flushPending()
 			}
 			pending = append(pending, result)

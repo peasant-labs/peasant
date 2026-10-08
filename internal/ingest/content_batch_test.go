@@ -567,7 +567,7 @@ func TestIndexWriteBudgetPredicate(t *testing.T) {
 					if fixture.ByteCapFraction != nil {
 						cfg.BatchBytes = int64(float64(cfg.BatchBytes) * *fixture.ByteCapFraction)
 					}
-					got := exceedsWriteBudget(
+					got := ExceedsWriteBudget(
 						cfg,
 						fixture.PendingCount,
 						budgetFractionBytes(budget, fixture.PendingFraction),

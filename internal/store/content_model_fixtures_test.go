@@ -168,24 +168,9 @@ func TestContentENOSPCFixtureManifest(t *testing.T) {
 	loadContentENOSPCFixture(t)
 }
 
-//go:embed testdata/content_write_budget.yaml
-var contentWriteBudgetYAML []byte
-
-//go:embed testdata/content_write_budget.manifest.yaml
-var contentWriteBudgetManifestYAML []byte
-
-// loadContentWriteBudgetFixture loads the content write budget scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentWriteBudgetFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content write budget", contentWriteBudgetYAML, contentWriteBudgetManifestYAML)
-}
-
-// TestContentWriteBudgetFixtureManifest pins the content write budget case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentWriteBudgetFixtureManifest(t *testing.T) {
-	loadContentWriteBudgetFixture(t)
-}
+// content_write_budget is owned by the typed loader in
+// content_write_budget_test.go; the full required-name inventory stays
+// manifest-protected there.
 
 //go:embed testdata/session_captured_stats.yaml
 var sessionCapturedStatsYAML []byte
