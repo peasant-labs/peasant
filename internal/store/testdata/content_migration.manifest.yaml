@@ -10,6 +10,8 @@ requiredNames:
   - native-stats-backfilled
   - native-newer-stats-row-converts
   - native-metadata-hash-recomputed
+  - native-parent-only-metadata-heals-row
+  - native-parent-divergence-rolls-back
   - native-field-blob-mismatch-rolls-back-and-marks
   - native-missing-blob-rolls-back-and-marks
   - native-damaged-blob-rolls-back-and-marks
@@ -21,6 +23,8 @@ requiredNames:
   - native-capture-hash-mismatch-rolls-back
   - native-session-hash-mismatch-rolls-back
   - null-session-entries-hash-skips-dimension
+  - native-stale-hash-converts
+  - native-unknown-key-rolls-back
   - native-detail-bytes-mismatch-halts
   - data-rollback-threshold-halts
   - rollback-then-reindex-converts

@@ -32,6 +32,16 @@ func seedFileBackedGeneration(t *testing.T, s *Store, root string, sid schema.Se
 	if err := os.MkdirAll(genDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The legacy writer always emits the subagent and warning collections,
+	// even when empty. Seeds must carry that shape: the migration's shadow
+	// verify compares the rebuilt metadata document byte for byte against
+	// the seeded one, and a null where legacy wrote [] fails it.
+	if generation.Metadata.Subagents == nil {
+		generation.Metadata.Subagents = []schema.SubagentRef{}
+	}
+	if generation.Metadata.Diagnostics.Warnings == nil {
+		generation.Metadata.Diagnostics.Warnings = []schema.DiagnosticEntry{}
+	}
 	manifest, err := json.Marshal(generation)
 	if err != nil {
 		t.Fatal(err)

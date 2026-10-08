@@ -136,7 +136,7 @@ func TestContentCLISurfaceInventory(t *testing.T) {
 			}
 			for _, flag := range c.Flags {
 				name := flag
-				if flag == "json" {
+				if flag == defaults.JSONFlagName {
 					name = defaults.JSONFlagName
 				}
 				if target.Flags().Lookup(name) == nil && target.PersistentFlags().Lookup(name) == nil {

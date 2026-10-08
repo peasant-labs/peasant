@@ -106,7 +106,7 @@ func TestWorkerBuffersConcurrentExclusivity(t *testing.T) {
 				bufs.Reset(w)
 				marker := []byte{byte(w), byte(r)}
 				if _, ok := bufs.Append(w, marker); !ok {
-					t.Errorf("worker %d round %d: a two-byte stage must fit the 4 MiB partition", w, r)
+					t.Errorf("worker %d round %d: a two-byte stage must fit the partition", w, r)
 					return
 				}
 				got := bufs.Bytes(w)
@@ -157,7 +157,7 @@ func TestNewWorkerBuffersRefusesUnusableConfig(t *testing.T) {
 }
 
 // TestNewWorkerBuffersRefusesInconsistentCaps fails when the buffers alone
-// would breach the total: two 4 MiB buffers do not fit under a single
+// would breach the total: two per-worker buffers do not fit under a single
 // buffer's worth of staged memory.
 func TestNewWorkerBuffersRefusesInconsistentCaps(t *testing.T) {
 	t.Parallel()

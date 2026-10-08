@@ -222,6 +222,7 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 	metadata.Git.Associations = children.associations
 	metadata.Diagnostics.Warnings = children.diagnostics
 	metadata.Relationships = children.relationships
+	legacyPresentCollections(&metadata)
 	stats, err := readCapturedStatsOnConn(conn, sessionID)
 	if err != nil {
 		// A native session always owns a stats row past the v62 backfill;
@@ -327,7 +328,7 @@ func harmonizedRelationshipsOnConn(conn *sqlite.Conn, sessionID schema.SessionID
 	var relationships []schema.SessionRelationship
 	err := sqlitex.ExecuteTransient(conn, `SELECT kind, target_state, target_local_id, evidence,
 anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref
-FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY kind`, &sqlitex.ExecOptions{
+FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			relationship := schema.SessionRelationship{

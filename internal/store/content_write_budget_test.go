@@ -513,13 +513,16 @@ func openWriteBudgetHarmonized(t *testing.T, dbPath string, options ...store.Ope
 		t.Fatal(err)
 	}
 	base := []store.OpenOption{
-		store.WithSkipMigrations(),
 		store.WithWALAutocheckpointDisabled(),
 		store.WithPoolSize(1),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),
 	}
-	db, err := store.Open(dbPath, append(base, options...)...)
+	// WithSkipMigrations is inline (not only in base) so the open-time
+	// rule can see it: the file opens an already-migrated golden copy, so
+	// skipping the migration replay changes nothing. Go spreads a single
+	// slice only, hence the nested append.
+	db, err := store.Open(dbPath, append([]store.OpenOption{store.WithSkipMigrations()}, append(base, options...)...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

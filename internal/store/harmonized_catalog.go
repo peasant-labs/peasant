@@ -97,8 +97,10 @@ type GenerationDiagnostic struct {
 }
 
 // GenerationRelationship is one session_relationship_evidence row
-// (metadata.relationships, structured; design §3.3 table 6).
+// (metadata.relationships, structured; design §3.3 table 6). Ordinal is the
+// captured document order, so readers rebuild the collection byte for byte.
 type GenerationRelationship struct {
+	Ordinal                 int
 	Kind                    schema.SessionRelationshipKind
 	TargetState             schema.RelationshipTargetState
 	TargetLocalID           *schema.SessionID
@@ -223,6 +225,24 @@ type ContentBlob struct {
 	ByteLength int64
 }
 
+// legacyPresentCollections coerces the always-present collections to
+// empty: the legacy writer emits "subagents":[] and
+// "diagnostics":{"warnings":[]} even when empty, never null and never
+// absent (every stored metadata_json carries both). A nil slice would
+// marshal as null, so empty collections are coerced here. Every
+// reconstructing builder of a captured UnifiedMetadata calls it, so
+// file-backed reads, harmonized reads, and the migration's shadow verify
+// agree byte for byte. (The ingest parser and seed builders construct
+// fresh documents rather than rebuilding captured ones, so they do not.)
+func legacyPresentCollections(metadata *schema.UnifiedMetadata) {
+	if metadata.Subagents == nil {
+		metadata.Subagents = []schema.SubagentRef{}
+	}
+	if metadata.Diagnostics.Warnings == nil {
+		metadata.Diagnostics.Warnings = []schema.DiagnosticEntry{}
+	}
+}
+
 // serializeMetadata rebuilds the captured UnifiedMetadata for internal
 // prior comparisons and the migration's shadow verify (§7.2); it is not a
 // wire surface — no wire payload carries the captured document, readers use
@@ -338,6 +358,8 @@ func serializeMetadata(gen GenerationRecord, children GenerationChildren, stats 
 		}
 		metadata.Relationships = append(metadata.Relationships, restored)
 	}
+	// Coerce the always-present collections (see legacyPresentCollections).
+	legacyPresentCollections(&metadata)
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
 		return nil

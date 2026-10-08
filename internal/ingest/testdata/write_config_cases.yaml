@@ -35,15 +35,15 @@ cases:
     write: {}
     valid: true
   # The documented YAML shape, verbatim: every default derivation at 8 workers
-  # (2×32 MiB in-flight batches + 8×4 MiB buffers = 96 MiB staged).
+  # (2×32 MiB in-flight batches + 8×16 MiB buffers = 192 MiB staged).
   - name: documented-shape-is-valid
     write:
       holdTargetMs: 4000
       activationSessions: 64
       batchBytes: 33554432
       batchSessions: 64
-      bufferBytes: 4194304
-      stagedMemoryBytes: 100663296
+      bufferBytes: 16777216
+      stagedMemoryBytes: 201326592
       flushIntervalMs: 500
       sweepRows: 5000
       harvestTargetMinutes: 20

@@ -74,13 +74,15 @@ func seedMigrateProfile(t *testing.T, s *Store, root string, sid schema.SessionI
 	t.Helper()
 	text, input, output := migrateSeedTexts(genID)
 	switch profile {
-	case "clean", "extra-keys", "newer-stats", "rich-metadata", "annotated", "preview-only", "settled-refusal", "two-earlier", "empty-blob":
+	case "clean", "extra-keys", "newer-stats", "rich-metadata", "annotated", "preview-only", "settled-refusal", "two-earlier", "empty-blob", "parent-only-metadata", "parent-row-wins":
 		v2, blobs := buildTestGeneration(t, sid, genID, text, input, output)
 		switch profile {
 		case "extra-keys":
 			applyMigrateExtraKeys(t, &v2, blobs)
 		case "rich-metadata":
 			applyMigrateRichMetadata(t, s, sid, &v2, blobs, genID)
+		case "parent-only-metadata", "parent-row-wins":
+			applyMigrateParentOnlyMetadata(t, s, sid, &v2, profile == "parent-row-wins")
 		case "two-earlier":
 			applyMigrateTwoEarlier(t, sid, &v2, blobs, genID)
 		case "empty-blob":
@@ -89,6 +91,9 @@ func seedMigrateProfile(t *testing.T, s *Store, root string, sid schema.SessionI
 		stampSeedMetadataHash(&v2)
 		full := profile != "preview-only"
 		seedFileBackedGeneration(t, s, root, sid, v2, blobs, full)
+		if profile == "parent-row-wins" {
+			seedMigrateParentRow(t, s, sid)
+		}
 		switch profile {
 		case "annotated":
 			seedMigrateAnnotation(t, s, sid)
@@ -201,6 +206,31 @@ func applyMigrateEmptyBlob(t *testing.T, v2 *indexformat.V2, blobs map[schema.So
 	}}
 }
 
+// applyMigrateParentOnlyMetadata names a parent in the captured document
+// without touching the sessions row, the shape thousands of live subagent
+// sessions hold. When rowWins it also records the winning row parent;
+// seedMigrateParentRow applies it after seeding because the mirror batch
+// below rewrites the sessions row.
+func applyMigrateParentOnlyMetadata(t *testing.T, s *Store, sid schema.SessionID, v2 *indexformat.V2, rowWins bool) {
+	t.Helper()
+	docParent := migrateCaseSessionID(t, "migrate-doc-parent", 0)
+	seedGenerationSession(t, s, string(docParent))
+	v2.Generation.Metadata.ParentUUID = &docParent
+	if rowWins {
+		rowParent := migrateCaseSessionID(t, "migrate-row-parent", 0)
+		seedGenerationSession(t, s, string(rowParent))
+	}
+}
+
+// seedMigrateParentRow sets the sessions row parent after the file-backed
+// seed (and its mirror batch) completes, so the conversion meets a set
+// row the way a live row survives harvests that preserve parentage.
+func seedMigrateParentRow(t *testing.T, s *Store, sid schema.SessionID) {
+	t.Helper()
+	rowParent := migrateCaseSessionID(t, "migrate-row-parent", 0)
+	execMigrateSQL(t, s, `UPDATE sessions SET parent_id = '`+string(rowParent)+`' WHERE session_id = '`+string(sid)+`'`)
+}
+
 // collections the metadata dimension proves: a parent link, subagents, a
 // commit, a relationship with an anchor, title refs, an earlier
 // partition, native metadata, and a context segment.
@@ -267,7 +297,7 @@ func seedMigrateRichChildren(t *testing.T, s *Store, sid schema.SessionID, genID
 			t.Fatalf("seed rich children: %v", err)
 		}
 	}
-	for _, relationship := range v2.Generation.Metadata.Relationships {
+	for ordinal, relationship := range v2.Generation.Metadata.Relationships {
 		var target, evidence, anchorKind, anchorRef any
 		if relationship.TargetLocalID != nil {
 			target = string(*relationship.TargetLocalID)
@@ -281,8 +311,8 @@ func seedMigrateRichChildren(t *testing.T, s *Store, sid schema.SessionID, genID
 				anchorRef = string(relationship.Anchor.SourceEntryRef)
 			}
 		}
-		exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-			string(sid), genID, string(relationship.Kind), string(relationship.TargetState), target, evidence, anchorKind, anchorRef)
+		exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+			string(sid), genID, ordinal, string(relationship.Kind), string(relationship.TargetState), target, evidence, anchorKind, anchorRef)
 	}
 	for partition, records := range map[int][]schema.NativeMetadataRecord{0: v2.Generation.Main.NativeMetadata} {
 		for ordinal, record := range records {
@@ -627,6 +657,51 @@ func applyMigrateDamage(t *testing.T, s *Store, root string, sid schema.SessionI
 	case "null-hash":
 		put(`UPDATE sessions SET session_entries_hash = NULL WHERE session_id = ?`, string(sid))
 		return nil
+	case "unknown-key":
+		// A top-level key the catalog has no column for: the struct decode
+		// would drop it, so the verify must refuse instead of converting
+		// with silent loss.
+		raw := get(`SELECT metadata_json FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, string(sid), genID)
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			t.Fatal(err)
+		}
+		doc["futureUnknownKey"] = "not-yet-promoted"
+		modified, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(`UPDATE session_projection_generations SET metadata_json = ? WHERE session_id = ? AND generation_id = ?`, string(modified), string(sid), genID)
+		return nil
+	case "stale-hash":
+		// The stored hash predates the current hashed fields (stats and
+		// timestamps move without a rehash), so the rebuilt document can
+		// never reproduce it byte for byte. The conversion still proceeds:
+		// the verify compares hash-excluded bytes and later reads recompute
+		// the fresh hash.
+		raw := get(`SELECT metadata_json FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, string(sid), genID)
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			t.Fatal(err)
+		}
+		doc["metadataHash"] = strings.Repeat("0", 64)
+		modified, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(`UPDATE session_projection_generations SET metadata_json = ? WHERE session_id = ? AND generation_id = ?`, string(modified), string(sid), genID)
+		return func() {
+			conn, err := s.pool.Take(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.pool.Put(conn)
+			if err := sqlitex.ExecuteTransient(conn, `UPDATE session_projection_generations SET metadata_json = ? WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+				Args: []any{raw, string(sid), genID},
+			}); err != nil {
+				t.Fatalf("restore metadata_json: %v", err)
+			}
+		}
 	default:
 		t.Fatalf("unknown migrate damage %q", damage)
 		return nil
@@ -786,6 +861,9 @@ func runMigrateConvertCase(t *testing.T, c contentMigrationCase, index int) {
 		}
 		if outcome != MigrateOutcomeRolledBack {
 			t.Fatalf("outcome = %q, want rolled_back", outcome)
+		}
+		if c.ExpectDimension != "" && rollback.Dimension != c.ExpectDimension {
+			t.Fatalf("rollback dimension = %q, want %q", rollback.Dimension, c.ExpectDimension)
 		}
 		assertMigrateRolledBack(t, s, root, sid, genID, rollback)
 		if c.Heal {
@@ -1014,6 +1092,38 @@ func assertMigrateProfile(t *testing.T, s *Store, _ string, sid schema.SessionID
 		}
 		if stats.SeedJSON == nil || *stats.SeedJSON != string(seed) {
 			t.Fatalf("converted seed_json changed; a derived update must never clobber the harness seed")
+		}
+	case "parent-only-metadata":
+		wantParent := v2.Generation.Metadata.ParentUUID
+		if wantParent == nil {
+			t.Fatalf("seed metadata carries no parent; the profile must name one")
+		}
+		var storedParent *string
+		if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(sid)},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				if stmt.ColumnType(0) != sqlite.TypeNull {
+					value := stmt.ColumnText(0)
+					storedParent = &value
+				}
+				return nil
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		storedValue := "<null>"
+		if storedParent != nil {
+			storedValue = *storedParent
+		}
+		if storedParent == nil || *storedParent != string(*wantParent) {
+			t.Fatalf("converted sessions.parent_id = %s, want %s", storedValue, string(*wantParent))
+		}
+		snapshot, err := harmonizedReadSnapshotOnConn(conn, sid, genID)
+		if err != nil {
+			t.Fatalf("read converted snapshot: %v", err)
+		}
+		if snapshot.Metadata.ParentUUID == nil || *snapshot.Metadata.ParentUUID != *wantParent {
+			t.Fatalf("converted snapshot parent = %v, want %s", snapshot.Metadata.ParentUUID, string(*wantParent))
 		}
 	case "rich-metadata":
 		var stored string

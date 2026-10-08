@@ -94,12 +94,12 @@ VALUES(?, ?, 11, 'opencode', 'snap-model', 'v', 1720000000000, 1720000009000, 'j
 	// makes the target the snapshot's logical parent, plus an anchored
 	// context edge covering the structured anchor assembly.
 	parentID := "0a999aaa-36bc-424c-a789-8be54d9702e9"
-	exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence,
+	exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence,
 anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
-VALUES(?, ?, 'started_by', 'target_known', ?, 'native_typed', NULL, NULL, NULL)`, id, gen, parentID)
-	exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence,
+VALUES(?, ?, 0, 'started_by', 'target_known', ?, 'native_typed', NULL, NULL, NULL)`, id, gen, parentID)
+	exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence,
 anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
-VALUES(?, ?, 'context_from', 'target_known', ?, 'native_typed', 'before_redacted_entry', 'snap-test:0', 'rev-1')`, id, gen, parentID)
+VALUES(?, ?, 1, 'context_from', 'target_known', ?, 'native_typed', 'before_redacted_entry', 'snap-test:0', 'rev-1')`, id, gen, parentID)
 	texts := []struct {
 		role schema.Role
 		text string

@@ -10,7 +10,11 @@ requiredNames:
   - evidence-full-anchor
   - evidence-null-anchor
   - evidence-kind-only-anchor
+  - evidence-order-first
+  - evidence-order-second
   - segment-two-refs
   - segment-no-refs
+  - segment-scalar-refs
   - section-mixed-metadata
   - section-null-metadata
+  - section-json-null-metadata

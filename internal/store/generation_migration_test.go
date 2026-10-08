@@ -135,7 +135,7 @@ func TestMigrationV60ManagedGenerationCatalog(t *testing.T) {
 	_ = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET input_submission_count = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{sid}})
 
 	for _, state := range schema.AllRelationshipTargetStates {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state) VALUES (?, 'gen-check', 'started_by', ?)`, &sqlitex.ExecOptions{Args: []any{sid, string(state)}}); err != nil {
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence (session_id, generation_id, ordinal, kind, target_state) VALUES (?, 'gen-check', 0, 'started_by', ?)`, &sqlitex.ExecOptions{Args: []any{sid, string(state)}}); err != nil {
 			t.Errorf("relationship target state %q was rejected: %v", state, err)
 		}
 		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_relationship_evidence WHERE generation_id='gen-check'`, nil); err != nil {
@@ -146,7 +146,7 @@ func TestMigrationV60ManagedGenerationCatalog(t *testing.T) {
 		if _, valid := schemaSet[state]; valid {
 			t.Fatalf("fixture target-state reject %q is actually schema-owned", state)
 		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state) VALUES (?, 'gen-check', 'started_by', ?)`, &sqlitex.ExecOptions{Args: []any{sid, state}}); err == nil {
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence (session_id, generation_id, ordinal, kind, target_state) VALUES (?, 'gen-check', 0, 'started_by', ?)`, &sqlitex.ExecOptions{Args: []any{sid, state}}); err == nil {
 			t.Errorf("relationship target state %q was accepted; the CHECK must admit exactly the schema set", state)
 		}
 	}

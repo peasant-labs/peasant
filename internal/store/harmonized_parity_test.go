@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -78,7 +79,7 @@ func TestSerializeEntryParity(t *testing.T) {
 	})
 	t.Run("nil-preservation", func(t *testing.T) {
 		entry := schema.SessionEntry{
-			SessionID: sid, EntryIndex: 1, Harness: schema.Harness("opencode"),
+			SessionID: sid, EntryIndex: 1, Harness: defaults.HarnessOpenCode,
 			EntryType: schema.EntryType("text"), Role: schema.Role("user"),
 		}
 		record, err := entryRecordFromEntry(entry)

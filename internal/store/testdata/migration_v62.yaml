@@ -166,6 +166,30 @@ evidenceRows:
     expectedAnchorKind: root
     expectedAnchorEntryRef: null
     expectedAnchorRevisionRef: null
+  - name: evidence-order-first
+    sessionId: s-v62-ordered
+    generationId: gen-active
+    kind: started_by
+    targetState: target_known
+    targetLocalId: parent-1
+    evidence: explicit
+    anchor: null
+    expectedAnchorKind: null
+    expectedAnchorEntryRef: null
+    expectedAnchorRevisionRef: null
+    expectedOrdinal: 0
+  - name: evidence-order-second
+    sessionId: s-v62-ordered
+    generationId: gen-active
+    kind: context_from
+    targetState: target_known
+    targetLocalId: parent-1
+    evidence: explicit
+    anchor: null
+    expectedAnchorKind: null
+    expectedAnchorEntryRef: null
+    expectedAnchorRevisionRef: null
+    expectedOrdinal: 1
 # Context segments with their captured refs; expectedRefs lists the child
 # rows (ordinal, ref) the shred must produce.
 segmentCases:
@@ -198,6 +222,20 @@ segmentCases:
     decodedByteEndExclusive: null
     inclusion: inherited
     capturedRefsJson: '[]'
+    expectedRefs: []
+  - name: segment-scalar-refs
+    sessionId: s-v62-scalar
+    generationId: gen-active
+    segmentOrdinal: 0
+    logicalSessionId: null
+    physicalSourceId: phys-1
+    coordinateKind: entries
+    startCoordinate: 0
+    endExclusive: 4
+    decodedByteStart: 0
+    decodedByteEndExclusive: 128
+    inclusion: retained
+    capturedRefsJson: 'null'
     expectedRefs: []
 # Projection sections with native metadata. The full record carries an
 # attachment, a custom type, and an object payload with escapable bytes;
@@ -237,4 +275,11 @@ sectionCases:
     partitionId: 0
     earlierState: retained
     nativeMetadata: null
+    expectedRecords: []
+  - name: section-json-null-metadata
+    sessionId: s-v62-scalar
+    generationId: gen-active
+    partitionId: 0
+    earlierState: null
+    nativeMetadata: 'null'
     expectedRecords: []

@@ -792,7 +792,7 @@ func loadGenerationChildrenOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	}); err != nil {
 		return fmt.Errorf("store: read generation title refs for session %s: %w", sessionID, err)
 	}
-	if err := query(`SELECT kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY kind`, func(stmt *sqlite.Stmt) error {
+	if err := query(`SELECT kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
 		relationship := GenerationRelationship{
 			Kind:        schema.SessionRelationshipKind(stmt.ColumnText(0)),
 			TargetState: schema.RelationshipTargetState(stmt.ColumnText(1)),
@@ -1139,9 +1139,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 			return fmt.Errorf("store: install segment ref %d of segment %d for generation %s of session %s: %w; no generation was activated", ref.Ordinal, ref.SegmentOrdinal, generationID, sessionID, err)
 		}
 	}
-	for _, relationship := range children.Relationships {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generationID, string(relationship.Kind), string(relationship.TargetState),
+	for i, relationship := range children.Relationships {
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+			string(sessionID), generationID, int64(i), string(relationship.Kind), string(relationship.TargetState),
 			optSessionID(relationship.TargetLocalID), optString(relationship.Evidence),
 			optAnchorKind(relationship.AnchorKind), optEntryRef(relationship.AnchorSourceEntryRef),
 			optString(relationship.AnchorSourceRevisionRef),
