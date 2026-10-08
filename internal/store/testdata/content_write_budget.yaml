@@ -1,18 +1,42 @@
-# content_write_budget — scaffolding for the harmonized session content model
+# content_write_budget — the harmonized session content model write-budget family
 # (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+#
+# The 8 cases this change owns carry typed expectations and run real assertions
+# in content_write_budget_test.go under their section-10 names; the gates assert
+# the invariants against the configured knobs, never the constants. The 4
+# writer-owned cases (staging-batch-commits-once, activation-batch-commits-once,
+# oversized-session-stages-alone, skip-commits-nothing) stay name placeholders
+# until the writer change fills them; the loader's manifest check still protects
+# their names, and a case with no typed fields runs as a placeholder.
+hostSlug: github.com-write-budget-fixture
+projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+transcript: '{"type":"user","message":{"role":"user","content":"write budget fixture"}}'
 cases:
   - name: splitter-single-home
+    minSites: 2
   - name: staging-batch-commits-once
   - name: activation-batch-commits-once
   - name: oversized-session-stages-alone
   - name: skip-commits-nothing
   - name: state-read-commits-nothing
+    action: read-index-state
+    sessions: 1
+    wantCommits: 0
   - name: commit-count-budget
+    action: refresh
+    sessions: 1
+    wantMaxCommits: 4
   - name: hold-under-busy-timeout
+    workers: [1, 8]
   - name: batch-under-configured-caps
+    batchBytes: 8388608
+    batchSessions: 64
+    stagedMemoryBytes: 50331648
+    workers: [8]
   - name: buffers-preallocated-partitioned
+    workers: [4]
   - name: staged-memory-under-cap
+    workers: [1, 2, 7, 8, 32]
   - name: flush-on-interval
+    flushIntervalsMs: [50, 3600000]
+    minSites: 2
