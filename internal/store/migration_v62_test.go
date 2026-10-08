@@ -2,14 +2,17 @@ package store
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,9 +62,71 @@ type v62AnnotationRow struct {
 	EndIndex     int    `yaml:"endIndex"`
 }
 
+type v62EvidenceRow struct {
+	Name                      string  `yaml:"name"`
+	SessionID                 string  `yaml:"sessionId"`
+	GenerationID              string  `yaml:"generationId"`
+	Kind                      string  `yaml:"kind"`
+	TargetState               string  `yaml:"targetState"`
+	TargetLocalID             *string `yaml:"targetLocalId"`
+	Evidence                  string  `yaml:"evidence"`
+	Anchor                    *string `yaml:"anchor"`
+	ExpectedAnchorKind        *string `yaml:"expectedAnchorKind"`
+	ExpectedAnchorEntryRef    *string `yaml:"expectedAnchorEntryRef"`
+	ExpectedAnchorRevisionRef *string `yaml:"expectedAnchorRevisionRef"`
+}
+
+type v62ExpectedRef struct {
+	Ordinal int    `yaml:"ordinal"`
+	Ref     string `yaml:"ref"`
+}
+
+type v62SegmentCase struct {
+	Name                    string           `yaml:"name"`
+	SessionID               string           `yaml:"sessionId"`
+	GenerationID            string           `yaml:"generationId"`
+	SegmentOrdinal          int              `yaml:"segmentOrdinal"`
+	LogicalSessionID        *string          `yaml:"logicalSessionId"`
+	PhysicalSourceID        string           `yaml:"physicalSourceId"`
+	CoordinateKind          string           `yaml:"coordinateKind"`
+	StartCoordinate         *int64           `yaml:"startCoordinate"`
+	EndExclusive            *int64           `yaml:"endExclusive"`
+	DecodedByteStart        *int64           `yaml:"decodedByteStart"`
+	DecodedByteEndExclusive *int64           `yaml:"decodedByteEndExclusive"`
+	Inclusion               string           `yaml:"inclusion"`
+	CapturedRefsJSON        string           `yaml:"capturedRefsJson"`
+	ExpectedRefs            []v62ExpectedRef `yaml:"expectedRefs"`
+}
+
+type v62ExpectedRecord struct {
+	Ordinal              int     `yaml:"ordinal"`
+	NativeID             string  `yaml:"nativeId"`
+	Kind                 string  `yaml:"kind"`
+	SourceEntryRef       string  `yaml:"sourceEntryRef"`
+	SourceType           string  `yaml:"sourceType"`
+	SourceMessageRole    *string `yaml:"sourceMessageRole"`
+	AttachmentTurnIndex  *int    `yaml:"attachmentTurnIndex"`
+	AttachmentToolCallID *string `yaml:"attachmentToolCallId"`
+	CustomType           *string `yaml:"customType"`
+	Data                 *string `yaml:"data"`
+}
+
+type v62SectionCase struct {
+	Name            string              `yaml:"name"`
+	SessionID       string              `yaml:"sessionId"`
+	GenerationID    string              `yaml:"generationId"`
+	PartitionID     int                 `yaml:"partitionId"`
+	EarlierState    *string             `yaml:"earlierState"`
+	NativeMetadata  *string             `yaml:"nativeMetadata"`
+	ExpectedRecords []v62ExpectedRecord `yaml:"expectedRecords"`
+}
+
 type v62Fixtures struct {
 	StatsCases     []v62StatsCase     `yaml:"statsCases"`
 	AnnotationRows []v62AnnotationRow `yaml:"annotationRows"`
+	EvidenceRows   []v62EvidenceRow   `yaml:"evidenceRows"`
+	SegmentCases   []v62SegmentCase   `yaml:"segmentCases"`
+	SectionCases   []v62SectionCase   `yaml:"sectionCases"`
 }
 
 func loadMigrationV62Fixtures(t *testing.T) v62Fixtures {
@@ -83,6 +148,15 @@ func loadMigrationV62Fixtures(t *testing.T) v62Fixtures {
 	for _, r := range fixtures.AnnotationRows {
 		actual = append(actual, r.Name)
 	}
+	for _, r := range fixtures.EvidenceRows {
+		actual = append(actual, r.Name)
+	}
+	for _, c := range fixtures.SegmentCases {
+		actual = append(actual, c.Name)
+	}
+	for _, c := range fixtures.SectionCases {
+		actual = append(actual, c.Name)
+	}
 	if err := validateRecoveryRequiredNames(manifest, actual, "v62 migration"); err != nil {
 		t.Fatal(err)
 	}
@@ -90,15 +164,14 @@ func loadMigrationV62Fixtures(t *testing.T) v62Fixtures {
 }
 
 // TestMigrationV62Backfills proves the v62 migration carries its backfills and
-// the annotation-target rebuild over a populated predecessor: stats rows and
-// seed documents from the active generation metadata, the sweep flag, and the
-// annotation targets carried over without their foreign key.
+// rebuilds over a populated predecessor: stats rows and seed documents from
+// the active generation metadata, the sweep flag, the annotation targets
+// without their foreign key, and the shredded generation-keyed tables.
 //
 // A V61 database is seeded from the typed fixture, then migrated to V62. The
 // migration must preserve every seeded row, extract the stats the live store
-// shape carries, and leave the JSON columns of the three generation-keyed
-// tables byte-identical: their reshape lands with the harmonized writer, not
-// with this migration or the conversion command.
+// shape carries, and shred the JSON columns so the structured rows reassemble
+// byte-identically through the schema package.
 func TestMigrationV62Backfills(t *testing.T) {
 	t.Parallel()
 	fixtures := loadMigrationV62Fixtures(t)
@@ -126,6 +199,9 @@ func TestMigrationV62Backfills(t *testing.T) {
 
 	assertV62StatsBackfill(t, conn, fixtures)
 	assertV62AnnotationRebuild(t, conn, fixtures)
+	assertV62EvidenceShred(t, conn, fixtures)
+	assertV62SegmentShred(t, conn, fixtures)
+	assertV62SectionShred(t, conn, fixtures)
 	assertV62SearchStore(t, conn)
 	assertV62Immutability(t, conn)
 
@@ -148,7 +224,7 @@ func TestMigrationV62Backfills(t *testing.T) {
 }
 
 // seedV62Predecessor populates a V61 database with the fixture sessions,
-// generations, and annotation targets. Foreign
+// generations, evidence, segments, sections, and annotation targets. Foreign
 // keys stay off during seeding: the annotation rows deliberately carry no
 // parents, and the migration itself runs with foreign keys off.
 func seedV62Predecessor(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures) {
@@ -185,6 +261,33 @@ VALUES('%s','%s','%s','%s','complete',2,%d,%s);`,
 				c.SessionID, g.ID, escapeV62Literal(t, g.MetadataJSON), digest, g.InstalledAtMs, activated))
 		}
 	}
+	for _, r := range fixtures.EvidenceRows {
+		declareSession(r.SessionID, nil)
+		execV62SQL(t, conn, fmt.Sprintf(`
+INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence, anchor)
+VALUES('%s','%s','%s','%s',%s,%s,%s);`,
+			r.SessionID, r.GenerationID, r.Kind, r.TargetState,
+			nullableV62Literal(r.TargetLocalID), quoteV62Literal(r.Evidence), nullableV62JSON(r.Anchor)))
+	}
+	for _, c := range fixtures.SegmentCases {
+		declareSession(c.SessionID, nil)
+		execV62SQL(t, conn, fmt.Sprintf(`
+INSERT INTO session_context_segments(session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion, captured_refs_json)
+VALUES('%s','%s',%d,%s,'%s','%s',%s,%s,%s,%s,'%s','%s');`,
+			c.SessionID, c.GenerationID, c.SegmentOrdinal,
+			nullableV62Literal(c.LogicalSessionID), c.PhysicalSourceID, c.CoordinateKind,
+			nullableV62Int(c.StartCoordinate), nullableV62Int(c.EndExclusive),
+			nullableV62Int(c.DecodedByteStart), nullableV62Int(c.DecodedByteEndExclusive),
+			c.Inclusion, escapeV62Literal(t, c.CapturedRefsJSON)))
+	}
+	for _, c := range fixtures.SectionCases {
+		declareSession(c.SessionID, nil)
+		execV62SQL(t, conn, fmt.Sprintf(`
+INSERT INTO session_projection_sections(session_id, generation_id, partition_id, earlier_state, native_metadata)
+VALUES('%s','%s',%d,%s,%s);`,
+			c.SessionID, c.GenerationID, c.PartitionID,
+			nullableV62Literal(c.EarlierState), nullableV62JSON(c.NativeMetadata)))
+	}
 	for _, r := range fixtures.AnnotationRows {
 		execV62SQL(t, conn, fmt.Sprintf(`
 INSERT INTO annotation_target_entries(annotation_id, session_id, entry_index, end_index)
@@ -198,6 +301,34 @@ func escapeV62Literal(t *testing.T, s string) string {
 		t.Fatalf("fixture literal carries a single quote; keep fixture JSON free of quotes that need escaping: %.40q", s)
 	}
 	return s
+}
+
+func quoteV62Literal(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func nullableV62Literal(s *string) string {
+	if s == nil {
+		return "NULL"
+	}
+	return quoteV62Literal(*s)
+}
+
+func nullableV62JSON(s *string) string {
+	if s == nil {
+		return "NULL"
+	}
+	if strings.Contains(*s, "'") {
+		return quoteV62Literal(*s)
+	}
+	return "'" + *s + "'"
+}
+
+func nullableV62Int(v *int64) string {
+	if v == nil {
+		return "NULL"
+	}
+	return fmt.Sprintf("%d", *v)
 }
 
 func execV62SQL(t *testing.T, conn *sqlite.Conn, script string) {
@@ -352,10 +483,252 @@ func assertV62AnnotationRebuild(t *testing.T, conn *sqlite.Conn, fixtures v62Fix
 	if sql := v62ObjectSQL(t, conn, "index", "idx_ann_target_entry"); !strings.Contains(sql, "annotation_target_entries") {
 		t.Errorf("idx_ann_target_entry missing or misplaced after rebuild: %s", sql)
 	}
+	views := 0
+	queryV62Row(t, conn, `SELECT COUNT(*) FROM annotations_with_target`, nil, func(stmt *sqlite.Stmt) {
+		views = int(stmt.ColumnInt64(0))
+	})
+	_ = views
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO annotation_target_entries(annotation_id, session_id, entry_index, end_index) VALUES('ann-v62-check','s-v62-full',5,5)`, nil); err == nil {
 		t.Errorf("rebuilt annotation_target_entries admits end_index <= entry_index; the CHECK must hold")
 	} else {
 		_ = sqlitex.ExecuteTransient(conn, `DELETE FROM annotation_target_entries WHERE annotation_id='ann-v62-check'`, nil)
+	}
+}
+
+func assertV62EvidenceShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures) {
+	t.Helper()
+	for _, r := range fixtures.EvidenceRows {
+		var kind, targetState, evidence string
+		var anchorKind, anchorEntryRef, anchorRevisionRef any
+		found := false
+		queryV62Row(t, conn, `SELECT kind, target_state, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref FROM session_relationship_evidence WHERE session_id=? AND generation_id=? AND kind=?`, []any{r.SessionID, r.GenerationID, r.Kind}, func(stmt *sqlite.Stmt) {
+			found = true
+			kind, targetState, evidence = stmt.ColumnText(0), stmt.ColumnText(1), stmt.ColumnText(2)
+			anchorKind = v62NullableText(stmt, 3)
+			anchorEntryRef = v62NullableText(stmt, 4)
+			anchorRevisionRef = v62NullableText(stmt, 5)
+		})
+		if !found {
+			t.Errorf("%s: evidence row missing after rebuild", r.Name)
+			continue
+		}
+		if kind != r.Kind || targetState != r.TargetState || evidence != r.Evidence {
+			t.Errorf("%s: preserved columns changed: (%s,%s,%s)", r.Name, kind, targetState, evidence)
+		}
+		checkNullable := func(label string, got any, want *string) {
+			t.Helper()
+			if want == nil {
+				if got != nil {
+					t.Errorf("%s: %s = %v, want NULL", r.Name, label, got)
+				}
+				return
+			}
+			if got != *want {
+				t.Errorf("%s: %s = %v, want %s", r.Name, label, got, *want)
+			}
+		}
+		checkNullable("anchor_kind", anchorKind, r.ExpectedAnchorKind)
+		checkNullable("anchor_source_entry_ref", anchorEntryRef, r.ExpectedAnchorEntryRef)
+		checkNullable("anchor_source_revision_ref", anchorRevisionRef, r.ExpectedAnchorRevisionRef)
+	}
+}
+
+func v62NullableText(stmt *sqlite.Stmt, col int) any {
+	if stmt.ColumnType(col) == sqlite.TypeNull {
+		return nil
+	}
+	return stmt.ColumnText(col)
+}
+
+func assertV62SegmentShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures) {
+	t.Helper()
+	for _, c := range fixtures.SegmentCases {
+		var cols [9]string
+		var nulls [9]bool
+		found := false
+		queryV62Row(t, conn, `SELECT logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id=? AND generation_id=? AND segment_ordinal=?`, []any{c.SessionID, c.GenerationID, c.SegmentOrdinal}, func(stmt *sqlite.Stmt) {
+			found = true
+			for i := 0; i < 8; i++ {
+				if stmt.ColumnType(i) == sqlite.TypeNull {
+					nulls[i] = true
+				} else {
+					cols[i] = stmt.ColumnText(i)
+				}
+			}
+		})
+		if !found {
+			t.Errorf("%s: segment row missing after rebuild", c.Name)
+			continue
+		}
+		if cols[1] != c.PhysicalSourceID || cols[2] != c.CoordinateKind || cols[7] != c.Inclusion {
+			t.Errorf("%s: preserved segment columns changed", c.Name)
+		}
+		refs := []v62ExpectedRef{}
+		queryV62Row(t, conn, `SELECT ordinal, source_entry_ref FROM session_context_segment_refs WHERE session_id=? AND generation_id=? AND segment_ordinal=? ORDER BY ordinal`, []any{c.SessionID, c.GenerationID, c.SegmentOrdinal}, func(stmt *sqlite.Stmt) {
+			refs = append(refs, v62ExpectedRef{Ordinal: int(stmt.ColumnInt64(0)), Ref: stmt.ColumnText(1)})
+		})
+		if !reflect.DeepEqual(refs, append([]v62ExpectedRef{}, c.ExpectedRefs...)) && len(refs)+len(c.ExpectedRefs) > 0 {
+			if len(refs) != len(c.ExpectedRefs) {
+				t.Errorf("%s: shredded %d refs, want %d", c.Name, len(refs), len(c.ExpectedRefs))
+			} else {
+				for i := range refs {
+					if refs[i] != c.ExpectedRefs[i] {
+						t.Errorf("%s: ref %d = %+v, want %+v", c.Name, i, refs[i], c.ExpectedRefs[i])
+					}
+				}
+			}
+		}
+	}
+}
+
+func assertV62SectionShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures) {
+	t.Helper()
+	for _, c := range fixtures.SectionCases {
+		found := false
+		queryV62Row(t, conn, `SELECT earlier_state FROM session_projection_sections WHERE session_id=? AND generation_id=? AND partition_id=?`, []any{c.SessionID, c.GenerationID, c.PartitionID}, func(stmt *sqlite.Stmt) {
+			found = true
+			if c.EarlierState == nil {
+				if stmt.ColumnType(0) != sqlite.TypeNull {
+					t.Errorf("%s: earlier_state = %q, want NULL", c.Name, stmt.ColumnText(0))
+				}
+			} else if stmt.ColumnText(0) != *c.EarlierState {
+				t.Errorf("%s: earlier_state = %q, want %q", c.Name, stmt.ColumnText(0), *c.EarlierState)
+			}
+		})
+		if !found {
+			t.Errorf("%s: section row missing after rebuild", c.Name)
+			continue
+		}
+		type storedRecord struct {
+			ordinal int
+			cols    [9]any
+		}
+		var stored []storedRecord
+		queryV62Row(t, conn, `SELECT ordinal, native_id, kind, source_entry_ref, source_type, source_message_role, attachment_turn_index, attachment_tool_call_id, custom_type, data FROM session_section_native_metadata WHERE session_id=? AND generation_id=? AND partition_id=? ORDER BY ordinal`, []any{c.SessionID, c.GenerationID, c.PartitionID}, func(stmt *sqlite.Stmt) {
+			rec := storedRecord{ordinal: int(stmt.ColumnInt64(0))}
+			for i := 1; i <= 9; i++ {
+				rec.cols[i-1] = v62NullableText(stmt, i)
+			}
+			stored = append(stored, rec)
+		})
+		if len(stored) != len(c.ExpectedRecords) {
+			t.Errorf("%s: shredded %d metadata records, want %d", c.Name, len(stored), len(c.ExpectedRecords))
+			continue
+		}
+		rebuilt := make([]schema.NativeMetadataRecord, 0, len(stored))
+		for i, want := range c.ExpectedRecords {
+			got := stored[i]
+			if got.ordinal != want.Ordinal {
+				t.Errorf("%s: record ordinal = %d, want %d", c.Name, got.ordinal, want.Ordinal)
+			}
+			str := func(label string, got any, wantVal string) string {
+				t.Helper()
+				s, ok := got.(string)
+				if !ok || s != wantVal {
+					t.Errorf("%s: record %d %s = %v, want %s", c.Name, want.Ordinal, label, got, wantVal)
+					return ""
+				}
+				return s
+			}
+			optStr := func(label string, got any, wantVal *string) *string {
+				t.Helper()
+				if wantVal == nil {
+					if got != nil {
+						t.Errorf("%s: record %d %s = %v, want NULL", c.Name, want.Ordinal, label, got)
+					}
+					return nil
+				}
+				s, ok := got.(string)
+				if !ok || s != *wantVal {
+					t.Errorf("%s: record %d %s = %v, want %s", c.Name, want.Ordinal, label, got, *wantVal)
+					return nil
+				}
+				out := s
+				return &out
+			}
+			optInt := func(label string, got any, wantVal *int) *int {
+				t.Helper()
+				if wantVal == nil {
+					if got != nil {
+						t.Errorf("%s: record %d %s = %v, want NULL", c.Name, want.Ordinal, label, got)
+					}
+					return nil
+				}
+				var n int
+				if _, err := fmt.Sscanf(got.(string), "%d", &n); err != nil || n != *wantVal {
+					t.Errorf("%s: record %d %s = %v, want %d", c.Name, want.Ordinal, label, got, *wantVal)
+					return nil
+				}
+				out := n
+				return &out
+			}
+			nativeID := str("native_id", got.cols[0], want.NativeID)
+			kind := str("kind", got.cols[1], want.Kind)
+			entryRef := str("source_entry_ref", got.cols[2], want.SourceEntryRef)
+			sourceType := str("source_type", got.cols[3], want.SourceType)
+			messageRole := optStr("source_message_role", got.cols[4], want.SourceMessageRole)
+			turnIndex := optInt("attachment_turn_index", got.cols[5], want.AttachmentTurnIndex)
+			toolCallID := optStr("attachment_tool_call_id", got.cols[6], want.AttachmentToolCallID)
+			customType := optStr("custom_type", got.cols[7], want.CustomType)
+			var data json.RawMessage
+			if want.Data == nil {
+				if got.cols[8] != nil {
+					t.Errorf("%s: record %d data = %v, want NULL", c.Name, want.Ordinal, got.cols[8])
+				}
+			} else {
+				s, ok := got.cols[8].(string)
+				if !ok || s != *want.Data {
+					t.Errorf("%s: record %d data = %.60v, want %.60s", c.Name, want.Ordinal, got.cols[8], *want.Data)
+				} else {
+					data = json.RawMessage(s)
+				}
+			}
+			rec := schema.NativeMetadataRecord{ID: nativeID, Kind: schema.NativeMetadataKind(kind)}
+			rec.Source.EntryRef = schema.SourceEntryRef(entryRef)
+			rec.Source.SourceType = schema.NativeMetadataSourceType(sourceType)
+			if messageRole != nil {
+				rec.Source.MessageRole = schema.NativePiMessageRole(*messageRole)
+			}
+			if turnIndex != nil || toolCallID != nil {
+				rec.Attachment = &schema.NativeAttachmentRef{ToolCallID: ""}
+				if turnIndex != nil {
+					rec.Attachment.TurnIndex = turnIndex
+				}
+				if toolCallID != nil {
+					rec.Attachment.ToolCallID = *toolCallID
+				}
+			}
+			if customType != nil {
+				rec.CustomType = *customType
+			}
+			rec.Data = data
+			rebuilt = append(rebuilt, rec)
+		}
+		if c.NativeMetadata == nil {
+			continue
+		}
+		// The shredded rows must reassemble to the original bytes: unmarshal
+		// the stored document and the rebuilt rows into the same struct type
+		// and require identical Go-marshaled bytes, so a future serializer
+		// restores the document exactly.
+		var original []schema.NativeMetadataRecord
+		if err := json.Unmarshal([]byte(*c.NativeMetadata), &original); err != nil {
+			t.Fatalf("%s: fixture nativeMetadata does not decode: %v", c.Name, err)
+		}
+		originalBytes, err := json.Marshal(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(originalBytes) != *c.NativeMetadata {
+			t.Fatalf("%s: fixture nativeMetadata is not in Go-marshal canonical form; the reassembly check needs canonical bytes", c.Name)
+		}
+		rebuiltBytes, err := json.Marshal(rebuilt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(rebuiltBytes) != *c.NativeMetadata {
+			t.Errorf("%s: reassembled metadata differs:\n got %.200s\nwant %.200s", c.Name, string(rebuiltBytes), *c.NativeMetadata)
+		}
 	}
 }
 
