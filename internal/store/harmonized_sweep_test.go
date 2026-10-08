@@ -41,7 +41,9 @@ func TestSweepSessionBatchBound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bounded sweep: %v", err)
 	}
-	if got.RowsDeleted != 7 || got.BodiesDeleted != 3 || got.BlobsDeleted != 0 || got.DirectoriesRemoved != 0 {
+	wrongRowDeletes := got.RowsDeleted != 7 || got.BodiesDeleted != 3
+	unexpectedOtherDeletes := got.BlobsDeleted != 0 || got.DirectoriesRemoved != 0
+	if wrongRowDeletes || unexpectedOtherDeletes {
 		t.Fatalf("bounded sweep = %+v, want 7 rows, 3 bodies, no blobs or dirs", got)
 	}
 	if got.Rebuilt {
@@ -261,17 +263,17 @@ func TestSweepCorruptBodyRebuildsIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `DROP TRIGGER session_entry_bodies_immutable`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `DROP TRIGGER session_entry_bodies_immutable`, nil); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("drop immutability trigger: %v", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_entry_bodies SET content_preview = content_preview || 'corrupted' WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `UPDATE session_entry_bodies SET content_preview = content_preview || 'corrupted' WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid), corruptDigest},
 	}); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("corrupt a body column: %v", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `CREATE TRIGGER session_entry_bodies_immutable BEFORE UPDATE ON session_entry_bodies BEGIN SELECT RAISE(ABORT, 'session_entry_bodies rows are immutable; insert a new entry instead'); END`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `CREATE TRIGGER session_entry_bodies_immutable BEFORE UPDATE ON session_entry_bodies BEGIN SELECT RAISE(ABORT, 'session_entry_bodies rows are immutable; insert a new entry instead'); END`, nil); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("recreate immutability trigger: %v", err)
 	}
@@ -324,7 +326,9 @@ func runSweepMidSweepBatch(t *testing.T) {
 		}
 		return nil
 	}
-	defer func() { contentSweepSeam = nil }()
+	defer func() {
+		contentSweepSeam = nil
+	}()
 	_, interrupted := s.SweepSession(ctx, sid)
 	if interrupted == nil {
 		t.Fatal("sweep across the mid-batch seam succeeded; the crash must interrupt it")
@@ -381,7 +385,7 @@ func gcGenerationRows(t *testing.T, s *Store, sid schema.SessionID, generationID
 // retry re-stages and commits cleanly. Lock-free staging and the locked
 // sweep serialize only through the commit's foreign keys, which fail
 // closed.
-func TestContentConcurrencySweepVsStage(t *testing.T) {
+func runConcurrencySweepVsStage(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx := context.Background()
 	sid := gcSession(t, s, "d9d9d9d9-d9d9-49d9-89d9-d9d9d9d9d9d9")
@@ -441,7 +445,7 @@ func TestContentConcurrencySweepVsStage(t *testing.T) {
 // contract (content_concurrency harvest-vs-reclaim): an activation racing a
 // reclaim pass serializes on the per-session lock, so every order ends with
 // the committed generation, zero orphans, and a clear flag.
-func TestContentConcurrencyHarvestVsReclaim(t *testing.T) {
+func runConcurrencyHarvestVsReclaim(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx := context.Background()
 	sid := gcSession(t, s, "e0e0e0e0-e0e0-40e0-80e0-e0e0e0e0e0e0")
@@ -494,7 +498,7 @@ func TestContentConcurrencyHarvestVsReclaim(t *testing.T) {
 // writers share: while the migration holds the session (here the test
 // itself, the way migrate Phase 2 does), an activation waits past its
 // context instead of interleaving, and succeeds once the holder releases.
-func TestContentConcurrencyHarvestVsMigrate(t *testing.T) {
+func runConcurrencyHarvestVsMigrate(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := gcSession(t, s, "f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1")
 	release, err := s.sessionLocker.LockExclusive(context.Background(), sid)
@@ -516,6 +520,21 @@ func TestContentConcurrencyHarvestVsMigrate(t *testing.T) {
 	}
 	if err := release(); err != nil {
 		t.Fatal(err)
+	}
+	// The real migration entry must take the same exclusive lock before it
+	// decides whether conversion is needed.
+	release, err = s.sessionLocker.LockExclusive(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer migrateCancel()
+	_, migrateErr := s.MigrateSession(migrateCtx, sid)
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	if migrateErr == nil || !strings.Contains(migrateErr.Error(), "lock session") {
+		t.Fatalf("migration bypassed held lock: %v", migrateErr)
 	}
 	if err := activateTestGeneration(t, s, v2, blobs); err != nil {
 		t.Fatalf("activation after the migration released: %v", err)

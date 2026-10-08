@@ -17,8 +17,12 @@ import (
 // openSnapshotStore opens a golden-copy store with managed-generation
 // support: the file locker plus an owned-root artifact store. Harmonized
 // reads never touch the artifact files; the probe only needs them present.
-func openSnapshotStore(t *testing.T) *store.Store {
+func openSnapshotStore(t *testing.T, poolSizes ...int) *store.Store {
 	t.Helper()
+	poolSize := 2
+	if len(poolSizes) != 0 {
+		poolSize = poolSizes[0]
+	}
 	root := t.TempDir()
 	locker, err := store.NewFileSessionLocker(root)
 	if err != nil {
@@ -32,13 +36,15 @@ func openSnapshotStore(t *testing.T) *store.Store {
 	storetest.CopyGoldenTo(t, path)
 	db, err := store.Open(path,
 		store.WithSkipMigrations(),
-		store.WithPoolSize(2),
+		store.WithPoolSize(poolSize),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 	return db
 }
 
@@ -243,7 +249,9 @@ func TestHarmonizedSnapshotLockFree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 	ctx := context.Background()
 	id := schema.SessionID("03999aaa-36bc-424c-a789-8be54d9702bc")
 	seedHarmonizedSnapshot(t, db, string(id), "gen-snap-lockfree")

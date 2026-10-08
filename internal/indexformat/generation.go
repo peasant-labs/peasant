@@ -641,7 +641,9 @@ type V2 struct {
 }
 
 // IndexVersion reports the concrete format version.
-func (V2) IndexVersion() int { return 2 }
+func (V2) IndexVersion() int {
+	return 2
+}
 
 // Validate checks the wrapped generation.
 func (v V2) Validate() error {
@@ -672,7 +674,9 @@ func (l LegacySource) Validate() error {
 }
 
 // IsZero reports whether the value carries no legacy source.
-func (l LegacySource) IsZero() bool { return l.Harness == "" && l.Path == "" }
+func (l LegacySource) IsZero() bool {
+	return l.Harness == "" && l.Path == ""
+}
 
 // ReadSnapshot is the immutable in-memory read captured under one shared
 // session lock. Session carries the flat durable metadata/stats with empty
@@ -688,7 +692,11 @@ type ReadSnapshot struct {
 	Main         Partition
 	Earlier      []EarlierPartition
 	Content      []ContentRecord
-	LegacySource LegacySource
+	// FullContentVerified means every mapped entry (including ref-less
+	// evidence) was verified in the owning read transaction. Its entry fields
+	// are full captured bytes and need no late content resolution.
+	FullContentVerified bool
+	LegacySource        LegacySource
 }
 
 // Validate checks the snapshot's metadata/session equality and its generation
@@ -727,7 +735,9 @@ func (s ReadSnapshot) validateLegacy() error {
 	if s.LegacySource.IsZero() {
 		return fmt.Errorf("indexformat.ReadSnapshot.Validate: index version 1 carries no legacy source; the reader cannot locate the retained transcript; set the local harness and path")
 	}
-	if len(s.Main.Entries) > 0 || len(s.Main.NativeMetadata) > 0 || len(s.Earlier) > 0 || len(s.Content) > 0 {
+	hasMainContent := len(s.Main.Entries) > 0 || len(s.Main.NativeMetadata) > 0
+	hasOtherContent := len(s.Earlier) > 0 || len(s.Content) > 0
+	if hasMainContent || hasOtherContent {
 		return fmt.Errorf("indexformat.ReadSnapshot.Validate: index version 1 carries generation partitions; the same content would have two authorities; clear main, earlier and content for a legacy read")
 	}
 	if len(s.TitleRefs) > 0 {
@@ -911,12 +921,18 @@ func equalOptionalSessionID(left, right *schema.SessionID) bool {
 	return *left == *right
 }
 
-// SnapshotReader loads ONE immutable read snapshot for a session and keeps the
-// session's shared lock held for the entire callback, through hydration and
-// serialization. Implementations acquire the shared OS lock before the SQLite
-// read transaction and must not re-read the active pointer during hydration.
+// SnapshotReader loads ONE authoritative read snapshot. DB-backed content is
+// verified and materialized inside the read transaction; file-backed content
+// keeps the shared OS lock through the callback and hydration. Neither path
+// re-reads the active pointer during hydration.
 type SnapshotReader interface {
 	WithSessionSnapshot(context.Context, schema.SessionID, func(ReadSnapshot) error) error
+}
+
+// PreviewSnapshotReader explicitly selects non-authoritative reads. Implementers
+// keep preview verification separate from full detail, export and publication.
+type PreviewSnapshotReader interface {
+	WithSessionPreviewSnapshot(context.Context, schema.SessionID, func(ReadSnapshot) error) error
 }
 
 // ContentResolver reads one immutable managed content blob addressed by the

@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -17,10 +20,8 @@ import (
 // in generation_snapshot.go stays untouched for Release N; the dispatch key
 // is the active generation row's location.
 //
-// Digest verification happens on full reads through the content records: each
-// emitted ref carries the mapped body's stored digest, and the resolver
-// recomputes it from the row before serving bytes. Preview builders never
-// hydrate, so they never verify.
+// Authoritative reads verify every mapped body in that read transaction, before
+// releasing the connection. Preview and migration-shadow reads do not verify.
 
 // harmonizedActiveOnConn reports whether the session's active generation row
 // lives in the harmonized catalog. A session with no active generation is
@@ -31,7 +32,7 @@ import (
 func harmonizedActiveOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (active string, harmonized bool, err error) {
 	var activeID *string
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -48,7 +49,7 @@ func harmonizedActiveOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (acti
 		return "", false, nil
 	}
 	located := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), *activeID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			located = true
@@ -64,9 +65,14 @@ func harmonizedActiveOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (acti
 // session: the generation's flattened columns plus its ordered children,
 // main and earlier partitions from the mapping and body rows, the captured
 // stats row as the wire stats, and one content record per emitted ref. The
-// records carry the stored body digest (not a file path): the resolver
-// serves the entry's own field bytes after re-verifying that digest.
+// records carry the stored body digest (not a file path). This entry point is
+// the unverified migration-shadow read; production full reads select verified
+// mode through the dispatched builder.
 func harmonizedReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (indexformat.ReadSnapshot, error) {
+	return harmonizedReadSnapshotModeOnConn(conn, sessionID, generationID, false)
+}
+
+func harmonizedReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, authoritative bool) (indexformat.ReadSnapshot, error) {
 	fail := func(err error) (indexformat.ReadSnapshot, error) {
 		return indexformat.ReadSnapshot{}, fmt.Errorf("store: read harmonized generation %s for session %s: %w; the snapshot cannot be built", generationID, sessionID, err)
 	}
@@ -82,20 +88,26 @@ func harmonizedReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	if err != nil {
 		return fail(err)
 	}
-	partitions, content, err := harmonizedPartitionsOnConn(conn, sessionID, generationID)
+	// A preview-only generation cannot serve a full transcript. Leave its
+	// fields unverified so the detail boundary can select the explicit preview
+	// exit on incompleteness instead of mistaking preview damage for full-read
+	// authority. Complete generations verify before any callback can run.
+	authoritative = authoritative && completeness == indexformat.GenerationCompletenessComplete
+	partitions, content, err := harmonizedPartitionsModeOnConn(conn, sessionID, generationID, authoritative)
 	if err != nil {
 		return fail(err)
 	}
 	return indexformat.ReadSnapshot{
-		Session:      session,
-		Metadata:     metadata,
-		TitleRefs:    titleRefs,
-		GenerationID: generationID,
-		Completeness: completeness,
-		IndexVersion: 2,
-		Main:         partitions.main,
-		Earlier:      partitions.earlier,
-		Content:      content,
+		Session:             session,
+		Metadata:            metadata,
+		TitleRefs:           titleRefs,
+		GenerationID:        generationID,
+		Completeness:        completeness,
+		IndexVersion:        2,
+		Main:                partitions.main,
+		Earlier:             partitions.earlier,
+		Content:             content,
+		FullContentVerified: authoritative,
 	}, nil
 }
 
@@ -106,7 +118,7 @@ func harmonizedReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 func harmonizedMetadataOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (schema.UnifiedMetadata, schema.SessionDetailPayload, error) {
 	var metadata schema.UnifiedMetadata
 	var session schema.SessionDetailPayload
-	err := sqlitex.ExecuteTransient(conn, `SELECT
+	err := sqlitex.Execute(conn, `SELECT
     g.schema_version, g.harness, g.model, g.version,
     g.ts_start, g.ts_end, g.ts_ingested,
     g.source_file_path, g.source_format,
@@ -305,7 +317,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.
 		}},
 	}
 	for _, query := range queries {
-		if err := sqlitex.ExecuteTransient(conn, query.sql, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, query.sql, &sqlitex.ExecOptions{
 			Args:       []any{string(sessionID), generationID},
 			ResultFunc: query.fn,
 		}); err != nil {
@@ -326,7 +338,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.
 // values (possibly empty) for a present one.
 func harmonizedRelationshipsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SessionRelationship, error) {
 	var relationships []schema.SessionRelationship
-	err := sqlitex.ExecuteTransient(conn, `SELECT kind, target_state, target_local_id, evidence,
+	err := sqlitex.Execute(conn, `SELECT kind, target_state, target_local_id, evidence,
 anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref
 FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
@@ -363,7 +375,7 @@ FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? OR
 // harmonizedTitleRefsOnConn reads the ordered title refs for one generation.
 func harmonizedTitleRefsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SourceEntryRef, error) {
 	var refs []schema.SourceEntryRef
-	err := sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref FROM session_generation_title_refs
+	err := sqlitex.Execute(conn, `SELECT source_entry_ref FROM session_generation_title_refs
 WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -383,7 +395,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptio
 func harmonizedCompletenessOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (indexformat.GenerationCompleteness, error) {
 	raw := ""
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT completeness FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT completeness FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			raw = stmt.ColumnText(0)
@@ -406,13 +418,17 @@ func harmonizedCompletenessOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 // Each record carries its mapped body's stored digest so the resolver can
 // re-verify the row before serving a byte.
 func harmonizedPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (generationPartitions, []indexformat.ContentRecord, error) {
+	return harmonizedPartitionsModeOnConn(conn, sessionID, generationID, false)
+}
+
+func harmonizedPartitionsModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, authoritative bool) (generationPartitions, []indexformat.ContentRecord, error) {
 	partitions := generationPartitions{}
 	type section struct {
 		partitionID int
 		state       string
 	}
 	var sections []section
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections
+	if err := sqlitex.Execute(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections
 WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -423,7 +439,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.Exec
 		return partitions, nil, err
 	}
 	mappedByPartition := map[int][]harmonizedMappedEntry{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT
+	if err := sqlitex.Execute(conn, `SELECT
     m.partition_id,
     b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
     b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
@@ -436,16 +452,24 @@ WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.Exec
     b.prov_origin, b.prov_actor, b.prov_delivery, b.prov_ownership,
     b.prov_evidence, b.prov_input_modality, b.prov_submission_ref
 FROM session_generation_entries m
-JOIN session_entry_bodies b
+LEFT JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 WHERE m.session_id = ? AND m.generation_id = ?
 ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			partitionID := stmt.ColumnInt(0)
+			if stmt.ColumnType(1) == sqlite.TypeNull {
+				return fmt.Errorf("store: a mapped body for session %s generation %s partition %d is missing during snapshot read; no partial transcript was emitted; run harvest verify --content and re-index the session to repair", sessionID, generationID, partitionID)
+			}
 			row, err := scanBodyRow(stmt, 1)
 			if err != nil {
 				return err
+			}
+			if authoritative {
+				if err := verifySnapshotBody(row); err != nil {
+					return err
+				}
 			}
 			// A mapped body without a source ref is retained evidence the
 			// producer never addressed (a carrier row): it hydrates as an
@@ -494,6 +518,28 @@ ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
 		partitions.earlier = append(partitions.earlier, indexformat.EarlierPartition{State: state, Content: partition})
 	}
 	return partitions, content, nil
+}
+
+// serializeEntryChecked keeps corrupt structured content on the error path,
+// never on serializeEntry's writer-side panic path.
+func serializeEntryChecked(row EntryRecord) ([]byte, error) {
+	encoded, err := json.Marshal(entryFromRow(row))
+	if err != nil {
+		return nil, fmt.Errorf("store: serialize entry %d for session %s during full read: %w; no partial transcript was emitted; re-index the session to repair", row.EntryIndex, row.SessionID, err)
+	}
+	return encoded, nil
+}
+
+func verifySnapshotBody(row EntryRecord) error {
+	encoded, err := serializeEntryChecked(row)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(encoded)
+	if hex.EncodeToString(sum[:]) != row.BodyDigest {
+		return fmt.Errorf("store: entry at index %d for session %s fails digest verification during full snapshot read; stored columns do not match the captured digest; no partial transcript was emitted; run harvest verify --content and re-index the session to repair", row.EntryIndex, row.SessionID)
+	}
+	return nil
 }
 
 // harmonizedMappedEntry is one emitted entry with its stored body digest.
@@ -603,7 +649,7 @@ func scanProvenance(stmt *sqlite.Stmt, off int) *schema.ContentProvenance {
 // call ID reassembles instead of collapsing to absent.
 func harmonizedNativeMetadataOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, partitionID int) ([]schema.NativeMetadataRecord, error) {
 	var records []schema.NativeMetadataRecord
-	err := sqlitex.ExecuteTransient(conn, `SELECT native_id, kind, source_entry_ref, source_type, source_message_role,
+	err := sqlitex.Execute(conn, `SELECT native_id, kind, source_entry_ref, source_type, source_message_role,
     attachment_turn_index, attachment_tool_call_id, custom_type, data
 FROM session_section_native_metadata
 WHERE session_id = ? AND generation_id = ? AND partition_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
@@ -670,7 +716,7 @@ func readHarmonizedBodyOnConn(conn *sqlite.Conn, sessionID schema.SessionID, gen
 	// into this generation's hydration.
 	var row EntryRecord
 	found := false
-	err := sqlitex.ExecuteTransient(conn, `SELECT
+	err := sqlitex.Execute(conn, `SELECT
     b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
     b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
     b.has_tool_use, b.tool_kind, b.tool_names_csv,
@@ -717,8 +763,8 @@ func readHarmonizedContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 	if err != nil {
 		return nil, err
 	}
-	if digest := SerializeEntryDigest(row); digest != record.Digest {
-		return nil, fmt.Errorf("store: entry at index %d for session %s fails digest verification; stored bytes do not match the captured digest; no partial transcript was emitted; run harvest verify --content and re-index the session to repair", row.EntryIndex, sessionID)
+	if err := verifySnapshotBody(row); err != nil {
+		return nil, err
 	}
 	field := harmonizedContentField(entryFromRow(row))
 	if int64(len(field)) != record.ByteLength {

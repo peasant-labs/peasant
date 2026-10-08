@@ -16,8 +16,9 @@ import (
 // Compile-time guards: the production Store is the concrete SnapshotReader and
 // ContentResolver consumed by the transcript hydration and export layers.
 var (
-	_ indexformat.SnapshotReader  = (*Store)(nil)
-	_ indexformat.ContentResolver = (*Store)(nil)
+	_ indexformat.SnapshotReader        = (*Store)(nil)
+	_ indexformat.ContentResolver       = (*Store)(nil)
+	_ indexformat.PreviewSnapshotReader = (*Store)(nil)
 )
 
 // GenerationSnapshotsSupported reports whether this store was opened with the
@@ -31,9 +32,9 @@ func (s *Store) GenerationSnapshotsSupported() bool {
 // WithSessionSnapshot loads ONE immutable read snapshot for a session.
 //
 // A harmonized session reads from one SQLite read transaction with no
-// session lock: its bodies are immutable and content-addressed, and the
-// sweep can never delete a referenced row, so a concurrent writer cannot
-// disturb the read. A file-backed or legacy session keeps the shared
+// session lock: every body is loaded and verified inside that transaction,
+// including ref-less evidence, so later activation and sweep cannot disturb
+// hydration. A file-backed or legacy session keeps the shared
 // per-session OS lock from before the SQLite read transaction through the
 // callback, because its blobs live on disk and cleanup could retire them.
 //
@@ -48,6 +49,16 @@ func (s *Store) GenerationSnapshotsSupported() bool {
 // LegacySource names the retained transcript; the caller uses the unchanged
 // legacy callback and never falls back to mutable native data for a V2 read.
 func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) (retErr error) {
+	return s.withSessionSnapshot(ctx, sessionID, true, fn)
+}
+
+// WithSessionPreviewSnapshot reads display fields without digest verification.
+// Only preview consumers opt in; authoritative reads use WithSessionSnapshot.
+func (s *Store) WithSessionPreviewSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) error {
+	return s.withSessionSnapshot(ctx, sessionID, false, fn)
+}
+
+func (s *Store) withSessionSnapshot(ctx context.Context, sessionID schema.SessionID, authoritative bool, fn func(indexformat.ReadSnapshot) error) (retErr error) {
 	if s.sessionLocker == nil {
 		return fmt.Errorf("store: managed generation support is not configured; a coherent session snapshot cannot be taken; open the store with WithGenerationArtifacts")
 	}
@@ -69,7 +80,7 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	}
 
 	endSnapshot := sqlitex.Save(conn)
-	snapshot, readErr := buildReadSnapshotOnConn(conn, sessionID)
+	snapshot, readErr := buildReadSnapshotModeOnConn(conn, sessionID, authoritative)
 	endSnapshot(&readErr)
 	// The snapshot is fully materialized in memory; return the pool connection
 	// before invoking the callback while retaining the shared OS lock.
@@ -96,7 +107,9 @@ func (s *Store) ReadFullContent(ctx context.Context, sessionID schema.SessionID,
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection for managed content %s: %w", sessionID, err)
@@ -132,6 +145,10 @@ func isHarmonizedSession(ctx context.Context, s *Store, sessionID schema.Session
 }
 
 func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (indexformat.ReadSnapshot, error) {
+	return buildReadSnapshotModeOnConn(conn, sessionID, true)
+}
+
+func buildReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, authoritative bool) (indexformat.ReadSnapshot, error) {
 	row, err := readSnapshotSessionRowOnConn(conn, sessionID)
 	if err != nil {
 		return indexformat.ReadSnapshot{}, err
@@ -149,7 +166,7 @@ func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (ind
 	// transaction as every row below, so the snapshot cannot straddle a
 	// conversion.
 	harmonized := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), *active},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			harmonized = true
@@ -159,7 +176,7 @@ func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (ind
 		return indexformat.ReadSnapshot{}, fmt.Errorf("store: locate active generation %s for session %s: %w; no snapshot was built", *active, sessionID, err)
 	}
 	if harmonized {
-		return harmonizedReadSnapshotOnConn(conn, sessionID, *active)
+		return harmonizedReadSnapshotModeOnConn(conn, sessionID, *active, authoritative)
 	}
 	return generationReadSnapshotOnConn(conn, sessionID, *active, row)
 }
@@ -180,7 +197,7 @@ type snapshotSessionRow struct {
 func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (snapshotSessionRow, error) {
 	row := snapshotSessionRow{sessionID: sessionID}
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT s.model_harness, s.parent_id, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
+	if err := sqlitex.Execute(conn, `SELECT s.model_harness, s.parent_id, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
  COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
  COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
   FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
@@ -266,7 +283,7 @@ func generationReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	var completeness string
 	var titleRefsJSON string
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT metadata_json, title_refs_json, completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT metadata_json, title_refs_json, completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -357,7 +374,7 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 		partitionID int
 		state       string
 	}{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sections = append(sections, struct {
@@ -398,7 +415,7 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 
 func readGenerationEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (map[int][]schema.SessionEntry, error) {
 	entries := map[int][]schema.SessionEntry{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			partitionID := stmt.ColumnInt(0)
@@ -417,7 +434,7 @@ func readGenerationEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 
 func readGenerationContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]indexformat.ContentRecord, error) {
 	var records []indexformat.ContentRecord
-	if err := sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref, relative_blob, byte_length, integrity_digest FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT source_entry_ref, relative_blob, byte_length, integrity_digest FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ref, err := schema.NewSourceEntryRef(stmt.ColumnText(0))

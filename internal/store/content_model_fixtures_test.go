@@ -110,18 +110,20 @@ var contentCorruptionYAML []byte
 //go:embed testdata/content_corruption.manifest.yaml
 var contentCorruptionManifestYAML []byte
 
-// contentCorruptionCase is one content_corruption case: the section-10 name
-// plus, for the two search-owned cases, the typed expectations the search
-// runner asserts, and for the four repair-owned cases, the damage profile
-// the repair runner applies. Every other case stays a name placeholder its
-// owner fills later; the loader's manifest check still protects each name.
+// contentCorruptionCase binds each required name to its executable owner and
+// damage profile. Full-read cases refuse partial output, preview and routing
+// deliberately remain unverified, and verify owns non-emitted blob integrity.
 type contentCorruptionCase struct {
-	Name                    string `yaml:"name"`
-	Query                   string `yaml:"query,omitempty"`
-	WantFoundOnce           bool   `yaml:"wantFoundOnce,omitempty"`
-	WantStaleRawMatch       bool   `yaml:"wantStaleRawMatch,omitempty"`
-	WantRefusedWhileFlagged bool   `yaml:"wantRefusedWhileFlagged,omitempty"`
-	WantCleanAfterRebuild   bool   `yaml:"wantCleanAfterRebuild,omitempty"`
+	Name                    string   `yaml:"name"`
+	Owner                   string   `yaml:"owner"`
+	Surfaces                []string `yaml:"surfaces,omitempty"`
+	Expect                  string   `yaml:"expect,omitempty"`
+	Why                     string   `yaml:"why,omitempty"`
+	Query                   string   `yaml:"query,omitempty"`
+	WantFoundOnce           bool     `yaml:"wantFoundOnce,omitempty"`
+	WantStaleRawMatch       bool     `yaml:"wantStaleRawMatch,omitempty"`
+	WantRefusedWhileFlagged bool     `yaml:"wantRefusedWhileFlagged,omitempty"`
+	WantCleanAfterRebuild   bool     `yaml:"wantCleanAfterRebuild,omitempty"`
 	// Damage names the corruption the repair runner applies before
 	// verification: body-column, blob-bytes, descriptor-digest.
 	Damage string `yaml:"damage,omitempty"`
@@ -174,25 +176,6 @@ func loadContentCorruptionFixture(t *testing.T) []string {
 // compiles, the manifest loads, and every required name is present.
 func TestContentCorruptionFixtureManifest(t *testing.T) {
 	loadContentCorruptionFixture(t)
-}
-
-//go:embed testdata/content_concurrency.yaml
-var contentConcurrencyYAML []byte
-
-//go:embed testdata/content_concurrency.manifest.yaml
-var contentConcurrencyManifestYAML []byte
-
-// loadContentConcurrencyFixture loads the content concurrency scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentConcurrencyFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content concurrency", contentConcurrencyYAML, contentConcurrencyManifestYAML)
-}
-
-// TestContentConcurrencyFixtureManifest pins the content concurrency case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentConcurrencyFixtureManifest(t *testing.T) {
-	loadContentConcurrencyFixture(t)
 }
 
 // The content garbage collection family graduated to a typed loader with
