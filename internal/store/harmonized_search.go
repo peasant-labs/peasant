@@ -151,10 +151,10 @@ func (s *Store) EnsureSearchIndexHealthy(ctx context.Context) (bool, error) {
 // inline; RebuildSearchIndex wraps it in its own transaction. This is the
 // one home for the rebuild statements.
 func rebuildSearchIndexOnConn(conn *sqlite.Conn) error {
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); err != nil {
 		return fmt.Errorf("store: rebuild the search index over the union view: %w; the index is unchanged and search still refuses; free disk space and retry", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); err != nil {
 		return fmt.Errorf("store: clear the search rebuild flag after the rebuild: %w; the index was rebuilt but search still refuses; retry the flag clear", err)
 	}
 	return nil
