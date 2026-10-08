@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1427,9 +1429,12 @@ func repairNeedsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID) (bool,
 // activeObjectsNeedRepair reports whether the active generation's mapped
 // objects fail self-verification: a mapped body missing or recomputing a
 // different digest than its stored anchor, or a descriptor whose blob
-// header is missing or whose chunks do not cover its byte length. Healthy
-// objects verify exactly the way full reads verify them, so this gate and
-// the read path can never disagree about corruption.
+// bytes do not verify. Blob verification hashes the concatenated chunk
+// bytes in chunk order against the descriptor digest and checks the summed
+// chunk lengths against the header byte length — the same proof a full
+// read demands of blob bytes — so a flipped chunk byte, a byte-length
+// error inside one chunk count, or a torn chunk row all count as failing.
+// This gate and the read path can never disagree about corruption.
 func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, activeID string) (bool, error) {
 	var digests []string
 	if err := sqlitex.ExecuteTransient(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
@@ -1487,18 +1492,36 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 		if !header {
 			return true, nil
 		}
-		wantChunks := (byteLength + 65535) / 65536
-		var chunks int64
-		if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_content_chunks WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+		// Hash the stored bytes in chunk order: the schema keeps no
+		// per-chunk digest, so the concatenation hash against the blob
+		// digest is the byte proof, and the summed lengths against the
+		// header length is the truncation proof. Both run here because the
+		// gate only runs for repair-predicate sessions.
+		hasher := sha256.New()
+		var total, chunks int64
+		contiguous := true
+		if err := sqlitex.ExecuteTransient(conn, `SELECT chunk_index, data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				chunks = stmt.ColumnInt64(0)
+				if stmt.ColumnInt64(0) != chunks {
+					contiguous = false
+				}
+				n := stmt.ColumnLen(1)
+				data := make([]byte, n)
+				stmt.ColumnBytes(1, data)
+				hasher.Write(data)
+				total += int64(n)
+				chunks++
 				return nil
 			},
 		}); err != nil {
-			return false, fmt.Errorf("store: count active blob %s chunks for session %s: %w; the repair decision could not be made", digest, sessionID, err)
+			return false, fmt.Errorf("store: read active blob %s chunks for session %s: %w; the repair decision could not be made", digest, sessionID, err)
 		}
-		if chunks != wantChunks {
+		wantChunks := (byteLength + 65535) / 65536
+		if !contiguous || chunks != wantChunks || total != byteLength {
+			return true, nil
+		}
+		if hex.EncodeToString(hasher.Sum(nil)) != digest {
 			return true, nil
 		}
 	}
