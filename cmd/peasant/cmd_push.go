@@ -2243,7 +2243,7 @@ func storedSessionEntries(ctx context.Context, reader availableContentReader) pu
 		if err != nil {
 			return push.StoredContent{}, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
-		snapshot, err := reader.ReadSessionAvailable(ctx, id)
+		snapshot, err := readPublicationSnapshot(ctx, reader, id)
 		if err != nil {
 			return push.StoredContent{}, err
 		}

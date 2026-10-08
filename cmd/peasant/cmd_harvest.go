@@ -138,16 +138,18 @@ func buildHarvestCommand(filesystem ingest.FileSystem) *cobra.Command {
 	cmd.AddCommand(indexCmd)
 
 	// Subcommand: harvest verify — checks database schema integrity.
-	var verifyVerbose bool
+	var verifyVerbose, verifyContent, verifyRepair bool
 	verifyCmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Verify database schema integrity",
 		Long:  "Checks that the SQLite database has the expected schema (all tables and key columns).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVerify(cmd, verifyVerbose)
+			return runVerify(cmd, verifyVerbose, verifyContent, verifyRepair)
 		},
 	}
 	verifyCmd.Flags().BoolVar(&verifyVerbose, "verbose", false, "Show sample data from each table")
+	verifyCmd.Flags().BoolVar(&verifyContent, "content", false, "Verify session content objects and the search index (harmonized content model; not yet implemented)")
+	verifyCmd.Flags().BoolVar(&verifyRepair, "repair", false, "Repair content corruptions found by --content (requires --content; not yet implemented)")
 	cmd.AddCommand(verifyCmd)
 
 	return cmd
@@ -836,7 +838,13 @@ func printIndexProfileStage(w io.Writer, stage ingest.IndexProfileStage) {
 }
 
 // runVerify checks database schema integrity.
-func runVerify(cmd *cobra.Command, verbose bool) error {
+func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
+	if repair && !content {
+		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
+	}
+	if content {
+		return fmt.Errorf("harvest verify: --content is not implemented yet: content verification lands with the harmonized content model; nothing was checked and nothing changed; run `peasant harvest verify` without --content for the schema check")
+	}
 	ctx := cmd.Context()
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 

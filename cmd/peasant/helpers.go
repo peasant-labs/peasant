@@ -93,8 +93,7 @@ func openDB(cmd *cobra.Command) (*store.Store, func(), error) {
 		return nil, func() {}, fmt.Errorf("create data directory: %w", err)
 	}
 	db, err := store.Open(dbPath,
-		store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()),
-		store.WithIndexFormats(store.V2IndexFormat()))
+		append(contentIndexFormats(), store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))...)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open analytics store: %w", err)
 	}
