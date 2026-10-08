@@ -235,22 +235,6 @@ func serializedMetadataToUnified(gen GenerationRecord, children GenerationChildr
 	return metadata, nil
 }
 
-func columnIntOrNil(stmt *sqlite.Stmt, col int) *int {
-	if stmt.ColumnType(col) == sqlite.TypeNull {
-		return nil
-	}
-	out := int(stmt.ColumnInt64(col))
-	return &out
-}
-
-func columnInt64OrNil(stmt *sqlite.Stmt, col int) *int64 {
-	if stmt.ColumnType(col) == sqlite.TypeNull {
-		return nil
-	}
-	out := stmt.ColumnInt64(col)
-	return &out
-}
-
 // readSessionParentOnConn reads the durable parent target cache: the
 // started_by target when it names a stored session, else NULL.
 func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) *schema.SessionID {

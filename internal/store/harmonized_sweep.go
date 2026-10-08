@@ -376,12 +376,8 @@ func (s *Store) rebuildSearchIndexWhenFlagged(ctx context.Context, sessionID sch
 	txnErr := error(nil)
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); err != nil {
+	if err := rebuildSearchIndexOnConn(conn); err != nil {
 		txnErr = fmt.Errorf("store: rebuild the search index while sweeping session %s: %w; the health flag stays set and the sweep flag is unchanged", sessionID, err)
-		return false, txnErr
-	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); err != nil {
-		txnErr = fmt.Errorf("store: clear the search health while sweeping session %s: %w; the health flag stays set and the sweep flag is unchanged", sessionID, err)
 		return false, txnErr
 	}
 	return true, nil
