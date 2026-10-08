@@ -125,6 +125,15 @@ func seedFileBackedCmdGeneration(t *testing.T, conn *sqlite.Conn, ownedRoot stri
 	t.Helper()
 	filled := fillReclaimCmdCandidate(v2, blobs)
 	generation := filled.Generation
+	// The legacy writer always emits the subagent and warning collections,
+	// even when empty; the migration's shadow verify compares the rebuilt
+	// metadata document byte for byte against this seed.
+	if generation.Metadata.Subagents == nil {
+		generation.Metadata.Subagents = []schema.SubagentRef{}
+	}
+	if generation.Metadata.Diagnostics.Warnings == nil {
+		generation.Metadata.Diagnostics.Warnings = []schema.DiagnosticEntry{}
+	}
 	execReclaimCmdSQL(t, conn, `INSERT INTO session_projection_generations(session_id, generation_id, metadata_json, title_refs_json, input_submission_count, source_evidence_digest, completeness, index_format_version, installed_at_ms, activated_at_ms) VALUES (`+
 		quoteReclaimLiteral(string(sid))+`,`+quoteReclaimLiteral(generation.ID)+`,`+
 		quoteReclaimLiteral(mustMarshalReclaimJSON(t, generation.Metadata))+`,`+
