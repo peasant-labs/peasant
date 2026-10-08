@@ -21,9 +21,11 @@ var contentCrashSeamsYAML []byte
 var contentCrashSeamsManifestYAML []byte
 
 type contentCrashSeamCase struct {
-	Name       string `yaml:"name"`
-	Seam       string `yaml:"seam,omitempty"`
-	BatchBytes int64  `yaml:"batch_bytes,omitempty"`
+	Name                 string `yaml:"name"`
+	Seam                 string `yaml:"seam,omitempty"`
+	BatchBytes           int64  `yaml:"batch_bytes,omitempty"`
+	ExpectedSweepFlag    *bool  `yaml:"expected_sweep_flag,omitempty"`
+	ExpectedStagedBodies *int64 `yaml:"expected_staged_bodies,omitempty"`
 }
 
 type contentCrashSeamFixtures struct {
@@ -105,6 +107,9 @@ func TestContentCrashSeams(t *testing.T) {
 			if err := activateTestGeneration(t, s, g1, g1Blobs); err != nil {
 				t.Fatalf("activate G1: %v", err)
 			}
+			if _, err := s.SweepSession(context.Background(), sid); err != nil {
+				t.Fatalf("finish G1 sweep before interruption: %v", err)
+			}
 			before := readIndexStateForTest(t, s, sid)
 
 			installHarmonizedFault(t, tc.Seam)
@@ -114,7 +119,7 @@ func TestContentCrashSeams(t *testing.T) {
 			if interrupted == nil {
 				// The between-transactions seam only fires when staging
 				// splits: without a split there is nothing to interrupt.
-				if tc.Name == "between-stage-txns" || tc.Name == "after-sweep-flag" {
+				if tc.Name == "between-stage-txns" {
 					t.Fatalf("activation across seam %s succeeded; the tiny budget must split staging", tc.Seam)
 				}
 				t.Fatalf("activation across seam %s succeeded; a crash seam must interrupt it", tc.Seam)
@@ -133,8 +138,18 @@ func TestContentCrashSeams(t *testing.T) {
 					t.Fatalf("interrupted activation stamped index_version %d, want the prior %d", after.IndexerVersion, before.IndexerVersion)
 				}
 			}
-			if tc.BatchBytes > 0 && !readSweepFlag(t, s, sid) {
+			if tc.ExpectedSweepFlag != nil {
+				if got := readSweepFlag(t, s, sid); got != *tc.ExpectedSweepFlag {
+					t.Fatalf("after seam %s sweep flag = %v, want %v", tc.Seam, got, *tc.ExpectedSweepFlag)
+				}
+			} else if tc.BatchBytes > 0 && !readSweepFlag(t, s, sid) {
 				t.Fatalf("after seam %s the sweep flag is unset; the first staging transaction must set it", tc.Seam)
+			}
+			if tc.ExpectedStagedBodies != nil {
+				got := queryMigrateInt(t, s, `SELECT COUNT(*) FROM session_entry_bodies b WHERE b.session_id = '`+string(sid)+`' AND NOT EXISTS (SELECT 1 FROM session_generation_entries e WHERE e.session_id=b.session_id AND e.body_digest=b.body_digest)`)
+				if got != *tc.ExpectedStagedBodies {
+					t.Fatalf("after seam %s new staged bodies = %d, want %d", tc.Seam, got, *tc.ExpectedStagedBodies)
+				}
 			}
 
 			if tc.Name == "after-commit-before-sweep" {
@@ -148,6 +163,12 @@ func TestContentCrashSeams(t *testing.T) {
 				t.Fatalf("after recovery visible = %q, want G2", got)
 			}
 			assertHarmonizedContent(t, s, sid, "gen_crash_g2", g2, g2Blobs)
+			if _, err := s.SweepSession(context.Background(), sid); err != nil {
+				t.Fatalf("recover flagged sweep: %v", err)
+			}
+			if readSweepFlag(t, s, sid) {
+				t.Fatal("recovery sweep left its flag set")
+			}
 		})
 	}
 }

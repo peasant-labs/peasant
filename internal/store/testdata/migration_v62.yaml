@@ -237,6 +237,16 @@ segmentCases:
     inclusion: retained
     capturedRefsJson: 'null'
     expectedRefs: []
+  - name: segment-object-refs-accounted
+    sessionId: s-v62-object
+    generationId: gen-active
+    segmentOrdinal: 0
+    physicalSourceId: phys-1
+    coordinateKind: entries
+    inclusion: retained
+    capturedRefsJson: '{"ref":"e_u1"}'
+    expectedRefs: []
+    expectedGap: {observedJsonType: object, observedLength: 14}
 # Projection sections with native metadata. The full record carries an
 # attachment, a custom type, and an object payload with escapable bytes;
 # the minimal record omits the optional keys and carries a null payload.
@@ -283,3 +293,20 @@ sectionCases:
     earlierState: null
     nativeMetadata: 'null'
     expectedRecords: []
+  - name: section-object-metadata-accounted
+    sessionId: s-v62-object
+    generationId: gen-active
+    partitionId: 0
+    nativeMetadata: '{"future":true}'
+    expectedRecords: []
+    expectedGap: {observedJsonType: object, observedLength: 15}
+accountingConversionCases:
+  - name: accounted-gap-survives-conversion
+    sourceTable: session_context_segments
+    sourceColumn: captured_refs_json
+    gap: {observedJsonType: object, observedLength: 14}
+  - name: accounted-gap-loss-refuses-conversion
+    sourceTable: session_projection_sections
+    sourceColumn: native_metadata
+    gap: {observedJsonType: object, observedLength: 15}
+    removeBeforeVerify: true

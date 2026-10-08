@@ -831,6 +831,22 @@ END`
 // harmonized sessions, sweep every flagged session, and evaluate the five
 // Release N+1 preconditions.
 func (s *Store) migrateCleanup(ctx context.Context, result *MigrateResult) error {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return fmt.Errorf("store: take connection to summarize migration gaps: %w", err)
+	}
+	var gaps int64
+	err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_migration_gaps`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		gaps = stmt.ColumnInt64(0)
+		return nil
+	}})
+	s.pool.Put(conn)
+	if err != nil {
+		return fmt.Errorf("store: summarize migration gap accounting: %w", err)
+	}
+	if gaps > 0 {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("%d accounted migration gap(s) remain in session_migration_gaps; source values were not converted; re-harvest affected sessions from the retained transcript", gaps))
+	}
 	harmonized, err := s.migrateHarmonizedSessions(ctx)
 	if err != nil {
 		return err

@@ -1028,6 +1028,65 @@ func assertMigrateProfile(t *testing.T, s *Store, _ string, sid schema.SessionID
 	}
 	defer s.pool.Put(conn)
 	switch c.Profile {
+	case "two-earlier":
+		partitions, records, err := harmonizedPartitionsOnConn(conn, sid, genID)
+		if err != nil {
+			t.Fatalf("read earlier partitions after conversion: %v", err)
+		}
+		if len(partitions.earlier) != len(v2.Generation.Earlier) {
+			t.Fatalf("earlier partitions = %d, want %d", len(partitions.earlier), len(v2.Generation.Earlier))
+		}
+		for i, want := range v2.Generation.Earlier {
+			if partitions.earlier[i].State != want.State {
+				t.Fatalf("earlier partition %d state = %s, want %s", i+1, partitions.earlier[i].State, want.State)
+			}
+			for _, entry := range want.Content.Entries {
+				mapped := 0
+				if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generation_entries m JOIN session_entry_bodies b ON b.session_id=m.session_id AND b.body_digest=m.body_digest WHERE m.session_id=? AND m.generation_id=? AND m.partition_id=? AND m.entry_index=? AND m.source_entry_ref=? AND b.content_preview=?`, &sqlitex.ExecOptions{
+					Args:       []any{string(sid), genID, i + 1, entry.EntryIndex, string(entry.SourceEntryRef), *entry.ContentPreview},
+					ResultFunc: func(*sqlite.Stmt) error { mapped++; return nil },
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if mapped != 1 {
+					t.Fatalf("earlier partition %d ref %s has %d surviving mapping/body rows, want 1", i+1, entry.SourceEntryRef, mapped)
+				}
+				found := false
+				for _, record := range records {
+					if record.Ref != entry.SourceEntryRef {
+						continue
+					}
+					found = true
+					data, err := readHarmonizedContentOnConn(conn, sid, genID, record)
+					if err != nil || string(data) != *entry.ContentPreview {
+						t.Fatalf("earlier ref %s content changed: %v", record.Ref, err)
+					}
+				}
+				if !found {
+					t.Fatalf("earlier ref %s missing from converted content records", entry.SourceEntryRef)
+				}
+			}
+		}
+	case "empty-blob":
+		rows := 0
+		if err := sqlitex.ExecuteTransient(conn, `SELECT c.byte_length, c.digest FROM session_generation_content g JOIN session_content c ON c.session_id=g.session_id AND c.digest=g.digest WHERE g.session_id=? AND g.generation_id=? AND g.source_entry_ref='e_migrate_empty'`, &sqlitex.ExecOptions{
+			Args: []any{string(sid), genID},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				rows++
+				if stmt.ColumnInt64(0) != 0 {
+					t.Fatalf("empty blob byte_length = %d, want 0", stmt.ColumnInt64(0))
+				}
+				if sum := sha256.Sum256(nil); stmt.ColumnText(1) != hex.EncodeToString(sum[:]) {
+					t.Fatal("empty blob digest does not certify zero bytes")
+				}
+				return nil
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 1 {
+			t.Fatalf("empty blob has %d surviving mapping/content rows, want 1", rows)
+		}
 	case "extra-keys":
 		type promoted struct {
 			model                  *string

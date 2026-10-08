@@ -47,6 +47,11 @@ const (
 	// harmonizedSeamAfterPrepare fires after P1–P4 prepared the candidate
 	// and before any object is staged.
 	harmonizedSeamAfterPrepare = "after-prepare"
+	// harmonizedSeamAfterSweepFlag fires inside each staging
+	// transaction after flag writes and before any objects. An interruption
+	// rolls that transaction back, unlike a between-transaction interruption
+	// which leaves committed flags and partial objects behind.
+	harmonizedSeamAfterSweepFlag = "after-sweep-flag"
 	// harmonizedSeamBetweenStageTxns fires after each committed staging
 	// transaction except the last, so a budget-split stage can stop with
 	// the flag set and partial objects staged.
@@ -283,6 +288,10 @@ func (s *Store) stageBatchTxn(conn *sqlite.Conn, batch stageBatch) error {
 			txnErr = fmt.Errorf("store: set the sweep flag for session %s before staging: %w; nothing was staged", sessionID, err)
 			return txnErr
 		}
+	}
+	if err := reportHarmonizedWriterSeam(harmonizedSeamAfterSweepFlag); err != nil {
+		txnErr = err
+		return txnErr
 	}
 	for i := range batch.units {
 		entry := batch.units[i]

@@ -33,13 +33,17 @@ const BodyRowIDBase = 1 << 50
 //     array index is the ordinal). Only JSON arrays shred: the production
 //     writer stores the JSON scalar null for an absent document, and a
 //     scalar or object would otherwise yield a NULL or text ordinal, so the
-//     shred filters to json_type = 'array' and non-arrays produce zero rows.
+//     shred filters to json_type = 'array'. JSON null means absent; every
+//     other valid JSON type leaves an accounted gap in session_migration_gaps
+//     instead of silently losing children. Malformed JSON still errors.
 //   - session_projection_sections loses native_metadata to ordered
 //     session_section_native_metadata rows (json_each over the record array;
 //     scalar fields decode with json_extract, which the Go serializer
 //     re-encodes byte-identically; the opaque data payload keeps its exact
 //     bytes through the -> operator, so both raw embedding and re-marshal
 //     round-trip).
+//     As with captured refs, null means absent and other non-array types
+//     leave an accounted gap recoverable from the retained transcript.
 //   - annotation_target_entries is rebuilt without its session_entries
 //     foreign key; the insert-time existence check replaces the key.
 //
@@ -213,6 +217,25 @@ CREATE TABLE session_generation_associations (
   FOREIGN KEY (session_id, generation_id) REFERENCES session_generations(session_id, generation_id) ON DELETE CASCADE
 ) STRICT;
 
+-- Session ownership keeps accounting valid before catalog conversion and
+-- after old generations are retired. An INTEGER PRIMARY KEY allocates a new
+-- id from the table's maximum on every insert; later inserts use the same
+-- allocator, not generation diagnostic ordinals, so the namespaces cannot
+-- collide. Source coordinates name exactly which parent lost children.
+CREATE TABLE session_migration_gaps (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  generation_id TEXT NOT NULL,
+  source_table TEXT NOT NULL,
+  source_column TEXT NOT NULL,
+  source_ordinal INTEGER NOT NULL CHECK(source_ordinal >= 0),
+  observed_json_type TEXT NOT NULL,
+  observed_length INTEGER NOT NULL CHECK(observed_length >= 0),
+  message TEXT NOT NULL,
+  remediation TEXT NOT NULL,
+  UNIQUE(session_id, generation_id, source_table, source_column, source_ordinal)
+) STRICT;
+
 CREATE TABLE session_generation_diagnostics (
   session_id TEXT NOT NULL,
   generation_id TEXT NOT NULL,
@@ -311,6 +334,16 @@ SELECT s.session_id, s.generation_id, s.segment_ordinal, je.key, je.value
 FROM session_context_segments s, json_each(s.captured_refs_json) AS je
 WHERE json_type(s.captured_refs_json) = 'array';
 
+INSERT INTO session_migration_gaps
+  (session_id, generation_id, source_table, source_column, source_ordinal,
+   observed_json_type, observed_length, message, remediation)
+SELECT session_id, generation_id, 'session_context_segments', 'captured_refs_json', segment_ordinal,
+  json_type(captured_refs_json), length(CAST(captured_refs_json AS BLOB)),
+  'captured_refs_json has JSON type ' || json_type(captured_refs_json) || '; captured ref children were not converted during schema migration',
+  're-harvest from the retained transcript to recover captured refs'
+FROM session_context_segments
+WHERE json_type(captured_refs_json) NOT IN ('array', 'null');
+
 CREATE TABLE session_context_segments_v62 (
   session_id                TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id             TEXT NOT NULL,
@@ -374,6 +407,16 @@ SELECT s.session_id, s.generation_id, s.partition_id, je.key,
   (je.value -> '$.data')
 FROM session_projection_sections s, json_each(s.native_metadata) AS je
 WHERE json_type(s.native_metadata) = 'array';
+
+INSERT INTO session_migration_gaps
+  (session_id, generation_id, source_table, source_column, source_ordinal,
+   observed_json_type, observed_length, message, remediation)
+SELECT session_id, generation_id, 'session_projection_sections', 'native_metadata', partition_id,
+  json_type(native_metadata), length(CAST(native_metadata AS BLOB)),
+  'native_metadata has JSON type ' || json_type(native_metadata) || '; native metadata children were not converted during schema migration',
+  're-harvest from the retained transcript to recover native metadata'
+FROM session_projection_sections
+WHERE json_type(native_metadata) NOT IN ('array', 'null');
 
 CREATE TABLE session_projection_sections_v62 (
   session_id     TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
