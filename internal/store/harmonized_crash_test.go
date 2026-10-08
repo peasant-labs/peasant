@@ -88,9 +88,15 @@ func TestContentCrashSeams(t *testing.T) {
 				runCrashMidActivationBatch(t, fixtures, tc)
 				return
 			case "savepoint-isolation":
+				if tc.Seam != "savepoint-refusal" {
+					t.Fatalf("unknown savepoint refusal seam %q", tc.Seam)
+				}
 				runCrashSavepointIsolation(t)
 				return
 			case "mid-sweep-batch":
+				if tc.Seam != "mid-sweep-batch" {
+					t.Fatalf("unknown sweep interruption seam %q", tc.Seam)
+				}
 				runSweepMidSweepBatch(t)
 				return
 			}

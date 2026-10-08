@@ -33,6 +33,8 @@ cases:
     expected_batch_committed: false
     expected_sweep_flag: true
   - name: savepoint-isolation
+    seam: savepoint-refusal
   - name: after-commit-before-sweep
     seam: after-commit
   - name: mid-sweep-batch
+    seam: mid-sweep-batch
