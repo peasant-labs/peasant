@@ -694,5 +694,11 @@ func writeHarmonizedContentOnConn(ctx context.Context, conn *sqlite.Conn, w inge
 		return out, err
 	}
 	out.stats.Rewrites++
-	return out, writeCapture(conn, w.SessionID, c, len(entries), 0, fullHash)
+	rows := 0
+	for i := range entries {
+		if entries[i].ContentPreview != nil {
+			rows++
+		}
+	}
+	return out, writeCapture(conn, w.SessionID, c, len(entries), rows, fullHash)
 }
