@@ -1,8 +1,11 @@
-# content_corruption — scaffolding for the harmonized session content model
+# content_corruption — the harmonized session content model corruption family
 # (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+# The two search-owned cases carry typed expectations their runner asserts:
+# a swept corrupt body flags the index and the rebuild clears the stale
+# postings, and an identical repair candidate rewrites the corrupt body with
+# the corrected term found exactly once. Every other case stays a name
+# placeholder its owner fills later; the manifest check still protects each
+# name.
 cases:
   - name: entry-column-altered
   - name: chunk-byte-flipped
@@ -17,4 +20,10 @@ cases:
   - name: repair-mode-rewrites-blob
   - name: repair-mode-rederives-descriptor
   - name: repair-identical-candidate-rewrites-corrupt-body
+    query: repairidenticalcorruptbody
+    wantFoundOnce: true
   - name: swept-corrupt-body-rebuilds-index
+    query: sweptcorruptbodyterm
+    wantStaleRawMatch: true
+    wantRefusedWhileFlagged: true
+    wantCleanAfterRebuild: true

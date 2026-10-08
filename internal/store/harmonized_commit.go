@@ -350,13 +350,14 @@ func insertStagedBodyOnConn(conn *sqlite.Conn, sessionID schema.SessionID, recor
 	return nil
 }
 
-// sqlInsertStagedBody is the only body insert form, built from
-// BodyRowIDBase so the allocation floor and the DDL CHECK read one home.
-// The migration DDL keeps the spelled literal: SQLite cannot reference a
-// Go constant.
-var sqlInsertStagedBody = fmt.Sprintf(`INSERT INTO session_entry_bodies(body_id, session_id, body_digest, entry_index, harness, entry_type, role, timestamp_ms, content_preview, tokens_in, tokens_out, has_tool_use, tool_kind, tool_names_csv, has_thinking, is_error, stop_reason, raw_byte_length, tool_call_id, entry_id, parent_entry_id, depth, parent_index, tool_input, tool_output, model_id, tokens_reasoning, cache_read, cache_write, extra, extra_verbatim, part_type, source_entry_ref, prov_origin, prov_actor, prov_delivery, prov_ownership, prov_evidence, prov_input_modality, prov_submission_ref)
+const sqlInsertStagedBodyTemplate = `INSERT INTO session_entry_bodies(body_id, session_id, body_digest, entry_index, harness, entry_type, role, timestamp_ms, content_preview, tokens_in, tokens_out, has_tool_use, tool_kind, tool_names_csv, has_thinking, is_error, stop_reason, raw_byte_length, tool_call_id, entry_id, parent_entry_id, depth, parent_index, tool_input, tool_output, model_id, tokens_reasoning, cache_read, cache_write, extra, extra_verbatim, part_type, source_entry_ref, prov_origin, prov_actor, prov_delivery, prov_ownership, prov_evidence, prov_input_modality, prov_submission_ref)
 VALUES ((SELECT coalesce(max(body_id), %d) + 1 FROM session_entry_bodies), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(session_id, body_digest) DO NOTHING`, BodyRowIDBase-1)
+ON CONFLICT(session_id, body_digest) DO NOTHING`
+
+// sqlInsertStagedBody allocates explicitly from max(body_id) so fresh and
+// migrated stores behave the same; the seed is BodyRowIDBase - 1, derived
+// here rather than spelled out, so the constant stays the one home.
+var sqlInsertStagedBody = fmt.Sprintf(sqlInsertStagedBodyTemplate, BodyRowIDBase-1)
 
 // bodyInsertArgs binds one body row: named closed sets as their strings,
 // NULLs for absent pointers, and the provenance struct fanned out to its

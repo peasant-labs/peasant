@@ -182,11 +182,60 @@ var contentCorruptionYAML []byte
 //go:embed testdata/content_corruption.manifest.yaml
 var contentCorruptionManifestYAML []byte
 
-// loadContentCorruptionFixture loads the content corruption scaffold family; later issues extend
-// the returned shape with typed expectations.
+// contentCorruptionCase is one content_corruption case: the section-10 name
+// plus, for the two search-owned cases, the typed expectations the search
+// runner asserts. Every other case stays a name placeholder its owner fills
+// later; the loader's manifest check still protects each name.
+type contentCorruptionCase struct {
+	Name                    string `yaml:"name"`
+	Query                   string `yaml:"query,omitempty"`
+	WantFoundOnce           bool   `yaml:"wantFoundOnce,omitempty"`
+	WantStaleRawMatch       bool   `yaml:"wantStaleRawMatch,omitempty"`
+	WantRefusedWhileFlagged bool   `yaml:"wantRefusedWhileFlagged,omitempty"`
+	WantCleanAfterRebuild   bool   `yaml:"wantCleanAfterRebuild,omitempty"`
+}
+
+type contentCorruptionFixtures struct {
+	Cases []contentCorruptionCase `yaml:"cases"`
+}
+
+// loadContentCorruptionCases strictly decodes the typed content corruption
+// family and enforces its required-names manifest in both directions.
+func loadContentCorruptionCases(t *testing.T) []contentCorruptionCase {
+	t.Helper()
+	var fixtures contentCorruptionFixtures
+	decoder := yaml.NewDecoder(strings.NewReader(string(contentCorruptionYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixtures); err != nil {
+		t.Fatalf("decode content_corruption.yaml: %v", err)
+	}
+	manifest, err := decodeRecoveryRequiredNames(contentCorruptionManifestYAML)
+	if err != nil {
+		t.Fatalf("decode content corruption manifest: %v", err)
+	}
+	actual := make([]string, 0, len(fixtures.Cases))
+	for _, c := range fixtures.Cases {
+		if strings.TrimSpace(c.Name) == "" {
+			t.Fatal("content_corruption.yaml: a case has a blank name")
+		}
+		actual = append(actual, c.Name)
+	}
+	if err := validateRecoveryRequiredNames(manifest, actual, "content corruption"); err != nil {
+		t.Fatal(err)
+	}
+	return fixtures.Cases
+}
+
+// loadContentCorruptionFixture loads the content corruption family names;
+// the typed loader above carries the expectations the runners assert.
 func loadContentCorruptionFixture(t *testing.T) []string {
 	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content corruption", contentCorruptionYAML, contentCorruptionManifestYAML)
+	cases := loadContentCorruptionCases(t)
+	names := make([]string, 0, len(cases))
+	for _, c := range cases {
+		names = append(names, c.Name)
+	}
+	return names
 }
 
 // TestContentCorruptionFixtureManifest pins the content corruption case inventory: the loader
@@ -280,11 +329,68 @@ var searchRecallYAML []byte
 //go:embed testdata/search_recall.manifest.yaml
 var searchRecallManifestYAML []byte
 
-// loadSearchRecallFixture loads the search recall scaffold family; later issues extend
-// the returned shape with typed expectations.
+// searchRecallCase is one search_recall case: the section-10 name plus the
+// query term and the production result the consolidated index must return.
+// Cases the slice owns carry typed expectations its runner asserts; the
+// loader's manifest check still protects every name.
+type searchRecallCase struct {
+	Name                    string `yaml:"name"`
+	Query                   string `yaml:"query,omitempty"`
+	WantCount               *int   `yaml:"wantCount,omitempty"`
+	WantEntryIndexes        []int  `yaml:"wantEntryIndexes,omitempty"`
+	WantRawMatchCount       *int   `yaml:"wantRawMatchCount,omitempty"`
+	Beyond2000              bool   `yaml:"beyond2000,omitempty"`
+	WantPushdown            bool   `yaml:"wantPushdown,omitempty"`
+	WantNoDuplicates        bool   `yaml:"wantNoDuplicates,omitempty"`
+	WantReverseQuery        string `yaml:"wantReverseQuery,omitempty"`
+	WantReverseCount        *int   `yaml:"wantReverseCount,omitempty"`
+	WantReverseEntryIndexes []int  `yaml:"wantReverseEntryIndexes,omitempty"`
+	WantFirstBodyID         *int64 `yaml:"wantFirstBodyID,omitempty"`
+	WantCeilingRefused      bool   `yaml:"wantCeilingRefused,omitempty"`
+	FallbackDualSource      bool   `yaml:"fallbackDualSource,omitempty"`
+}
+
+type searchRecallFixtures struct {
+	Cases []searchRecallCase `yaml:"cases"`
+}
+
+// loadSearchRecallFixtures strictly decodes the typed search recall family
+// and enforces its required-names manifest in both directions.
+func loadSearchRecallFixtures(t *testing.T) []searchRecallCase {
+	t.Helper()
+	var fixtures searchRecallFixtures
+	decoder := yaml.NewDecoder(strings.NewReader(string(searchRecallYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixtures); err != nil {
+		t.Fatalf("decode search_recall.yaml: %v", err)
+	}
+	manifest, err := decodeRecoveryRequiredNames(searchRecallManifestYAML)
+	if err != nil {
+		t.Fatalf("decode search recall manifest: %v", err)
+	}
+	actual := make([]string, 0, len(fixtures.Cases))
+	for _, c := range fixtures.Cases {
+		if strings.TrimSpace(c.Name) == "" {
+			t.Fatal("search_recall.yaml: a case has a blank name")
+		}
+		actual = append(actual, c.Name)
+	}
+	if err := validateRecoveryRequiredNames(manifest, actual, "search recall"); err != nil {
+		t.Fatal(err)
+	}
+	return fixtures.Cases
+}
+
+// loadSearchRecallFixture loads the search recall family names; the typed
+// loader above carries the expectations the runners assert.
 func loadSearchRecallFixture(t *testing.T) []string {
 	t.Helper()
-	return loadContentModelScaffoldFixture(t, "search recall", searchRecallYAML, searchRecallManifestYAML)
+	cases := loadSearchRecallFixtures(t)
+	names := make([]string, 0, len(cases))
+	for _, c := range cases {
+		names = append(names, c.Name)
+	}
+	return names
 }
 
 // TestSearchRecallFixtureManifest pins the search recall case inventory: the loader
