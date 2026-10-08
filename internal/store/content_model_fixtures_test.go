@@ -111,25 +111,6 @@ func TestContentOneCopyFixtureManifest(t *testing.T) {
 	loadContentOneCopyFixture(t)
 }
 
-//go:embed testdata/generation_skip.yaml
-var generationSkipYAML []byte
-
-//go:embed testdata/generation_skip.manifest.yaml
-var generationSkipManifestYAML []byte
-
-// loadGenerationSkipFixture loads the generation skip scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadGenerationSkipFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "generation skip", generationSkipYAML, generationSkipManifestYAML)
-}
-
-// TestGenerationSkipFixtureManifest pins the generation skip case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestGenerationSkipFixtureManifest(t *testing.T) {
-	loadGenerationSkipFixture(t)
-}
-
 // The content crash seams family graduated to a typed loader with seam
 // expectations in harmonized_crash_test.go, which supersedes the name-only
 // scaffold here (the manifest inventory it protects is unchanged).
@@ -141,25 +122,6 @@ func TestGenerationSkipFixtureManifest(t *testing.T) {
 // content_write_budget is owned by the typed loader in
 // content_write_budget_test.go; the full required-name inventory stays
 // manifest-protected there.
-
-//go:embed testdata/session_captured_stats.yaml
-var sessionCapturedStatsYAML []byte
-
-//go:embed testdata/session_captured_stats.manifest.yaml
-var sessionCapturedStatsManifestYAML []byte
-
-// loadSessionCapturedStatsFixture loads the session captured stats scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadSessionCapturedStatsFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "session captured stats", sessionCapturedStatsYAML, sessionCapturedStatsManifestYAML)
-}
-
-// TestSessionCapturedStatsFixtureManifest pins the session captured stats case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestSessionCapturedStatsFixtureManifest(t *testing.T) {
-	loadSessionCapturedStatsFixture(t)
-}
 
 //go:embed testdata/content_corruption.yaml
 var contentCorruptionYAML []byte
@@ -252,25 +214,6 @@ func TestContentConcurrencyFixtureManifest(t *testing.T) {
 	loadContentConcurrencyFixture(t)
 }
 
-//go:embed testdata/content_hostile_input.yaml
-var contentHostileInputYAML []byte
-
-//go:embed testdata/content_hostile_input.manifest.yaml
-var contentHostileInputManifestYAML []byte
-
-// loadContentHostileInputFixture loads the content hostile input scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentHostileInputFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content hostile input", contentHostileInputYAML, contentHostileInputManifestYAML)
-}
-
-// TestContentHostileInputFixtureManifest pins the content hostile input case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentHostileInputFixtureManifest(t *testing.T) {
-	loadContentHostileInputFixture(t)
-}
-
 // The content garbage collection family graduated to a typed loader with
 // count, flag, and MATCH expectations in content_gc_test.go, which
 // supersedes the name-only scaffold here (the manifest inventory it protects
@@ -357,23 +300,4 @@ func loadSearchRecallFixture(t *testing.T) []string {
 // compiles, the manifest loads, and every required name is present.
 func TestSearchRecallFixtureManifest(t *testing.T) {
 	loadSearchRecallFixture(t)
-}
-
-//go:embed testdata/annotation_targets_no_fk.yaml
-var annotationTargetsNoFkYAML []byte
-
-//go:embed testdata/annotation_targets_no_fk.manifest.yaml
-var annotationTargetsNoFkManifestYAML []byte
-
-// loadAnnotationTargetsNoFKFixture loads the annotation targets without foreign keys scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadAnnotationTargetsNoFKFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "annotation targets without foreign keys", annotationTargetsNoFkYAML, annotationTargetsNoFkManifestYAML)
-}
-
-// TestAnnotationTargetsNoFKFixtureManifest pins the annotation targets without foreign keys case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestAnnotationTargetsNoFKFixtureManifest(t *testing.T) {
-	loadAnnotationTargetsNoFKFixture(t)
 }

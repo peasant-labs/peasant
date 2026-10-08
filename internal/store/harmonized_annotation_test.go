@@ -106,30 +106,29 @@ func annotationIDs(t *testing.T, s *store.Store) (annotatorID, typeID string) {
 	return seedAnnotatorIDForTest(t, s), seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
 }
 
-// TestAnnotationTargetsNoFK pins create-annotation-in-range and
+// runAnnotationCreate pins create-annotation-in-range and
 // create-annotation-out-of-range-refused: every representation accepts a
 // start entry it stores and refuses one it does not, with the six-part
 // error.
-func TestAnnotationTargetsNoFK(t *testing.T) {
+func runAnnotationCreate(t *testing.T, c annotationTargetCase) {
+	t.Helper()
 	s := openV2TestStore(t)
 	ctx := context.Background()
 	seedAnnotationRemapSuite(t, s)
 	annotatorID, typeID := annotationIDs(t, s)
-	for _, sessionID := range []string{annotationHarmonizedID, annotationFileBackedID, annotationV1ID} {
-		if _, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
-			EntryTarget:      &store.EntryTarget{SessionID: sessionID, EntryIndex: 1},
-			AnnotatorID:      annotatorID,
-			AnnotationTypeID: typeID,
-			Value:            "resolved",
-		}); err != nil {
-			t.Fatalf("create in range for %s: %v", sessionID, err)
-		}
+	for _, sessionID := range c.SessionIDs {
 		_, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
-			EntryTarget:      &store.EntryTarget{SessionID: sessionID, EntryIndex: 99},
+			EntryTarget:      &store.EntryTarget{SessionID: sessionID, EntryIndex: c.EntryIndex},
 			AnnotatorID:      annotatorID,
 			AnnotationTypeID: typeID,
 			Value:            "resolved",
 		})
+		if !c.WantRefused {
+			if err != nil {
+				t.Fatalf("create in range for %s: %v", sessionID, err)
+			}
+			continue
+		}
 		if err == nil {
 			t.Fatalf("create out of range for %s succeeded, want refusal", sessionID)
 		}
@@ -139,64 +138,60 @@ func TestAnnotationTargetsNoFK(t *testing.T) {
 	}
 }
 
-// TestAnnotationSupersedeAndBatchRefused pins
+// runAnnotationSupersedeOrBatch pins
 // create-and-supersede-out-of-range-refused and
 // batch-create-out-of-range-refused at their sites.
-func TestAnnotationSupersedeAndBatchRefused(t *testing.T) {
+func runAnnotationSupersedeOrBatch(t *testing.T, c annotationTargetCase) {
+	t.Helper()
 	s := openV2TestStore(t)
 	ctx := context.Background()
 	seedAnnotationRemapSuite(t, s)
 	annotatorID, typeID := annotationIDs(t, s)
-	first, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
-		EntryTarget:      &store.EntryTarget{SessionID: annotationHarmonizedID, EntryIndex: 0},
-		AnnotatorID:      annotatorID,
-		AnnotationTypeID: typeID,
-		Value:            "resolved",
-	})
-	if err != nil {
-		t.Fatalf("seed annotation: %v", err)
-	}
-	if _, err := s.CreateAnnotationAndSupersede(ctx, ingest.CreateAnnotationParams{
-		EntryTarget:      &ingest.EntryTarget{SessionID: annotationHarmonizedID, EntryIndex: 77},
-		AnnotatorID:      annotatorID,
-		AnnotationTypeID: typeID,
-		Value:            "resolved",
-	}, first, "hash-supersede"); err == nil {
-		t.Fatal("supersede create out of range succeeded, want refusal")
-	} else if !strings.Contains(err.Error(), "matches no stored entry") {
-		t.Fatalf("supersede create error = %v, want the six-part refusal", err)
-	}
-	if _, err := s.BatchCreateAnnotations(ctx, []store.CreateAnnotationParams{
-		{
-			EntryTarget:      &store.EntryTarget{SessionID: annotationV1ID, EntryIndex: 0},
+	if c.Action == "supersede" {
+		first, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
+			EntryTarget:      &store.EntryTarget{SessionID: c.SessionIDs[0], EntryIndex: 0},
 			AnnotatorID:      annotatorID,
 			AnnotationTypeID: typeID,
 			Value:            "resolved",
-		},
-		{
-			EntryTarget:      &store.EntryTarget{SessionID: annotationV1ID, EntryIndex: 78},
+		})
+		if err != nil {
+			t.Fatalf("seed annotation: %v", err)
+		}
+		if _, err := s.CreateAnnotationAndSupersede(ctx, ingest.CreateAnnotationParams{
+			EntryTarget:      &ingest.EntryTarget{SessionID: c.SessionIDs[0], EntryIndex: c.EntryIndex},
 			AnnotatorID:      annotatorID,
 			AnnotationTypeID: typeID,
 			Value:            "resolved",
-		},
-	}); err == nil {
+		}, first, "hash-supersede"); err == nil {
+			t.Fatal("supersede create out of range succeeded, want refusal")
+		} else if !strings.Contains(err.Error(), "matches no stored entry") {
+			t.Fatalf("supersede create error = %v, want the six-part refusal", err)
+		}
+		return
+	}
+	var batch []store.CreateAnnotationParams
+	for _, index := range c.BatchIndexes {
+		batch = append(batch, store.CreateAnnotationParams{EntryTarget: &store.EntryTarget{SessionID: c.SessionIDs[0], EntryIndex: index}, AnnotatorID: annotatorID, AnnotationTypeID: typeID, Value: "resolved"})
+	}
+	if _, err := s.BatchCreateAnnotations(ctx, batch); err == nil {
 		t.Fatal("batch create with out-of-range target succeeded, want refusal")
 	} else if !strings.Contains(err.Error(), "matches no stored entry") {
 		t.Fatalf("batch create error = %v, want the six-part refusal", err)
 	}
 }
 
-// TestClassifierInsertOutOfRangeRefused pins
+// runClassifierInsertRefused pins
 // classifier-insert-out-of-range-refused through the classifier write path.
-func TestClassifierInsertOutOfRangeRefused(t *testing.T) {
+func runClassifierInsertRefused(t *testing.T, c annotationTargetCase) {
+	t.Helper()
 	s := openV2TestStore(t)
 	ctx := context.Background()
 	seedAnnotationRemapSuite(t, s)
 	annotatorID, typeID := annotationIDs(t, s)
-	sid := annotationFileBackedID
+	sid := c.SessionIDs[0]
 	write := ingest.ClassifierAnnotationWrite{
 		Create: ingest.CreateAnnotationParams{
-			EntryTarget:      &ingest.EntryTarget{SessionID: sid, EntryIndex: 79},
+			EntryTarget:      &ingest.EntryTarget{SessionID: sid, EntryIndex: c.EntryIndex},
 			AnnotatorID:      annotatorID,
 			AnnotationTypeID: typeID,
 			Value:            "resolved",
@@ -288,17 +283,18 @@ func annotationAnchorState(t *testing.T, s *store.Store, annotationID string) st
 	return state
 }
 
-// TestAnnotationRemapAfterReindex pins remap-after-reindex: shifting entries
+// runAnnotationRemap pins remap-after-reindex: shifting entries
 // across a re-index moves the carried target to the matching span instead
 // of dropping it.
-func TestAnnotationRemapAfterReindex(t *testing.T) {
+func runAnnotationRemap(t *testing.T, c annotationTargetCase) {
+	t.Helper()
 	s := openV2TestStore(t)
 	ctx := context.Background()
-	sessionID := "08999aaa-36bc-424c-a789-8be54d9702d1"
-	seedRemapSession(t, s, sessionID, []string{"alpha", "bravo", "charlie"})
+	sessionID := c.SessionIDs[0]
+	seedRemapSession(t, s, sessionID, c.Previews)
 	annotatorID, typeID := annotationIDs(t, s)
 	if _, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
-		EntryTarget:      &store.EntryTarget{SessionID: sessionID, EntryIndex: 1, EndIndex: 2},
+		EntryTarget:      &store.EntryTarget{SessionID: sessionID, EntryIndex: c.EntryIndex, EndIndex: c.EntryIndex + 1},
 		AnnotatorID:      annotatorID,
 		AnnotationTypeID: typeID,
 		Value:            "resolved",
@@ -307,20 +303,18 @@ func TestAnnotationRemapAfterReindex(t *testing.T) {
 	}
 	// Shift every entry one index forward; the bravo content key now lives
 	// at index 2 and matches uniquely.
-	shifted := []schema.SessionEntry{
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 0, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("zero")},
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 1, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("alpha")},
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 2, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("bravo")},
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 3, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("charlie")},
+	var shifted []schema.SessionEntry
+	for i, preview := range c.Replacement {
+		shifted = append(shifted, schema.SessionEntry{SessionID: schema.SessionID(sessionID), EntryIndex: i, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr(preview)})
 	}
 	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), shifted); err != nil {
 		t.Fatalf("shift re-index: %v", err)
 	}
-	rows, err := s.GetAnnotationsForEntry(ctx, sessionID, 2)
+	rows, err := s.GetAnnotationsForEntry(ctx, sessionID, c.WantIndex)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("remapped annotations at 2 = (%d, %v), want (1, nil)", len(rows), err)
 	}
-	stale, err := s.GetAnnotationsForEntry(ctx, sessionID, 1)
+	stale, err := s.GetAnnotationsForEntry(ctx, sessionID, c.EntryIndex)
 	if err != nil {
 		t.Fatalf("stale span read: %v", err)
 	}
@@ -331,79 +325,81 @@ func TestAnnotationRemapAfterReindex(t *testing.T) {
 
 func strptr(v string) *string { return &v }
 
-// TestAnnotationRestoreOutOfRange pins restore-out-of-range-refused and
+// runAnnotationRestore pins restore-out-of-range-refused and
 // unresolved-kept: a carried span with no remappable entry is not
 // reattached at its missing span. Machine annotations settle superseded,
 // human ones unresolved, and the annotation itself is kept in both cases.
-func TestAnnotationRestoreOutOfRange(t *testing.T) {
-	for _, human := range []bool{false, true} {
-		name := "machine-superseded"
-		if human {
-			name = "human-unresolved"
-		}
-		t.Run(name, func(t *testing.T) {
-			s := openV2TestStore(t)
-			ctx := context.Background()
-			sessionID := "08999aaa-36bc-424c-a789-8be54d9702d2"
-			if human {
-				sessionID = "08999aaa-36bc-424c-a789-8be54d9702d3"
-			}
-			seedRemapSession(t, s, sessionID, []string{"alpha", "bravo", "charlie"})
-			annotatorID, typeID := annotationIDs(t, s)
-			if human {
-				annotatorID = humanAnnotatorID(t, s)
-			}
-			annotationID, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
-				EntryTarget:      &store.EntryTarget{SessionID: sessionID, EntryIndex: 1, EndIndex: 2},
-				AnnotatorID:      annotatorID,
-				AnnotationTypeID: typeID,
-				Value:            "resolved",
-			})
-			if err != nil {
-				t.Fatalf("seed annotation: %v", err)
-			}
-			// Drop every entry: nothing remaps, so the span is refused
-			// reattachment at its missing index.
-			if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), nil); err != nil {
-				t.Fatalf("empty re-index: %v", err)
-			}
-			rows, err := s.GetAnnotationsForEntry(ctx, sessionID, 1)
-			if err != nil {
-				t.Fatalf("missing-span read: %v", err)
-			}
-			if len(rows) != 0 {
-				t.Fatalf("annotations reattached at missing span = %d, want 0", len(rows))
-			}
-			wantState := "superseded"
-			if human {
-				wantState = "unresolved"
-			}
-			if state := annotationAnchorState(t, s, annotationID); state != wantState {
-				t.Fatalf("anchor state = %q, want %q", state, wantState)
-			}
-		})
+func runAnnotationRestore(t *testing.T, c annotationTargetCase) {
+	t.Helper()
+	s := openV2TestStore(t)
+	ctx := context.Background()
+	sessionID := c.SessionIDs[0]
+	seedRemapSession(t, s, sessionID, c.Previews)
+	annotatorID, typeID := annotationIDs(t, s)
+	if c.Human {
+		annotatorID = humanAnnotatorID(t, s)
+	}
+	annotationID, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
+		EntryTarget:      &store.EntryTarget{SessionID: sessionID, EntryIndex: c.EntryIndex, EndIndex: c.EntryIndex + 1},
+		AnnotatorID:      annotatorID,
+		AnnotationTypeID: typeID,
+		Value:            "resolved",
+	})
+	if err != nil {
+		t.Fatalf("seed annotation: %v", err)
+	}
+	// Drop every entry: nothing remaps, so the span is refused
+	// reattachment at its missing index.
+	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), nil); err != nil {
+		t.Fatalf("empty re-index: %v", err)
+	}
+	rows, err := s.GetAnnotationsForEntry(ctx, sessionID, c.EntryIndex)
+	if err != nil {
+		t.Fatalf("missing-span read: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("annotations reattached at missing span = %d, want 0", len(rows))
+	}
+	wantState := c.WantState
+	if state := annotationAnchorState(t, s, annotationID); state != wantState {
+		t.Fatalf("anchor state = %q, want %q", state, wantState)
+	}
+	conn, err := s.PoolForTest().Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.PoolForTest().Put(conn)
+	kept := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT id FROM annotations WHERE id = ?`, &sqlitex.ExecOptions{
+		Args: []any{annotationID}, ResultFunc: func(stmt *sqlite.Stmt) error { kept = stmt.ColumnText(0) == annotationID; return nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !kept {
+		t.Fatal("restore lost the annotation instead of retaining its unresolved or superseded anchor")
 	}
 }
 
-// TestAnnotationPruneCascade pins prune-cascade: pruning a session removes
+// runAnnotationPrune pins prune-cascade: pruning a session removes
 // its entry targets with it.
-func TestAnnotationPruneCascade(t *testing.T) {
+func runAnnotationPrune(t *testing.T, c annotationTargetCase) {
+	t.Helper()
 	s := openV2TestStore(t)
 	ctx := context.Background()
 	seedAnnotationRemapSuite(t, s)
 	annotatorID, typeID := annotationIDs(t, s)
 	if _, err := s.CreateAnnotation(ctx, store.CreateAnnotationParams{
-		EntryTarget:      &store.EntryTarget{SessionID: annotationHarmonizedID, EntryIndex: 2},
+		EntryTarget:      &store.EntryTarget{SessionID: c.SessionIDs[0], EntryIndex: c.EntryIndex},
 		AnnotatorID:      annotatorID,
 		AnnotationTypeID: typeID,
 		Value:            "resolved",
 	}); err != nil {
 		t.Fatalf("seed annotation: %v", err)
 	}
-	if _, err := s.PruneSessions(ctx, []ingest.SessionID{ingest.SessionID(annotationHarmonizedID)}); err != nil {
+	if _, err := s.PruneSessions(ctx, []ingest.SessionID{ingest.SessionID(c.SessionIDs[0])}); err != nil {
 		t.Fatalf("prune: %v", err)
 	}
-	rows, err := s.GetAnnotationsForEntry(ctx, annotationHarmonizedID, 2)
+	rows, err := s.GetAnnotationsForEntry(ctx, c.SessionIDs[0], c.EntryIndex)
 	if err != nil {
 		t.Fatalf("targets after prune: %v", err)
 	}
