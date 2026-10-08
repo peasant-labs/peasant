@@ -7,15 +7,6 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// bodyRowIDBase is the FTS rowid base (design §3.3, §3.5): every
-// session_entry_bodies.body_id is allocated at or above it, and every
-// session_entries rowid stays below it, so the two external-content FTS rowid
-// spaces never meet. SQLite DDL cannot reference a Go constant, so the schema
-// spells the literal 1125899906842624 in the CHECK and the allocation
-// subquery; Go allocation, harvest verify --content, and fixtures use this
-// constant. Pinned by the rowid-space-guard fixture.
-const bodyRowIDBase int64 = 1 << 50 // 1125899906842624
-
 // EntryRecord is the session_entry_bodies row (design §3.3 table 1): every
 // schema.SessionEntry field is a column, with the schema's named types — no
 // raw strings for closed sets (harness, entry type, role, tool kind, stop
@@ -26,7 +17,7 @@ const bodyRowIDBase int64 = 1 << 50 // 1125899906842624
 // unknown remainder, canonical; extra_verbatim holds the original string
 // whenever the canonical rebuild would not be byte-identical.
 type EntryRecord struct {
-	BodyID          int64 // >= bodyRowIDBase
+	BodyID          int64 // >= BodyRowIDBase (1 << 50): the shared FTS rowid base, spelled as a literal in the DDL CHECK
 	SessionID       schema.SessionID
 	BodyDigest      string // hex sha256(serializeEntry(row)) — a digest, not a closed set
 	EntryIndex      int
@@ -62,10 +53,14 @@ type EntryRecord struct {
 	Provenance      *schema.ContentProvenance
 }
 
-// entryFromRow is the ONLY row -> struct reconstruction: every column maps to
-// one SessionEntry field, preserving NULL vs empty and pointer nil-ness
-// exactly (design §3.4). Stub: panics with ErrHarmonizedNotImplemented until
-// the reader slice lands it.
+// entryFromRow is the ONLY row -> struct reconstruction. Storage identity
+// (BodyID, BodyDigest) stays out of the wire struct; the four promoted
+// columns (ModelID, TokensReasoning, CacheRead, CacheWrite) fold back into
+// Extra alongside the unknown remainder, with ExtraVerbatim winning whenever
+// the canonical rebuild would not be byte-identical; Provenance fans out
+// from the eight prov_* columns. NULL vs empty and pointer nil-ness are
+// preserved exactly (design §3.4). Stub: panics with
+// ErrHarmonizedNotImplemented until the reader lands it.
 func entryFromRow(r EntryRecord) schema.SessionEntry {
 	panic(ErrHarmonizedNotImplemented)
 }
@@ -74,7 +69,7 @@ func entryFromRow(r EntryRecord) schema.SessionEntry {
 // applied to the in-memory entry. body_digest = sha256(serializeEntry(row));
 // the wire builders use entryFromRow directly, so byte-parity is this one
 // function's contract (golden-tested; design §3.4). Stub: panics with
-// ErrHarmonizedNotImplemented until the reader slice lands it.
+// ErrHarmonizedNotImplemented until the reader lands it.
 func serializeEntry(r EntryRecord) []byte {
 	panic(ErrHarmonizedNotImplemented)
 }
@@ -86,7 +81,7 @@ func serializeEntry(r EntryRecord) []byte {
 // promoted columns merged by mergeExtIntoExtra exactly as for the mirror.
 // Callers (metrics, classifier inputs, sessions context, TUI, code map) are
 // unchanged. Stub: panics with ErrHarmonizedNotImplemented until the reader
-// slice lands it.
+// lands it.
 func legacyShape(row EntryRecord, bounded bool) schema.SessionEntry {
 	panic(ErrHarmonizedNotImplemented)
 }

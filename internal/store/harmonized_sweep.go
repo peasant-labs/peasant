@@ -20,7 +20,7 @@ type SweepResult struct {
 
 // SweepSession runs the per-session sweep (design §4.5): bounded, idempotent,
 // selected by the content_sweep_pending flag. Stub: returns
-// ErrHarmonizedNotImplemented until the sweep slice lands it.
+// ErrHarmonizedNotImplemented until the sweep lands it.
 func SweepSession(ctx context.Context, sessionID schema.SessionID) (SweepResult, error) {
 	return SweepResult{}, ErrHarmonizedNotImplemented
 }

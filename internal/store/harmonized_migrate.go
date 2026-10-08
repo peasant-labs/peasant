@@ -28,7 +28,7 @@ type MigrateResult struct {
 // PlanMigration computes the Phase 0 preflight: counts per phase, pending
 // intents and superseded generations to discard, field/blob mismatches
 // (sampled), and the free-disk and no-other-writer advisories. Stub: returns
-// ErrHarmonizedNotImplemented until the migration slice lands it.
+// ErrHarmonizedNotImplemented until the migration lands it.
 func PlanMigration(ctx context.Context) (MigratePlan, error) {
 	return MigratePlan{}, ErrHarmonizedNotImplemented
 }
@@ -38,7 +38,7 @@ func PlanMigration(ctx context.Context) (MigratePlan, error) {
 // stats backfill, catalog transaction with the in-transaction shadow verify,
 // old-row deletes, directory removal, sweep, and flag clear. Resumable: the
 // per-session DB state is the progress record. Stub: returns
-// ErrHarmonizedNotImplemented until the migration slice lands it.
+// ErrHarmonizedNotImplemented until the migration lands it.
 func MigrateSession(ctx context.Context, sessionID schema.SessionID) (MigrateOutcome, error) {
 	return "", ErrHarmonizedNotImplemented
 }

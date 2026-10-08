@@ -136,7 +136,10 @@ type GenerationSection struct {
 
 // GenerationNativeMetadata is one session_section_native_metadata row
 // (partition.NativeMetadata, ordered). Data stays opaque: the native
-// usage-metadata payload, schema-less by the harness's own design.
+// usage-metadata payload, schema-less by the harness's own design. It is
+// text, not bytes: the STRICT data TEXT column refuses BLOB bindings, so the
+// contract carries the JSON document as a string and the writer binds it
+// directly with no conversion.
 type GenerationNativeMetadata struct {
 	PartitionID          int
 	Ordinal              int
@@ -148,7 +151,7 @@ type GenerationNativeMetadata struct {
 	AttachmentTurnIndex  *int
 	AttachmentToolCallID *string
 	CustomType           *string
-	Data                 []byte // opaque native payload (json.RawMessage)
+	Data                 string // opaque native payload (JSON text, bound to the STRICT TEXT column)
 }
 
 // GenerationChildren is the generation's 1:N metadata children (design §3.3
@@ -206,7 +209,7 @@ type SeedWrite struct {
 
 // SeedWriteAllowed is the seed rule: it reports whether an origin may write
 // the harness-only seed home. Only StatsSourceHarness origins are admitted.
-// Stub: returns ErrHarmonizedNotImplemented until the stats slice lands it.
+// Stub: returns ErrHarmonizedNotImplemented until the stats writer lands it.
 func SeedWriteAllowed(source StatsSource) (bool, error) {
 	return false, ErrHarmonizedNotImplemented
 }
@@ -232,7 +235,7 @@ type ContentChunk struct {
 // shadow verify (§7.2) and for internal prior comparisons; it is not a wire
 // surface — no wire payload carries the captured document, readers use the
 // structured columns. Stub: panics with ErrHarmonizedNotImplemented until the
-// migration slice lands it.
+// migration lands it.
 func serializeMetadata(gen GenerationRecord, children GenerationChildren, stats CapturedStats) []byte {
 	panic(ErrHarmonizedNotImplemented)
 }

@@ -14,7 +14,7 @@ type SearchState struct {
 }
 
 // SearchStateRead reports the store-global search index health. Stub: returns
-// ErrHarmonizedNotImplemented until the search slice lands it.
+// ErrHarmonizedNotImplemented until the search health tracking lands.
 func SearchStateRead(ctx context.Context) (SearchState, error) {
 	return SearchState{}, ErrHarmonizedNotImplemented
 }
@@ -26,7 +26,7 @@ func SearchStateRead(ctx context.Context) (SearchState, error) {
 // (The contract sketch names tx *sqlitex.Tx; the vendored sqlite fork has no
 // Tx type — every store helper takes *sqlite.Conn — so the seam takes the
 // connection.) Stub: returns ErrHarmonizedNotImplemented until the search
-// slice lands it.
+// health tracking lands.
 func SearchStateSetNeedsRebuild(ctx context.Context, conn *sqlite.Conn) error {
 	return ErrHarmonizedNotImplemented
 }
