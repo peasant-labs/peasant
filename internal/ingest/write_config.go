@@ -77,6 +77,16 @@ type writeConfigYAML struct {
 // caller's value, so Parse-over-BaseConfig only overrides what the user
 // wrote; an explicitly negative value is kept and refused by Validate.
 func (w *WriteConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			key := value.Content[i].Value
+			switch key {
+			case "holdTargetMs", "activationSessions", "batchBytes", "batchSessions", "bufferBytes", "stagedMemoryBytes", "flushIntervalMs", "sweepRows", "harvestTargetMinutes":
+			default:
+				return fmt.Errorf("ingest: unknown write.%s at config load (line %d); write keys are case-sensitive, so this budget was not applied; use the camelCase write key or remove it", key, value.Content[i].Line)
+			}
+		}
+	}
 	var raw writeConfigYAML
 	if err := value.Decode(&raw); err != nil {
 		return err
@@ -186,7 +196,7 @@ func (w WriteConfig) WithDefaults(workers int) WriteConfig {
 		w.BufferBytes = def.BufferBytes
 	}
 	if w.StagedMemoryBytes == 0 {
-		w.StagedMemoryBytes = def.StagedMemoryBytes
+		w.StagedMemoryBytes = w.derivedStagedMemoryBytes(workers)
 	}
 	if w.FlushIntervalMs == 0 {
 		w.FlushIntervalMs = def.FlushIntervalMs

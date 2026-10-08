@@ -12,6 +12,10 @@ hostSlug: github.com-write-budget-fixture
 projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 transcript: '{"type":"user","message":{"role":"user","content":"write budget fixture"}}'
 cases:
+  - name: unset-staged-memory-derives-from-custom-batch
+    batchBytes: 67108864
+    stagedMemoryBytes: 268435456
+    workers: [8]
   - name: splitter-single-home
     minSites: 2
   - name: staging-batch-commits-once

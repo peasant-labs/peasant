@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,9 +25,10 @@ func TestWriteConfigCases(t *testing.T) {
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
-			Name  string         `yaml:"name"`
-			Write map[string]any `yaml:"write"`
-			Valid bool           `yaml:"valid"`
+			Name        string         `yaml:"name"`
+			Write       map[string]any `yaml:"write"`
+			Valid       bool           `yaml:"valid"`
+			DecodeError string         `yaml:"decode_error,omitempty"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(writeConfigCasesYAML, &fixtures); err != nil {
@@ -50,7 +52,14 @@ func TestWriteConfigCases(t *testing.T) {
 			var decoded struct {
 				Write WriteConfig `yaml:"write"`
 			}
-			if err := yaml.Unmarshal(fragment, &decoded); err != nil {
+			decodeErr := yaml.Unmarshal(fragment, &decoded)
+			if fixture.DecodeError != "" {
+				if decodeErr == nil || !strings.Contains(decodeErr.Error(), fixture.DecodeError) {
+					t.Fatalf("decode err=%v, want key-naming refusal %q", decodeErr, fixture.DecodeError)
+				}
+				return
+			}
+			if err := decodeErr; err != nil {
 				t.Fatalf("decode write.* fragment: %v", err)
 			}
 			_, err = decoded.Write.validatedWithDefaults(8)
@@ -101,7 +110,7 @@ func TestDefaultWriteConfigDerivations(t *testing.T) {
 }
 
 // TestWriteConfigDocumentedShape decodes the design's YAML shape verbatim, so
-// the keys S3 promises are the keys the pipeline reads.
+// the documented keys are the keys the pipeline reads.
 func TestWriteConfigDocumentedShape(t *testing.T) {
 	t.Parallel()
 	var decoded struct {
