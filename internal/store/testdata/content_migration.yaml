@@ -1,15 +1,52 @@
-# content_migration — scaffolding for the harmonized session content model
-# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+# content_migration — the full section-10 case inventory for the in-place
+# conversion (design llm/peasant--harmonized-content-model.md section 10,
+# ratified revision 17). The required-names manifest protects every name from
+# the start; a case that carries no sessionId is a placeholder the conversion
+# command fills later.
+#
+# This migration (v62) fills native-stats-backfilled: the stats row and sweep
+# flag backfilled from the active generation's metadata_json. Stats documents
+# use the live-store shape (a Go-marshaled SessionStats under $.stats);
+# metadataJson values are compact single-line documents so seed_json equality
+# is exact.
+#
+# native-extra-keys-promoted is owned by the conversion command: extra-key
+# promotion runs at conversion time, so v62 carries the keys through untouched
+# and asserts nothing for them here.
 cases:
   - name: native-clean
   - name: native-superseded-identical-discarded
   - name: native-pending-intent-discarded
   - name: native-non-emitted
   - name: native-extra-keys-promoted
+    ownedBy: conversion
   - name: native-stats-backfilled
+    sessionId: s-v62-full
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{"schemaVersion":11,"sessionId":"s-v62-full","harness":"opencode","model":"m","version":"1","timestamp":{},"source":{},"git":{},"project":{},"hostSlug":"h","stats":{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30},"subagents":[],"diagnostics":{},"contentHash":"c","metadataHash":"m","redaction":{}}'
+        installedAtMs: 1699999999000
+        activatedAtMs: 1700000000000
+      - id: gen-old
+        metadataJson: '{}'
+        installedAtMs: 1699999990000
+        activatedAtMs: null
+    expected:
+      turnCount: 12
+      inputSubmissionCount: 3
+      toolCallCount: 7
+      subagentCount: 2
+      durationMs: 90000
+      tokensIn: 100
+      tokensOut: 200
+      thoughtTokens: 10
+      cachedReadTokens: 20
+      cachedWriteTokens: 30
+      seedJson: '{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30}'
+      source: harness
+      updatedAtMs: 1700000000000
+    expectedFlag: 1
   - name: native-newer-stats-row-converts
   - name: native-metadata-hash-recomputed
   - name: native-field-blob-mismatch-rolls-back-and-marks

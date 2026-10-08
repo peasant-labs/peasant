@@ -1,0 +1,4 @@
+requiredNames:
+  - fresh-first-body-id
+  - migrated-first-body-id
+  - fresh-equals-migrated-schema

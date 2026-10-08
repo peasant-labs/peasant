@@ -263,6 +263,10 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV53 widens the two local harness CHECK mirrors to admit Pi. See schema_v53.go.
 // migrationV61 adds the reverse logical-target indexes the independent-child
 // cache reconciliation seeks by target. See schema_v61.go.
+// migrationV62 adds the harmonized session content model: the typed entry
+// entity, the digest-addressed content store, the immutable generation
+// catalog, the mutable stats row, and the unified search store, with the
+// stats and sweep backfills. See schema_v62.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -328,6 +332,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV59,
 		migrationV60,
 		migrationV61,
+		migrationV62,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -383,5 +388,6 @@ var dbSchema = sqlitemigration.Schema{
 		{DisableForeignKeys: true}, // V59: rebuild session_content_captures for the closed capture-format set
 		nil,                        // V60: managed-generation catalog (new tables, no data rewrite)
 		nil,                        // V61: reverse logical-target lookup indexes (additive, no data rewrite)
+		{DisableForeignKeys: true}, // V62: rebuilds annotation targets (FKs off for drop/rename); the JSON generation-keyed tables stay untouched for the harmonized writer
 	},
 }

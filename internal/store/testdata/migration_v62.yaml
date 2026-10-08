@@ -1,0 +1,133 @@
+# Focused v62 migration cases: the stats and sweep backfills and the
+# annotation-target rebuild. The JSON columns of the three generation-keyed
+# tables stay untouched here; their reshape lands with the harmonized writer.
+# Each named entity is required by migration_v62.manifest.yaml. Stats documents use the
+# live-store shape (a Go-marshaled SessionStats under $.stats); metadataJson
+# values are compact single-line documents so seed_json equality is exact.
+statsCases:
+  - name: full-stats-backfilled
+    sessionId: s-v62-full
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{"schemaVersion":11,"sessionId":"s-v62-full","harness":"opencode","model":"m","version":"1","timestamp":{},"source":{},"git":{},"project":{},"hostSlug":"h","stats":{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30},"subagents":[],"diagnostics":{},"contentHash":"c","metadataHash":"m","redaction":{}}'
+        installedAtMs: 1699999999000
+        activatedAtMs: 1700000000000
+      - id: gen-old
+        metadataJson: '{}'
+        installedAtMs: 1699999990000
+        activatedAtMs: null
+    expected:
+      turnCount: 12
+      inputSubmissionCount: 3
+      toolCallCount: 7
+      subagentCount: 2
+      durationMs: 90000
+      tokensIn: 100
+      tokensOut: 200
+      thoughtTokens: 10
+      cachedReadTokens: 20
+      cachedWriteTokens: 30
+      seedJson: '{"turnCount":12,"inputSubmissionCount":3,"toolCallCount":7,"subagentCount":2,"durationMs":90000,"tokensIn":100,"tokensOut":200,"thoughtTokens":10,"cachedReadTokens":20,"cachedWriteTokens":30}'
+      source: harness
+      updatedAtMs: 1700000000000
+    expectedFlag: 1
+  - name: partial-stats-keep-null
+    sessionId: s-v62-partial
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{"schemaVersion":11,"stats":{"turnCount":5,"toolCallCount":2,"subagentCount":0,"durationMs":100,"tokensIn":10,"tokensOut":20}}'
+        installedAtMs: 1699999999000
+        activatedAtMs: null
+    expected:
+      turnCount: 5
+      inputSubmissionCount: null
+      toolCallCount: 2
+      subagentCount: 0
+      durationMs: 100
+      tokensIn: 10
+      tokensOut: 20
+      thoughtTokens: null
+      cachedReadTokens: null
+      cachedWriteTokens: null
+      seedJson: '{"turnCount":5,"toolCallCount":2,"subagentCount":0,"durationMs":100,"tokensIn":10,"tokensOut":20}'
+      source: harness
+      updatedAtMs: 1699999999000
+    expectedFlag: 0
+  - name: active-empty-stats-row-nulls
+    sessionId: s-v62-empty
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{}'
+        installedAtMs: 1699999998000
+        activatedAtMs: null
+    expected:
+      turnCount: null
+      inputSubmissionCount: null
+      toolCallCount: null
+      subagentCount: null
+      durationMs: null
+      tokensIn: null
+      tokensOut: null
+      thoughtTokens: null
+      cachedReadTokens: null
+      cachedWriteTokens: null
+      seedJson: null
+      source: harness
+      updatedAtMs: 1699999998000
+    expectedFlag: 0
+  - name: null-active-writes-no-stats-row
+    sessionId: s-v62-nullactive
+    activeGeneration: null
+    generations:
+      - id: gen-orphan
+        metadataJson: '{}'
+        installedAtMs: 1699999997000
+        activatedAtMs: 1699999997000
+    expected: null
+    expectedFlag: 1
+  - name: no-generations-no-row-no-flag
+    sessionId: s-v62-bare
+    activeGeneration: null
+    generations: []
+    expected: null
+    expectedFlag: 0
+  - name: active-only-unflagged
+    sessionId: s-v62-clean
+    activeGeneration: gen-active
+    generations:
+      - id: gen-active
+        metadataJson: '{}'
+        installedAtMs: 1699999996000
+        activatedAtMs: 1699999996000
+    expected:
+      turnCount: null
+      inputSubmissionCount: null
+      toolCallCount: null
+      subagentCount: null
+      durationMs: null
+      tokensIn: null
+      tokensOut: null
+      thoughtTokens: null
+      cachedReadTokens: null
+      cachedWriteTokens: null
+      seedJson: null
+      source: harness
+      updatedAtMs: 1699999996000
+    expectedFlag: 0
+# Rows the annotation-target rebuild must carry over verbatim. Seeded with
+# foreign keys off (their annotation parents are not seeded); the test
+# deletes them before the foreign_key_check gate.
+annotationRows:
+  - name: annotation-target-first
+    annotationId: ann-v62-aaa
+    sessionId: s-v62-full
+    entryIndex: 3
+    endIndex: 4
+  - name: annotation-target-second
+    annotationId: ann-v62-bbb
+    sessionId: s-v62-partial
+    entryIndex: 0
+    endIndex: 9

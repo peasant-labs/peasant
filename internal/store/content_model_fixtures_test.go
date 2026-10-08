@@ -282,24 +282,8 @@ func TestContentGCFixtureManifest(t *testing.T) {
 	loadContentGCFixture(t)
 }
 
-//go:embed testdata/content_migration.yaml
-var contentMigrationYAML []byte
-
-//go:embed testdata/content_migration.manifest.yaml
-var contentMigrationManifestYAML []byte
-
-// loadContentMigrationFixture loads the content migration scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentMigrationFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content migration", contentMigrationYAML, contentMigrationManifestYAML)
-}
-
-// TestContentMigrationFixtureManifest pins the content migration case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentMigrationFixtureManifest(t *testing.T) {
-	loadContentMigrationFixture(t)
-}
+// content_migration is owned by the typed loader in content_migration_test.go;
+// the full required-name inventory stays manifest-protected there.
 
 //go:embed testdata/content_release_guard.yaml
 var contentReleaseGuardYAML []byte
