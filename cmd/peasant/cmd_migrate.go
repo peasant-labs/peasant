@@ -18,9 +18,9 @@ import (
 // Where it failed: cmd/peasant/cmd_migrate.go (BuildMigrateCommand).
 // When it failed: at command startup, before any store was opened.
 // What it means: nothing ran and nothing changed; re-running is safe.
-// How to fix: wait for the migration implementation (peasant-labs/peasant#568);
+// How to fix: wait for the migration engine implementation to land;
 // until then, keep running `peasant harvest` and `peasant reclaim` as before.
-var errMigrateNotImplemented = errors.New("peasant migrate is not implemented yet: the command skeleton exists but the migration engine has not landed; nothing ran and nothing changed; follow peasant-labs/peasant#568 for the implementation")
+var errMigrateNotImplemented = errors.New("peasant migrate is not implemented yet: the command skeleton exists but the migration engine has not landed; nothing ran and nothing changed")
 
 // BuildMigrateCommand constructs the `peasant migrate` maintenance command.
 //

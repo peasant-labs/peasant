@@ -843,7 +843,7 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
 	}
 	if content {
-		return fmt.Errorf("harvest verify: --content is not implemented yet: content verification lands with the harmonized content model (peasant-labs/peasant#568); nothing was checked and nothing changed; run `peasant harvest verify` without --content for the schema check")
+		return fmt.Errorf("harvest verify: --content is not implemented yet: content verification lands with the harmonized content model; nothing was checked and nothing changed; run `peasant harvest verify` without --content for the schema check")
 	}
 	ctx := cmd.Context()
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))

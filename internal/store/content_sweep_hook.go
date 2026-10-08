@@ -1,7 +1,6 @@
 package store
 
-// The harvest-side sweep hook for the harmonized content model (design §4.5;
-// peasant-labs/peasant#568).
+// The harvest-side sweep hook for the harmonized content model (design §4.5).
 //
 // The per-session sweep is bounded, resumable, and idempotent; every predicate
 // is qualified by session_id. It runs in harvest (after a commit, or alone for

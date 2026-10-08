@@ -9,8 +9,8 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// The CLI read-router call sites (design §6.2; harmonized content model,
-// peasant-labs/peasant#568).
+// The CLI read-router call sites (design §6.2) for the harmonized content
+// model.
 //
 // Each function below names one consumer read that the harmonized readers
 // collapse onto the one store-level selection shim: navigation (the sessions
@@ -19,7 +19,7 @@ import (
 // serves the viewer lives in internal/api and collapses in the same step.
 //
 // Today every seam delegates to the existing store read, so behavior is
-// unchanged. A later slice routes them through the shim without touching the
+// unchanged. A later change routes them through the shim without touching the
 // callers.
 func readContextEntries(ctx context.Context, db *store.Store, sid schema.SessionID, fromIndex, toIndex int) ([]schema.SessionEntry, error) {
 	return db.ListEntriesRange(ctx, sid, fromIndex, toIndex)
