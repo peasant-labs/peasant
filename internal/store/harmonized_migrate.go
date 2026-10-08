@@ -539,7 +539,7 @@ func (s *Store) sampleMigrateSessionMismatches(ctx context.Context, conn *sqlite
 			if err != nil {
 				return err
 			}
-			records = append(records, record{ref: ref, digest: stmt.ColumnText(1), relative: stmt.ColumnText(2), byteLength: stmt.ColumnInt64(2)})
+			records = append(records, record{ref: ref, digest: stmt.ColumnText(1), relative: stmt.ColumnText(2), byteLength: stmt.ColumnInt64(3)})
 			return nil
 		},
 	}); err != nil {
