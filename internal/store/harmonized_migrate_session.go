@@ -1244,8 +1244,7 @@ func verifyMigrateFullShape(conn *sqlite.Conn, oracle *migrateOracle, _ *prepare
 // captured stats) against the old metadata_json. The stats operand is
 // the captured document from the oracle read, never the live stats row
 // (a newer row, e.g. a COMPUTE derived update, is expected and does not
-// fail this dimension). The rebuilt document's metadataHash is recomputed
-// stats-inclusive; the durable parent restores beside the catalog
+// fail this dimension). The durable parent restores beside the catalog
 // mapping, the way the snapshot reader restores it.
 //
 // The comparison excludes the hash on both sides. The stored hash goes
@@ -1253,7 +1252,9 @@ func verifyMigrateFullShape(conn *sqlite.Conn, oracle *migrateOracle, _ *prepare
 // timestamps advance on resume without a rehash, so a byte-stable legacy
 // document can carry a hash the current function never reproduces. Encoder
 // drift still shows in every other byte, and the fresh hash is what later
-// reads recompute.
+// reads recompute. Unknown top-level keys still refuse: the struct decode
+// would drop a key the catalog has no column for, so the key sets must
+// agree exactly.
 func verifyMigrateMetadataDocument(conn *sqlite.Conn, oracle *migrateOracle, prepared *preparedHarmonized) *migrateShadowMismatch {
 	_ = conn
 	stats := capturedStatsForHarnessWrite(oracle.sessionID, oracle.metadata.Stats, oracle.statsSeedDoc, oracle.statsCaptureTime)
@@ -1275,6 +1276,25 @@ func verifyMigrateMetadataDocument(conn *sqlite.Conn, oracle *migrateOracle, pre
 		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: fmt.Sprintf("decode the stored metadata document: %v", err)}
 	}
 	stored.MetadataHash = ""
+	var rawKeys, rebuiltKeys map[string]any
+	if err := json.Unmarshal([]byte(oracle.metadataRaw), &rawKeys); err != nil {
+		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: fmt.Sprintf("decode the stored metadata keys: %v", err)}
+	}
+	if err := json.Unmarshal(rebuilt, &rebuiltKeys); err != nil {
+		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: fmt.Sprintf("decode the rebuilt metadata keys: %v", err)}
+	}
+	// The rebuilt document drops its hash before marshaling, so the key
+	// sets agree only when no unknown key arrived or left.
+	delete(rawKeys, "metadataHash")
+	delete(rebuiltKeys, "metadataHash")
+	if len(rawKeys) != len(rebuiltKeys) {
+		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: "the rebuilt metadata document carries a different key set than the old metadata_json"}
+	}
+	for key := range rawKeys {
+		if _, ok := rebuiltKeys[key]; !ok {
+			return &migrateShadowMismatch{Dimension: "metadata-document", Reason: fmt.Sprintf("the rebuilt metadata document drops the stored key %q", key)}
+		}
+	}
 	storedBytes, err := json.Marshal(&stored)
 	if err != nil {
 		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: fmt.Sprintf("encode the stored metadata document: %v", err)}
