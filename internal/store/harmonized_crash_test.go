@@ -84,7 +84,7 @@ func TestContentCrashSeams(t *testing.T) {
 				runCrashSavepointIsolation(t)
 				return
 			case "mid-sweep-batch":
-				t.Log("mid-sweep-batch: the sweep owns this seam; it lands with the sweep")
+				runSweepMidSweepBatch(t)
 				return
 			}
 			if tc.Seam == "" {

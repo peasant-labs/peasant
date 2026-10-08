@@ -683,6 +683,14 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return p.runReindex(ctx, start)
 	}
 
+	// Harvest-start recovery precedes discovery: every session the crash
+	// marker flags is swept before this harvest selects or commits
+	// anything, so crash leftovers recover even when the input is
+	// unchanged and nothing re-selects the session.
+	if err := p.sweepFlaggedSessionsAtStart(ctx); err != nil {
+		return nil, err
+	}
+
 	prog := p.config.Progress
 
 	// Stage 1: DISCOVER

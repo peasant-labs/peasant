@@ -46,7 +46,10 @@ func loadGenerationReclaimFixture(t *testing.T) generationReclaimFixture {
 // seedSupersededReclaimSession seeds one session, activates the superseded
 // generation and then the active one, and returns both generation identifiers.
 // Activation installs the superseded generation's rows and directory first, so
-// the later activation leaves it a real inactive generation to reclaim.
+// the later activation leaves it a real inactive generation to reclaim. The
+// helper sets the sweep flag for the session, exactly as the v62 backfill
+// does for sessions with a non-active projection row: the reclaim selects
+// candidates through the flag, so an unflagged session is never a candidate.
 func seedSupersededReclaimSession(t *testing.T, s *Store, root string, fixture generationReclaimFixture) schema.SessionID {
 	t.Helper()
 	id, err := schema.NewSessionID(fixture.Session.ID)
@@ -64,6 +67,7 @@ func seedSupersededReclaimSession(t *testing.T, s *Store, root string, fixture g
 	if visible := visibleGeneration(t, s, id); visible != fixture.Generation.ActiveID {
 		t.Fatalf("visible generation = %q, want active %q", visible, fixture.Generation.ActiveID)
 	}
+	execGenerationSQL(t, s, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = '`+fixture.Session.ID+`';`)
 	return id
 }
 

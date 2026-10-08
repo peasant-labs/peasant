@@ -19,6 +19,7 @@ var (
 	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
 	_ ingest.NativeGenerationStaged            = (*PreparedGeneration)(nil)
 	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
+	_ ingest.ContentSweeper                    = (*Store)(nil)
 )
 
 // generationActivationFromNative mirrors the ingest-owned activation envelope
@@ -80,6 +81,37 @@ func (s *Store) ActivateStagedNativeGeneration(ctx context.Context, activation i
 		generationActivation.Prepared = prepared
 	}
 	return s.ActivateGeneration(ctx, generationActivation)
+}
+
+// SweepSessionForHarvest sweeps one committed session through the
+// harvest-side entry point: the same per-session pass the harvest start
+// runs, scoped to the session the pipeline just committed. The pipeline
+// calls it after every committed activation; the sweep error never fails
+// the commit. A store without managed-generation support skips silently:
+// it holds no staged state this build could have created, and a flag set
+// by a capable opener on the same database stays set for that opener.
+func (s *Store) SweepSessionForHarvest(ctx context.Context, sessionID schema.SessionID) error {
+	if err := s.requireGenerationSupport(); err != nil {
+		return nil
+	}
+	_, err := s.SweepSession(ctx, sessionID)
+	return err
+}
+
+// SweepFlaggedSessionsForHarvest sweeps every flagged session through the
+// harvest-side entry point: the harvest-start recovery pass with
+// pipeline-neutral types (a swept count, per-session warnings, and a fatal
+// error). The pipeline calls it before discovery. Like the per-session
+// entry point, it skips silently without managed-generation support.
+func (s *Store) SweepFlaggedSessionsForHarvest(ctx context.Context) (int, []error, error) {
+	if err := s.requireGenerationSupport(); err != nil {
+		return 0, nil, nil
+	}
+	report, err := s.SweepFlaggedSessions(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	return len(report.Sessions), report.Warnings, nil
 }
 
 // ReadNativeGenerationPrior loads the active generation's reusable evidence for
