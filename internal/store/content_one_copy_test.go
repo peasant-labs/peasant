@@ -26,6 +26,7 @@ type contentOneCopyCase struct {
 	ExtraBlobs map[string]string `yaml:"extraBlobs"`
 	Bodies     int               `yaml:"bodies"`
 	Blobs      int               `yaml:"blobs"`
+	ToolRows   bool              `yaml:"toolRows"`
 }
 
 func loadContentOneCopyFixture(t *testing.T) []contentOneCopyCase {
@@ -101,6 +102,16 @@ func TestContentOneCopy(t *testing.T) {
 			sid := gcSession(t, s, "a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2")
 			before := ownedContentTree(t, root)
 			first, blobs := gcBuildCandidate(t, sid, "copy_first", c.Texts, c.ExtraBlobs)
+			if c.ToolRows {
+				input := &first.Generation.Main.Entries[1]
+				input.EntryType, input.Role = schema.EntryTypeToolUse, schema.RoleAssistant
+				input.ToolInput, input.ContentPreview = input.ContentPreview, nil
+				output := &first.Generation.Main.Entries[2]
+				output.EntryType, output.Role = schema.EntryTypeToolResult, schema.RoleTool
+				// The accepted tool-result echo remains in preview and output.
+				output.ToolOutput = output.ContentPreview
+				first = filledCandidateForValidation(t, first, blobs)
+			}
 			if err := activateTestGeneration(t, s, first, blobs); err != nil {
 				t.Fatal(err)
 			}
@@ -175,19 +186,38 @@ func TestContentOneCopy(t *testing.T) {
 			if len(actual) != c.Blobs || !reflect.DeepEqual(actual, expected) {
 				t.Fatalf("blob set = %v; want %v (%d rows)", actual, expected, c.Blobs)
 			}
+			if err := sqlitex.Execute(conn, `SELECT (SELECT count(*) FROM session_entries WHERE session_id=?), (SELECT count(*) FROM session_entry_full_content WHERE session_id=?)`, &sqlitex.ExecOptions{Args: []any{string(sid), string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+				if stmt.ColumnInt64(0) != 0 || stmt.ColumnInt64(1) != 0 {
+					return fmt.Errorf("native activation retained a mirror or full-content copy")
+				}
+				return nil
+			}}); err != nil {
+				t.Fatal(err)
+			}
 			if c.Mode == "columns" || c.Mode == "collision" {
-				var texts []string
+				index := 0
 				if err := sqlitex.Execute(conn, `SELECT content_preview,tool_input,tool_output FROM session_entry_bodies WHERE session_id=? ORDER BY body_id`, &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
-					texts = append(texts, stmt.ColumnText(0))
-					if stmt.ColumnType(1) != sqlite.TypeNull || stmt.ColumnType(2) != sqlite.TypeNull {
-						return fmt.Errorf("text body duplicates emitted content in tool columns")
+					if index >= len(first.Generation.Main.Entries) {
+						return fmt.Errorf("unexpected extra body")
 					}
+					entry := first.Generation.Main.Entries[index]
+					fields := []*string{entry.ContentPreview, entry.ToolInput, entry.ToolOutput}
+					for column, expected := range fields {
+						if expected == nil {
+							if stmt.ColumnType(column) != sqlite.TypeNull {
+								return fmt.Errorf("entry %d has an unexpected content copy in column %d", index, column)
+							}
+						} else if stmt.ColumnType(column) == sqlite.TypeNull || stmt.ColumnText(column) != *expected {
+							return fmt.Errorf("entry %d content column %d changed", index, column)
+						}
+					}
+					index++
 					return nil
 				}}); err != nil {
 					t.Fatal(err)
 				}
-				if !reflect.DeepEqual(texts, c.Texts) {
-					t.Fatalf("stored content = %v; want %v", texts, c.Texts)
+				if index != len(c.Texts) {
+					t.Fatalf("stored content rows = %d; want one per supplied content string", index)
 				}
 			}
 		})

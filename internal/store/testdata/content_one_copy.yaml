@@ -13,6 +13,7 @@ cases:
     blobs: 0
   - name: each-content-string-stored-once
     mode: columns
+    toolRows: true
     texts: [onecopyalpha, onecopybeta, onecopygamma]
     bodies: 3
     blobs: 0
