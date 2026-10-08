@@ -1,17 +1,61 @@
-# annotation_targets_no_fk — scaffolding for the harmonized session content model
-# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
 cases:
   - name: create-annotation-in-range
+    action: create
+    sessionIDs: &representations [07999aaa-36bc-424c-a789-8be54d9702c1, 07999aaa-36bc-424c-a789-8be54d9702c2, 07999aaa-36bc-424c-a789-8be54d9702c3]
+    entryIndex: 1
+    wantRefused: false
   - name: create-annotation-out-of-range-refused
+    action: create
+    sessionIDs: *representations
+    entryIndex: 99
+    wantRefused: true
   - name: create-and-supersede-out-of-range-refused
+    action: supersede
+    sessionIDs: [07999aaa-36bc-424c-a789-8be54d9702c1]
+    entryIndex: 77
+    wantRefused: true
   - name: classifier-insert-out-of-range-refused
+    action: classifier
+    sessionIDs: [07999aaa-36bc-424c-a789-8be54d9702c2]
+    entryIndex: 79
+    wantRefused: true
   - name: batch-create-out-of-range-refused
+    action: batch
+    sessionIDs: [07999aaa-36bc-424c-a789-8be54d9702c3]
+    batchIndexes: [0, 78]
+    wantRefused: true
   - name: restore-out-of-range-refused
+    action: restore
+    sessionIDs: [08999aaa-36bc-424c-a789-8be54d9702d2]
+    entryIndex: 1
+    previews: &previews [alpha, bravo, charlie]
+    human: false
+    wantState: superseded
   - name: remap-after-reindex
+    action: remap
+    sessionIDs: [08999aaa-36bc-424c-a789-8be54d9702d1]
+    entryIndex: 1
+    previews: *previews
+    replacement: [zero, alpha, bravo, charlie]
+    wantIndex: 2
   - name: unresolved-kept
+    action: restore
+    sessionIDs: [08999aaa-36bc-424c-a789-8be54d9702d3]
+    entryIndex: 1
+    previews: *previews
+    human: true
+    wantState: unresolved
   - name: prune-cascade
+    action: prune
+    sessionIDs: [07999aaa-36bc-424c-a789-8be54d9702c1]
+    entryIndex: 2
   - name: v1-unchanged
+    action: create
+    sessionIDs: [07999aaa-36bc-424c-a789-8be54d9702c3]
+    entryIndex: 1
+    wantRefused: false
   - name: file-backed-native-checked-against-mirror
+    action: create
+    sessionIDs: [07999aaa-36bc-424c-a789-8be54d9702c2]
+    entryIndex: 1
+    wantRefused: false

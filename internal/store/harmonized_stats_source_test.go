@@ -15,8 +15,22 @@ import (
 // seedStatsListSuite writes a native session (active generation, captured
 // row, and legacy metrics row with different values) and a non-native
 // session (legacy metrics row only) for the list/detail source test.
-func seedStatsListSuite(t *testing.T, s *store.Store) {
+func seedStatsListSuite(t *testing.T, s *store.Store, cases ...capturedStatsCase) {
 	t.Helper()
+	var c capturedStatsCase
+	if len(cases) == 0 {
+		for _, fixture := range LoadSessionCapturedStatsFixtures(t) {
+			if fixture.Action == "list-detail" {
+				c = fixture
+				break
+			}
+		}
+		if c.Action == "" {
+			t.Fatal("captured stats fixtures lack list-detail source data")
+		}
+	} else {
+		c = cases[0]
+	}
 	ctx := context.Background()
 	conn, err := s.PoolForTest().Take(ctx)
 	if err != nil {
@@ -40,20 +54,21 @@ VALUES(?, 'opencode', 'list-model', 'list-host', 'list-project', 1, 2, 3, '/synt
 	// Legacy metrics rows disagree with the captured row on purpose: the
 	// native session must serve captured values, the other legacy ones.
 	exec(`INSERT INTO session_metrics(session_id, turn_count, tool_calls, input_tokens, output_tokens, duration_minutes)
-VALUES(?, 3, 4, 700, 100, 0.5)`, nativeID)
+VALUES(?, ?, ?, ?, ?, 0.5)`, nativeID, c.LegacyTurns, c.LegacyTools, c.PeakInput, c.LegacyOutput)
 	exec(`INSERT INTO session_metrics(session_id, turn_count, tool_calls, input_tokens, output_tokens, duration_minutes)
-VALUES(?, 3, 4, 700, 100, 0.5)`, legacyID)
+VALUES(?, ?, ?, ?, ?, 0.5)`, legacyID, c.LegacyTurns, c.LegacyTools, c.PeakInput, c.LegacyOutput)
 	exec(`INSERT INTO session_captured_stats(session_id, turn_count, tool_call_count, tokens_out, duration_ms, tokens_in, source, updated_at_ms)
-VALUES(?, 10, 20, 300, 60000, 111, 'harness', 100)`, nativeID)
+VALUES(?, ?, ?, ?, ?, 111, 'harness', 100)`, nativeID, c.NativeTurns, c.NativeTools, c.NativeOutput, c.DurationMs)
 }
 
-// TestListDetailStatsSource pins list-detail-stats-source: list and detail
+// runListDetailStatsSource pins list-detail-stats-source: list and detail
 // rows serve the captured measurements for native sessions (with the peak
 // input tokens and the summed total) and the legacy columns otherwise.
-func TestListDetailStatsSource(t *testing.T) {
+func runListDetailStatsSource(t *testing.T, c capturedStatsCase) {
+	t.Helper()
 	s := openV2TestStore(t)
 	ctx := context.Background()
-	seedStatsListSuite(t, s)
+	seedStatsListSuite(t, s, c)
 	nativeID := "0a999aaa-36bc-424c-a789-8be54d9702e1"
 	legacyID := "0a999aaa-36bc-424c-a789-8be54d9702e2"
 	rows, err := s.ListSessionsFiltered(ctx, store.SessionListFilter{})
@@ -68,31 +83,31 @@ func TestListDetailStatsSource(t *testing.T) {
 	if !ok {
 		t.Fatalf("native session missing from list: %v", byID)
 	}
-	if native.TurnCount != 10 || native.ToolCalls != 20 || native.OutputTokens != 300 {
+	if native.TurnCount != c.NativeTurns || native.ToolCalls != c.NativeTools || native.OutputTokens != c.NativeOutput {
 		t.Fatalf("native list = (%d, %d, %d), want captured (10, 20, 300)",
 			native.TurnCount, native.ToolCalls, native.OutputTokens)
 	}
-	if native.InputTokens != 700 {
+	if native.InputTokens != c.PeakInput {
 		t.Fatalf("native input tokens = %d, want peak 700", native.InputTokens)
 	}
-	if native.TokensTotal != 1000 {
+	if native.TokensTotal != c.PeakInput+c.NativeOutput {
 		t.Fatalf("native total = %d, want peak 700 + captured 300", native.TokensTotal)
 	}
-	if native.DurationMinutes != 1.0 {
+	if native.DurationMinutes != float64(c.DurationMs)/60000 {
 		t.Fatalf("native duration = %v, want 1.0 minutes", native.DurationMinutes)
 	}
 	legacy, ok := byID[legacyID]
 	if !ok {
 		t.Fatalf("legacy session missing from list")
 	}
-	if legacy.TurnCount != 3 || legacy.ToolCalls != 4 || legacy.OutputTokens != 100 || legacy.TokensTotal != 800 {
+	if legacy.TurnCount != c.LegacyTurns || legacy.ToolCalls != c.LegacyTools || legacy.OutputTokens != c.LegacyOutput || legacy.TokensTotal != c.PeakInput+c.LegacyOutput {
 		t.Fatalf("legacy list = %+v, want legacy values", legacy)
 	}
 	detail, err := s.SessionByID(ctx, nativeID)
 	if err != nil {
 		t.Fatalf("detail: %v", err)
 	}
-	if detail.TurnCount != 10 || detail.ToolCalls != 20 || detail.OutputTokens != 300 {
+	if detail.TurnCount != c.NativeTurns || detail.ToolCalls != c.NativeTools || detail.OutputTokens != c.NativeOutput {
 		t.Fatalf("native detail = %+v, want captured values", detail)
 	}
 }

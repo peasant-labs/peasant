@@ -1,14 +1,27 @@
-# content_hostile_input — scaffolding for the harmonized session content model
-# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
 cases:
   - name: malformed-record
+    operation: malformed-record
+    content: '{not an entry extra}'
   - name: oversized-record-placeholder
+    operation: oversized-record-placeholder
+    content: L
+    repeat: 262144
   - name: invalid-utf8
+    operation: invalid-utf8
+    contentBytes: [118, 97, 108, 105, 100, 32, 112, 114, 101, 102, 105, 120, 255, 254, 32, 105, 110, 118, 97, 108, 105, 100, 32, 115, 117, 102, 102, 105, 120]
   - name: foreign-session-entry
+    operation: foreign-session-entry
+    foreignSession: ffffffff-ffff-4fff-8fff-ffffffffffff
   - name: duplicate-ref
+    operation: duplicate-ref
+    duplicateEntry: 1
+    duplicateOf: 0
   - name: forged-full-claim
+    operation: forged-full-claim
+    texts: [hostile preview, hostile preview in, hostile preview out]
   - name: pi-carrier-with-content-refused
+    operation: pi-carrier-with-content-refused
+    content: smuggled content
   - name: pi-carrier-refused-at-store-boundary
+    operation: pi-carrier-refused-at-store-boundary
+    content: smuggled tool output

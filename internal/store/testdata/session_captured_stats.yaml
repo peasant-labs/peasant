@@ -1,18 +1,98 @@
-# session_captured_stats — scaffolding for the harmonized session content model
-# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
 cases:
   - name: capture-upsert
+    action: upsert
+    updates:
+      - values: &capture {turnCount: 3, toolCallCount: 7, inputSubmissionCount: 2, seedJSON: '{"turnCount":3,"toolCallCount":7}', source: harness, updatedAtMs: 100}
+        wantApplied: true
+    want: *capture
+    wantMirror: 2
   - name: resume-latest-wins
+    action: upsert
+    updates: &resume
+      - values: {turnCount: 3, source: harness, updatedAtMs: 100}
+        wantApplied: true
+      - values: &derived {turnCount: 5, toolCallCount: 9, source: derived, updatedAtMs: 200}
+        wantApplied: true
+    want: *derived
   - name: null-is-unknown
+    action: upsert
+    updates:
+      - values: &unknown {source: harness, updatedAtMs: 100}
+        wantApplied: true
+    want: *unknown
   - name: derived-source-overwrite
+    action: upsert
+    updates: *resume
+    want: *derived
   - name: mirror-in-same-transaction
+    action: upsert
+    updates:
+      - values: *capture
+        wantApplied: true
+      - values: {turnCount: 99, toolCallCount: 11, inputSubmissionCount: 5, seedJSON: '{"turnCount":99,"toolCallCount":11}', source: harness, updatedAtMs: 200}
+        mirrorFailureSQL: >-
+          CREATE TRIGGER refuse_stats_mirror_update
+          BEFORE UPDATE OF input_submission_count ON sessions
+          BEGIN SELECT RAISE(ABORT, 'synthetic mirror write refused'); END
+        wantApplied: false
+        wantError: synthetic mirror write refused
+    want: *capture
+    wantMirror: 2
   - name: overflow-new-kind
+    action: upsert
+    updates:
+      - values: &overflow {overflow: '{"m9_score":0.5}', source: harness, updatedAtMs: 150}
+        wantApplied: true
+    want: *overflow
   - name: partial-update-merges
+    action: upsert
+    updates: &partial
+      - values: {turnCount: 3, toolCallCount: 7, source: harness, updatedAtMs: 100}
+        wantApplied: true
+      - values: {tokensOut: 400, overflow: '{"m9_score":0.5}', source: harness, updatedAtMs: 150}
+        wantApplied: true
+      - values: {turnCount: 99, source: harness, updatedAtMs: 120}
+        wantApplied: false
+    want: &merged {turnCount: 3, toolCallCount: 7, tokensOut: 400, overflow: '{"m9_score":0.5}', source: harness, updatedAtMs: 150}
   - name: older-update-ignored
+    action: upsert
+    updates: *partial
+    want: *merged
   - name: list-detail-stats-source
+    action: list-detail
+    nativeTurns: 10
+    nativeTools: 20
+    nativeOutput: 300
+    legacyTurns: 3
+    legacyTools: 4
+    legacyOutput: 100
+    peakInput: 700
+    durationMs: 60000
   - name: seed-unknown-for-compute-only-row
+    action: upsert
+    updates:
+      - values: &compute {turnCount: 4, source: derived, updatedAtMs: 50}
+        wantApplied: true
+    want: *compute
+    checkSeed: true
+    wantSeed: null
   - name: seed-json-survives-derived-update
+    action: upsert
+    updates:
+      - values: {turnCount: 3, seedJSON: '{"turnCount":3,"toolCallCount":7}', source: harness, updatedAtMs: 100}
+        wantApplied: true
+      - values: {turnCount: 9, source: derived, updatedAtMs: 200}
+        wantApplied: true
+    want: {turnCount: 9, seedJSON: '{"turnCount":3,"toolCallCount":7}', source: derived, updatedAtMs: 200}
+    checkSeed: true
+    wantSeed: {turnCount: 3, toolCallCount: 7}
   - name: seed-unknown-after-partial-harness-update
+    action: upsert
+    updates:
+      - values: {turnCount: 3, seedJSON: '{"turnCount":3}', source: harness, updatedAtMs: 100}
+        wantApplied: true
+      - values: &seedless {turnCount: 4, source: harness, updatedAtMs: 150}
+        wantApplied: true
+    want: *seedless
+    checkSeed: true
+    wantSeed: null
