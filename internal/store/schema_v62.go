@@ -24,7 +24,10 @@ const BodyRowIDBase = 1 << 50
 // (the v53 pattern), so this slot disables foreign keys in MigrationOptions.
 // Data preservation rules, per rebuilt table:
 //   - session_relationship_evidence loses its anchor JSON to three structured
-//     columns (json_extract over the anchor object; NULL anchor stays NULL).
+//     columns (json_extract over the anchor object; NULL anchor stays NULL)
+//     and gains the document ordinal (ROW_NUMBER over the legacy rowid order,
+//     which preserves the captured document's relationship order; the kind
+//     key stays unique).
 //   - session_context_segments loses captured_refs_json to ordered
 //     session_context_segment_refs rows (json_each over the ref array; the
 //     array index is the ordinal). Only JSON arrays shred: the production
@@ -260,6 +263,7 @@ CREATE INDEX idx_generation_content_digest ON session_generation_content(session
 CREATE TABLE session_relationship_evidence_v62 (
   session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id   TEXT NOT NULL,
+  ordinal         INTEGER NOT NULL CHECK(ordinal >= 0),
   kind            TEXT NOT NULL,
   target_state    TEXT NOT NULL CHECK(target_state IN
     ('target_known','target_known_retained','explicit_none','unknown',
@@ -273,9 +277,11 @@ CREATE TABLE session_relationship_evidence_v62 (
 ) STRICT;
 
 INSERT INTO session_relationship_evidence_v62
-  (session_id, generation_id, kind, target_state, target_local_id, evidence,
+  (session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence,
    anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
-SELECT session_id, generation_id, kind, target_state, target_local_id, evidence,
+SELECT session_id, generation_id,
+  ROW_NUMBER() OVER (PARTITION BY session_id, generation_id ORDER BY rowid) - 1,
+  kind, target_state, target_local_id, evidence,
   json_extract(anchor, '$.kind'),
   json_extract(anchor, '$.sourceEntryRef'),
   json_extract(anchor, '$.sourceRevisionRef')

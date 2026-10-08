@@ -463,8 +463,9 @@ func mapGenerationRecord(sessionID schema.SessionID, generation indexformat.Gene
 		})
 	}
 	children.TitleRefs = append(children.TitleRefs, generation.TitleRefs...)
-	for _, relationship := range metadata.Relationships {
+	for i, relationship := range metadata.Relationships {
 		mapped := GenerationRelationship{
+			Ordinal:     i,
 			Kind:        relationship.Kind,
 			TargetState: relationship.TargetState,
 			Evidence:    nullableEvidence(relationship.Evidence),

@@ -179,7 +179,7 @@ nullability:
   - name: evidence-nullability
     table: session_relationship_evidence
     nullable: [target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref]
-    notNull: [session_id, generation_id, kind, target_state]
+    notNull: [session_id, generation_id, ordinal, kind, target_state]
   - name: segments-nullability
     table: session_context_segments
     nullable: [logical_session_id, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive]

@@ -74,6 +74,7 @@ type v62EvidenceRow struct {
 	ExpectedAnchorKind        *string `yaml:"expectedAnchorKind"`
 	ExpectedAnchorEntryRef    *string `yaml:"expectedAnchorEntryRef"`
 	ExpectedAnchorRevisionRef *string `yaml:"expectedAnchorRevisionRef"`
+	ExpectedOrdinal           *int    `yaml:"expectedOrdinal"`
 }
 
 type v62ExpectedRef struct {
@@ -500,17 +501,22 @@ func assertV62EvidenceShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixture
 	for _, r := range fixtures.EvidenceRows {
 		var kind, targetState, evidence string
 		var anchorKind, anchorEntryRef, anchorRevisionRef any
+		var ordinal int64
 		found := false
-		queryV62Row(t, conn, `SELECT kind, target_state, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref FROM session_relationship_evidence WHERE session_id=? AND generation_id=? AND kind=?`, []any{r.SessionID, r.GenerationID, r.Kind}, func(stmt *sqlite.Stmt) {
+		queryV62Row(t, conn, `SELECT kind, target_state, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref, ordinal FROM session_relationship_evidence WHERE session_id=? AND generation_id=? AND kind=?`, []any{r.SessionID, r.GenerationID, r.Kind}, func(stmt *sqlite.Stmt) {
 			found = true
 			kind, targetState, evidence = stmt.ColumnText(0), stmt.ColumnText(1), stmt.ColumnText(2)
 			anchorKind = v62NullableText(stmt, 3)
 			anchorEntryRef = v62NullableText(stmt, 4)
 			anchorRevisionRef = v62NullableText(stmt, 5)
+			ordinal = stmt.ColumnInt64(6)
 		})
 		if !found {
 			t.Errorf("%s: evidence row missing after rebuild", r.Name)
 			continue
+		}
+		if r.ExpectedOrdinal != nil && ordinal != int64(*r.ExpectedOrdinal) {
+			t.Errorf("%s: ordinal = %d, want %d: the rebuild must preserve document order", r.Name, ordinal, *r.ExpectedOrdinal)
 		}
 		if kind != r.Kind || targetState != r.TargetState || evidence != r.Evidence {
 			t.Errorf("%s: preserved columns changed: (%s,%s,%s)", r.Name, kind, targetState, evidence)

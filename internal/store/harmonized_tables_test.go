@@ -437,6 +437,7 @@ VALUES('%s','opencode','m','tables-host','tables-project',1,2,3,'/s.jsonl','json
 	case "session_relationship_evidence":
 		set("session_id", sid)
 		set("generation_id", fmt.Sprintf("gen-ev-%d", n))
+		set("ordinal", 0)
 		set("kind", "started_by")
 		set("target_state", "unknown")
 		set("target_local_id", "t")

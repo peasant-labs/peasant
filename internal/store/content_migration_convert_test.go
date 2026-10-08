@@ -267,7 +267,7 @@ func seedMigrateRichChildren(t *testing.T, s *Store, sid schema.SessionID, genID
 			t.Fatalf("seed rich children: %v", err)
 		}
 	}
-	for _, relationship := range v2.Generation.Metadata.Relationships {
+	for ordinal, relationship := range v2.Generation.Metadata.Relationships {
 		var target, evidence, anchorKind, anchorRef any
 		if relationship.TargetLocalID != nil {
 			target = string(*relationship.TargetLocalID)
@@ -281,8 +281,8 @@ func seedMigrateRichChildren(t *testing.T, s *Store, sid schema.SessionID, genID
 				anchorRef = string(relationship.Anchor.SourceEntryRef)
 			}
 		}
-		exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-			string(sid), genID, string(relationship.Kind), string(relationship.TargetState), target, evidence, anchorKind, anchorRef)
+		exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+			string(sid), genID, ordinal, string(relationship.Kind), string(relationship.TargetState), target, evidence, anchorKind, anchorRef)
 	}
 	for partition, records := range map[int][]schema.NativeMetadataRecord{0: v2.Generation.Main.NativeMetadata} {
 		for ordinal, record := range records {

@@ -97,8 +97,10 @@ type GenerationDiagnostic struct {
 }
 
 // GenerationRelationship is one session_relationship_evidence row
-// (metadata.relationships, structured; design §3.3 table 6).
+// (metadata.relationships, structured; design §3.3 table 6). Ordinal is the
+// captured document order, so readers rebuild the collection byte for byte.
 type GenerationRelationship struct {
+	Ordinal                 int
 	Kind                    schema.SessionRelationshipKind
 	TargetState             schema.RelationshipTargetState
 	TargetLocalID           *schema.SessionID

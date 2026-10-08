@@ -869,6 +869,7 @@ CREATE TABLE session_publications (
 CREATE TABLE "session_relationship_evidence" (
   session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id   TEXT NOT NULL,
+  ordinal         INTEGER NOT NULL CHECK(ordinal >= 0),
   kind            TEXT NOT NULL,
   target_state    TEXT NOT NULL CHECK(target_state IN
     ('target_known','target_known_retained','explicit_none','unknown',
