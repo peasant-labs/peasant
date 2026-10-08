@@ -1,0 +1,6 @@
+requiredNames:
+  - unknown-kind-kept-in-overflow
+  - absent-stays-null-through-conversion
+  - explicit-zero-stays-zero
+  - overflow-diagnostic-emitted
+  - shadow-detects-dropped-overflow

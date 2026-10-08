@@ -156,11 +156,12 @@ type RetirementPreconditionStatus struct {
 // per-session dispositions accumulated across the run, the freed bytes,
 // the data rollbacks with their reasons, and the retirement evaluation.
 type MigrateResult struct {
-	Converted  int64
-	RolledBack int64
-	Marked     int64
-	Skipped    int64
-	BytesFreed int64
+	Converted         int64
+	RolledBack        int64
+	Marked            int64
+	Skipped           int64
+	BytesFreed        int64
+	StatsOverflowKeys map[string]int
 	// Rollbacks names every data rollback with its dimension, so the
 	// report says which sessions need attention and why.
 	Rollbacks []MigrateRollback
@@ -420,6 +421,9 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 		case MigrateOutcomeConverted:
 			result.Converted++
 			result.BytesFreed += before.Bytes
+			if err := s.accumulateMigrateStatsOverflow(ctx, sessionID, &result); err != nil {
+				return result, err
+			}
 		case MigrateOutcomeRolledBack:
 			result.RolledBack++
 			rollbacks++

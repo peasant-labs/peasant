@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/store"
@@ -10,7 +11,8 @@ import (
 )
 
 // seedStatsSession inserts the host, project, and session rows one stats
-// test needs. A non-nil active generation makes the session native.
+// test needs. A non-nil active generation installs a harmonized catalog row;
+// a pointer alone would still dispatch to file-backed compatibility reads.
 func seedStatsSession(t *testing.T, s *store.Store, id string, active *string) {
 	t.Helper()
 	conn, err := s.PoolForTest().Take(context.Background())
@@ -32,6 +34,13 @@ func seedStatsSession(t *testing.T, s *store.Store, id string, active *string) {
 	}
 	exec(`INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, schema_version, active_generation_id)
 VALUES(?, 'opencode', 'stats-model', 'stats-host', 'stats-project', 1, 2, 3, '/synthetic/stats.jsonl', 'jsonl', 11, ?)`, id, activeArg)
+	if active != nil {
+		digest := strings.Repeat("0", 64)
+		exec(`INSERT INTO session_generations(session_id,generation_id,schema_version,harness,model,version,
+ts_start,ts_end,source_format,project_hash,project_name,host_slug,content_hash,metadata_hash,
+redaction_applied,completeness,source_evidence_digest,index_format_version,candidate_digest,installed_at_ms)
+VALUES(?,?,11,'opencode','stats-model','test',1,2,'jsonl','stats-project','stats','stats-host','',?,0,'complete',?,2,?,1)`, id, *active, digest, digest, digest)
+	}
 }
 
 func statsInt(v int) *int          { return &v }

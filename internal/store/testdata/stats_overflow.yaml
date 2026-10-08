@@ -1,0 +1,47 @@
+cases:
+  - name: unknown-kind-kept-in-overflow
+    statsJson: '{"turnCount":2,"inputSubmissionCount":1,"futureZ":{"count":7},"futureA":null}'
+    want:
+      turnCount: 2
+      inputSubmissionCount: 1
+    overflow: '{"futureA":null,"futureZ":{"count":7}}'
+    keys: [futureA, futureZ]
+    expect: converted
+  - name: absent-stays-null-through-conversion
+    statsJson: '{"inputSubmissionCount":1,"tokensIn":12,"thoughtTokens":null}'
+    want:
+      tokensIn: 12
+      inputSubmissionCount: 1
+    expect: converted
+  - name: explicit-zero-stays-zero
+    statsJson: '{"turnCount":0,"inputSubmissionCount":0,"toolCallCount":0,"subagentCount":0,"durationMs":0,"tokensIn":0,"tokensOut":0,"thoughtTokens":0,"cachedReadTokens":0,"cachedWriteTokens":0}'
+    want:
+      turnCount: 0
+      inputSubmissionCount: 0
+      toolCallCount: 0
+      subagentCount: 0
+      durationMs: 0
+      tokensIn: 0
+      tokensOut: 0
+      thoughtTokens: 0
+      cachedReadTokens: 0
+      cachedWriteTokens: 0
+    expect: converted
+  - name: overflow-diagnostic-emitted
+    reportDriver: true
+    statsJson: '{"turnCount":1,"inputSubmissionCount":1,"newCost":4.25}'
+    want:
+      turnCount: 1
+      inputSubmissionCount: 1
+    overflow: '{"newCost":4.25}'
+    keys: [newCost]
+    expect: converted
+  - name: shadow-detects-dropped-overflow
+    statsJson: '{"turnCount":1,"inputSubmissionCount":1,"futureCount":8}'
+    want:
+      turnCount: 1
+      inputSubmissionCount: 1
+    overflow: '{"futureCount":8}'
+    keys: [futureCount]
+    damage: drop-overflow
+    expect: rolled-back

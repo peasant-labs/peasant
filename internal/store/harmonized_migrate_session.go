@@ -70,10 +70,8 @@ type migrateOracle struct {
 	sessionEntriesHash   *string
 	parentID             *string
 	priorEvidence        []byte
-	// statsSeedDoc is the captured stats document: the harness's own JSON
-	// over the capture's measurements, which the Phase 2c upsert writes
-	// to the seed home and the metadata dimension consumes as its operand.
-	statsSeedDoc string
+	statsRaw             CapturedStats
+	statsWarnings        []schema.DiagnosticEntry
 	// statsCaptureTime stamps the Phase 2c upsert: the generation's
 	// activated_at_ms, falling back to installed_at_ms (the v62 backfill
 	// rule). A pre-existing newer row survives the age gate, is never
@@ -359,11 +357,12 @@ func readMigrateOracleCatalogOnConn(conn *sqlite.Conn, oracle *migrateOracle) er
 	if !found {
 		return fmt.Errorf("no old generation row exists; the session was converted or drained by a concurrent pass")
 	}
-	seed, err := json.Marshal(oracle.metadata.Stats)
+	stats, warnings, err := capturedStatsFromRaw(json.RawMessage(oracle.metadataRaw), oracle.metadata.ModelHarness)
 	if err != nil {
-		return fmt.Errorf("encode the captured stats document: %w", err)
+		return err
 	}
-	oracle.statsSeedDoc = string(seed)
+	oracle.statsRaw = stats
+	oracle.statsWarnings = warnings
 	oracle.statsCaptureTime = oracle.installedAtMs
 	if oracle.activatedAtMs != nil {
 		oracle.statsCaptureTime = *oracle.activatedAtMs
@@ -679,6 +678,7 @@ func oracleGeneration(oracle *migrateOracle) indexformat.Generation {
 		SourceEvidenceDigest: oracle.sourceEvidenceDigest,
 		TitleRefs:            append([]schema.SourceEntryRef(nil), oracle.titleRefs...),
 	}
+	generation.Metadata.Diagnostics.Warnings = append(append([]schema.DiagnosticEntry(nil), oracle.metadata.Diagnostics.Warnings...), oracle.statsWarnings...)
 	for _, section := range oracle.sections {
 		if section.partitionID == 0 {
 			continue
@@ -907,7 +907,9 @@ func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) e
 	txnErr := error(nil)
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
-	stats := capturedStatsForHarnessWrite(oracle.sessionID, oracle.metadata.Stats, oracle.statsSeedDoc, oracle.statsCaptureTime)
+	stats := oracle.statsRaw
+	stats.SessionID = oracle.sessionID
+	stats.UpdatedAtMs = oracle.statsCaptureTime
 	if _, err := upsertCapturedStatsOnConn(conn, stats); err != nil {
 		txnErr = fmt.Errorf("upsert the captured stats: %w", err)
 		return txnErr
@@ -969,6 +971,10 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 			return false, nil, fmt.Errorf("session %s: defect mismatch at %s: %s; the catalog transaction rolled back and the run halts", oracle.sessionID, mismatch.Dimension, mismatch.Reason)
 		}
 		return false, mismatch, nil
+	}
+	if err := clearLegacySeedOnConn(conn, oracle.sessionID); err != nil {
+		txnErr = err
+		return false, nil, txnErr
 	}
 	if err := deleteMigrateProjectionOldRows(conn, oracle); err != nil {
 		txnErr = err
@@ -1262,8 +1268,17 @@ func verifyMigrateFullShape(conn *sqlite.Conn, oracle *migrateOracle, _ *prepare
 // agree exactly. Nested unknown keys are dropped by the struct decode on
 // both sides; only the top-level key-set check refuses unknown keys.
 func verifyMigrateMetadataDocument(conn *sqlite.Conn, oracle *migrateOracle, prepared *preparedHarmonized) *migrateShadowMismatch {
-	_ = conn
-	stats := capturedStatsForHarnessWrite(oracle.sessionID, oracle.metadata.Stats, oracle.statsSeedDoc, oracle.statsCaptureTime)
+	stats, warnings, err := capturedStatsFromRaw(json.RawMessage(oracle.metadataRaw), oracle.metadata.ModelHarness)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: err.Error()}
+	}
+	storedStats, err := readCapturedStatsOnConn(conn, oracle.sessionID)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "stats-overflow", Reason: err.Error()}
+	}
+	if !capturedOverflowContains(storedStats.Overflow, stats.Overflow) {
+		return &migrateShadowMismatch{Dimension: "stats-overflow", Reason: "the captured stats overflow differs from the unmodeled keys in the raw metadata document"}
+	}
 	rebuilt := serializeMetadata(prepared.record, prepared.children, stats)
 	var document schema.UnifiedMetadata
 	if err := json.Unmarshal(rebuilt, &document); err != nil {
@@ -1282,6 +1297,7 @@ func verifyMigrateMetadataDocument(conn *sqlite.Conn, oracle *migrateOracle, pre
 		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: fmt.Sprintf("decode the stored metadata document: %v", err)}
 	}
 	stored.MetadataHash = ""
+	stored.Diagnostics.Warnings = append(stored.Diagnostics.Warnings, warnings...)
 	var rawKeys, rebuiltKeys map[string]any
 	if err := json.Unmarshal([]byte(oracle.metadataRaw), &rawKeys); err != nil {
 		return &migrateShadowMismatch{Dimension: "metadata-document", Reason: fmt.Sprintf("decode the stored metadata keys: %v", err)}
@@ -1386,6 +1402,7 @@ func verifyMigrateDetailChildren(conn *sqlite.Conn, oracle *migrateOracle, _ *pr
 	if err != nil {
 		return &migrateShadowMismatch{Dimension: "detail-children", Reason: fmt.Sprintf("build the legacy oracle snapshot: %v", err)}
 	}
+	legacy.Metadata.Diagnostics.Warnings = append(legacy.Metadata.Diagnostics.Warnings, oracle.statsWarnings...)
 	forced, err := harmonizedReadSnapshotOnConn(conn, oracle.sessionID, oracle.generationID)
 	if err != nil {
 		return &migrateShadowMismatch{Dimension: "detail-children", Reason: fmt.Sprintf("build the forced-harmonized snapshot: %v", err)}
@@ -1442,6 +1459,7 @@ func verifyMigrateDetailBytes(conn *sqlite.Conn, oracle *migrateOracle, _ *prepa
 	if err != nil {
 		return &migrateShadowMismatch{Dimension: "detail-bytes", Defect: true, Reason: fmt.Sprintf("build the legacy oracle snapshot: %v", err)}
 	}
+	legacy.Metadata.Diagnostics.Warnings = append(legacy.Metadata.Diagnostics.Warnings, oracle.statsWarnings...)
 	forced, err := harmonizedReadSnapshotOnConn(conn, oracle.sessionID, oracle.generationID)
 	if err != nil {
 		return &migrateShadowMismatch{Dimension: "detail-bytes", Defect: true, Reason: fmt.Sprintf("build the forced-harmonized snapshot: %v", err)}

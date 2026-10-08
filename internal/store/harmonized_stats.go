@@ -1,10 +1,13 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -242,10 +245,115 @@ func upsertCapturedStatsOnConn(conn *sqlite.Conn, stats CapturedStats) (bool, er
 	return applied, nil
 }
 
+// capturedStatsFromRaw preserves measurements' presence and unmodeled kinds
+// before a retained metadata document is decoded through the wire struct.
+func capturedStatsFromRaw(raw json.RawMessage, harness schema.Harness) (CapturedStats, []schema.DiagnosticEntry, error) {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return CapturedStats{}, nil, fmt.Errorf("store: decode retained metadata stats for harness %s before capture: %w; no measurements were written; restore valid retained metadata and retry", harness, err)
+	}
+	stats := CapturedStats{Source: StatsSourceHarness}
+	seed, present := document["stats"]
+	if !present || string(seed) == "null" {
+		return stats, nil, nil
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(seed, &values); err != nil || values == nil {
+		return CapturedStats{}, nil, fmt.Errorf("store: retained stats for harness %s are not a JSON object; no measurements were written; restore the captured stats object before retrying", harness)
+	}
+	seedDoc := string(seed)
+	stats.SeedJSON = &seedDoc
+	known := map[string]any{
+		"turnCount": &stats.TurnCount, "inputSubmissionCount": &stats.InputSubmissionCount,
+		"toolCallCount": &stats.ToolCallCount, "subagentCount": &stats.SubagentCount,
+		"durationMs": &stats.DurationMs, "tokensIn": &stats.TokensIn, "tokensOut": &stats.TokensOut,
+		"thoughtTokens": &stats.ThoughtTokens, "cachedReadTokens": &stats.CachedReadTokens,
+		"cachedWriteTokens": &stats.CachedWriteTokens,
+	}
+	for key, dest := range known {
+		if value, ok := values[key]; ok {
+			if err := json.Unmarshal(value, dest); err != nil {
+				return CapturedStats{}, nil, fmt.Errorf("store: decode retained stats.%s for harness %s before capture: %w; no measurements were written; restore an integer or null and retry", key, harness, err)
+			}
+			delete(values, key)
+		}
+	}
+	if len(values) == 0 {
+		return stats, nil, nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return CapturedStats{}, nil, fmt.Errorf("store: encode retained stat overflow for harness %s: %w; no measurements were written; restore valid stat values and retry", harness, err)
+	}
+	overflow := string(encoded)
+	stats.Overflow = &overflow
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	warnings := make([]schema.DiagnosticEntry, 0, len(keys))
+	for _, key := range keys {
+		warnings = append(warnings, schema.DiagnosticEntry{
+			ErrorType: "stats-overflow", Location: "stats." + key,
+			Message:     fmt.Sprintf("harness %s reported stat kind %s that this build does not model; kept in session_captured_stats.overflow", harness, key),
+			Remediation: "promote this stat through the documented compatibility-field promotion workflow; retain overflow until the typed column and readers are deployed",
+		})
+	}
+	return stats, warnings, nil
+}
+
+// capturedOverflowContains checks raw evidence independently of the typed
+// metadata comparison. A newer stats row may retain additional unknown keys.
+func capturedOverflowContains(stored, captured *string) bool {
+	if captured == nil {
+		return true
+	}
+	if stored == nil {
+		return false
+	}
+	var actual, expected map[string]json.RawMessage
+	if json.Unmarshal([]byte(*stored), &actual) != nil || json.Unmarshal([]byte(*captured), &expected) != nil {
+		return false
+	}
+	for key, value := range expected {
+		got, present := actual[key]
+		if !present {
+			return false
+		}
+		var compactGot, compactWant bytes.Buffer
+		if json.Compact(&compactGot, got) != nil || json.Compact(&compactWant, value) != nil || !bytes.Equal(compactGot.Bytes(), compactWant.Bytes()) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Store) accumulateMigrateStatsOverflow(ctx context.Context, id schema.SessionID, result *MigrateResult) error {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return fmt.Errorf("store: take connection to report stat overflow for session %s after conversion: %w; conversion is committed; retry migration reporting", id, err)
+	}
+	defer s.pool.Put(conn)
+	return sqlitex.ExecuteTransient(conn, `SELECT d.location FROM session_generation_diagnostics d
+JOIN sessions s ON s.session_id = d.session_id AND s.active_generation_id = d.generation_id
+WHERE d.session_id = ? AND d.error_type = 'stats-overflow'`, &sqlitex.ExecOptions{
+		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			if result.StatsOverflowKeys == nil {
+				result.StatsOverflowKeys = make(map[string]int)
+			}
+			result.StatsOverflowKeys[strings.TrimPrefix(stmt.ColumnText(0), "stats.")]++
+			return nil
+		},
+	})
+}
+
 // capturedStatsForHarnessWrite builds the harness-origin row the write lanes
 // merge: the candidate's measurements plus the harness's own seed document,
 // stamped with the caller's updated_at. The seed rule admits harness origins
-// only; a derived update never carries a seed.
+// only; a derived update never carries a seed. Non-pointer typed adapter
+// fields are measurements, including zero. Raw retained documents preserve
+// absence separately through capturedStatsFromRaw before wire decoding.
 func capturedStatsForHarnessWrite(sessionID schema.SessionID, stats schema.SessionStats, seedDoc string, updatedAtMs int64) CapturedStats {
 	turnCount := stats.TurnCount
 	toolCallCount := stats.ToolCallCount
@@ -272,13 +380,14 @@ func capturedStatsForHarnessWrite(sessionID schema.SessionID, stats schema.Sessi
 }
 
 // clearLegacySeedOnConn clears the retired sessions seed column once a
-// native session owns a captured stats row: the harness-only seed home
+// harmonized session owns a captured stats row: the harness-only seed home
 // carries the evidence from here on, and the retired column must not keep a
 // stale document beside it. Sessions without an active generation are never
-// touched; their seed still serves the legacy path.
+// touched; file-backed generations also retain their seed until conversion.
 func clearLegacySeedOnConn(conn *sqlite.Conn, id schema.SessionID) error {
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET metric_seed_json = NULL
-WHERE session_id = ? AND active_generation_id IS NOT NULL AND metric_seed_json IS NOT NULL`, &sqlitex.ExecOptions{
+WHERE session_id = ? AND active_generation_id IS NOT NULL AND metric_seed_json IS NOT NULL
+AND EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = sessions.session_id AND g.generation_id = sessions.active_generation_id)`, &sqlitex.ExecOptions{
 		Args: []any{string(id)},
 	}); err != nil {
 		return fmt.Errorf("store: clear retired metric seed for session %s: %w", id, err)
@@ -338,7 +447,7 @@ func (s *Store) ReadMetricSeed(ctx context.Context, id schema.SessionID) (*inges
 // readMetricSeedOnConn borrows an already-open connection so ingest paths can
 // read the seed in their own snapshot.
 func readMetricSeedOnConn(conn *sqlite.Conn, id schema.SessionID) (*ingest.StatsInfo, error) {
-	native, err := isNativeSessionOnConn(conn, id)
+	_, native, err := harmonizedActiveOnConn(conn, id)
 	if err != nil {
 		return nil, err
 	}

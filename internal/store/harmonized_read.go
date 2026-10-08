@@ -56,10 +56,9 @@ func entryFromRow(r EntryRecord) schema.SessionEntry {
 // rebuildExtra folds the promoted columns back into the entry's Extra
 // document. ExtraVerbatim wins outright: it holds the original string
 // whenever the canonical rebuild would not be byte-identical. Otherwise the
-// promoted keys merge over the unknown remainder with sorted-key encoding,
-// which is exactly the shape the mirror's ext merge produced on read
-// (mergeExtIntoExtra marshals a map), so a shimmed row and its mirror row
-// carry byte-identical Extra.
+// promoted keys merge over the unknown remainder with sorted-key encoding.
+// This is the raw full/generation shape; routing applies mergeExtIntoExtra
+// separately to preserve the mirror's extension-read semantics.
 //
 // A remainder that no longer parses is passed through verbatim without the
 // merge. Corruption of that shape is caught by the digest check on full reads
