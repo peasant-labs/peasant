@@ -253,6 +253,9 @@ func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessi
 // sweep flag before removing anything, so a crash leaves the leftovers
 // flagged for the per-session sweep; it removes no objects itself — the
 // unreferenced entry rows and blobs go through the verified sweep (§4.5).
+// The table list is the shared reclaim inventory (reclaimTableNames): the
+// same closed set the reclaim and the sweep delete per generation, so the
+// two hand-maintained lists stay in step by construction.
 func (generationIndexFormat) Delete(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -260,29 +263,13 @@ func (generationIndexFormat) Delete(ctx context.Context, conn *sqlite.Conn, sess
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
 		return fmt.Errorf("store: flag session %s for sweep before representation replacement: %w; the prior representation is preserved", sessionID, err)
 	}
-	for _, statement := range []string{
-		`DELETE FROM session_relationship_evidence WHERE session_id = ?`,
-		`DELETE FROM session_generation_entries WHERE session_id = ?`,
-		`DELETE FROM session_generation_content WHERE session_id = ?`,
-		`DELETE FROM session_generation_subagents WHERE session_id = ?`,
-		`DELETE FROM session_generation_commits WHERE session_id = ?`,
-		`DELETE FROM session_generation_associations WHERE session_id = ?`,
-		`DELETE FROM session_generation_diagnostics WHERE session_id = ?`,
-		`DELETE FROM session_generation_title_refs WHERE session_id = ?`,
-		`DELETE FROM session_context_segment_refs WHERE session_id = ?`,
-		`DELETE FROM session_context_segments WHERE session_id = ?`,
-		`DELETE FROM session_section_native_metadata WHERE session_id = ?`,
-		`DELETE FROM session_projection_sections WHERE session_id = ?`,
-		`DELETE FROM session_projection_aliases WHERE session_id = ?`,
-		`DELETE FROM session_projection_entries WHERE session_id = ?`,
-		`DELETE FROM session_projection_content WHERE session_id = ?`,
-		`DELETE FROM session_generations WHERE session_id = ?`,
-		`DELETE FROM session_projection_generations WHERE session_id = ?`,
-		`UPDATE sessions SET active_generation_id = NULL WHERE session_id = ?`,
-	} {
-		if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+	for _, table := range reclaimTableNames {
+		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM `+table+` WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
 			return fmt.Errorf("store: clear managed generations for session %s before representation replacement: %w; the transaction was refused and the prior representation is preserved", sessionID, err)
 		}
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+		return fmt.Errorf("store: clear the active generation for session %s before representation replacement: %w; the transaction was refused and the prior representation is preserved", sessionID, err)
 	}
 	return nil
 }

@@ -205,6 +205,8 @@ func writeReclaimResult(cmd *cobra.Command, result store.ReclaimResult, jsonOutp
 			"sessions":                result.Sessions,
 			"generations":             result.Generations,
 			"rows":                    reclaimRowsToJSON(result.Rows),
+			"bodies_deleted":          result.BodiesDeleted,
+			"blobs_deleted":           result.BlobsDeleted,
 			"bytes":                   result.Footprint.Bytes,
 			"files":                   result.Footprint.Files,
 			"directories_removed":     result.DirectoriesRemoved,
@@ -268,13 +270,23 @@ type reclaimRowEntry struct {
 // sorted by table name so the output is stable.
 func reclaimRowEntries(rows store.ReclaimTableCounts) []reclaimRowEntry {
 	entries := []reclaimRowEntry{
+		{"session_context_segment_refs", rows.SegmentRefs},
 		{"session_context_segments", rows.ContextSegments},
+		{"session_generation_associations", rows.GenerationAssociations},
+		{"session_generation_commits", rows.GenerationCommits},
+		{"session_generation_content", rows.GenerationContent},
+		{"session_generation_diagnostics", rows.GenerationDiagnostics},
+		{"session_generation_entries", rows.GenerationEntries},
+		{"session_generation_subagents", rows.GenerationSubagents},
+		{"session_generation_title_refs", rows.GenerationTitleRefs},
+		{"session_generations", rows.SessionGenerations},
 		{"session_projection_aliases", rows.ProjectionAliases},
 		{"session_projection_content", rows.ProjectionContent},
 		{"session_projection_entries", rows.ProjectionEntries},
 		{"session_projection_generations", rows.Generations},
 		{"session_projection_sections", rows.ProjectionSections},
 		{"session_relationship_evidence", rows.RelationshipEvidence},
+		{"session_section_native_metadata", rows.NativeMetadata},
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].table < entries[j].table })
 	return entries
@@ -283,13 +295,23 @@ func reclaimRowEntries(rows store.ReclaimTableCounts) []reclaimRowEntry {
 // reclaimRowsToJSON converts per-table counts to a JSON object.
 func reclaimRowsToJSON(rows store.ReclaimTableCounts) map[string]any {
 	return map[string]any{
+		"session_context_segment_refs":   rows.SegmentRefs,
 		"session_context_segments":       rows.ContextSegments,
+		"session_generation_associations": rows.GenerationAssociations,
+		"session_generation_commits":     rows.GenerationCommits,
+		"session_generation_content":     rows.GenerationContent,
+		"session_generation_diagnostics": rows.GenerationDiagnostics,
+		"session_generation_entries":     rows.GenerationEntries,
+		"session_generation_subagents":   rows.GenerationSubagents,
+		"session_generation_title_refs":  rows.GenerationTitleRefs,
+		"session_generations":              rows.SessionGenerations,
 		"session_projection_aliases":     rows.ProjectionAliases,
 		"session_projection_content":     rows.ProjectionContent,
 		"session_projection_entries":     rows.ProjectionEntries,
 		"session_projection_generations": rows.Generations,
 		"session_projection_sections":    rows.ProjectionSections,
 		"session_relationship_evidence":  rows.RelationshipEvidence,
+		"session_section_native_metadata": rows.NativeMetadata,
 		"total":                          rows.Total(),
 	}
 }
