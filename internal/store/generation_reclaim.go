@@ -303,16 +303,17 @@ func (s *Store) PlanSupersededGenerationReclaim(ctx context.Context, limit int) 
 
 // ReclaimSupersededGenerations reclaims every superseded generation. For each
 // candidate session it takes the exclusive per-session lock, re-reads the
-// active generation and the pending intent, and then, in ONE transaction,
-// deletes every non-active row across the generation-scoped tables. It then
-// releases the lock and removes each superseded generation's directory through
-// the ownership-verified cleanup path.
+// active generation and the pending intent, and deletes every non-active row
+// across the generation-scoped tables in bounded batches. It then releases
+// the lock and removes each superseded generation's directory through the
+// ownership-verified cleanup path, and finally sweeps the orphan objects
+// the row deletes uncovered and clears the sweep flag.
 //
 // A session with a pending intent is never touched. The active generation is
 // never deleted: the row predicate excludes it and the cleanup path refuses
-// it. A missing directory is success, so a crash between the row transaction
-// and directory removal leaves a readable store and a retryable orphan that
-// the next pass removes. limit, when positive, bounds how many sessions with
+// it. A missing directory is success, so a crash between the row deletes and
+// directory removal leaves a readable store and a retryable orphan that the
+// next pass removes. limit, when positive, bounds how many sessions with
 // work this pass reclaims.
 func (s *Store) ReclaimSupersededGenerations(ctx context.Context, limit int) (ReclaimResult, error) {
 	var result ReclaimResult

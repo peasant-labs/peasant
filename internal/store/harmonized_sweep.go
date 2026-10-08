@@ -73,9 +73,10 @@ func (s *Store) SweepSession(ctx context.Context, sessionID schema.SessionID) (S
 }
 
 // sweepSessionLocked runs the five sweep steps with the exclusive
-// per-session lock held by the caller (SweepSession, or reclaim's orphan
-// pass). It never takes the lock itself, so the two callers cannot deadlock
-// against a non-reentrant file lock.
+// per-session lock held by the caller. Only SweepSession calls it; reclaim's
+// orphan pass shares sweepUnreferencedObjects instead (its row and directory
+// steps already ran). It never takes the lock itself, so the two callers
+// cannot deadlock against a non-reentrant file lock.
 func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.SessionID) (SweepResult, error) {
 	var result SweepResult
 	active, err := s.activeGenerationID(ctx, sessionID)
