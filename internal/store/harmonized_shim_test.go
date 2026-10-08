@@ -73,7 +73,7 @@ VALUES(?, ?, 11, 'opencode', 'shim-model', 'v', 1, 2, 'jsonl', 'shim-project', '
 		record := store.EntryRecord{
 			SessionID:      schema.SessionID(shimSessionID),
 			EntryIndex:     i,
-			Harness:        schema.Harness("opencode"),
+			Harness:        schema.HarnessOpenCode,
 			EntryType:      schema.EntryTypeText,
 			Role:           schema.Role(entry.role),
 			ContentPreview: &preview,

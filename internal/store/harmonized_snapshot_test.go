@@ -50,7 +50,7 @@ func snapshotEntryRecord(sessionID, ref string, index int, role schema.Role, tex
 	return store.EntryRecord{
 		SessionID:      schema.SessionID(sessionID),
 		EntryIndex:     index,
-		Harness:        schema.Harness("opencode"),
+		Harness:        schema.HarnessOpenCode,
 		EntryType:      schema.EntryTypeText,
 		Role:           role,
 		ContentPreview: &preview,

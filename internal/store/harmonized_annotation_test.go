@@ -79,7 +79,7 @@ VALUES(?, ?, 11, 'opencode', 'ann-model', 'v', 1, 2, 'jsonl', 'ann-project', 'an
 		record := store.EntryRecord{
 			SessionID:      schema.SessionID(annotationHarmonizedID),
 			EntryIndex:     i,
-			Harness:        schema.Harness("opencode"),
+			Harness:        schema.HarnessOpenCode,
 			EntryType:      schema.EntryTypeText,
 			Role:           schema.Role("user"),
 			ContentPreview: &preview,
@@ -308,10 +308,10 @@ func TestAnnotationRemapAfterReindex(t *testing.T) {
 	// Shift every entry one index forward; the bravo content key now lives
 	// at index 2 and matches uniquely.
 	shifted := []schema.SessionEntry{
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 0, Harness: schema.Harness("opencode"), EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("zero")},
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 1, Harness: schema.Harness("opencode"), EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("alpha")},
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 2, Harness: schema.Harness("opencode"), EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("bravo")},
-		{SessionID: schema.SessionID(sessionID), EntryIndex: 3, Harness: schema.Harness("opencode"), EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("charlie")},
+		{SessionID: schema.SessionID(sessionID), EntryIndex: 0, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("zero")},
+		{SessionID: schema.SessionID(sessionID), EntryIndex: 1, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("alpha")},
+		{SessionID: schema.SessionID(sessionID), EntryIndex: 2, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("bravo")},
+		{SessionID: schema.SessionID(sessionID), EntryIndex: 3, Harness: schema.HarnessOpenCode, EntryType: schema.EntryTypeText, Role: schema.Role("user"), ContentPreview: strptr("charlie")},
 	}
 	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), shifted); err != nil {
 		t.Fatalf("shift re-index: %v", err)

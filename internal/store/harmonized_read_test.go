@@ -17,7 +17,7 @@ func TestEntryFromRowPreservesPresence(t *testing.T) {
 	row := EntryRecord{
 		SessionID:      schema.SessionID("ses_01JABC"),
 		EntryIndex:     7,
-		Harness:        schema.Harness("opencode"),
+		Harness:        schema.HarnessOpenCode,
 		EntryType:      schema.EntryTypeToolResult,
 		Role:           schema.Role("assistant"),
 		TimestampMs:    &ts,
@@ -53,7 +53,7 @@ func TestSerializeEntryIsPlainMarshal(t *testing.T) {
 	row := EntryRecord{
 		SessionID:      schema.SessionID("ses_01JABC"),
 		EntryIndex:     7,
-		Harness:        schema.Harness("opencode"),
+		Harness:        schema.HarnessOpenCode,
 		EntryType:      schema.EntryTypeToolResult,
 		Role:           schema.Role("assistant"),
 		ContentPreview: &preview,
@@ -121,7 +121,7 @@ func TestLegacyShapeBoundsLikeMirror(t *testing.T) {
 	row := EntryRecord{
 		SessionID:      schema.SessionID("ses_01JABC"),
 		EntryIndex:     3,
-		Harness:        schema.Harness("opencode"),
+		Harness:        schema.HarnessOpenCode,
 		EntryType:      schema.EntryTypeText,
 		Role:           schema.Role("user"),
 		ContentPreview: &long,
