@@ -29,6 +29,13 @@ cases:
     updates:
       - values: *capture
         wantApplied: true
+      - values: {turnCount: 99, toolCallCount: 11, inputSubmissionCount: 5, seedJSON: '{"turnCount":99,"toolCallCount":11}', source: harness, updatedAtMs: 200}
+        mirrorFailureSQL: >-
+          CREATE TRIGGER refuse_stats_mirror_update
+          BEFORE UPDATE OF input_submission_count ON sessions
+          BEGIN SELECT RAISE(ABORT, 'synthetic mirror write refused'); END
+        wantApplied: false
+        wantError: synthetic mirror write refused
     want: *capture
     wantMirror: 2
   - name: overflow-new-kind

@@ -4,10 +4,12 @@ import (
 	"context"
 	_ "embed"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -36,8 +38,10 @@ func (v capturedStatsValues) row(id schema.SessionID) store.CapturedStats {
 }
 
 type capturedStatsUpdate struct {
-	Values      capturedStatsValues `yaml:"values"`
-	WantApplied bool                `yaml:"wantApplied"`
+	Values           capturedStatsValues `yaml:"values"`
+	WantApplied      bool                `yaml:"wantApplied"`
+	MirrorFailureSQL string              `yaml:"mirrorFailureSQL"`
+	WantError        string              `yaml:"wantError"`
 }
 
 type capturedStatsSeed struct {
@@ -104,7 +108,48 @@ func TestSessionCapturedStatsFamily(t *testing.T) {
 			gen := "gen-stats-fixture"
 			seedStatsSession(t, s, string(id), &gen)
 			for i, update := range c.Updates {
+				var before store.CapturedStats
+				var beforeMirror any
+				if update.MirrorFailureSQL != "" {
+					if update.WantError == "" || update.WantApplied {
+						t.Fatalf("update %d mirror failure must specify an error and unapplied result", i)
+					}
+					var err error
+					before, err = s.ReadCapturedStats(ctx, id)
+					if err != nil {
+						t.Fatalf("read captured row before failed update %d: %v", i, err)
+					}
+					beforeMirror = readStatsMirror(t, s, string(id))
+					conn, err := s.PoolForTest().Take(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					err = sqlitex.ExecuteTransient(conn, update.MirrorFailureSQL, nil)
+					s.PoolForTest().Put(conn)
+					if err != nil {
+						t.Fatalf("install mirror-write refusal for update %d: %v", i, err)
+					}
+				}
 				applied, err := s.UpsertCapturedStats(ctx, update.Values.row(id))
+				if update.WantError != "" {
+					if update.MirrorFailureSQL == "" {
+						t.Fatalf("update %d expects a mirror error without a failure trigger", i)
+					}
+					if err == nil || !strings.Contains(err.Error(), update.WantError) || applied != update.WantApplied {
+						t.Fatalf("update %d = (%v, %v), want (%v, error containing %q)", i, applied, err, update.WantApplied, update.WantError)
+					}
+					after, err := s.ReadCapturedStats(ctx, id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(after, before) {
+						t.Fatalf("failed mirror update %d changed captured row: got %+v, prior %+v", i, after, before)
+					}
+					if afterMirror := readStatsMirror(t, s, string(id)); afterMirror != beforeMirror {
+						t.Fatalf("failed mirror update %d changed mirror: got %v, prior %v", i, afterMirror, beforeMirror)
+					}
+					continue
+				}
 				if err != nil || applied != update.WantApplied {
 					t.Fatalf("update %d = (%v, %v), want (%v, nil)", i, applied, err, update.WantApplied)
 				}
