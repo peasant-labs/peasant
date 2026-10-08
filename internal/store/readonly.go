@@ -199,6 +199,10 @@ func (a readOnlyGenerationArtifacts) ReadBlob(ctx context.Context, id schema.Ses
 	return a.inner.ReadBlob(ctx, id, generationID, record)
 }
 
+func (a readOnlyGenerationArtifacts) BlobExists(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) (bool, error) {
+	return a.inner.BlobExists(ctx, id, generationID, record)
+}
+
 func (a readOnlyGenerationArtifacts) WritePriorEvidence(context.Context, schema.SessionID, string, []byte) error {
 	return errReadOnlyGenerationWrite
 }

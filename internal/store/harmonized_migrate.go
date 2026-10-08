@@ -2,9 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -42,11 +46,32 @@ import (
 // set, rounded to 25 GB.
 const migrateDiskFloorBytes = 25 << 30
 
+// migratePreflightSampleSessions bounds the Phase 0 mismatch sample: the
+// first that many sessions with conversion work, in session-id order.
+// migratePreflightSampleRefs bounds the content records checked per
+// sampled session. Both keep the read-only preflight cheap while still
+// forecasting rollbacks.
+const (
+	migratePreflightSampleSessions = 20
+	migratePreflightSampleRefs     = 100
+)
+
 // migrateDataRollbackMin is the floor of the systematic-cause halt (design
 // §7.2 Phase 2d): data rollbacks halt the run when they exceed 1% of
 // sessions processed, with a minimum of 20 so early noise never stops a
 // run before the rate is meaningful.
 const migrateDataRollbackMin = 20
+
+// checkMigrateRollbackHalt enforces the systematic-cause halt in one
+// home: data rollbacks halt the run past 1% of sessions processed with
+// a minimum of 20, since a systematic cause is likelier than bad data.
+// The re-run resumes where the halted pass stopped.
+func checkMigrateRollbackHalt(rollbacks, processed int64) error {
+	if rollbacks > migrateDataRollbackMin && rollbacks*100 > processed {
+		return fmt.Errorf("store: migration halted: %d data rollbacks in %d sessions exceeds 1%% (minimum %d); a systematic cause is likelier than bad data; fix the cause and re-run, which resumes where this pass stopped", rollbacks, processed, migrateDataRollbackMin)
+	}
+	return nil
+}
 
 // MigratePlan is the peasant migrate Phase 0 preflight report (design
 // §7.2): the sessions with conversion work plus the drain counts (pending
@@ -69,6 +94,14 @@ type MigratePlan struct {
 	NeedsSearchConsolidation bool
 	// MirrorRows estimates the native mirror rows Phase 2 deletes.
 	MirrorRows int64
+	// SampledSessions counts the work sessions the mismatch sample
+	// covered; SampledMismatchSessions counts the sampled sessions with
+	// at least one field or blob mismatch, and SampledMismatchedRefs the
+	// mismatched refs among them. A sampled mismatch forecasts a Phase
+	// 2d data rollback; the conversion still verifies every byte.
+	SampledSessions         int
+	SampledMismatchSessions int
+	SampledMismatchedRefs   int
 	// EstimatedBytes estimates the owned-tree bytes Phase 2 frees.
 	EstimatedBytes int64
 	// DiskFreeBytes is the free space on the database filesystem, or -1
@@ -169,6 +202,10 @@ func (s *Store) PlanMigration(ctx context.Context) (MigratePlan, error) {
 		return plan, err
 	}
 	plan.PendingIntents, err = s.countMigratePendingIntents(ctx, drainSessions)
+	if err != nil {
+		return plan, err
+	}
+	plan.SampledSessions, plan.SampledMismatchSessions, plan.SampledMismatchedRefs, err = s.sampleMigrateMismatches(ctx, conn, plan.Sessions)
 	if err != nil {
 		return plan, err
 	}
@@ -371,8 +408,8 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 					Reason:    dataRollback.Reason,
 				})
 				report(MigrationPhaseConvertSessions, i+1, result.BytesFreed)
-				if rollbacks > migrateDataRollbackMin && rollbacks*100 > processed {
-					return result, fmt.Errorf("store: migration halted: %d data rollbacks in %d sessions exceeds 1%% (minimum %d); a systematic cause is likelier than bad data; fix the cause and re-run, which resumes where this pass stopped", rollbacks, processed, migrateDataRollbackMin)
+				if err := checkMigrateRollbackHalt(rollbacks, processed); err != nil {
+					return result, err
 				}
 				continue
 			}
@@ -392,8 +429,8 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 			result.Skipped++
 		}
 		report(MigrationPhaseConvertSessions, i+1, result.BytesFreed)
-		if rollbacks > migrateDataRollbackMin && rollbacks*100 > processed {
-			return result, fmt.Errorf("store: migration halted: %d data rollbacks in %d sessions exceeds 1%% (minimum %d); a systematic cause is likelier than bad data; fix the cause and re-run, which resumes where this pass stopped", rollbacks, processed, migrateDataRollbackMin)
+		if err := checkMigrateRollbackHalt(rollbacks, processed); err != nil {
+			return result, err
 		}
 	}
 
@@ -442,6 +479,127 @@ func (s *Store) countMigratePendingIntents(ctx context.Context, sessions []schem
 	return count, nil
 }
 
+// sampleMigrateMismatches scans the first sample of work sessions for
+// the mismatches Phase 2d would roll back on: an emitted ref whose
+// entry field hashes differently than its integrity digest, and a
+// content record whose blob file is missing. Blob bytes are never read
+// here (conversion verifies them); a damaged-but-present file is found
+// at conversion time, not in the forecast. It reports the sampled
+// session count, the sessions carrying at least one mismatch, and the
+// mismatched refs among them.
+func (s *Store) sampleMigrateMismatches(ctx context.Context, conn *sqlite.Conn, sessions []schema.SessionID) (sampled, mismatchSessions, mismatchedRefs int, err error) {
+	if len(sessions) == 0 {
+		return 0, 0, 0, nil
+	}
+	if len(sessions) > migratePreflightSampleSessions {
+		sessions = sessions[:migratePreflightSampleSessions]
+	}
+	for _, sessionID := range sessions {
+		if err := ctx.Err(); err != nil {
+			return sampled, mismatchSessions, mismatchedRefs, err
+		}
+		mismatches, err := s.sampleMigrateSessionMismatches(ctx, conn, sessionID)
+		if err != nil {
+			return sampled, mismatchSessions, mismatchedRefs, err
+		}
+		sampled++
+		if mismatches > 0 {
+			mismatchSessions++
+			mismatchedRefs += mismatches
+		}
+	}
+	return sampled, mismatchSessions, mismatchedRefs, nil
+}
+
+// sampleMigrateSessionMismatches counts one session's sampled mismatches:
+// emitted field-against-digest disagreements plus missing blob files,
+// over at most migratePreflightSampleRefs content records.
+func (s *Store) sampleMigrateSessionMismatches(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID) (int, error) {
+	var active string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			active = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		return 0, fmt.Errorf("store: read the active generation while sampling session %s: %w", sessionID, err)
+	}
+	type record struct {
+		ref        schema.SourceEntryRef
+		digest     string
+		relative   string
+		byteLength int64
+	}
+	var records []record
+	if err := sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref, integrity_digest, relative_blob, byte_length FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref LIMIT ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), active, migratePreflightSampleRefs},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			ref, err := schema.NewSourceEntryRef(stmt.ColumnText(0))
+			if err != nil {
+				return err
+			}
+			records = append(records, record{ref: ref, digest: stmt.ColumnText(1), relative: stmt.ColumnText(2), byteLength: stmt.ColumnInt64(2)})
+			return nil
+		},
+	}); err != nil {
+		return 0, fmt.Errorf("store: read content records while sampling session %s: %w", sessionID, err)
+	}
+	mismatches := 0
+	for _, content := range records {
+		if err := ctx.Err(); err != nil {
+			return mismatches, err
+		}
+		entry, found, err := readMigrateSampleEntry(conn, sessionID, active, content.ref)
+		if err != nil {
+			return mismatches, err
+		}
+		if found {
+			sum := sha256.Sum256([]byte(harmonizedContentField(entry)))
+			if !equalDigests(hex.EncodeToString(sum[:]), content.digest) {
+				mismatches++
+				continue
+			}
+		}
+		if s.generationArtifacts == nil {
+			continue
+		}
+		present, err := s.generationArtifacts.BlobExists(ctx, sessionID, active, indexformat.ContentRecord{
+			Ref:          content.ref,
+			RelativeBlob: content.relative,
+			ByteLength:   content.byteLength,
+			Digest:       content.digest,
+		})
+		if err != nil {
+			return mismatches, fmt.Errorf("store: check blob presence while sampling session %s: %w", sessionID, err)
+		}
+		if !present {
+			mismatches++
+		}
+	}
+	return mismatches, nil
+}
+
+// readMigrateSampleEntry reads one legacy entry by source ref, preferring
+// the main partition. It reports whether any entry emits the ref.
+func readMigrateSampleEntry(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, ref schema.SourceEntryRef) (schema.SessionEntry, bool, error) {
+	var entry schema.SessionEntry
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ? ORDER BY partition_id LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), generationID, string(ref)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			if err := json.Unmarshal([]byte(stmt.ColumnText(0)), &entry); err != nil {
+				return fmt.Errorf("decode sampled entry: %w", err)
+			}
+			return nil
+		},
+	}); err != nil {
+		return entry, false, fmt.Errorf("store: read the sampled entry for ref %q: %w", ref, err)
+	}
+	return entry, found, nil
+}
+
 // migrateDrain discards the Phase 1 sets (design §7.2): every pending
 // generation intent with its staged directory, every superseded
 // generation through the sweep, and every reserved .tmp-gen-* directory,
@@ -460,14 +618,30 @@ func (s *Store) migrateDrain(ctx context.Context, result *MigrateResult) (int64,
 		if err := ctx.Err(); err != nil {
 			return marked, bytes, fmt.Errorf("store: migration drain interrupted before session %s: %w; drained sessions keep their state and the next pass resumes the drain", sessionID, err)
 		}
-		touched, freed, err := s.migrateDrainSession(ctx, sessionID)
+		// The freed bytes are the owned generations footprint delta
+		// around the drain: reserved staging names fall outside the
+		// generation listing, so their bytes stay uncounted as
+		// immaterial next to the discarded generations.
+		before, err := s.sessionGenerationsFootprint(ctx, sessionID)
+		if err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("drain session %s: %v", sessionID, err))
+			continue
+		}
+		touched, err := s.migrateDrainSession(ctx, sessionID)
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("drain session %s: %v", sessionID, err))
 			continue
 		}
 		if touched {
 			marked++
-			bytes += freed
+			after, err := s.sessionGenerationsFootprint(ctx, sessionID)
+			if err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("drain session %s: %v", sessionID, err))
+				continue
+			}
+			if after.Bytes < before.Bytes {
+				bytes += before.Bytes - after.Bytes
+			}
 		}
 	}
 	return marked, bytes, nil
@@ -506,36 +680,35 @@ func migrateDrainSessionsOnConn(conn *sqlite.Conn) ([]schema.SessionID, error) {
 // is then just another non-active directory), then the superseded rows,
 // then the non-active directories, then the reserved staging names. The
 // active file-backed generation is never touched.
-func (s *Store) migrateDrainSession(ctx context.Context, sessionID schema.SessionID) (bool, int64, error) {
+func (s *Store) migrateDrainSession(ctx context.Context, sessionID schema.SessionID) (bool, error) {
 	if err := s.requireGenerationSupport(); err != nil {
-		return false, 0, err
+		return false, err
 	}
 	release, err := s.sessionLocker.LockExclusive(ctx, sessionID)
 	if err != nil {
-		return false, 0, fmt.Errorf("store: lock session %s for the migration drain: %w; nothing was drained", sessionID, err)
+		return false, fmt.Errorf("store: lock session %s for the migration drain: %w; nothing was drained", sessionID, err)
 	}
 	defer func() { _ = release() }()
 	touched := false
-	var freed int64
 	if s.generationArtifacts != nil {
 		intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
 		if err != nil {
-			return false, 0, fmt.Errorf("store: read the pending intent for session %s: %w; nothing was drained", sessionID, err)
+			return false, fmt.Errorf("store: read the pending intent for session %s: %w; nothing was drained", sessionID, err)
 		}
 		if intent != nil {
 			if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
-				return false, 0, fmt.Errorf("store: discard the pending intent for session %s: %w; nothing was drained", sessionID, err)
+				return false, fmt.Errorf("store: discard the pending intent for session %s: %w; nothing was drained", sessionID, err)
 			}
 			touched = true
 		}
 	}
 	active, err := s.activeGenerationID(ctx, sessionID)
 	if err != nil {
-		return false, 0, err
+		return false, err
 	}
 	deleted, err := s.deleteSupersededGenerationRows(ctx, sessionID, active)
 	if err != nil {
-		return false, 0, err
+		return false, err
 	}
 	if deleted.Total() > 0 {
 		touched = true
@@ -543,14 +716,14 @@ func (s *Store) migrateDrainSession(ctx context.Context, sessionID schema.Sessio
 	if s.generationArtifacts != nil {
 		dirs, err := s.removeLeftoverGenerationDirs(ctx, sessionID, active)
 		if err != nil {
-			return false, 0, err
+			return false, err
 		}
 		if dirs > 0 {
 			touched = true
 		}
 		reserved, err := s.generationArtifacts.RemoveReservedStagingDirs(ctx, sessionID)
 		if err != nil {
-			return false, 0, fmt.Errorf("store: remove reserved staging directories for session %s: %w; drained rows stay deleted and the next pass retries the directories", sessionID, err)
+			return false, fmt.Errorf("store: remove reserved staging directories for session %s: %w; drained rows stay deleted and the next pass retries the directories", sessionID, err)
 		}
 		if reserved > 0 {
 			touched = true
@@ -558,10 +731,10 @@ func (s *Store) migrateDrainSession(ctx context.Context, sessionID schema.Sessio
 	}
 	if touched {
 		if err := s.clearIndexedInputHash(ctx, sessionID); err != nil {
-			return false, 0, err
+			return false, err
 		}
 	}
-	return touched, freed, nil
+	return touched, nil
 }
 
 // clearIndexedInputHash clears the consumed-input proof for one session,

@@ -196,11 +196,10 @@ func (s *Store) migrateSessionWork(ctx context.Context, sessionID schema.Session
 	if active == nil || *active == "" {
 		return work, nil
 	}
-	harmonizedActive, harmonized, err := harmonizedActiveOnConn(conn, sessionID)
+	_, harmonized, err := harmonizedActiveOnConn(conn, sessionID)
 	if err != nil {
 		return work, err
 	}
-	_ = harmonizedActive
 	if harmonized {
 		return work, nil
 	}
@@ -1004,10 +1003,15 @@ func deleteMigrateProjectionOldRows(conn *sqlite.Conn, oracle *migrateOracle) er
 	return nil
 }
 
-// verifyMigrateShadow runs the seven shadow-verify dimensions inside the
+// verifyMigrateShadow runs the nine shadow-verify checks inside the
 // catalog transaction, before any delete (design §7.2 Phase 2d): the new
 // readers forced to the harmonized path against the legacy oracle
-// readers. A data mismatch rolls back; a defect mismatch halts.
+// readers. The entry serialization, the bounded and full legacy shapes,
+// the metadata document, the session hash, and the capture hash cover
+// the design's data dimensions; the carried children and the detail
+// children cover the carried catalog rows the snapshots do not compare;
+// the detail bytes are the defect dimension. A data mismatch rolls back;
+// a defect mismatch halts.
 func verifyMigrateShadow(conn *sqlite.Conn, oracle *migrateOracle, prepared *preparedHarmonized) *migrateShadowMismatch {
 	checks := []func(*sqlite.Conn, *migrateOracle, *preparedHarmonized) *migrateShadowMismatch{
 		verifyMigrateEntrySerialization,
@@ -1106,15 +1110,22 @@ func verifyMigrateEntrySerialization(conn *sqlite.Conn, oracle *migrateOracle, _
 	return nil
 }
 
+// orderedOraclePartitions lists the oracle's partitions with the main
+// partition first and the earlier partitions in ascending order. The
+// entries map has randomized range order, so the keys sort here: the
+// shadow verify aligns staged mapping rows (read ascending) against
+// this order, and a random rotation would fail a valid multi-partition
+// session.
 func orderedOraclePartitions(oracle *migrateOracle) []int {
-	ordered := []int{0}
+	var earlier []int
 	for partition := range oracle.entries {
 		if partition == 0 {
 			continue
 		}
-		ordered = append(ordered, partition)
+		earlier = append(earlier, partition)
 	}
-	return ordered
+	sort.Ints(earlier)
+	return append([]int{0}, earlier...)
 }
 
 // migrateBoundedShapes shapes the staged main-partition rows the way the
@@ -1459,7 +1470,9 @@ func compareMigrateSnapshotContent(legacy, forced []indexformat.ContentRecord) *
 }
 
 // readMigrateBlobBytes concatenates one blob's chunks in order: the same
-// byte proof the repair gate demands of blob bytes.
+// byte proof the repair gate demands of blob bytes. A header with
+// byte_length zero and no chunk rows is a legitimate empty payload, not
+// a torn blob: it reads as zero bytes.
 func readMigrateBlobBytes(conn *sqlite.Conn, sessionID schema.SessionID, digest string) ([]byte, error) {
 	var payload []byte
 	if err := sqlitex.ExecuteTransient(conn, `SELECT data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
@@ -1474,10 +1487,23 @@ func readMigrateBlobBytes(conn *sqlite.Conn, sessionID schema.SessionID, digest 
 	}); err != nil {
 		return nil, err
 	}
-	if len(payload) == 0 {
+	if len(payload) != 0 {
+		return payload, nil
+	}
+	empty := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT byte_length = 0 FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), digest},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			empty = stmt.ColumnInt64(0) == 1
+			return nil
+		},
+	}); err != nil {
+		return nil, err
+	}
+	if !empty {
 		return nil, fmt.Errorf("no chunks stored")
 	}
-	return payload, nil
+	return []byte{}, nil
 }
 
 // migrateStageSeam is a nil production hook a test sets to fail between

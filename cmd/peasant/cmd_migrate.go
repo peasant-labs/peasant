@@ -253,6 +253,11 @@ func writeMigratePlan(cmd *cobra.Command, plan store.MigratePlan, jsonOutput boo
 				"estimated_bytes":      plan.EstimatedBytes,
 				"search_consolidation": plan.NeedsSearchConsolidation,
 			},
+			"mismatch_sample": map[string]any{
+				"sessions":          plan.SampledSessions,
+				"mismatch_sessions": plan.SampledMismatchSessions,
+				"mismatched_refs":   plan.SampledMismatchedRefs,
+			},
 			"disk": map[string]any{
 				"free_bytes": plan.DiskFreeBytes,
 				"ok":         plan.DiskFreeOK,
@@ -269,6 +274,10 @@ func writeMigratePlan(cmd *cobra.Command, plan store.MigratePlan, jsonOutput boo
 	fmt.Fprintf(out, "Phase 0 preflight: %d session(s) to convert, %d pending intent(s) to discard, %d superseded generation(s) to discard\n",
 		len(plan.Sessions), plan.PendingIntents, plan.SupersededGenerations)
 	writeMigratePlanSessions(out, plan.Sessions)
+	if plan.SampledSessions > 0 {
+		fmt.Fprintf(out, "sampled field/blob mismatches: %d of %d sampled session(s) carry %d mismatched ref(s) and will roll back in Phase 2\n",
+			plan.SampledMismatchSessions, plan.SampledSessions, plan.SampledMismatchedRefs)
+	}
 	fmt.Fprintf(out, "Phase 1 drain: %d pending intent(s), %d superseded generation(s)\n", plan.PendingIntents, plan.SupersededGenerations)
 	fmt.Fprintf(out, "Phase 2 convert: %d session(s), about %d mirror row(s)\n", len(plan.Sessions), plan.MirrorRows)
 	if plan.NeedsSearchConsolidation {

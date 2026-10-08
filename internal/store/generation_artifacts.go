@@ -106,6 +106,10 @@ type GenerationArtifactStore interface {
 	// ReadBlob reads one immutable content blob addressed by its captured
 	// relative path and verifies its length and integrity digest.
 	ReadBlob(context.Context, schema.SessionID, string, indexformat.ContentRecord) ([]byte, error)
+	// BlobExists reports whether one immutable content blob file is
+	// present, without reading its bytes. The preflight samples blob
+	// presence with it; conversion verifies the bytes through ReadBlob.
+	BlobExists(context.Context, schema.SessionID, string, indexformat.ContentRecord) (bool, error)
 	// ReadPriorEvidence returns the persisted prior document for one
 	// generation, or (nil, nil) when none was written.
 	ReadPriorEvidence(context.Context, schema.SessionID, string) ([]byte, error)
@@ -593,6 +597,35 @@ func (a *osGenerationArtifactStore) ReadManifest(ctx context.Context, id schema.
 		return indexformat.Generation{}, fmt.Errorf("store: decode staged manifest in ReadManifest for generation %s of session %s: %s; the candidate cannot be recovered", generationID, id, sanitizeFSError(err))
 	}
 	return generation, nil
+}
+
+// BlobExists reports whether one immutable content blob file is present,
+// without reading its bytes. A missing session or generation directory
+// reads as absent, never as an error; other failures name the step.
+func (a *osGenerationArtifactStore) BlobExists(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := record.Validate(); err != nil {
+		return false, fmt.Errorf("store: resolve managed content in BlobExists for session %s: %w; presence is unknown", id, err)
+	}
+	_, genRel, err := a.generationRel(id, generationID)
+	if err != nil {
+		return false, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	_, err = root.Lstat(path.Join(genRel, record.RelativeBlob))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("store: stat managed content in BlobExists for session %s: %s; presence is unknown", id, sanitizeFSError(err))
+	}
+	return true, nil
 }
 
 func (a *osGenerationArtifactStore) ReadBlob(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) ([]byte, error) {
