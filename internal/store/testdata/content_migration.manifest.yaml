@@ -1,5 +1,10 @@
 # Required-name manifest for content_migration: deletion protection by NAME, never by count.
 requiredNames:
+  - drain-intent-only-session
+  - drain-directory-only-session
+  - drain-tmp-only-session
+  - drain-flag-set-before-destructive-step
+  - drain-crash-after-intent-clear
   - native-clean
   - native-superseded-identical-discarded
   - native-pending-intent-discarded

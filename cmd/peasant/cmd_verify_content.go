@@ -11,9 +11,8 @@ import (
 )
 
 // runVerifyContent checks the harmonized session content objects and the
-// search index. Without --repair it is read-only: it lists the damaged
-// sessions and reports the index health with its size ratio, changing
-// nothing. With --repair it clears the consumed-input proof of each
+// search index. It rebuilds a flagged search index before checking content.
+// Only --repair clears the consumed-input proof of each
 // damaged session, so the repair predicate selects it and its next
 // activation runs in repair mode, which rewrites the failing objects;
 // healing still needs that harvest to run.
@@ -29,7 +28,7 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 	}
 
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-	db, closeStore, err := openVerifyContentStore(cmd, repair, string(ownedRoot), dbPath)
+	db, closeStore, err := openVerifyContentStore(cmd, string(ownedRoot), dbPath)
 	if err != nil {
 		return err
 	}
@@ -43,20 +42,8 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 }
 
 // openVerifyContentStore opens the analytics store for content
-// verification: read-only without --repair (nothing can change), and
-// read-write with --repair (the re-index marks need a writer).
-func openVerifyContentStore(cmd *cobra.Command, repair bool, ownedRoot, dbPath string) (*store.Store, func(), error) {
-	if !repair {
-		options, err := generationStoreOptionsReadOnly(ownedRoot)
-		if err != nil {
-			return nil, func() {}, err
-		}
-		db, err := store.OpenReadOnlyWithOptions(dbPath, options...)
-		if err != nil {
-			return nil, func() {}, err
-		}
-		return db, func() { _ = db.Close() }, nil
-	}
+// verification with a writer so flagged search indexes can be rebuilt.
+func openVerifyContentStore(cmd *cobra.Command, ownedRoot, dbPath string) (*store.Store, func(), error) {
 	dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		return nil, func() {}, fmt.Errorf("create data directory: %w", err)
@@ -81,6 +68,15 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "Content verification")
 	fmt.Fprintf(out, "sessions checked: %d\n", report.SessionsChecked)
+	fmt.Fprintf(out, "orphan content: %d bodies, %d blobs, %d database payload bytes\n", report.OrphanBodies, report.OrphanBlobs, report.OrphanBytes)
+	fmt.Fprintf(out, "orphan owned directories: %d, %d bytes\n", report.OrphanOwnedDirs, report.OrphanOwnedBytes)
+	fmt.Fprintf(out, "unflagged orphan sessions: %d\n", len(report.UnflaggedOrphanSessions))
+	for _, id := range report.UnflaggedOrphanSessions {
+		fmt.Fprintf(out, "  - %s: run peasant harvest --force --session %s to re-index and sweep orphan content; peasant migrate also drains owned directory leftovers\n", id, id)
+	}
+	if report.IndexRebuilt {
+		fmt.Fprintln(out, "search index rebuilt: pending health flag cleared")
+	}
 	if len(report.Damaged) == 0 {
 		fmt.Fprintln(out, "damaged sessions: none")
 	} else {
@@ -106,9 +102,6 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 			fmt.Fprintln(out, "repair: nothing to mark")
 		} else {
 			fmt.Fprintf(out, "repair: marked %d session(s) for the repair activation; re-run harvest to heal them\n", len(report.Repaired))
-		}
-		if report.IndexRebuilt {
-			fmt.Fprintln(out, "repair: search index rebuilt")
 		}
 	} else if len(report.Damaged) > 0 {
 		fmt.Fprintln(out, "re-run with --repair to mark the damaged sessions for the repair activation")

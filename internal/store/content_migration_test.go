@@ -58,7 +58,11 @@ type contentMigrationCase struct {
 	Crash string `yaml:"crash,omitempty"`
 	// Heal restores the damage after the rollback and converts on the
 	// re-run.
-	Heal bool `yaml:"heal,omitempty"`
+	Heal        bool   `yaml:"heal,omitempty"`
+	Drain       string `yaml:"drain,omitempty"`
+	DrainRow    bool   `yaml:"drainRow,omitempty"`
+	DrainIntent bool   `yaml:"drainIntent,omitempty"`
+	DrainCrash  bool   `yaml:"drainCrash,omitempty"`
 	// AssertSkipState proves the conversion preserves the session's
 	// skip and bookkeeping state.
 	AssertSkipState bool `yaml:"assertSkipState,omitempty"`

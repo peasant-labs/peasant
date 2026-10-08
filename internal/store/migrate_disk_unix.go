@@ -10,7 +10,7 @@ import (
 // filesystem holding path. ok is false when the query itself fails, in
 // which case the preflight warns instead of refusing: correctness never
 // depends on the guard.
-func migrateFreeBytes(path string) (free uint64, ok bool) {
+func platformMigrateFreeBytes(path string) (free uint64, ok bool) {
 	if path == "" {
 		return 0, false
 	}

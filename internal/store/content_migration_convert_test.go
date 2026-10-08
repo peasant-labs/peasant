@@ -37,6 +37,10 @@ func TestContentMigrationConversion(t *testing.T) {
 		}
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
+			if c.Drain != "" {
+				runMigrateDrainCase(t, c)
+				return
+			}
 			if c.Driver != "" {
 				runMigrateDriverCase(t, c)
 				return

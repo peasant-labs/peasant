@@ -320,6 +320,9 @@ func (s *Store) ReclaimSupersededGenerations(ctx context.Context, limit int) (Re
 	if err := s.requireGenerationSupport(); err != nil {
 		return result, err
 	}
+	if _, err := s.EnsureSearchIndexHealthy(ctx); err != nil {
+		return result, err
+	}
 	candidates, err := s.reclaimCandidateSessions(ctx)
 	if err != nil {
 		return result, err

@@ -1,0 +1,19 @@
+cases:
+  - name: migrate-refuses-before-health-write
+    entry: migrate
+    free: below
+    refuses: true
+    needsRebuild: true
+  - name: migrate-health-before-drain
+    entry: migrate
+    free: at
+    cancelAtPreflight: true
+  - name: reclaim-health-with-no-candidates
+    entry: reclaim
+  - name: verify-health-without-repair
+    entry: verify
+    rebuilt: true
+  - name: migrate-unknown-filesystem-warns
+    entry: migrate
+    free: unknown
+    cancelAtPreflight: true

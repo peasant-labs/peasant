@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -41,10 +43,13 @@ import (
 //          retirement preconditions, and the final report.
 // Phase 5  (documented, offline) optimize + VACUUM: printed, never run.
 
-// migrateDiskFloorBytes is the Phase 0 free-disk floor (design §7.2): the
-// ~13 GB peak need (§7.3) plus 10 GB headroom plus the per-session working
-// set, rounded to 25 GB.
-const migrateDiskFloorBytes = 25 << 30
+// migrateDiskReserve is proportional to the database's allocated page bytes:
+// 60% rounds the design's 25 GB / 42.9 GB anchor up, above the sandbox's
+// measured 2.6 GB peak extra space in a partial run. It retains headroom
+// for the unmeasured complete run without a fixed floor.
+const migrateDiskReserve = 0.60
+
+var migrateFreeBytes = platformMigrateFreeBytes
 
 // migratePreflightSampleSessions bounds the Phase 0 mismatch sample: the
 // first that many sessions with conversion work, in session-id order.
@@ -106,8 +111,10 @@ type MigratePlan struct {
 	EstimatedBytes int64
 	// DiskFreeBytes is the free space on the database filesystem, or -1
 	// when the platform cannot report it.
-	DiskFreeBytes int64
-	// DiskFreeOK reports whether the free space clears the 25 GB floor
+	DiskFreeBytes     int64
+	StoreBytes        int64
+	DiskRequiredBytes int64
+	// DiskFreeOK reports whether the free space clears the proportional reserve
 	// (or is unknowable, which warns instead of refusing).
 	DiskFreeOK bool
 	// Advisory carries the no-other-writer note: the run is recommended
@@ -201,6 +208,10 @@ func (s *Store) PlanMigration(ctx context.Context) (MigratePlan, error) {
 	if err != nil {
 		return plan, err
 	}
+	drainSessions, err = s.unionOwnedSessions(ctx, drainSessions)
+	if err != nil {
+		return plan, err
+	}
 	plan.PendingIntents, err = s.countMigratePendingIntents(ctx, drainSessions)
 	if err != nil {
 		return plan, err
@@ -213,7 +224,12 @@ func (s *Store) PlanMigration(ctx context.Context) (MigratePlan, error) {
 	if err != nil {
 		return plan, err
 	}
-	plan.DiskFreeBytes, plan.DiskFreeOK = checkMigrateDisk(ctx, conn)
+	plan.StoreBytes, err = migrateStoreBytesOnConn(conn)
+	if err != nil {
+		return plan, err
+	}
+	plan.DiskRequiredBytes = int64(math.Ceil(float64(plan.StoreBytes) * migrateDiskReserve))
+	plan.DiskFreeBytes, plan.DiskFreeOK = checkMigrateDisk(ctx, conn, plan.DiskRequiredBytes)
 	plan.Advisory = "no other writer running is recommended: Phase 2 takes the per-session lock and Phase 3 holds the single SQLite writer for minutes, so a concurrent harvest waits on busy_timeout or retries on its next harvest"
 	return plan, nil
 }
@@ -321,9 +337,9 @@ func (s *Store) sessionGenerationsFootprint(ctx context.Context, sessionID schem
 }
 
 // checkMigrateDisk reports the free space on the database filesystem
-// against the 25 GB floor. An unknowable filesystem warns instead of
+// against the proportional reserve. An unknowable filesystem warns instead of
 // refusing: correctness never depends on the guard.
-func checkMigrateDisk(ctx context.Context, conn *sqlite.Conn) (int64, bool) {
+func checkMigrateDisk(ctx context.Context, conn *sqlite.Conn, required int64) (int64, bool) {
 	if err := ctx.Err(); err != nil {
 		return -1, false
 	}
@@ -331,7 +347,30 @@ func checkMigrateDisk(ctx context.Context, conn *sqlite.Conn) (int64, bool) {
 	if !ok {
 		return -1, true
 	}
-	return int64(free), free >= migrateDiskFloorBytes
+	if free > math.MaxInt64 {
+		return math.MaxInt64, true
+	}
+	return int64(free), free >= uint64(required)
+}
+
+func migrateStoreBytesOnConn(conn *sqlite.Conn) (int64, error) {
+	var pages, size int64
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA page_count`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error { pages = stmt.ColumnInt64(0); return nil }}); err != nil {
+		return 0, err
+	}
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA page_size`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error { size = stmt.ColumnInt64(0); return nil }}); err != nil {
+		return 0, err
+	}
+	return pages * size, nil
+}
+
+// CheckDisk refuses an applied migration before its first write. An unknown
+// filesystem remains an explicit warning in the CLI preflight.
+func (p MigratePlan) CheckDisk() error {
+	if !p.DiskFreeOK {
+		return fmt.Errorf("store: migration preflight refused: free disk %d bytes is below the required %d bytes (60%% of the %d-byte peasant database); nothing was migrated; free space on the database filesystem and re-run `peasant migrate --confirm`", p.DiskFreeBytes, p.DiskRequiredBytes, p.StoreBytes)
+	}
+	return nil
 }
 
 // dbMainFileOnConn reads the main database file from the connection's
@@ -367,6 +406,12 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 	if err != nil {
 		return result, err
 	}
+	if err := plan.CheckDisk(); err != nil {
+		return result, err
+	}
+	if _, err := s.EnsureSearchIndexHealthy(ctx); err != nil {
+		return result, err
+	}
 	total := len(plan.Sessions)
 	if opts.Limit > 0 && total > opts.Limit {
 		total = opts.Limit
@@ -380,6 +425,9 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 		progress(MigrateProgress{Phase: phase, SessionsDone: done, SessionsTotal: total, BytesFreed: bytes})
 	}
 	report(MigrationPhasePreflight, 0, 0)
+	if err := ctx.Err(); err != nil {
+		return result, fmt.Errorf("store: migration interrupted after preflight: %w; re-run peasant migrate --confirm to resume", err)
+	}
 
 	drained, drainBytes, err := s.migrateDrain(ctx, &result)
 	if err != nil {
@@ -395,7 +443,7 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 			return result, fmt.Errorf("store: migration interrupted before session %s: %w; %d of %d sessions converted and the rest keep their state for the next pass", sessionID, err, i, total)
 		}
 		before, _ := s.sessionGenerationsFootprint(ctx, sessionID)
-		outcome, sessionErr := s.MigrateSession(ctx, sessionID)
+		outcome, sessionErr := s.MigrateSession(context.WithoutCancel(ctx), sessionID)
 		if sessionErr != nil {
 			var dataRollback *MigrateDataRollbackError
 			if errors.As(sessionErr, &dataRollback) && outcome == MigrateOutcomeRolledBack {
@@ -437,7 +485,7 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 	if err := ctx.Err(); err != nil {
 		return result, fmt.Errorf("store: migration interrupted before search consolidation: %w; converted sessions keep their state and the next pass resumes at Phase 3", err)
 	}
-	consolidated, err := s.migrateConsolidateSearch(ctx)
+	consolidated, err := s.migrateConsolidateSearch(context.WithoutCancel(ctx))
 	if err != nil {
 		return result, err
 	}
@@ -627,7 +675,7 @@ func (s *Store) migrateDrain(ctx context.Context, result *MigrateResult) (int64,
 			result.Warnings = append(result.Warnings, fmt.Sprintf("drain session %s: %v", sessionID, err))
 			continue
 		}
-		touched, err := s.migrateDrainSession(ctx, sessionID)
+		touched, err := s.migrateDrainSession(context.WithoutCancel(ctx), sessionID)
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("drain session %s: %v", sessionID, err))
 			continue
@@ -656,7 +704,34 @@ func (s *Store) migrateDrainSessions(ctx context.Context) ([]schema.SessionID, e
 		return nil, fmt.Errorf("store: take connection to list drain sessions: %w; nothing was drained", err)
 	}
 	defer s.pool.Put(conn)
-	return migrateDrainSessionsOnConn(conn)
+	sessions, err := migrateDrainSessionsOnConn(conn)
+	if err != nil {
+		return nil, err
+	}
+	return s.unionOwnedSessions(ctx, sessions)
+}
+
+func (s *Store) unionOwnedSessions(ctx context.Context, sessions []schema.SessionID) ([]schema.SessionID, error) {
+	if s.generationArtifacts == nil {
+		return sessions, nil
+	}
+	owned, err := s.generationArtifacts.ListOwnedSessionIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[schema.SessionID]bool, len(sessions)+len(owned))
+	for _, id := range sessions {
+		set[id] = true
+	}
+	for _, id := range owned {
+		set[id] = true
+	}
+	sessions = sessions[:0]
+	for id := range set {
+		sessions = append(sessions, id)
+	}
+	sort.Slice(sessions, func(i, j int) bool { return sessions[i] < sessions[j] })
+	return sessions, nil
 }
 
 // migrateDrainSessionsOnConn lists the drain scope on the caller's
@@ -689,53 +764,106 @@ func (s *Store) migrateDrainSession(ctx context.Context, sessionID schema.Sessio
 		return false, fmt.Errorf("store: lock session %s for the migration drain: %w; nothing was drained", sessionID, err)
 	}
 	defer func() { _ = release() }()
-	touched := false
+	var intent *GenerationIntent
 	if s.generationArtifacts != nil {
-		intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
+		intent, err = s.generationArtifacts.ReadIntent(ctx, sessionID)
 		if err != nil {
 			return false, fmt.Errorf("store: read the pending intent for session %s: %w; nothing was drained", sessionID, err)
 		}
-		if intent != nil {
-			if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
-				return false, fmt.Errorf("store: discard the pending intent for session %s: %w; nothing was drained", sessionID, err)
-			}
-			touched = true
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return false, err
+	}
+	var exists, dead, pending bool
+	var keep string
+	err = sqlitex.ExecuteTransient(conn, `SELECT s.active_generation_id,
+EXISTS(SELECT 1 FROM session_projection_generations g WHERE g.session_id=s.session_id AND g.generation_id IS NOT s.active_generation_id),
+EXISTS(SELECT 1 FROM session_projection_generations g WHERE g.session_id=s.session_id AND g.generation_id=s.active_generation_id),
+s.content_sweep_pending FROM sessions s WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+		exists = true
+		dead = stmt.ColumnInt(1) != 0
+		pending = stmt.ColumnInt(3) != 0
+		if stmt.ColumnInt(2) != 0 {
+			keep = stmt.ColumnText(0)
+		}
+		return nil
+	}})
+	s.pool.Put(conn)
+	if err != nil {
+		return false, err
+	}
+	var dirs int64
+	if s.generationArtifacts != nil {
+		dirs, _, err = s.generationArtifacts.OrphanGenerationFootprint(ctx, sessionID, keep)
+		if err != nil {
+			return false, err
 		}
 	}
-	active, err := s.activeGenerationID(ctx, sessionID)
-	if err != nil {
-		return false, err
+	touched := intent != nil || dead || dirs > 0
+	if !touched && !pending {
+		return false, nil
 	}
-	deleted, err := s.deleteSupersededGenerationRows(ctx, sessionID, active)
-	if err != nil {
-		return false, err
+	// The durable re-index proof and sweep flag precede every destructive
+	// operation. A row-less namespace is itself the rediscoverable marker.
+	if exists {
+		conn, err := s.pool.Take(ctx)
+		if err != nil {
+			return false, err
+		}
+		query := `UPDATE sessions SET content_sweep_pending=1 WHERE session_id=?`
+		if touched {
+			query = `UPDATE sessions SET indexed_input_hash=NULL, content_sweep_pending=1 WHERE session_id=?`
+		}
+		err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: []any{string(sessionID)}})
+		s.pool.Put(conn)
+		if err != nil {
+			return false, fmt.Errorf("store: mark session %s before migration drain: %w; nothing was discarded; retry migration", sessionID, err)
+		}
 	}
-	if deleted.Total() > 0 {
-		touched = true
+	if intent != nil {
+		if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
+			return touched, err
+		}
+		if migrateDrainAfterIntentClear != nil {
+			if err := migrateDrainAfterIntentClear(sessionID); err != nil {
+				return touched, err
+			}
+		}
+	}
+	if !exists {
+		if s.generationArtifacts != nil {
+			_, err = s.generationArtifacts.RemoveConvertedSessionFiles(ctx, sessionID)
+		}
+		return touched, err
+	}
+	// With no file-backed read authority, even the directory named after
+	// the active harmonized generation is obsolete. The ordinary sweep
+	// preserves that name, so drain it via the conversion cleanup first.
+	if keep == "" && s.generationArtifacts != nil && dirs > 0 {
+		if _, err := s.generationArtifacts.RemoveConvertedSessionFiles(ctx, sessionID); err != nil {
+			return touched, err
+		}
+	}
+	if _, err := s.sweepSessionLocked(ctx, sessionID); err != nil {
+		return touched, err
 	}
 	if s.generationArtifacts != nil {
-		dirs, err := s.removeLeftoverGenerationDirs(ctx, sessionID, active)
-		if err != nil {
-			return false, err
-		}
-		if dirs > 0 {
-			touched = true
-		}
-		reserved, err := s.generationArtifacts.RemoveReservedStagingDirs(ctx, sessionID)
-		if err != nil {
-			return false, fmt.Errorf("store: remove reserved staging directories for session %s: %w; drained rows stay deleted and the next pass retries the directories", sessionID, err)
-		}
-		if reserved > 0 {
-			touched = true
-		}
-	}
-	if touched {
-		if err := s.clearIndexedInputHash(ctx, sessionID); err != nil {
-			return false, err
+		if _, err := s.generationArtifacts.RemoveReservedStagingDirs(ctx, sessionID); err != nil {
+			// Preserve the retry flag if the sweep succeeded but the reserved
+			// directory removal did not. The raw tree also survives a crash.
+			if conn, takeErr := s.pool.Take(context.WithoutCancel(ctx)); takeErr == nil {
+				_ = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET content_sweep_pending=1 WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}})
+				s.pool.Put(conn)
+			}
+			return touched, err
 		}
 	}
 	return touched, nil
 }
+
+// migrateDrainAfterIntentClear is a nil production crash boundary.
+var migrateDrainAfterIntentClear func(schema.SessionID) error
 
 // clearIndexedInputHash clears the consumed-input proof for one session,
 // so the repair predicate re-selects it and the next harvest re-indexes

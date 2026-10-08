@@ -1620,7 +1620,7 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 			return txnErr
 		}
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
+	if err := SearchStateSetNeedsRebuild(ctx, conn); err != nil {
 		txnErr = fmt.Errorf("store: flag the search index for rebuild after the repair of session %s: %w", prepared.sessionID, err)
 		return txnErr
 	}

@@ -15,7 +15,8 @@ import (
 // The content verification and repair marking (design §5): `harvest
 // verify --content` lists the harmonized sessions whose stored objects
 // fail self-verification and reports the search index health with its
-// size ratio; `--repair` clears the consumed-input proof of each damaged
+// size ratio, rebuilding a flagged search index on entry; `--repair` clears
+// the consumed-input proof of each damaged
 // session, so the repair predicate selects it and its next activation
 // runs in repair mode (§4.6): it bypasses the identical-refresh skip,
 // inserts no new generation row, and rewrites the failing entry rows,
@@ -40,12 +41,18 @@ type ContentDamage struct {
 // size ratio, and — with --repair — the sessions marked for the repair
 // activation.
 type ContentVerifyReport struct {
-	SessionsChecked int64
-	Damaged         []ContentDamage
-	NeedsRebuild    bool
-	Size            SearchSizeReport
-	Repaired        []schema.SessionID
-	IndexRebuilt    bool
+	SessionsChecked         int64
+	Damaged                 []ContentDamage
+	NeedsRebuild            bool
+	Size                    SearchSizeReport
+	Repaired                []schema.SessionID
+	IndexRebuilt            bool
+	OrphanBodies            int64
+	OrphanBlobs             int64
+	OrphanBytes             int64
+	OrphanOwnedDirs         int64
+	OrphanOwnedBytes        int64
+	UnflaggedOrphanSessions []schema.SessionID
 }
 
 // VerifyContent checks every harmonized session's mapped objects with
@@ -53,13 +60,24 @@ type ContentVerifyReport struct {
 // canonical text, blob bytes hashed in chunk order against the
 // descriptor digest with the summed lengths against the header length,
 // and the capture proof over the shim entries — and reports the search
-// index health with its size ratio. With repair it clears the
+// index health with its size ratio. Every invocation rebuilds a flagged
+// search index on entry. With repair it clears the
 // consumed-input proof of each damaged session (the ordinary marking the
-// drain and the migration rollbacks share) and rebuilds the search index
-// when the rebuild flag is set. Verify never rewrites content itself:
+// drain and the migration rollbacks share). Verify never rewrites content itself:
 // healing runs through the repair activation on the next harvest.
 func (s *Store) VerifyContent(ctx context.Context, repair bool) (ContentVerifyReport, error) {
 	var report ContentVerifyReport
+	if err := s.CheckSessionEntriesRowidCeiling(ctx); err != nil {
+		return report, err
+	}
+	rebuilt, err := s.EnsureSearchIndexHealthy(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.IndexRebuilt = rebuilt
+	if err := s.collectContentOrphans(ctx, &report); err != nil {
+		return report, err
+	}
 	sessions, err := s.migrateHarmonizedSessions(ctx)
 	if err != nil {
 		return report, err

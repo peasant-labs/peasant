@@ -95,6 +95,12 @@ func (f *GenerationFootprint) Add(other GenerationFootprint) {
 // candidate re-reads and verifies its blobs. Tests substitute a failing
 // implementation to interrupt a chosen seam.
 type GenerationArtifactStore interface {
+	// ListOwnedSessionIDs discovers valid top-level session directories,
+	// including sessions that have no catalog row. It never follows symlinks.
+	ListOwnedSessionIDs(context.Context) ([]schema.SessionID, error)
+	// OrphanGenerationFootprint measures non-active and reserved directories.
+	// keep names the live file-backed directory, or is empty for no file authority.
+	OrphanGenerationFootprint(context.Context, schema.SessionID, string) (int64, GenerationFootprint, error)
 	// ReadIntent returns the recorded intent, or (nil, nil) when none exists.
 	ReadIntent(context.Context, schema.SessionID) (*GenerationIntent, error)
 	// ClearIntent removes the activation intent after the commit and repair.
@@ -761,6 +767,96 @@ func (a *osGenerationArtifactStore) ListGenerationDirectories(ctx context.Contex
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func (a *osGenerationArtifactStore) ListOwnedSessionIDs(ctx context.Context) ([]schema.SessionID, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("store: discover owned sessions: %s; no directory was changed; fix owned-root access and retry", sanitizeFSError(err))
+	}
+	var ids []schema.SessionID
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		id, err := schema.NewSessionID(entry.Name())
+		if err == nil {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids, nil
+}
+
+func (a *osGenerationArtifactStore) OrphanGenerationFootprint(ctx context.Context, id schema.SessionID, keep string) (int64, GenerationFootprint, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	sessionRel, err := a.sessionRel(id)
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	defer root.Close()
+	rel := path.Join(sessionRel, "generations")
+	if _, err := noFollowRemovalPath(root, rel); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, GenerationFootprint{}, nil
+		}
+		return 0, GenerationFootprint{}, err
+	}
+	dir, err := root.Open(rel)
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	var count int64
+	var total GenerationFootprint
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return count, total, err
+		}
+		if !entry.IsDir() || entry.Name() == keep {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), ".tmp-gen-") && validateGenerationID(entry.Name()) != nil {
+			continue
+		}
+		child := path.Join(rel, entry.Name())
+		if _, err := noFollowRemovalPath(root, child); err != nil {
+			return count, total, err
+		}
+		footprint, err := footprintUnderRoot(root, child)
+		if err != nil {
+			return count, total, err
+		}
+		count++
+		total.Add(footprint)
+	}
+	return count, total, nil
 }
 
 // footprintUnderRoot sums the regular files under one root-relative directory.

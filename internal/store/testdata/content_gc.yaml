@@ -10,6 +10,13 @@
 # after the sweep. A case with no typed fields is a placeholder a later
 # change fills; the loader's manifest check still protects its name.
 cases:
+  - name: verify-reports-orphan-bytes
+    verify: orphans
+  - name: verify-flags-unflagged-orphan-session
+    verify: orphans
+    unflagged: true
+  - name: verify-rowid-ceiling-refuses
+    verify: rowid
   - name: active-only
     wantRowsDeleted: 0
     wantBodiesDeleted: 0

@@ -233,7 +233,7 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 			txnErr = err
 			return deleted, txnErr
 		}
-		trusted, err := sweepVerifyBodyForDelete(conn, sessionID, digest)
+		_, trusted, err := trustBodyForDelete(conn, sessionID, digest)
 		if err != nil {
 			txnErr = err
 			return deleted, txnErr
@@ -253,36 +253,6 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 		deleted += int64(conn.Changes())
 	}
 	return deleted, nil
-}
-
-// sweepVerifyBodyForDelete is the sweep's delete-time check: the row's
-// recomputed digest must equal its stored anchor, or the FTS delete values
-// read from its columns cannot be trusted. A missing row reads as
-// untrusted: concurrent work removed it first, and the rebuild resolves any
-// doubt about its postings.
-//
-// The search change owns the canonical delete-time check and the rebuild
-// gates; this sweep-local helper carries the same contract until that change
-// consolidates the two call sites.
-func sweepVerifyBodyForDelete(conn *sqlite.Conn, sessionID schema.SessionID, digest string) (bool, error) {
-	found := false
-	trusted := false
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), digest},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			found = true
-			record := scanEntryRecord(stmt)
-			trusted = verifyBodyForDelete(record)
-			return nil
-		},
-	})
-	if err != nil {
-		return false, fmt.Errorf("store: verify body %s for session %s before delete: %w; no row was deleted", digest, sessionID, err)
-	}
-	if !found {
-		return false, nil
-	}
-	return trusted, nil
 }
 
 // sweepFlagSearchRebuild marks the store-global search index for a

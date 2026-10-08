@@ -3,7 +3,7 @@
 # The migration cases carry the command and flag inventory the runner
 # resolves from the production command tree; the JSON cases also carry
 # the output keys the machine-readable shapes must contain. The search
-# and reclaim cases stay name placeholders their owners fill.
+# and reclaim cases assert the rendered production reports.
 cases:
   - name: migrate
     command: migrate
@@ -24,9 +24,22 @@ cases:
   - name: harvest-verify-content
     command: harvest verify
     flags: [verbose, content, repair]
+    textContains: ['sessions checked: 0', 'search index rebuilt:', 'ratio 2.00 (ok)', 'orphan content:', 'unflagged orphan sessions: 0', 'Status: PASSED']
   - name: harvest-verify-content-repair
     command: harvest verify
     flags: [content, repair]
+    repair: true
+    textContains: ['repair: nothing to mark', 'search index rebuilt:', 'ratio 2.00 (ok)']
   - name: fts-size-ratio-reported
+    command: harvest verify
+    flags: [content]
+    needsOptimize: true
+    textContains: ['780 bytes over 1000 bytes of text (2 documents)', 'fresh estimate 390 bytes', 'ratio 2.00 (needs-optimize:']
   - name: reclaim-sweeps-orphans
+    command: reclaim
+    flags: [dry-run, confirm, json]
+    jsonKeys: [sessions, generations, rows, directories_removed, bytes, bodies_deleted, blobs_deleted, pending_intent_sessions]
   - name: reclaim-selects-by-flag
+    command: reclaim
+    flags: [dry-run, confirm, json]
+    jsonKeys: [sessions, generations, rows, directories_removed, bytes, bodies_deleted, blobs_deleted, pending_intent_sessions]

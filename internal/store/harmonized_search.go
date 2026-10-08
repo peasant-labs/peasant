@@ -2,12 +2,16 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // SearchState is the store-global search index health (design §3.5): exactly
@@ -69,7 +73,28 @@ func verifyBodyForDelete(row EntryRecord) bool {
 	if row.BodyDigest == "" {
 		return false
 	}
-	return string(bodyDigestForRecord(row)) == row.BodyDigest
+	data, err := json.Marshal(entryFromRow(row))
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]) == row.BodyDigest
+}
+
+// trustBodyForDelete owns missing-row and digest semantics for every delete
+// path. Missing or unserializable bodies are untrusted, never assumed safe.
+func trustBodyForDelete(conn *sqlite.Conn, sid schema.SessionID, digest string) (found, trusted bool, err error) {
+	err = sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id=? AND body_digest=?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), digest}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			trusted = verifyBodyForDelete(scanEntryRecord(stmt))
+			return nil
+		},
+	})
+	if err != nil {
+		return false, false, fmt.Errorf("store: verify body %s of session %s before delete: %w; nothing was deleted; retry the operation", digest, sid, err)
+	}
+	return found, trusted, nil
 }
 
 // SearchState returns the store-global search index health.
@@ -521,7 +546,7 @@ func verifyBodiesForDeleteOnConn(conn *sqlite.Conn, sessionIDs []string) (bool, 
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	query := `SELECT ` + sqlSelectBodyColumns + ` FROM session_entry_bodies WHERE session_id IN (` + strings.Join(placeholders, `,`) + `)`
+	query := `SELECT session_id, body_digest FROM session_entry_bodies WHERE session_id IN (` + strings.Join(placeholders, `,`) + `)`
 	mismatch := false
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,
@@ -529,8 +554,15 @@ func verifyBodiesForDeleteOnConn(conn *sqlite.Conn, sessionIDs []string) (bool, 
 			if mismatch {
 				return nil
 			}
-			record := scanEntryRecord(stmt)
-			if !verifyBodyForDelete(record) {
+			sid, err := schema.NewSessionID(stmt.ColumnText(0))
+			if err != nil {
+				return err
+			}
+			_, trusted, err := trustBodyForDelete(conn, sid, stmt.ColumnText(1))
+			if err != nil {
+				return err
+			}
+			if !trusted {
 				mismatch = true
 			}
 			return nil
@@ -539,7 +571,7 @@ func verifyBodiesForDeleteOnConn(conn *sqlite.Conn, sessionIDs []string) (bool, 
 		return false, fmt.Errorf("store: verify %d sessions' bodies before delete: %w; nothing was deleted", len(sessionIDs), err)
 	}
 	if mismatch {
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
+		if err := SearchStateSetNeedsRebuild(context.Background(), conn); err != nil {
 			return true, fmt.Errorf("store: flag the search index for rebuild after an untrusted delete: %w; the row was verified but the flag is not set — retry the delete", err)
 		}
 	}

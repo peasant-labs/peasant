@@ -58,6 +58,8 @@ type contentGCCase struct {
 	MatchFound          []string               `yaml:"matchFound,omitempty"`
 	MatchEmpty          []string               `yaml:"matchEmpty,omitempty"`
 	Sessions            []contentGCFlagSession `yaml:"sessions,omitempty"`
+	Verify              string                 `yaml:"verify,omitempty"`
+	Unflagged           bool                   `yaml:"unflagged,omitempty"`
 }
 
 // isPlaceholder reports whether the case carries no typed expectations, in
@@ -67,7 +69,7 @@ func (c contentGCCase) isPlaceholder() bool {
 		c.WantDirsRemoved == 0 && c.WantFlagCleared == nil && c.WantRebuilt == nil &&
 		c.WantMirrorRows == nil && c.WantFullContentRows == nil &&
 		len(c.FirstTerms) == 0 && len(c.SecondTerms) == 0 &&
-		len(c.MatchFound) == 0 && len(c.MatchEmpty) == 0 && len(c.Sessions) == 0
+		len(c.MatchFound) == 0 && len(c.MatchEmpty) == 0 && len(c.Sessions) == 0 && c.Verify == ""
 }
 
 type contentGCFixtures struct {
@@ -113,6 +115,8 @@ func TestContentGCFamily(t *testing.T) {
 	for _, c := range fixtures.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			switch c.Name {
+			case "verify-reports-orphan-bytes", "verify-flags-unflagged-orphan-session", "verify-rowid-ceiling-refuses":
+				runGCVerify(t, c)
 			case "active-only":
 				runGCActiveOnly(t, c)
 			case "superseded-only":

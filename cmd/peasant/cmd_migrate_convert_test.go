@@ -275,4 +275,25 @@ func TestVerifyCmdContent(t *testing.T) {
 			t.Errorf("verify output misses %q:\n%s", want, out)
 		}
 	}
+	conn, err := sqlite.OpenConn(string(defaults.ResolveDBFilePathWith(dir)), sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild=1 WHERE id=1`, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err = executeVerifyCmd(t, dir, ownedRoot, []string{"--content"})
+	if err != nil {
+		t.Fatalf("verify flagged index: %v", err)
+	}
+	if !strings.Contains(out, "rebuilt") {
+		t.Fatalf("verification hid rebuilding: %s", out)
+	}
+	out, err = executeVerifyCmd(t, dir, ownedRoot, []string{"--content"})
+	if err != nil || strings.Contains(out, "rebuilt") {
+		t.Fatalf("rebuild did not persist: %v\n%s", err, out)
+	}
 }
