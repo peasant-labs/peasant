@@ -23,6 +23,13 @@ var schemaFreshVsMigratedManifestYAML []byte
 type freshVsMigratedCase struct {
 	Name string `yaml:"name"`
 	Kind string `yaml:"kind"`
+	// OwnedBy names the external runner for cases this white-box family
+	// cannot execute: importing storetest here would cycle (storetest
+	// imports store), so the golden-template leg runs in
+	// TestGoldenTemplateBodyInsert and asserts nothing here. This follows
+	// the content_migration ownedBy convention; the manifest check still
+	// protects the name.
+	OwnedBy string `yaml:"ownedBy,omitempty"`
 }
 
 type freshVsMigratedFixtures struct {
@@ -62,11 +69,17 @@ func loadFreshVsMigratedFixtures(t *testing.T) freshVsMigratedFixtures {
 // copy (this white-box package cannot import storetest without a cycle). The
 // explicit allocation subquery is the writer contract (no AUTOINCREMENT, no
 // sqlite_sequence), spelled here from the same constant the writers use; the
-// migration's literal CHECK holds it equal.
+// migration's literal CHECK holds it equal. Cases carrying ownedBy run under
+// that external runner and assert nothing here; the loader's manifest check
+// still protects their names.
 func TestSchemaFreshVsMigrated(t *testing.T) {
 	t.Parallel()
 	fixtures := loadFreshVsMigratedFixtures(t)
 	for _, c := range fixtures.Cases {
+		if c.OwnedBy != "" {
+			t.Logf("%s: owned by %s; the golden template needs storetest and asserts nothing here", c.Name, c.OwnedBy)
+			continue
+		}
 		switch c.Kind {
 		case "fresh-body-id":
 			assertFirstBodyID(t, c.Name, freshBodyStore(t))

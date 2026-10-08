@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	_ "embed"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,7 +10,42 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/schema_fresh_vs_migrated.yaml
+var freshVsMigratedFamilyYAML []byte
+
+// assertGoldenCaseInFamily confirms golden-template-body-insert is still in
+// the schema_fresh_vs_migrated inventory with this test as its documented
+// runner, so removing either side fails a gate: removing the name trips the
+// family's required-name manifest, and removing this test leaves the family
+// entry pointing at a runner that no longer exists.
+func assertGoldenCaseInFamily(t *testing.T) {
+	t.Helper()
+	var family struct {
+		Cases []struct {
+			Name    string `yaml:"name"`
+			Kind    string `yaml:"kind"`
+			OwnedBy string `yaml:"ownedBy,omitempty"`
+		} `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(string(freshVsMigratedFamilyYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&family); err != nil {
+		t.Fatalf("decode schema_fresh_vs_migrated.yaml: %v", err)
+	}
+	for _, c := range family.Cases {
+		if c.Name != "golden-template-body-insert" {
+			continue
+		}
+		if c.OwnedBy != "TestGoldenTemplateBodyInsert" {
+			t.Fatalf("golden-template-body-insert is owned by %q, want this test %q", c.OwnedBy, "TestGoldenTemplateBodyInsert")
+		}
+		return
+	}
+	t.Fatal("schema_fresh_vs_migrated.yaml carries no golden-template-body-insert case")
+}
 
 // TestGoldenTemplateBodyInsert proves the storetest golden template — the
 // migrated database every storetest.Open copy derives from — allocates its
@@ -21,6 +57,7 @@ import (
 // TestSchemaFreshVsMigrated.
 func TestGoldenTemplateBodyInsert(t *testing.T) {
 	t.Parallel()
+	assertGoldenCaseInFamily(t)
 	s := storetest.Open(t)
 	conn := takeConn(t, s.PoolForTest())
 	defer s.PoolForTest().Put(conn)

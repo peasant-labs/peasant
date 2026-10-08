@@ -9,5 +9,8 @@ cases:
     kind: fresh-body-id
   - name: migrated-first-body-id
     kind: migrated-body-id
+  - name: golden-template-body-insert
+    kind: golden-body-id
+    ownedBy: TestGoldenTemplateBodyInsert
   - name: fresh-equals-migrated-schema
     kind: schema-equality
