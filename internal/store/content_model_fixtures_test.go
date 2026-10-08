@@ -54,25 +54,6 @@ func loadContentModelScaffoldFixture(t *testing.T, label string, fixtureYAML, ma
 	return actual
 }
 
-//go:embed testdata/content_model_parity.yaml
-var contentModelParityYAML []byte
-
-//go:embed testdata/content_model_parity.manifest.yaml
-var contentModelParityManifestYAML []byte
-
-// loadContentModelParityFixture loads the content model parity scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentModelParityFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content model parity", contentModelParityYAML, contentModelParityManifestYAML)
-}
-
-// TestContentModelParityFixtureManifest pins the content model parity case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentModelParityFixtureManifest(t *testing.T) {
-	loadContentModelParityFixture(t)
-}
-
 //go:embed testdata/content_promotion.yaml
 var contentPromotionYAML []byte
 
