@@ -1,0 +1,19 @@
+# Required-name manifest for content_gc: deletion protection by NAME, never by count.
+requiredNames:
+  - active-only
+  - superseded-only
+  - shared-active-superseded
+  - non-native-untouched
+  - crash-orphan
+  - fk-blocks-live-delete
+  - blob-unreferenced-swept
+  - blob-referenced-kept
+  - chunk-cascade
+  - blob-shared-active-superseded
+  - flag-complete-after-v62
+  - directory-orphan-retried-without-rows
+  - representation-replacement-flagged-and-swept
+  - non-native-reindexed-as-native-settles
+  - sweep-session-qualified
+  - fts-postings-removed-on-sweep
+  - fts-postings-removed-on-prune

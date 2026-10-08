@@ -1,0 +1,25 @@
+# search_recall — scaffolding for the harmonized session content model
+# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
+# No cases are filled yet; each entry below is a name placeholder so the
+# required-names manifest protects the case inventory from the start.
+# Later issues extend the case shape and the loader struct field-for-field.
+cases:
+  - name: term-in-tool-output
+  - name: term-in-tool-input
+  - name: term-in-text-head
+  - name: term-beyond-2000-in-text-found
+  - name: term-beyond-2000-in-tool-output-found
+  - name: preview-only-capture-parity
+  - name: preview-only-dedup-parity
+  - name: dedup-no-longer-hides-full-preview-difference
+  - name: tool-row-preview-differs-beyond-2000-found
+  - name: pi-carrier-excluded
+  - name: superseded-only-term
+  - name: earlier-partition-body-not-returned
+  - name: non-native-term
+  - name: non-native-indexed-text-unchanged
+  - name: delete-then-match-returns-nothing
+  - name: union-view-rowid-pushdown
+  - name: transition-window-match-set
+  - name: transition-window-fallback-filter
+  - name: rowid-space-guard

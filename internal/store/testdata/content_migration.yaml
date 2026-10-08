@@ -1,0 +1,41 @@
+# content_migration — scaffolding for the harmonized session content model
+# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
+# No cases are filled yet; each entry below is a name placeholder so the
+# required-names manifest protects the case inventory from the start.
+# Later issues extend the case shape and the loader struct field-for-field.
+cases:
+  - name: native-clean
+  - name: native-superseded-identical-discarded
+  - name: native-pending-intent-discarded
+  - name: native-non-emitted
+  - name: native-extra-keys-promoted
+  - name: native-stats-backfilled
+  - name: native-newer-stats-row-converts
+  - name: native-metadata-hash-recomputed
+  - name: native-field-blob-mismatch-rolls-back-and-marks
+  - name: native-missing-blob-rolls-back-and-marks
+  - name: native-damaged-blob-rolls-back-and-marks
+  - name: native-annotated
+  - name: native-serialization-mismatch-rolls-back
+  - name: native-shim-mismatch-rolls-back
+  - name: native-aux-json-mismatch-rolls-back
+  - name: native-full-shape-mismatch-rolls-back
+  - name: native-capture-hash-mismatch-rolls-back
+  - name: native-session-hash-mismatch-rolls-back
+  - name: null-session-entries-hash-skips-dimension
+  - name: native-detail-bytes-mismatch-halts
+  - name: data-rollback-threshold-halts
+  - name: rollback-then-reindex-converts
+  - name: harvest-converted-sweep-not-run-migrate-resumes
+  - name: non-native-full-untouched
+  - name: non-native-preview-only-untouched
+  - name: search-consolidation
+  - name: search-consolidation-with-unconverted-native
+  - name: resume-crash-in-body-subtxn
+  - name: resume-crash-before-catalog-commit
+  - name: resume-crash-after-commit-before-dir-removal
+  - name: resume-crash-during-search-consolidation
+  - name: resume-crash-after-search-consolidation
+  - name: skip-state-preserved-across-conversion
+  - name: settled-refusal-stays-settled
+  - name: dry-run-no-write

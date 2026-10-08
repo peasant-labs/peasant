@@ -1,0 +1,20 @@
+# content_corruption — scaffolding for the harmonized session content model
+# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
+# No cases are filled yet; each entry below is a name placeholder so the
+# required-names manifest protects the case inventory from the start.
+# Later issues extend the case shape and the loader struct field-for-field.
+cases:
+  - name: entry-column-altered
+  - name: chunk-byte-flipped
+  - name: chunk-missing
+  - name: header-length-wrong
+  - name: descriptor-digest-wrong
+  - name: capture-hash-wrong
+  - name: body-row-missing-fk-blocked
+  - name: preview-read-not-verified
+  - name: routing-read-not-verified
+  - name: repair-mode-rewrites-object
+  - name: repair-mode-rewrites-blob
+  - name: repair-mode-rederives-descriptor
+  - name: repair-identical-candidate-rewrites-corrupt-body
+  - name: swept-corrupt-body-rebuilds-index
