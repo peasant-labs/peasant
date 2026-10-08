@@ -85,188 +85,204 @@ func assertStatsPresence(t *testing.T, got CapturedStats, want v62ExpectedStats)
 func TestStatsOverflowFamily(t *testing.T) {
 	for _, c := range LoadStatsOverflowFixtures(t) {
 		t.Run(c.Name, func(t *testing.T) {
-			dir := t.TempDir()
-			sid, err := schema.NewSessionID("11111111-1111-4111-8111-111111111111")
-			if err != nil {
-				t.Fatal(err)
-			}
-			genID := "gen_stats_raw"
-			conn, err := sqlite.OpenConn(filepath.Join(dir, "generations.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
-			if err != nil {
-				t.Fatal(err)
-			}
-			predecessor := sqlitemigration.Schema{Migrations: dbSchema.Migrations[:61], MigrationOptions: dbSchema.MigrationOptions[:61]}
-			if err := sqlitemigration.Migrate(t.Context(), conn, predecessor); err != nil {
-				t.Fatal(err)
-			}
-			seedV62Predecessor(t, conn, v62Fixtures{StatsCases: []v62StatsCase{{SessionID: string(sid), ActiveGeneration: &genID, Generations: []v62GenerationSeed{{ID: genID, MetadataJSON: `{"stats":` + c.StatsJSON + `}`, InstalledAtMs: 1}}}}})
-			if err := conn.Close(); err != nil {
-				t.Fatal(err)
-			}
-			s := openGenerationStoreAt(t, dir)
-			t.Cleanup(func() {
-				_ = s.Close()
-			})
-			backfilled, err := s.ReadCapturedStats(t.Context(), sid)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertStatsPresence(t, backfilled, c.Want)
-			if backfilled.SeedJSON == nil || *backfilled.SeedJSON != c.StatsJSON {
-				t.Fatalf("backfill lost raw stats: %+v", backfilled.SeedJSON)
-			}
+			runStatsOverflowCase(t, c)
+		})
+	}
+}
 
-			// Add the entry/blob evidence needed for the real conversion. The
-			// backfilled stats row stays intact, and the same raw stats subtree
-			// is restored beside the complete captured metadata document.
-			execMigrateSQL(t, s, `DELETE FROM session_projection_generations WHERE session_id='`+string(sid)+`'`)
-			seedMigrateProfile(t, s, filepath.Join(dir, "artifacts"), sid, "clean", genID)
-			// The general file-backed helper seeds typed measurements too;
-			// restore the exact raw backfill row so it cannot invent presence.
-			execMigrateSQL(t, s, `DELETE FROM session_captured_stats WHERE session_id='`+string(sid)+`'`)
-			if _, err := s.UpsertCapturedStats(t.Context(), backfilled); err != nil {
-				t.Fatal(err)
-			}
-			conn, err = s.pool.Take(t.Context())
+func runStatsOverflowCase(t *testing.T, c statsOverflowCase) {
+	t.Helper()
+	dir := t.TempDir()
+	sid, err := schema.NewSessionID("11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	genID := "gen_stats_raw"
+	conn, err := sqlite.OpenConn(filepath.Join(dir, "generations.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	predecessor := sqlitemigration.Schema{Migrations: dbSchema.Migrations[:61], MigrationOptions: dbSchema.MigrationOptions[:61]}
+	if err := sqlitemigration.Migrate(t.Context(), conn, predecessor); err != nil {
+		t.Fatal(err)
+	}
+	seedV62Predecessor(t, conn, v62Fixtures{StatsCases: []v62StatsCase{{SessionID: string(sid), ActiveGeneration: &genID, Generations: []v62GenerationSeed{{ID: genID, MetadataJSON: `{"stats":` + c.StatsJSON + `}`, InstalledAtMs: 1}}}}})
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := openGenerationStoreAt(t, dir)
+	t.Cleanup(func() {
+		_ = s.Close()
+	})
+	backfilled, err := s.ReadCapturedStats(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStatsPresence(t, backfilled, c.Want)
+	if backfilled.SeedJSON == nil || *backfilled.SeedJSON != c.StatsJSON {
+		t.Fatalf("backfill lost raw stats: %+v", backfilled.SeedJSON)
+	}
+
+	// Add the entry/blob evidence needed for the real conversion. The
+	// backfilled stats row stays intact, and the same raw stats subtree
+	// is restored beside the complete captured metadata document.
+	execMigrateSQL(t, s, `DELETE FROM session_projection_generations WHERE session_id='`+string(sid)+`'`)
+	seedMigrateProfile(t, s, filepath.Join(dir, "artifacts"), sid, "clean", genID)
+	// The general file-backed helper seeds typed measurements too;
+	// restore the exact raw backfill row so it cannot invent presence.
+	execMigrateSQL(t, s, `DELETE FROM session_captured_stats WHERE session_id='`+string(sid)+`'`)
+	if _, err := s.UpsertCapturedStats(t.Context(), backfilled); err != nil {
+		t.Fatal(err)
+	}
+	conn, err = s.pool.Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sqlitex.Execute(conn, `UPDATE session_projection_generations SET metadata_json=json_set(metadata_json,'$.stats',json(?)) WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{c.StatsJSON, string(sid)}})
+	s.pool.Put(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Refresh {
+		if c.LegacySeedOnly {
+			conn, err := s.pool.Take(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = sqlitex.Execute(conn, `UPDATE session_projection_generations SET metadata_json=json_set(metadata_json,'$.stats',json(?)) WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{c.StatsJSON, string(sid)}})
+			err = sqlitex.Execute(conn, `DELETE FROM session_captured_stats WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+			if err == nil {
+				err = sqlitex.Execute(conn, `UPDATE sessions SET metric_seed_json=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{c.StatsJSON, string(sid)}})
+			}
 			s.pool.Put(conn)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.Refresh {
-				if c.LegacySeedOnly {
-					conn, err := s.pool.Take(t.Context())
-					if err != nil {
-						t.Fatal(err)
-					}
-					err = sqlitex.Execute(conn, `DELETE FROM session_captured_stats WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
-					if err == nil {
-						err = sqlitex.Execute(conn, `UPDATE sessions SET metric_seed_json=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{c.StatsJSON, string(sid)}})
-					}
-					s.pool.Put(conn)
-					if err != nil {
-						t.Fatal(err)
-					}
-				}
-				for ordinal := 1; ordinal <= c.RefreshCount; ordinal++ {
-					v2, blobs := buildTestGeneration(t, sid, fmt.Sprintf("gen_stats_refresh_%d", ordinal), fmt.Sprintf("fresh measured content %d", ordinal), "fresh tool input", "fresh tool output")
-					v2.Generation.Metadata.ModelHarness = schema.HarnessClaudeCode
-					activation := GenerationActivation{Generation: v2, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: int64(1000 + ordinal),
-						ContentCapture: ingest.SessionContentCaptureWrite{
-							Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
-							TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull,
-						},
-					}
-					activation.Prepared, err = s.StageGeneration(t.Context(), activation)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if _, err := s.ActivateGeneration(t.Context(), activation); err != nil {
-						t.Fatal(err)
-					}
-					assertRefreshedStatsOverflow(t, s, sid, v2.Generation.Metadata.Stats, c)
-					if c.CheckSkip {
-						activation.Generation.Generation.ID += "_unchanged"
-						activation.Prepared = nil
-						result, err := s.ActivateGeneration(t.Context(), activation)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if result.Disposition != ingest.ActivationSkipped {
-							t.Fatalf("retained stat diagnostics prevented an unchanged refresh from skipping: %v", result.Disposition)
-						}
-						assertRefreshedStatsOverflow(t, s, sid, v2.Generation.Metadata.Stats, c)
-					}
-				}
-				return
+		}
+		for ordinal := 1; ordinal <= c.RefreshCount; ordinal++ {
+			v2, blobs := buildTestGeneration(t, sid, fmt.Sprintf("gen_stats_refresh_%d", ordinal), fmt.Sprintf("fresh measured content %d", ordinal), "fresh tool input", "fresh tool output")
+			v2.Generation.Metadata.ModelHarness = schema.HarnessClaudeCode
+			activation := GenerationActivation{Generation: v2, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: int64(1000 + ordinal),
+				ContentCapture: ingest.SessionContentCaptureWrite{
+					Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
+					TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull,
+				},
 			}
-			if c.Damage != "" {
-				if c.Damage != "drop-overflow" {
-					t.Fatalf("unknown stat damage %q", c.Damage)
-				}
-				previous := migrateShadowSeam
-				migrateShadowSeam = func(conn *sqlite.Conn, _ string) error {
-					return sqlitex.Execute(conn, `UPDATE session_captured_stats SET overflow=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
-				}
-				t.Cleanup(func() {
-					migrateShadowSeam = previous
-				})
-			}
-			var result MigrateResult
-			var outcome MigrateOutcome
-			if c.ReportDriver {
-				result, err = s.Migrate(t.Context(), MigrateOptions{Limit: 1})
-				if result.Converted == 1 {
-					outcome = MigrateOutcomeConverted
-				}
-			} else {
-				outcome, err = s.MigrateSession(t.Context(), sid)
-			}
-			if c.Expect == "rolled-back" {
-				var rollback *MigrateDataRollbackError
-				if outcome != MigrateOutcomeRolledBack || !errors.As(err, &rollback) || rollback.Dimension != "stats-overflow" {
-					t.Fatalf("dropped overflow escaped shadow check: %s, %v", outcome, err)
-				}
-				return
-			}
-			if err != nil || outcome != MigrateOutcomeConverted {
-				t.Fatalf("conversion: %s, %v", outcome, err)
-			}
-			got, err := s.ReadCapturedStats(t.Context(), sid)
+			activation.Prepared, err = s.StageGeneration(t.Context(), activation)
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertStatsPresence(t, got, c.Want)
-			if !reflect.DeepEqual(got.Overflow, c.Overflow) || got.SeedJSON == nil || *got.SeedJSON != c.StatsJSON {
-				t.Fatalf("raw stats retention: %+v", got)
-			}
-			var warnings []schema.DiagnosticEntry
-			if err := s.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error {
-				warnings = snapshot.Metadata.Diagnostics.Warnings
-				return nil
-			}); err != nil {
+			if _, err := s.ActivateGeneration(t.Context(), activation); err != nil {
 				t.Fatal(err)
 			}
-			keys := make([]string, 0)
-			for _, w := range warnings {
-				if w.ErrorType == "stats-overflow" {
-					keys = append(keys, strings.TrimPrefix(w.Location, "stats."))
-					if !strings.Contains(w.Message, "harness claude-code") || w.Remediation == "" {
-						t.Fatalf("stat diagnostic lacks origin/remedy: %+v", w)
-					}
+			assertRefreshedStatsOverflow(t, s, sid, v2.Generation.Metadata.Stats, c)
+			if c.CheckSkip {
+				activation.Generation.Generation.ID += "_unchanged"
+				activation.Prepared = nil
+				result, err := s.ActivateGeneration(t.Context(), activation)
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-			if len(c.Keys) == 0 {
-				c.Keys = []string{}
-			}
-			if !reflect.DeepEqual(keys, c.Keys) {
-				t.Fatalf("diagnostic keys: got %v, want %v", keys, c.Keys)
-			}
-			if c.ReportDriver {
-				for _, key := range c.Keys {
-					if result.StatsOverflowKeys[key] != 1 {
-						t.Fatalf("stat %s absent from report: %+v", key, result)
-					}
+				if result.Disposition != ingest.ActivationSkipped {
+					t.Fatalf("retained stat diagnostics prevented an unchanged refresh from skipping: %v", result.Disposition)
 				}
-				if len(result.StatsOverflowKeys) != len(c.Keys) {
-					t.Fatalf("report key membership differs: %+v", result.StatsOverflowKeys)
-				}
+				assertRefreshedStatsOverflow(t, s, sid, v2.Generation.Metadata.Stats, c)
 			}
-			seed, err := s.ReadMetricSeed(t.Context(), sid)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var typed ingest.StatsInfo
-			if err := json.Unmarshal([]byte(c.StatsJSON), &typed); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(seed, &typed) {
-				t.Fatalf("typed metric seed differs: got %+v; want %+v", seed, typed)
-			}
+		}
+		return
+	}
+	if c.Damage != "" {
+		if c.Damage != "drop-overflow" {
+			t.Fatalf("unknown stat damage %q", c.Damage)
+		}
+		previous := migrateShadowSeam
+		migrateShadowSeam = func(conn *sqlite.Conn, _ string) error {
+			return sqlitex.Execute(conn, `UPDATE session_captured_stats SET overflow=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+		}
+		t.Cleanup(func() {
+			migrateShadowSeam = previous
 		})
+	}
+	var result MigrateResult
+	var outcome MigrateOutcome
+	if c.ReportDriver {
+		result, err = s.Migrate(t.Context(), MigrateOptions{Limit: 1})
+		if result.Converted == 1 {
+			outcome = MigrateOutcomeConverted
+		}
+	} else {
+		outcome, err = s.MigrateSession(t.Context(), sid)
+	}
+	if c.Expect == "rolled-back" {
+		var rollback *MigrateDataRollbackError
+		if outcome != MigrateOutcomeRolledBack || !errors.As(err, &rollback) || rollback.Dimension != "stats-overflow" {
+			t.Fatalf("dropped overflow escaped shadow check: %s, %v", outcome, err)
+		}
+		return
+	}
+	if err != nil || outcome != MigrateOutcomeConverted {
+		t.Fatalf("conversion: %s, %v", outcome, err)
+	}
+	got, err := s.ReadCapturedStats(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStatsPresence(t, got, c.Want)
+	if !reflect.DeepEqual(got.Overflow, c.Overflow) || got.SeedJSON == nil || *got.SeedJSON != c.StatsJSON {
+		t.Fatalf("raw stats retention: %+v", got)
+	}
+	var warnings []schema.DiagnosticEntry
+	if err := s.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error {
+		warnings = snapshot.Metadata.Diagnostics.Warnings
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, 0)
+	for _, w := range warnings {
+		if w.ErrorType == "stats-overflow" {
+			keys = append(keys, strings.TrimPrefix(w.Location, "stats."))
+			if !strings.Contains(w.Message, "harness claude-code") || w.Remediation == "" {
+				t.Fatalf("stat diagnostic lacks origin/remedy: %+v", w)
+			}
+		}
+	}
+	if len(c.Keys) == 0 {
+		c.Keys = []string{}
+	}
+	if !reflect.DeepEqual(keys, c.Keys) {
+		t.Fatalf("diagnostic keys: got %v, want %v", keys, c.Keys)
+	}
+	if c.ReportDriver {
+		for _, key := range c.Keys {
+			if result.StatsOverflowKeys[key] != 1 {
+				t.Fatalf("stat %s absent from report: %+v", key, result)
+			}
+		}
+		if len(result.StatsOverflowKeys) != len(c.Keys) {
+			t.Fatalf("report key membership differs: %+v", result.StatsOverflowKeys)
+		}
+	}
+	seed, err := s.ReadMetricSeed(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var typed ingest.StatsInfo
+	if err := json.Unmarshal([]byte(c.StatsJSON), &typed); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(seed, &typed) {
+		t.Fatalf("typed metric seed differs: got %+v; want %+v", seed, typed)
+	}
+	seedBytes, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedBytes, err := json.Marshal(&typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(seedBytes) != string(typedBytes) {
+		t.Fatalf("metric seed bytes changed: got %s; want %s", seedBytes, typedBytes)
 	}
 }
 

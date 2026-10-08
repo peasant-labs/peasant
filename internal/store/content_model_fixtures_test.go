@@ -8,64 +8,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Fixture scaffolding for the harmonized session content model (design
-// llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-//
-// Each family below owns a <family>.yaml of typed cases and a
-// <family>.manifest.yaml listing requiredNames, following the existing
-// generation_inherited_content idiom: deletion protection by required NAME,
-// never by bare count. No cases are filled yet; every entry is a name
-// placeholder so the manifest guards the inventory from the start. The
-// later issues extend the case shape and these loaders field-for-field.
-
-// contentModelScaffoldCase is the minimal case shape: a name only. Later
-// issues add typed expectation fields beside it.
-type contentModelScaffoldCase struct {
-	Name string `yaml:"name"`
-}
-
-type contentModelScaffoldFixture struct {
-	Cases []contentModelScaffoldCase `yaml:"cases"`
-}
-
-// loadContentModelScaffoldFixture strictly decodes one scaffold family and
-// enforces its required-names manifest in both directions: every required
-// name must be present and every present case must be declared, so a
-// deletion or rename goes red.
-func loadContentModelScaffoldFixture(t *testing.T, label string, fixtureYAML, manifestYAML []byte) []string {
-	t.Helper()
-	var fixture contentModelScaffoldFixture
-	decoder := yaml.NewDecoder(strings.NewReader(string(fixtureYAML)))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("decode %s fixture: %v", label, err)
-	}
-	manifest, err := decodeRecoveryRequiredNames(manifestYAML)
-	if err != nil {
-		t.Fatalf("decode %s manifest: %v", label, err)
-	}
-	actual := make([]string, 0, len(fixture.Cases))
-	for _, c := range fixture.Cases {
-		actual = append(actual, c.Name)
-	}
-	if err := validateRecoveryRequiredNames(manifest, actual, label); err != nil {
-		t.Fatal(err)
-	}
-	return actual
-}
+// Typed content fixtures use exact required-name membership. The behavioral
+// runners own their assertions; inventory alone is not behavioral proof.
 
 //go:embed testdata/content_promotion.yaml
 var contentPromotionYAML []byte
 
 //go:embed testdata/content_promotion.manifest.yaml
 var contentPromotionManifestYAML []byte
-
-// loadContentPromotionFixture loads the content promotion scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentPromotionFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content promotion", contentPromotionYAML, contentPromotionManifestYAML)
-}
 
 // TestContentPromotionFixtureManifest pins the content promotion case inventory: the loader
 // compiles, the manifest loads, and every required name is present.
@@ -78,13 +28,6 @@ var contentOneCopyYAML []byte
 
 //go:embed testdata/content_one_copy.manifest.yaml
 var contentOneCopyManifestYAML []byte
-
-// loadContentOneCopyFixture loads the content one copy scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentOneCopyFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content one copy", contentOneCopyYAML, contentOneCopyManifestYAML)
-}
 
 // TestContentOneCopyFixtureManifest pins the content one copy case inventory: the loader
 // compiles, the manifest loads, and every required name is present.
