@@ -141,10 +141,10 @@ func (s *Store) MigrateSession(ctx context.Context, sessionID schema.SessionID) 
 		return s.migrateDataRollback(ctx, sessionID, "prepare", err.Error())
 	}
 	if err := s.stageMigrateObjects(ctx, prepared); err != nil {
-		return s.migrateDataRollback(ctx, sessionID, "stage", err.Error())
+		return "", fmt.Errorf("store: migration staging of session %s failed: %w; staged sub-transactions stand committed under the set flag, the old representation is intact, and the re-run resumes", sessionID, err)
 	}
 	if err := s.upsertMigrateStats(ctx, oracle); err != nil {
-		return s.migrateDataRollback(ctx, sessionID, "stats-upsert", err.Error())
+		return "", fmt.Errorf("store: migration stats upsert of session %s failed: %w; staged rows stand committed under the set flag, the old representation is intact, and the re-run resumes", sessionID, err)
 	}
 	converted, rollbackErr, err := s.commitMigrateSession(ctx, oracle, prepared)
 	if err != nil {
@@ -801,16 +801,23 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 	if err != nil {
 		return fmt.Errorf("take connection to stage blobs: %w", err)
 	}
+	// No defer here: the blob transaction commits and the connection
+	// returns before the body sub-transactions take their own, so the
+	// blob write lock is never held across the body writes. Every exit
+	// below ends the transaction and returns the connection explicitly.
 	txnErr := error(nil)
 	endFn := sqlitex.Transaction(conn)
 	for _, blob := range prepared.blobs {
 		if err := ctx.Err(); err != nil {
+			txnErr = err
+			endFn(&txnErr)
 			s.pool.Put(conn)
-			return err
+			return txnErr
 		}
 		blobCopy := blob
 		if err := insertStagedBlobOnConn(conn, prepared.sessionID, &blobCopy); err != nil {
 			txnErr = err
+			endFn(&txnErr)
 			s.pool.Put(conn)
 			return txnErr
 		}
@@ -845,22 +852,29 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 	}
 	var pending []int
 	var pendingBytes int64
+	flushPending := func() error {
+		if len(pending) == 0 {
+			return nil
+		}
+		if err := flush(pending); err != nil {
+			return err
+		}
+		pending = nil
+		pendingBytes = 0
+		return reportMigrateStageSeam("between-body-subtxns")
+	}
 	for index := range prepared.bodies {
 		size := int64(len(serializeEntry(prepared.bodies[index])))
 		if len(pending) > 0 && ingest.ExceedsWriteBudget(cfg, len(pending), pendingBytes, size) {
-			if err := flush(pending); err != nil {
-				return err
+			if err := flushPending(); err != nil {
+				return fmt.Errorf("store: migration staging of session %s interrupted: %w; staged sub-transactions stand committed under the set flag and the re-run resumes", prepared.sessionID, err)
 			}
-			pending = nil
-			pendingBytes = 0
 		}
 		pending = append(pending, index)
 		pendingBytes += size
 	}
-	if len(pending) > 0 {
-		if err := flush(pending); err != nil {
-			return err
-		}
+	if err := flushPending(); err != nil {
+		return fmt.Errorf("store: migration staging of session %s interrupted: %w; staged sub-transactions stand committed under the set flag and the re-run resumes", prepared.sessionID, err)
 	}
 	return nil
 }
@@ -921,7 +935,7 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 		txnErr = fmt.Errorf("install the harmonized generation: %w", err)
 		return false, nil, txnErr
 	}
-	if err := reportMigrateShadowSeam("before-shadow-verify"); err != nil {
+	if err := reportMigrateShadowSeam(conn, "before-shadow-verify"); err != nil {
 		txnErr = fmt.Errorf("interrupted at the shadow-verify seam: %w; the transaction rolled back and the old representation is intact", err)
 		return false, nil, txnErr
 	}
@@ -1003,6 +1017,7 @@ func verifyMigrateShadow(conn *sqlite.Conn, oracle *migrateOracle, prepared *pre
 		verifyMigrateSessionHash,
 		verifyMigrateCaptureHash,
 		verifyMigrateCarriedChildren,
+		verifyMigrateDetailChildren,
 		verifyMigrateDetailBytes,
 	}
 	for _, check := range checks {
@@ -1013,25 +1028,46 @@ func verifyMigrateShadow(conn *sqlite.Conn, oracle *migrateOracle, prepared *pre
 	return nil
 }
 
-// readMigrateStagedBodies reads the staged body rows back in
-// (partition, index) order for the entry-facing dimensions.
+// readMigrateStagedBodies reads the staged body rows back through the
+// inserted mapping rows in (partition, index) order, aligned with the
+// oracle's entry order. The mapping — not the oracle digest — locates
+// each row, so a serialization drift still reports the differing bytes
+// instead of a missing row.
 func readMigrateStagedBodies(conn *sqlite.Conn, oracle *migrateOracle) ([]EntryRecord, []int, error) {
 	records := make([]EntryRecord, 0, len(oracle.entries[0]))
 	partitions := make([]int, 0, len(oracle.entries[0]))
-	ordered := []int{0}
-	for partition := range oracle.entries {
-		if partition == 0 {
-			continue
-		}
-		ordered = append(ordered, partition)
+	type mapped struct {
+		partition int
+		index     int
+		digest    string
 	}
-	for _, partition := range ordered {
+	var mapping []mapped
+	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, entry_index, body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
+		Args: []any{string(oracle.sessionID), oracle.generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			mapping = append(mapping, mapped{partition: stmt.ColumnInt(0), index: stmt.ColumnInt(1), digest: stmt.ColumnText(2)})
+			return nil
+		},
+	}); err != nil {
+		return nil, nil, fmt.Errorf("read the staged mapping rows: %w", err)
+	}
+	want := 0
+	for _, partition := range orderedOraclePartitions(oracle) {
+		want += len(oracle.entries[partition])
+	}
+	if len(mapping) != want {
+		return nil, nil, fmt.Errorf("the staged mapping holds %d rows but the oracle carried %d entries", len(mapping), want)
+	}
+	position := 0
+	for _, partition := range orderedOraclePartitions(oracle) {
 		for _, item := range oracle.entries[partition] {
-			sum := sha256.Sum256([]byte(item.raw))
-			digest := hex.EncodeToString(sum[:])
+			mapped := mapping[position]
+			if mapped.partition != partition || mapped.index != item.entry.EntryIndex {
+				return nil, nil, fmt.Errorf("the staged mapping names partition %d entry %d at position %d, want partition %d entry %d", mapped.partition, mapped.index, position, partition, item.entry.EntryIndex)
+			}
 			found := false
 			err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
-				Args: []any{string(oracle.sessionID), digest},
+				Args: []any{string(oracle.sessionID), mapped.digest},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
 					records = append(records, scanEntryRecord(stmt))
 					partitions = append(partitions, partition)
@@ -1045,6 +1081,7 @@ func readMigrateStagedBodies(conn *sqlite.Conn, oracle *migrateOracle) ([]EntryR
 			if !found {
 				return nil, nil, fmt.Errorf("the staged body for partition %d entry %d is missing", partition, item.entry.EntryIndex)
 			}
+			position++
 		}
 	}
 	return records, partitions, nil
@@ -1261,6 +1298,61 @@ func verifyMigrateCaptureHash(conn *sqlite.Conn, oracle *migrateOracle, _ *prepa
 	return nil
 }
 
+// verifyMigrateDetailChildren is the data half of the detail
+// dimension: the snapshot's metadata children (title refs, subagents,
+// commits, associations, diagnostics, relationships) through the
+// forced-harmonized readers against the legacy oracle snapshot. The
+// children prove the derived catalog rows, so a difference is a data
+// mismatch that rolls back.
+func verifyMigrateDetailChildren(conn *sqlite.Conn, oracle *migrateOracle, _ *preparedHarmonized) *migrateShadowMismatch {
+	sessionRow, err := readSnapshotSessionRowOnConn(conn, oracle.sessionID)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "detail-children", Reason: fmt.Sprintf("read the legacy session row: %v", err)}
+	}
+	legacy, err := generationReadSnapshotOnConn(conn, oracle.sessionID, oracle.generationID, sessionRow)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "detail-children", Reason: fmt.Sprintf("build the legacy oracle snapshot: %v", err)}
+	}
+	forced, err := harmonizedReadSnapshotOnConn(conn, oracle.sessionID, oracle.generationID)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "detail-children", Reason: fmt.Sprintf("build the forced-harmonized snapshot: %v", err)}
+	}
+	shape := func(snapshot indexformat.ReadSnapshot) (string, error) {
+		children := struct {
+			TitleRefs     []schema.SourceEntryRef       `json:"titleRefs"`
+			Subagents     []schema.SubagentRef          `json:"subagents"`
+			Commits       []schema.CommitInfo           `json:"commits"`
+			Associations  []schema.PublishedAssociation `json:"associations"`
+			Diagnostics   []schema.DiagnosticEntry      `json:"diagnostics"`
+			Relationships []schema.SessionRelationship  `json:"relationships"`
+		}{
+			TitleRefs:     snapshot.TitleRefs,
+			Subagents:     snapshot.Metadata.Subagents,
+			Commits:       snapshot.Metadata.Git.Commits,
+			Associations:  snapshot.Metadata.Git.Associations,
+			Diagnostics:   snapshot.Metadata.Diagnostics.Warnings,
+			Relationships: snapshot.Metadata.Relationships,
+		}
+		raw, err := json.Marshal(children)
+		if err != nil {
+			return "", err
+		}
+		return string(raw), nil
+	}
+	want, err := shape(legacy)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "detail-children", Reason: fmt.Sprintf("encode the legacy children: %v", err)}
+	}
+	got, err := shape(forced)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "detail-children", Reason: fmt.Sprintf("encode the forced-harmonized children: %v", err)}
+	}
+	if got != want {
+		return &migrateShadowMismatch{Dimension: "detail-children", Reason: "the forced-harmonized snapshot children differ from the legacy oracle children"}
+	}
+	return nil
+}
+
 // verifyMigrateDetailBytes is the defect dimension: the snapshot detail
 // payload through the forced-harmonized readers against the legacy
 // oracle snapshot with its blob bytes, checked only after every data
@@ -1388,20 +1480,35 @@ func readMigrateBlobBytes(conn *sqlite.Conn, sessionID schema.SessionID, digest 
 	return payload, nil
 }
 
+// migrateStageSeam is a nil production hook a test sets to fail between
+// body sub-transactions, proving an interrupted staging resumes: the
+// re-run stages idempotently through ON CONFLICT DO NOTHING and
+// converts. Production never sets it.
+var migrateStageSeam func(stage string) error
+
 // migrateShadowSeam is a nil production hook a test sets to corrupt one
 // derived row between the catalog insert and the shadow verify, proving
 // the verify refuses a conversion whose derived output disagrees with
-// its oracle. Production never sets it.
-var migrateShadowSeam func(stage string) error
+// its oracle. It runs on the catalog transaction's own connection, so
+// the corruption shares the transaction's fate. Production never sets it.
+var migrateShadowSeam func(conn *sqlite.Conn, stage string) error
+
+// reportMigrateStageSeam runs the staging seam hook when set.
+func reportMigrateStageSeam(stage string) error {
+	if migrateStageSeam == nil {
+		return nil
+	}
+	return migrateStageSeam(stage)
+}
 
 // reportMigrateShadowSeam runs the seam hook when set. A set hook that
 // fails stops the conversion with the injected error, like the
 // reclaimSeam crash tests stop the reclaim.
-func reportMigrateShadowSeam(stage string) error {
+func reportMigrateShadowSeam(conn *sqlite.Conn, stage string) error {
 	if migrateShadowSeam == nil {
 		return nil
 	}
-	return migrateShadowSeam(stage)
+	return migrateShadowSeam(conn, stage)
 }
 
 // checkMigrateOracleConverges proves the reshaped relationship rows still
@@ -1433,7 +1540,7 @@ func (s *Store) checkMigrateOracleConverges(ctx context.Context, oracle *migrate
 		return string(raw)
 	}
 	if shape(structured) != shape(oracle.metadata.Relationships) {
-		return fmt.Errorf("the reshaped relationship rows disagree with the captured metadata document; the conversion cannot choose between them")
+		return fmt.Errorf("the reshaped relationship rows disagree with the captured metadata document; the conversion cannot choose between them: reshaped %.200q against captured %.200q", shape(structured), shape(oracle.metadata.Relationships))
 	}
 	return nil
 }

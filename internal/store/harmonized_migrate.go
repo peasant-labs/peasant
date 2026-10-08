@@ -161,11 +161,22 @@ func (s *Store) PlanMigration(ctx context.Context) (MigratePlan, error) {
 	if err := collectMigrateWorkOnConn(conn, &plan); err != nil {
 		return plan, err
 	}
+	// The drain scope and the intent count ride the same connection the
+	// preflight already holds: the pool connection returns before any
+	// other lookup, so the preflight never holds two checkouts at once.
+	drainSessions, err := migrateDrainSessionsOnConn(conn)
+	if err != nil {
+		return plan, err
+	}
+	plan.PendingIntents, err = s.countMigratePendingIntents(ctx, drainSessions)
+	if err != nil {
+		return plan, err
+	}
 	plan.EstimatedBytes, err = s.estimateMigrateBytes(ctx, plan.Sessions)
 	if err != nil {
 		return plan, err
 	}
-	plan.DiskFreeBytes, plan.DiskFreeOK = checkMigrateDisk(ctx, s, conn)
+	plan.DiskFreeBytes, plan.DiskFreeOK = checkMigrateDisk(ctx, conn)
 	plan.Advisory = "no other writer running is recommended: Phase 2 takes the per-session lock and Phase 3 holds the single SQLite writer for minutes, so a concurrent harvest waits on busy_timeout or retries on its next harvest"
 	return plan, nil
 }
@@ -275,11 +286,10 @@ func (s *Store) sessionGenerationsFootprint(ctx context.Context, sessionID schem
 // checkMigrateDisk reports the free space on the database filesystem
 // against the 25 GB floor. An unknowable filesystem warns instead of
 // refusing: correctness never depends on the guard.
-func checkMigrateDisk(ctx context.Context, s *Store, conn *sqlite.Conn) (int64, bool) {
+func checkMigrateDisk(ctx context.Context, conn *sqlite.Conn) (int64, bool) {
 	if err := ctx.Err(); err != nil {
 		return -1, false
 	}
-	_ = s
 	free, ok := migrateFreeBytes(dbMainFileOnConn(conn))
 	if !ok {
 		return -1, true
@@ -407,6 +417,31 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (MigrateResult
 	return result, nil
 }
 
+// countMigratePendingIntents counts the sessions holding a pending
+// generation intent Phase 1 discards, over the drain scope the caller
+// lists on its own connection. Reading intents touches only the owned
+// files, never the pool, so the caller's connection stays the only one
+// checked out.
+func (s *Store) countMigratePendingIntents(ctx context.Context, sessions []schema.SessionID) (int, error) {
+	if s.generationArtifacts == nil {
+		return 0, nil
+	}
+	count := 0
+	for _, sessionID := range sessions {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
+		intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
+		if err != nil {
+			return count, fmt.Errorf("store: read the pending intent for session %s: %w", sessionID, err)
+		}
+		if intent != nil {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // migrateDrain discards the Phase 1 sets (design §7.2): every pending
 // generation intent with its staged directory, every superseded
 // generation through the sweep, and every reserved .tmp-gen-* directory,
@@ -447,6 +482,13 @@ func (s *Store) migrateDrainSessions(ctx context.Context) ([]schema.SessionID, e
 		return nil, fmt.Errorf("store: take connection to list drain sessions: %w; nothing was drained", err)
 	}
 	defer s.pool.Put(conn)
+	return migrateDrainSessionsOnConn(conn)
+}
+
+// migrateDrainSessionsOnConn lists the drain scope on the caller's
+// connection, so a caller that already holds one never checks out a
+// second.
+func migrateDrainSessionsOnConn(conn *sqlite.Conn) ([]schema.SessionID, error) {
 	var sessions []schema.SessionID
 	if err := sqlitex.ExecuteTransient(conn, `SELECT DISTINCT session_id FROM session_projection_generations ORDER BY session_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -633,11 +675,19 @@ func (s *Store) migrateCleanup(ctx context.Context, result *MigrateResult) error
 	if err != nil {
 		return err
 	}
+	converted := make(map[schema.SessionID]bool, len(harmonized))
+	for _, sessionID := range harmonized {
+		converted[sessionID] = true
+	}
 	for _, sessionID := range flagged {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("store: migration cleanup interrupted before flagged session %s: %w; the flag stays set and the next pass retries it", sessionID, err)
 		}
-		if s.generationArtifacts != nil {
+		// Owned files go only for converted sessions: a flagged
+		// file-backed session still reads its generation directory,
+		// so the sweep below clears its orphans without touching a
+		// live file.
+		if s.generationArtifacts != nil && converted[sessionID] {
 			footprint, err := s.generationArtifacts.RemoveConvertedSessionFiles(ctx, sessionID)
 			if err != nil {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("cleanup files of session %s: %v", sessionID, err))
