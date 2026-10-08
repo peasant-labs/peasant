@@ -477,9 +477,6 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 		return outcome, fmt.Errorf("store: reclaim superseded generations for session %s: %w; no row was deleted", candidate.sessionID, err)
 	}
 	ids := reclaimGenerationUnion(rowCounts, committed, dirs, active)
-	if len(ids) == 0 {
-		return outcome, nil
-	}
 
 	deleted, err := s.deleteSupersededGenerationRows(ctx, candidate.sessionID, active)
 	if err != nil {
@@ -492,7 +489,7 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 	release()
 	locked = false
 
-	if s.reclaimSeam != nil {
+	if len(ids) > 0 && s.reclaimSeam != nil {
 		if err := s.reclaimSeam(reclaimSeamAfterRows); err != nil {
 			outcome.rows = deleted
 			outcome.generations = len(ids)
@@ -500,8 +497,18 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 		}
 	}
 
+	// Only generations with an owned directory attempt removal: a
+	// harmonized generation without one has nothing to remove, and
+	// attempting it would refuse ownership no manifest can prove.
+	present := make(map[string]struct{}, len(dirs))
+	for _, generationID := range dirs {
+		present[generationID] = struct{}{}
+	}
 	sort.Strings(ids)
 	for _, generationID := range ids {
+		if _, ok := present[generationID]; !ok {
+			continue
+		}
 		footprint, sizeErr := s.generationArtifacts.GenerationSize(ctx, candidate.sessionID, generationID)
 		if sizeErr != nil {
 			outcome.warnings = append(outcome.warnings, fmt.Errorf("store: measure superseded generation %s for session %s: %w; the directory was left in place", generationID, candidate.sessionID, sizeErr))
