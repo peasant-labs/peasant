@@ -43,7 +43,7 @@ cases:
   - name: batch-under-configured-caps
     batchBytes: 8388608
     batchSessions: 64
-    stagedMemoryBytes: 50331648
+    stagedMemoryBytes: 150994944
     workers: [8]
   - name: buffers-preallocated-partitioned
     workers: [4]

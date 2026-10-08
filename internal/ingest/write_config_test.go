@@ -80,10 +80,10 @@ func TestDefaultWriteConfigDerivations(t *testing.T) {
 	if cfg.BatchSessions != 64 {
 		t.Fatalf("BatchSessions=%d, want 64", cfg.BatchSessions)
 	}
-	if cfg.BufferBytes != 4<<20 {
-		t.Fatalf("BufferBytes=%d, want 4 MiB", cfg.BufferBytes)
+	if cfg.BufferBytes != 16<<20 {
+		t.Fatalf("BufferBytes=%d, want 16 MiB", cfg.BufferBytes)
 	}
-	if want := int64(2*(32<<20) + 8*(4<<20)); cfg.StagedMemoryBytes != want {
+	if want := int64(2*(32<<20) + 8*(16<<20)); cfg.StagedMemoryBytes != want {
 		t.Fatalf("StagedMemoryBytes=%d, want %d (2×BatchBytes + 8×BufferBytes)", cfg.StagedMemoryBytes, want)
 	}
 	if cfg.FlushIntervalMs != 500 {
@@ -112,8 +112,8 @@ func TestWriteConfigDocumentedShape(t *testing.T) {
   activationSessions: 64
   batchBytes: 33554432
   batchSessions: 64
-  bufferBytes: 4194304
-  stagedMemoryBytes: 100663296
+  bufferBytes: 16777216
+  stagedMemoryBytes: 201326592
   flushIntervalMs: 500
   sweepRows: 5000
   harvestTargetMinutes: 20
@@ -125,8 +125,8 @@ func TestWriteConfigDocumentedShape(t *testing.T) {
 		ActivationSessions: 64,
 		BatchBytes:         33554432,
 		BatchSessions:      64,
-		BufferBytes:        4194304,
-		StagedMemoryBytes:  100663296,
+		BufferBytes:        16777216,
+		StagedMemoryBytes:  201326592,
 		FlushIntervalMs:    500,
 		SweepRows:          5000,
 		HarvestTarget:      20 * time.Minute,

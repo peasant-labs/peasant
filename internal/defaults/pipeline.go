@@ -86,8 +86,12 @@ const (
 	// factor leaves scheduling headroom.
 	WriteDefaultHoldTarget = SQLiteBusyTimeout * 4 / 5
 	// WriteDefaultActivationSessions is the hold target divided by the
-	// measured per-session commit cost; the legacy batch limit is the
-	// starting point. An oversized conversion commits alone.
+	// measured per-session commit cost. The sandbox measured budget-
+	// conforming activation commits at 60 ms (126 entries) and 350 ms
+	// (828 entries) against the 4 s hold, so a 64-session batch of
+	// byte-conforming sessions commits far under it; the byte cap stays
+	// the binding bound. An oversized conversion commits alone (the
+	// 71 MiB largest session measured 6.6 s).
 	WriteDefaultActivationSessions = 64
 	// WriteDefaultBatchBytes is the staging memory bound (the legacy drain's
 	// soft full-string budget). A session whose objects exceed it stages
@@ -97,18 +101,30 @@ const (
 	// the byte cap is the binding bound.
 	WriteDefaultBatchSessions = 64
 	// WriteDefaultBufferBytes is the per-worker pre-allocated buffer cap,
-	// fixed at run start and never grown. The estimate starts above the
-	// largest single prepared unit the sandbox measures.
-	WriteDefaultBufferBytes = 4 << 20
+	// fixed at run start and never grown. The sandbox measured the largest
+	// single prepared unit at 14.2 MiB (the largest entry_json; the largest
+	// content blob is 7.1 MiB), so the cap sits above it at 16 MiB; a unit
+	// above the cap still bypasses the shared buffers under the total
+	// staged-memory cap.
+	WriteDefaultBufferBytes = 16 << 20
 	// WriteDefaultFlushIntervalMs bounds the write lane's idle wait before it
 	// commits a partial batch: the push-profiler and legacy ANNOTATE flush
-	// interval, re-derived per sandbox run.
+	// interval. The sandbox confirmed the mechanism (the flush-on-interval
+	// gate proves the lane reads the knob at 50 ms and hour bounds) with no
+	// contrary evidence, so the profiler interval stands.
 	WriteDefaultFlushIntervalMs = 500
 	// WriteDefaultSweepRows is the hold target divided by the measured
-	// delete rate (sandbox).
+	// delete rate: the sandbox deleted 5,000 wide chunk rows in 0.04 s
+	// (about 119 k rows/s; narrow rows about 245 k rows/s), so the
+	// configured batch holds about two orders of magnitude under the
+	// 4 s hold.
 	WriteDefaultSweepRows = 5000
 	// WriteDefaultHarvestTarget is half the measured warm-harvest baseline
-	// for the cohort, re-derived per sandbox run.
+	// for the cohort. The 40-minute baseline stands and the integrated
+	// build beats it: a full-discovery warm run on the sandbox processed a
+	// 1,512-session live delta in 6m49s (1,465 updated, 47 dirty-record
+	// errors; COMPUTE swept all 19,119 sessions in 3m41s), so the 20-minute
+	// target holds with headroom on the new pipeline's skip paths.
 	WriteDefaultHarvestTarget = 20 * time.Minute
 )
 
