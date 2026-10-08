@@ -171,11 +171,9 @@ func fillContentRecords(records []indexformat.ContentRecord, blobs map[schema.So
 	return filled
 }
 
-// the Pi-carrier rule and the session-identity rule both writers call at
-// prepare (P1) and at the store boundary (S0).
 // validateEntriesForStorage runs the ingest-owned shared storage validator:
-// the Pi-carrier rule and the session-identity rule both writers call at
-// prepare (P1) and at the store boundary (S0).
+// the harmonized prepare path calls it at P1 and again at the store
+// boundary (S0).
 func validateEntriesForStorage(sessionID schema.SessionID, entries []schema.SessionEntry) error {
 	return ingest.ValidateEntriesForStorage(ingest.SessionID(sessionID), entries)
 }
