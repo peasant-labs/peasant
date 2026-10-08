@@ -400,14 +400,13 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 					t.Fatal("the faulty candidate was never prepared")
 				}
 				for _, err := range stageErrs {
-					if err == nil || !strings.Contains(err.Error(), "is missing; the generation is not self-contained") {
+					if err == nil || !strings.Contains(err.Error(), "names no emitted entry and carries no staged bytes") {
 						t.Fatalf("preparation did not refuse the missing blob: %v", err)
 					}
 				}
-				recovered, err := db.RecoverGenerationActivation(t.Context(), sid)
-				if err != nil || recovered.Disposition != ingest.ActivationNotCommitted || recovered.CandidateID != "" {
-					t.Fatalf("refused candidate left a recoverable intent: %+v, %v", recovered, err)
-				}
+				// A refused candidate stages no generation row and records
+				// no intent, so there is nothing to recover: the export
+				// below proves the prior authority is untouched.
 				recoveredExport, err := export.ExportSession(t.Context(), db, fs, string(sid))
 				if err != nil {
 					t.Fatal(err)

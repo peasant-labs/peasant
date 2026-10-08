@@ -1,7 +1,10 @@
 package store_test
 
 import (
+	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +19,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
 
@@ -118,6 +123,14 @@ func TestContentWriteBudgetFamily(t *testing.T) {
 				runWriteBudgetStateReadCommitsNothing(t, fixtures, c)
 			case "commit-count-budget":
 				runWriteBudgetCommitCountBudget(t, fixtures, c)
+			case "staging-batch-commits-once":
+				runWriteBudgetStagingBatchCommitsOnce(t, fixtures, c)
+			case "activation-batch-commits-once":
+				runWriteBudgetActivationBatchCommitsOnce(t, fixtures, c)
+			case "oversized-session-stages-alone":
+				runWriteBudgetOversizedStagesAlone(t, fixtures, c)
+			case "skip-commits-nothing":
+				runWriteBudgetSkipCommitsNothing(t, fixtures, c)
 			default:
 				if !c.isPlaceholder() {
 					t.Fatalf("%s: not one of the cases this change owns, yet it carries typed expectations; route it to its owner", c.Name)
@@ -440,4 +453,285 @@ func runWriteBudgetCommitCountBudget(t *testing.T, fixtures contentWriteBudgetFi
 	if got := after - before; got > *c.WantMaxCommits {
 		t.Fatalf("an ordinary refresh committed %d frames, want at most %d", got, *c.WantMaxCommits)
 	}
+}
+
+// writeBudgetV2 builds one minimal valid harmonized candidate: text entries
+// with filled content records and their bytes, so the budget runners stage
+// and commit through the production writer without a parser.
+func writeBudgetV2(t *testing.T, sid schema.SessionID, genID string, texts []string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+	t.Helper()
+	entries := make([]schema.SessionEntry, 0, len(texts))
+	blobs := make(map[schema.SourceEntryRef][]byte, len(texts))
+	content := make([]indexformat.ContentRecord, 0, len(texts))
+	for i, text := range texts {
+		ref := schema.SourceEntryRef(fmt.Sprintf("e_b%d", i))
+		preview := text
+		entries = append(entries, schema.SessionEntry{
+			SessionID: sid, EntryIndex: i, Harness: defaults.HarnessClaudeCode,
+			EntryType: schema.EntryTypeText, Role: schema.RoleUser,
+			ContentPreview: &preview, SourceEntryRef: ref,
+		})
+		payload := []byte(text)
+		sum := sha256.Sum256(payload)
+		content = append(content, indexformat.ContentRecord{
+			Ref: ref, RelativeBlob: "c_" + hex.EncodeToString(sum[:]) + ".blob",
+			ByteLength: int64(len(payload)), Digest: hex.EncodeToString(sum[:]),
+		})
+		blobs[ref] = payload
+	}
+	inputCount := int64(1)
+	return indexformat.V2{Generation: indexformat.Generation{
+		ID:           genID,
+		Completeness: indexformat.GenerationCompletenessComplete,
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: ingest.CurrentSchemaVersion,
+			SessionID:     sid,
+			ModelHarness:  defaults.HarnessClaudeCode,
+			Model:         schema.ModelID("budget-model"),
+			Version:       "budget-version",
+			Stats:         schema.SessionStats{TurnCount: len(entries), InputSubmissionCount: &inputCount},
+		},
+		Main:                 indexformat.Partition{Entries: entries},
+		Content:              content,
+		SourceEvidenceDigest: strings.Repeat("b", 64),
+	}}, blobs
+}
+
+// openWriteBudgetHarmonized opens one commit-counted store with the
+// harmonized writer registered, the owned-artifact file store, and the
+// session lock. Extra options (such as a tiny write budget) append after
+// the autorecovery-disabled log configuration the frame counter needs.
+func openWriteBudgetHarmonized(t *testing.T, dbPath string, options ...store.OpenOption) *store.Store {
+	t.Helper()
+	root := t.TempDir()
+	artifacts, err := store.NewOSGenerationArtifactStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := store.NewFileSessionLocker(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := []store.OpenOption{
+		store.WithSkipMigrations(),
+		store.WithWALAutocheckpointDisabled(),
+		store.WithPoolSize(1),
+		store.WithIndexFormats(store.V2IndexFormat()),
+		store.WithGenerationArtifacts(artifacts, locker),
+	}
+	db, err := store.Open(dbPath, append(base, options...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// seedWriteBudgetSession inserts one bare session row for a harmonized
+// budget candidate: no artifacts, no index state, just the identity the
+// staging flag and the generation rows hang from.
+func seedWriteBudgetSession(t *testing.T, ctx context.Context, db *store.Store, id string, fixtures contentWriteBudgetFixtures) schema.SessionID {
+	t.Helper()
+	sid := schema.SessionID(id)
+	if err := db.InsertSessions(ctx, []ingest.StoreEntry{
+		makeStoreEntry(t, id, fixtures.ProjectHash, fixtures.HostSlug, defaults.HarnessClaudeCode, 1700000000000, 100, 50),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return sid
+}
+
+// writeBudgetActivation builds the production activation for one budget
+// candidate: a complete generation with a full capture.
+func writeBudgetActivation(v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) store.GenerationActivation {
+	return store.GenerationActivation{
+		Generation:     v2,
+		Blobs:          blobs,
+		IndexerVersion: 1,
+		IndexedAtMs:    1,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			Status:           ingest.ContentCaptureComplete,
+			SourceAuthority:  ingest.ContentSourceNewIngest,
+			TranscriptOrigin: ingest.TranscriptOriginFile,
+			CaptureFormat:    ingest.ContentCaptureFormatFull,
+			CapturedAtMs:     1,
+		},
+	}
+}
+
+// runWriteBudgetStagingBatchCommitsOnce proves one ordinary session's
+// object batch stages in exactly one commit: the flag, every body, and
+// every blob share the batch's single transaction.
+func runWriteBudgetStagingBatchCommitsOnce(t *testing.T, fixtures contentWriteBudgetFixtures, c contentWriteBudgetCase) {
+	t.Helper()
+	if c.Action != "stage-batch" || c.Sessions != 1 || c.WantCommits == nil {
+		t.Fatal("staging-batch-commits-once needs action stage-batch, sessions 1, and wantCommits")
+	}
+	dbPath := storetest.CopyGoldenDB(t)
+	db := openWriteBudgetHarmonized(t, dbPath)
+	ctx := t.Context()
+	sid := seedWriteBudgetSession(t, ctx, db, "11111111-1111-4111-8111-111111111111", fixtures)
+	v2, blobs := writeBudgetV2(t, sid, "gen_stage_1", []string{"staging batch one", "staging batch two"})
+	before, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.StageGeneration(ctx, writeBudgetActivation(v2, blobs)); err != nil {
+		t.Fatal(err)
+	}
+	after, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after - before; got != *c.WantCommits {
+		t.Fatalf("a staging batch gained %d commit frames, want %d", got, *c.WantCommits)
+	}
+}
+
+// runWriteBudgetActivationBatchCommitsOnce proves a two-session activation
+// batch commits once: one outer transaction with a per-session savepoint
+// serves the whole batch.
+func runWriteBudgetActivationBatchCommitsOnce(t *testing.T, fixtures contentWriteBudgetFixtures, c contentWriteBudgetCase) {
+	t.Helper()
+	if c.Action != "activate-batch" || c.Sessions != 2 || c.WantCommits == nil {
+		t.Fatal("activation-batch-commits-once needs action activate-batch, sessions 2, and wantCommits")
+	}
+	dbPath := storetest.CopyGoldenDB(t)
+	db := openWriteBudgetHarmonized(t, dbPath)
+	ctx := t.Context()
+	writes := make([]ingest.SessionEntryWrite, 0, c.Sessions)
+	for i := 0; i < c.Sessions; i++ {
+		id := fmt.Sprintf("%08x-0000-4000-8000-%012x", i+1, i+1)
+		sid := seedWriteBudgetSession(t, ctx, db, id, fixtures)
+		v2, blobs := writeBudgetV2(t, sid, fmt.Sprintf("gen_active_%d", i), []string{fmt.Sprintf("activation batch %d", i)})
+		if _, err := db.StageGeneration(ctx, writeBudgetActivation(v2, blobs)); err != nil {
+			t.Fatal(err)
+		}
+		writes = append(writes, ingest.SessionEntryWrite{
+			SessionID: sid, Result: v2, IndexVersion: 2,
+			IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000001000,
+			RequireFullContent: true,
+			ContentCapture: ingest.SessionContentCaptureWrite{
+				Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
+				TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 1700000001000,
+			},
+		})
+	}
+	before, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := db.IndexSessionEntryBatch(ctx, writes)
+	for _, result := range results {
+		if result.Err != nil || !result.Written {
+			t.Fatalf("activation batch write: %+v", results)
+		}
+	}
+	after, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after - before; got != *c.WantCommits {
+		t.Fatalf("an activation batch gained %d commit frames, want %d", got, *c.WantCommits)
+	}
+}
+
+// runWriteBudgetOversizedStagesAlone proves a session whose objects exceed
+// the byte budget stages alone in budget-sized transactions: with a tiny
+// budget every body exceeds it, so each commits in its own transaction and
+// the ordinary single-commit fast path does not merge them.
+func runWriteBudgetOversizedStagesAlone(t *testing.T, fixtures contentWriteBudgetFixtures, c contentWriteBudgetCase) {
+	t.Helper()
+	if c.Action != "stage-oversized" || c.Sessions != 1 || c.WantCommits == nil {
+		t.Fatal("oversized-session-stages-alone needs action stage-oversized, sessions 1, and wantCommits")
+	}
+	dbPath := storetest.CopyGoldenDB(t)
+	tiny := ingest.WriteConfig{BatchBytes: 64, BatchSessions: 64}.WithDefaults(1)
+	db := openWriteBudgetHarmonized(t, dbPath, store.WithWriteConfig(tiny))
+	ctx := t.Context()
+	sid := seedWriteBudgetSession(t, ctx, db, "22222222-2222-4222-8222-222222222222", fixtures)
+	v2, blobs := writeBudgetV2(t, sid, "gen_oversized", []string{"oversized body one....................", "oversized body two...................."})
+	before, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.StageGeneration(ctx, writeBudgetActivation(v2, blobs)); err != nil {
+		t.Fatal(err)
+	}
+	after, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after - before; got != *c.WantCommits {
+		t.Fatalf("an oversized session gained %d commit frames, want %d alone-sized transactions", got, *c.WantCommits)
+	}
+}
+
+// runWriteBudgetSkipCommitsNothing proves an identical refresh commits no
+// objects and no generation: the second activation reports skipped, the
+// generation and object tables hold exactly the first activation's rows,
+// and the log gains at most the one bookkeeping commit.
+func runWriteBudgetSkipCommitsNothing(t *testing.T, fixtures contentWriteBudgetFixtures, c contentWriteBudgetCase) {
+	t.Helper()
+	if c.Action != "skip-refresh" || c.Sessions != 1 || c.WantMaxCommits == nil {
+		t.Fatal("skip-commits-nothing needs action skip-refresh, sessions 1, and wantMaxCommits")
+	}
+	dbPath := storetest.CopyGoldenDB(t)
+	db := openWriteBudgetHarmonized(t, dbPath)
+	ctx := t.Context()
+	sid := seedWriteBudgetSession(t, ctx, db, "33333333-3333-4333-8333-333333333333", fixtures)
+	v2, blobs := writeBudgetV2(t, sid, "gen_skip_1", []string{"skip-unchanged body"})
+	first, err := db.ActivateGeneration(ctx, writeBudgetActivation(v2, blobs))
+	if err != nil || first.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("first activation: %+v %v", first, err)
+	}
+	generationsBefore, bodiesBefore := countSkipTables(t, dbPath, sid)
+	before, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A refresh carries a fresh generation identifier over identical
+	// content: the same identifier would report AlreadyCommitted through
+	// the immutable identity instead of comparing.
+	refreshed, refreshedBlobs := writeBudgetV2(t, sid, "gen_skip_2", []string{"skip-unchanged body"})
+	second, err := db.ActivateGeneration(ctx, writeBudgetActivation(refreshed, refreshedBlobs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Disposition != ingest.ActivationSkipped {
+		t.Fatalf("identical refresh disposition = %v, want skipped", second.Disposition)
+	}
+	after, err := storetest.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after - before; got > *c.WantMaxCommits {
+		t.Fatalf("an identical refresh committed %d frames, want at most %d (the bookkeeping alone)", got, *c.WantMaxCommits)
+	}
+	generationsAfter, bodiesAfter := countSkipTables(t, dbPath, sid)
+	if generationsAfter != generationsBefore || bodiesAfter != bodiesBefore {
+		t.Fatalf("a skip wrote rows: generations %d->%d bodies %d->%d; a skip writes nothing", generationsBefore, generationsAfter, bodiesBefore, bodiesAfter)
+	}
+}
+
+// countSkipTables counts one session's generation rows and body rows
+// through a direct connection: the skip writes neither.
+func countSkipTables(t *testing.T, dbPath string, sid schema.SessionID) (int, int) {
+	t.Helper()
+	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var generations, bodies int
+	if err := sqlitex.ExecuteTransient(conn, `SELECT (SELECT COUNT(*) FROM session_generations WHERE session_id = ?), (SELECT COUNT(*) FROM session_entry_bodies WHERE session_id = ?)`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), string(sid)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			generations, bodies = stmt.ColumnInt(0), stmt.ColumnInt(1)
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return generations, bodies
 }

@@ -1,7 +1,7 @@
 package store
 
 // BodyRowIDBase is the FTS rowid base for harmonized entry bodies:
-// bodyRowIDBase = 1 << 50 = 1125899906842624. Every session_entries rowid
+// BodyRowIDBase = 1 << 50 = 1125899906842624. Every session_entries rowid
 // stays below it and every session_entry_bodies body_id at or above it, so
 // the two rowid spaces feeding session_search_source never meet. SQLite DDL
 // cannot reference a Go constant, so migrationV62 spells the literal in the
@@ -15,28 +15,30 @@ const BodyRowIDBase = 1 << 50
 // entity, the digest-addressed content store, the immutable generation
 // catalog with its ordered metadata children, the mutable per-session stats
 // row, and the unified search store. It backfills the stats row and the
-// sweep flag from the file-backed catalog, rebuilds the annotation targets
-// without their session_entries foreign key, and drops the duplicate
-// partition index. No entry content moves inside this migration:
+// sweep flag from the file-backed catalog, rebuilds the reshaped
+// generation-keyed tables and the annotation targets, and drops the
+// duplicate partition index. No entry content moves inside this migration:
 // conversion runs later in peasant migrate.
 //
-// The migration is SQL-only and runs at open. The annotation-target rebuild
-// drops and renames (the v53 pattern), so this slot disables foreign keys in
-// MigrationOptions. The three generation-keyed tables that carry JSON
-// columns (session_relationship_evidence.anchor,
-// session_context_segments.captured_refs_json,
-// session_projection_sections.native_metadata) are NOT reshaped here: the
-// current writer and readers still use those columns, so reshaping them in
-// v62 would break the write path until the harmonized writer lands. That
-// writer change reshapes them once it speaks the new shape. v62 only creates the
-// two ordered child tables (session_context_segment_refs,
-// session_section_native_metadata), which stay empty until the harmonized
-// writer and the conversion fill them alongside the reshaped parents. annotation_target_entries is
-// rebuilt without its session_entries foreign key; the insert-time existence
-// check replaces the key.
+// The migration is SQL-only and runs at open. Table rebuilds drop and rename
+// (the v53 pattern), so this slot disables foreign keys in MigrationOptions.
+// Data preservation rules, per rebuilt table:
+//   - session_relationship_evidence loses its anchor JSON to three structured
+//     columns (json_extract over the anchor object; NULL anchor stays NULL).
+//   - session_context_segments loses captured_refs_json to ordered
+//     session_context_segment_refs rows (json_each over the ref array; the
+//     array index is the ordinal).
+//   - session_projection_sections loses native_metadata to ordered
+//     session_section_native_metadata rows (json_each over the record array;
+//     scalar fields decode with json_extract, which the Go serializer
+//     re-encodes byte-identically; the opaque data payload keeps its exact
+//     bytes through the -> operator, so both raw embedding and re-marshal
+//     round-trip).
+//   - annotation_target_entries is rebuilt without its session_entries
+//     foreign key; the insert-time existence check replaces the key.
 //
-// The v61 relationship-evidence target index is untouched, and the
-// annotations_with_target view is recreated in its v41 form.
+// The v61 relationship-evidence target index is recreated after its table
+// rebuild, and the annotations_with_target view is recreated in its v41 form.
 //
 // Backfills:
 //   - session_captured_stats gains one row per session whose active
@@ -252,6 +254,37 @@ CREATE TABLE session_generation_content (
 
 CREATE INDEX idx_generation_content_digest ON session_generation_content(session_id, digest);
 
+CREATE TABLE session_relationship_evidence_v62 (
+  session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  generation_id   TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  target_state    TEXT NOT NULL CHECK(target_state IN
+    ('target_known','target_known_retained','explicit_none','unknown',
+     'conflicting_current_native_evidence')),
+  target_local_id TEXT,
+  evidence        TEXT,
+  anchor_kind TEXT,
+  anchor_source_entry_ref TEXT,
+  anchor_source_revision_ref TEXT,
+  PRIMARY KEY (session_id, generation_id, kind)
+) STRICT;
+
+INSERT INTO session_relationship_evidence_v62
+  (session_id, generation_id, kind, target_state, target_local_id, evidence,
+   anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+SELECT session_id, generation_id, kind, target_state, target_local_id, evidence,
+  json_extract(anchor, '$.kind'),
+  json_extract(anchor, '$.sourceEntryRef'),
+  json_extract(anchor, '$.sourceRevisionRef')
+FROM session_relationship_evidence;
+
+DROP TABLE session_relationship_evidence;
+
+ALTER TABLE session_relationship_evidence_v62 RENAME TO session_relationship_evidence;
+
+CREATE INDEX idx_relationship_evidence_started_by_target
+  ON session_relationship_evidence(kind, target_local_id, session_id, target_state);
+
 CREATE TABLE session_context_segment_refs (
   session_id TEXT NOT NULL,
   generation_id TEXT NOT NULL,
@@ -262,6 +295,39 @@ CREATE TABLE session_context_segment_refs (
   FOREIGN KEY (session_id, generation_id, segment_ordinal)
     REFERENCES session_context_segments(session_id, generation_id, segment_ordinal) ON DELETE CASCADE
 ) STRICT;
+
+INSERT INTO session_context_segment_refs
+  (session_id, generation_id, segment_ordinal, ordinal, source_entry_ref)
+SELECT s.session_id, s.generation_id, s.segment_ordinal, je.key, je.value
+FROM session_context_segments s, json_each(s.captured_refs_json) AS je;
+
+CREATE TABLE session_context_segments_v62 (
+  session_id                TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  generation_id             TEXT NOT NULL,
+  segment_ordinal           INTEGER NOT NULL CHECK(segment_ordinal >= 0),
+  logical_session_id        TEXT,
+  physical_source_id        TEXT NOT NULL,
+  coordinate_kind           TEXT NOT NULL,
+  start_coordinate          INTEGER,
+  end_exclusive             INTEGER,
+  decoded_byte_start        INTEGER,
+  decoded_byte_end_exclusive INTEGER,
+  inclusion                 TEXT NOT NULL,
+  PRIMARY KEY (session_id, generation_id, segment_ordinal)
+) STRICT;
+
+INSERT INTO session_context_segments_v62
+  (session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id,
+   coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start,
+   decoded_byte_end_exclusive, inclusion)
+SELECT session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id,
+  coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start,
+  decoded_byte_end_exclusive, inclusion
+FROM session_context_segments;
+
+DROP TABLE session_context_segments;
+
+ALTER TABLE session_context_segments_v62 RENAME TO session_context_segments;
 
 CREATE TABLE session_section_native_metadata (
   session_id TEXT NOT NULL,
@@ -281,6 +347,39 @@ CREATE TABLE session_section_native_metadata (
   FOREIGN KEY (session_id, generation_id, partition_id)
     REFERENCES session_projection_sections(session_id, generation_id, partition_id) ON DELETE CASCADE
 ) STRICT;
+
+INSERT INTO session_section_native_metadata
+  (session_id, generation_id, partition_id, ordinal, native_id, kind,
+   source_entry_ref, source_type, source_message_role, attachment_turn_index,
+   attachment_tool_call_id, custom_type, data)
+SELECT s.session_id, s.generation_id, s.partition_id, je.key,
+  json_extract(je.value, '$.id'),
+  json_extract(je.value, '$.kind'),
+  json_extract(je.value, '$.source.entryRef'),
+  json_extract(je.value, '$.source.sourceType'),
+  json_extract(je.value, '$.source.messageRole'),
+  json_extract(je.value, '$.attachment.turnIndex'),
+  json_extract(je.value, '$.attachment.toolCallId'),
+  json_extract(je.value, '$.customType'),
+  (je.value -> '$.data')
+FROM session_projection_sections s, json_each(s.native_metadata) AS je;
+
+CREATE TABLE session_projection_sections_v62 (
+  session_id     TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  generation_id  TEXT NOT NULL,
+  partition_id   INTEGER NOT NULL CHECK(partition_id >= 0),
+  earlier_state  TEXT,
+  PRIMARY KEY (session_id, generation_id, partition_id)
+) STRICT;
+
+INSERT INTO session_projection_sections_v62
+  (session_id, generation_id, partition_id, earlier_state)
+SELECT session_id, generation_id, partition_id, earlier_state
+FROM session_projection_sections;
+
+DROP TABLE session_projection_sections;
+
+ALTER TABLE session_projection_sections_v62 RENAME TO session_projection_sections;
 
 CREATE TABLE session_captured_stats (
   session_id             TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,

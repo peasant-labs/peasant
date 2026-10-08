@@ -86,7 +86,10 @@ func (s *Store) ActivateStagedNativeGeneration(ctx context.Context, activation i
 // must reuse, whether a complete generation is already the last-good authority,
 // and the harness-owned prior document when one was persisted. A session with
 // no active generation returns (nil, nil), so a first discovery builds an empty
-// prior state instead of guessing.
+// prior state instead of guessing. A harmonized active generation reads its
+// structured rows (the metadata rebuilds from the catalog row, the children,
+// and the stats row, with the durable parent from the session row); a
+// file-backed one reads the projection tables and the prior document file.
 func (s *Store) ReadNativeGenerationPrior(ctx context.Context, sessionID schema.SessionID) (*ingest.NativeGenerationPrior, error) {
 	if s.generationArtifacts == nil {
 		return nil, fmt.Errorf("store: managed generation support is not configured; the active generation's prior evidence cannot be loaded for session %s; open the store with WithGenerationArtifacts before refreshing", sessionID)
@@ -103,6 +106,9 @@ func (s *Store) ReadNativeGenerationPrior(ctx context.Context, sessionID schema.
 	if active == nil || *active == "" {
 		return nil, nil
 	}
+	if generationIsHarmonized(conn, sessionID, *active) {
+		return readHarmonizedPriorOnConn(conn, sessionID, *active)
+	}
 	prior, err := readGenerationPriorOnConn(conn, sessionID, *active)
 	if err != nil {
 		return nil, err
@@ -113,6 +119,170 @@ func (s *Store) ReadNativeGenerationPrior(ctx context.Context, sessionID schema.
 	}
 	prior.PriorEvidence = evidence
 	return prior, nil
+}
+
+// readHarmonizedPriorOnConn loads the reusable evidence for a harmonized
+// active generation: the catalog row plus children, segments, sections, and
+// evidence rebuild the captured metadata beside the stats row (the durable
+// parent comes from the session row, since the catalog stores no ParentUUID),
+// the main entries hydrate from their body rows, and the alias table stays
+// the reusable-identity authority exactly as for file-backed generations.
+func readHarmonizedPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (*ingest.NativeGenerationPrior, error) {
+	prior := &ingest.NativeGenerationPrior{
+		GenerationID: generationID,
+		Aliases:      ingest.NewProjectionPriorState(),
+	}
+	var view activeHarmonizedView
+	view.descriptors = map[schema.SourceEntryRef]string{}
+	view.aliases = map[string]schema.SourceEntryRef{}
+	if err := loadGenerationRecordOnConn(conn, sessionID, generationID, &view); err != nil {
+		return nil, err
+	}
+	if !view.found {
+		return nil, fmt.Errorf("store: session %s points at harmonized generation %s with no catalog row; the prior evidence cannot be trusted; re-index the session for a fresh candidate", sessionID, generationID)
+	}
+	if err := loadGenerationChildrenOnConn(conn, sessionID, generationID, &view); err != nil {
+		return nil, err
+	}
+	stats, err := readCapturedStatsOnConn(conn, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := serializedMetadataToUnified(view.record, view.children, stats)
+	if err != nil {
+		return nil, err
+	}
+	if parent := readSessionParentOnConn(conn, sessionID); parent != nil {
+		metadata.ParentUUID = parent
+	}
+	prior.Metadata = &metadata
+	prior.HasCompleteGeneration = view.record.Completeness == indexformat.GenerationCompletenessComplete
+	prior.PriorEvidence = view.record.PriorEvidence
+	aliases, err := readGenerationAliasesOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := readHarmonizedMainEntriesOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return nil, err
+	}
+	stub := indexformat.Generation{
+		ID:       generationID,
+		Aliases:  aliases,
+		Metadata: metadata,
+		Main:     indexformat.Partition{Entries: entries},
+	}
+	state, err := ingest.PriorStateFromGeneration(stub)
+	if err != nil {
+		return nil, fmt.Errorf("store: rebuild reusable identities for session %s generation %s: %w; no candidate was produced; the committed generation stays active", sessionID, generationID, err)
+	}
+	prior.Aliases = state
+	return prior, nil
+}
+
+// serializedMetadataToUnified rebuilds the captured document from the
+// structured rows: serializeMetadata carries the exact inverse mapping,
+// and the JSON round-trips through the schema type so the prior loader
+// hands the pipeline the same shape the file-backed path decoded.
+func serializedMetadataToUnified(gen GenerationRecord, children GenerationChildren, stats CapturedStats) (schema.UnifiedMetadata, error) {
+	var metadata schema.UnifiedMetadata
+	encoded := serializeMetadata(gen, children, stats)
+	if encoded == nil {
+		return metadata, fmt.Errorf("store: rebuild captured metadata: the structured rows did not serialize; no candidate was produced")
+	}
+	if err := json.Unmarshal(encoded, &metadata); err != nil {
+		return metadata, fmt.Errorf("store: rebuild captured metadata: the rebuilt document did not decode: %w; no candidate was produced", err)
+	}
+	return metadata, nil
+}
+
+// readCapturedStatsOnConn reads one session's measurements row: latest
+// knowledge wins, and a missing row reads as unknown (every measurement
+// nil), never as zero knowledge claimed.
+func readCapturedStatsOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (CapturedStats, error) {
+	stats := CapturedStats{SessionID: sessionID}
+	err := sqlitex.ExecuteTransient(conn, `SELECT turn_count, input_submission_count, tool_call_count, subagent_count, duration_ms, tokens_in, tokens_out, thought_tokens, cached_read_tokens, cached_write_tokens, seed_json, source, updated_at_ms, overflow FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			stats.TurnCount = columnIntOrNil(stmt, 0)
+			stats.InputSubmissionCount = columnInt64OrNil(stmt, 1)
+			stats.ToolCallCount = columnIntOrNil(stmt, 2)
+			stats.SubagentCount = columnIntOrNil(stmt, 3)
+			stats.DurationMs = columnInt64OrNil(stmt, 4)
+			stats.TokensIn = columnIntOrNil(stmt, 5)
+			stats.TokensOut = columnIntOrNil(stmt, 6)
+			stats.ThoughtTokens = columnIntOrNil(stmt, 7)
+			stats.CachedReadTokens = columnIntOrNil(stmt, 8)
+			stats.CachedWriteTokens = columnIntOrNil(stmt, 9)
+			if stmt.ColumnType(10) != sqlite.TypeNull {
+				seed := stmt.ColumnText(10)
+				stats.SeedJSON = &seed
+			}
+			if source, err := NewStatsSource(stmt.ColumnText(11)); err == nil {
+				stats.Source = source
+			}
+			stats.UpdatedAtMs = stmt.ColumnInt64(12)
+			if stmt.ColumnType(13) != sqlite.TypeNull {
+				overflow := stmt.ColumnText(13)
+				stats.Overflow = &overflow
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return CapturedStats{}, fmt.Errorf("store: read captured stats for session %s: %w", sessionID, err)
+	}
+	return stats, nil
+}
+
+func columnIntOrNil(stmt *sqlite.Stmt, col int) *int {
+	if stmt.ColumnType(col) == sqlite.TypeNull {
+		return nil
+	}
+	out := int(stmt.ColumnInt64(col))
+	return &out
+}
+
+func columnInt64OrNil(stmt *sqlite.Stmt, col int) *int64 {
+	if stmt.ColumnType(col) == sqlite.TypeNull {
+		return nil
+	}
+	out := stmt.ColumnInt64(col)
+	return &out
+}
+
+// readSessionParentOnConn reads the durable parent target cache: the
+// started_by target when it names a stored session, else NULL.
+func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) *schema.SessionID {
+	var parent *schema.SessionID
+	_ = sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				id := schema.SessionID(stmt.ColumnText(0))
+				parent = &id
+			}
+			return nil
+		},
+	})
+	return parent
+}
+
+// readHarmonizedMainEntriesOnConn hydrates the active generation's main
+// entries from their body rows in index order.
+func readHarmonizedMainEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SessionEntry, error) {
+	var entries []schema.SessionEntry
+	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			entries = append(entries, entryFromRow(scanEntryRecord(stmt)))
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: read harmonized main entries for session %s generation %s: %w; no candidate was produced; restore database access and retry", sessionID, generationID, err)
+	}
+	return entries, nil
 }
 
 func readGenerationPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (*ingest.NativeGenerationPrior, error) {

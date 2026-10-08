@@ -520,6 +520,15 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 	if activationOutcome.Disposition == ActivationCommittedNow {
 		committed = candidates
 	}
+	if activationOutcome.Disposition == ActivationSkipped {
+		// An identical refresh: the projection is unchanged, so the
+		// bookkeeping advanced and nothing else did. The outcome reports
+		// skipped with the fixed reason; per-invocation counts stay zero.
+		reason := "projection unchanged"
+		logEntry := p.makeIndexLogEntry(im, IndexOutcomeSkipped, entriesCount, result.startedAt, &reason, nil)
+		profile := p.makeIndexProfileSession(result, logEntry, 0)
+		return indexedMeta{session: im.session, startMs: im.startMs, indexed: true}, logEntry, profile
+	}
 	logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
 	profile := p.makeIndexProfileSession(result, logEntry, 0)
 	return indexedMeta{session: im.session, startMs: im.startMs, indexed: true, retainedUnknown: committed}, logEntry, profile

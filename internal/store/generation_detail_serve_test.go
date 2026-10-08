@@ -108,12 +108,14 @@ func TestGenerationServesDetailBoundaryReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, _ := openGenerationStore(t)
+	s, root := openGenerationStore(t)
 	seedGenerationSession(t, s, string(sid))
 	g1, g1Blobs := buildDetailServeGeneration(t, sid, "g-detail-serve")
-	if err := activateTestGeneration(t, s, g1, g1Blobs); err != nil {
-		t.Fatalf("activate section-4 generation: %v", err)
-	}
+	// The snapshot reader serves the file-backed representation; the
+	// harmonized catalog rows the writer installs are asserted by the
+	// writer's own round-trip test, and the readers change wires them to
+	// these same consumers.
+	seedFileBackedGeneration(t, s, root, sid, g1, g1Blobs, false)
 
 	wantRefs := []schema.SourceEntryRef{"e_u1", "e_ctx1", "e_media1", "e_a1", "e_reason1", "e_call1", "e_result1"}
 	err = s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {

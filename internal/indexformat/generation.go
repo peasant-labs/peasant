@@ -634,6 +634,10 @@ func isKnownHarness(harness schema.Harness) bool {
 // until a matching writer and snapshot reader are both integrated.
 type V2 struct {
 	Generation Generation
+	// PriorEvidence is the opaque harness-owned prior document the
+	// activation persists beside the generation row. Nil leaves prior
+	// evidence absent; the committed generation rows still supply aliases.
+	PriorEvidence []byte
 }
 
 // IndexVersion reports the concrete format version.

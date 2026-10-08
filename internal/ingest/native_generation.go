@@ -139,6 +139,11 @@ const (
 	// committed before this invocation. The call re-repaired from the
 	// committed row and changed no authority.
 	ActivationAlreadyCommitted
+	// ActivationSkipped reports the requested candidate reproduces the
+	// active harmonized generation exactly: no new generation row was
+	// written and no object was staged, and the call advanced only the
+	// bookkeeping stamps. It counts zero, like AlreadyCommitted.
+	ActivationSkipped
 )
 
 // ActivationOutcome is the request-scoped activation result. RepairPending

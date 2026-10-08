@@ -53,9 +53,11 @@ func TestGenerationBoundComputeRefusedAcrossActivation(t *testing.T) {
 	}
 	metrics.OutputHash = &outputHash
 
-	// A replacement generation with byte-identical entries: only the installed
-	// generation identity changes.
-	second, secondBlobs := buildTestGeneration(t, sid, "gen-bound-2", "same text", "same in", "same out")
+	// A replacement generation with different entries: the installed
+	// generation identity changes, so compute bound to the first input
+	// must refuse. (Byte-identical content under a fresh identifier would
+	// skip instead of replacing, keeping the first generation active.)
+	second, secondBlobs := buildTestGeneration(t, sid, "gen-bound-2", "changed text", "changed in", "changed out")
 	if err := activateTestGeneration(t, s, second, secondBlobs); err != nil {
 		t.Fatalf("activate replacement generation: %v", err)
 	}

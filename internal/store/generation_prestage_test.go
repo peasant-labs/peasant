@@ -2,16 +2,13 @@ package store
 
 import (
 	"context"
-	"errors"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
 
@@ -19,7 +16,7 @@ func testActivation(t *testing.T, sid schema.SessionID, genID string) Generation
 	t.Helper()
 	generation, blobs := buildTestGeneration(t, sid, genID, "prestage text", "prestage input", "prestage output")
 	return GenerationActivation{
-		Generation:     generation,
+		Generation:     filledCandidateForValidation(t, generation, blobs),
 		Blobs:          blobs,
 		IndexerVersion: 18,
 		IndexedAtMs:    4242,
@@ -31,67 +28,17 @@ func testActivation(t *testing.T, sid schema.SessionID, genID string) Generation
 	}
 }
 
-// tempGenerationDirs lists the owned temporary staging directories of one
-// session.
-func tempGenerationDirs(t *testing.T, root string, sid schema.SessionID) []string {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(root, string(sid), "generations"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	var dirs []string
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".tmp-gen-") {
-			dirs = append(dirs, filepath.Join(root, string(sid), "generations", entry.Name()))
-		}
-	}
-	return dirs
-}
-
-func inodeOf(t *testing.T, path string) uint64 {
-	t.Helper()
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ino, ok := fileIdentity(info)
-	if !ok {
-		t.Skip("inode identity is unavailable on this platform")
-	}
-	return ino
-}
-
-func requireNoIntent(t *testing.T, s *Store, sid schema.SessionID) {
-	t.Helper()
-	intent, err := s.generationArtifacts.ReadIntent(context.Background(), sid)
-	if err != nil {
-		t.Fatalf("ReadIntent: %v", err)
-	}
-	if intent != nil {
-		t.Fatalf("intent = %+v, want none", intent)
-	}
-}
-
-func requireNotInstalled(t *testing.T, s *Store, sid schema.SessionID, genID string) {
-	t.Helper()
-	if _, err := s.generationArtifacts.ReadManifest(context.Background(), sid, genID); !errors.Is(err, ErrStagedGenerationAbsent) {
-		t.Fatalf("ReadManifest(%s) err = %v, want ErrStagedGenerationAbsent", genID, err)
-	}
-}
-
 // TestStageGenerationPreparesThenActivationInstalls proves the split: the
-// preparation writes the candidate only into a temporary directory, with no
-// intent and nothing installed, and the activation installs those same files
-// (the renamed directory keeps its identity) instead of writing them again.
+// preparation stages the candidate's objects idempotently with no lock and
+// no generation row, and the activation commits those same objects (no
+// generation row exists before it, the active pointer is unset) with the
+// caller stamps.
 func TestStageGenerationPreparesThenActivationInstalls(t *testing.T) {
 	sid, err := schema.NewSessionID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, root := openGenerationStore(t)
+	s, _ := openGenerationStore(t)
 	seedGenerationSession(t, s, string(sid))
 	activation := testActivation(t, sid, "gen_prestage")
 	ctx := context.Background()
@@ -100,32 +47,25 @@ func TestStageGenerationPreparesThenActivationInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StageGeneration: %v", err)
 	}
-	requireNoIntent(t, s, sid)
-	requireNotInstalled(t, s, sid, "gen_prestage")
-	temps := tempGenerationDirs(t, root, sid)
-	if len(temps) != 1 {
-		t.Fatalf("temporary directories after preparation = %v, want exactly one", temps)
+	if rowPresent(t, s, sid, "gen_prestage") {
+		t.Fatal("preparation wrote a generation row; staging installs no generation")
 	}
-	preparedInode := inodeOf(t, temps[0])
 	if active, err := s.activeGenerationID(ctx, sid); err != nil || active != "" {
 		t.Fatalf("active after preparation = %q (err=%v), want none", active, err)
 	}
+	assertStagedObjects(t, s, sid, activation)
 
 	activation.Prepared = prepared
 	outcome, err := s.ActivateGeneration(ctx, activation)
 	if err != nil {
-		t.Fatalf("ActivateGeneration with prepared files: %v", err)
+		t.Fatalf("ActivateGeneration with prepared objects: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationCommittedNow {
 		t.Fatalf("disposition = %v, want CommittedNow", outcome.Disposition)
 	}
-	if got := inodeOf(t, filepath.Join(root, string(sid), "generations", "gen_prestage")); got != preparedInode {
-		t.Fatal("activation rewrote the candidate instead of installing the prepared directory")
+	if got := visibleGeneration(t, s, sid); got != "gen_prestage" {
+		t.Fatalf("active after activation = %q, want gen_prestage", got)
 	}
-	if left := tempGenerationDirs(t, root, sid); len(left) != 0 {
-		t.Fatalf("temporary directories after activation = %v, want none", left)
-	}
-	requireNoIntent(t, s, sid)
 	state := readIndexStateForTest(t, s, sid)
 	if state.IndexerVersion != 18 || state.IndexedAt == nil || *state.IndexedAt != 4242 {
 		t.Fatalf("stamps = (%d,%v), want (18,4242)", state.IndexerVersion, state.IndexedAt)
@@ -134,14 +74,15 @@ func TestStageGenerationPreparesThenActivationInstalls(t *testing.T) {
 
 // TestStageGenerationAbandonedIsNeverRecovered is the refusal regression: a
 // caller that prepares a candidate and then refuses it (for example because
-// its input changed) drops the handle. Recovery must find nothing to replay,
-// and the prior generation and its stamps stay authoritative.
+// its input changed) drops the handle. No generation row records it, so no
+// recovery can activate it; the prior generation and its stamps stay
+// authoritative, and a later activation for the session proceeds normally.
 func TestStageGenerationAbandonedIsNeverRecovered(t *testing.T) {
 	sid, err := schema.NewSessionID("abababab-abab-4bab-8bab-abababababab")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, root := openGenerationStore(t)
+	s, _ := openGenerationStore(t)
 	seedGenerationSession(t, s, string(sid))
 	ctx := context.Background()
 	prior := testActivation(t, sid, "gen_prior")
@@ -158,112 +99,73 @@ func TestStageGenerationAbandonedIsNeverRecovered(t *testing.T) {
 	}
 	// The handle is dropped: the caller refused the candidate.
 
-	outcome, err := s.RecoverGenerationActivation(ctx, sid)
-	if err != nil {
-		t.Fatalf("RecoverGenerationActivation: %v", err)
-	}
-	if outcome.Disposition != ingest.ActivationNotCommitted || outcome.CandidateID != "" {
-		t.Fatalf("recovery outcome = %+v, want nothing recovered", outcome)
-	}
 	if active, err := s.activeGenerationID(ctx, sid); err != nil || active != "gen_prior" {
-		t.Fatalf("active after recovery = %q (err=%v), want gen_prior", active, err)
+		t.Fatalf("active after abandoned preparation = %q (err=%v), want gen_prior", active, err)
 	}
-	requireNoIntent(t, s, sid)
-	requireNotInstalled(t, s, sid, "gen_refused")
+	if rowPresent(t, s, sid, "gen_refused") {
+		t.Fatal("abandoned preparation wrote a generation row; nothing must be installed")
+	}
 	after := readIndexStateForTest(t, s, sid)
 	if after.IndexerVersion != before.IndexerVersion || after.IndexedAt == nil || before.IndexedAt == nil || *after.IndexedAt != *before.IndexedAt {
-		t.Fatalf("stamps changed after recovery: before (%d,%v) after (%d,%v)", before.IndexerVersion, before.IndexedAt, after.IndexerVersion, after.IndexedAt)
+		t.Fatalf("stamps changed after abandoned preparation: before (%d,%v) after (%d,%v)", before.IndexerVersion, before.IndexedAt, after.IndexerVersion, after.IndexedAt)
 	}
 
-	// The next preparation for the session removes the abandoned files.
-	next := testActivation(t, sid, "gen_next")
-	if _, err := s.StageGeneration(ctx, next); err != nil {
-		t.Fatalf("next StageGeneration: %v", err)
-	}
-	temps := tempGenerationDirs(t, root, sid)
-	if len(temps) != 1 || !strings.Contains(filepath.Base(temps[0]), "gen_next") {
-		t.Fatalf("temporary directories after the next preparation = %v, want only gen_next", temps)
-	}
-}
-
-// TestStageGenerationLeavesPendingIntentForActivation proves preparation is
-// file-only: a pending intent recorded for another candidate is neither
-// replayed nor cleared, so the commit and its disposition stay with
-// activation.
-func TestStageGenerationLeavesPendingIntentForActivation(t *testing.T) {
-	sid, err := schema.NewSessionID("acacacac-acac-4cac-8cac-acacacacacac")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, _ := openGenerationStore(t)
-	seedGenerationSession(t, s, string(sid))
-	ctx := context.Background()
-	pending := testActivation(t, sid, "gen_pending")
-	digest, err := computeActivationBinding(pending.Generation.Generation, bindingFromBlobs(pending.Blobs))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.generationArtifacts.Stage(ctx, pending.Generation.Generation, pending.Blobs); err != nil {
-		t.Fatalf("stage pending: %v", err)
-	}
-	if err := s.generationArtifacts.WriteIntent(ctx, GenerationIntent{
-		SessionID: sid, GenerationID: "gen_pending",
-		ManifestPath: "generations/gen_pending/manifest.json",
-		Completeness: string(pending.Generation.Generation.Completeness), StagedAtMs: 1,
-		ContentCapture: pending.ContentCapture, CandidateDigest: digest,
+	// A later activation for the session reuses the staged objects and
+	// commits normally.
+	nextGen, nextBlobs := buildTestGeneration(t, sid, "gen_next", "next text", "next input", "next output")
+	if _, err := s.ActivateGeneration(ctx, GenerationActivation{
+		Generation:     filledCandidateForValidation(t, nextGen, nextBlobs),
+		Blobs:          nextBlobs,
+		IndexerVersion: 20,
+		IndexedAtMs:    10000,
 	}); err != nil {
-		t.Fatalf("write pending intent: %v", err)
+		t.Fatalf("next activation: %v", err)
 	}
-
-	if _, err := s.StageGeneration(ctx, testActivation(t, sid, "gen_other")); err != nil {
-		t.Fatalf("StageGeneration: %v", err)
-	}
-	intent, err := s.generationArtifacts.ReadIntent(ctx, sid)
-	if err != nil || intent == nil || intent.GenerationID != "gen_pending" {
-		t.Fatalf("pending intent after preparation = %+v (err=%v), want gen_pending untouched", intent, err)
-	}
-	if active, err := s.activeGenerationID(ctx, sid); err != nil || active != "" {
-		t.Fatalf("active after preparation = %q (err=%v), want none", active, err)
+	if got := visibleGeneration(t, s, sid); got != "gen_next" {
+		t.Fatalf("after next activation visible = %q, want gen_next", got)
 	}
 }
 
-// TestStageGenerationMissingBlobLeavesNothing stages a multi-blob candidate
-// with the production writer counts and one blob missing in the middle of the
-// sorted order: the preparation reports the missing blob, cancels the other
-// writers, and leaves no temporary directory and no intent.
+// TestStageGenerationMissingBlobLeavesNothing stages a candidate with one
+// non-emitted content record missing its bytes: the preparation reports
+// the missing bytes and stages nothing committable — no generation row and
+// no sweep flag, because S0 refuses before any write.
 func TestStageGenerationMissingBlobLeavesNothing(t *testing.T) {
-	s, root := openGenerationStore(t)
-	generation, blobs := benchGeneration(t, 5*defaultBlobWriteWorkers)
-	generation.ID = "gen_missing_blob"
-	sid := generation.Metadata.SessionID
-	refs := make([]string, 0, len(generation.Content))
-	for _, record := range generation.Content {
-		refs = append(refs, string(record.Ref))
+	s, _ := openGenerationStore(t)
+	sid, err := schema.NewSessionID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	if err != nil {
+		t.Fatal(err)
 	}
-	sort.Strings(refs)
-	delete(blobs, schema.SourceEntryRef(refs[len(refs)/2]))
+	seedGenerationSession(t, s, string(sid))
+	generation, blobs := buildTestGeneration(t, sid, "gen_missing_blob", "text", "input", "output")
+	retained := schema.SourceEntryRef("e_retained")
+	generation.Generation.Content = append(generation.Generation.Content, indexformat.ContentRecord{Ref: retained})
+	blobs[retained] = []byte("retained bytes")
+	generation = filledCandidateForValidation(t, generation, blobs)
+	delete(blobs, retained)
 
-	_, err := s.StageGeneration(context.Background(), GenerationActivation{Generation: indexformat.V2{Generation: generation}, Blobs: blobs})
-	if err == nil || !strings.Contains(err.Error(), "is missing; the generation is not self-contained") {
-		t.Fatalf("StageGeneration err = %v, want the missing-blob refusal", err)
+	_, err = s.StageGeneration(context.Background(), GenerationActivation{Generation: generation, Blobs: blobs})
+	if err == nil {
+		t.Fatal("StageGeneration with missing blob bytes succeeded; it must be refused")
 	}
-	if left := tempGenerationDirs(t, root, sid); len(left) != 0 {
-		t.Fatalf("temporary directories after the refusal = %v, want none", left)
+	if rowPresent(t, s, sid, "gen_missing_blob") {
+		t.Fatal("refused preparation wrote a generation row; nothing must be installed")
 	}
-	requireNoIntent(t, s, sid)
-	requireNotInstalled(t, s, sid, generation.ID)
+	if flag := readSweepFlag(t, s, sid); flag {
+		t.Fatal("refused preparation set the sweep flag; S0 refuses before any write")
+	}
 }
 
 // TestStageGenerationConcurrentSessions proves independent sessions can
-// prepare in parallel under their own locks and still commit through the
-// ordinary activation; the race detector is the second assertion.
+// prepare in parallel without locks and still commit through the ordinary
+// activation; the race detector is the second assertion.
 func TestStageGenerationConcurrentSessions(t *testing.T) {
 	ids := []string{
 		"cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 		"dddddddd-dddd-4ddd-8ddd-dddddddddddd",
 		"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
 	}
-	s, root := openGenerationStore(t)
+	s, _ := openGenerationStore(t)
 	activations := make([]GenerationActivation, len(ids))
 	for i, raw := range ids {
 		sid, err := schema.NewSessionID(raw)
@@ -299,9 +201,54 @@ func TestStageGenerationConcurrentSessions(t *testing.T) {
 		if outcome.Disposition != ingest.ActivationCommittedNow {
 			t.Fatalf("activation %d disposition = %v, want CommittedNow", i, outcome.Disposition)
 		}
-		sid := activation.Generation.Generation.Metadata.SessionID
-		if left := tempGenerationDirs(t, root, sid); len(left) != 0 {
-			t.Fatalf("session %d temporary directories after activation = %v, want none", i, left)
+	}
+}
+
+// assertStagedObjects proves the preparation staged the candidate's bodies:
+// every entry maps to a stored body by digest. Non-emitted blobs are
+// asserted by the callers that supply them.
+func assertStagedObjects(t *testing.T, s *Store, sid schema.SessionID, activation GenerationActivation) {
+	t.Helper()
+	prepared, err := prepareHarmonizedCandidate(sid, activation.Generation.Generation, activation.Blobs)
+	if err != nil {
+		t.Fatalf("prepare expected digests: %v", err)
+	}
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	for _, digest := range prepared.bodyDigests {
+		found := false
+		if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_entry_bodies WHERE session_id = ? AND body_digest = ? LIMIT 1`, &sqlitex.ExecOptions{
+			Args:       []any{string(sid), string(digest)},
+			ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			t.Fatalf("staged body %q missing after preparation", digest)
 		}
 	}
+}
+
+// readSweepFlag reads the session's crash flag.
+func readSweepFlag(t *testing.T, s *Store, sid schema.SessionID) bool {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	flag := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			flag = stmt.ColumnInt64(0) == 1
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return flag
 }

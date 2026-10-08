@@ -130,24 +130,9 @@ func TestGenerationSkipFixtureManifest(t *testing.T) {
 	loadGenerationSkipFixture(t)
 }
 
-//go:embed testdata/content_crash_seams.yaml
-var contentCrashSeamsYAML []byte
-
-//go:embed testdata/content_crash_seams.manifest.yaml
-var contentCrashSeamsManifestYAML []byte
-
-// loadContentCrashSeamsFixture loads the content crash seams scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentCrashSeamsFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content crash seams", contentCrashSeamsYAML, contentCrashSeamsManifestYAML)
-}
-
-// TestContentCrashSeamsFixtureManifest pins the content crash seams case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentCrashSeamsFixtureManifest(t *testing.T) {
-	loadContentCrashSeamsFixture(t)
-}
+// The content crash seams family graduated to a typed loader with seam
+// expectations in harmonized_crash_test.go, which supersedes the name-only
+// scaffold here (the manifest inventory it protects is unchanged).
 
 //go:embed testdata/content_enospc.yaml
 var contentEnospcYAML []byte

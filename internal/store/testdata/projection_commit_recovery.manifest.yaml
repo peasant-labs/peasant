@@ -1,11 +1,6 @@
 requiredNames:
-  - before-temporary-fsync
-  - after-fsync-before-rename
-  - after-rename-before-db
-  - during-activation-transaction
-  - after-db-before-metadata
-  - after-metadata-before-intent-clear
-  - mismatched-durable-intent-digest-refused
-  - unverifiable-candidate-discarded
-  - undecodable-manifest-discarded
-  - corrupt-artifact
+  - after-prepare
+  - between-stage-txns
+  - before-commit
+  - commit-rollback
+  - after-commit-before-sweep

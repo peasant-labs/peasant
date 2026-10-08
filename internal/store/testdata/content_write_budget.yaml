@@ -15,9 +15,21 @@ cases:
   - name: splitter-single-home
     minSites: 2
   - name: staging-batch-commits-once
+    action: stage-batch
+    sessions: 1
+    wantCommits: 1
   - name: activation-batch-commits-once
+    action: activate-batch
+    sessions: 2
+    wantCommits: 1
   - name: oversized-session-stages-alone
+    action: stage-oversized
+    sessions: 1
+    wantCommits: 2
   - name: skip-commits-nothing
+    action: skip-refresh
+    sessions: 1
+    wantMaxCommits: 1
   - name: state-read-commits-nothing
     action: read-index-state
     sessions: 1

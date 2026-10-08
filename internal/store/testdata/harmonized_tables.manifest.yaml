@@ -34,4 +34,7 @@ requiredNames:
   - subagents-nullability
   - segment-refs-nullability
   - native-metadata-nullability
+  - evidence-nullability
+  - segments-nullability
+  - sections-nullability
   - annotation-targets-nullability

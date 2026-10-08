@@ -302,7 +302,7 @@ func BuildPushCommand() *cobra.Command {
 				}
 				cfg.Output.BasePath = string(resolvedOutput)
 
-				db, err := openRunStore(cmd, dryRun, string(resolvedOutput))
+				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write)
 				if err != nil {
 					return fmt.Errorf("open analytics store: %w", err)
 				}

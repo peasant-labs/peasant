@@ -279,6 +279,9 @@ type Store struct {
 	// the reclaim after its row transaction commits and before any generation
 	// directory is removed. It proves the row-first ordering is crash-safe.
 	reclaimSeam func(stage string) error
+	// writeConfig carries the resolved write.* budgets for the staging and
+	// activation lanes (see WithWriteConfig).
+	writeConfig ingest.WriteConfig
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -313,6 +316,19 @@ type openOptions struct {
 	// log for the life of the pool. It exists so a test can count commits by
 	// reading the log, and is never set on a production open.
 	walAutocheckpointDisabled bool
+	// writeConfig carries the write.* budgets the staging and activation
+	// lanes enforce. Nil means the shipped defaults at the host's worker
+	// count; the pipeline passes its resolved configuration so the store
+	// lanes ask the same splitter over the same knobs.
+	writeConfig *ingest.WriteConfig
+}
+
+// WithWriteConfig gives the store's staging and activation lanes their
+// budgets: every batch bound is read from this configuration through the one
+// splitter, never from a compiled literal. Pass a resolved configuration
+// (WithDefaults applied); a nil option keeps the shipped defaults.
+func WithWriteConfig(cfg ingest.WriteConfig) OpenOption {
+	return func(o *openOptions) { o.writeConfig = &cfg }
 }
 
 // WithSkipMigrations skips the migration-state check on Open. The caller MUST
@@ -486,7 +502,9 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	return &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker}, nil
+	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker}
+	opened.writeConfig = resolveStoreWriteConfig(o.writeConfig)
+	return opened, nil
 }
 
 // readUserVersion returns the PRAGMA user_version value from the pool.
