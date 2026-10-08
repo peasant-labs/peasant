@@ -54,12 +54,15 @@ func loadFreshVsMigratedFixtures(t *testing.T) freshVsMigratedFixtures {
 	return fixtures
 }
 
-// TestSchemaFreshVsMigrated proves a fresh baseline install, a chain-migrated
-// store, and the golden template agree on harmonized behavior: the first
-// allocated body_id is BodyRowIDBase on each, and the fresh and migrated
-// schemas dump identically. The explicit allocation subquery is the writer
-// contract (no AUTOINCREMENT, no sqlite_sequence), spelled here from the same
-// constant the writers use; the migration's literal CHECK holds it equal.
+// TestSchemaFreshVsMigrated proves a fresh baseline install and a
+// chain-migrated store agree on harmonized behavior: the first allocated
+// body_id is BodyRowIDBase on each, and the fresh and migrated schemas dump
+// identically. The golden-template leg of the trio lives in
+// TestGoldenTemplateBodyInsert, which allocates on a real storetest golden
+// copy (this white-box package cannot import storetest without a cycle). The
+// explicit allocation subquery is the writer contract (no AUTOINCREMENT, no
+// sqlite_sequence), spelled here from the same constant the writers use; the
+// migration's literal CHECK holds it equal.
 func TestSchemaFreshVsMigrated(t *testing.T) {
 	t.Parallel()
 	fixtures := loadFreshVsMigratedFixtures(t)
@@ -69,8 +72,6 @@ func TestSchemaFreshVsMigrated(t *testing.T) {
 			assertFirstBodyID(t, c.Name, freshBodyStore(t))
 		case "migrated-body-id":
 			assertFirstBodyID(t, c.Name, migratedBodyStore(t))
-		case "golden-body-id":
-			assertFirstBodyID(t, c.Name, goldenBodyStore(t))
 		case "schema-equality":
 			assertFreshEqualsMigrated(t, c.Name)
 		default:
@@ -142,24 +143,6 @@ func migratedBodyStore(t *testing.T) *Store {
 	t.Cleanup(func() {
 		if err := s.Close(); err != nil {
 			t.Errorf("close migrated store: %v", err)
-		}
-	})
-	return s
-}
-
-func goldenBodyStore(t *testing.T) *Store {
-	t.Helper()
-	// The storetest golden template is built by store.Open on a fresh path
-	// and distributed as a byte-identical copy, so opening a fresh path
-	// here exercises the template's own build path. Importing storetest
-	// from this white-box test would cycle (storetest imports store).
-	s, err := Open(filepath.Join(t.TempDir(), "golden-body.db"))
-	if err != nil {
-		t.Fatalf("open golden-path store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
-			t.Errorf("close golden-path store: %v", err)
 		}
 	})
 	return s
