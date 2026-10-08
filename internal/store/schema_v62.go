@@ -1,7 +1,7 @@
 package store
 
 // BodyRowIDBase is the FTS rowid base for harmonized entry bodies:
-// bodyRowIDBase = 1 << 50 = 1125899906842624. Every session_entries rowid
+// BodyRowIDBase = 1 << 50 = 1125899906842624. Every session_entries rowid
 // stays below it and every session_entry_bodies body_id at or above it, so
 // the two rowid spaces feeding session_search_source never meet. SQLite DDL
 // cannot reference a Go constant, so migrationV62 spells the literal in the
