@@ -116,6 +116,7 @@ func assertCLISurfaceJSONKeys(t *testing.T, c contentCLISurfaceCase) {
 		}
 	}
 }
+
 // TestContentCLISurfaceInventory resolves every cased command from the
 // production command tree and proves its flags exist. The JSON cases
 // additionally prove their output shapes contain the required keys.

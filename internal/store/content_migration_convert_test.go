@@ -74,13 +74,17 @@ func seedMigrateProfile(t *testing.T, s *Store, root string, sid schema.SessionI
 	t.Helper()
 	text, input, output := migrateSeedTexts(genID)
 	switch profile {
-	case "clean", "extra-keys", "newer-stats", "rich-metadata", "annotated", "preview-only", "settled-refusal":
+	case "clean", "extra-keys", "newer-stats", "rich-metadata", "annotated", "preview-only", "settled-refusal", "two-earlier", "empty-blob":
 		v2, blobs := buildTestGeneration(t, sid, genID, text, input, output)
 		switch profile {
 		case "extra-keys":
 			applyMigrateExtraKeys(t, &v2, blobs)
 		case "rich-metadata":
 			applyMigrateRichMetadata(t, s, sid, &v2, blobs, genID)
+		case "two-earlier":
+			applyMigrateTwoEarlier(t, sid, &v2, blobs, genID)
+		case "empty-blob":
+			applyMigrateEmptyBlob(t, &v2, blobs)
 		}
 		stampSeedMetadataHash(&v2)
 		full := profile != "preview-only"
@@ -154,7 +158,49 @@ func applyMigrateExtraKeys(t *testing.T, v2 *indexformat.V2, _ map[schema.Source
 	}
 }
 
-// applyMigrateRichMetadata extends the seed candidate with the metadata
+// applyMigrateTwoEarlier extends the seed candidate with two earlier
+// partitions in distinct history states, each with one emitted entry
+// carrying a content record and bytes like the main ones. The shadow
+// verify aligns staged rows against ascending partition order, so this
+// profile pins the ordering a map range would randomize.
+func applyMigrateTwoEarlier(t *testing.T, sid schema.SessionID, v2 *indexformat.V2, blobs map[schema.SourceEntryRef][]byte, genID string) {
+	t.Helper()
+	states := []schema.EarlierHistoryState{
+		schema.EarlierHistoryUncertainMigrated,
+		schema.EarlierHistoryUncertainUnresolved,
+	}
+	for i, state := range states {
+		ref := schema.SourceEntryRef(fmt.Sprintf("e_earlier_%d", i+1))
+		text := fmt.Sprintf("earlier %d text for %s ", i+1, genID) + strings.Repeat("x", 100)
+		v2.Generation.Earlier = append(v2.Generation.Earlier, indexformat.EarlierPartition{
+			State: state,
+			Content: indexformat.Partition{Entries: []schema.SessionEntry{{
+				SessionID: sid, EntryIndex: 0, Harness: v2.Generation.Metadata.ModelHarness,
+				EntryType: schema.EntryTypeText, Role: schema.RoleUser,
+				ContentPreview: &text, SourceEntryRef: ref,
+			}}},
+		})
+		v2.Generation.Content = append(v2.Generation.Content, indexformat.ContentRecord{Ref: ref})
+		blobs[ref] = []byte(text)
+	}
+}
+
+// applyMigrateEmptyBlob adds one zero-length non-emitted ref with its
+// bytes and covering segment: the conversion must carry the empty blob
+// through instead of refusing it as a torn object.
+func applyMigrateEmptyBlob(t *testing.T, v2 *indexformat.V2, blobs map[schema.SourceEntryRef][]byte) {
+	t.Helper()
+	empty := schema.SourceEntryRef("e_migrate_empty")
+	v2.Generation.Content = append(v2.Generation.Content, indexformat.ContentRecord{Ref: empty})
+	blobs[empty] = []byte{}
+	v2.Generation.Segments = []indexformat.ContextSegment{{
+		Ordinal: 0, PhysicalSourceID: "source-migrate-empty",
+		Coordinates:  indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
+		Inclusion:    indexformat.SegmentInclusionInherited,
+		CapturedRefs: []schema.SourceEntryRef{empty},
+	}}
+}
+
 // collections the metadata dimension proves: a parent link, subagents, a
 // commit, a relationship with an anchor, title refs, an earlier
 // partition, native metadata, and a context segment.
@@ -197,8 +243,8 @@ func applyMigrateRichMetadata(t *testing.T, s *Store, sid schema.SessionID, v2 *
 	}}
 	v2.Generation.Segments = []indexformat.ContextSegment{{
 		Ordinal: 0, PhysicalSourceID: "source-seed",
-		Coordinates: indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
-		Inclusion:   indexformat.SegmentInclusionInherited,
+		Coordinates:  indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
+		Inclusion:    indexformat.SegmentInclusionInherited,
 		CapturedRefs: []schema.SourceEntryRef{"e_u1"},
 	}}
 	_ = genID
@@ -573,10 +619,10 @@ func applyMigrateDamage(t *testing.T, s *Store, root string, sid schema.SessionI
 		rewriteMigrateFullText(t, s, sid, 0, strings.Repeat("divergent full tail ", 500))
 		return nil
 	case "capture-hash":
-		put(`UPDATE session_content_captures SET full_capture_sha256 = '` + strings.Repeat("e", 64) + `' WHERE session_id = ?`, string(sid))
+		put(`UPDATE session_content_captures SET full_capture_sha256 = '`+strings.Repeat("e", 64)+`' WHERE session_id = ?`, string(sid))
 		return nil
 	case "session-hash":
-		put(`UPDATE sessions SET session_entries_hash = '` + strings.Repeat("f", 64) + `' WHERE session_id = ?`, string(sid))
+		put(`UPDATE sessions SET session_entries_hash = '`+strings.Repeat("f", 64)+`' WHERE session_id = ?`, string(sid))
 		return nil
 	case "null-hash":
 		put(`UPDATE sessions SET session_entries_hash = NULL WHERE session_id = ?`, string(sid))
@@ -906,9 +952,9 @@ func assertMigrateProfile(t *testing.T, s *Store, _ string, sid schema.SessionID
 	switch c.Profile {
 	case "extra-keys":
 		type promoted struct {
-			model                                            *string
-			reasoning, read, write                            *int
-			extra, verbatim                                   *string
+			model                  *string
+			reasoning, read, write *int
+			extra, verbatim        *string
 		}
 		_ = promoted{}
 		byIndex := map[int]map[string]*string{}
@@ -1312,5 +1358,32 @@ func TestMigrateInterruptFinishesSession(t *testing.T) {
 	}
 	if done != 1 {
 		t.Fatalf("converted sessions = %d; want exactly the finished one", done)
+	}
+}
+
+// TestPlanMigrationSamplesMismatches proves the Phase 0 preflight
+// forecasts rollbacks: a sampled session with a field/blob mismatch is
+// reported before anything converts, while a clean store samples clean.
+func TestPlanMigrationSamplesMismatches(t *testing.T) {
+	s, root := openGenerationStore(t)
+	clean := migrateCaseSessionID(t, "migrate-sample-clean", 0)
+	seedGenerationSession(t, s, string(clean))
+	seedMigrateProfile(t, s, root, clean, "clean", "gen_migrate_case")
+	damaged := migrateCaseSessionID(t, "migrate-sample-damaged", 0)
+	seedGenerationSession(t, s, string(damaged))
+	seedMigrateProfile(t, s, root, damaged, "clean", "gen_migrate_case")
+	applyMigrateDamage(t, s, root, damaged, "gen_migrate_case", "field-blob")
+	plan, err := s.PlanMigration(context.Background())
+	if err != nil {
+		t.Fatalf("PlanMigration: %v", err)
+	}
+	if plan.SampledSessions != 2 {
+		t.Fatalf("sampled sessions = %d; want both work sessions", plan.SampledSessions)
+	}
+	if plan.SampledMismatchSessions != 1 {
+		t.Fatalf("sampled mismatch sessions = %d; want the damaged one", plan.SampledMismatchSessions)
+	}
+	if plan.SampledMismatchedRefs == 0 {
+		t.Fatal("sampled mismatched refs = 0; want the divergent ref counted")
 	}
 }

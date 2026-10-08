@@ -4,6 +4,8 @@ requiredNames:
   - native-superseded-identical-discarded
   - native-pending-intent-discarded
   - native-non-emitted
+  - native-two-earlier-partitions-converts
+  - native-empty-non-emitted-converts
   - native-extra-keys-promoted
   - native-stats-backfilled
   - native-newer-stats-row-converts

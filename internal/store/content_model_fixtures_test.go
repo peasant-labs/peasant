@@ -134,24 +134,9 @@ func TestGenerationSkipFixtureManifest(t *testing.T) {
 // expectations in harmonized_crash_test.go, which supersedes the name-only
 // scaffold here (the manifest inventory it protects is unchanged).
 
-//go:embed testdata/content_enospc.yaml
-var contentEnospcYAML []byte
-
-//go:embed testdata/content_enospc.manifest.yaml
-var contentEnospcManifestYAML []byte
-
-// loadContentENOSPCFixture loads the content disk-full scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentENOSPCFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content disk-full", contentEnospcYAML, contentEnospcManifestYAML)
-}
-
-// TestContentENOSPCFixtureManifest pins the content disk-full case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentENOSPCFixtureManifest(t *testing.T) {
-	loadContentENOSPCFixture(t)
-}
+// content_enospc is owned by the typed loader in
+// content_migration_enospc_test.go, which enforces the required-name
+// manifest over the full family; no scaffold loader remains here.
 
 // content_write_budget is owned by the typed loader in
 // content_write_budget_test.go; the full required-name inventory stays

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,6 +15,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+//go:embed testdata/content_enospc.yaml
+var contentEnospcYAML []byte
+
+//go:embed testdata/content_enospc.manifest.yaml
+var contentEnospcManifestYAML []byte
+
 // contentEnospcMigrationCase is one migration-owned content_enospc case:
 // the section-10 name plus the migration step the runner drives under a
 // real SQLITE_FULL.
@@ -24,7 +31,10 @@ type contentEnospcMigrationCase struct {
 }
 
 // loadContentEnospcMigrationCases strictly decodes the disk-full family
-// and returns the migration-owned cases with their steps.
+// and returns the migration-owned cases with their steps. The
+// required-name manifest is enforced here over the full six-name family
+// — including the cases other owners fill later — so the inventory keeps
+// its deletion protection now that the scaffold loader is retired.
 func loadContentEnospcMigrationCases(t *testing.T) []contentEnospcMigrationCase {
 	t.Helper()
 	var fixture struct {
@@ -34,6 +44,20 @@ func loadContentEnospcMigrationCases(t *testing.T) []contentEnospcMigrationCase 
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatalf("decode content_enospc.yaml: %v", err)
+	}
+	manifest, err := decodeRecoveryRequiredNames(contentEnospcManifestYAML)
+	if err != nil {
+		t.Fatalf("decode content_enospc manifest: %v", err)
+	}
+	actual := make([]string, 0, len(fixture.Cases))
+	for _, c := range fixture.Cases {
+		if strings.TrimSpace(c.Name) == "" {
+			t.Fatal("content_enospc.yaml: a case has a blank name")
+		}
+		actual = append(actual, c.Name)
+	}
+	if err := validateRecoveryRequiredNames(manifest, actual, "content disk-full"); err != nil {
+		t.Fatal(err)
 	}
 	var owned []contentEnospcMigrationCase
 	for _, c := range fixture.Cases {

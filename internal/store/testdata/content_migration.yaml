@@ -37,6 +37,14 @@ cases:
     ownedBy: conversion
     profile: non-emitted
     expect: converted
+  - name: native-two-earlier-partitions-converts
+    ownedBy: conversion
+    profile: two-earlier
+    expect: converted
+  - name: native-empty-non-emitted-converts
+    ownedBy: conversion
+    profile: empty-blob
+    expect: converted
   - name: native-extra-keys-promoted
     ownedBy: conversion
     profile: extra-keys
