@@ -1,13 +1,10 @@
 # content_write_budget — the harmonized session content model write-budget family
 # (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
 #
-# The 8 cases this change owns carry typed expectations and run real assertions
-# in content_write_budget_test.go under their section-10 names; the gates assert
-# the invariants against the configured knobs, never the constants. The 4
-# writer-owned cases (staging-batch-commits-once, activation-batch-commits-once,
-# oversized-session-stages-alone, skip-commits-nothing) stay name placeholders
-# until the writer change fills them; the loader's manifest check still protects
-# their names, and a case with no typed fields runs as a placeholder.
+# Every case carries executable expectations. Native staging and activation
+# gates count real WAL commit frames. Parser headroom remains in the derived
+# budget without allocating an unused scratch pool; native byte admission and
+# the mounted drain's timer are exercised by the ingest fixture families.
 hostSlug: github.com-write-budget-fixture
 projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 transcript: '{"type":"user","message":{"role":"user","content":"write budget fixture"}}'
@@ -25,6 +22,10 @@ cases:
   - name: activation-batch-commits-once
     action: activate-batch
     sessions: 2
+    wantCommits: 1
+  - name: activation-batch-api-commits-once
+    action: activate-batch
+    sessions: 3
     wantCommits: 1
   - name: oversized-session-stages-alone
     action: stage-oversized
@@ -49,7 +50,7 @@ cases:
     batchSessions: 64
     stagedMemoryBytes: 150994944
     workers: [8]
-  - name: buffers-preallocated-partitioned
+  - name: worker-headroom-derived
     workers: [4]
   - name: staged-memory-under-cap
     workers: [1, 2, 7, 8, 32]

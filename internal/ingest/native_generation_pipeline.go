@@ -409,6 +409,12 @@ func (p *Pipeline) stageAndCommitNativeGenerations(
 	if len(positions) == 0 {
 		return
 	}
+	if stager, ok := p.metricsStore.(NativeGenerationBatchStager); ok {
+		if activator, ok := p.metricsStore.(NativeGenerationBatchActivator); ok {
+			p.stageAndCommitNativeBatches(ctx, results, positions, outcome, logPrefix, writeLane, onCommit, stager, activator)
+			return
+		}
+	}
 	stager := p.nativeGenerationStager()
 	workers := 1
 	if stager != nil {
@@ -469,7 +475,6 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 	result := prepared.result
 	im := result.im
 	entriesCount := prepared.entriesCount
-	candidates := prepared.candidates
 	fail := func(err error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
 		return p.refuseNativeGeneration(result, entriesCount, logPrefix, err)
 	}
@@ -492,6 +497,19 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 			return err
 		})
 	})
+	return p.finishNativeGenerationResult(ctx, prepared, outcome, logPrefix, activationOutcome, activationErr)
+}
+
+// finishNativeGenerationResult is shared by single and batched activation so
+// refusal, retained accounting, skip, and post-commit sweep have one owner.
+func (p *Pipeline) finishNativeGenerationResult(ctx context.Context, prepared preparedNativeGeneration, outcome IndexOutcome, logPrefix string, activationOutcome ActivationOutcome, activationErr error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+	result := prepared.result
+	im := result.im
+	entriesCount := prepared.entriesCount
+	candidates := prepared.candidates
+	fail := func(err error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+		return p.refuseNativeGeneration(result, entriesCount, logPrefix, err)
+	}
 	if activationErr != nil {
 		var repairPending *GenerationRepairPendingError
 		if errors.As(activationErr, &repairPending) {

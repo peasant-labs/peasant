@@ -4,12 +4,13 @@ requiredNames:
   - splitter-single-home
   - staging-batch-commits-once
   - activation-batch-commits-once
+  - activation-batch-api-commits-once
   - oversized-session-stages-alone
   - skip-commits-nothing
   - state-read-commits-nothing
   - commit-count-budget
   - hold-under-busy-timeout
   - batch-under-configured-caps
-  - buffers-preallocated-partitioned
+  - worker-headroom-derived
   - staged-memory-under-cap
   - flush-on-interval

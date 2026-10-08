@@ -11,7 +11,8 @@
 # editable is the exact set of keys PATCH accepts. readOnly is the exact set of
 # keys GET marks editable false and PATCH refuses: the format version, the
 # Village sign-in flag, the saved selection (the settings page does not edit
-# it), the settings the dashboard reads only when it starts, and the retired
+# it), the settings the dashboard reads only when it starts, write budgets read
+# at harvest start (a separate lifecycle from dashboard startup), and the retired
 # keys peasant reads only to refuse or report.
 #
 # choices is the exact set of choice keys, each with its exact menu in order.

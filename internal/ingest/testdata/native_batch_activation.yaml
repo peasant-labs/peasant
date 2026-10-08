@@ -1,0 +1,29 @@
+required_names: [fills-to-activation-cap, byte-cap-splits, oversized-alone, refused-session-isolated, skip-routed-single]
+cases:
+  - name: fills-to-activation-cap
+    entries: [2, 2, 2]
+    activation_cap: 3
+    byte_cap_units: 10
+    batches: [3]
+  - name: byte-cap-splits
+    entries: [2, 2, 2]
+    activation_cap: 3
+    byte_cap_units: 2
+    batches: [2, 1]
+  - name: oversized-alone
+    entries: [2, 20, 2]
+    activation_cap: 3
+    byte_cap_units: 2
+    batches: [1, 1, 1]
+  - name: refused-session-isolated
+    entries: [2, 2, 2]
+    activation_cap: 3
+    byte_cap_units: 10
+    refuse: 1
+    batches: [3]
+  - name: skip-routed-single
+    entries: [2, 2, 2]
+    activation_cap: 3
+    byte_cap_units: 10
+    skip: 1
+    batches: [3]

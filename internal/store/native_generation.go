@@ -14,6 +14,8 @@ import (
 )
 
 var (
+	_ ingest.NativeGenerationBatchStager       = (*Store)(nil)
+	_ ingest.NativeGenerationBatchActivator    = (*Store)(nil)
 	_ ingest.NativeGenerationActivator         = (*Store)(nil)
 	_ ingest.NativeGenerationStager            = (*Store)(nil)
 	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
@@ -21,6 +23,37 @@ var (
 	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
 	_ ingest.ContentSweeper                    = (*Store)(nil)
 )
+
+func (s *Store) StageNativeGenerations(ctx context.Context, native []ingest.NativeGenerationActivation) ([]ingest.NativeGenerationStaged, []error) {
+	activations := make([]GenerationActivation, len(native))
+	for i, a := range native {
+		activations[i] = generationActivationFromNative(a)
+	}
+	handles, errs := s.StageGenerationBatch(ctx, activations)
+	staged := make([]ingest.NativeGenerationStaged, len(handles))
+	for i, h := range handles {
+		if h != nil {
+			staged[i] = h
+		}
+	}
+	return staged, errs
+}
+
+func (s *Store) ActivateStagedNativeGenerations(ctx context.Context, native []ingest.NativeGenerationActivation, staged []ingest.NativeGenerationStaged) []ingest.NativeActivationResult {
+	activations := make([]GenerationActivation, len(native))
+	for i, a := range native {
+		activations[i] = generationActivationFromNative(a)
+		if i < len(staged) {
+			activations[i].Prepared, _ = staged[i].(*PreparedGeneration)
+		}
+	}
+	results := s.ActivateGenerationBatch(ctx, activations)
+	adapted := make([]ingest.NativeActivationResult, len(results))
+	for i, r := range results {
+		adapted[i] = ingest.NativeActivationResult{Outcome: r.Outcome, Err: r.Err}
+	}
+	return adapted
+}
 
 // generationActivationFromNative mirrors the ingest-owned activation envelope
 // into the store's own immutable activation. Both entry points (pre-staging and

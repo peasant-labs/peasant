@@ -1619,22 +1619,18 @@ func (p *Pipeline) indexLoop(
 	if workers < 1 {
 		workers = 1
 	}
-	// One pre-allocated buffer per parser, claimed by worker index: the
-	// partitions are mutually exclusive by construction, and each parse
-	// starts from a reset partition, so no item ever reads another's
-	// scratch. The serialize/hash scratch use arrives with the prepare lane.
-	bufs := p.newRunWorkerBuffers(workers)
+	gate := newStagedBytesGate(p.writeConfig().StagedMemoryBytes)
 	parsedCh := make(chan indexParseResult, workers)
 	var activeParses atomic.Int64
 	var maxActiveParses atomic.Int64
 	var parserWG sync.WaitGroup
 	parserWG.Add(workers)
-	for i := range workers {
+	for range workers {
 		go func() {
 			defer parserWG.Done()
 			for work := range indexCh {
-				bufs.Reset(i)
 				result := p.parseIndexMeta(ctx, work.meta, &activeParses, &maxActiveParses, logPrefix)
+				result = p.admitNativeResult(ctx, result, gate)
 				if batch, complete := work.batch.completeWorkItem(); complete {
 					indexDoneCh <- batch
 				}
@@ -1691,7 +1687,7 @@ func (p *Pipeline) indexLoop(
 			profileBatch.WriteStats.Add(flush.writeStats)
 		}
 	}
-	drainIndexParseResults(parsedCh, pending, writeCfg, flushPending)
+	drainIndexParseResultsWithGate(parsedCh, pending, writeCfg, flushPending, gate.blocked)
 	if profileEnabled && profileBatch.WorkItems > 0 {
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 		p.config.IndexProfiler.Record(profileBatch, profileSessions)
@@ -1700,6 +1696,7 @@ func (p *Pipeline) indexLoop(
 }
 
 type indexParseResult struct {
+	releaseStaged   func()
 	retainedUnknown []RetainedUnknownKindCount
 	fullContent     bool
 	// partial reports that the strict parser refused the transcript and the
@@ -1823,8 +1820,12 @@ func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, o
 // A single result larger than the whole budget is still written, alone: the
 // batch it would join is flushed first, and the empty-batch term then admits
 // it. Refusing it instead would lose the session.
-func ExceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextBytes int64) bool {
-	if pendingCount >= cfg.BatchSessions {
+func ExceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextBytes int64, sessionCaps ...int) bool {
+	cap := cfg.BatchSessions
+	if len(sessionCaps) > 0 {
+		cap = sessionCaps[0]
+	}
+	if pendingCount >= cap {
 		return true
 	}
 	return pendingCount > 0 && pendingBytes+nextBytes > cfg.BatchBytes
@@ -1841,53 +1842,24 @@ func ExceedsWriteBudget(cfg WriteConfig, pendingCount int, pendingBytes, nextByt
 //
 // pending is the caller's reusable buffer; it is cleared before return.
 func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexParseResult, cfg WriteConfig, flush func([]indexParseResult)) {
-	for {
-		result, ok := <-parsedCh
-		if !ok {
-			break
-		}
-		pending = append(pending, result)
-		pendingBytes := indexResultWriteBytes(result.output)
-		parsedClosed := false
-		// No bound is restated here: ExceedsWriteBudget owns the split and
-		// applies it below, before each result joins the batch, so the batch
-		// never grows past the limit or the budget however long this absorbs.
-		// A second copy of those terms would be one more place to miss.
-	drainParsed:
-		for {
-			select {
-			case next, ok := <-parsedCh:
-				if !ok {
-					parsedClosed = true
-					break drainParsed
-				}
-				nextBytes := indexResultWriteBytes(next.output)
-				if ExceedsWriteBudget(cfg, len(pending), pendingBytes, nextBytes) {
-					flush(pending)
-					clear(pending)
-					pending = pending[:0]
-					pendingBytes = 0
-				}
-				pending = append(pending, next)
-				pendingBytes += nextBytes
-			default:
-				break drainParsed
-			}
-		}
-		flush(pending)
-		clear(pending)
-		pending = pending[:0]
-		if parsedClosed {
-			break
-		}
-	}
+	drainIndexParseResultsWithGate(parsedCh, pending, cfg, flush, nil)
 }
 
 func indexResultWriteBytes(result indexformat.Result) int64 {
 	if v1, ok := result.(indexformat.V1); ok {
 		return fullEntryWriteBytes(v1.Entries)
 	}
+	if v2, ok := result.(indexformat.V2); ok {
+		return nativeCandidateWriteBytes(&NativeGenerationCandidate{Result: v2})
+	}
 	return 0
+}
+
+func indexParseWriteBytes(result indexParseResult) int64 {
+	if result.nativeCandidate != nil {
+		return nativeCandidateWriteBytes(result.nativeCandidate)
+	}
+	return indexResultWriteBytes(result.output)
 }
 
 // indexBatch parses a batch, then serializes SQLite writes through one goroutine.
@@ -1910,30 +1882,14 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	var maxActiveParses atomic.Int64
 
 	workers := max(1, parallelWorkers(p.config))
-	// The wave's items claim pool partitions exclusively for their duration:
-	// the slot channel hands each item a partition no other in-flight item
-	// holds, and the item resets it before parsing, so partitions stay
-	// mutually exclusive even though the wave fans out anonymously.
-	bufs := p.newRunWorkerBuffers(workers)
-	slots := make(chan int, workers)
-	for i := 0; i < workers; i++ {
-		slots <- i
-	}
-	parseOne := func(im indexedMeta) indexParseResult {
-		slot := <-slots
-		defer func() { slots <- slot }()
-		bufs.Reset(slot)
-		return p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
-	}
 	// Retain at most one bounded parser wave, not every full session in a
 	// reindex invocation. The wave is capped by the configured session cap,
 	// and the writer further splits each wave by full bytes.
 	writeCfg := p.writeConfig()
-	waveSize := min(workers, writeCfg.BatchSessions)
+	gate := newStagedBytesGate(writeCfg.StagedMemoryBytes)
 	profileSessions := make([]IndexProfileSession, 0, len(metas))
 	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(metas), WorkItems: len(metas)}
 	pending := make([]indexParseResult, 0, writeCfg.BatchSessions)
-	var pendingBytes int64
 	flushPending := func() {
 		if len(pending) == 0 {
 			return
@@ -1959,26 +1915,29 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		profileBatch.WriteStats.Add(flush.writeStats)
 		clear(pending)
 		pending = pending[:0]
-		pendingBytes = 0
 	}
-	for start := 0; start < len(metas); start += waveSize {
-		end := min(start+waveSize, len(metas))
-		var parsed []indexParseResult
-		if workers > 1 && end-start > 1 {
-			parsed = runParallel(func() error { return nil }, metas[start:end], workers, parseOne)
-		} else {
-			parsed = []indexParseResult{parseOne(metas[start])}
-		}
-		for _, result := range parsed {
-			size := indexResultWriteBytes(result.output)
-			if ExceedsWriteBudget(writeCfg, len(pending), pendingBytes, size) {
-				flushPending()
+	parsed := make(chan indexParseResult, workers)
+	work := make(chan indexedMeta)
+	var parsers sync.WaitGroup
+	for range workers {
+		parsers.Add(1)
+		go func() {
+			defer parsers.Done()
+			for im := range work {
+				result := p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
+				parsed <- p.admitNativeResult(ctx, result, gate)
 			}
-			pending = append(pending, result)
-			pendingBytes += size
-		}
+		}()
 	}
-	flushPending()
+	go func() {
+		for _, im := range metas {
+			work <- im
+		}
+		close(work)
+		parsers.Wait()
+		close(parsed)
+	}()
+	drainIndexParseResultsWithGate(parsed, pending, writeCfg, func(batch []indexParseResult) { pending = batch; flushPending() }, gate.blocked)
 	profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	return indexed, logs, refused
@@ -2253,6 +2212,9 @@ func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results [
 	}
 	for _, result := range results {
 		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix, writeLane)
+		if result.releaseStaged != nil {
+			result.releaseStaged()
+		}
 		flush.indexed = append(flush.indexed, indexedMeta)
 		flush.logEntries = append(flush.logEntries, logEntry)
 		flush.profileSessions = append(flush.profileSessions, profileSession)
@@ -2274,6 +2236,9 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	// emits the result's one progress advance, so no branch can store an
 	// outcome without reporting it.
 	record := func(position int, indexed indexedMeta, logEntry IndexLogEntry, profileSession IndexProfileSession) {
+		if results[position].releaseStaged != nil {
+			results[position].releaseStaged()
+		}
 		flush.indexed[position] = indexed
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = profileSession
