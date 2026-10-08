@@ -1,11 +1,32 @@
 package ingest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 )
+
+type writeAdvisoryReporterKey struct{}
+
+// WithWriteAdvisoryReporter lets a store lane retain a nonfatal advisory in
+// the harvest report even when an interactive progress renderer mutes slog.
+// The reporter must be safe for concurrent staging workers.
+func WithWriteAdvisoryReporter(ctx context.Context, report func(DiagnosticEntry)) context.Context {
+	return context.WithValue(ctx, writeAdvisoryReporterKey{}, report)
+}
+
+// ReportWriteAdvisory returns false when no harvest reporter is attached, so
+// standalone store callers can fall back to their normal logging surface.
+func ReportWriteAdvisory(ctx context.Context, diagnostic DiagnosticEntry) bool {
+	report, ok := ctx.Value(writeAdvisoryReporterKey{}).(func(DiagnosticEntry))
+	if !ok || report == nil {
+		return false
+	}
+	report(diagnostic)
+	return true
+}
 
 // reportMetadataRefusal retains nonfatal warnings independently from slog,
 // which interactive callers may suppress while rendering progress.
