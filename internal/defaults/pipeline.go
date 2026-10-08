@@ -120,11 +120,11 @@ const (
 	// 4 s hold.
 	WriteDefaultSweepRows = 5000
 	// WriteDefaultHarvestTarget is half the measured warm-harvest baseline
-	// for the cohort. The 40-minute baseline stands and the integrated
-	// build beats it: a full-discovery warm run on the sandbox processed a
+	// for the cohort (40 minutes). A full-discovery warm sandbox run processed a
 	// 1,512-session live delta in 6m49s (1,465 updated, 47 dirty-record
-	// errors; COMPUTE swept all 19,119 sessions in 3m41s), so the 20-minute
-	// target holds with headroom on the new pipeline's skip paths.
+	// errors), about 0.27 s/session, versus the 40-minute baseline.
+	// COMPUTE swept all 19,119 sessions in 3m41s. This delta measurement
+	// does not prove the 20-minute cohort target; that awaits a cohort run.
 	WriteDefaultHarvestTarget = 20 * time.Minute
 )
 
