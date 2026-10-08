@@ -1,0 +1,7 @@
+requiredNames: [small, medium, large]
+samples: 30
+listLimit: 200
+bands:
+  - {name: small, nominalEntries: 126}
+  - {name: medium, nominalEntries: 828}
+  - {name: large, nominalEntries: 22619}
