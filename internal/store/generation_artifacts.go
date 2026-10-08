@@ -106,6 +106,10 @@ type GenerationArtifactStore interface {
 	// ReadBlob reads one immutable content blob addressed by its captured
 	// relative path and verifies its length and integrity digest.
 	ReadBlob(context.Context, schema.SessionID, string, indexformat.ContentRecord) ([]byte, error)
+	// BlobExists reports whether one immutable content blob file is
+	// present, without reading its bytes. The preflight samples blob
+	// presence with it; conversion verifies the bytes through ReadBlob.
+	BlobExists(context.Context, schema.SessionID, string, indexformat.ContentRecord) (bool, error)
 	// ReadPriorEvidence returns the persisted prior document for one
 	// generation, or (nil, nil) when none was written.
 	ReadPriorEvidence(context.Context, schema.SessionID, string) ([]byte, error)
@@ -119,6 +123,18 @@ type GenerationArtifactStore interface {
 	// directories. A missing session directory is an empty list, never an
 	// error.
 	ListGenerationDirectories(context.Context, schema.SessionID) ([]string, error)
+	// RemoveReservedStagingDirs removes the owned reserved staging
+	// directories (.tmp-gen-*) the install listing skips, reporting how many
+	// went away. A missing generations directory is success. The migration
+	// drain owns this call: no other writer creates reserved names.
+	RemoveReservedStagingDirs(context.Context, schema.SessionID) (int, error)
+	// RemoveConvertedSessionFiles removes the managed files a converted
+	// session no longer reads: the whole generations subtree, the exported
+	// generation metadata document, and the activation intent. Retained
+	// transcripts, pair files, and lock files stay. Every removal tolerates
+	// absence, so an interrupted run repeats safely. It reports the removed
+	// footprint for migration progress.
+	RemoveConvertedSessionFiles(context.Context, schema.SessionID) (GenerationFootprint, error)
 }
 
 // priorEvidenceName is the fixed file name of the activation-owned prior
@@ -330,6 +346,120 @@ func (a *osGenerationArtifactStore) ClearIntent(ctx context.Context, id schema.S
 	return nil
 }
 
+// RemoveReservedStagingDirs removes the owned reserved staging directories
+// (.tmp-gen-*) the install listing skips, reporting how many went away. A
+// missing generations directory is success. The walk is per-component
+// no-follow like every other recursive removal, and each reserved name is a
+// fixed-prefix match, never a caller-supplied path.
+func (a *osGenerationArtifactStore) RemoveReservedStagingDirs(ctx context.Context, id schema.SessionID) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	sessionRel, err := a.sessionRel(id)
+	if err != nil {
+		return 0, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return 0, err
+	}
+	defer root.Close()
+	dir, err := root.Open(path.Join(sessionRel, "generations"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("store: list reserved staging directories for session %s in RemoveReservedStagingDirs: %s; no directory was removed", id, sanitizeFSError(err))
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return 0, fmt.Errorf("store: list reserved staging directories for session %s in RemoveReservedStagingDirs: %s; no directory was removed", id, sanitizeFSError(err))
+	}
+	removed := 0
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return removed, err
+		}
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), ".tmp-gen-") {
+			continue
+		}
+		rel := path.Join(sessionRel, "generations", entry.Name())
+		if _, err := noFollowRemovalPath(root, rel); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return removed, fmt.Errorf("store: inspect reserved staging directory for session %s in RemoveReservedStagingDirs: %s; the directory was left in place", id, sanitizeFSError(err))
+		}
+		if err := root.RemoveAll(rel); err != nil {
+			return removed, fmt.Errorf("store: remove reserved staging directory for session %s in RemoveReservedStagingDirs: %s; the directory was left in place", id, sanitizeFSError(err))
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// RemoveConvertedSessionFiles removes the managed files a converted session
+// no longer reads: the whole generations subtree, the exported generation
+// metadata document, and the activation intent. Retained transcripts, pair
+// files, and lock files stay. Every removal tolerates absence, so an
+// interrupted run repeats safely. The caller proves conversion from the
+// database before calling; the per-component no-follow walk still guards
+// the recursive removal.
+func (a *osGenerationArtifactStore) RemoveConvertedSessionFiles(ctx context.Context, id schema.SessionID) (GenerationFootprint, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationFootprint{}, err
+	}
+	sessionRel, err := a.sessionRel(id)
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	defer root.Close()
+	var footprint GenerationFootprint
+	generationsRel := path.Join(sessionRel, "generations")
+	measured, err := footprintUnderRoot(root, generationsRel)
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	footprint.Add(measured)
+	if _, err := noFollowRemovalPath(root, generationsRel); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return footprint, fmt.Errorf("store: inspect generations for session %s in RemoveConvertedSessionFiles: %s; no file was removed", id, sanitizeFSError(err))
+		}
+	} else if err := root.RemoveAll(generationsRel); err != nil {
+		return footprint, fmt.Errorf("store: remove generations for session %s in RemoveConvertedSessionFiles: %s; remaining files are retried on the next pass", id, sanitizeFSError(err))
+	}
+	for _, name := range []string{"metadata.json", "generation-intent.json"} {
+		if err := ctx.Err(); err != nil {
+			return footprint, err
+		}
+		rel := path.Join(sessionRel, name)
+		info, err := root.Lstat(rel)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return footprint, fmt.Errorf("store: inspect managed file for session %s in RemoveConvertedSessionFiles: %s; remaining files are retried on the next pass", id, sanitizeFSError(err))
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return footprint, fmt.Errorf("store: refuse to remove a managed file for session %s in RemoveConvertedSessionFiles: the owned target is a symbolic link; the file was left in place", id)
+		}
+		if info.IsDir() {
+			return footprint, fmt.Errorf("store: refuse to remove a managed file for session %s in RemoveConvertedSessionFiles: the owned target is a directory; the file was left in place", id)
+		}
+		footprint.Bytes += info.Size()
+		footprint.Files++
+		if err := root.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return footprint, fmt.Errorf("store: remove a managed file for session %s in RemoveConvertedSessionFiles: %s; remaining files are retried on the next pass", id, sanitizeFSError(err))
+		}
+	}
+	return footprint, nil
+}
+
 func (a *osGenerationArtifactStore) RemoveGeneration(ctx context.Context, id schema.SessionID, generationID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -467,6 +597,35 @@ func (a *osGenerationArtifactStore) ReadManifest(ctx context.Context, id schema.
 		return indexformat.Generation{}, fmt.Errorf("store: decode staged manifest in ReadManifest for generation %s of session %s: %s; the candidate cannot be recovered", generationID, id, sanitizeFSError(err))
 	}
 	return generation, nil
+}
+
+// BlobExists reports whether one immutable content blob file is present,
+// without reading its bytes. A missing session or generation directory
+// reads as absent, never as an error; other failures name the step.
+func (a *osGenerationArtifactStore) BlobExists(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := record.Validate(); err != nil {
+		return false, fmt.Errorf("store: resolve managed content in BlobExists for session %s: %w; presence is unknown", id, err)
+	}
+	_, genRel, err := a.generationRel(id, generationID)
+	if err != nil {
+		return false, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	_, err = root.Lstat(path.Join(genRel, record.RelativeBlob))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("store: stat managed content in BlobExists for session %s: %s; presence is unknown", id, sanitizeFSError(err))
+	}
+	return true, nil
 }
 
 func (a *osGenerationArtifactStore) ReadBlob(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) ([]byte, error) {

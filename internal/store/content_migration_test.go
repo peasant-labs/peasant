@@ -18,12 +18,44 @@ var contentMigrationYAML []byte
 var contentMigrationManifestYAML []byte
 
 // contentMigrationCase is one content_migration case: the section-10 name
-// plus, for the cases this migration executes, the predecessor seed and the
-// expected backfill in the v62StatsCase shape. Cases owned by the conversion
-// command carry ownedBy instead and assert nothing here.
+// plus, for the v62-owned stats case, the predecessor seed and the
+// expected backfill in the v62StatsCase shape. Cases owned by the
+// conversion carry a seed profile, an optional single-dimension damage,
+// and the expected disposition instead; the conversion runner builds
+// the file-backed seed from the profile, applies the damage, runs the
+// conversion, and asserts the end state.
 type contentMigrationCase struct {
 	v62StatsCase `yaml:",inline"`
 	OwnedBy      string `yaml:"ownedBy,omitempty"`
+	// Profile names the file-backed seed the runner builds: clean,
+	// superseded, pending-intent, non-emitted, extra-keys, newer-stats,
+	// rich-metadata, annotated, preview-only, non-native-full,
+	// non-native-preview-only, settled-refusal.
+	Profile string `yaml:"profile,omitempty"`
+	// Expect is the conversion disposition: converted, rolled-back,
+	// halted, skipped.
+	Expect string `yaml:"expect,omitempty"`
+	// Damage corrupts exactly one dimension of the seeded input or of
+	// the conversion's derived output: field-blob, missing-blob,
+	// damaged-blob, serialization, shim, aux-json, full-shape,
+	// capture-hash, session-hash, null-hash, detail-bytes.
+	Damage string `yaml:"damage,omitempty"`
+	// Count seeds that many identical sessions for the driver-level
+	// threshold case.
+	Count int `yaml:"count,omitempty"`
+	// Driver marks a driver-level case: threshold, consolidate,
+	// consolidate-unconverted, consolidate-twice, dry-run, resume.
+	Driver string `yaml:"driver,omitempty"`
+	// Crash fabricates one crash artifact before the resume run:
+	// stage-once and shadow-once fail their seam once; converted-with-dirs
+	// converts, then restores owned files, a mirror row, and the flag.
+	Crash string `yaml:"crash,omitempty"`
+	// Heal restores the damage after the rollback and converts on the
+	// re-run.
+	Heal bool `yaml:"heal,omitempty"`
+	// AssertSkipState proves the conversion preserves the session's
+	// skip and bookkeeping state.
+	AssertSkipState bool `yaml:"assertSkipState,omitempty"`
 }
 
 type contentMigrationFixtures struct {
@@ -56,18 +88,21 @@ func loadContentMigrationFixtures(t *testing.T) contentMigrationFixtures {
 // migration owns under their section-10 names. native-stats-backfilled
 // aliases the v62 stats/sweep backfill: it seeds the same V61 predecessor
 // shape and runs the same assertions as the migration_v62 family, so deleting
-// either copy fails a required-name manifest. native-extra-keys-promoted is
-// owned by the conversion command (extra-key promotion is conversion-time);
-// v62 carries those keys through untouched, so the case records that
-// ownership and asserts nothing here. A case that carries no sessionId is a
-// placeholder the conversion command fills later; the loader's manifest
-// check still protects its name.
+// either copy fails a required-name manifest. Conversion-owned cases with a
+// sessionId run the v62 assertions; conversion-owned cases with a profile
+// run the conversion runner (TestContentMigrationConversion), which builds
+// the file-backed seed, applies the damage, converts, and asserts the end
+// state. A case that carries neither is a placeholder the manifest still
+// protects by name.
 func TestContentMigrationBackfills(t *testing.T) {
 	t.Parallel()
 	fixtures := loadContentMigrationFixtures(t)
 	for _, c := range fixtures.Cases {
-		if c.OwnedBy != "" {
-			t.Logf("%s: owned by %s; this migration carries the keys through untouched and asserts nothing", c.Name, c.OwnedBy)
+		if c.OwnedBy == "conversion" && c.SessionID == "" && c.Profile == "" {
+			t.Logf("%s: placeholder; the conversion runner fills this case", c.Name)
+			continue
+		}
+		if c.OwnedBy != "" && c.SessionID == "" {
 			continue
 		}
 		if c.SessionID == "" {

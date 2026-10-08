@@ -134,24 +134,9 @@ func TestGenerationSkipFixtureManifest(t *testing.T) {
 // expectations in harmonized_crash_test.go, which supersedes the name-only
 // scaffold here (the manifest inventory it protects is unchanged).
 
-//go:embed testdata/content_enospc.yaml
-var contentEnospcYAML []byte
-
-//go:embed testdata/content_enospc.manifest.yaml
-var contentEnospcManifestYAML []byte
-
-// loadContentENOSPCFixture loads the content disk-full scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentENOSPCFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content disk-full", contentEnospcYAML, contentEnospcManifestYAML)
-}
-
-// TestContentENOSPCFixtureManifest pins the content disk-full case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentENOSPCFixtureManifest(t *testing.T) {
-	loadContentENOSPCFixture(t)
-}
+// content_enospc is owned by the typed loader in
+// content_migration_enospc_test.go, which enforces the required-name
+// manifest over the full family; no scaffold loader remains here.
 
 // content_write_budget is owned by the typed loader in
 // content_write_budget_test.go; the full required-name inventory stays
@@ -184,8 +169,9 @@ var contentCorruptionManifestYAML []byte
 
 // contentCorruptionCase is one content_corruption case: the section-10 name
 // plus, for the two search-owned cases, the typed expectations the search
-// runner asserts. Every other case stays a name placeholder its owner fills
-// later; the loader's manifest check still protects each name.
+// runner asserts, and for the four repair-owned cases, the damage profile
+// the repair runner applies. Every other case stays a name placeholder its
+// owner fills later; the loader's manifest check still protects each name.
 type contentCorruptionCase struct {
 	Name                    string `yaml:"name"`
 	Query                   string `yaml:"query,omitempty"`
@@ -193,6 +179,9 @@ type contentCorruptionCase struct {
 	WantStaleRawMatch       bool   `yaml:"wantStaleRawMatch,omitempty"`
 	WantRefusedWhileFlagged bool   `yaml:"wantRefusedWhileFlagged,omitempty"`
 	WantCleanAfterRebuild   bool   `yaml:"wantCleanAfterRebuild,omitempty"`
+	// Damage names the corruption the repair runner applies before
+	// verification: body-column, blob-bytes, descriptor-digest.
+	Damage string `yaml:"damage,omitempty"`
 }
 
 type contentCorruptionFixtures struct {

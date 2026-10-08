@@ -199,17 +199,6 @@ type CapturedStats struct {
 	Overflow             *string // opaque: stat kinds not yet promoted
 }
 
-// SeedWrite is one write to the harness-only seed home (design §3.3): the
-// capture's stats document, replaced wholesale. Only harness origins
-// (capture, resume, backfill, migration) may produce one; COMPUTE's derived
-// upsert never writes it, so computed output can never be consumed as adapter
-// evidence.
-type SeedWrite struct {
-	SessionID   schema.SessionID
-	SeedJSON    string // the capture's stats document; must satisfy the json_valid guard
-	UpdatedAtMs int64
-}
-
 // SeedWriteAllowed is the seed rule: it reports whether an origin may write
 // the harness-only seed home. Only StatsSourceHarness origins are admitted;
 // COMPUTE's derived upsert never writes it, so computed output can never be
@@ -232,15 +221,6 @@ type ContentBlob struct {
 	SessionID  schema.SessionID
 	Digest     ContentDigest
 	ByteLength int64
-}
-
-// ContentChunk is one session_content_chunks row: a whole 64 KiB chunk of a
-// ContentBlob, ordered by chunk index.
-type ContentChunk struct {
-	SessionID  schema.SessionID
-	Digest     ContentDigest
-	ChunkIndex int
-	Data       []byte
 }
 
 // serializeMetadata rebuilds the captured UnifiedMetadata for internal

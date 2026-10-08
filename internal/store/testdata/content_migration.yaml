@@ -1,25 +1,54 @@
 # content_migration — the full section-10 case inventory for the in-place
 # conversion (design llm/peasant--harmonized-content-model.md section 10,
-# ratified revision 17). The required-names manifest protects every name from
-# the start; a case that carries no sessionId is a placeholder the conversion
-# command fills later.
+# ratified revision 17). The required-names manifest protects every name
+# from the start.
 #
-# This migration (v62) fills native-stats-backfilled: the stats row and sweep
-# flag backfilled from the active generation's metadata_json. Stats documents
-# use the live-store shape (a Go-marshaled SessionStats under $.stats);
-# metadataJson values are compact single-line documents so seed_json equality
-# is exact.
+# native-stats-backfilled is filled by the v62 migration itself (the stats
+# row and sweep flag backfilled from the active generation's metadata_json).
+# Every other conversion case carries ownedBy conversion with a seed profile,
+# an optional damage, and the expected disposition: the conversion runner
+# builds the file-backed seed from the profile, applies the damage, runs
+# the conversion, and asserts the end state. Stats documents use the
+# live-store shape (a Go-marshaled SessionStats under $.stats).
 #
-# native-extra-keys-promoted is owned by the conversion command: extra-key
-# promotion runs at conversion time, so v62 carries the keys through untouched
-# and asserts nothing for them here.
+# Profiles: clean, superseded, pending-intent, non-emitted, extra-keys,
+# newer-stats, rich-metadata, annotated, preview-only, non-native-full,
+# non-native-preview-only, settled-refusal.
+# Damages (each corrupts exactly one dimension of the seeded input or of
+# the conversion's derived output): field-blob, missing-blob,
+# damaged-blob, serialization, shim, aux-json, full-shape, capture-hash,
+# session-hash, null-hash, detail-bytes.
+# expect: converted, rolled-back, halted, skipped.
 cases:
+
   - name: native-clean
+    ownedBy: conversion
+    profile: clean
+    expect: converted
   - name: native-superseded-identical-discarded
+    ownedBy: conversion
+    profile: superseded
+    expect: converted
   - name: native-pending-intent-discarded
+    ownedBy: conversion
+    profile: pending-intent
+    expect: converted
   - name: native-non-emitted
+    ownedBy: conversion
+    profile: non-emitted
+    expect: converted
+  - name: native-two-earlier-partitions-converts
+    ownedBy: conversion
+    profile: two-earlier
+    expect: converted
+  - name: native-empty-non-emitted-converts
+    ownedBy: conversion
+    profile: empty-blob
+    expect: converted
   - name: native-extra-keys-promoted
     ownedBy: conversion
+    profile: extra-keys
+    expect: converted
   - name: native-stats-backfilled
     sessionId: s-v62-full
     activeGeneration: gen-active
@@ -48,31 +77,146 @@ cases:
       updatedAtMs: 1700000000000
     expectedFlag: 1
   - name: native-newer-stats-row-converts
+    ownedBy: conversion
+    profile: newer-stats
+    expect: converted
   - name: native-metadata-hash-recomputed
+    ownedBy: conversion
+    profile: rich-metadata
+    expect: converted
   - name: native-field-blob-mismatch-rolls-back-and-marks
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: field-blob
   - name: native-missing-blob-rolls-back-and-marks
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: missing-blob
   - name: native-damaged-blob-rolls-back-and-marks
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: damaged-blob
   - name: native-annotated
+    ownedBy: conversion
+    profile: annotated
+    expect: converted
   - name: native-serialization-mismatch-rolls-back
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: serialization
   - name: native-shim-mismatch-rolls-back
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: shim
   - name: native-aux-json-mismatch-rolls-back
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: aux-json
   - name: native-full-shape-mismatch-rolls-back
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: full-shape
   - name: native-capture-hash-mismatch-rolls-back
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: capture-hash
   - name: native-session-hash-mismatch-rolls-back
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: session-hash
   - name: null-session-entries-hash-skips-dimension
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    damage: null-hash
   - name: native-detail-bytes-mismatch-halts
+    ownedBy: conversion
+    profile: clean
+    expect: halted
+    damage: detail-bytes
   - name: data-rollback-threshold-halts
+    ownedBy: conversion
+    profile: clean
+    expect: halted
+    damage: field-blob
+    count: 25
+    driver: threshold
   - name: rollback-then-reindex-converts
+    ownedBy: conversion
+    profile: clean
+    expect: rolled-back
+    damage: field-blob
+    heal: true
   - name: harvest-converted-sweep-not-run-migrate-resumes
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    crash: converted-with-dirs
+    driver: resume
   - name: non-native-full-untouched
+    ownedBy: conversion
+    profile: non-native-full
+    expect: skipped
   - name: non-native-preview-only-untouched
+    ownedBy: conversion
+    profile: non-native-preview-only
+    expect: skipped
   - name: search-consolidation
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    driver: consolidate
   - name: search-consolidation-with-unconverted-native
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    driver: consolidate-unconverted
   - name: resume-crash-in-body-subtxn
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    crash: stage-once
   - name: resume-crash-before-catalog-commit
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    crash: shadow-once
   - name: resume-crash-after-commit-before-dir-removal
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    crash: converted-with-dirs
+    driver: resume
   - name: resume-crash-during-search-consolidation
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    driver: consolidate-twice
   - name: resume-crash-after-search-consolidation
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    driver: consolidate-twice
   - name: skip-state-preserved-across-conversion
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    assertSkipState: true
   - name: settled-refusal-stays-settled
+    ownedBy: conversion
+    profile: settled-refusal
+    expect: skipped
   - name: dry-run-no-write
+    ownedBy: conversion
+    profile: clean
+    expect: converted
+    driver: dry-run

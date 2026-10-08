@@ -199,6 +199,10 @@ func (a readOnlyGenerationArtifacts) ReadBlob(ctx context.Context, id schema.Ses
 	return a.inner.ReadBlob(ctx, id, generationID, record)
 }
 
+func (a readOnlyGenerationArtifacts) BlobExists(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) (bool, error) {
+	return a.inner.BlobExists(ctx, id, generationID, record)
+}
+
 func (a readOnlyGenerationArtifacts) WritePriorEvidence(context.Context, schema.SessionID, string, []byte) error {
 	return errReadOnlyGenerationWrite
 }
@@ -213,6 +217,14 @@ func (a readOnlyGenerationArtifacts) GenerationSize(ctx context.Context, id sche
 
 func (a readOnlyGenerationArtifacts) ListGenerationDirectories(ctx context.Context, id schema.SessionID) ([]string, error) {
 	return a.inner.ListGenerationDirectories(ctx, id)
+}
+
+func (a readOnlyGenerationArtifacts) RemoveReservedStagingDirs(context.Context, schema.SessionID) (int, error) {
+	return 0, errReadOnlyGenerationWrite
+}
+
+func (a readOnlyGenerationArtifacts) RemoveConvertedSessionFiles(context.Context, schema.SessionID) (GenerationFootprint, error) {
+	return GenerationFootprint{}, errReadOnlyGenerationWrite
 }
 
 // prepareReadOnlyConn pins the read-only guarantees on every pooled connection.

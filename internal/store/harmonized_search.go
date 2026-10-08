@@ -40,19 +40,6 @@ func searchStateReadOnConn(conn *sqlite.Conn) (SearchState, error) {
 	return state, nil
 }
 
-// SearchStateRead reports the store-global search index health on the
-// caller's connection: a deleting transaction reads it before deciding
-// whether the whole-index rebuild must run.
-func SearchStateRead(ctx context.Context, conn *sqlite.Conn) (SearchState, error) {
-	if err := ctx.Err(); err != nil {
-		return SearchState{}, err
-	}
-	if conn == nil {
-		return SearchState{}, fmt.Errorf("store: read the search index health with no connection: pass the deleting transaction's connection; nothing was read; retry with the caller's *sqlite.Conn")
-	}
-	return searchStateReadOnConn(conn)
-}
-
 // SearchStateSetNeedsRebuild flags the store-global search index for a
 // whole-index rebuild on the caller's connection: a deleting transaction
 // calls it when the deleted row failed the serializeEntry digest check, so

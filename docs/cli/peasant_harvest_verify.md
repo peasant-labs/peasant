@@ -13,9 +13,9 @@ peasant harvest verify [flags]
 ### Options
 
 ```
-      --content   Verify session content objects and the search index (harmonized content model; not yet implemented)
+      --content   Verify session content objects and the search index
   -h, --help      help for verify
-      --repair    Repair content corruptions found by --content (requires --content; not yet implemented)
+      --repair    Mark content corruptions found by --content for the repair activation (requires --content)
       --verbose   Show sample data from each table
 ```
 

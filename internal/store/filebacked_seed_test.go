@@ -122,6 +122,27 @@ func seedFileBackedGeneration(t *testing.T, s *Store, root string, sid schema.Se
 			t.Fatalf("seed file-backed alias: %v", err)
 		}
 	}
+	for _, segment := range generation.Segments {
+		var logical any
+		if segment.LogicalSessionID != nil {
+			logical = string(*segment.LogicalSessionID)
+		}
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_context_segments(session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+			string(sid), generation.ID, segment.Ordinal, logical, segment.PhysicalSourceID, string(segment.Coordinates.Kind),
+			optInt64(segment.Coordinates.Start), optInt64(segment.Coordinates.EndExclusive),
+			optInt64(segment.Coordinates.DecodedByteStart), optInt64(segment.Coordinates.DecodedByteEndExclusive),
+			string(segment.Inclusion),
+		}}); err != nil {
+			t.Fatalf("seed file-backed segment: %v", err)
+		}
+		for ordinal, ref := range segment.CapturedRefs {
+			if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_context_segment_refs(session_id, generation_id, segment_ordinal, ordinal, source_entry_ref) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+				string(sid), generation.ID, segment.Ordinal, ordinal, string(ref),
+			}}); err != nil {
+				t.Fatalf("seed file-backed segment ref: %v", err)
+			}
+		}
+	}
 	if err := pointSessionAtGenerationOnConn(conn, sid, generation); err != nil {
 		t.Fatalf("point session at seeded generation: %v", err)
 	}
