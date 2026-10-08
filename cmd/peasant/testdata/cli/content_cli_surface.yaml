@@ -1,16 +1,32 @@
-# content_cli_surface — scaffolding for the harmonized session content model
+# content_cli_surface — the harmonized session content model CLI surface
 # (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+# The migration cases carry the command and flag inventory the runner
+# resolves from the production command tree; the JSON cases also carry
+# the output keys the machine-readable shapes must contain. The search
+# and reclaim cases stay name placeholders their owners fill.
 cases:
   - name: migrate
+    command: migrate
+    flags: [dry-run, limit, confirm, json]
   - name: migrate-dry-run
+    command: migrate
+    flags: [dry-run]
   - name: migrate-limit
+    command: migrate
+    flags: [limit]
   - name: migrate-confirm
+    command: migrate
+    flags: [confirm]
   - name: migrate-json
+    command: migrate
+    flags: [json]
+    jsonKeys: [converted, rolled_back, marked, skipped, bytes_freed, rollbacks, warnings, search_consolidated, preconditions, ready_for_release, database, vacuum]
   - name: harvest-verify-content
+    command: harvest verify
+    flags: [verbose, content, repair]
   - name: harvest-verify-content-repair
+    command: harvest verify
+    flags: [content, repair]
   - name: fts-size-ratio-reported
   - name: reclaim-sweeps-orphans
   - name: reclaim-selects-by-flag

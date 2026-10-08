@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
+	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -23,10 +28,16 @@ var contentCLISurfaceYAML []byte
 //go:embed testdata/cli/content_cli_surface.manifest.yaml
 var contentCLISurfaceManifestYAML []byte
 
-// contentCLISurfaceCase is the minimal case shape: a name only. Later issues
-// add command, flags, and output-shape expectations beside it.
+// contentCLISurfaceCase is one CLI surface case: the section-10 name
+// plus, for the migration cases, the production command path and the
+// flags the runner resolves from the live command tree. The JSON cases
+// also carry the output keys the machine-readable shapes must contain.
+// Cases without a command stay name placeholders their owners fill.
 type contentCLISurfaceCase struct {
-	Name string `yaml:"name"`
+	Name     string   `yaml:"name"`
+	Command  string   `yaml:"command,omitempty"`
+	Flags    []string `yaml:"flags,omitempty"`
+	JSONKeys []string `yaml:"jsonKeys,omitempty"`
 }
 
 type contentCLISurfaceFixture struct {
@@ -40,7 +51,7 @@ type contentCLISurfaceManifest struct {
 // loadContentCLISurfaceFixture strictly decodes the CLI surface scaffold and
 // enforces its required-names manifest: every required name must be present,
 // with no blank or duplicate entry.
-func loadContentCLISurfaceFixture(t *testing.T) []string {
+func loadContentCLISurfaceFixture(t *testing.T) []contentCLISurfaceCase {
 	t.Helper()
 	var fixture contentCLISurfaceFixture
 	if err := yaml.Unmarshal(contentCLISurfaceYAML, &fixture); err != nil {
@@ -60,11 +71,7 @@ func loadContentCLISurfaceFixture(t *testing.T) []string {
 	if err := testutil.RequireFixtureNames("content_cli_surface", "case", manifest.RequiredNames, present); err != nil {
 		t.Fatal(err)
 	}
-	names := make([]string, 0, len(fixture.Cases))
-	for _, c := range fixture.Cases {
-		names = append(names, c.Name)
-	}
-	return names
+	return fixture.Cases
 }
 
 // TestContentCLISurfaceFixtureManifest pins the CLI surface case inventory:
@@ -72,4 +79,72 @@ func loadContentCLISurfaceFixture(t *testing.T) []string {
 func TestContentCLISurfaceFixtureManifest(t *testing.T) {
 	t.Parallel()
 	loadContentCLISurfaceFixture(t)
+}
+
+// assertCLISurfaceJSONKeys proves the case's JSON shape contains its
+// required keys by rendering the production printer over synthetic
+// input: the keys are pinned against the real output path, not a copy.
+func assertCLISurfaceJSONKeys(t *testing.T, c contentCLISurfaceCase) {
+	t.Helper()
+	var decoded map[string]any
+	switch c.Name {
+	case "migrate-json":
+		cmd := BuildMigrateCommand()
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		result := store.MigrateResult{
+			Rollbacks:     []store.MigrateRollback{},
+			Warnings:      []string{},
+			Preconditions: []store.RetirementPreconditionStatus{},
+		}
+		if err := writeMigrateResult(cmd, result, true, "/tmp/peasant.db"); err != nil {
+			t.Fatalf("render migrate JSON: %v", err)
+		}
+		if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+			t.Fatalf("decode migrate JSON: %v\n%s", err, buf.String())
+		}
+	default:
+		t.Fatalf("no JSON renderer for case %q", c.Name)
+	}
+	for _, key := range c.JSONKeys {
+		if _, ok := decoded[key]; !ok {
+			keys := make([]string, 0, len(decoded))
+			for k := range decoded {
+				keys = append(keys, k)
+			}
+			t.Errorf("migrate JSON misses key %q (has %s)", key, strings.Join(keys, ", "))
+		}
+	}
+}
+// TestContentCLISurfaceInventory resolves every cased command from the
+// production command tree and proves its flags exist. The JSON cases
+// additionally prove their output shapes contain the required keys.
+func TestContentCLISurfaceInventory(t *testing.T) {
+	t.Parallel()
+	for _, c := range loadContentCLISurfaceFixture(t) {
+		if c.Command == "" {
+			continue
+		}
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			root := buildRootCommand()
+			target, _, err := root.Find(strings.Split(c.Command, " "))
+			if err != nil || target == nil {
+				t.Fatalf("cannot resolve `peasant %s`: %v", c.Command, err)
+			}
+			for _, flag := range c.Flags {
+				name := flag
+				if flag == "json" {
+					name = defaults.JSONFlagName
+				}
+				if target.Flags().Lookup(name) == nil && target.PersistentFlags().Lookup(name) == nil {
+					t.Errorf("`peasant %s` is missing --%s", c.Command, flag)
+				}
+			}
+			if len(c.JSONKeys) > 0 {
+				assertCLISurfaceJSONKeys(t, c)
+			}
+		})
+	}
 }

@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -87,7 +89,7 @@ func BuildMigrateCommand() *cobra.Command {
 				}
 			}
 
-			tracker := newMigrateProgressTracker()
+			tracker := newMigrateProgressTracker(jsonOutput)
 			result, err := db.Migrate(ctx, store.MigrateOptions{
 				Limit:    limit,
 				Progress: tracker.report(cmd),
@@ -148,22 +150,24 @@ func confirmMigrate(cmd *cobra.Command) (bool, error) {
 	if !isFile || !term.IsTerminal(int(file.Fd())) {
 		return false, fmt.Errorf("non-interactive terminal: `peasant migrate` refused to prompt for consent to convert sessions in place because its standard input is not a terminal; nothing was converted; re-run with --confirm to proceed without a prompt, or run the command from an interactive shell")
 	}
-	fmt.Fprint(cmd.OutOrStderr(), "\nConvert file-backed sessions to the harmonized content model? [y/N]: ")
+	fmt.Fprint(cmd.ErrOrStderr(), "\nConvert file-backed sessions to the harmonized content model? [y/N]: ")
 	var response string
 	fmt.Fscanln(file, &response)
 	return response == "y" || response == "Y", nil
 }
 
 // migrateProgressTracker derives rate and ETA from the store's progress
-// events for the human-readable progress lines.
+// events for the human-readable progress lines. In JSON mode the lines
+// go to stderr so stdout carries exactly one JSON document.
 type migrateProgressTracker struct {
-	started time.Time
-	last    time.Time
+	started  time.Time
+	last     time.Time
+	jsonMode bool
 }
 
-func newMigrateProgressTracker() *migrateProgressTracker {
+func newMigrateProgressTracker(jsonMode bool) *migrateProgressTracker {
 	now := time.Now()
-	return &migrateProgressTracker{started: now, last: now}
+	return &migrateProgressTracker{started: now, last: now, jsonMode: jsonMode}
 }
 
 // report returns the progress callback: a line per phase entry and a
@@ -174,6 +178,9 @@ func (t *migrateProgressTracker) report(cmd *cobra.Command) func(store.MigratePr
 	var lastLine time.Time
 	return func(progress store.MigrateProgress) {
 		out := cmd.OutOrStdout()
+		if t.jsonMode {
+			out = cmd.ErrOrStderr()
+		}
 		if progress.Phase != lastPhase {
 			lastPhase = progress.Phase
 			lastLine = time.Now()
@@ -261,6 +268,7 @@ func writeMigratePlan(cmd *cobra.Command, plan store.MigratePlan, jsonOutput boo
 	}
 	fmt.Fprintf(out, "Phase 0 preflight: %d session(s) to convert, %d pending intent(s) to discard, %d superseded generation(s) to discard\n",
 		len(plan.Sessions), plan.PendingIntents, plan.SupersededGenerations)
+	writeMigratePlanSessions(out, plan.Sessions)
 	fmt.Fprintf(out, "Phase 1 drain: %d pending intent(s), %d superseded generation(s)\n", plan.PendingIntents, plan.SupersededGenerations)
 	fmt.Fprintf(out, "Phase 2 convert: %d session(s), about %d mirror row(s)\n", len(plan.Sessions), plan.MirrorRows)
 	if plan.NeedsSearchConsolidation {
@@ -283,6 +291,22 @@ func writeMigratePlan(cmd *cobra.Command, plan store.MigratePlan, jsonOutput boo
 	fmt.Fprintf(out, "advisory: %s\n", plan.Advisory)
 	fmt.Fprintln(out, "dry run: nothing was converted and nothing was deleted; re-run without --dry-run to migrate")
 	return nil
+}
+
+// writeMigratePlanSessions lists the sessions with conversion work,
+// bounded so a large store prints a readable plan while the full list
+// stays one --json away.
+func writeMigratePlanSessions(out io.Writer, sessions []schema.SessionID) {
+	const shown = 10
+	for i, session := range sessions {
+		if i >= shown {
+			break
+		}
+		fmt.Fprintf(out, "  convert %s\n", session)
+	}
+	if len(sessions) > shown {
+		fmt.Fprintf(out, "  ... and %d more (see --json for the full list)\n", len(sessions)-shown)
+	}
 }
 
 // writeMigrateResult prints an applied pass: the per-session
