@@ -186,11 +186,14 @@ func TestNewRunWorkerBuffersSizesByEffectiveWorkers(t *testing.T) {
 // TestNewRunWorkerBuffersFallsBackToDefaults keeps a literal-built pipeline
 // with an unusable config bounded: the run enforces the shipped budgets
 // instead of running uncapped.
+//
+// Not parallel: it swaps the process-global slog default to silence the
+// expected fallback warning, which would race with parallel tests.
 func TestNewRunWorkerBuffersFallsBackToDefaults(t *testing.T) {
-	t.Parallel()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	defer slog.SetDefault(slog.Default())
+	previous := slog.Default()
 	slog.SetDefault(quiet)
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	p := &Pipeline{config: PipelineConfig{Write: WriteConfig{BatchBytes: -1}}}
 	bufs := p.newRunWorkerBuffers(2)
 	if bufs == nil {
