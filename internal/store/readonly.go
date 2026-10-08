@@ -100,6 +100,9 @@ func OpenReadOnlyWithOptions(path string, opts ...OpenOption) (*Store, error) {
 	}}); err != nil {
 		return fail(fmt.Errorf("store: read schema version from %s for dry-run: %w; no files were changed", path, err))
 	}
+	if current := CurrentSchemaVersion(); version > current {
+		return fail(fmt.Errorf("store: dry-run inspection of %s: database schema is version %d, but this build understands only up to version %d (the database was upgraded by a newer Peasant); no files were changed; install that version or newer to inspect it", path, version, current))
+	}
 	if version != CurrentSchemaVersion() {
 		return fail(fmt.Errorf("store: dry-run inspection of %s: database schema is %d, this build needs schema %d; no files were changed; run a normal harvest to migrate this database, or use the matching Peasant version", path, version, CurrentSchemaVersion()))
 	}
