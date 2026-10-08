@@ -199,6 +199,20 @@ segmentCases:
     inclusion: inherited
     capturedRefsJson: '[]'
     expectedRefs: []
+  - name: segment-scalar-refs
+    sessionId: s-v62-scalar
+    generationId: gen-active
+    segmentOrdinal: 0
+    logicalSessionId: null
+    physicalSourceId: phys-1
+    coordinateKind: entries
+    startCoordinate: 0
+    endExclusive: 4
+    decodedByteStart: 0
+    decodedByteEndExclusive: 128
+    inclusion: retained
+    capturedRefsJson: 'null'
+    expectedRefs: []
 # Projection sections with native metadata. The full record carries an
 # attachment, a custom type, and an object payload with escapable bytes;
 # the minimal record omits the optional keys and carries a null payload.
@@ -237,4 +251,11 @@ sectionCases:
     partitionId: 0
     earlierState: retained
     nativeMetadata: null
+    expectedRecords: []
+  - name: section-json-null-metadata
+    sessionId: s-v62-scalar
+    generationId: gen-active
+    partitionId: 0
+    earlierState: null
+    nativeMetadata: 'null'
     expectedRecords: []

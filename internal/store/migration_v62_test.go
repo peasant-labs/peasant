@@ -715,6 +715,11 @@ func assertV62SectionShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures
 		if err := json.Unmarshal([]byte(*c.NativeMetadata), &original); err != nil {
 			t.Fatalf("%s: fixture nativeMetadata does not decode: %v", c.Name, err)
 		}
+		if original == nil {
+			// The JSON null scalar shreds to zero rows under the array
+			// filter; there is nothing to reassemble.
+			continue
+		}
 		originalBytes, err := json.Marshal(original)
 		if err != nil {
 			t.Fatal(err)

@@ -27,7 +27,10 @@ const BodyRowIDBase = 1 << 50
 //     columns (json_extract over the anchor object; NULL anchor stays NULL).
 //   - session_context_segments loses captured_refs_json to ordered
 //     session_context_segment_refs rows (json_each over the ref array; the
-//     array index is the ordinal).
+//     array index is the ordinal). Only JSON arrays shred: the production
+//     writer stores the JSON scalar null for an absent document, and a
+//     scalar or object would otherwise yield a NULL or text ordinal, so the
+//     shred filters to json_type = 'array' and non-arrays produce zero rows.
 //   - session_projection_sections loses native_metadata to ordered
 //     session_section_native_metadata rows (json_each over the record array;
 //     scalar fields decode with json_extract, which the Go serializer
@@ -299,7 +302,8 @@ CREATE TABLE session_context_segment_refs (
 INSERT INTO session_context_segment_refs
   (session_id, generation_id, segment_ordinal, ordinal, source_entry_ref)
 SELECT s.session_id, s.generation_id, s.segment_ordinal, je.key, je.value
-FROM session_context_segments s, json_each(s.captured_refs_json) AS je;
+FROM session_context_segments s, json_each(s.captured_refs_json) AS je
+WHERE json_type(s.captured_refs_json) = 'array';
 
 CREATE TABLE session_context_segments_v62 (
   session_id                TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -362,7 +366,8 @@ SELECT s.session_id, s.generation_id, s.partition_id, je.key,
   json_extract(je.value, '$.attachment.toolCallId'),
   json_extract(je.value, '$.customType'),
   (je.value -> '$.data')
-FROM session_projection_sections s, json_each(s.native_metadata) AS je;
+FROM session_projection_sections s, json_each(s.native_metadata) AS je
+WHERE json_type(s.native_metadata) = 'array';
 
 CREATE TABLE session_projection_sections_v62 (
   session_id     TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,

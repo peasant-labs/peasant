@@ -12,5 +12,7 @@ requiredNames:
   - evidence-kind-only-anchor
   - segment-two-refs
   - segment-no-refs
+  - segment-scalar-refs
   - section-mixed-metadata
   - section-null-metadata
+  - section-json-null-metadata
