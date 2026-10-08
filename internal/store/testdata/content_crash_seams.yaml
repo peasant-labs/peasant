@@ -10,11 +10,14 @@ cases:
   - name: after-prepare
     seam: after-prepare
   - name: after-sweep-flag
-    seam: between-stage-txns
-    batch_bytes: 64
+    seam: after-sweep-flag
+    expected_sweep_flag: false
+    expected_staged_bodies: 0
   - name: between-stage-txns
     seam: between-stage-txns
     batch_bytes: 64
+    expected_sweep_flag: true
+    expected_staged_bodies: 1
   - name: before-commit
     seam: before-commit
   - name: commit-rollback
