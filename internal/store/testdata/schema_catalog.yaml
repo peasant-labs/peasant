@@ -64,6 +64,7 @@ tables:
   - session_generation_commits
   - session_generation_content
   - session_generation_diagnostics
+  - session_migration_gaps
   - session_generation_entries
   - session_generation_subagents
   - session_generation_title_refs

@@ -788,6 +788,20 @@ CREATE TABLE session_metrics (
     output_hash IS NULL OR (length(output_hash) = 64 AND output_hash NOT GLOB '*[^0-9a-f]*')
 )) STRICT;
 
+CREATE TABLE session_migration_gaps (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  generation_id TEXT NOT NULL,
+  source_table TEXT NOT NULL,
+  source_column TEXT NOT NULL,
+  source_ordinal INTEGER NOT NULL CHECK(source_ordinal >= 0),
+  observed_json_type TEXT NOT NULL,
+  observed_length INTEGER NOT NULL CHECK(observed_length >= 0),
+  message TEXT NOT NULL,
+  remediation TEXT NOT NULL,
+  UNIQUE(session_id, generation_id, source_table, source_column, source_ordinal)
+) STRICT;
+
 CREATE TABLE session_projection_aliases (
   session_id       TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   generation_id    TEXT NOT NULL,

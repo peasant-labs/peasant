@@ -1,8 +1,10 @@
 package store
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -97,6 +99,20 @@ type v62SegmentCase struct {
 	Inclusion               string           `yaml:"inclusion"`
 	CapturedRefsJSON        string           `yaml:"capturedRefsJson"`
 	ExpectedRefs            []v62ExpectedRef `yaml:"expectedRefs"`
+	ExpectedGap             *v62ExpectedGap  `yaml:"expectedGap"`
+}
+
+type v62ExpectedGap struct {
+	ObservedJSONType string `yaml:"observedJsonType"`
+	ObservedLength   int64  `yaml:"observedLength"`
+}
+
+type v62AccountingConversionCase struct {
+	Name               string         `yaml:"name"`
+	SourceTable        string         `yaml:"sourceTable"`
+	SourceColumn       string         `yaml:"sourceColumn"`
+	Gap                v62ExpectedGap `yaml:"gap"`
+	RemoveBeforeVerify bool           `yaml:"removeBeforeVerify"`
 }
 
 type v62ExpectedRecord struct {
@@ -120,14 +136,16 @@ type v62SectionCase struct {
 	EarlierState    *string             `yaml:"earlierState"`
 	NativeMetadata  *string             `yaml:"nativeMetadata"`
 	ExpectedRecords []v62ExpectedRecord `yaml:"expectedRecords"`
+	ExpectedGap     *v62ExpectedGap     `yaml:"expectedGap"`
 }
 
 type v62Fixtures struct {
-	StatsCases     []v62StatsCase     `yaml:"statsCases"`
-	AnnotationRows []v62AnnotationRow `yaml:"annotationRows"`
-	EvidenceRows   []v62EvidenceRow   `yaml:"evidenceRows"`
-	SegmentCases   []v62SegmentCase   `yaml:"segmentCases"`
-	SectionCases   []v62SectionCase   `yaml:"sectionCases"`
+	StatsCases                []v62StatsCase                `yaml:"statsCases"`
+	AnnotationRows            []v62AnnotationRow            `yaml:"annotationRows"`
+	EvidenceRows              []v62EvidenceRow              `yaml:"evidenceRows"`
+	SegmentCases              []v62SegmentCase              `yaml:"segmentCases"`
+	SectionCases              []v62SectionCase              `yaml:"sectionCases"`
+	AccountingConversionCases []v62AccountingConversionCase `yaml:"accountingConversionCases"`
 }
 
 func loadMigrationV62Fixtures(t *testing.T) v62Fixtures {
@@ -156,6 +174,9 @@ func loadMigrationV62Fixtures(t *testing.T) v62Fixtures {
 		actual = append(actual, c.Name)
 	}
 	for _, c := range fixtures.SectionCases {
+		actual = append(actual, c.Name)
+	}
+	for _, c := range fixtures.AccountingConversionCases {
 		actual = append(actual, c.Name)
 	}
 	if err := validateRecoveryRequiredNames(manifest, actual, "v62 migration"); err != nil {
@@ -550,6 +571,7 @@ func assertV62SegmentShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures
 	t.Helper()
 	for _, c := range fixtures.SegmentCases {
 		var cols [9]string
+		assertV62Accounting(t, conn, c.SessionID, c.GenerationID, "session_context_segments", "captured_refs_json", c.SegmentOrdinal, c.ExpectedGap)
 		var nulls [9]bool
 		found := false
 		queryV62Row(t, conn, `SELECT logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id=? AND generation_id=? AND segment_ordinal=?`, []any{c.SessionID, c.GenerationID, c.SegmentOrdinal}, func(stmt *sqlite.Stmt) {
@@ -591,6 +613,7 @@ func assertV62SectionShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures
 	t.Helper()
 	for _, c := range fixtures.SectionCases {
 		found := false
+		assertV62Accounting(t, conn, c.SessionID, c.GenerationID, "session_projection_sections", "native_metadata", c.PartitionID, c.ExpectedGap)
 		queryV62Row(t, conn, `SELECT earlier_state FROM session_projection_sections WHERE session_id=? AND generation_id=? AND partition_id=?`, []any{c.SessionID, c.GenerationID, c.PartitionID}, func(stmt *sqlite.Stmt) {
 			found = true
 			if c.EarlierState == nil {
@@ -713,6 +736,11 @@ func assertV62SectionShred(t *testing.T, conn *sqlite.Conn, fixtures v62Fixtures
 		if c.NativeMetadata == nil {
 			continue
 		}
+		if c.ExpectedGap != nil {
+			// Non-array bytes were not convertible; the accounting above is
+			// required even when there are no child rows to compare.
+			continue
+		}
 		// The shredded rows must reassemble to the original bytes: unmarshal
 		// the stored document and the rebuilt rows into the same struct type
 		// and require identical Go-marshaled bytes, so a future serializer
@@ -792,5 +820,88 @@ func assertV62NoFKViolations(t *testing.T, conn *sqlite.Conn) {
 	}
 	if len(violations) > 0 {
 		t.Errorf("foreign_key_check reports %d violations after v62: %v", len(violations), violations)
+	}
+}
+
+func assertV62Accounting(t *testing.T, conn *sqlite.Conn, sid, gen, table, column string, ordinal int, want *v62ExpectedGap) {
+	t.Helper()
+	rows := 0
+	queryV62Row(t, conn, `SELECT observed_json_type, observed_length, message, remediation FROM session_migration_gaps WHERE session_id=? AND generation_id=? AND source_table=? AND source_column=? AND source_ordinal=?`, []any{sid, gen, table, column, ordinal}, func(stmt *sqlite.Stmt) {
+		rows++
+		if want == nil {
+			t.Errorf("%s.%s: unexpected accounting row for absent or array value", table, column)
+			return
+		}
+		if stmt.ColumnText(0) != want.ObservedJSONType || stmt.ColumnInt64(1) != want.ObservedLength {
+			t.Errorf("%s.%s: observed shape/bytes = %s/%d, want %s/%d", table, column, stmt.ColumnText(0), stmt.ColumnInt64(1), want.ObservedJSONType, want.ObservedLength)
+		}
+		message, remediation := stmt.ColumnText(2), stmt.ColumnText(3)
+		if !strings.Contains(message, column) || !strings.Contains(message, want.ObservedJSONType) || !strings.Contains(message, "not converted") {
+			t.Errorf("accounting message omits the column, type, or conversion gap: %q", message)
+		}
+		if !strings.Contains(remediation, "re-harvest") || !strings.Contains(remediation, "retained transcript") {
+			t.Errorf("accounting remediation does not name the recovery source: %q", remediation)
+		}
+	})
+	wantRows := 0
+	if want != nil {
+		wantRows = 1
+	}
+	if rows != wantRows {
+		t.Errorf("%s.%s: accounting rows = %d, want %d", table, column, rows, wantRows)
+	}
+}
+
+// TestMigrationV62AccountingConversion exercises the real converter and its
+// shadow verify. Session-owned accounting must survive catalog replacement;
+// losing it must fail even when the carried child arrays are empty.
+func TestMigrationV62AccountingConversion(t *testing.T) {
+	for i, c := range loadMigrationV62Fixtures(t).AccountingConversionCases {
+		t.Run(c.Name, func(t *testing.T) {
+			s, root := openGenerationStore(t)
+			sid := migrateCaseSessionID(t, c.Name, i)
+			seedGenerationSession(t, s, string(sid))
+			gen := "gen_accounted"
+			seedMigrateProfile(t, s, root, sid, "clean", gen)
+			conn, err := s.pool.Take(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_migration_gaps(session_id, generation_id, source_table, source_column, source_ordinal, observed_json_type, observed_length, message, remediation) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{string(sid), gen, c.SourceTable, c.SourceColumn, c.Gap.ObservedJSONType, c.Gap.ObservedLength, c.SourceColumn + " has JSON type " + c.Gap.ObservedJSONType + "; children were not converted", "re-harvest from the retained transcript"}}); err != nil {
+				t.Fatal(err)
+			}
+			s.pool.Put(conn)
+			if c.RemoveBeforeVerify {
+				armMigrateSeamOnce(t, "shadow", func(conn *sqlite.Conn, stage string) error {
+					return sqlitex.ExecuteTransient(conn, `DELETE FROM session_migration_gaps WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+				})
+			}
+			outcome, err := s.MigrateSession(context.Background(), sid)
+			if c.RemoveBeforeVerify {
+				var rollback *MigrateDataRollbackError
+				if !errors.As(err, &rollback) || rollback.Dimension != "carried-gaps" || outcome != MigrateOutcomeRolledBack {
+					t.Fatalf("lost accounting: outcome %s, err %v; want carried-gaps rollback", outcome, err)
+				}
+			} else {
+				if err != nil || outcome != MigrateOutcomeConverted {
+					t.Fatalf("convert accounted session: outcome %s, err %v", outcome, err)
+				}
+				assertSessionConverted(t, s, root, sid, gen)
+				result, err := s.Migrate(context.Background(), MigrateOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(strings.Join(result.Warnings, "\n"), "1 accounted migration gap") {
+					t.Fatalf("summary does not surface accounting count: %v", result.Warnings)
+				}
+			}
+			conn, err = s.pool.Take(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.pool.Put(conn)
+			assertV62Accounting(t, conn, string(sid), gen, c.SourceTable, c.SourceColumn, 0, &c.Gap)
+			assertV62NoFKViolations(t, conn)
+		})
 	}
 }

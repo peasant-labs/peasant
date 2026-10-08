@@ -61,6 +61,7 @@ type migrateOracle struct {
 	aliases              []indexformat.NativeAlias
 	nativeMetadata       map[int][]schema.NativeMetadataRecord
 	segments             []indexformat.ContextSegment
+	gaps                 []migrationGap
 	mirror               []schema.SessionEntry
 	full                 []schema.SessionEntry
 	fullAvailable        bool
@@ -312,6 +313,10 @@ func (s *Store) readMigrateOracle(ctx context.Context, sessionID schema.SessionI
 	}
 	if err := s.readMigrateOracleBlobsOnConn(ctx, conn, oracle); err != nil {
 		return nil, err
+	}
+	oracle.gaps, err = readMigrationGapsOnConn(conn, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: read migration gap accounting for session %s: %w; conversion stopped before replacing the catalog", sessionID, err)
 	}
 	return oracle, nil
 }
@@ -1254,7 +1259,8 @@ func verifyMigrateFullShape(conn *sqlite.Conn, oracle *migrateOracle, _ *prepare
 // drift still shows in every other byte, and the fresh hash is what later
 // reads recompute. Unknown top-level keys still refuse: the struct decode
 // would drop a key the catalog has no column for, so the key sets must
-// agree exactly.
+// agree exactly. Nested unknown keys are dropped by the struct decode on
+// both sides; only the top-level key-set check refuses unknown keys.
 func verifyMigrateMetadataDocument(conn *sqlite.Conn, oracle *migrateOracle, prepared *preparedHarmonized) *migrateShadowMismatch {
 	_ = conn
 	stats := capturedStatsForHarnessWrite(oracle.sessionID, oracle.metadata.Stats, oracle.statsSeedDoc, oracle.statsCaptureTime)
@@ -1636,6 +1642,9 @@ func (s *Store) checkMigrateOracleConverges(ctx context.Context, oracle *migrate
 // snapshots; the mapping rows through the body reads; and the
 // descriptors through the blob bytes. A difference is a data rollback.
 func verifyMigrateCarriedChildren(conn *sqlite.Conn, oracle *migrateOracle, _ *preparedHarmonized) *migrateShadowMismatch {
+	if mismatch := verifyMigrateCarriedGaps(conn, oracle); mismatch != nil {
+		return mismatch
+	}
 	if mismatch := verifyMigrateCarriedAliases(conn, oracle); mismatch != nil {
 		return mismatch
 	}

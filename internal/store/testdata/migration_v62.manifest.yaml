@@ -18,3 +18,7 @@ requiredNames:
   - section-mixed-metadata
   - section-null-metadata
   - section-json-null-metadata
+  - segment-object-refs-accounted
+  - section-object-metadata-accounted
+  - accounted-gap-survives-conversion
+  - accounted-gap-loss-refuses-conversion
