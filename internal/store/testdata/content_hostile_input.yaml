@@ -1,4 +1,11 @@
 cases:
+  - name: empty-non-emitted-stages-on-harvest
+    operation: empty-non-emitted-stages-on-harvest
+    content: ''
+    ref: e_empty_staged
+    expectedDigest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    expectedChunks: 0
+    expectedLength: 0
   - name: malformed-record
     operation: malformed-record
     content: '{not an entry extra}'
