@@ -1,8 +1,13 @@
-# The byte budget that bounds ONE write wave, asserted at the grouping boundary
-# that applies it.
+# The write byte budget that bounds ONE write wave, asserted at the grouping
+# boundary that applies it: the configured write.batchBytes knob.
 #
-# Sizes are a fraction of the shipped budget, never a byte count, so the corpus
-# keeps describing the same situations if the budget moves. The sessions here
+# Sizes are a fraction of the configured budget, never a byte count, so the
+# corpus keeps describing the same situations whatever the configured budget
+# is. The loaders multiply each fraction by the budget under test — the
+# shipped default and a smaller custom one — so a case that stopped tracking
+# the knob fails under the custom budget.
+#
+# The sessions here
 # write a few hundred bytes each to disk: the boundary measures PARSE OUTPUT, so a
 # case crosses the budget through the parser seam instead of through 32 MiB of
 # synthetic transcript.
@@ -12,7 +17,7 @@
 # by identifier, while the flushes run in parse order, and these sessions are
 # seeded with identifiers that descend as parsing advances. The commit ORDER
 # therefore changes whenever the grouping changes.
-budget: defaults.FullContentWriteBatchBytes
+budget: write.batchBytes
 required_names: [index_batch_by_bytes, oversized_session_alone, under-budget-sessions-share-one-flush]
 cases:
   # Two sessions that cannot share the budget, then a small one that can join the

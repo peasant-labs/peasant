@@ -46,7 +46,6 @@ const (
 	downstreamIndexBatchLimit   = 64
 	annotationFlushSessionLimit = 256
 	annotationFlushWriteLimit   = 4096
-	annotationFlushInterval     = 500 * time.Millisecond
 )
 
 // String returns a human-readable name for the DiffStatus.
@@ -3985,6 +3984,12 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 	buffered, useBuffered := p.classifier.(BufferedSessionClassifier)
 	var bufferedPending []SessionAnnotationBatch
 	bufferedPendingWrites := 0
+	// The lane's idle-wait fallback: a batch flushes when it is full, or
+	// when the configured interval passes on the lane's idle wait. The timer
+	// is armed on admission and observed only in the receive wait below, so
+	// a filling batch never flushes early and a slow input cannot leave the
+	// writer waiting on a batch that never fills.
+	flushInterval := p.writeConfig().FlushInterval()
 	var flushTimer *time.Timer
 	var flushTimerC <-chan time.Time
 	stopFlushTimer := func() {
@@ -4004,7 +4009,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 		if !useBuffered || len(bufferedPending) == 0 || flushTimer != nil {
 			return
 		}
-		flushTimer = time.NewTimer(annotationFlushInterval)
+		flushTimer = time.NewTimer(flushInterval)
 		flushTimerC = flushTimer.C
 	}
 	recordAnnotationResult := func(batchResult SessionAnnotationBatchResult) {
@@ -5595,7 +5600,10 @@ func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []Sessi
 	writerWG.Add(1)
 	go func() {
 		defer writerWG.Done()
-		ticker := time.NewTicker(annotationFlushInterval)
+		// The periodic flush at the configured interval: progress stays
+		// visible on small or slow batches, bounded by batch size and by
+		// this interval. Same knob as the lane's idle-wait fallback above.
+		ticker := time.NewTicker(p.writeConfig().FlushInterval())
 		defer ticker.Stop()
 		var pending []SessionAnnotationBatch
 		pendingWrites := 0
