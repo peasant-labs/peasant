@@ -456,6 +456,20 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 			return page, err
 		}
 	}
+	// Preview pages for harmonized sessions serve the same partition-0
+	// body rows through the routing shim the bounded readers use: the
+	// mirror holds no rows once the writer goes harmonized, so paging the
+	// mirror would serve nothing. The cursor contract matches the mirror
+	// pager (index cursor, entry limit, byte budget).
+	if mode == ingest.SessionEntryReadPreview {
+		shimmed, shimErr := shimmedOnConn(conn, string(id))
+		if shimErr != nil {
+			return page, shimErr
+		}
+		if shimmed {
+			return shimPreviewPage(conn, id, opts, page)
+		}
+	}
 	result, err := readContentPageOnConn(ctx, conn, id, opts)
 	result.Capture = c
 	return result, err
@@ -606,6 +620,35 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 		}
 		from = *page.NextIndex
 	}
+}
+
+// shimPreviewPage serves one bounded preview page for a harmonized session
+// from its partition-0 body rows: the mirror holds no rows for such
+// sessions, so without this branch available reads would serve nothing for
+// valid incomplete authority. Entries shape through the shared shim exactly
+// as the bounded mirror readers shape them, and the cursor advances under
+// the same contract as the mirror pager. The caller's capture rides along
+// on the returned page.
+func shimPreviewPage(conn *sqlite.Conn, id ingest.SessionID, opts ingest.SessionEntryReadOptions, page ingest.SessionEntryReadPage) (ingest.SessionEntryReadPage, error) {
+	records, err := shimBodyRecordsOnConn(conn, string(id), nil, nil)
+	if err != nil {
+		return page, err
+	}
+	bounded, err := shimBoundedOnConn(conn, string(id))
+	if err != nil {
+		return page, err
+	}
+	entries, err := shimListEntries(records, bounded)
+	if err != nil {
+		return page, err
+	}
+	paged, next, bytesRead := shimContentPage(entries, opts.FromIndex, opts.Limit, opts.SoftMaxBytes)
+	page.Entries = paged
+	page.BytesRead = bytesRead
+	if next >= 0 {
+		page.NextIndex = &next
+	}
+	return page, nil
 }
 
 // loadShimFullSessionEntries serves verified full body rows with the same
