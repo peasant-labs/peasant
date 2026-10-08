@@ -15,12 +15,16 @@ func TestContentCorruptionRetainedObjects(t *testing.T) {
 			continue
 		}
 		t.Run(c.Name, func(t *testing.T) {
-			if c.Expect != "refuse" || len(c.Surfaces) != 1 || c.Surfaces[0] != "verify" || c.Why == "" {
+			verifyOnly := len(c.Surfaces) == 1 && c.Surfaces[0] == "verify"
+			if c.Expect != "refuse" || !verifyOnly || c.Why == "" {
 				t.Fatalf("invalid retained corruption fixture: %+v", c)
 			}
 			s, sid, _, _, _, _ := seedCorruptionCandidate(t, c.Damage)
 			var before indexformat.ReadSnapshot
-			if err := s.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error { before = snapshot; return nil }); err != nil {
+			if err := s.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error {
+				before = snapshot
+				return nil
+			}); err != nil {
 				t.Fatal(err)
 			}
 			applyCorruptionDamage(t, s, sid, c.Damage)
@@ -28,7 +32,11 @@ func TestContentCorruptionRetainedObjects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(report.Damaged) != 1 || report.Damaged[0].SessionID != sid || !strings.HasPrefix(report.Damaged[0].Object, "blob:") || report.Damaged[0].Reason == "" {
+			if len(report.Damaged) != 1 {
+				t.Fatalf("retained corruption damage count: %+v", report)
+			}
+			damage := report.Damaged[0]
+			if damage.SessionID != sid || !strings.HasPrefix(damage.Object, "blob:") || damage.Reason == "" {
 				t.Fatalf("retained corruption not attributed: %+v", report)
 			}
 			if err := s.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error {

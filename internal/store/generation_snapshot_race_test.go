@@ -41,7 +41,8 @@ func loadSnapshotRaceFixtures(t *testing.T) []snapshotRaceCase {
 	}
 	names := make(map[string]bool)
 	for _, c := range fixtures.Cases {
-		if c.Name == "" || c.FirstText == "" || c.NextText == "" || names[c.Name] {
+		missingText := c.FirstText == "" || c.NextText == ""
+		if c.Name == "" || missingText || names[c.Name] {
 			t.Fatalf("invalid snapshot race fixture: %+v", c)
 		}
 		names[c.Name] = true

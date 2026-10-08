@@ -32,7 +32,7 @@ import (
 func harmonizedActiveOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (active string, harmonized bool, err error) {
 	var activeID *string
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -49,7 +49,7 @@ func harmonizedActiveOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (acti
 		return "", false, nil
 	}
 	located := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), *activeID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			located = true
@@ -118,7 +118,7 @@ func harmonizedReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.Sessio
 func harmonizedMetadataOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (schema.UnifiedMetadata, schema.SessionDetailPayload, error) {
 	var metadata schema.UnifiedMetadata
 	var session schema.SessionDetailPayload
-	err := sqlitex.ExecuteTransient(conn, `SELECT
+	err := sqlitex.Execute(conn, `SELECT
     g.schema_version, g.harness, g.model, g.version,
     g.ts_start, g.ts_end, g.ts_ingested,
     g.source_file_path, g.source_format,
@@ -317,7 +317,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.
 		}},
 	}
 	for _, query := range queries {
-		if err := sqlitex.ExecuteTransient(conn, query.sql, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, query.sql, &sqlitex.ExecOptions{
 			Args:       []any{string(sessionID), generationID},
 			ResultFunc: query.fn,
 		}); err != nil {
@@ -338,7 +338,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.
 // values (possibly empty) for a present one.
 func harmonizedRelationshipsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SessionRelationship, error) {
 	var relationships []schema.SessionRelationship
-	err := sqlitex.ExecuteTransient(conn, `SELECT kind, target_state, target_local_id, evidence,
+	err := sqlitex.Execute(conn, `SELECT kind, target_state, target_local_id, evidence,
 anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref
 FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
@@ -375,7 +375,7 @@ FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? OR
 // harmonizedTitleRefsOnConn reads the ordered title refs for one generation.
 func harmonizedTitleRefsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SourceEntryRef, error) {
 	var refs []schema.SourceEntryRef
-	err := sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref FROM session_generation_title_refs
+	err := sqlitex.Execute(conn, `SELECT source_entry_ref FROM session_generation_title_refs
 WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -395,7 +395,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptio
 func harmonizedCompletenessOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (indexformat.GenerationCompleteness, error) {
 	raw := ""
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT completeness FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT completeness FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			raw = stmt.ColumnText(0)
@@ -428,7 +428,7 @@ func harmonizedPartitionsModeOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 		state       string
 	}
 	var sections []section
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections
+	if err := sqlitex.Execute(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections
 WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -439,7 +439,7 @@ WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.Exec
 		return partitions, nil, err
 	}
 	mappedByPartition := map[int][]harmonizedMappedEntry{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT
+	if err := sqlitex.Execute(conn, `SELECT
     m.partition_id,
     b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
     b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
@@ -649,7 +649,7 @@ func scanProvenance(stmt *sqlite.Stmt, off int) *schema.ContentProvenance {
 // call ID reassembles instead of collapsing to absent.
 func harmonizedNativeMetadataOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, partitionID int) ([]schema.NativeMetadataRecord, error) {
 	var records []schema.NativeMetadataRecord
-	err := sqlitex.ExecuteTransient(conn, `SELECT native_id, kind, source_entry_ref, source_type, source_message_role,
+	err := sqlitex.Execute(conn, `SELECT native_id, kind, source_entry_ref, source_type, source_message_role,
     attachment_turn_index, attachment_tool_call_id, custom_type, data
 FROM session_section_native_metadata
 WHERE session_id = ? AND generation_id = ? AND partition_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
@@ -716,7 +716,7 @@ func readHarmonizedBodyOnConn(conn *sqlite.Conn, sessionID schema.SessionID, gen
 	// into this generation's hydration.
 	var row EntryRecord
 	found := false
-	err := sqlitex.ExecuteTransient(conn, `SELECT
+	err := sqlitex.Execute(conn, `SELECT
     b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
     b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
     b.has_tool_use, b.tool_kind, b.tool_names_csv,

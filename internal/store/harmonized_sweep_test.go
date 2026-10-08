@@ -41,7 +41,9 @@ func TestSweepSessionBatchBound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bounded sweep: %v", err)
 	}
-	if got.RowsDeleted != 7 || got.BodiesDeleted != 3 || got.BlobsDeleted != 0 || got.DirectoriesRemoved != 0 {
+	wrongRowDeletes := got.RowsDeleted != 7 || got.BodiesDeleted != 3
+	unexpectedOtherDeletes := got.BlobsDeleted != 0 || got.DirectoriesRemoved != 0
+	if wrongRowDeletes || unexpectedOtherDeletes {
 		t.Fatalf("bounded sweep = %+v, want 7 rows, 3 bodies, no blobs or dirs", got)
 	}
 	if got.Rebuilt {
@@ -261,17 +263,17 @@ func TestSweepCorruptBodyRebuildsIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `DROP TRIGGER session_entry_bodies_immutable`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `DROP TRIGGER session_entry_bodies_immutable`, nil); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("drop immutability trigger: %v", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_entry_bodies SET content_preview = content_preview || 'corrupted' WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `UPDATE session_entry_bodies SET content_preview = content_preview || 'corrupted' WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid), corruptDigest},
 	}); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("corrupt a body column: %v", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `CREATE TRIGGER session_entry_bodies_immutable BEFORE UPDATE ON session_entry_bodies BEGIN SELECT RAISE(ABORT, 'session_entry_bodies rows are immutable; insert a new entry instead'); END`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `CREATE TRIGGER session_entry_bodies_immutable BEFORE UPDATE ON session_entry_bodies BEGIN SELECT RAISE(ABORT, 'session_entry_bodies rows are immutable; insert a new entry instead'); END`, nil); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("recreate immutability trigger: %v", err)
 	}
@@ -324,7 +326,9 @@ func runSweepMidSweepBatch(t *testing.T) {
 		}
 		return nil
 	}
-	defer func() { contentSweepSeam = nil }()
+	defer func() {
+		contentSweepSeam = nil
+	}()
 	_, interrupted := s.SweepSession(ctx, sid)
 	if interrupted == nil {
 		t.Fatal("sweep across the mid-batch seam succeeded; the crash must interrupt it")

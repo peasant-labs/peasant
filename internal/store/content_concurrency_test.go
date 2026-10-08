@@ -122,7 +122,10 @@ func runConcurrencySameCandidate(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx, cancel := context.WithCancel(testwait.Context(t))
 	var workers sync.WaitGroup
-	defer func() { cancel(); workers.Wait() }()
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
 	sid := gcSession(t, s, "b5b5b5b5-b5b5-45b5-85b5-b5b5b5b5b5b5")
 	v2, blobs := buildTestGeneration(t, sid, "same-candidate", "same durable text", "same input", "same output")
 	activation := GenerationActivation{Generation: filledCandidateForValidation(t, v2, blobs), Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1}
@@ -183,7 +186,10 @@ func runConcurrencyStagedCAS(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx, cancel := context.WithCancel(testwait.Context(t))
 	var workers sync.WaitGroup
-	defer func() { cancel(); workers.Wait() }()
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
 	sid := gcSession(t, s, "b6b6b6b6-b6b6-46b6-86b6-b6b6b6b6b6b6")
 	gcActivate(t, s, sid, "cas-original", []string{"original0", "original1", "original2"}, nil)
 	state, err := s.ReadIndexState(t.Context(), sid)
@@ -200,8 +206,16 @@ func runConcurrencyStagedCAS(t *testing.T) {
 	}
 	done2, done3 := make(chan staged, 1), make(chan staged, 1)
 	workers.Add(2)
-	go func() { defer workers.Done(); h, e := s.StageGeneration(ctx, a2); done2 <- staged{h, e} }()
-	go func() { defer workers.Done(); h, e := s.StageGeneration(ctx, a3); done3 <- staged{h, e} }()
+	go func() {
+		defer workers.Done()
+		h, e := s.StageGeneration(ctx, a2)
+		done2 <- staged{h, e}
+	}()
+	go func() {
+		defer workers.Done()
+		h, e := s.StageGeneration(ctx, a3)
+		done3 <- staged{h, e}
+	}()
 	r2, r3 := testwait.Receive(t, done2, "first staging"), testwait.Receive(t, done3, "second staging")
 	if r2.err != nil || r3.err != nil {
 		t.Fatalf("concurrent staging: %v %v", r2.err, r3.err)
@@ -228,7 +242,10 @@ func runConcurrencyConsolidation(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx, cancel := context.WithCancel(testwait.Context(t))
 	var workers sync.WaitGroup
-	defer func() { cancel(); workers.Wait() }()
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
 	sid := gcSession(t, s, "b7b7b7b7-b7b7-47b7-87b7-b7b7b7b7b7b7")
 	v2, blobs := buildTestGeneration(t, sid, "consolidation-next", "consolidationharvestterm", "next input", "next output")
 	activation := GenerationActivation{Generation: filledCandidateForValidation(t, v2, blobs), Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1}
@@ -246,7 +263,11 @@ func runConcurrencyConsolidation(t *testing.T) {
 		if action.Table() == "session_entries_fts" && action.Type() == sqlite.OpDropVTable {
 			entered = true
 			workers.Add(1)
-			go func() { defer workers.Done(); _, err := s.ActivateGeneration(ctx, activation); done <- err }()
+			go func() {
+				defer workers.Done()
+				_, err := s.ActivateGeneration(ctx, activation)
+				done <- err
+			}()
 			testwait.Receive(t, prepared, "harvest prepared while search consolidation owns the write transaction")
 		}
 		return sqlite.AuthResultOK
@@ -292,7 +313,10 @@ func runConcurrencyAcrossProcesses(t *testing.T) {
 			_ = cmd.Wait()
 		}
 	}()
-	testwait.Until(t, "child owns the OS session lock", func() bool { _, err := os.Stat(ready); return err == nil })
+	testwait.Until(t, "child owns the OS session lock", func() bool {
+		_, err := os.Stat(ready)
+		return err == nil
+	})
 	v2, blobs := buildTestGeneration(t, sid, "cross-process-candidate", "cross process text", "cross process input", "cross process output")
 	activation := GenerationActivation{Generation: filledCandidateForValidation(t, v2, blobs), Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1}
 	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
@@ -341,12 +365,17 @@ func runConcurrencyChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	if err := os.WriteFile(os.Getenv("PEASANT_CONTENT_CONCURRENCY_READY"), []byte("ready"), 0600); err != nil {
 		_ = release()
 		t.Fatal(err)
 	}
-	testwait.Until(t, "parent releases the held-lock barrier", func() bool { _, err := os.Stat(os.Getenv("PEASANT_CONTENT_CONCURRENCY_RELEASE")); return err == nil })
+	testwait.Until(t, "parent releases the held-lock barrier", func() bool {
+		_, err := os.Stat(os.Getenv("PEASANT_CONTENT_CONCURRENCY_RELEASE"))
+		return err == nil
+	})
 	if err := release(); err != nil {
 		t.Fatal(err)
 	}

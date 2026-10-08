@@ -22,9 +22,13 @@ func TestSearchCorruptionFamily(t *testing.T) {
 		}
 		switch c.Name {
 		case "swept-corrupt-body-rebuilds-index":
-			t.Run(c.Name, func(t *testing.T) { runSweptCorruptBody(t, c) })
+			t.Run(c.Name, func(t *testing.T) {
+				runSweptCorruptBody(t, c)
+			})
 		case "repair-identical-candidate-rewrites-corrupt-body":
-			t.Run(c.Name, func(t *testing.T) { runRepairIdenticalCandidate(t, c) })
+			t.Run(c.Name, func(t *testing.T) {
+				runRepairIdenticalCandidate(t, c)
+			})
 		default:
 			t.Fatalf("unknown search corruption case %q", c.Name)
 		}
@@ -47,7 +51,9 @@ func searchTakeConn(t *testing.T, s *Store) *sqlite.Conn {
 func searchTestConn(t *testing.T, s *Store) *sqlite.Conn {
 	t.Helper()
 	conn := searchTakeConn(t, s)
-	t.Cleanup(func() { s.pool.Put(conn) })
+	t.Cleanup(func() {
+		s.pool.Put(conn)
+	})
 	return conn
 }
 
@@ -86,11 +92,11 @@ func runSweptCorruptBody(t *testing.T, c contentCorruptionCase) {
 		s.pool.Put(conn)
 		t.Fatal("corrupt body passes the delete-time check")
 	}
-	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_generation_entries WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
+	if err := sqlitex.Execute(conn, `DELETE FROM session_generation_entries WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("delete mapping rows: %v", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
+	if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
 		s.pool.Put(conn)
 		t.Fatalf("delete corrupt bodies: %v", err)
 	}
@@ -105,9 +111,12 @@ func runSweptCorruptBody(t *testing.T, c contentCorruptionCase) {
 	}
 	if c.WantStaleRawMatch {
 		var n int
-		if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
-			Args:       []any{`"` + c.Query + `"`},
-			ResultFunc: func(stmt *sqlite.Stmt) error { n = int(stmt.ColumnInt64(0)); return nil },
+		if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
+			Args: []any{`"` + c.Query + `"`},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				n = int(stmt.ColumnInt64(0))
+				return nil
+			},
 		}); err != nil {
 			s.pool.Put(conn)
 			t.Fatalf("raw MATCH after the untrusted delete: %v", err)
@@ -139,9 +148,12 @@ func runSweptCorruptBody(t *testing.T, c contentCorruptionCase) {
 		}
 		conn := searchTestConn(t, s)
 		var n int
-		if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
-			Args:       []any{`"` + c.Query + `"`},
-			ResultFunc: func(stmt *sqlite.Stmt) error { n = int(stmt.ColumnInt64(0)); return nil },
+		if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
+			Args: []any{`"` + c.Query + `"`},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				n = int(stmt.ColumnInt64(0))
+				return nil
+			},
 		}); err != nil {
 			t.Fatalf("raw MATCH after the rebuild: %v", err)
 		}
@@ -236,7 +248,7 @@ func TestSearchDeleteTimeCheck(t *testing.T) {
 	}
 	defer s.pool.Put(conn)
 	var record EntryRecord
-	if err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			record = scanEntryRecord(stmt)
@@ -397,9 +409,12 @@ func TestPruneVerifiesBodies(t *testing.T) {
 		}
 		defer s.pool.Put(conn)
 		var n int
-		if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
-			Args:       []any{`"prune corrupt text"`},
-			ResultFunc: func(stmt *sqlite.Stmt) error { n = int(stmt.ColumnInt64(0)); return nil },
+		if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
+			Args: []any{`"prune corrupt text"`},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				n = int(stmt.ColumnInt64(0))
+				return nil
+			},
 		}); err != nil {
 			t.Fatalf("raw MATCH after corrupt prune: %v", err)
 		}

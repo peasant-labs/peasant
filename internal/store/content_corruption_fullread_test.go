@@ -148,7 +148,7 @@ func TestContentCorruptionFullRead(t *testing.T) {
 					if err := sqlitex.ExecuteTransient(conn, `PRAGMA foreign_keys=OFF`, nil); err != nil {
 						t.Fatal(err)
 					}
-					err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+					err = sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
 					if restoreErr := sqlitex.ExecuteTransient(conn, `PRAGMA foreign_keys=ON`, nil); restoreErr != nil {
 						t.Fatal(restoreErr)
 					}
@@ -166,7 +166,7 @@ func TestContentCorruptionFullRead(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+				err = sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
 				s.PoolForTest().Put(conn)
 				if c.Expect != "fk-refuses" || err == nil || !strings.Contains(err.Error(), "FOREIGN KEY") {
 					t.Fatalf("mapped body delete = %v; want foreign-key refusal", err)
@@ -196,7 +196,8 @@ func TestContentCorruptionFullRead(t *testing.T) {
 						}
 					case "publish", "scan":
 						input, payload, err := push.LoadPublicationInput(t.Context(), s, string(sid))
-						if err == nil || payload != nil || input.Entries != nil || input.Generation != nil {
+						hasInputContent := input.Entries != nil || input.Generation != nil
+						if err == nil || payload != nil || hasInputContent {
 							t.Fatalf("damaged publication returned partial output: %+v %v %v", input, payload, err)
 						}
 						if surface == "scan" {
@@ -214,12 +215,18 @@ func TestContentCorruptionFullRead(t *testing.T) {
 						payload, err := api.DetailPayloadWithReader(t.Context(), s, s, string(sid), func(context.Context, string) (*schema.SessionDetailPayload, error) {
 							return nil, fmt.Errorf("unexpected legacy fallback")
 						})
-						if err != nil || payload == nil || payload.Diagnostics == nil || !payload.Diagnostics.Partial {
+						if err != nil || payload == nil {
+							t.Fatalf("mounted preview exit refused: %+v %v", payload, err)
+						}
+						if payload.Diagnostics == nil || !payload.Diagnostics.Partial {
 							t.Fatalf("mounted preview exit refused or lost partial status: %+v %v", payload, err)
 						}
 					case "routing":
 						entries, err := s.ListEntries(t.Context(), sid)
-						if err != nil || len(entries) != 1 || entries[0].ContentPreview == nil || *entries[0].ContentPreview != "tampered full read bytes" {
+						if err != nil || len(entries) != 1 {
+							t.Fatalf("unverified routing entries = %+v %v", entries, err)
+						}
+						if entries[0].ContentPreview == nil || *entries[0].ContentPreview != "tampered full read bytes" {
 							t.Fatalf("unverified routing = %+v %v", entries, err)
 						}
 					default:

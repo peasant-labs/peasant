@@ -42,7 +42,9 @@ func openSnapshotStore(t *testing.T, poolSizes ...int) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 	return db
 }
 
@@ -247,7 +249,9 @@ func TestHarmonizedSnapshotLockFree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 	ctx := context.Background()
 	id := schema.SessionID("03999aaa-36bc-424c-a789-8be54d9702bc")
 	seedHarmonizedSnapshot(t, db, string(id), "gen-snap-lockfree")
