@@ -45,7 +45,7 @@ type contentCLISurfaceManifest struct {
 	RequiredNames []string `yaml:"requiredNames"`
 }
 
-// loadContentCLISurfaceFixture strictly decodes the CLI surface scaffold and
+// loadContentCLISurfaceFixture decodes typed CLI surface cases and
 // enforces its required-names manifest: every required name must be present,
 // with no blank or duplicate entry.
 func loadContentCLISurfaceFixture(t *testing.T) []contentCLISurfaceCase {
@@ -69,6 +69,23 @@ func loadContentCLISurfaceFixture(t *testing.T) []contentCLISurfaceCase {
 		t.Fatal(err)
 	}
 	return fixture.Cases
+}
+
+// TestContentFamilyInventory protects the CLI-owned content family alongside
+// the store-owned inventory. Cases must carry a real command and an executable
+// flag or report assertion, never only a name.
+func TestContentFamilyInventory(t *testing.T) {
+	for _, c := range loadContentCLISurfaceFixture(t) {
+		if strings.TrimSpace(c.Command) == "" || len(c.Flags)+len(c.JSONKeys)+len(c.TextContains) == 0 {
+			t.Fatalf("CLI content case %s has no executable command assertion; implement it in TestContentCLISurfaceInventory", c.Name)
+		}
+	}
+	var manifest contentCLISurfaceManifest
+	decoder := yaml.NewDecoder(bytes.NewReader(contentCLISurfaceManifestYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
+		t.Fatalf("CLI content manifest permits no deferral or unknown field: %v", err)
+	}
 }
 
 // TestContentCLISurfaceFixtureManifest pins the CLI surface case inventory:
