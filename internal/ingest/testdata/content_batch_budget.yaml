@@ -41,7 +41,7 @@ cases:
 # indexBatch above groups the stale-session waves. The drain below is the
 # boundary EVERY parsed session crosses on an ordinary harvest and on a
 # reindex, so it is where the memory bound actually earns its keep. Both now
-# ask exceedsIndexWriteBudget, and both are asserted: the predicate on its own
+# ask exceedsWriteBudget, and both are asserted: the predicate on its own
 # inputs, and the drain over a channel, so a call site that stopped asking is
 # visible as well as a predicate that stopped answering.
 #
