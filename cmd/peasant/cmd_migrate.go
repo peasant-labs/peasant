@@ -122,7 +122,9 @@ func openMigrateStore(cmd *cobra.Command, dryRun bool, ownedRoot, dbPath string)
 		if err != nil {
 			return nil, func() {}, err
 		}
-		return db, func() { _ = db.Close() }, nil
+		return db, func() {
+			_ = db.Close()
+		}, nil
 	}
 	dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
@@ -137,7 +139,9 @@ func openMigrateStore(cmd *cobra.Command, dryRun bool, ownedRoot, dbPath string)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open analytics store: %w", err)
 	}
-	return db, func() { _ = db.Close() }, nil
+	return db, func() {
+		_ = db.Close()
+	}, nil
 }
 
 // confirmMigrate asks for consent to an in-place conversion. It refuses

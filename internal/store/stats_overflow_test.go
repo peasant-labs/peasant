@@ -31,6 +31,7 @@ type statsOverflowCase struct {
 	Refresh        bool             `yaml:"refresh"`
 	RefreshCount   int              `yaml:"refreshCount"`
 	LegacySeedOnly bool             `yaml:"legacySeedOnly"`
+	CheckSkip      bool             `yaml:"checkSkip"`
 }
 
 //go:embed testdata/stats_overflow.yaml
@@ -167,6 +168,18 @@ func TestStatsOverflowFamily(t *testing.T) {
 						t.Fatal(err)
 					}
 					assertRefreshedStatsOverflow(t, s, sid, v2.Generation.Metadata.Stats, c)
+					if c.CheckSkip {
+						activation.Generation.Generation.ID += "_unchanged"
+						activation.Prepared = nil
+						result, err := s.ActivateGeneration(t.Context(), activation)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if result.Disposition != ingest.ActivationSkipped {
+							t.Fatalf("retained stat diagnostics prevented an unchanged refresh from skipping: %v", result.Disposition)
+						}
+						assertRefreshedStatsOverflow(t, s, sid, v2.Generation.Metadata.Stats, c)
+					}
 				}
 				return
 			}

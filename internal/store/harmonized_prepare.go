@@ -282,7 +282,9 @@ func (p *preparedHarmonized) classifyContent(generation indexformat.Generation, 
 			data:   append([]byte{}, data...),
 		})
 	}
-	sort.Slice(p.blobs, func(i, j int) bool { return p.blobs[i].ref < p.blobs[j].ref })
+	sort.Slice(p.blobs, func(i, j int) bool {
+		return p.blobs[i].ref < p.blobs[j].ref
+	})
 	return nil
 }
 

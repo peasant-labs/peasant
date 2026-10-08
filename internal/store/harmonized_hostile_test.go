@@ -149,7 +149,7 @@ func TestHarmonizedHostileInput(t *testing.T) {
 					t.Fatal(err)
 				}
 				found := false
-				err = sqlitex.ExecuteTransient(conn, `SELECT digest, byte_length, (SELECT count(*) FROM session_content_chunks c WHERE c.session_id=h.session_id AND c.digest=h.digest) FROM session_content h WHERE session_id=?`, &sqlitex.ExecOptions{
+				err = sqlitex.Execute(conn, `SELECT digest, byte_length, (SELECT count(*) FROM session_content_chunks c WHERE c.session_id=h.session_id AND c.digest=h.digest) FROM session_content h WHERE session_id=?`, &sqlitex.ExecOptions{
 					Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 						found = true
 						if stmt.ColumnText(0) != c.ExpectedDigest || stmt.ColumnInt(1) != c.ExpectedLength || stmt.ColumnInt(2) != c.ExpectedChunks {
@@ -170,7 +170,7 @@ func TestHarmonizedHostileInput(t *testing.T) {
 					t.Fatal(err)
 				}
 				var record indexformat.ContentRecord
-				err = sqlitex.ExecuteTransient(conn, `SELECT c.source_entry_ref,c.digest,h.byte_length FROM session_generation_content c JOIN session_content h ON h.session_id=c.session_id AND h.digest=c.digest WHERE c.session_id=? AND c.generation_id=? AND c.source_entry_ref=?`, &sqlitex.ExecOptions{
+				err = sqlitex.Execute(conn, `SELECT c.source_entry_ref,c.digest,h.byte_length FROM session_generation_content c JOIN session_content h ON h.session_id=c.session_id AND h.digest=c.digest WHERE c.session_id=? AND c.generation_id=? AND c.source_entry_ref=?`, &sqlitex.ExecOptions{
 					Args: []any{string(sid), v2.Generation.ID, string(ref)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 						record = indexformat.ContentRecord{Ref: ref, Digest: stmt.ColumnText(1), ByteLength: stmt.ColumnInt64(2)}
 						return nil
@@ -336,4 +336,6 @@ func mustDecodePiExtra(t *testing.T) ingest.PiExtra {
 	return extra
 }
 
-func strPtr(text string) *string { return &text }
+func strPtr(text string) *string {
+	return &text
+}

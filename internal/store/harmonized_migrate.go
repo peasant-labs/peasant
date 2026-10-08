@@ -227,7 +227,7 @@ func (s *Store) PlanMigration(ctx context.Context) (MigratePlan, error) {
 // proof. Non-native sessions (no generation-backed rows at all) are not
 // listed either.
 func collectMigrateWorkOnConn(conn *sqlite.Conn, plan *MigratePlan) error {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT s.session_id FROM sessions s
+	if err := sqlitex.Execute(conn, `SELECT s.session_id FROM sessions s
 WHERE s.active_generation_id IS NOT NULL
 AND EXISTS (SELECT 1 FROM session_projection_generations g
   WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id)
@@ -241,7 +241,7 @@ ORDER BY s.session_id`, &sqlitex.ExecOptions{
 	}); err != nil {
 		return fmt.Errorf("store: list file-backed sessions for the migration preflight: %w; nothing was planned", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_projection_generations g
+	if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_projection_generations g
 JOIN sessions s ON s.session_id = g.session_id
 WHERE g.generation_id IS NOT s.active_generation_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -251,7 +251,7 @@ WHERE g.generation_id IS NOT s.active_generation_id`, &sqlitex.ExecOptions{
 	}); err != nil {
 		return fmt.Errorf("store: count superseded generations for the migration preflight: %w; nothing was planned", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_entries WHERE session_id IN (
+	if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_entries WHERE session_id IN (
 SELECT s.session_id FROM sessions s
 WHERE s.active_generation_id IS NOT NULL
 AND EXISTS (SELECT 1 FROM session_projection_generations g
@@ -271,7 +271,7 @@ AND EXISTS (SELECT 1 FROM session_projection_generations g
 // existing relation.
 func tableExistsOnConn(conn *sqlite.Conn, name string) bool {
 	exists := false
-	_ = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1`, &sqlitex.ExecOptions{
+	_ = sqlitex.Execute(conn, `SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{name},
 		ResultFunc: func(*sqlite.Stmt) error {
 			exists = true
@@ -520,7 +520,7 @@ func (s *Store) sampleMigrateMismatches(ctx context.Context, conn *sqlite.Conn, 
 // over at most migratePreflightSampleRefs content records.
 func (s *Store) sampleMigrateSessionMismatches(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID) (int, error) {
 	var active string
-	if err := sqlitex.ExecuteTransient(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			active = stmt.ColumnText(0)
@@ -536,7 +536,7 @@ func (s *Store) sampleMigrateSessionMismatches(ctx context.Context, conn *sqlite
 		byteLength int64
 	}
 	var records []record
-	if err := sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref, integrity_digest, relative_blob, byte_length FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref LIMIT ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT source_entry_ref, integrity_digest, relative_blob, byte_length FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref LIMIT ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), active, migratePreflightSampleRefs},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ref, err := schema.NewSourceEntryRef(stmt.ColumnText(0))
@@ -589,7 +589,7 @@ func (s *Store) sampleMigrateSessionMismatches(ctx context.Context, conn *sqlite
 func readMigrateSampleEntry(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, ref schema.SourceEntryRef) (schema.SessionEntry, bool, error) {
 	var entry schema.SessionEntry
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ? ORDER BY partition_id LIMIT 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ? ORDER BY partition_id LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID, string(ref)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -668,7 +668,7 @@ func (s *Store) migrateDrainSessions(ctx context.Context) ([]schema.SessionID, e
 // second.
 func migrateDrainSessionsOnConn(conn *sqlite.Conn) ([]schema.SessionID, error) {
 	var sessions []schema.SessionID
-	if err := sqlitex.ExecuteTransient(conn, `SELECT DISTINCT session_id FROM session_projection_generations ORDER BY session_id`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT DISTINCT session_id FROM session_projection_generations ORDER BY session_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sessions = append(sessions, schema.SessionID(stmt.ColumnText(0)))
 			return nil
@@ -692,7 +692,9 @@ func (s *Store) migrateDrainSession(ctx context.Context, sessionID schema.Sessio
 	if err != nil {
 		return false, fmt.Errorf("store: lock session %s for the migration drain: %w; nothing was drained", sessionID, err)
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	touched := false
 	if s.generationArtifacts != nil {
 		intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
@@ -751,7 +753,7 @@ func (s *Store) clearIndexedInputHash(ctx context.Context, sessionID schema.Sess
 		return fmt.Errorf("store: take connection to mark session %s for re-index: %w; the input proof is unchanged", sessionID, err)
 	}
 	defer s.pool.Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: mark session %s for re-index: %w; the input proof is unchanged", sessionID, err)
@@ -840,7 +842,7 @@ func (s *Store) migrateCleanup(ctx context.Context, result *MigrateResult) error
 		return fmt.Errorf("store: take connection to summarize migration gaps: %w", err)
 	}
 	var gaps int64
-	err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_migration_gaps`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+	err = sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_migration_gaps`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
 		gaps = stmt.ColumnInt64(0)
 		return nil
 	}})
@@ -920,7 +922,7 @@ func (s *Store) migrateHarmonizedSessions(ctx context.Context) ([]schema.Session
 	}
 	defer s.pool.Put(conn)
 	var sessions []schema.SessionID
-	if err := sqlitex.ExecuteTransient(conn, `SELECT s.session_id FROM sessions s
+	if err := sqlitex.Execute(conn, `SELECT s.session_id FROM sessions s
 WHERE s.active_generation_id IS NOT NULL
 AND EXISTS (SELECT 1 FROM session_generations g
   WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id)
@@ -944,7 +946,7 @@ func (s *Store) migrateFlaggedSessions(ctx context.Context) ([]schema.SessionID,
 	}
 	defer s.pool.Put(conn)
 	var sessions []schema.SessionID
-	if err := sqlitex.ExecuteTransient(conn, `SELECT session_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT session_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sessions = append(sessions, schema.SessionID(stmt.ColumnText(0)))
 			return nil
@@ -996,7 +998,7 @@ func evaluateRetirementPreconditionsOnConn(ctx context.Context, conn *sqlite.Con
 		if !tableExistsOnConn(conn, count.table) {
 			// The drop already removed this table: nothing remains in it.
 			rows = 0
-		} else if err := sqlitex.ExecuteTransient(conn, count.query, &sqlitex.ExecOptions{
+		} else if err := sqlitex.Execute(conn, count.query, &sqlitex.ExecOptions{
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				rows = stmt.ColumnInt64(0)
 				return nil

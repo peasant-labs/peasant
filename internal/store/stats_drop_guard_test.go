@@ -48,6 +48,7 @@ func TestDeprecatedStatsColumnsGuarded(t *testing.T) {
 		{file: "internal/store/metrics_writer.go", contains: "session_id, turn_count, subagent_count,", why: "analysis record shape"},
 		// The retirement clear itself.
 		{file: "internal/store/harmonized_stats.go", contains: "UPDATE sessions SET metric_seed_json = NULL", why: "retired seed clear for natives"},
+		{file: "internal/store/harmonized_stats.go", contains: "SELECT model_harness, metric_seed_json FROM sessions", why: "file-backed refresh preserves unknown prior legacy seed keys before cutover replaces its authority"},
 		// The current activation's legacy mirrors; the activation commit
 		// records them alongside the generation rows.
 		{file: "internal/store/index_format_v2.go", contains: "INSERT INTO session_metrics (session_id, turn_count, tool_calls, title)", why: "activation legacy mirrors"},
@@ -117,10 +118,14 @@ func isShippedSchemaFile(rel string) bool {
 	if filepath.Dir(rel) != "internal/store" {
 		return false
 	}
-	if base == "schema.go" || base == "migrations.go" || base == "baseline.go" || base == "baseline_fresh.go" {
+	baseSchema := base == "schema.go" || base == "migrations.go"
+	baselineSchema := base == "baseline.go" || base == "baseline_fresh.go"
+	if baseSchema || baselineSchema {
 		return true
 	}
-	if strings.HasSuffix(base, ".go") && (strings.HasPrefix(base, "schema_v") || strings.HasPrefix(base, "migration_v") || strings.HasPrefix(base, "migration_")) {
+	versionedSchema := strings.HasPrefix(base, "schema_v") || strings.HasPrefix(base, "migration_v")
+	migrationSchema := versionedSchema || strings.HasPrefix(base, "migration_")
+	if strings.HasSuffix(base, ".go") && migrationSchema {
 		return true
 	}
 	return false

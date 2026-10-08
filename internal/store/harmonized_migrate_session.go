@@ -114,7 +114,9 @@ func (s *Store) MigrateSession(ctx context.Context, sessionID schema.SessionID) 
 	if err != nil {
 		return "", fmt.Errorf("store: lock session %s for migration: %w; nothing was converted", sessionID, err)
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	work, err := s.migrateSessionWork(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -203,7 +205,7 @@ func (s *Store) migrateSessionWork(ctx context.Context, sessionID schema.Session
 		return work, nil
 	}
 	fileBacked := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), *active},
 		ResultFunc: func(*sqlite.Stmt) error {
 			fileBacked = true
@@ -216,7 +218,7 @@ func (s *Store) migrateSessionWork(ctx context.Context, sessionID schema.Session
 		return work, nil
 	}
 	settled := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_content_captures WHERE session_id = ? AND failure_code IS NOT NULL LIMIT 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_content_captures WHERE session_id = ? AND failure_code IS NOT NULL LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(*sqlite.Stmt) error {
 			settled = true
@@ -242,7 +244,7 @@ func (s *Store) setSweepFlag(ctx context.Context, sessionID schema.SessionID) er
 		return fmt.Errorf("store: take connection to flag session %s for migration: %w", sessionID, err)
 	}
 	defer s.pool.Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: flag session %s for migration: %w", sessionID, err)
@@ -326,7 +328,7 @@ func (s *Store) readMigrateOracle(ctx context.Context, sessionID schema.SessionI
 // backfill rule (activated, else installed).
 func readMigrateOracleCatalogOnConn(conn *sqlite.Conn, oracle *migrateOracle) error {
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT metadata_json, title_refs_json, completeness, source_evidence_digest, installed_at_ms, activated_at_ms FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT metadata_json, title_refs_json, completeness, source_evidence_digest, installed_at_ms, activated_at_ms FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -374,7 +376,7 @@ func readMigrateOracleCatalogOnConn(conn *sqlite.Conn, oracle *migrateOracle) er
 // (partition, index) order, keeping the exact entry_json bytes beside
 // the parsed struct.
 func readMigrateOracleEntriesOnConn(conn *sqlite.Conn, oracle *migrateOracle) error {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			partitionID := stmt.ColumnInt(0)
@@ -398,7 +400,7 @@ func readMigrateOracleEntriesOnConn(conn *sqlite.Conn, oracle *migrateOracle) er
 // readMigrateOracleSectionsOnConn reads the old partition sections in
 // partition order.
 func readMigrateOracleSectionsOnConn(conn *sqlite.Conn, oracle *migrateOracle) error {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			oracle.sections = append(oracle.sections, migrateOracleSection{partitionID: stmt.ColumnInt(0), state: stmt.ColumnText(1)})
@@ -413,7 +415,7 @@ func readMigrateOracleSectionsOnConn(conn *sqlite.Conn, oracle *migrateOracle) e
 // readMigrateOracleContentOnConn reads the old content records in ref
 // order.
 func readMigrateOracleContentOnConn(conn *sqlite.Conn, oracle *migrateOracle) error {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref, relative_blob, byte_length, integrity_digest FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT source_entry_ref, relative_blob, byte_length, integrity_digest FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ref, err := schema.NewSourceEntryRef(stmt.ColumnText(0))
@@ -437,7 +439,7 @@ func readMigrateOracleContentOnConn(conn *sqlite.Conn, oracle *migrateOracle) er
 // readMigrateOracleAliasesOnConn reads the old native aliases in key
 // order.
 func readMigrateOracleAliasesOnConn(conn *sqlite.Conn, oracle *migrateOracle) error {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT native_key, source_entry_ref FROM session_projection_aliases WHERE session_id = ? AND generation_id = ? ORDER BY native_key`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT native_key, source_entry_ref FROM session_projection_aliases WHERE session_id = ? AND generation_id = ? ORDER BY native_key`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ref, err := schema.NewSourceEntryRef(stmt.ColumnText(1))
@@ -469,7 +471,7 @@ func readMigrateOracleSegmentsOnConn(conn *sqlite.Conn, oracle *migrateOracle) e
 		inclusion indexformat.SegmentInclusion
 	}
 	var raws []rawSegment
-	if err := sqlitex.ExecuteTransient(conn, `SELECT segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			raw := rawSegment{ordinal: stmt.ColumnInt(0), physical: stmt.ColumnText(2)}
@@ -506,7 +508,7 @@ func readMigrateOracleSegmentsOnConn(conn *sqlite.Conn, oracle *migrateOracle) e
 	}
 	refsBySegment := map[int][]schema.SourceEntryRef{}
 	if len(raws) > 0 {
-		if err := sqlitex.ExecuteTransient(conn, `SELECT segment_ordinal, source_entry_ref FROM session_context_segment_refs WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal, ordinal`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT segment_ordinal, source_entry_ref FROM session_context_segment_refs WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal, ordinal`, &sqlitex.ExecOptions{
 			Args: []any{string(oracle.sessionID), oracle.generationID},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				ref, err := schema.NewSourceEntryRef(stmt.ColumnText(1))
@@ -545,7 +547,7 @@ func readMigrateOracleSegmentsOnConn(conn *sqlite.Conn, oracle *migrateOracle) e
 // parent the metadata compare restores beside the catalog mapping, and
 // the capture row with its full-capture proof.
 func readMigrateOracleSessionOnConn(conn *sqlite.Conn, oracle *migrateOracle) error {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT session_entries_hash, parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT session_entries_hash, parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) != sqlite.TypeNull {
@@ -733,7 +735,7 @@ func checkMigrateEmittedIntegrity(oracle *migrateOracle) error {
 // dispatch.
 func readOracleMirrorEntries(conn *sqlite.Conn, sessionID schema.SessionID) ([]schema.SessionEntry, error) {
 	var entries []schema.SessionEntry
-	if err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, sqlListEntries, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := scanSessionEntry(stmt)
@@ -747,7 +749,7 @@ func readOracleMirrorEntries(conn *sqlite.Conn, sessionID schema.SessionID) ([]s
 		return nil, fmt.Errorf("read the oracle mirror rows: %w", err)
 	}
 	extMap := make(map[int]map[string]any)
-	if err := sqlitex.ExecuteTransient(conn, sqlListEntriesExt, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, sqlListEntriesExt, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			idx := stmt.ColumnInt(0)
@@ -950,7 +952,7 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 		// Persist the healed parentage before the verify: the harmonized
 		// snapshot readers rebuild the parent from sessions.parent_id, and
 		// the NULL guard never clobbers a linkage set after the oracle read.
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET parent_id = ? WHERE session_id = ? AND parent_id IS NULL`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET parent_id = ? WHERE session_id = ? AND parent_id IS NULL`, &sqlitex.ExecOptions{
 			Args: []any{*oracle.parentID, string(oracle.sessionID)},
 		}); err != nil {
 			txnErr = fmt.Errorf("carry the parent linkage for session %s: %w; the catalog transaction rolled back and the old representation is intact", oracle.sessionID, err)
@@ -1077,7 +1079,7 @@ func readMigrateStagedBodies(conn *sqlite.Conn, oracle *migrateOracle) ([]EntryR
 		digest    string
 	}
 	var mapping []mapped
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, entry_index, body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, entry_index, body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			mapping = append(mapping, mapped{partition: stmt.ColumnInt(0), index: stmt.ColumnInt(1), digest: stmt.ColumnText(2)})
@@ -1101,7 +1103,7 @@ func readMigrateStagedBodies(conn *sqlite.Conn, oracle *migrateOracle) ([]EntryR
 				return nil, nil, fmt.Errorf("the staged mapping names partition %d entry %d at position %d, want partition %d entry %d", mapped.partition, mapped.index, position, partition, item.entry.EntryIndex)
 			}
 			found := false
-			err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+			err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 				Args: []any{string(oracle.sessionID), mapped.digest},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
 					records = append(records, scanEntryRecord(stmt))
@@ -1532,7 +1534,9 @@ func compareMigrateSnapshotContent(legacy, forced []indexformat.ContentRecord) *
 		for _, record := range records {
 			out = append(out, [2]string{string(record.Ref), fmt.Sprintf("%d", record.ByteLength)})
 		}
-		sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+		sort.Slice(out, func(i, j int) bool {
+			return out[i][0] < out[j][0]
+		})
 		return out
 	}
 	want, err := json.Marshal(shape(legacy))
@@ -1555,7 +1559,7 @@ func compareMigrateSnapshotContent(legacy, forced []indexformat.ContentRecord) *
 // a torn blob: it reads as zero bytes.
 func readMigrateBlobBytes(conn *sqlite.Conn, sessionID schema.SessionID, digest string) ([]byte, error) {
 	var payload []byte
-	if err := sqlitex.ExecuteTransient(conn, `SELECT data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), digest},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			n := stmt.ColumnLen(0)
@@ -1571,7 +1575,7 @@ func readMigrateBlobBytes(conn *sqlite.Conn, sessionID schema.SessionID, digest 
 		return payload, nil
 	}
 	empty := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT byte_length = 0 FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT byte_length = 0 FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), digest},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			empty = stmt.ColumnInt64(0) == 1
@@ -1683,7 +1687,7 @@ func verifyMigrateCarriedAliases(conn *sqlite.Conn, oracle *migrateOracle) *migr
 		ref string
 	}
 	var stored []alias
-	if err := sqlitex.ExecuteTransient(conn, `SELECT native_key, source_entry_ref FROM session_projection_aliases WHERE session_id = ? AND generation_id = ? ORDER BY native_key`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT native_key, source_entry_ref FROM session_projection_aliases WHERE session_id = ? AND generation_id = ? ORDER BY native_key`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			stored = append(stored, alias{stmt.ColumnText(0), stmt.ColumnText(1)})
@@ -1711,7 +1715,7 @@ func verifyMigrateCarriedSections(conn *sqlite.Conn, oracle *migrateOracle) *mig
 		state     string
 	}
 	var stored []section
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			stored = append(stored, section{stmt.ColumnInt(0), stmt.ColumnText(1)})
@@ -1766,7 +1770,7 @@ func verifyMigrateCarriedNativeMetadata(conn *sqlite.Conn, oracle *migrateOracle
 func verifyMigrateCarriedSegments(conn *sqlite.Conn, oracle *migrateOracle) *migrateShadowMismatch {
 	var stored []indexformat.ContextSegment
 	refsBySegment := map[int][]schema.SourceEntryRef{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal`, &sqlitex.ExecOptions{
 		Args: []any{string(oracle.sessionID), oracle.generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			segment := indexformat.ContextSegment{
@@ -1807,7 +1811,7 @@ func verifyMigrateCarriedSegments(conn *sqlite.Conn, oracle *migrateOracle) *mig
 		return &migrateShadowMismatch{Dimension: "carried-segments", Reason: fmt.Sprintf("read back the segment rows: %v", err)}
 	}
 	if len(stored) > 0 {
-		if err := sqlitex.ExecuteTransient(conn, `SELECT segment_ordinal, source_entry_ref FROM session_context_segment_refs WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal, ordinal`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT segment_ordinal, source_entry_ref FROM session_context_segment_refs WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal, ordinal`, &sqlitex.ExecOptions{
 			Args: []any{string(oracle.sessionID), oracle.generationID},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				ref, err := schema.NewSourceEntryRef(stmt.ColumnText(1))

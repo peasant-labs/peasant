@@ -2,6 +2,7 @@ cases:
   - name: file-backed-refresh-retains-prior-raw-stats
     refresh: true
     refreshCount: 2
+    checkSkip: true
     statsJson: '{"inputSubmissionCount":1,"futureZ":{"count":7},"futureA":null}'
     want:
       inputSubmissionCount: 1

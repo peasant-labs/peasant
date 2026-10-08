@@ -28,7 +28,9 @@ func LoadContentModelParityFixtures(t *testing.T) []contentparity.Case {
 	return cases
 }
 
-func TestContentModelParityFixtureManifest(t *testing.T) { LoadContentModelParityFixtures(t) }
+func TestContentModelParityFixtureManifest(t *testing.T) {
+	LoadContentModelParityFixtures(t)
+}
 
 func TestContentModelParity(t *testing.T) {
 	for _, c := range LoadContentModelParityFixtures(t) {

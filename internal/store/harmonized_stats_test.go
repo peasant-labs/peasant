@@ -22,7 +22,7 @@ func seedStatsSession(t *testing.T, s *store.Store, id string, active *string) {
 	defer s.PoolForTest().Put(conn)
 	exec := func(query string, args ...any) {
 		t.Helper()
-		if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args}); err != nil {
+		if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: args}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,8 +43,12 @@ VALUES(?,?,11,'opencode','stats-model','test',1,2,'jsonl','stats-project','stats
 	}
 }
 
-func statsInt(v int) *int          { return &v }
-func statsString(v string) *string { return &v }
+func statsInt(v int) *int {
+	return &v
+}
+func statsString(v string) *string {
+	return &v
+}
 
 func readStatsMirror(t *testing.T, s *store.Store, id string) any {
 	t.Helper()
@@ -54,7 +58,7 @@ func readStatsMirror(t *testing.T, s *store.Store, id string) any {
 	}
 	defer s.PoolForTest().Put(conn)
 	var mirror any
-	if err := sqlitex.ExecuteTransient(conn, `SELECT input_submission_count FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT input_submission_count FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{id}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) != sqlite.TypeNull {
 				mirror = stmt.ColumnInt64(0)
