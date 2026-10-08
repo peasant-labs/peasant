@@ -189,6 +189,7 @@ func execReclaimCmdSQL(t *testing.T, conn *sqlite.Conn, script string) {
 		t.Fatalf("exec seed SQL: %v\nscript: %.200s", err, script)
 	}
 }
+
 // seedReclaimCmdStore seeds one session with a superseded and an active
 // managed generation into the file-backed storage Release N still reads:
 // the projection catalog rows plus the owned generation directories with
