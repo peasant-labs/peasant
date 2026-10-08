@@ -21,9 +21,9 @@ import (
 // pins the domain instead of recomputing it.
 const (
 	shimSessionID     = "04999aaa-36bc-424c-a789-8be54d9702bd"
-	shimGenerationID   = "gen-shim-suite"
+	shimGenerationID  = "gen-shim-suite"
 	shimFullTokenHash = "2d49f8174a0aa58ad30af2e02b6ac8c14f246e7284e905125916c906499f705e"
-	mirrorSessionID    = "05999aaa-36bc-424c-a789-8be54d9702be"
+	mirrorSessionID   = "05999aaa-36bc-424c-a789-8be54d9702be"
 )
 
 // seedShimSuite writes the harmonized session (bodies plus mapping, active

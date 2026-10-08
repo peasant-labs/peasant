@@ -660,6 +660,7 @@ func shimContentPage(verified []schema.SessionEntry, from, limit int, softMaxByt
 	}
 	return page, next, bytesRead
 }
+
 // loadAvailableSessionEntriesOnConn returns the content that is actually
 // stored, with no completeness, publication-readiness, recovery or native-source
 // gate: the verified full text when the capture is complete, and the bounded

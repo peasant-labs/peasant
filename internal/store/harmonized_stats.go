@@ -257,6 +257,7 @@ WHERE session_id = ? AND active_generation_id IS NOT NULL AND metric_seed_json I
 	}
 	return nil
 }
+
 // syncInputSubmissionMirrorOnConn repoints the sessions mirror at the merged
 // row, so list and grouping paths keep serving one narrow row. The mirror is
 // a copy of the row's current value: an update that reports no count leaves

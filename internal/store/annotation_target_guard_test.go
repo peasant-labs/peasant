@@ -44,7 +44,7 @@ func TestAnnotationTargetGuardedInsert(t *testing.T) {
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	var matches []struct {
-		File string `json:"file"`
+		File  string `json:"file"`
 		Range struct {
 			Start struct {
 				Line int `json:"line"`

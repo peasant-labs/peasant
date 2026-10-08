@@ -277,11 +277,11 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.
 WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
 			children.commits = append(children.commits, schema.CommitInfo{
 				Hash:        stmt.ColumnText(0),
-				Message:      stmt.ColumnText(1),
-				AuthorName:   stmt.ColumnText(2),
-				AuthorEmail:  stmt.ColumnText(3),
-				CommitTime:   stmt.ColumnInt64(4),
-				AuthorTime:   stmt.ColumnInt64(5),
+				Message:     stmt.ColumnText(1),
+				AuthorName:  stmt.ColumnText(2),
+				AuthorEmail: stmt.ColumnText(3),
+				CommitTime:  stmt.ColumnInt64(4),
+				AuthorTime:  stmt.ColumnInt64(5),
 			})
 			return nil
 		}},
@@ -510,18 +510,18 @@ type harmonizedMappedEntry struct {
 // closed on anything unrecognized.
 func scanBodyRow(stmt *sqlite.Stmt, off int) (EntryRecord, error) {
 	row := EntryRecord{
-		BodyID:       stmt.ColumnInt64(off),
-		SessionID:    schema.SessionID(stmt.ColumnText(off + 1)),
-		BodyDigest:   stmt.ColumnText(off + 2),
-		EntryIndex:   stmt.ColumnInt(off + 3),
-		Harness:      schema.Harness(stmt.ColumnText(off + 4)),
-		EntryType:    schema.EntryType(stmt.ColumnText(off + 5)),
-		Role:         schema.Role(stmt.ColumnText(off + 6)),
-		HasToolUse:   stmt.ColumnInt(off + 11) == 1,
-		ToolNamesCSV: nullableText(stmt, off+13),
-		HasThinking:  stmt.ColumnInt(off + 14) == 1,
-		IsError:      stmt.ColumnInt(off + 15) == 1,
-		Depth:        stmt.ColumnInt(off + 21),
+		BodyID:         stmt.ColumnInt64(off),
+		SessionID:      schema.SessionID(stmt.ColumnText(off + 1)),
+		BodyDigest:     stmt.ColumnText(off + 2),
+		EntryIndex:     stmt.ColumnInt(off + 3),
+		Harness:        schema.Harness(stmt.ColumnText(off + 4)),
+		EntryType:      schema.EntryType(stmt.ColumnText(off + 5)),
+		Role:           schema.Role(stmt.ColumnText(off + 6)),
+		HasToolUse:     stmt.ColumnInt(off+11) == 1,
+		ToolNamesCSV:   nullableText(stmt, off+13),
+		HasThinking:    stmt.ColumnInt(off+14) == 1,
+		IsError:        stmt.ColumnInt(off+15) == 1,
+		Depth:          stmt.ColumnInt(off + 21),
 		SourceEntryRef: schema.SourceEntryRef(stmt.ColumnText(off + 32)),
 	}
 	row.TimestampMs = nullableInt64Col(stmt, off+7)
