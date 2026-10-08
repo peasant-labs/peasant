@@ -128,9 +128,9 @@ func removePeasantBuildDir() {
 
 // buildPeasantOnce memoizes the default (PEASANT_BIN-unset) build so one test
 // binary performs exactly one `go build` even when several e2e tests ask for
-// the CLI. The output lives for the process; the OS temp reaper removes it after
-// exit. An injected PEASANT_BIN is resolved per call and never memoized, so the
-// seam tests keep observing their own command.
+// the CLI. The dir lives until TestMain removes it after the run; the OS temp
+// reaper covers a killed run. An injected PEASANT_BIN is resolved per call and
+// never memoized, so the seam tests keep observing their own command.
 var (
 	buildPeasantOnce sync.Once
 	buildPeasantPath string

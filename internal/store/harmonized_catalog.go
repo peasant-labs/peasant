@@ -229,9 +229,11 @@ type ContentBlob struct {
 // empty: the legacy writer emits "subagents":[] and
 // "diagnostics":{"warnings":[]} even when empty, never null and never
 // absent (every stored metadata_json carries both). A nil slice would
-// marshal as null, so empty collections are coerced here. Every builder
-// of a captured UnifiedMetadata calls it, so file-backed reads,
-// harmonized reads, and the migration's shadow verify agree byte for byte.
+// marshal as null, so empty collections are coerced here. Every
+// reconstructing builder of a captured UnifiedMetadata calls it, so
+// file-backed reads, harmonized reads, and the migration's shadow verify
+// agree byte for byte. (The ingest parser and seed builders construct
+// fresh documents rather than rebuilding captured ones, so they do not.)
 func legacyPresentCollections(metadata *schema.UnifiedMetadata) {
 	if metadata.Subagents == nil {
 		metadata.Subagents = []schema.SubagentRef{}
@@ -356,12 +358,7 @@ func serializeMetadata(gen GenerationRecord, children GenerationChildren, stats 
 		}
 		metadata.Relationships = append(metadata.Relationships, restored)
 	}
-	// The legacy writer always emits the subagent and warning collections,
-	// even when empty: every stored metadata_json carries "subagents":[] and
-	// "diagnostics":{"warnings":[]}, never null and never absent. A nil slice
-	// would marshal as null, so empty collections are coerced to empty here;
-	// the migration's shadow verify compares the rebuilt document byte for
-	// byte against the stored one.
+	// Coerce the always-present collections (see legacyPresentCollections).
 	legacyPresentCollections(&metadata)
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
