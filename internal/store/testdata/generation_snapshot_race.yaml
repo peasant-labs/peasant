@@ -1,0 +1,7 @@
+requiredNames:
+  - activation-and-sweep-preserve-captured-detail
+cases:
+  - name: activation-and-sweep-preserve-captured-detail
+    firstText: captured original text
+    nextText: replacement text
+    sweep: true
