@@ -107,6 +107,19 @@ func TestContentWriteBudgetFamily(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			switch c.Name {
+			case "unset-staged-memory-derives-from-custom-batch":
+				if c.BatchBytes == nil || c.StagedMemory == nil || len(c.Workers) == 0 {
+					t.Fatal("staged-memory derivation needs batchBytes, stagedMemoryBytes, and workers")
+				}
+				for _, workers := range c.Workers {
+					cfg := ingest.WriteConfig{BatchBytes: *c.BatchBytes}.WithDefaults(workers)
+					if cfg.StagedMemoryBytes != *c.StagedMemory {
+						t.Fatalf("workers=%d: derived cap=%d, want %d", workers, cfg.StagedMemoryBytes, *c.StagedMemory)
+					}
+					if err := cfg.Validate(); err != nil {
+						t.Fatalf("derived cap must validate: %v", err)
+					}
+				}
 			case "splitter-single-home":
 				runWriteBudgetSplitterSingleHome(t, c)
 			case "batch-under-configured-caps":

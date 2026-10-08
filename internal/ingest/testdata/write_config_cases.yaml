@@ -4,6 +4,8 @@
 # themselves, so a case pins the exact values under test. The zero-value and
 # omitted-key paths resolve to the shipped defaults before validation.
 required_names: [
+  wrong-case-key-is-refused,
+  unknown-key-is-refused,
   omitted-section-takes-all-defaults,
   documented-shape-is-valid,
   derived-staged-memory-is-valid,
@@ -30,6 +32,12 @@ required_names: [
   harvest-zero-takes-default,
 ]
 cases:
+  - name: wrong-case-key-is-refused
+    write: {hold_target_ms: 4000}
+    decode_error: 'unknown write.hold_target_ms'
+  - name: unknown-key-is-refused
+    write: {surprise: 64}
+    decode_error: 'unknown write.surprise'
   # No keys at all: every knob defaults and the staged-memory cap derives.
   - name: omitted-section-takes-all-defaults
     write: {}

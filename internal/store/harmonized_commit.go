@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"runtime"
 	"sort"
@@ -142,6 +143,16 @@ func (s *Store) stageHarmonizedBatch(ctx context.Context, prepared []*preparedHa
 				return fmt.Errorf("store: blob %s of session %s carries no bytes to stage; stage the candidate with its content bytes instead", unit.blob.digest, candidate.sessionID)
 			}
 			bytes += unit.bytes
+		}
+		if bytes > cfg.BatchBytes {
+			diagnostic := ingest.DiagnosticEntry{
+				ErrorType: "oversize_write_advisory", Location: string(candidate.sessionID),
+				Message:     fmt.Sprintf("harvest: session stages %d bytes, exceeding write.batchBytes=%d, and commits alone; its activation may exceed the %s writer hold target, so no other writer running is recommended; stop concurrent harvest or migration until this session finishes", bytes, cfg.BatchBytes, cfg.HoldTarget),
+				Remediation: "Run harvest without another writer until the oversized session finishes.",
+			}
+			if !ingest.ReportWriteAdvisory(ctx, diagnostic) {
+				slog.WarnContext(ctx, diagnostic.Message, "session_id", candidate.sessionID)
+			}
 		}
 		sessions = append(sessions, stagedSessionObjects{session: candidate.sessionID, units: units, bytes: bytes})
 	}

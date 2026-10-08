@@ -22,6 +22,15 @@
 # writes. The test also derives the set from the registry itself; this list
 # pins it, so a probe that finds nothing cannot pass.
 requiredNames:
+  - write.holdTargetMs
+  - write.activationSessions
+  - write.batchBytes
+  - write.batchSessions
+  - write.bufferBytes
+  - write.stagedMemoryBytes
+  - write.flushIntervalMs
+  - write.sweepRows
+  - write.harvestTargetMinutes
   - version
   - user.email
   - redaction.level
@@ -100,6 +109,15 @@ editable:
   - push.concurrency
   - display.theme
 readOnly:
+  - write.holdTargetMs
+  - write.activationSessions
+  - write.batchBytes
+  - write.batchSessions
+  - write.bufferBytes
+  - write.stagedMemoryBytes
+  - write.flushIntervalMs
+  - write.sweepRows
+  - write.harvestTargetMinutes
   - version
   - village.connected
   - selection.mode
