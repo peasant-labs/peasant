@@ -122,8 +122,8 @@ VALUES('s-tables','opencode','tables-model','tables-host','tables-project',1,2,3
 	execHarmonized(t, conn, fmt.Sprintf(
 		`INSERT INTO session_content(session_id, digest, byte_length) VALUES('s-tables','%s',10)`, db.content))
 	db.segment = "gen-seg"
-	execHarmonized(t, conn, `INSERT INTO session_context_segments(session_id, generation_id, segment_ordinal, physical_source_id, coordinate_kind, inclusion, captured_refs_json)
-VALUES('s-tables','gen-seg',0,'phys','entries','retained','[]')`)
+	execHarmonized(t, conn, `INSERT INTO session_context_segments(session_id, generation_id, segment_ordinal, physical_source_id, coordinate_kind, inclusion)
+VALUES('s-tables','gen-seg',0,'phys','entries','retained')`)
 	db.section = "gen-sec"
 	execHarmonized(t, conn, `INSERT INTO session_projection_sections(session_id, generation_id, partition_id) VALUES('s-tables','gen-sec',0)`)
 	// Start probe keys far above every setup key so no probe collides with a
@@ -434,6 +434,33 @@ VALUES('%s','opencode','m','tables-host','tables-project',1,2,3,'/s.jsonl','json
 		set("attachment_tool_call_id", "c")
 		set("custom_type", "t")
 		set("data", "{}")
+	case "session_relationship_evidence":
+		set("session_id", sid)
+		set("generation_id", fmt.Sprintf("gen-ev-%d", n))
+		set("kind", "started_by")
+		set("target_state", "unknown")
+		set("target_local_id", "t")
+		set("evidence", "e")
+		set("anchor_kind", "k")
+		set("anchor_source_entry_ref", "e")
+		set("anchor_source_revision_ref", "r")
+	case "session_context_segments":
+		set("session_id", sid)
+		set("generation_id", fmt.Sprintf("gen-seg-%d", n))
+		set("segment_ordinal", 0)
+		set("logical_session_id", "l")
+		set("physical_source_id", "p")
+		set("coordinate_kind", "c")
+		set("start_coordinate", 0)
+		set("end_exclusive", 1)
+		set("decoded_byte_start", 0)
+		set("decoded_byte_end_exclusive", 1)
+		set("inclusion", "i")
+	case "session_projection_sections":
+		set("session_id", sid)
+		set("generation_id", fmt.Sprintf("gen-sec-%d", n))
+		set("partition_id", 0)
+		set("earlier_state", "e")
 	case "annotation_target_entries":
 		set("annotation_id", fmt.Sprintf("ann-%d", n))
 		set("session_id", sid)
