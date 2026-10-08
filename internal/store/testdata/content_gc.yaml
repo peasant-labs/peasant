@@ -1,23 +1,176 @@
-# content_gc — scaffolding for the harmonized session content model
-# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+# content_gc — the per-session sweep family (design
+# llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
+#
+# Each case names the section-10 behavior plus the typed expectations its
+# runner asserts: the exact sweep counts, the sessions the v62 backfill flags,
+# the mirror/full-content rows a conversion settles, and the raw MATCH sets
+# (terms that must still match, terms that must match nothing). firstTerms
+# are embedded in the first generation's entries, secondTerms in the second's
+# (or the staged-only candidate); matchFound/matchEmpty assert the raw index
+# after the sweep. A case with no typed fields is a placeholder a later
+# change fills; the loader's manifest check still protects its name.
 cases:
   - name: active-only
+    wantRowsDeleted: 0
+    wantBodiesDeleted: 0
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    secondTerms: [gcactivea0, gcactivea1, gcactivea2]
+    matchFound: [gcactivea0, gcactivea1, gcactivea2]
   - name: superseded-only
+    wantRowsDeleted: 7
+    wantBodiesDeleted: 3
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcsupoldo0, gcsupoldo1, gcsupoldo2]
+    secondTerms: [gcsupoldn0, gcsupoldn1, gcsupoldn2]
+    matchFound: [gcsupoldn0, gcsupoldn1, gcsupoldn2]
+    matchEmpty: [gcsupoldo0, gcsupoldo1, gcsupoldo2]
   - name: shared-active-superseded
+    wantRowsDeleted: 7
+    wantBodiesDeleted: 2
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcshared0, gcsharedold1, gcsharedold2]
+    secondTerms: [gcshared0, gcsharednew1, gcsharednew2]
+    matchFound: [gcshared0, gcsharednew1, gcsharednew2]
+    matchEmpty: [gcsharedold1, gcsharedold2]
   - name: non-native-untouched
+    wantRowsDeleted: 0
+    wantBodiesDeleted: 0
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantMirrorRows: 1
+    wantFullContentRows: 1
   - name: crash-orphan
+    wantRowsDeleted: 0
+    wantBodiesDeleted: 3
+    wantBlobsDeleted: 1
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gccrasho0, gccrasho1, gccrasho2]
+    secondTerms: [gccrashn0, gccrashn1, gccrashn2]
+    matchFound: [gccrasho0, gccrasho1, gccrasho2]
+    matchEmpty: [gccrashn0, gccrashn1, gccrashn2]
   - name: fk-blocks-live-delete
+    matchFound: [gcfko0, gcfko1, gcfko2]
+    firstTerms: [gcfko0, gcfko1, gcfko2]
   - name: blob-unreferenced-swept
+    wantRowsDeleted: 10
+    wantBodiesDeleted: 3
+    wantBlobsDeleted: 1
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcblobuo0, gcblobuo1, gcblobuo2]
+    secondTerms: [gcblobun0, gcblobun1, gcblobun2]
+    matchFound: [gcblobun0, gcblobun1, gcblobun2]
+    matchEmpty: [gcblobuo0, gcblobuo1, gcblobuo2]
   - name: blob-referenced-kept
+    wantRowsDeleted: 0
+    wantBodiesDeleted: 0
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcblobrk0, gcblobrk1, gcblobrk2]
+    matchFound: [gcblobrk0, gcblobrk1, gcblobrk2]
   - name: chunk-cascade
+    wantRowsDeleted: 10
+    wantBodiesDeleted: 3
+    wantBlobsDeleted: 1
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcchunko0, gcchunko1, gcchunko2]
+    secondTerms: [gcchunkn0, gcchunkn1, gcchunkn2]
+    matchFound: [gcchunkn0, gcchunkn1, gcchunkn2]
+    matchEmpty: [gcchunko0, gcchunko1, gcchunko2]
   - name: blob-shared-active-superseded
+    wantRowsDeleted: 12
+    wantBodiesDeleted: 3
+    wantBlobsDeleted: 1
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcblobso0, gcblobso1, gcblobso2]
+    secondTerms: [gcblobsn0, gcblobsn1, gcblobsn2]
+    matchFound: [gcblobsn0, gcblobsn1, gcblobsn2]
+    matchEmpty: [gcblobso0, gcblobso1, gcblobso2]
   - name: flag-complete-after-v62
+    sessions:
+      - id: "11111111-1111-4111-8111-111111111111"
+        active: "gc_flag_active_a"
+        generations: ["gc_flag_active_a", "gc_flag_old_a"]
+      - id: "22222222-2222-4222-8222-222222222222"
+        active: "gc_flag_active_b"
+        generations: ["gc_flag_active_b"]
+      - id: "33333333-3333-4333-8333-333333333333"
+        generations: ["gc_flag_orphan_c"]
+      - id: "44444444-4444-4444-8444-444444444444"
+        active: "gc_flag_missing_d"
+        generations: []
   - name: directory-orphan-retried-without-rows
+    wantRowsDeleted: 0
+    wantBodiesDeleted: 0
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 1
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcdiroa0, gcdiroa1, gcdiroa2]
+    matchFound: [gcdiroa0, gcdiroa1, gcdiroa2]
   - name: representation-replacement-flagged-and-swept
+    wantRowsDeleted: 0
+    wantBodiesDeleted: 6
+    wantBlobsDeleted: 1
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcrepo0, gcrepo1, gcrepo2]
+    secondTerms: [gcrepn0, gcrepn1, gcrepn2]
+    matchEmpty: [gcrepo0, gcrepo1, gcrepo2, gcrepn0, gcrepn1, gcrepn2]
   - name: non-native-reindexed-as-native-settles
+    wantRowsDeleted: 0
+    wantBodiesDeleted: 0
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    wantMirrorRows: 0
+    wantFullContentRows: 0
+    secondTerms: [gcreindexn0, gcreindexn1, gcreindexn2]
+    matchFound: [gcreindexn0, gcreindexn1, gcreindexn2]
+    matchEmpty: [gcreindexv0]
   - name: sweep-session-qualified
+    wantRowsDeleted: 7
+    wantBodiesDeleted: 3
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcqualao0, gcqualao1, gcqualao2]
+    secondTerms: [gcqualan0, gcqualan1, gcqualan2]
+    matchFound: [gcqualan0, gcqualan1, gcqualan2, gcqualbo0, gcqualbo1, gcqualbo2, gcqualbn0, gcqualbn1, gcqualbn2]
+    matchEmpty: [gcqualao0, gcqualao1, gcqualao2]
   - name: fts-postings-removed-on-sweep
+    wantRowsDeleted: 7
+    wantBodiesDeleted: 3
+    wantBlobsDeleted: 0
+    wantDirsRemoved: 0
+    wantFlagCleared: true
+    wantRebuilt: false
+    firstTerms: [gcftssweepo0, gcftssweepo1, gcftssweepo2]
+    secondTerms: [gcftssweepn0, gcftssweepn1, gcftssweepn2]
+    matchFound: [gcftssweepn0, gcftssweepn1, gcftssweepn2]
+    matchEmpty: [gcftssweepo0, gcftssweepo1, gcftssweepo2]
   - name: fts-postings-removed-on-prune
+    firstTerms: [gcprune0, gcprune1, gcprune2]
+    matchEmpty: [gcprune0, gcprune1, gcprune2]

@@ -233,24 +233,10 @@ func TestContentHostileInputFixtureManifest(t *testing.T) {
 	loadContentHostileInputFixture(t)
 }
 
-//go:embed testdata/content_gc.yaml
-var contentGcYAML []byte
-
-//go:embed testdata/content_gc.manifest.yaml
-var contentGcManifestYAML []byte
-
-// loadContentGCFixture loads the content garbage collection scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentGCFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content garbage collection", contentGcYAML, contentGcManifestYAML)
-}
-
-// TestContentGCFixtureManifest pins the content garbage collection case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentGCFixtureManifest(t *testing.T) {
-	loadContentGCFixture(t)
-}
+// The content garbage collection family graduated to a typed loader with
+// count, flag, and MATCH expectations in content_gc_test.go, which
+// supersedes the name-only scaffold here (the manifest inventory it protects
+// is unchanged).
 
 // content_migration is owned by the typed loader in content_migration_test.go;
 // the full required-name inventory stays manifest-protected there.
