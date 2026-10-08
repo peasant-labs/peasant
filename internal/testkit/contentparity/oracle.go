@@ -71,10 +71,10 @@ func Load(data, manifest []byte) ([]Case, error) {
 	}
 	seen := map[string]bool{}
 	for _, c := range family.Cases {
-		invalidName := c.Name == "" || seen[c.Name]
-		missingContext := c.SessionID == "" || c.Why == ""
+		invalidIdentity := c.Name == "" || seen[c.Name] || c.SessionID == ""
 		missingSource := len(c.Entries) == 0 && c.Source == ""
-		if invalidName || missingContext || missingSource {
+		incompleteScenario := c.Why == "" || missingSource
+		if invalidIdentity || incompleteScenario {
 			return nil, fmt.Errorf("load parity sources: case %q is duplicate or incomplete; restore its pinned source and explanation", c.Name)
 		}
 		seen[c.Name] = true
@@ -470,7 +470,8 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 		return result, e
 	}
 	defer conn.Close()
-	err = sqlitex.Execute(conn, `SELECT s.session_entries_hash,c.full_capture_sha256 FROM sessions s LEFT JOIN session_content_captures c USING(session_id) WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(st *sqlite.Stmt) error {
+	// This connection performs exactly one hash query before it is closed.
+	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_entries_hash,c.full_capture_sha256 FROM sessions s LEFT JOIN session_content_captures c USING(session_id) WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(st *sqlite.Stmt) error {
 		if st.ColumnType(0) != sqlite.TypeNull {
 			v := st.ColumnText(0)
 			result.SessionHash = &v
@@ -551,6 +552,7 @@ func seedFileBacked(ctx context.Context, db *store.Store, path, root string, g i
 		return err
 	}
 	defer conn.Close()
+	// All callers pass constant SQL; entry/content inserts reuse cached statements.
 	exec := func(query string, args ...any) error {
 		return sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: args})
 	}
