@@ -125,6 +125,39 @@ func seedFileBackedGeneration(t *testing.T, s *Store, root string, sid schema.Se
 	if err := pointSessionAtGenerationOnConn(conn, sid, generation); err != nil {
 		t.Fatalf("point session at seeded generation: %v", err)
 	}
+	// The v62 backfill gives every native session its captured-stats row
+	// before Release N; a synthetic file-backed seed mirrors that so the
+	// moved readers find the capture's measurements. The stamp stays at the
+	// install time (1) so any later activation merge wins.
+	seedDoc, err := json.Marshal(generation.Metadata.Stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedDocText := string(seedDoc)
+	turnCount := generation.Metadata.Stats.TurnCount
+	toolCallCount := generation.Metadata.Stats.ToolCallCount
+	subagentCount := generation.Metadata.Stats.SubagentCount
+	durationMs := generation.Metadata.Stats.DurationMs
+	tokensIn := generation.Metadata.Stats.TokensIn
+	tokensOut := generation.Metadata.Stats.TokensOut
+	if _, err := upsertCapturedStatsOnConn(conn, CapturedStats{
+		SessionID:            sid,
+		TurnCount:            &turnCount,
+		InputSubmissionCount: generation.Metadata.Stats.InputSubmissionCount,
+		ToolCallCount:        &toolCallCount,
+		SubagentCount:        &subagentCount,
+		DurationMs:           &durationMs,
+		TokensIn:             &tokensIn,
+		TokensOut:            &tokensOut,
+		ThoughtTokens:        generation.Metadata.Stats.ThoughtTokens,
+		CachedReadTokens:     generation.Metadata.Stats.CachedReadTokens,
+		CachedWriteTokens:    generation.Metadata.Stats.CachedWriteTokens,
+		SeedJSON:             &seedDocText,
+		Source:               StatsSourceHarness,
+		UpdatedAtMs:          1,
+	}); err != nil {
+		t.Fatalf("seed captured stats row: %v", err)
+	}
 	// The mirror batch takes its own connection; release this one first.
 	s.pool.Put(conn)
 	// The mirror rows come from the production V1 batch write over the main

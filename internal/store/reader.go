@@ -152,12 +152,21 @@ const (
 	// project_name removed; project display name is COALESCE(p.canonical_cwd, p.project_hash).
 	//
 	// tokens_total = peak context window usage (input_tokens stores MAX, not SUM).
+	//
+	// Native sessions (an active generation) read their moved measurements
+	// from the captured stats row; sessions without one keep the legacy
+	// metrics columns. Input tokens stay on the analysis record everywhere:
+	// they are peak context usage, not the harness-reported total.
 	sqlAllSessions = `SELECT
     s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
     s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
     s.git_branch, s.tool_version,
-    m.turn_count, m.tool_calls, m.input_tokens, m.output_tokens,
-    COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0), m.duration_minutes,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
+    m.input_tokens,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
+    COALESCE(m.input_tokens, 0) + COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END, 0),
+    CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END,
     m.title, m.outcome, m.scope,
     m.files_touched, m.lines_changed,
     m.retry_loops, m.retry_tokens_wasted, m.within_session_reverts,
@@ -171,7 +180,8 @@ const (
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 JOIN projects p ON s.project_hash = p.project_hash
-LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
+LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id`
 
 	sqlSessionByID = sqlAllSessions + ` WHERE s.session_id = ?`
 
@@ -185,8 +195,12 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
     s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
     s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
     s.git_branch, s.tool_version,
-    m.turn_count, m.tool_calls, m.input_tokens, m.output_tokens,
-    COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0), m.duration_minutes,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
+    m.input_tokens,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
+    COALESCE(m.input_tokens, 0) + COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END, 0),
+    CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END,
     m.title, m.outcome, m.scope,
     m.files_touched, m.lines_changed,
     m.retry_loops, m.retry_tokens_wasted, m.within_session_reverts,
@@ -202,6 +216,7 @@ FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 JOIN projects p ON s.project_hash = p.project_hash
 LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 WHERE s.session_id = ?`
 
 	sqlDashboardAggregates = `SELECT
@@ -931,7 +946,10 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 func sortFieldToColumn(f defaults.SessionSortField) string {
 	switch f {
 	case defaults.SessionSortTurns:
-		return "m.turn_count"
+		// Sorts the moved turn count both homes serve: the captured row for
+		// native sessions, the legacy metrics columns otherwise. sqlAllSessions
+		// carries both joins, so this expression is valid wherever it sorts.
+		return "CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END"
 	case defaults.SessionSortTokens:
 		// tokens_total in sqlAllSessions is COALESCE(m.input_tokens, 0); use m.input_tokens for sort.
 		return "COALESCE(m.input_tokens, 0)"
@@ -955,6 +973,14 @@ func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (_ strin
 	defer endSnapshot(&retErr)
 	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
 		return "", err
+	}
+
+	shimmed, err := shimmedOnConn(conn, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if shimmed {
+		return shimFirstUserPreview(conn, sessionID)
 	}
 
 	const q = `SELECT content_preview FROM session_entries
@@ -1001,7 +1027,32 @@ func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (
 		return nil, err
 	}
 
+	// Bulk previews span both representations: partition the batch once,
+	// then run each side's bounded query and merge the maps.
+	shimmed, err := shimmedIDsOnConn(conn, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	var mirrorIDs, shimIDs []string
+	for _, id := range sessionIDs {
+		if shimmed[id] {
+			shimIDs = append(shimIDs, id)
+		} else {
+			mirrorIDs = append(mirrorIDs, id)
+		}
+	}
 	result := make(map[string]string, len(sessionIDs))
+	if len(shimIDs) > 0 {
+		shimResult, err := shimFirstUserPreviewBulk(conn, shimIDs)
+		if err != nil {
+			return nil, err
+		}
+		for sid, preview := range shimResult {
+			result[sid] = preview
+		}
+	}
+	sessionIDs = mirrorIDs
+
 	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
 		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
 		// Keep every projection query below SQLite's variable limit.
@@ -1062,7 +1113,30 @@ func (s *Store) LeadingUserMessagesBulk(ctx context.Context, sessionIDs []string
 		return nil, err
 	}
 
+	shimmed, err := shimmedIDsOnConn(conn, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	var mirrorIDs, shimIDs []string
+	for _, id := range sessionIDs {
+		if shimmed[id] {
+			shimIDs = append(shimIDs, id)
+		} else {
+			mirrorIDs = append(mirrorIDs, id)
+		}
+	}
 	result := make(map[string][]string, len(sessionIDs))
+	if len(shimIDs) > 0 {
+		shimResult, err := shimLeadingUserPreviewsBulk(conn, shimIDs, perSession)
+		if err != nil {
+			return nil, err
+		}
+		for sid, previews := range shimResult {
+			result[sid] = previews
+		}
+	}
+	sessionIDs = mirrorIDs
+
 	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
 		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
 		placeholders := make([]string, len(selectedIDs))

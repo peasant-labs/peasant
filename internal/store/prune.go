@@ -24,11 +24,12 @@ const (
 	sqlQueryPrunableSessions = `SELECT
     s.session_id, s.model_harness,
     COALESCE(p.canonical_cwd, p.project_hash, ''), COALESCE(h.git_remote, ''),
-    s.start_ms, COALESCE(m.turn_count, 0), h.host_slug,
+    s.start_ms, COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0), h.host_slug,
     s.project_hash, ` + sqlRecordedDirectory + `,
     COALESCE(s.git_branch, '')
 FROM sessions s
 LEFT JOIN session_metrics m ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 LEFT JOIN projects p ON s.project_hash = p.project_hash
 LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 )

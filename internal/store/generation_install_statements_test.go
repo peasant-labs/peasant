@@ -569,6 +569,8 @@ func assertInstalledRelationshipEvidence(t *testing.T, conn *sqlite.Conn, sid sc
 }
 
 // nullableColumnInt64ForTest reads a nullable INTEGER column as a *int64.
+
+// nullableColumnInt64ForTest reads a nullable INTEGER column as a *int64.
 func nullableColumnInt64ForTest(stmt *sqlite.Stmt, col int) *int64 {
 	if stmt.ColumnType(col) == sqlite.TypeNull {
 		return nil

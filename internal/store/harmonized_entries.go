@@ -60,102 +60,6 @@ type EntryRecord struct {
 	Provenance      *schema.ContentProvenance
 }
 
-// entryFromRow is the ONLY row -> struct reconstruction. Storage identity
-// (BodyID, BodyDigest) stays out of the wire struct; the four promoted
-// columns (ModelID, TokensReasoning, CacheRead, CacheWrite) fold back into
-// Extra alongside the unknown remainder, with ExtraVerbatim winning whenever
-// the canonical rebuild would not be byte-identical; Provenance fans out
-// from the eight prov_* columns. NULL vs empty and pointer nil-ness are
-// preserved exactly (design §3.4).
-func entryFromRow(r EntryRecord) schema.SessionEntry {
-	entry := schema.SessionEntry{
-		SessionID:      r.SessionID,
-		EntryIndex:     r.EntryIndex,
-		Harness:        r.Harness,
-		EntryType:      r.EntryType,
-		Role:           r.Role,
-		TimestampMs:    r.TimestampMs,
-		ContentPreview: r.ContentPreview,
-		TokensIn:       r.TokensIn,
-		TokensOut:      r.TokensOut,
-		HasToolUse:     r.HasToolUse,
-		ToolKind:       r.ToolKind,
-		ToolNamesCSV:   r.ToolNamesCSV,
-		HasThinking:    r.HasThinking,
-		IsError:        r.IsError,
-		StopReason:     r.StopReason,
-		RawByteLength:  r.RawByteLength,
-		ToolCallID:     r.ToolCallID,
-		EntryID:        r.EntryID,
-		ParentEntryID:  r.ParentEntryID,
-		Depth:          r.Depth,
-		ParentIndex:    r.ParentIndex,
-		ToolInput:      r.ToolInput,
-		ToolOutput:     r.ToolOutput,
-		PartType:       r.PartType,
-		SourceEntryRef: r.SourceEntryRef,
-	}
-	entry.Extra = rebuildEntryExtra(r)
-	if r.Provenance != nil {
-		provenance := *r.Provenance
-		entry.Provenance = &provenance
-	}
-	return entry
-}
-
-// rebuildEntryExtra folds the promoted columns back into the unknown
-// remainder: ExtraVerbatim wins outright (the canonical rebuild would not
-// have been byte-identical), otherwise the promoted values join the stored
-// remainder under the canonical key order and marshal to the same bytes the
-// writer stored. A corrupt stored remainder reads back as-is; the full-read
-// digest check refuses it before anything is served.
-func rebuildEntryExtra(r EntryRecord) *string {
-	if r.ExtraVerbatim != nil {
-		verbatim := *r.ExtraVerbatim
-		return &verbatim
-	}
-	remainder := map[string]json.RawMessage{}
-	if r.Extra != nil {
-		if err := json.Unmarshal([]byte(*r.Extra), &remainder); err != nil {
-			verbatim := *r.Extra
-			return &verbatim
-		}
-	}
-	if r.ModelID != nil {
-		remainder[extraKeyModelID] = json.RawMessage(quoteJSONString(*r.ModelID))
-	}
-	if r.TokensReasoning != nil {
-		remainder[extraKeyTokensReasoning] = json.RawMessage(jsonNumber(*r.TokensReasoning))
-	}
-	if r.CacheRead != nil {
-		remainder[extraKeyCacheRead] = json.RawMessage(jsonNumber(*r.CacheRead))
-	}
-	if r.CacheWrite != nil {
-		remainder[extraKeyCacheWrite] = json.RawMessage(jsonNumber(*r.CacheWrite))
-	}
-	if len(remainder) == 0 {
-		return nil
-	}
-	encoded, err := json.Marshal(remainder)
-	if err != nil {
-		return nil
-	}
-	out := string(encoded)
-	return &out
-}
-
-// serializeEntry is the canonical text: the same json.Marshal the old writer
-// applied to the in-memory entry. body_digest = sha256(serializeEntry(row));
-// the wire builders use entryFromRow directly, so byte-parity is this one
-// function's contract (golden-tested; design §3.4).
-func serializeEntry(r EntryRecord) []byte {
-	encoded, err := json.Marshal(entryFromRow(r))
-	if err != nil {
-		panic(fmt.Sprintf("store: serialize entry %d of session %s: json.Marshal of the reconstructed entry cannot fail on plain columns: %v", r.EntryIndex, r.SessionID, err))
-	}
-	return encoded
-}
-
 // bodyDigestForRecord hashes the canonical text: the entry row's integrity
 // anchor, stored in session_entry_bodies.body_digest and recomputed on every
 // full read.
@@ -387,18 +291,6 @@ func quoteJSONString(text string) string {
 // jsonNumber encodes one int as its canonical JSON spelling.
 func jsonNumber(value int) string {
 	return fmt.Sprintf("%d", value)
-}
-
-// legacyShape is the routing shim (design §6.2 reader 3): the entry row
-// reconstructed and bounded exactly as the mirror would have stored it.
-// contentPreview is bounded by contentPreview() only where the mirror bounded
-// it (full-content captures, not preview-only ones); ext keys come from the
-// promoted columns merged by mergeExtIntoExtra exactly as for the mirror.
-// Callers (metrics, classifier inputs, sessions context, TUI, code map) are
-// unchanged. Stub: panics with ErrHarmonizedNotImplemented until the reader
-// lands it.
-func legacyShape(row EntryRecord, bounded bool) schema.SessionEntry {
-	panic(ErrHarmonizedNotImplemented)
 }
 
 // The one read router is a single store-level selection shim. The routing

@@ -1191,75 +1191,6 @@ func optNativeRole(v *schema.NativePiMessageRole) any {
 	return string(*v)
 }
 
-// upsertCapturedStatsOnConn runs the harness side of the measurements merge
-// (design §3.3 table 3c, C4): the per-field merge of the candidate's stats
-// into the session's row, with the harness seed document replaced wholesale.
-// An update older than the stored updated_at_ms is ignored, and equal
-// timestamps allow an idempotent rewrite. It reports whether the row moved,
-// so the caller advances the sessions mirror only on newer knowledge.
-func upsertCapturedStatsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, stats schema.SessionStats, seedJSON string, updatedAtMs int64) (bool, error) {
-	var stored *int64
-	if err := sqlitex.ExecuteTransient(conn, `SELECT updated_at_ms FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			at := stmt.ColumnInt64(0)
-			stored = &at
-			return nil
-		},
-	}); err != nil {
-		return false, fmt.Errorf("store: read captured stats for session %s: %w", sessionID, err)
-	}
-	if stored != nil && updatedAtMs < *stored {
-		return false, nil
-	}
-	seed := seedJSON
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_captured_stats(session_id, turn_count, input_submission_count, tool_call_count, subagent_count, duration_ms, tokens_in, tokens_out, thought_tokens, cached_read_tokens, cached_write_tokens, seed_json, source, updated_at_ms, overflow)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'harness', ?, NULL)
-ON CONFLICT(session_id) DO UPDATE SET
-turn_count = coalesce(excluded.turn_count, session_captured_stats.turn_count),
-input_submission_count = coalesce(excluded.input_submission_count, session_captured_stats.input_submission_count),
-tool_call_count = coalesce(excluded.tool_call_count, session_captured_stats.tool_call_count),
-subagent_count = coalesce(excluded.subagent_count, session_captured_stats.subagent_count),
-duration_ms = coalesce(excluded.duration_ms, session_captured_stats.duration_ms),
-tokens_in = coalesce(excluded.tokens_in, session_captured_stats.tokens_in),
-tokens_out = coalesce(excluded.tokens_out, session_captured_stats.tokens_out),
-thought_tokens = coalesce(excluded.thought_tokens, session_captured_stats.thought_tokens),
-cached_read_tokens = coalesce(excluded.cached_read_tokens, session_captured_stats.cached_read_tokens),
-cached_write_tokens = coalesce(excluded.cached_write_tokens, session_captured_stats.cached_write_tokens),
-seed_json = excluded.seed_json,
-source = excluded.source,
-updated_at_ms = excluded.updated_at_ms
-WHERE excluded.updated_at_ms >= session_captured_stats.updated_at_ms`, &sqlitex.ExecOptions{Args: []any{
-		string(sessionID),
-		int64(stats.TurnCount), optInt64(stats.InputSubmissionCount),
-		int64(stats.ToolCallCount), int64(stats.SubagentCount),
-		stats.DurationMs, int64(stats.TokensIn), int64(stats.TokensOut),
-		optInt(stats.ThoughtTokens), optInt(stats.CachedReadTokens), optInt(stats.CachedWriteTokens),
-		seed, updatedAtMs,
-	}}); err != nil {
-		return false, fmt.Errorf("store: upsert captured stats for session %s: %w", sessionID, err)
-	}
-	var merged *int64
-	if err := sqlitex.ExecuteTransient(conn, `SELECT input_submission_count FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			if stmt.ColumnType(0) != sqlite.TypeNull {
-				count := stmt.ColumnInt64(0)
-				merged = &count
-			}
-			return nil
-		},
-	}); err != nil {
-		return false, fmt.Errorf("store: read merged submission count for session %s: %w", sessionID, err)
-	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET input_submission_count = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{untypedInt64(merged), string(sessionID)},
-	}); err != nil {
-		return false, fmt.Errorf("store: mirror the submission count for session %s: %w", sessionID, err)
-	}
-	return true, nil
-}
-
 // untypedInt64 binds a nullable count: NULL when absent, so the driver
 // never stores a typed nil pointer as TEXT.
 func untypedInt64(v *int64) any {
@@ -1378,7 +1309,7 @@ func stampHarmonizedBookkeeping(conn *sqlite.Conn, sessionID schema.SessionID, s
 	if err := checkPublicationIndexRevision(conn, sessionID, stamps.captureRevision); err != nil {
 		return err
 	}
-	if _, err := upsertCapturedStatsOnConn(conn, sessionID, stamps.stats, stamps.seedJSON, stamps.updatedAtMs); err != nil {
+	if _, err := upsertCapturedStatsOnConn(conn, capturedStatsForHarnessWrite(sessionID, stamps.stats, stamps.seedJSON, stamps.updatedAtMs)); err != nil {
 		return err
 	}
 	if stamps.artifactIdentity != nil {
@@ -1650,7 +1581,7 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 		if err != nil {
 			return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: hash main entries for the idempotent retry of session %s: %w", write.SessionID, err)
 		}
-		if _, err := upsertCapturedStatsOnConn(conn, write.SessionID, v2.Generation.Metadata.Stats, seedJSONForStats(v2.Generation.Metadata.Stats), write.IndexedAtMs); err != nil {
+		if _, err := upsertCapturedStatsOnConn(conn, capturedStatsForHarnessWrite(write.SessionID, v2.Generation.Metadata.Stats, seedJSONForStats(v2.Generation.Metadata.Stats), write.IndexedAtMs)); err != nil {
 			return nil, nil, harmonizedBatchSkip{}, err
 		}
 		outcome := sessionEntryWriteOutcome{sessionEntriesHash: hash, skipped: true}

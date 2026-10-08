@@ -37,9 +37,11 @@ ORDER BY s.start_ms DESC, s.session_id`
 	// retry loops, and nullable total cost.
 	sqlMetricsForProject = `SELECT
     m.session_id, COALESCE(m.title, ''), COALESCE(m.outcome, ''),
-    m.output_tokens, m.retry_loops, m.cost_total_usd
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
+    m.retry_loops, m.cost_total_usd
 FROM session_metrics m
 JOIN sessions s ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = m.session_id
 WHERE s.project_hash = ?`
 
 	// sqlCommitsForProject reads every commit linked to any of the project's

@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
@@ -210,10 +211,19 @@ type SeedWrite struct {
 }
 
 // SeedWriteAllowed is the seed rule: it reports whether an origin may write
-// the harness-only seed home. Only StatsSourceHarness origins are admitted.
-// Stub: returns ErrHarmonizedNotImplemented until the stats writer lands it.
+// the harness-only seed home. Only StatsSourceHarness origins are admitted;
+// COMPUTE's derived upsert never writes it, so computed output can never be
+// consumed as adapter evidence. An origin outside the closed set is refused
+// with an error rather than a quiet false.
 func SeedWriteAllowed(source StatsSource) (bool, error) {
-	return false, ErrHarmonizedNotImplemented
+	switch source {
+	case StatsSourceHarness:
+		return true, nil
+	case StatsSourceDerived:
+		return false, nil
+	default:
+		return false, fmt.Errorf("store.SeedWriteAllowed: origin %q is outside the closed stats-source set; no seed home exists for it; use harness or derived", string(source))
+	}
 }
 
 // ContentBlob is the session_content header row (design §3.3 table 2): bytes

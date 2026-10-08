@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -146,7 +147,13 @@ func readHarmonizedPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, ge
 	}
 	stats, err := readCapturedStatsOnConn(conn, sessionID)
 	if err != nil {
-		return nil, err
+		// A native session always owns a stats row past the v62 backfill;
+		// without one its measurements read as unknown, exactly like a
+		// missing metric row did.
+		if !errors.Is(err, ErrNoCapturedStats) {
+			return nil, err
+		}
+		stats = CapturedStats{SessionID: sessionID, Source: StatsSourceHarness}
 	}
 	metadata, err := serializedMetadataToUnified(view.record, view.children, stats)
 	if err != nil {
@@ -194,45 +201,6 @@ func serializedMetadataToUnified(gen GenerationRecord, children GenerationChildr
 		return metadata, fmt.Errorf("store: rebuild captured metadata: the rebuilt document did not decode: %w; no candidate was produced", err)
 	}
 	return metadata, nil
-}
-
-// readCapturedStatsOnConn reads one session's measurements row: latest
-// knowledge wins, and a missing row reads as unknown (every measurement
-// nil), never as zero knowledge claimed.
-func readCapturedStatsOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (CapturedStats, error) {
-	stats := CapturedStats{SessionID: sessionID}
-	err := sqlitex.ExecuteTransient(conn, `SELECT turn_count, input_submission_count, tool_call_count, subagent_count, duration_ms, tokens_in, tokens_out, thought_tokens, cached_read_tokens, cached_write_tokens, seed_json, source, updated_at_ms, overflow FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			stats.TurnCount = columnIntOrNil(stmt, 0)
-			stats.InputSubmissionCount = columnInt64OrNil(stmt, 1)
-			stats.ToolCallCount = columnIntOrNil(stmt, 2)
-			stats.SubagentCount = columnIntOrNil(stmt, 3)
-			stats.DurationMs = columnInt64OrNil(stmt, 4)
-			stats.TokensIn = columnIntOrNil(stmt, 5)
-			stats.TokensOut = columnIntOrNil(stmt, 6)
-			stats.ThoughtTokens = columnIntOrNil(stmt, 7)
-			stats.CachedReadTokens = columnIntOrNil(stmt, 8)
-			stats.CachedWriteTokens = columnIntOrNil(stmt, 9)
-			if stmt.ColumnType(10) != sqlite.TypeNull {
-				seed := stmt.ColumnText(10)
-				stats.SeedJSON = &seed
-			}
-			if source, err := NewStatsSource(stmt.ColumnText(11)); err == nil {
-				stats.Source = source
-			}
-			stats.UpdatedAtMs = stmt.ColumnInt64(12)
-			if stmt.ColumnType(13) != sqlite.TypeNull {
-				overflow := stmt.ColumnText(13)
-				stats.Overflow = &overflow
-			}
-			return nil
-		},
-	})
-	if err != nil {
-		return CapturedStats{}, fmt.Errorf("store: read captured stats for session %s: %w", sessionID, err)
-	}
-	return stats, nil
 }
 
 func columnIntOrNil(stmt *sqlite.Stmt, col int) *int {
