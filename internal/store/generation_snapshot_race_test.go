@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
@@ -24,6 +27,7 @@ type snapshotRaceCase struct {
 	FirstText string `yaml:"firstText"`
 	NextText  string `yaml:"nextText"`
 	Sweep     bool   `yaml:"sweep"`
+	Surface   string `yaml:"surface"`
 }
 
 func loadSnapshotRaceFixtures(t *testing.T) []snapshotRaceCase {
@@ -83,13 +87,68 @@ func snapshotActivation(id schema.SessionID, generation, text string) store.Gene
 
 func TestHarmonizedFullSnapshotSurvivesActivationSweep(t *testing.T) {
 	for _, c := range loadSnapshotRaceFixtures(t) {
-		t.Run(c.Name, func(t *testing.T) { runSnapshotActivationSweep(t, c) })
+		t.Run(c.Name, func(t *testing.T) {
+			switch c.Surface {
+			case "detail":
+				runSnapshotActivationSweep(t, c)
+			case "publication":
+				runPublicationActivationSweep(t, c)
+			default:
+				t.Fatalf("unknown snapshot race surface %q", c.Surface)
+			}
+		})
+	}
+}
+
+func runPublicationActivationSweep(t *testing.T, c snapshotRaceCase) {
+	t.Helper()
+	s, sid := seedFullReadCorruption(t, "body-column", c.FirstText)
+	_, wantPayload, err := push.LoadPublicationInput(t.Context(), s, string(sid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(wantPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.WithCommittedPublicationInput(t.Context(), sid, func(input ingest.PublicationInputBundle) error {
+		if input.Generation == nil || input.Readiness != ingest.PublicationReady {
+			t.Fatal("publication input is not the committed generation")
+		}
+		next := snapshotActivation(sid, "publication-next", c.NextText)
+		next.Generation.Generation.Metadata = input.Generation.Metadata
+		next.Generation.Generation.Main.Entries[0].Harness = input.Generation.Metadata.ModelHarness
+		next.CaptureRevision = input.CaptureRevision
+		next.ContentCapture = ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest, TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 2}
+		if _, err := s.ActivateGeneration(t.Context(), next); err != nil {
+			return err
+		}
+		if c.Sweep {
+			if _, err := s.SweepSession(t.Context(), sid); err != nil {
+				return err
+			}
+		}
+		payload, err := transcript.SnapshotToDetailValidated(t.Context(), *input.Generation, s)
+		if err != nil {
+			return err
+		}
+		got, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("captured publication bytes changed after activation and sweep:\ngot %s\nwant %s", got, want)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
 func runSnapshotActivationSweep(t *testing.T, c snapshotRaceCase) {
 	t.Helper()
-	s := openSnapshotStore(t)
+	s := openSnapshotStore(t, 1)
 	ctx := t.Context()
 	sid := schema.SessionID("d4d4d4d4-d4d4-44d4-84d4-d4d4d4d4d4d4")
 	seedHarmonizedSnapshot(t, s, string(sid), "seed-snapshot")

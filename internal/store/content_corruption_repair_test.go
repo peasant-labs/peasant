@@ -20,7 +20,7 @@ import (
 func TestContentCorruptionRepair(t *testing.T) {
 	t.Parallel()
 	for _, c := range loadContentCorruptionCases(t) {
-		if c.Damage == "" {
+		if c.Owner != "repair" {
 			continue
 		}
 		c := c
@@ -34,7 +34,7 @@ func TestContentCorruptionRepair(t *testing.T) {
 // runCorruptionRepairCase seeds one harmonized session through the
 // production activation, applies the case damage, and walks the
 // verify-mark-repair-rebuild path.
-func runCorruptionRepairCase(t *testing.T, c contentCorruptionCase) {
+func seedCorruptionCandidate(t *testing.T, damage string) (*Store, schema.SessionID, indexformat.V2, map[schema.SourceEntryRef][]byte, string, string) {
 	t.Helper()
 	ctx := context.Background()
 	sid, err := schema.NewSessionID("d3d3d3d3-d3d3-43d3-83d3-d3d3d3d3d3d3")
@@ -44,7 +44,7 @@ func runCorruptionRepairCase(t *testing.T, c contentCorruptionCase) {
 	s, _ := openGenerationStore(t)
 	seedGenerationSession(t, s, string(sid))
 	v2, blobs := buildTestGeneration(t, sid, "gen_repair_case", "repair durable text", "repair durable input", "repair durable output")
-	if c.Damage == "blob-bytes" || c.Damage == "descriptor-digest" {
+	if damage != "body-column" {
 		inherited := schema.SourceEntryRef("e_repair_inherited")
 		v2.Generation.Content = append(v2.Generation.Content, indexformat.ContentRecord{Ref: inherited})
 		blobs[inherited] = []byte(strings.Repeat("inherited repair bytes ", 200))
@@ -76,6 +76,13 @@ func runCorruptionRepairCase(t *testing.T, c contentCorruptionCase) {
 	if err := verifyAllBodies(t, s, sid); err != nil {
 		t.Fatal("healthy bodies fail verification")
 	}
+	return s, sid, v2, blobs, identity, proof
+}
+
+func runCorruptionRepairCase(t *testing.T, c contentCorruptionCase) {
+	t.Helper()
+	ctx := context.Background()
+	s, sid, v2, blobs, identity, proof := seedCorruptionCandidate(t, c.Damage)
 	digest := applyCorruptionDamage(t, s, sid, c.Damage)
 	if report, err := s.VerifyContent(ctx, false); err != nil {
 		t.Fatalf("verify before repair: %v", err)
@@ -179,6 +186,21 @@ func applyCorruptionDamage(t *testing.T, s *Store, sid schema.SessionID, damage 
 	case "blob-bytes":
 		digest := corruptionInheritedDigest(t, s, sid)
 		flipBlobChunkByte(t, s, sid, digest)
+		return digest
+	case "chunk-missing", "header-length":
+		digest := corruptionInheritedDigest(t, s, sid)
+		conn, err := s.pool.Take(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.pool.Put(conn)
+		query := `DELETE FROM session_content_chunks WHERE session_id = ? AND digest = ? AND chunk_index = 0`
+		if damage == "header-length" {
+			query = `UPDATE session_content SET byte_length = byte_length + 1 WHERE session_id = ? AND digest = ?`
+		}
+		if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: []any{string(sid), digest}}); err != nil {
+			t.Fatal(err)
+		}
 		return digest
 	case "descriptor-digest":
 		// Leaving a dangling descriptor needs enforcement off: deferral

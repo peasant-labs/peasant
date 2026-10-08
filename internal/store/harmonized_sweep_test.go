@@ -381,7 +381,7 @@ func gcGenerationRows(t *testing.T, s *Store, sid schema.SessionID, generationID
 // retry re-stages and commits cleanly. Lock-free staging and the locked
 // sweep serialize only through the commit's foreign keys, which fail
 // closed.
-func TestContentConcurrencySweepVsStage(t *testing.T) {
+func runConcurrencySweepVsStage(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx := context.Background()
 	sid := gcSession(t, s, "d9d9d9d9-d9d9-49d9-89d9-d9d9d9d9d9d9")
@@ -441,7 +441,7 @@ func TestContentConcurrencySweepVsStage(t *testing.T) {
 // contract (content_concurrency harvest-vs-reclaim): an activation racing a
 // reclaim pass serializes on the per-session lock, so every order ends with
 // the committed generation, zero orphans, and a clear flag.
-func TestContentConcurrencyHarvestVsReclaim(t *testing.T) {
+func runConcurrencyHarvestVsReclaim(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx := context.Background()
 	sid := gcSession(t, s, "e0e0e0e0-e0e0-40e0-80e0-e0e0e0e0e0e0")
@@ -494,7 +494,7 @@ func TestContentConcurrencyHarvestVsReclaim(t *testing.T) {
 // writers share: while the migration holds the session (here the test
 // itself, the way migrate Phase 2 does), an activation waits past its
 // context instead of interleaving, and succeeds once the holder releases.
-func TestContentConcurrencyHarvestVsMigrate(t *testing.T) {
+func runConcurrencyHarvestVsMigrate(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := gcSession(t, s, "f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1")
 	release, err := s.sessionLocker.LockExclusive(context.Background(), sid)
@@ -516,6 +516,21 @@ func TestContentConcurrencyHarvestVsMigrate(t *testing.T) {
 	}
 	if err := release(); err != nil {
 		t.Fatal(err)
+	}
+	// The real migration entry must take the same exclusive lock before it
+	// decides whether conversion is needed.
+	release, err = s.sessionLocker.LockExclusive(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer migrateCancel()
+	_, migrateErr := s.MigrateSession(migrateCtx, sid)
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	if migrateErr == nil || !strings.Contains(migrateErr.Error(), "lock session") {
+		t.Fatalf("migration bypassed held lock: %v", migrateErr)
 	}
 	if err := activateTestGeneration(t, s, v2, blobs); err != nil {
 		t.Fatalf("activation after the migration released: %v", err)

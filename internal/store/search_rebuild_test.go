@@ -17,13 +17,16 @@ import (
 // the gate and report cases prove the production helpers directly.
 func TestSearchCorruptionFamily(t *testing.T) {
 	for _, c := range loadContentCorruptionCases(t) {
+		if c.Owner != "search" {
+			continue
+		}
 		switch c.Name {
 		case "swept-corrupt-body-rebuilds-index":
 			t.Run(c.Name, func(t *testing.T) { runSweptCorruptBody(t, c) })
 		case "repair-identical-candidate-rewrites-corrupt-body":
 			t.Run(c.Name, func(t *testing.T) { runRepairIdenticalCandidate(t, c) })
 		default:
-			t.Logf("%s: placeholder; its owner fills this case", c.Name)
+			t.Fatalf("unknown search corruption case %q", c.Name)
 		}
 	}
 }

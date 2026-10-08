@@ -6,32 +6,95 @@
 # the corrected term found exactly once. The four repair-owned cases carry
 # the damage profile the repair runner applies: verify lists the session,
 # repair marks it, the repair activation rewrites the failing objects, and
-# the session verifies clean with the index rebuilt. Every other case stays
-# a name placeholder its owner fills later; the manifest check still
-# protects each name.
+# the session verifies clean with the index rebuilt. Full-read cases prove
+# refusal without partial output. Non-emitted blobs are not served by detail,
+# export or publication; their corruption is owned by verify --content.
 #
 # Damages: body-column (entry-column-altered shape), blob-bytes
 # (chunk-byte-flipped shape), descriptor-digest (wrong descriptor).
 cases:
   - name: entry-column-altered
+    owner: full-read
+    damage: body-column
+    surfaces: [detail, export, publish, scan]
+    expect: refuse
   - name: chunk-byte-flipped
+    owner: verify
+    damage: blob-bytes
+    surfaces: [verify]
+    expect: refuse
+    why: Retained non-emitted blob bytes are never served by full transcript reads; verify --content owns their integrity.
   - name: chunk-missing
+    owner: verify
+    damage: chunk-missing
+    surfaces: [verify]
+    expect: refuse
+    why: Retained non-emitted chunks are not display content; verify --content owns their integrity.
   - name: header-length-wrong
+    owner: verify
+    damage: header-length
+    surfaces: [verify]
+    expect: refuse
+    why: Retained non-emitted headers are not read by detail, export or publication; verify --content owns their integrity.
   - name: descriptor-digest-wrong
+    owner: verify
+    damage: descriptor-digest
+    surfaces: [verify]
+    expect: refuse
+    why: Only non-emitted blobs have retained descriptors; verify --content owns their integrity.
   - name: capture-hash-wrong
+    owner: full-read
+    damage: capture-hash
+    surfaces: [publish, scan]
+    expect: refuse
+    why: Full snapshots do not read session_content_captures; the publication capture check owns this proof.
   - name: body-row-missing-fk-blocked
+    owner: full-read
+    damage: body-delete
+    surfaces: [detail]
+    expect: fk-refuses
   - name: preview-read-not-verified
+    owner: full-read
+    damage: body-column
+    surfaces: [preview, detail]
+    expect: serve-unverified
   - name: routing-read-not-verified
+    owner: full-read
+    damage: body-column
+    surfaces: [routing, detail]
+    expect: serve-unverified
+  - name: carrier-column-altered-full-read-refuses
+    owner: full-read
+    damage: carrier-column
+    surfaces: [detail, export, publish, scan, preview]
+    expect: refuse
+  - name: preview-only-damaged-api-serves
+    owner: full-read
+    damage: preview-only-column
+    surfaces: [preview, api-preview, detail]
+    expect: incomplete-refuses-full
+    why: Incomplete generations select the mounted API preview exit before full-byte authority; damaged previews stay deliberately unverified.
+  - name: carrier-row-missing-full-read-refuses
+    owner: full-read
+    damage: carrier-missing
+    surfaces: [detail, export, publish, scan]
+    expect: refuse
+    why: Damage below SQLite may bypass foreign keys; a missing ref-less body must never disappear silently from a full snapshot.
   - name: repair-mode-rewrites-object
+    owner: repair
     damage: body-column
   - name: repair-mode-rewrites-blob
+    owner: repair
     damage: blob-bytes
   - name: repair-mode-rederives-descriptor
+    owner: repair
     damage: descriptor-digest
   - name: repair-identical-candidate-rewrites-corrupt-body
+    owner: search
     query: repairidenticalcorruptbody
     wantFoundOnce: true
   - name: swept-corrupt-body-rebuilds-index
+    owner: search
     query: sweptcorruptbodyterm
     wantStaleRawMatch: true
     wantRefusedWhileFlagged: true

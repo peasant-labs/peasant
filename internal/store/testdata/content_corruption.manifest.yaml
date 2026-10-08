@@ -9,6 +9,9 @@ requiredNames:
   - body-row-missing-fk-blocked
   - preview-read-not-verified
   - routing-read-not-verified
+  - carrier-column-altered-full-read-refuses
+  - preview-only-damaged-api-serves
+  - carrier-row-missing-full-read-refuses
   - repair-mode-rewrites-object
   - repair-mode-rewrites-blob
   - repair-mode-rederives-descriptor
