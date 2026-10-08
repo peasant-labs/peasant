@@ -18,9 +18,8 @@ var freshVsMigratedFamilyYAML []byte
 
 // assertGoldenCaseInFamily confirms golden-template-body-insert is still in
 // the schema_fresh_vs_migrated inventory with this test as its documented
-// runner, so removing either side fails a gate: removing the name trips the
-// family's required-name manifest, and removing this test leaves the family
-// entry pointing at a runner that no longer exists.
+// runner: removing the name trips the family's required-name manifest, and
+// this test refuses to run unless the entry names it as the runner.
 func assertGoldenCaseInFamily(t *testing.T) {
 	t.Helper()
 	var family struct {
