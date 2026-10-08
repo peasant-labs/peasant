@@ -9,7 +9,7 @@ import (
 )
 
 // Fixture scaffolding for the harmonized session content model (design
-// llm/peasant--harmonized-content-model.md section 10, ratified revision 16).
+// llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
 //
 // Each family below owns a <family>.yaml of typed cases and a
 // <family>.manifest.yaml listing requiredNames, following the existing
@@ -356,23 +356,4 @@ func loadAnnotationTargetsNoFKFixture(t *testing.T) []string {
 // compiles, the manifest loads, and every required name is present.
 func TestAnnotationTargetsNoFKFixtureManifest(t *testing.T) {
 	loadAnnotationTargetsNoFKFixture(t)
-}
-
-//go:embed testdata/schema_fresh_vs_migrated.yaml
-var schemaFreshVsMigratedYAML []byte
-
-//go:embed testdata/schema_fresh_vs_migrated.manifest.yaml
-var schemaFreshVsMigratedManifestYAML []byte
-
-// loadSchemaFreshVsMigratedFixture loads the schema fresh versus migrated scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadSchemaFreshVsMigratedFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "schema fresh versus migrated", schemaFreshVsMigratedYAML, schemaFreshVsMigratedManifestYAML)
-}
-
-// TestSchemaFreshVsMigratedFixtureManifest pins the schema fresh versus migrated case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestSchemaFreshVsMigratedFixtureManifest(t *testing.T) {
-	loadSchemaFreshVsMigratedFixture(t)
 }

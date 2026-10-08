@@ -10,7 +10,7 @@ import (
 
 // Fixture scaffolding for the harmonized session content model CLI surface
 // (design llm/peasant--harmonized-content-model.md section 10, ratified
-// revision 16). The command and flag inventory lives in
+// revision 17). The command and flag inventory lives in
 // testdata/cli/content_cli_surface.yaml with its required-name manifest in
 // testdata/cli/content_cli_surface.manifest.yaml: deletion protection by
 // required NAME, never by bare count. No cases are filled yet; every entry is
