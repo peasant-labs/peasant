@@ -1426,9 +1426,10 @@ func anchorsShareKey(a, b entryTargetAnchor) bool {
 
 func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target entryAnnotationTarget, start, end int, stats *ingest.SessionEntryWriteStats) error {
 	restoreStarted := time.Now()
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertTargetEntry, &sqlitex.ExecOptions{
-		Args: []any{target.annotationID, sessionID, start, end},
-	}); err != nil {
+	// The restore re-attaches through the same guarded existence check as
+	// every other entry-target insert: a carried span whose start entry is
+	// gone refuses here instead of reattaching to nothing.
+	if err := insertAnnotationTargetEntryOnConn(conn, "restoreEntryAnnotationTargets", target.annotationID, sessionID, start, end); err != nil {
 		if stats != nil {
 			stats.AnnotationTargetRestoreTime += time.Since(restoreStarted)
 		}
