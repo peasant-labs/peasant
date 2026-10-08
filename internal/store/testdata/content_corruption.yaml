@@ -3,9 +3,15 @@
 # The two search-owned cases carry typed expectations their runner asserts:
 # a swept corrupt body flags the index and the rebuild clears the stale
 # postings, and an identical repair candidate rewrites the corrupt body with
-# the corrected term found exactly once. Every other case stays a name
-# placeholder its owner fills later; the manifest check still protects each
-# name.
+# the corrected term found exactly once. The four repair-owned cases carry
+# the damage profile the repair runner applies: verify lists the session,
+# repair marks it, the repair activation rewrites the failing objects, and
+# the session verifies clean with the index rebuilt. Every other case stays
+# a name placeholder its owner fills later; the manifest check still
+# protects each name.
+#
+# Damages: body-column (entry-column-altered shape), blob-bytes
+# (chunk-byte-flipped shape), descriptor-digest (wrong descriptor).
 cases:
   - name: entry-column-altered
   - name: chunk-byte-flipped
@@ -17,8 +23,11 @@ cases:
   - name: preview-read-not-verified
   - name: routing-read-not-verified
   - name: repair-mode-rewrites-object
+    damage: body-column
   - name: repair-mode-rewrites-blob
+    damage: blob-bytes
   - name: repair-mode-rederives-descriptor
+    damage: descriptor-digest
   - name: repair-identical-candidate-rewrites-corrupt-body
     query: repairidenticalcorruptbody
     wantFoundOnce: true

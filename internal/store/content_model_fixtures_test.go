@@ -184,8 +184,9 @@ var contentCorruptionManifestYAML []byte
 
 // contentCorruptionCase is one content_corruption case: the section-10 name
 // plus, for the two search-owned cases, the typed expectations the search
-// runner asserts. Every other case stays a name placeholder its owner fills
-// later; the loader's manifest check still protects each name.
+// runner asserts, and for the four repair-owned cases, the damage profile
+// the repair runner applies. Every other case stays a name placeholder its
+// owner fills later; the loader's manifest check still protects each name.
 type contentCorruptionCase struct {
 	Name                    string `yaml:"name"`
 	Query                   string `yaml:"query,omitempty"`
@@ -193,6 +194,9 @@ type contentCorruptionCase struct {
 	WantStaleRawMatch       bool   `yaml:"wantStaleRawMatch,omitempty"`
 	WantRefusedWhileFlagged bool   `yaml:"wantRefusedWhileFlagged,omitempty"`
 	WantCleanAfterRebuild   bool   `yaml:"wantCleanAfterRebuild,omitempty"`
+	// Damage names the corruption the repair runner applies before
+	// verification: body-column, blob-bytes, descriptor-digest.
+	Damage string `yaml:"damage,omitempty"`
 }
 
 type contentCorruptionFixtures struct {
