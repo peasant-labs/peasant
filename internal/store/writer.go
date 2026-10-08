@@ -87,7 +87,7 @@ VALUES (?, ?, ?, ?)`
     adapter_version, metric_seed_json, source_fingerprint, artifact_hash
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
-    parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
+    parent_id = CASE WHEN ? THEN excluded.parent_id ELSE COALESCE(excluded.parent_id, sessions.parent_id) END,
     opaque_host_id = excluded.opaque_host_id,
     project_hash = excluded.project_hash,
     model_harness = excluded.model_harness,
@@ -114,7 +114,7 @@ ON CONFLICT(session_id) DO UPDATE SET
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
-    parent_id=COALESCE(excluded.parent_id, sessions.parent_id), model_harness=excluded.model_harness,
+    parent_id=CASE WHEN ? THEN excluded.parent_id ELSE COALESCE(excluded.parent_id, sessions.parent_id) END, model_harness=excluded.model_harness,
     model_id=excluded.model_id, opaque_host_id=excluded.opaque_host_id,
     project_hash=excluded.project_hash, start_ms=excluded.start_ms,
     end_ms=excluded.end_ms, ingested_ms=excluded.ingested_ms,
@@ -399,6 +399,16 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		// the managed metadata. A cache is written only to a target that is
 		// available in this batch or already stored. Every other harness keeps
 		// the legacy logical resolution and orphan skip.
+		//
+		// The write carries an authoritative parent edge exactly when it
+		// derived one: a scheduling resolution (a target or a dispatch-root
+		// nil), logical parent evidence, or relationship evidence. Durable
+		// evidence of no parent (explicit-none) therefore clears the cache,
+		// while a write with no evidence at all preserves whatever is
+		// stored instead of clearing it.
+		parentAuthoritative := sorted[i].SchedulingParentResolved ||
+			m.ParentUUID != nil ||
+			len(m.Relationships) > 0
 		cacheParent := m.ParentUUID
 		if sorted[i].SchedulingParentResolved && ingest.IndependentAdmissionHarness(m.ModelHarness) {
 			scheduling := sorted[i].SchedulingParentID
@@ -466,6 +476,10 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		} else {
 			sessionSQL = sqlInsertSessionBeforeSourceFingerprint
 		}
+		// The trailing argument feeds the parent_id CASE in the upsert's
+		// conflict branch: an authoritative write carries its edge (value
+		// or explicit nil), anything else preserves the stored cache.
+		sessionArgs = append(sessionArgs, parentAuthoritative)
 		if err = sqlitex.Execute(conn, sessionSQL, &sqlitex.ExecOptions{
 			Args: sessionArgs,
 		}); err != nil {
