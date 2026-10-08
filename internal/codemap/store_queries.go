@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -109,35 +110,13 @@ ORDER BY v.target_session_id, v.type_id,
 	// multi-block depth>0 text (parent preview = first block only) and
 	// tool_input/tool_output matches (content_preview NULL or distinct) survive.
 	// The parent lookup is a PK point lookup on (session_id, entry_index).
-	sqlSearch = `SELECT
-    f.session_id,
-    f.entry_index,
-    e.role,
-    COALESCE(p.canonical_cwd, s.project_hash, '') AS project,
-    s.project_hash,
-    snippet(session_entries_fts, -1, '[', ']', '…', 12) AS snippet,
-    bm25(session_entries_fts) AS rank,
-    s.model_harness,
-    COALESCE(s.git_branch, ''),
-    COALESCE(p.canonical_remote, ''),
-    COALESCE(p.canonical_cwd, ''),
-    COALESCE(s.git_worktree, '')
-FROM session_entries_fts f
-JOIN session_entries e ON e.rowid = f.rowid
-JOIN sessions s        ON s.session_id = f.session_id
-LEFT JOIN projects p   ON p.project_hash = s.project_hash
-WHERE session_entries_fts MATCH ?
-  AND COALESCE(e.part_type, '') <> 'pi.carrier'
-  AND NOT (
-    e.depth > 0
-    AND e.content_preview IS NOT NULL
-    AND e.content_preview = (
-      SELECT pe.content_preview FROM session_entries pe
-      WHERE pe.session_id = e.session_id AND pe.entry_index = e.parent_index
-    )
-  )
-ORDER BY rank, f.session_id, f.entry_index
-LIMIT ? OFFSET ?`
+	sqlSearch = store.LegacyMirrorSearchSQL
+
+	// sqlSearchUnified is the consolidated transcript search over the one
+	// index. Its text lives in store.UnifiedSearchSQL so store tests prove
+	// the same production query the service runs; this name stays as the
+	// codemap alias.
+	sqlSearchUnified = store.UnifiedSearchSQL
 )
 
 // projectRow is one projects row.
@@ -198,6 +177,12 @@ type searchRow struct {
 // the sanitized FTS5 string; limit is positive and already bounded, and offset
 // counts raw ranked rows rather than visibility-filtered results. An empty
 // result set is returned as a nil slice.
+//
+// While the rebuild flag is set search refuses with the fix. During the
+// transition window both indexes exist: the legacy mirror index and the
+// consolidated index over the union view. Both are read and merged by rank
+// with the representation filter, so a converted session never returns a
+// duplicate pair. After consolidation only the unified index is read.
 func (s *Service) querySearch(ctx context.Context, match string, limit, offset int) (_ []searchRow, retErr error) {
 	conn, err := s.store.Pool().Take(ctx)
 	if err != nil {
@@ -209,9 +194,101 @@ func (s *Service) querySearch(ctx context.Context, match string, limit, offset i
 	if err := s.store.ValidateAllIndexFormatsOnConn(conn); err != nil {
 		return nil, err
 	}
+	if refuse, err := searchNeedsRebuildOnConn(conn); err != nil {
+		return nil, err
+	} else if refuse {
+		return nil, store.SearchRefusalError()
+	}
+	legacy := legacySearchIndexExists(conn)
+	unified := unifiedSearchIndexExists(conn)
+	switch {
+	case legacy && unified:
+		return s.querySearchMerged(conn, match, limit, offset)
+	case unified:
+		return runSearchQuery(conn, sqlSearchUnified, match, limit, offset)
+	case legacy:
+		return runSearchQuery(conn, sqlSearch, match, limit, offset)
+	default:
+		return nil, fmt.Errorf("codemap: search %q at raw offset %d with page limit %d: no search index exists; run `peasant harvest index` to build one", match, offset, limit)
+	}
+}
 
+// searchNeedsRebuildOnConn reports whether search must refuse on the
+// caller's connection. A store without the health table predates the
+// consolidated index and never refuses.
+func searchNeedsRebuildOnConn(conn *sqlite.Conn) (bool, error) {
+	health := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_search_state'`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error { health = true; return nil },
+	}); err != nil {
+		return false, fmt.Errorf("codemap: probe the search health table: %w", err)
+	}
+	if !health {
+		return false, nil
+	}
+	needs := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT needs_rebuild FROM session_search_state WHERE id = 1`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			needs = stmt.ColumnInt64(0) == 1
+			return nil
+		},
+	}); err != nil {
+		return false, fmt.Errorf("codemap: read the search rebuild flag: %w; run `peasant harvest verify --content` to inspect the index", err)
+	}
+	return needs, nil
+}
+
+func legacySearchIndexExists(conn *sqlite.Conn) bool {
+	found := false
+	_ = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_entries_fts'`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	})
+	return found
+}
+
+func unifiedSearchIndexExists(conn *sqlite.Conn) bool {
+	found := false
+	_ = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_search_fts'`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	})
+	return found
+}
+
+// querySearchMerged reads both indexes and merges by rank. It delegates to
+// the store's production merged search so codemap and store tests prove one
+// query, then shapes the hits into search rows.
+func (s *Service) querySearchMerged(conn *sqlite.Conn, match string, limit, offset int) ([]searchRow, error) {
+	hits, err := store.SearchMergedOnConn(conn, match, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]searchRow, 0, len(hits))
+	for _, hit := range hits {
+		projectHash, hashErr := schema.NewProjectHash(hit.ProjectHash)
+		if hashErr != nil {
+			return nil, fmt.Errorf("codemap: search row %q has invalid stored project hash at raw offset %d: %w; run `peasant ingest verify` and repair the store before retrying", hit.SessionID, offset, hashErr)
+		}
+		rows = append(rows, searchRow{
+			sessionID:   hit.SessionID,
+			entryIndex:  hit.EntryIndex,
+			role:        hit.Role,
+			project:     hit.Project,
+			hash:        projectHash,
+			snippet:     hit.Snippet,
+			bm25:        hit.Rank,
+			harness:     hit.Harness,
+			gitBranch:   hit.GitBranch,
+			gitRemote:   hit.GitRemote,
+			projectName: hit.ProjectName,
+			gitWorktree: hit.GitWorktree,
+		})
+	}
+	return rows, nil
+}
+
+func runSearchQuery(conn *sqlite.Conn, sql, match string, limit, offset int) ([]searchRow, error) {
 	var rows []searchRow
-	err = sqlitex.ExecuteTransient(conn, sqlSearch, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sql, &sqlitex.ExecOptions{
 		Args: []any{match, limit, offset},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			projectHash, hashErr := schema.NewProjectHash(stmt.ColumnText(4))

@@ -125,6 +125,23 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
 
+	// Index-health gate before the first delete: when a prior untrusted
+	// delete set the flag, rebuild the whole index first so prune never
+	// compounds stale postings.
+	if state, gateErr := searchStateReadOnConn(conn); gateErr != nil {
+		err = fmt.Errorf("store.PruneSessions: read the search index health: %w", gateErr)
+		return ingest.PruneResult{}, err
+	} else if state.NeedsRebuild {
+		if gateErr := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); gateErr != nil {
+			err = fmt.Errorf("store.PruneSessions: rebuild the flagged search index before pruning: %w; nothing was pruned", gateErr)
+			return ingest.PruneResult{}, err
+		}
+		if gateErr := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); gateErr != nil {
+			err = fmt.Errorf("store.PruneSessions: clear the search rebuild flag before pruning: %w; nothing was pruned", gateErr)
+			return ingest.PruneResult{}, err
+		}
+	}
+
 	// Build IN clause for all queries.
 	placeholders := make([]string, len(sessionIDs))
 	args := make([]any, len(sessionIDs))
@@ -186,6 +203,20 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		if err = deleteAnnotationClosure(conn, annIDs); err != nil {
 			return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: %w", err)
 		}
+	}
+
+	// Delete-time digest check over the harmonized bodies: a row whose
+	// serialization fails to hash-match cannot be trusted for the BEFORE
+	// DELETE un-indexing, so the flag is set on the same transaction and
+	// the whole-index rebuild clears the stale postings. Most body rows
+	// cascade from the sessions delete below, and the trigger fires on the
+	// cascade.
+	pruneIDs := make([]string, len(sessionIDs))
+	for i, id := range sessionIDs {
+		pruneIDs[i] = string(id)
+	}
+	if _, err = verifyBodiesForDeleteOnConn(conn, pruneIDs); err != nil {
+		return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: %w", err)
 	}
 
 	// Phase 2: Delete from tables with session_id in FK-safe order.
