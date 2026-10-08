@@ -360,6 +360,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		RebuildAll:         reindex && flags.all,
 		Harness:            indexHarness,
 		Parallelism:        0, // 0 = auto (runtime.NumCPU())
+		Write:              cfg.Write,
 		IndexProfiler:      indexProfiler,
 		Progress:           progState,
 	}

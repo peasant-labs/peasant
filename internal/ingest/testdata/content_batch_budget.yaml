@@ -1,8 +1,13 @@
-# The byte budget that bounds ONE write wave, asserted at the grouping boundary
-# that applies it.
+# The write byte budget that bounds ONE write wave, asserted at the grouping
+# boundary that applies it: the configured write.batchBytes knob.
 #
-# Sizes are a fraction of the shipped budget, never a byte count, so the corpus
-# keeps describing the same situations if the budget moves. The sessions here
+# Sizes are a fraction of the configured budget, never a byte count, so the
+# corpus keeps describing the same situations whatever the configured budget
+# is. The loaders multiply each fraction by the budget under test — the
+# shipped default and a smaller custom one — so a case that stopped tracking
+# the knob fails under the custom budget.
+#
+# The sessions here
 # write a few hundred bytes each to disk: the boundary measures PARSE OUTPUT, so a
 # case crosses the budget through the parser seam instead of through 32 MiB of
 # synthetic transcript.
@@ -12,7 +17,7 @@
 # by identifier, while the flushes run in parse order, and these sessions are
 # seeded with identifiers that descend as parsing advances. The commit ORDER
 # therefore changes whenever the grouping changes.
-budget: defaults.FullContentWriteBatchBytes
+budget: write.batchBytes
 required_names: [index_batch_by_bytes, oversized_session_alone, under-budget-sessions-share-one-flush]
 cases:
   # Two sessions that cannot share the budget, then a small one that can join the
@@ -36,7 +41,7 @@ cases:
 # indexBatch above groups the stale-session waves. The drain below is the
 # boundary EVERY parsed session crosses on an ordinary harvest and on a
 # reindex, so it is where the memory bound actually earns its keep. Both now
-# ask exceedsIndexWriteBudget, and both are asserted: the predicate on its own
+# ask exceedsWriteBudget, and both are asserted: the predicate on its own
 # inputs, and the drain over a channel, so a call site that stopped asking is
 # visible as well as a predicate that stopped answering.
 #
@@ -49,6 +54,9 @@ predicate_required_names:
   - full-batch-flushes-before-counting-bytes
   - crossing-the-budget-flushes
   - staying-under-the-budget-does-not
+  - count-cap-two-flushes-early
+  - small-byte-cap-flushes
+  - large-byte-cap-holds
 predicate_cases:
   # An oversized result must still be written, so an empty batch never flushes.
   - name: empty-batch-admits-any-single-result
@@ -71,6 +79,29 @@ predicate_cases:
     pending_count: 1
     pending_budget_fraction: 0.2
     next_budget_fraction: 0.2
+    want_flush: false
+  # The caps are configured, not compiled in: a count cap of 2 flushes where
+  # the shipped 64 would hold, a byte cap of half the shipped budget flushes
+  # where the shipped budget would hold, and a doubled byte cap holds where
+  # the shipped budget would flush. Fractions below stay relative to the
+  # shipped budget; only the cap under test moves.
+  - name: count-cap-two-flushes-early
+    pending_count: 2
+    pending_budget_fraction: 0.0
+    next_budget_fraction: 0.000001
+    batch_sessions: 2
+    want_flush: true
+  - name: small-byte-cap-flushes
+    pending_count: 1
+    pending_budget_fraction: 0.3
+    next_budget_fraction: 0.3
+    byte_cap_fraction: 0.5
+    want_flush: true
+  - name: large-byte-cap-holds
+    pending_count: 1
+    pending_budget_fraction: 0.6
+    next_budget_fraction: 0.6
+    byte_cap_fraction: 2.0
     want_flush: false
 # The drain cases mirror the indexBatch cases above, so the two boundaries are
 # shown to group the same corpus the same way.
