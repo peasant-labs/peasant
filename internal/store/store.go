@@ -448,12 +448,21 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	// DB is already at the current schema (WithSkipMigrations). Skipping avoids
 	// the per-Open migration-state re-check (~16% of store.Open CPU), which is
 	// pure waste for a copy of a freshly-migrated golden DB in tests.
+	conn, err := pool.Take(context.Background())
+	if err != nil {
+		_ = pool.Close()
+		return nil, fmt.Errorf("store: take connection for migration: %w", err)
+	}
+	// A database upgraded by a newer release is refused before any
+	// migration, backfill, or salt load: the migrator only moves forward,
+	// so opening it would silently serve a schema this build cannot
+	// understand.
+	if err := refuseNewerSchemaOnConn(conn, dbPath); err != nil {
+		pool.Put(conn)
+		_ = pool.Close()
+		return nil, err
+	}
 	if !o.skipMigrations {
-		conn, err := pool.Take(context.Background())
-		if err != nil {
-			_ = pool.Close()
-			return nil, fmt.Errorf("store: take connection for migration: %w", err)
-		}
 		if err := refuseUnmappableCaptureFormats(conn); err != nil {
 			pool.Put(conn)
 			_ = pool.Close()
@@ -492,6 +501,11 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			_ = pool.Close()
 			return nil, fmt.Errorf("store: apply V23 data migration: %w", err)
 		}
+	} else {
+		// The caller guarantees the schema: the newer-schema check above
+		// already ran on this connection, so return it before the salt
+		// load takes its own.
+		pool.Put(conn)
 	}
 
 	// Load the installation salt. Required by InsertSessions to compute opaque_host_id.

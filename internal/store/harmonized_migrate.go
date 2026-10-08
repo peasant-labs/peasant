@@ -938,21 +938,34 @@ func (s *Store) migrateFlaggedSessions(ctx context.Context) ([]schema.SessionID,
 // EvaluateRetirementPreconditions evaluates the five Release N+1 guards
 // (design §7.1). A failing guard names its row count, why it blocks the
 // upgrade, and the fix: run peasant migrate with Release N, then upgrade.
+// A projection table the drop already removed counts as empty, so the
+// evaluation stays all-passed on a retired database and the drop is
+// idempotent.
 func (s *Store) EvaluateRetirementPreconditions(ctx context.Context) ([]RetirementPreconditionStatus, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection to evaluate the retirement preconditions: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return evaluateRetirementPreconditionsOnConn(ctx, conn)
+}
+
+// evaluateRetirementPreconditionsOnConn evaluates the five guards on the
+// caller's connection, so a caller that goes on to write (the retired-table
+// drop, and later the next release's schema migration) shares one
+// connection for the check and the change instead of opening a window for
+// a concurrent writer between them.
+func evaluateRetirementPreconditionsOnConn(ctx context.Context, conn *sqlite.Conn) ([]RetirementPreconditionStatus, error) {
 	counts := []struct {
+		table string
 		name  RetirementPrecondition
 		query string
 		block string
 	}{
-		{RetirementPreconditionProjectionGenerationsEmpty, `SELECT COUNT(*) FROM session_projection_generations`, "unconverted file-backed generations remain"},
-		{RetirementPreconditionProjectionEntriesEmpty, `SELECT COUNT(*) FROM session_projection_entries`, "unconverted file-backed entries remain"},
-		{RetirementPreconditionProjectionContentEmpty, `SELECT COUNT(*) FROM session_projection_content`, "unconverted file-backed content records remain"},
-		{RetirementPreconditionNoNativeFullContentRows, `SELECT COUNT(*) FROM session_entry_full_content f JOIN sessions s USING(session_id) WHERE s.active_generation_id IS NOT NULL`, "native full-content rows remain beside their harmonized bodies"},
+		{"session_projection_generations", RetirementPreconditionProjectionGenerationsEmpty, `SELECT COUNT(*) FROM session_projection_generations`, "unconverted file-backed generations remain"},
+		{"session_projection_entries", RetirementPreconditionProjectionEntriesEmpty, `SELECT COUNT(*) FROM session_projection_entries`, "unconverted file-backed entries remain"},
+		{"session_projection_content", RetirementPreconditionProjectionContentEmpty, `SELECT COUNT(*) FROM session_projection_content`, "unconverted file-backed content records remain"},
+		{"session_entry_full_content", RetirementPreconditionNoNativeFullContentRows, `SELECT COUNT(*) FROM session_entry_full_content f JOIN sessions s USING(session_id) WHERE s.active_generation_id IS NOT NULL`, "native full-content rows remain beside their harmonized bodies"},
 	}
 	statuses := make([]RetirementPreconditionStatus, 0, len(AllRetirementPreconditions))
 	for _, count := range counts {
@@ -960,7 +973,10 @@ func (s *Store) EvaluateRetirementPreconditions(ctx context.Context) ([]Retireme
 			return nil, err
 		}
 		var rows int64
-		if err := sqlitex.ExecuteTransient(conn, count.query, &sqlitex.ExecOptions{
+		if !tableExistsOnConn(conn, count.table) {
+			// The drop already removed this table: nothing remains in it.
+			rows = 0
+		} else if err := sqlitex.ExecuteTransient(conn, count.query, &sqlitex.ExecOptions{
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				rows = stmt.ColumnInt64(0)
 				return nil

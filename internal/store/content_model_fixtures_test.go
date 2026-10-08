@@ -279,24 +279,9 @@ func TestContentHostileInputFixtureManifest(t *testing.T) {
 // content_migration is owned by the typed loader in content_migration_test.go;
 // the full required-name inventory stays manifest-protected there.
 
-//go:embed testdata/content_release_guard.yaml
-var contentReleaseGuardYAML []byte
-
-//go:embed testdata/content_release_guard.manifest.yaml
-var contentReleaseGuardManifestYAML []byte
-
-// loadContentReleaseGuardFixture loads the content release guard scaffold family; later issues extend
-// the returned shape with typed expectations.
-func loadContentReleaseGuardFixture(t *testing.T) []string {
-	t.Helper()
-	return loadContentModelScaffoldFixture(t, "content release guard", contentReleaseGuardYAML, contentReleaseGuardManifestYAML)
-}
-
-// TestContentReleaseGuardFixtureManifest pins the content release guard case inventory: the loader
-// compiles, the manifest loads, and every required name is present.
-func TestContentReleaseGuardFixtureManifest(t *testing.T) {
-	loadContentReleaseGuardFixture(t)
-}
+// content_release_guard is owned by the typed loader in
+// content_release_guard_test.go; the full required-name inventory stays
+// manifest-protected there.
 
 //go:embed testdata/search_recall.yaml
 var searchRecallYAML []byte

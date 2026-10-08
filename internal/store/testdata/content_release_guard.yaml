@@ -1,15 +1,150 @@
-# content_release_guard — scaffolding for the harmonized session content model
-# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+# content_release_guard — the Release N+1 retirement guard and drop
+# (design llm/peasant--harmonized-content-model.md section 10, ratified
+# revision 17). Every branch of the five preconditions, the allow cases,
+# the fresh-install case, and the downgrade refusal.
+#
+# Runner: TestContentReleaseGuard in content_release_guard_test.go. Each
+# case opens a fresh store, seeds per seed, clears per clear, optionally
+# converts its session (migrate: true runs the production conversion, then
+# search consolidation) or consolidates the search index (consolidate:
+# true runs the production Phase 3), evaluates the five preconditions,
+# asserts wantFailed/wantPassed plus the refusal detail substrings, and
+# then proves the drop behind the guard (drop: refused|allowed|skip).
 cases:
   - name: refuses-nonempty-projection-generations
+    seed: file-backed
+    clear:
+      - session_projection_entries
+      - session_projection_content
+      - session_entry_full_content
+    consolidate: true
+    wantFailed:
+      - projection_generations_empty
+    wantPassed:
+      - projection_entries_empty
+      - projection_content_empty
+      - session_entries_fts_absent
+      - no_native_full_content_rows
+    wantDetailContains:
+      - peasant migrate
+    drop: refused
   - name: refuses-nonempty-projection-entries
+    seed: file-backed
+    clear:
+      - session_projection_generations
+      - session_projection_content
+      - session_entry_full_content
+    consolidate: true
+    wantFailed:
+      - projection_entries_empty
+    wantPassed:
+      - projection_generations_empty
+      - projection_content_empty
+      - session_entries_fts_absent
+      - no_native_full_content_rows
+    wantDetailContains:
+      - peasant migrate
+    drop: refused
   - name: refuses-nonempty-projection-content
+    seed: file-backed
+    clear:
+      - session_projection_generations
+      - session_projection_entries
+      - session_entry_full_content
+    consolidate: true
+    wantFailed:
+      - projection_content_empty
+    wantPassed:
+      - projection_generations_empty
+      - projection_entries_empty
+      - session_entries_fts_absent
+      - no_native_full_content_rows
+    wantDetailContains:
+      - peasant migrate
+    drop: refused
   - name: refuses-session-entries-fts-present
+    seed: none
+    wantFailed:
+      - session_entries_fts_absent
+    wantPassed:
+      - projection_generations_empty
+      - projection_entries_empty
+      - projection_content_empty
+      - no_native_full_content_rows
+    wantDetailContains:
+      - peasant migrate
+      - Phase 3
+    drop: refused
   - name: refuses-native-full-content-rows
+    seed: file-backed
+    clear:
+      - session_projection_generations
+      - session_projection_entries
+      - session_projection_content
+    consolidate: true
+    wantFailed:
+      - no_native_full_content_rows
+    wantPassed:
+      - projection_generations_empty
+      - projection_entries_empty
+      - projection_content_empty
+      - session_entries_fts_absent
+    wantDetailContains:
+      - peasant migrate
+    drop: refused
   - name: allows-non-native-full-content-rows
+    seed: non-native-full
+    consolidate: true
+    wantFailed: []
+    wantPassed:
+      - projection_generations_empty
+      - projection_entries_empty
+      - projection_content_empty
+      - session_entries_fts_absent
+      - no_native_full_content_rows
+    wantDetailContains: []
+    drop: allowed
+    # The drop keeps the non-native full-content tables: rows seeded here
+    # must survive it.
+    wantFullContentKept: true
   - name: allows-all-preconditions-met
+    seed: file-backed
+    migrate: true
+    wantFailed: []
+    wantPassed:
+      - projection_generations_empty
+      - projection_entries_empty
+      - projection_content_empty
+      - session_entries_fts_absent
+      - no_native_full_content_rows
+    wantDetailContains: []
+    drop: allowed
+    # After the drop the retired tables are gone and the kept tables stay.
+    wantRetiredGone: true
   - name: fresh-install-needs-consolidation
+    seed: none
+    wantFailed:
+      - session_entries_fts_absent
+    wantPassed:
+      - projection_generations_empty
+      - projection_entries_empty
+      - projection_content_empty
+      - no_native_full_content_rows
+    wantDetailContains:
+      - peasant migrate
+      - Phase 3
+    drop: refused
+    # A fresh install carries both search indexes until peasant migrate
+    # runs Phase 3; the runner asserts that dual-index state, consolidates,
+    # and then proves every precondition holds.
+    wantDualIndex: true
+    thenConsolidate: true
   - name: newer-schema-refused-on-open
+    seed: none
+    wantFailed: []
+    wantPassed: []
+    wantDetailContains: []
+    drop: skip
+    # The runner stamps user_version past this build and proves both the
+    # read-write and the read-only opens refuse with the newer-release fix.
+    newerSchema: true
