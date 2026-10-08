@@ -317,7 +317,7 @@ var searchRecallManifestYAML []byte
 
 // searchRecallCase is one search_recall case: the section-10 name plus the
 // query term and the production result the consolidated index must return.
-// Cases the slice owns carry typed expectations its runner asserts; the
+// Cases this runner covers carry typed expectations it asserts; the
 // loader's manifest check still protects every name.
 type searchRecallCase struct {
 	Name                    string `yaml:"name"`

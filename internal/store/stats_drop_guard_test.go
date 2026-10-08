@@ -48,8 +48,8 @@ func TestDeprecatedStatsColumnsGuarded(t *testing.T) {
 		{file: "internal/store/metrics_writer.go", contains: "session_id, turn_count, subagent_count,", why: "analysis record shape"},
 		// The retirement clear itself.
 		{file: "internal/store/harmonized_stats.go", contains: "UPDATE sessions SET metric_seed_json = NULL", why: "retired seed clear for natives"},
-		// The current activation's legacy mirrors; the writer slice moves
-		// them into the activation commit.
+		// The current activation's legacy mirrors; the activation commit
+		// records them alongside the generation rows.
 		{file: "internal/store/index_format_v2.go", contains: "INSERT INTO session_metrics (session_id, turn_count, tool_calls, title)", why: "activation legacy mirrors"},
 	}
 	var violations []string
