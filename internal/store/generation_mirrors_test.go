@@ -136,8 +136,8 @@ func TestGenerationMirrors(t *testing.T) {
 					t.Fatalf("activate child with missing parent: %v", err)
 				}
 				// The availability cache stays NULL so the admitted child
-				// survives, while the snapshot still names the durable logical
-				// parent.
+				// survives, while the durable evidence still names the
+				// missing logical parent.
 				conn, err := s.pool.Take(context.Background())
 				if err != nil {
 					t.Fatal(err)
@@ -150,18 +150,27 @@ func TestGenerationMirrors(t *testing.T) {
 						return nil
 					},
 				})
-				s.pool.Put(conn)
 				if !parentNull {
+					s.pool.Put(conn)
 					t.Fatal("sessions.parent_id names a missing target; it must stay NULL")
 				}
-				err = s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
-					if snapshot.Session.ParentSessionID == nil || *snapshot.Session.ParentSessionID != missing {
-						return stringsErrorf("snapshot parent = %v, want missing target %s", snapshot.Session.ParentSessionID, missing)
-					}
-					return nil
+				var evidenceTarget *string
+				_ = sqlitex.ExecuteTransient(conn, `SELECT target_local_id FROM session_relationship_evidence WHERE session_id = ? AND kind = 'started_by'`, &sqlitex.ExecOptions{
+					Args: []any{string(id)},
+					ResultFunc: func(stmt *sqlite.Stmt) error {
+						if stmt.ColumnType(0) != sqlite.TypeNull {
+							v := stmt.ColumnText(0)
+							evidenceTarget = &v
+						}
+						return nil
+					},
 				})
+				s.pool.Put(conn)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if evidenceTarget == nil || *evidenceTarget != string(missing) {
+					t.Fatalf("durable parent target = %v, want missing target %s", evidenceTarget, missing)
 				}
 
 			case "absent-input-count-preserved":
@@ -269,26 +278,69 @@ func assertMirrorRow(t *testing.T, s *Store, sid schema.SessionID, wantStart, wa
 
 func assertSnapshotMirrors(t *testing.T, s *Store, sid schema.SessionID, wantGen string, wantStart, wantEnd int64, wantParent *string, wantInput *int64, wantTurns, wantTools int) {
 	t.Helper()
-	err := s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		if snapshot.GenerationID != wantGen {
-			return stringsErrorf("generation = %q, want %q", snapshot.GenerationID, wantGen)
-		}
-		if snapshot.Session.StartTime.UnixMilli() != wantStart || snapshot.Session.EndTime.UnixMilli() != wantEnd {
-			return stringsErrorf("snapshot timestamps = (%d,%d), want (%d,%d)", snapshot.Session.StartTime.UnixMilli(), snapshot.Session.EndTime.UnixMilli(), wantStart, wantEnd)
-		}
-		if !equalOptionalSessionIDPtr(snapshot.Session.ParentSessionID, wantParent) {
-			return stringsErrorf("snapshot parent = %v, want %v", snapshot.Session.ParentSessionID, wantParent)
-		}
-		if !equalOptionalInt64Ptr(snapshot.Session.InputSubmissionCount, wantInput) {
-			return stringsErrorf("snapshot input count = %v, want %v", snapshot.Session.InputSubmissionCount, wantInput)
-		}
-		if snapshot.Session.TurnCount != wantTurns || snapshot.Session.ToolCallCount != wantTools {
-			return stringsErrorf("snapshot counts = (%d,%d), want (%d,%d)", snapshot.Session.TurnCount, snapshot.Session.ToolCallCount, wantTurns, wantTools)
-		}
-		return nil
-	})
+	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	active, err := readActiveGenerationOnConn(conn, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active == nil || *active != wantGen {
+		t.Fatalf("active generation = %v, want %q", active, wantGen)
+	}
+	var start, end int64
+	var turns, tools int
+	var input *int64
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT g.ts_start, g.ts_end, c.turn_count, c.tool_call_count, c.input_submission_count FROM session_generations g LEFT JOIN session_captured_stats c ON c.session_id = g.session_id WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), wantGen},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			start, end = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			if stmt.ColumnType(2) != sqlite.TypeNull {
+				turns = stmt.ColumnInt(2)
+			}
+			if stmt.ColumnType(3) != sqlite.TypeNull {
+				tools = stmt.ColumnInt(3)
+			}
+			if stmt.ColumnType(4) != sqlite.TypeNull {
+				v := stmt.ColumnInt64(4)
+				input = &v
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("no harmonized generation row %q", wantGen)
+	}
+	if start != wantStart || end != wantEnd {
+		t.Fatalf("timestamps = (%d,%d), want (%d,%d)", start, end, wantStart, wantEnd)
+	}
+	if !equalOptionalInt64Ptr(input, wantInput) {
+		t.Fatalf("input count = %v, want %v", input, wantInput)
+	}
+	if turns != wantTurns || tools != wantTools {
+		t.Fatalf("counts = (%d,%d), want (%d,%d)", turns, tools, wantTurns, wantTools)
+	}
+	var parent *string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				v := stmt.ColumnText(0)
+				parent = &v
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !equalOptionalStringPtr(parent, wantParent) {
+		t.Fatalf("parent = %v, want %v", parent, wantParent)
 	}
 }
 
@@ -310,7 +362,7 @@ func assertInputCountMirror(t *testing.T, s *Store, sid schema.SessionID, want *
 			return nil
 		},
 	})
-	_ = sqlitex.ExecuteTransient(conn, `SELECT input_submission_count FROM session_projection_generations WHERE session_id = ?`, &sqlitex.ExecOptions{
+	_ = sqlitex.ExecuteTransient(conn, `SELECT input_submission_count FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			var row *int64
@@ -319,25 +371,13 @@ func assertInputCountMirror(t *testing.T, s *Store, sid schema.SessionID, want *
 				row = &v
 			}
 			if !equalOptionalInt64Ptr(row, want) {
-				t.Fatalf("generation input count = %v, want %v", row, want)
+				t.Fatalf("captured stats input count = %v, want %v", row, want)
 			}
 			return nil
 		},
 	})
 	if !equalOptionalInt64Ptr(got, want) {
 		t.Fatalf("sessions input count = %v, want %v (absent versus measured zero must be preserved)", got, want)
-	}
-	err = s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		if !equalOptionalInt64Ptr(snapshot.Session.InputSubmissionCount, want) {
-			return stringsErrorf("snapshot input count = %v, want %v", snapshot.Session.InputSubmissionCount, want)
-		}
-		if !equalOptionalInt64Ptr(snapshot.Metadata.Stats.InputSubmissionCount, want) {
-			return stringsErrorf("metadata input count = %v, want %v", snapshot.Metadata.Stats.InputSubmissionCount, want)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 

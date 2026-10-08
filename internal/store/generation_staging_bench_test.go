@@ -17,58 +17,61 @@ const (
 	benchSessionID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 )
 
-// benchGeneration builds one generation whose content records all have a
-// captured blob, shaped like the per-part generation a large OpenCode session
-// produces: many small files, each written before the manifest and rename.
+// benchGeneration builds one generation whose content records are all
+// retained (non-emitted) blobs, shaped like the per-part generation a large
+// OpenCode session produces: many small blobs, each staged idempotently
+// without a lock. The records stay in a captured context segment so the
+// generation is self-contained.
 func benchGeneration(tb testing.TB, n int) (indexformat.Generation, map[schema.SourceEntryRef][]byte) {
 	tb.Helper()
 	payload := []byte(strings.Repeat("x", benchBlobBytes))
 	content := make([]indexformat.ContentRecord, 0, n)
 	blobs := make(map[schema.SourceEntryRef][]byte, n)
+	refs := make([]schema.SourceEntryRef, 0, n)
 	for i := 0; i < n; i++ {
 		ref := schema.SourceEntryRef(fmt.Sprintf("e_%06d", i))
 		content = append(content, indexformat.ContentRecord{Ref: ref})
 		blobs[ref] = payload
+		refs = append(refs, ref)
 	}
 	sid, err := schema.NewSessionID(benchSessionID)
 	if err != nil {
 		tb.Fatal(err)
 	}
+	inputCount := int64(1)
 	generation := indexformat.Generation{
 		Completeness: indexformat.GenerationCompletenessComplete,
 		Metadata: schema.UnifiedMetadata{
 			SchemaVersion: ingest.CurrentSchemaVersion,
 			SessionID:     sid,
 			ModelHarness:  ingest.HarnessOpenCode,
+			Stats:         schema.SessionStats{InputSubmissionCount: &inputCount},
 		},
 		Content:              content,
 		SourceEvidenceDigest: strings.Repeat("a", 64),
+		Segments: []indexformat.ContextSegment{{
+			PhysicalSourceID: "bench-source",
+			Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
+			Inclusion:        indexformat.SegmentInclusionInherited,
+			CapturedRefs:     refs,
+		}},
 	}
 	return generation, blobs
 }
 
 // BenchmarkStageGeneration measures one staging call for a 1000-blob
-// generation with different blob-writer counts. The store-wide slot pool is
-// sized to the per-call worker count so the single staging call under test is
-// not bounded by the shared pool.
+// generation shaped like the per-part generation a large OpenCode session
+// produces: many small retained blobs staged idempotently without a lock.
 func BenchmarkStageGeneration(b *testing.B) {
-	for _, workers := range []int{1, 4, 8, 16} {
-		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
-			artifacts, err := NewOSGenerationArtifactStore(b.TempDir())
-			if err != nil {
-				b.Fatal(err)
-			}
-			concrete := artifacts.(*osGenerationArtifactStore)
-			concrete.blobWorkers = workers
-			concrete.blobSlots = make(chan struct{}, workers)
-			generation, blobs := benchGeneration(b, benchBlobCount)
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				generation.ID = fmt.Sprintf("g_bench_%d_%d", workers, i)
-				if _, err := concrete.Stage(context.Background(), generation, blobs); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
+	s, _ := openGenerationStore(b)
+	seedGenerationSession(b, s, benchSessionID)
+	generation, blobs := benchGeneration(b, benchBlobCount)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		generation.ID = fmt.Sprintf("g_bench_%d", i)
+		filled := filledCandidateForValidation(b, indexformat.V2{Generation: generation}, blobs)
+		if _, err := s.StageGeneration(context.Background(), GenerationActivation{Generation: filled, Blobs: blobs}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

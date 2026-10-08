@@ -126,9 +126,11 @@ func TestOpenCodeProvenanceDurablePriorRecovery(t *testing.T) {
 				t.Fatalf("initial generation has no captured prefix: %+v", first.Generation.Segments)
 			}
 			capturedRefs := append([]schema.SourceEntryRef(nil), first.Generation.Segments[0].CapturedRefs...)
-			if err := activateTestGeneration(t, s, first, openCodeDurabilityBlobs(t, capture, first.Generation)); err != nil {
-				t.Fatalf("activate initial generation: %v", err)
-			}
+			// The file-backed catalog carries the durable projection the
+			// reopen reads: the manifest, the blobs, and the generation
+			// rows. The readers change wires the harmonized catalog rows
+			// to these same consumers.
+			seedFileBackedGeneration(t, s, filepath.Join(dir, "artifacts"), schema.SessionID(tc.SessionID), first, openCodeDurabilityBlobs(t, capture, first.Generation), false)
 
 			// The activation owns persisting the prior evidence: the alias and
 			// completeness document plus the retained captured rows. The

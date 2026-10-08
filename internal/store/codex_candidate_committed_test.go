@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -176,14 +177,11 @@ func TestCodexCandidateCommittedDetailExcludesInherited(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	seedGenerationSession(t, s, fixture.Session.ID)
 
-	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
-		Generation:     candidate.V2,
-		Blobs:          candidate.Content,
-		IndexerVersion: 1,
-		IndexedAtMs:    1,
-	}); err != nil {
-		t.Fatalf("ActivateGeneration: %v", err)
-	}
+	// The committed readers serve the file-backed representation; the
+	// harmonized catalog rows the writer installs are asserted by the
+	// writer's own round-trip test, and the readers change wires them to
+	// these same consumers.
+	seedFileBackedGeneration(t, s, filepath.Join(dir, "artifacts"), sessionID, candidate.V2, candidate.Content, false)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
 	}
