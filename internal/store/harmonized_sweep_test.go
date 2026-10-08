@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
 
@@ -230,6 +231,76 @@ func assertSweepRecovered(t *testing.T, s *Store, sid schema.SessionID, generati
 		t.Fatalf("visible generation = %q after recovery, want %q", got, generationID)
 	}
 	assertHarmonizedContent(t, s, sid, generationID, candidate, blobs)
+}
+
+// TestSweepCorruptBodyRebuildsIndex proves the sweep's verified delete:
+// a body whose columns no longer hash to its digest flags the search index
+// instead of trusting the delete values, and the step-5 whole-index rebuild
+// clears the stale postings: raw MATCH finds the surviving terms exactly
+// once and the production query stays clean.
+func TestSweepCorruptBodyRebuildsIndex(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	ctx := context.Background()
+	sid := gcSession(t, s, "b9b9b9b9-b9b9-49b9-89b9-b9b9b9b9b9b9")
+	oldTerms := []string{"gccorrupto0", "gccorrupto1", "gccorrupto2"}
+	activeTerms := []string{"gccorruptn0", "gccorruptn1", "gccorruptn2"}
+	old, oldBlobs := gcActivate(t, s, sid, "gc_corrupt_old", oldTerms, nil)
+	active, activeBlobs := gcActivate(t, s, sid, "gc_corrupt_active", activeTerms, nil)
+
+	// Corrupt one superseded body under the immutability trigger (dropped
+	// and recreated here; the trigger DDL is pinned by schema_v62.go): its
+	// columns no longer hash to its stored digest. Bodies are
+	// generation-scoped only by reference, so the corrupt write addresses
+	// the old body by its digest and leaves the active bodies intact.
+	oldPrepared, err := prepareHarmonizedCandidate(sid, old.Generation, oldBlobs)
+	if err != nil {
+		t.Fatalf("prepare corrupt target: %v", err)
+	}
+	corruptDigest := string(oldPrepared.bodyDigests[0])
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `DROP TRIGGER session_entry_bodies_immutable`, nil); err != nil {
+		s.pool.Put(conn)
+		t.Fatalf("drop immutability trigger: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_entry_bodies SET content_preview = content_preview || 'corrupted' WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), corruptDigest},
+	}); err != nil {
+		s.pool.Put(conn)
+		t.Fatalf("corrupt a body column: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `CREATE TRIGGER session_entry_bodies_immutable BEFORE UPDATE ON session_entry_bodies BEGIN SELECT RAISE(ABORT, 'session_entry_bodies rows are immutable; insert a new entry instead'); END`, nil); err != nil {
+		s.pool.Put(conn)
+		t.Fatalf("recreate immutability trigger: %v", err)
+	}
+	s.pool.Put(conn)
+
+	got, err := s.SweepSession(ctx, sid)
+	if err != nil {
+		t.Fatalf("sweep with a corrupt body: %v", err)
+	}
+	if !got.Rebuilt {
+		t.Fatal("sweep of an untrusted delete did not run the whole-index rebuild")
+	}
+	if got.BodiesDeleted != 3 {
+		t.Fatalf("sweep deleted %d bodies, want all 3 old ones", got.BodiesDeleted)
+	}
+	if readSweepFlag(t, s, sid) {
+		t.Fatal("sweep left the flag set after the rebuild")
+	}
+	assertGCDigestsEqual(t, s, sid, "corrupt-body-rebuilds-index", gcBodyDigests(t, sid, active, activeBlobs))
+	for _, term := range activeTerms {
+		if got := gcMatchCount(t, s, term); got != 1 {
+			t.Fatalf("raw MATCH for surviving term %q returned %d rows, want exactly 1 after the rebuild", term, got)
+		}
+	}
+	for _, term := range oldTerms {
+		if got := gcMatchCount(t, s, term); got != 0 {
+			t.Fatalf("raw MATCH for swept term %q returned %d rows, want none", term, got)
+		}
+	}
 }
 
 // runSweepMidSweepBatch proves a crash between the sweep's bounded batches
