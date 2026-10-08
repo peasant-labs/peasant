@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -545,6 +546,12 @@ func scanEntryRecord(stmt *sqlite.Stmt) EntryRecord {
 }
 
 const sqlSelectBodyColumns = `body_id, session_id, body_digest, entry_index, harness, entry_type, role, timestamp_ms, content_preview, tokens_in, tokens_out, has_tool_use, tool_kind, tool_names_csv, has_thinking, is_error, stop_reason, raw_byte_length, tool_call_id, entry_id, parent_entry_id, depth, parent_index, tool_input, tool_output, model_id, tokens_reasoning, cache_read, cache_write, extra, extra_verbatim, part_type, source_entry_ref, prov_origin, prov_actor, prov_delivery, prov_ownership, prov_evidence, prov_input_modality, prov_submission_ref`
+
+// sqlSelectBodyColumnsJoined is the same column list qualified for the
+// body/mapping join both tables expose session_id under: the unqualified
+// list is ambiguous there, so join sites read through this derived form
+// and the column home stays single.
+var sqlSelectBodyColumnsJoined = "b." + strings.ReplaceAll(sqlSelectBodyColumns, ", ", ", b.")
 
 // hasProvenanceColumns reports whether the row carries any provenance: the
 // six required dimensions are non-NULL together, or all NULL together. A
@@ -1262,7 +1269,7 @@ func remapHarmonizedAnnotations(conn *sqlite.Conn, sessionID schema.SessionID, e
 // body rows, reconstructed through the one row-to-struct function.
 func readHarmonizedBodyAnchors(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]entryTargetAnchor, error) {
 	var anchors []entryTargetAnchor
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := entryFromRow(scanEntryRecord(stmt))
@@ -1405,7 +1412,97 @@ func repairNeedsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID) (bool,
 	}); err != nil {
 		return false, fmt.Errorf("store: check the repair predicate for session %s: %w", sessionID, err)
 	}
-	return predicate, nil
+	if !predicate {
+		return false, nil
+	}
+	// The predicate alone cannot select repair: the mirror clears the input
+	// proof on every artifact-hash change, so it also matches an ordinary
+	// changed-input refresh whose stored objects are healthy — and repair
+	// inserts no new generation row, so it would swallow the refresh. Only
+	// failing objects take the in-place rewrite; a healthy store takes the
+	// ordinary skip-or-commit path, which restores the proof itself.
+	return activeObjectsNeedRepair(conn, sessionID, *active)
+}
+
+// activeObjectsNeedRepair reports whether the active generation's mapped
+// objects fail self-verification: a mapped body missing or recomputing a
+// different digest than its stored anchor, or a descriptor whose blob
+// header is missing or whose chunks do not cover its byte length. Healthy
+// objects verify exactly the way full reads verify them, so this gate and
+// the read path can never disagree about corruption.
+func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, activeID string) (bool, error) {
+	var digests []string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), activeID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			digests = append(digests, stmt.ColumnText(0))
+			return nil
+		},
+	}); err != nil {
+		return false, fmt.Errorf("store: list active mapped bodies for session %s: %w; the repair decision could not be made", sessionID, err)
+	}
+	for _, digest := range digests {
+		found := false
+		failing := false
+		if err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID), digest},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				found = true
+				record := scanEntryRecord(stmt)
+				if string(bodyDigestForRecord(record)) != record.BodyDigest {
+					failing = true
+				}
+				return nil
+			},
+		}); err != nil {
+			return false, fmt.Errorf("store: verify active body %s for session %s: %w; the repair decision could not be made", digest, sessionID, err)
+		}
+		if !found || failing {
+			return true, nil
+		}
+	}
+	var blobDigests []string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT digest FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), activeID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			blobDigests = append(blobDigests, stmt.ColumnText(0))
+			return nil
+		},
+	}); err != nil {
+		return false, fmt.Errorf("store: list active descriptors for session %s: %w; the repair decision could not be made", sessionID, err)
+	}
+	for _, digest := range blobDigests {
+		var byteLength int64
+		header := false
+		if err := sqlitex.ExecuteTransient(conn, `SELECT byte_length FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID), digest},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				header = true
+				byteLength = stmt.ColumnInt64(0)
+				return nil
+			},
+		}); err != nil {
+			return false, fmt.Errorf("store: verify active blob %s for session %s: %w; the repair decision could not be made", digest, sessionID, err)
+		}
+		if !header {
+			return true, nil
+		}
+		wantChunks := (byteLength + 65535) / 65536
+		var chunks int64
+		if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_content_chunks WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID), digest},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				chunks = stmt.ColumnInt64(0)
+				return nil
+			},
+		}); err != nil {
+			return false, fmt.Errorf("store: count active blob %s chunks for session %s: %w; the repair decision could not be made", digest, sessionID, err)
+		}
+		if chunks != wantChunks {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // repairHarmonizedObjects rewrites the candidate's objects in place in one

@@ -272,7 +272,7 @@ func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) *sch
 // entries from their body rows in index order.
 func readHarmonizedMainEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SessionEntry, error) {
 	var entries []schema.SessionEntry
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entries = append(entries, entryFromRow(scanEntryRecord(stmt)))

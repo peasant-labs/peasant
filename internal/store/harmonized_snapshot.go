@@ -446,9 +446,11 @@ ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
 			if err != nil {
 				return err
 			}
-			if row.SourceEntryRef == "" {
-				return fmt.Errorf("mapped entry at index %d carries no source ref; the mapping row cannot hydrate; re-index the session to repair its refs", row.EntryIndex)
-			}
+			// A mapped body without a source ref is retained evidence the
+			// producer never addressed (a carrier row): it hydrates as an
+			// entry but emits no content record, since no ref addresses it.
+			// The mapping table leaves source_entry_ref NULL for such rows
+			// by schema, so the reader must not refuse them.
 			mappedByPartition[partitionID] = append(mappedByPartition[partitionID], harmonizedMappedEntry{
 				entry:  entryFromRow(row),
 				digest: row.BodyDigest,
