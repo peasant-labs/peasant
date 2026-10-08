@@ -1,0 +1,23 @@
+required_names:
+  - staging-only-advisory
+  - inline-activation-only-advisory
+  - both-boundaries-deduplicate-advisory
+cases:
+  - name: staging-only-advisory
+    stager: true
+    emit_stage: true
+    emit_activation: false
+    want_stage_calls: 1
+    want_activation_calls: 1
+  - name: inline-activation-only-advisory
+    stager: false
+    emit_stage: false
+    emit_activation: true
+    want_stage_calls: 0
+    want_activation_calls: 1
+  - name: both-boundaries-deduplicate-advisory
+    stager: true
+    emit_stage: true
+    emit_activation: true
+    want_stage_calls: 1
+    want_activation_calls: 1
