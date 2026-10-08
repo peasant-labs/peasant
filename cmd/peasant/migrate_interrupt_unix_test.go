@@ -14,7 +14,9 @@ func TestMigrateSIGINTPartialReport(t *testing.T) {
 			continue
 		}
 		t.Run(c.Name, func(t *testing.T) {
-			runMigrateInterruptCase(t, c, func() error { return syscall.Kill(os.Getpid(), syscall.SIGINT) })
+			runMigrateInterruptCase(t, c, func() error {
+				return syscall.Kill(os.Getpid(), syscall.SIGINT)
+			})
 		})
 	}
 }

@@ -142,6 +142,8 @@ func TestMigrateInterruptPartialReport(t *testing.T) {
 		if c.Mode != "context" {
 			t.Fatalf("unknown interrupt mode %s", c.Mode)
 		}
-		t.Run(c.Name, func(t *testing.T) { runMigrateInterruptCase(t, c, nil) })
+		t.Run(c.Name, func(t *testing.T) {
+			runMigrateInterruptCase(t, c, nil)
+		})
 	}
 }

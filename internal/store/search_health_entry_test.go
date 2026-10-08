@@ -49,7 +49,9 @@ func TestSearchHealthEntry(t *testing.T) {
 			s, _ := openGenerationStore(t)
 			recallExec(t, s, `UPDATE session_search_state SET needs_rebuild=1 WHERE id=1`)
 			previous := migrateFreeBytes
-			t.Cleanup(func() { migrateFreeBytes = previous })
+			t.Cleanup(func() {
+				migrateFreeBytes = previous
+			})
 			plan, err := s.PlanMigration(t.Context())
 			if err != nil {
 				t.Fatal(err)

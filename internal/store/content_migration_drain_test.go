@@ -68,7 +68,9 @@ func runMigrateDrainCase(t *testing.T, c contentMigrationCase) {
 		t.Fatalf("plan intents=%d", plan.PendingIntents)
 	}
 	previous := migrateDrainAfterIntentClear
-	t.Cleanup(func() { migrateDrainAfterIntentClear = previous })
+	t.Cleanup(func() {
+		migrateDrainAfterIntentClear = previous
+	})
 	fired := false
 	if c.DrainIntent {
 		migrateDrainAfterIntentClear = func(id schema.SessionID) error {

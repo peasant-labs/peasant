@@ -33,7 +33,7 @@ const searchFreshBuildFactor = 0.39
 // caller's connection.
 func searchStateReadOnConn(conn *sqlite.Conn) (SearchState, error) {
 	var state SearchState
-	if err := sqlitex.ExecuteTransient(conn, `SELECT needs_rebuild FROM session_search_state WHERE id = 1`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT needs_rebuild FROM session_search_state WHERE id = 1`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			state.NeedsRebuild = stmt.ColumnInt64(0) == 1
 			return nil
@@ -58,7 +58,7 @@ func SearchStateSetNeedsRebuild(ctx context.Context, conn *sqlite.Conn) error {
 	if conn == nil {
 		return fmt.Errorf("store: flag the search index for rebuild with no connection: pass the deleting transaction's connection; nothing was flagged; retry with the caller's *sqlite.Conn")
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
 		return fmt.Errorf("store: flag the search index for rebuild: %w; the stale postings are still indexed and search refuses until the flag is set; retry the delete", err)
 	}
 	return nil
@@ -84,7 +84,7 @@ func verifyBodyForDelete(row EntryRecord) bool {
 // trustBodyForDelete owns missing-row and digest semantics for every delete
 // path. Missing or unserializable bodies are untrusted, never assumed safe.
 func trustBodyForDelete(conn *sqlite.Conn, sid schema.SessionID, digest string) (found, trusted bool, err error) {
-	err = sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id=? AND body_digest=?`, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id=? AND body_digest=?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid), digest}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
 			trusted = verifyBodyForDelete(scanEntryRecord(stmt))
@@ -271,7 +271,7 @@ var UnifiedSearchSQL = fmt.Sprintf(
 // search refuses instead of serving postings that may be stale.
 func SearchUnifiedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]UnifiedSearchHit, error) {
 	var hits []UnifiedSearchHit
-	if err := sqlitex.ExecuteTransient(conn, UnifiedSearchSQL, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, UnifiedSearchSQL, &sqlitex.ExecOptions{
 		Args: []any{match, limit, offset},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			hits = append(hits, UnifiedSearchHit{
@@ -337,9 +337,12 @@ LIMIT ? OFFSET ?`
 // searchTableExists reports whether a table exists on the caller's connection.
 func searchTableExists(conn *sqlite.Conn, table string) bool {
 	found := false
-	_ = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, &sqlitex.ExecOptions{
-		Args:       []any{table},
-		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	_ = sqlitex.Execute(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, &sqlitex.ExecOptions{
+		Args: []any{table},
+		ResultFunc: func(*sqlite.Stmt) error {
+			found = true
+			return nil
+		},
 	})
 	return found
 }
@@ -405,7 +408,7 @@ func SearchMergedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]U
 
 func searchLegacyOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]UnifiedSearchHit, error) {
 	var hits []UnifiedSearchHit
-	if err := sqlitex.ExecuteTransient(conn, LegacyMirrorSearchSQL, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, LegacyMirrorSearchSQL, &sqlitex.ExecOptions{
 		Args: []any{match, limit, offset},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			hits = append(hits, UnifiedSearchHit{

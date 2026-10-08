@@ -65,11 +65,15 @@ type contentGCCase struct {
 // isPlaceholder reports whether the case carries no typed expectations, in
 // which case the runner logs it and asserts nothing.
 func (c contentGCCase) isPlaceholder() bool {
-	return c.WantRowsDeleted == 0 && c.WantBodiesDeleted == 0 && c.WantBlobsDeleted == 0 &&
-		c.WantDirsRemoved == 0 && c.WantFlagCleared == nil && c.WantRebuilt == nil &&
-		c.WantMirrorRows == nil && c.WantFullContentRows == nil &&
-		len(c.FirstTerms) == 0 && len(c.SecondTerms) == 0 &&
-		len(c.MatchFound) == 0 && len(c.MatchEmpty) == 0 && len(c.Sessions) == 0 && c.Verify == ""
+	noDeletes := c.WantRowsDeleted == 0 && c.WantBodiesDeleted == 0 && c.WantBlobsDeleted == 0
+	noSweepState := c.WantDirsRemoved == 0 && c.WantFlagCleared == nil && c.WantRebuilt == nil
+	noLegacyRows := c.WantMirrorRows == nil && c.WantFullContentRows == nil
+	noTerms := len(c.FirstTerms) == 0 && len(c.SecondTerms) == 0
+	noMatches := len(c.MatchFound) == 0 && len(c.MatchEmpty) == 0
+	noVerify := len(c.Sessions) == 0 && c.Verify == ""
+	noStateExpectations := noDeletes && noSweepState && noLegacyRows
+	noContentExpectations := noTerms && noMatches && noVerify
+	return noStateExpectations && noContentExpectations
 }
 
 type contentGCFixtures struct {
@@ -307,7 +311,7 @@ func gcRemainingDigests(t *testing.T, s *Store, sid schema.SessionID) map[string
 	}
 	defer s.pool.Put(conn)
 	remaining := map[string]struct{}{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT body_digest FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT body_digest FROM session_entry_bodies WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			remaining[stmt.ColumnText(0)] = struct{}{}
@@ -328,7 +332,7 @@ func gcCount(t *testing.T, s *Store, table string, sid schema.SessionID) int64 {
 	}
 	defer s.pool.Put(conn)
 	var count int64
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM `+table+` WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM `+table+` WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			count = stmt.ColumnInt64(0)
@@ -351,7 +355,7 @@ func gcMatchCount(t *testing.T, s *Store, term string) int64 {
 	}
 	defer s.pool.Put(conn)
 	var count int64
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_search_fts MATCH ?`, &sqlitex.ExecOptions{
 		Args: []any{term},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			count = stmt.ColumnInt64(0)
@@ -372,7 +376,7 @@ func gcBlobChunks(t *testing.T, s *Store, sid schema.SessionID, digest string) i
 	}
 	defer s.pool.Put(conn)
 	var count int64
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_content_chunks WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT COUNT(*) FROM session_content_chunks WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid), digest},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			count = stmt.ColumnInt64(0)
@@ -760,7 +764,7 @@ VALUES('`+session.ID+`','`+generationID+`','{}','`+digest+`','complete',2,1,1);`
 			}
 		}
 		var flag int64
-		if err := sqlitex.ExecuteTransient(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{session.ID},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				flag = stmt.ColumnInt64(0)

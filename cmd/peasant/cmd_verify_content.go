@@ -57,7 +57,9 @@ func openVerifyContentStore(cmd *cobra.Command, ownedRoot, dbPath string) (*stor
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open analytics store: %w", err)
 	}
-	return db, func() { _ = db.Close() }, nil
+	return db, func() {
+		_ = db.Close()
+	}, nil
 }
 
 // writeVerifyContentReport prints the content verification report. A

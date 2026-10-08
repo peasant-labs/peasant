@@ -800,7 +800,9 @@ func (a *osGenerationArtifactStore) ListOwnedSessionIDs(ctx context.Context) ([]
 			ids = append(ids, id)
 		}
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i] < ids[j]
+	})
 	return ids, nil
 }
 

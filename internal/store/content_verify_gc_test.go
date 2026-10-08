@@ -41,7 +41,10 @@ func runGCVerify(t *testing.T, c contentGCCase) {
 	for _, text := range texts {
 		wantBytes += int64(len(text))
 	}
-	if report.OrphanBodies != 3 || report.OrphanBlobs != 1 || report.OrphanBytes != wantBytes || report.OrphanOwnedDirs != 1 || report.OrphanOwnedBytes != int64(len(blob)) {
+	wrongObjects := report.OrphanBodies != 3 || report.OrphanBlobs != 1
+	wrongPayload := report.OrphanBytes != wantBytes
+	wrongDirectories := report.OrphanOwnedDirs != 1 || report.OrphanOwnedBytes != int64(len(blob))
+	if wrongObjects || wrongPayload || wrongDirectories {
 		t.Fatalf("orphan report = %+v, want database payload %d bytes", report, wantBytes)
 	}
 	if c.Unflagged {

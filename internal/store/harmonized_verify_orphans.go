@@ -47,7 +47,10 @@ SELECT b.session_id, 0, 1, b.byte_length FROM session_content b WHERE NOT EXISTS
 		}
 		for _, id := range ids {
 			var keep string
-			if err := sqlitex.ExecuteTransient(conn, `SELECT s.active_generation_id FROM sessions s JOIN session_projection_generations g ON g.session_id=s.session_id AND g.generation_id=s.active_generation_id WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { keep = stmt.ColumnText(0); return nil }}); err != nil {
+			if err := sqlitex.Execute(conn, `SELECT s.active_generation_id FROM sessions s JOIN session_projection_generations g ON g.session_id=s.session_id AND g.generation_id=s.active_generation_id WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+				keep = stmt.ColumnText(0)
+				return nil
+			}}); err != nil {
 				return err
 			}
 			dirs, footprint, err := s.generationArtifacts.OrphanGenerationFootprint(ctx, id, keep)
@@ -63,13 +66,18 @@ SELECT b.session_id, 0, 1, b.byte_length FROM session_content b WHERE NOT EXISTS
 	}
 	for id := range owners {
 		var flagged bool
-		if err := sqlitex.ExecuteTransient(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { flagged = stmt.ColumnInt(0) != 0; return nil }}); err != nil {
+		if err := sqlitex.Execute(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			flagged = stmt.ColumnInt(0) != 0
+			return nil
+		}}); err != nil {
 			return err
 		}
 		if !flagged {
 			report.UnflaggedOrphanSessions = append(report.UnflaggedOrphanSessions, id)
 		}
 	}
-	sort.Slice(report.UnflaggedOrphanSessions, func(i, j int) bool { return report.UnflaggedOrphanSessions[i] < report.UnflaggedOrphanSessions[j] })
+	sort.Slice(report.UnflaggedOrphanSessions, func(i, j int) bool {
+		return report.UnflaggedOrphanSessions[i] < report.UnflaggedOrphanSessions[j]
+	})
 	return nil
 }
