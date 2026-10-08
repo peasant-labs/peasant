@@ -95,10 +95,12 @@ func generationStoreOptionsReadOnly(ownedRoot string) ([]store.OpenOption, error
 
 // openRunStore opens the analytics store for an ingestion or publication run.
 // ownedRoot is the run's resolved output directory; when it is set the store
-// can stage, activate and read managed generations. A dry-run store is opened
-// read-only but with the same target-resolving reader, so its forecast matches
-// a real run; it still changes no file.
-func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string) (*store.Store, error) {
+// can stage, activate and read managed generations. write carries the
+// configured write.* budgets into the staging and activation lanes, so a run
+// honors the user's batch caps instead of the shipped defaults. A dry-run
+// store is opened read-only but with the same target-resolving reader, so its
+// forecast matches a real run; it still changes no file.
+func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string, write ingest.WriteConfig) (*store.Store, error) {
 	path := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if dryRun {
 		options, err := generationStoreOptionsReadOnly(ownedRoot)
@@ -115,6 +117,7 @@ func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string) (*store.Sto
 	if err != nil {
 		return nil, err
 	}
+	options = append(options, store.WithWriteConfig(write))
 	return store.Open(path, options...)
 }
 
