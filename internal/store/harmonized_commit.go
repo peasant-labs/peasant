@@ -1602,12 +1602,12 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 	txnErr := error(nil)
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
-	if err := sqlitex.ExecuteTransient(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
 		txnErr = fmt.Errorf("store: defer foreign keys for the repair of session %s: %w", prepared.sessionID, err)
 		return txnErr
 	}
 	defer func() {
-		_ = sqlitex.ExecuteTransient(conn, `PRAGMA defer_foreign_keys = OFF`, nil)
+		_ = sqlitex.Execute(conn, `PRAGMA defer_foreign_keys = OFF`, nil)
 	}()
 	for i := range prepared.bodies {
 		record := prepared.bodies[i]

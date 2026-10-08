@@ -1014,7 +1014,7 @@ var migrateSharedOldTables = []string{
 // mirror stay: the shadow verify reads them.
 func deleteMigrateSharedOldRows(conn *sqlite.Conn, oracle *migrateOracle) error {
 	for _, table := range migrateSharedOldTables {
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM `+table+` WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM `+table+` WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(oracle.sessionID), oracle.generationID},
 		}); err != nil {
 			return fmt.Errorf("delete old %s rows: %w", table, err)
@@ -1027,7 +1027,7 @@ func deleteMigrateSharedOldRows(conn *sqlite.Conn, oracle *migrateOracle) error 
 // entry and content rows after the shadow verify passed.
 func deleteMigrateProjectionOldRows(conn *sqlite.Conn, oracle *migrateOracle) error {
 	for _, table := range []string{"session_projection_entries", "session_projection_content", "session_projection_generations"} {
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM `+table+` WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM `+table+` WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(oracle.sessionID), oracle.generationID},
 		}); err != nil {
 			return fmt.Errorf("delete old %s rows: %w", table, err)
