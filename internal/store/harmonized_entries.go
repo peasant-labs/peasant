@@ -53,39 +53,6 @@ type EntryRecord struct {
 	Provenance      *schema.ContentProvenance
 }
 
-// entryFromRow is the ONLY row -> struct reconstruction. Storage identity
-// (BodyID, BodyDigest) stays out of the wire struct; the four promoted
-// columns (ModelID, TokensReasoning, CacheRead, CacheWrite) fold back into
-// Extra alongside the unknown remainder, with ExtraVerbatim winning whenever
-// the canonical rebuild would not be byte-identical; Provenance fans out
-// from the eight prov_* columns. NULL vs empty and pointer nil-ness are
-// preserved exactly (design §3.4). Stub: panics with
-// ErrHarmonizedNotImplemented until the reader lands it.
-func entryFromRow(r EntryRecord) schema.SessionEntry {
-	panic(ErrHarmonizedNotImplemented)
-}
-
-// serializeEntry is the canonical text: the same json.Marshal the old writer
-// applied to the in-memory entry. body_digest = sha256(serializeEntry(row));
-// the wire builders use entryFromRow directly, so byte-parity is this one
-// function's contract (golden-tested; design §3.4). Stub: panics with
-// ErrHarmonizedNotImplemented until the reader lands it.
-func serializeEntry(r EntryRecord) []byte {
-	panic(ErrHarmonizedNotImplemented)
-}
-
-// legacyShape is the routing shim (design §6.2 reader 3): the entry row
-// reconstructed and bounded exactly as the mirror would have stored it.
-// contentPreview is bounded by contentPreview() only where the mirror bounded
-// it (full-content captures, not preview-only ones); ext keys come from the
-// promoted columns merged by mergeExtIntoExtra exactly as for the mirror.
-// Callers (metrics, classifier inputs, sessions context, TUI, code map) are
-// unchanged. Stub: panics with ErrHarmonizedNotImplemented until the reader
-// lands it.
-func legacyShape(row EntryRecord, bounded bool) schema.SessionEntry {
-	panic(ErrHarmonizedNotImplemented)
-}
-
 // The one read router is a single store-level selection shim. The routing
 // vocabulary is closed and unchanged: a file-backed session reads through the
 // legacy representation, a harmonized session through the body rows.
