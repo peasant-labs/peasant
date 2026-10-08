@@ -1,25 +1,92 @@
-# search_recall — scaffolding for the harmonized session content model
+# search_recall — the harmonized session content model recall family
 # (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+# Each case carries its query term and the production result it must return
+# through the consolidated index: result sets per query, with native
+# widening only where the design states it. The loader enforces the
+# required-names manifest in both directions, so a deletion or rename goes red.
 cases:
   - name: term-in-tool-output
+    query: recalloutputalpha
+    wantCount: 1
+    wantEntryIndexes: [2]
   - name: term-in-tool-input
+    query: recallinputbravo
+    wantCount: 1
+    wantEntryIndexes: [1]
   - name: term-in-text-head
+    query: recalltextheadcharlie
+    wantCount: 1
+    wantEntryIndexes: [0]
   - name: term-beyond-2000-in-text-found
+    query: recallbeyondtextdelta
+    wantCount: 1
+    wantEntryIndexes: [0]
+    beyond2000: true
   - name: term-beyond-2000-in-tool-output-found
+    query: recallbeyondoutputecho
+    wantCount: 1
+    wantEntryIndexes: [2]
+    beyond2000: true
   - name: preview-only-capture-parity
+    query: recallpreviewparityfoxtrot
+    wantCount: 1
+    wantEntryIndexes: [0]
   - name: preview-only-dedup-parity
+    query: recalldedupparitygolf
+    wantCount: 1
+    wantEntryIndexes: [0]
   - name: dedup-no-longer-hides-full-preview-difference
+    query: recalldedupwidenhotel
+    wantCount: 1
+    wantEntryIndexes: [1]
   - name: tool-row-preview-differs-beyond-2000-found
+    query: recalltoolrowbeyondindia
+    wantCount: 1
+    wantEntryIndexes: [2]
+    beyond2000: true
   - name: pi-carrier-excluded
+    query: recallcarrierjuliet
+    wantCount: 0
+    wantRawMatchCount: 1
   - name: superseded-only-term
+    query: recallsupersededkilo
+    wantCount: 0
+    wantRawMatchCount: 1
   - name: earlier-partition-body-not-returned
+    query: recallearlierlima
+    wantCount: 0
+    wantRawMatchCount: 1
+    wantReverseQuery: recallearliermainmike
+    wantReverseCount: 1
+    wantReverseEntryIndexes: [0]
   - name: non-native-term
+    query: recallnonnativenovember
+    wantCount: 1
+    wantEntryIndexes: [0]
   - name: non-native-indexed-text-unchanged
+    query: recallnonnativeunchangedoscar
+    wantCount: 1
+    wantEntryIndexes: [1]
   - name: delete-then-match-returns-nothing
+    query: recalldeletepapa
+    wantCount: 0
+    wantRawMatchCount: 0
   - name: union-view-rowid-pushdown
+    query: recallpushdownquebec
+    wantCount: 1
+    wantPushdown: true
   - name: transition-window-match-set
+    query: recalltransitionromeo
+    wantCount: 1
+    wantEntryIndexes: [0]
+    wantNoDuplicates: true
   - name: transition-window-fallback-filter
+    query: recallfallbacksierra
+    wantCount: 1
+    wantEntryIndexes: [0]
+    wantNoDuplicates: true
   - name: rowid-space-guard
+    query: recallrowidtango
+    wantCount: 1
+    wantFirstBodyID: 1125899906842624
+    wantCeilingRefused: true
