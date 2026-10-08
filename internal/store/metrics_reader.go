@@ -192,8 +192,27 @@ func (s *Store) listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID)
 }
 
 func listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if shimmed {
+		records, err := shimBodyRecordsOnConn(conn, string(sessionID), nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		bounded, err := shimBoundedOnConn(conn, string(sessionID))
+		if err != nil {
+			return nil, err
+		}
+		entries, err := shimListEntries(records, bounded)
+		if err != nil {
+			return nil, fmt.Errorf("store: list shim entries for %s: %w", sessionID, err)
+		}
+		return entries, nil
+	}
 	var entries []schema.SessionEntry
-	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
+	err = sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := scanSessionEntry(stmt)
@@ -263,6 +282,26 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 		return nil, err
 	}
 
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if shimmed {
+		records, err := shimBodyRecordsOnConn(conn, string(sessionID), &fromIndex, &toIndex)
+		if err != nil {
+			return nil, err
+		}
+		bounded, err := shimBoundedOnConn(conn, string(sessionID))
+		if err != nil {
+			return nil, err
+		}
+		entries, err := shimListEntries(records, bounded)
+		if err != nil {
+			return nil, fmt.Errorf("store: list shim entries range [%d,%d] for %s: %w", fromIndex, toIndex, sessionID, err)
+		}
+		return entries, nil
+	}
+
 	var entries []schema.SessionEntry
 	err = sqlitex.ExecuteTransient(conn, sqlListEntriesRange, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), fromIndex, toIndex},
@@ -330,6 +369,14 @@ func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (
 		return -1, err
 	}
 
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return -1, err
+	}
+	if shimmed {
+		return shimMaxEntryIndex(conn, string(sessionID))
+	}
+
 	maxIdx := -1
 	err = sqlitex.ExecuteTransient(conn, sqlMaxEntryIndex, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
@@ -367,6 +414,14 @@ func (s *Store) FirstEntry(ctx context.Context, sessionID schema.SessionID) (_ *
 	defer endSnapshot(&retErr)
 	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
 		return nil, err
+	}
+
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if shimmed {
+		return shimFirstEntry(conn, string(sessionID))
 	}
 
 	var head *EntryHead

@@ -957,6 +957,14 @@ func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (_ strin
 		return "", err
 	}
 
+	shimmed, err := shimmedOnConn(conn, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if shimmed {
+		return shimFirstUserPreview(conn, sessionID)
+	}
+
 	const q = `SELECT content_preview FROM session_entries
 WHERE session_id = ? AND role = 'user' AND depth = 0
 ORDER BY entry_index ASC LIMIT 1`
@@ -1001,7 +1009,32 @@ func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (
 		return nil, err
 	}
 
+	// Bulk previews span both representations: partition the batch once,
+	// then run each side's bounded query and merge the maps.
+	shimmed, err := shimmedIDsOnConn(conn, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	var mirrorIDs, shimIDs []string
+	for _, id := range sessionIDs {
+		if shimmed[id] {
+			shimIDs = append(shimIDs, id)
+		} else {
+			mirrorIDs = append(mirrorIDs, id)
+		}
+	}
 	result := make(map[string]string, len(sessionIDs))
+	if len(shimIDs) > 0 {
+		shimResult, err := shimFirstUserPreviewBulk(conn, shimIDs)
+		if err != nil {
+			return nil, err
+		}
+		for sid, preview := range shimResult {
+			result[sid] = preview
+		}
+	}
+	sessionIDs = mirrorIDs
+
 	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
 		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
 		// Keep every projection query below SQLite's variable limit.
@@ -1062,7 +1095,30 @@ func (s *Store) LeadingUserMessagesBulk(ctx context.Context, sessionIDs []string
 		return nil, err
 	}
 
+	shimmed, err := shimmedIDsOnConn(conn, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	var mirrorIDs, shimIDs []string
+	for _, id := range sessionIDs {
+		if shimmed[id] {
+			shimIDs = append(shimIDs, id)
+		} else {
+			mirrorIDs = append(mirrorIDs, id)
+		}
+	}
 	result := make(map[string][]string, len(sessionIDs))
+	if len(shimIDs) > 0 {
+		shimResult, err := shimLeadingUserPreviewsBulk(conn, shimIDs, perSession)
+		if err != nil {
+			return nil, err
+		}
+		for sid, previews := range shimResult {
+			result[sid] = previews
+		}
+	}
+	sessionIDs = mirrorIDs
+
 	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
 		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
 		placeholders := make([]string, len(selectedIDs))

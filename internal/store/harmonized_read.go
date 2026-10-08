@@ -138,17 +138,27 @@ func SerializeEntryDigest(r EntryRecord) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// legacyShape is the routing shim (design section 6.2 reader 3): the entry
-// row reconstructed and bounded exactly as the mirror would have stored it.
-// ContentPreview is bounded by contentPreview only where the mirror bounded
-// it (full-content captures; preview-only captures stay unbounded), so the
-// caller passes bounded for full captures. The source ref and provenance
-// stay out: the mirror table carries no columns for them, and a shimmed row
-// must match its mirror row field for field. Callers (metrics, classifier
-// inputs, sessions context, the terminal UI, code map) are unchanged.
+// legacyShape is the routing shim (design section 6.2 readers 3 and 4): one
+// row-shaping function serves the mirror insert and the shim so the two can
+// never drift apart.
+//
+// With bounded=true it reconstructs the entry exactly as the mirror would
+// have stored it: ContentPreview bounded by contentPreview, and the source
+// ref and provenance left out (the mirror table carries no columns for
+// them), so a shimmed row matches its mirror row field for field. Callers
+// are metrics, classifier inputs, sessions context, the terminal UI, and
+// code map — all unchanged.
+//
+// With bounded=false it returns the full entry: unbounded preview with ref
+// and provenance intact. Publication entries, the review scan, and the
+// wizard preview read this shape, digest-verified, because those are full
+// reads.
 func legacyShape(row EntryRecord, bounded bool) schema.SessionEntry {
 	entry := entryFromRow(row)
-	if bounded && entry.ContentPreview != nil {
+	if !bounded {
+		return entry
+	}
+	if entry.ContentPreview != nil {
 		preview := contentPreview(*entry.ContentPreview)
 		entry.ContentPreview = &preview
 	}

@@ -112,10 +112,10 @@ func TestRebuildExtraEmptyReadsNil(t *testing.T) {
 	}
 }
 
-// TestLegacyShapeBoundsLikeMirror pins the shim contract: a bounded shim
-// truncates the preview exactly like contentPreview, an unbounded one keeps
-// the stored text, and both drop the ref and provenance the mirror never
-// stored.
+// TestLegacyShapeBoundsLikeMirror pins the shim contract in both shapes:
+// bounded reconstructs the row exactly as the mirror stored it (bounded
+// preview, no ref, no provenance); unbounded returns the full entry the
+// publication path hydrates.
 func TestLegacyShapeBoundsLikeMirror(t *testing.T) {
 	long := strings.Repeat("あ", 800)
 	row := EntryRecord{
@@ -137,6 +137,9 @@ func TestLegacyShapeBoundsLikeMirror(t *testing.T) {
 	}
 	full := legacyShape(row, false)
 	if full.ContentPreview == nil || *full.ContentPreview != long {
-		t.Fatalf("unbounded preview truncated: %d bytes of %d", len(*full.ContentPreview), len(long))
+		t.Fatalf("full preview truncated: %d bytes of %d", len(*full.ContentPreview), len(long))
+	}
+	if full.SourceEntryRef != row.SourceEntryRef {
+		t.Fatalf("full shim drops ref: %q, want %q", full.SourceEntryRef, row.SourceEntryRef)
 	}
 }

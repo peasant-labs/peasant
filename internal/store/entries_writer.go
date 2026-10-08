@@ -38,6 +38,13 @@ const (
 
 	sqlSessionEntriesExist = `SELECT 1 FROM session_entries WHERE session_id = ? LIMIT 1`
 
+	// sqlShimEntriesExist covers the harmonized representation: an active
+	// generation's main-partition mapping rows. The mirror holds no rows for
+	// converted sessions, so existence checks both homes.
+	sqlShimEntriesExist = `SELECT 1 FROM session_generation_entries m
+JOIN sessions s ON s.session_id = m.session_id
+WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partition_id = 0 LIMIT 1`
+
 	// sqlSelectTargetEntriesForSession reads the entry-annotation attachments a
 	// re-index has to carry across its DELETE. Ordered so a restore is
 	// deterministic and a failure names the same row every time.
@@ -1239,7 +1246,24 @@ func readEntryAnnotationTargetSpans(conn *sqlite.Conn, sessionID string) ([]entr
 
 func readSessionEntryAnchors(conn *sqlite.Conn, sessionID string) (map[int]entryTargetAnchor, error) {
 	anchors := map[int]entryTargetAnchor{}
-	err := sqlitex.ExecuteTransient(conn, sqlSelectSessionEntryAnchors, &sqlitex.ExecOptions{
+	// Harmonized sessions anchor against the new main entries through the
+	// shim: the entry row's own entry_type, role, and part_type columns.
+	shimmed, err := shimmedOnConn(conn, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	query := sqlSelectSessionEntryAnchors
+	if shimmed {
+		query = `SELECT m.entry_index, b.entry_id, b.tool_call_id, b.entry_type, b.role, b.part_type, b.content_preview
+FROM session_generation_entries m
+JOIN session_entry_bodies b
+  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+JOIN sessions s ON s.session_id = m.session_id
+WHERE m.session_id = ?
+AND m.generation_id = s.active_generation_id AND m.partition_id = 0
+ORDER BY m.entry_index`
+	}
+	err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			anchor := entryTargetAnchor{
@@ -1525,6 +1549,15 @@ func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.Sessio
 	})
 	if err != nil {
 		return false, fmt.Errorf("store: check session_entries for %s: %w", sessionID, err)
+	}
+	if !exists {
+		err = sqlitex.ExecuteTransient(conn, sqlShimEntriesExist, &sqlitex.ExecOptions{
+			Args:       []any{string(sessionID)},
+			ResultFunc: func(_ *sqlite.Stmt) error { exists = true; return nil },
+		})
+		if err != nil {
+			return false, fmt.Errorf("store: check shim entries for %s: %w", sessionID, err)
+		}
 	}
 	return exists, nil
 }
