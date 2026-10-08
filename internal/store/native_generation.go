@@ -18,6 +18,7 @@ var (
 	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
 	_ ingest.NativeGenerationStaged            = (*PreparedGeneration)(nil)
 	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
+	_ ingest.ContentSweeper                    = (*Store)(nil)
 )
 
 // generationActivationFromNative mirrors the ingest-owned activation envelope
@@ -79,6 +80,28 @@ func (s *Store) ActivateStagedNativeGeneration(ctx context.Context, activation i
 		generationActivation.Prepared = prepared
 	}
 	return s.ActivateGeneration(ctx, generationActivation)
+}
+
+// SweepSessionForHarvest sweeps one committed session through the
+// harvest-side entry point: the same per-session pass the harvest start
+// runs, scoped to the session the pipeline just committed. The pipeline
+// calls it after every committed activation; the sweep error never fails
+// the commit.
+func (s *Store) SweepSessionForHarvest(ctx context.Context, sessionID schema.SessionID) error {
+	_, err := s.SweepSession(ctx, sessionID)
+	return err
+}
+
+// SweepFlaggedSessionsForHarvest sweeps every flagged session through the
+// harvest-side entry point: the harvest-start recovery pass with
+// pipeline-neutral types (a swept count, per-session warnings, and a fatal
+// error). The pipeline calls it before discovery.
+func (s *Store) SweepFlaggedSessionsForHarvest(ctx context.Context) (int, []error, error) {
+	report, err := s.SweepFlaggedSessions(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	return len(report.Sessions), report.Warnings, nil
 }
 
 // ReadNativeGenerationPrior loads the active generation's reusable evidence for

@@ -407,8 +407,12 @@ func assertGCSweepResult(t *testing.T, s *Store, sid schema.SessionID, c content
 		t.Fatalf("%s: Rebuilt = %v, want %v", c.Name, got.Rebuilt, *c.WantRebuilt)
 	}
 	if c.WantFlagCleared != nil {
-		if flag := readSweepFlag(t, s, sid); flag == *c.WantFlagCleared {
-			t.Fatalf("%s: sweep flag is set = %v, want cleared = %v", c.Name, flag, *c.WantFlagCleared)
+		// WantFlagCleared names the desired end state, so derive the
+		// set-bit it implies and compare directly: a set flag fails a
+		// case that wants it cleared, and vice versa.
+		wantSet := !*c.WantFlagCleared
+		if flag := readSweepFlag(t, s, sid); flag != wantSet {
+			t.Fatalf("%s: sweep flag is set = %v, want set = %v", c.Name, flag, wantSet)
 		}
 	}
 	if c.WantMirrorRows != nil {

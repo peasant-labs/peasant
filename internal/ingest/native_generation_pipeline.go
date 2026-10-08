@@ -516,6 +516,16 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 	// CommittedNow counts once. AlreadyCommitted is an idempotent repair with
 	// zero new counts, not a failed capture. NotCommitted carries no counts
 	// by construction (activationErr would be non-nil above).
+	//
+	// The commit is durable in both committing dispositions (or was already
+	// durable for the idempotent retry), so the per-session sweep runs for
+	// either: the superseded rows and orphans the staging flagged are
+	// deleted and the flag is cleared. A sweep failure never fails the
+	// session; the next harvest recovers it.
+	if activationOutcome.Disposition == ActivationCommittedNow ||
+		activationOutcome.Disposition == ActivationAlreadyCommitted {
+		p.sweepCommittedSession(ctx, im.session.SessionID, logPrefix)
+	}
 	var committed []RetainedUnknownKindCount
 	if activationOutcome.Disposition == ActivationCommittedNow {
 		committed = candidates
