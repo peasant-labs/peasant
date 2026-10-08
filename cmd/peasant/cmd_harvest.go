@@ -475,6 +475,15 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			return fmt.Errorf("open analytics store: %w", err)
 		}
 		defer db.Close()
+		// Index-health gate at harvest start: when a prior untrusted delete
+		// set the rebuild flag, rebuild before any harvest work so the flag
+		// keeps the state crash-safe. Skipped on dry runs, which must not
+		// write.
+		if !flags.dryRun {
+			if _, err := db.EnsureSearchIndexHealthy(ctx); err != nil {
+				return fmt.Errorf("heal the flagged search index: %w", err)
+			}
+		}
 		pipelineOpts = append(pipelineOpts,
 			ingest.WithStore(db),
 			ingest.WithMetricsStore(db),

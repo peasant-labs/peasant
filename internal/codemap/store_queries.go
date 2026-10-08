@@ -12,8 +12,10 @@ import (
 
 // SQL for the codemap read path. These queries run over existing tables only
 // without a migration; they live here, not in internal/store,
-// because they are Map/Review-specific aggregation inputs.
-const (
+// because they are Map/Review-specific aggregation inputs. The two search
+// queries alias the store's canonical text (built from the rowid-base
+// constant there), so this block is vars, not consts.
+var (
 	// sqlProjectCwd resolves a project's canonical working directory and its
 	// git remote (for the projectlabel display-name preference). No row =>
 	// unknown projectHash (ErrProjectNotFound).

@@ -132,12 +132,8 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		err = fmt.Errorf("store.PruneSessions: read the search index health: %w", gateErr)
 		return ingest.PruneResult{}, err
 	} else if state.NeedsRebuild {
-		if gateErr := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); gateErr != nil {
+		if gateErr := rebuildSearchIndexOnConn(conn); gateErr != nil {
 			err = fmt.Errorf("store.PruneSessions: rebuild the flagged search index before pruning: %w; nothing was pruned", gateErr)
-			return ingest.PruneResult{}, err
-		}
-		if gateErr := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); gateErr != nil {
-			err = fmt.Errorf("store.PruneSessions: clear the search rebuild flag before pruning: %w; nothing was pruned", gateErr)
 			return ingest.PruneResult{}, err
 		}
 	}
@@ -215,7 +211,8 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 	for i, id := range sessionIDs {
 		pruneIDs[i] = string(id)
 	}
-	if _, err = verifyBodiesForDeleteOnConn(conn, pruneIDs); err != nil {
+	mismatched, err := verifyBodiesForDeleteOnConn(conn, pruneIDs)
+	if err != nil {
 		return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: %w", err)
 	}
 
@@ -242,7 +239,19 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		}
 	}
 
-	// Use actual rows affected from the sessions DELETE (last statement).
+	// Use actual rows affected from the sessions DELETE (the last delete
+	// statement): read before the conditional rebuild below runs its own
+	// statements.
 	deleted := conn.Changes()
+
+	// When the delete-time check found an untrusted body, the deletes above
+	// ran with values the trigger cannot un-index exactly. Rebuild through
+	// the one path before committing, so prune never leaves the flag set.
+	if mismatched {
+		if err = rebuildSearchIndexOnConn(conn); err != nil {
+			return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: rebuild the search index after an untrusted delete: %w", err)
+		}
+	}
+
 	return ingest.PruneResult{Deleted: deleted}, nil
 }

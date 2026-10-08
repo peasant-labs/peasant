@@ -108,12 +108,8 @@ func (s *Store) RebuildSearchIndex(ctx context.Context) error {
 	txnErr := error(nil)
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); err != nil {
-		txnErr = fmt.Errorf("store: rebuild the search index over the union view: %w; the index is unchanged and search still refuses; free disk space and retry", err)
-		return txnErr
-	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); err != nil {
-		txnErr = fmt.Errorf("store: clear the search rebuild flag after the rebuild: %w; the index was rebuilt but search still refuses; retry the flag clear", err)
+	if err := rebuildSearchIndexOnConn(conn); err != nil {
+		txnErr = err
 		return txnErr
 	}
 	return nil
@@ -135,6 +131,21 @@ func (s *Store) EnsureSearchIndexHealthy(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// rebuildSearchIndexOnConn runs the whole-index rebuild on the caller's
+// connection: it re-tokenizes the union view and clears the needs_rebuild
+// flag. Callers already inside a transaction (prune, the sweep) run it
+// inline; RebuildSearchIndex wraps it in its own transaction. This is the
+// one home for the rebuild statements.
+func rebuildSearchIndexOnConn(conn *sqlite.Conn) error {
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); err != nil {
+		return fmt.Errorf("store: rebuild the search index over the union view: %w; the index is unchanged and search still refuses; free disk space and retry", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); err != nil {
+		return fmt.Errorf("store: clear the search rebuild flag after the rebuild: %w; the index was rebuilt but search still refuses; retry the flag clear", err)
+	}
+	return nil
 }
 
 // SearchRefusalError is the actionable refusal search reads return while the
@@ -160,16 +171,13 @@ type UnifiedSearchHit struct {
 	GitWorktree string
 }
 
-// UnifiedSearchSQL is the consolidated transcript search over the one index.
-// The FTS rowid is the union-view rid: below the body base it joins the
-// mirror row, at or above it joins the body row plus the active-generation
-// main-partition mapping row by digest. A body hit counts only through that
-// digest join, so staged bodies, superseded-only bodies, and
-// earlier-partition bodies never return. The depth-echo de-duplication
-// compares full stored previews, and the mirror branch carries the
-// representation filter so a converted session's leftover mirror rows never
-// duplicate a body hit.
-const UnifiedSearchSQL = `SELECT
+// unifiedSearchSQLTemplate is the consolidated transcript search over the
+// one index, with the rowid-space split as parameters: below the body base
+// a hit joins the mirror row, at or above it joins the body row plus the
+// active-generation main-partition mapping row by digest. The DDL keeps its
+// own literal (SQLite cannot reference a Go constant); every Go use builds
+// from BodyRowIDBase below, so the constant stays the one home.
+const unifiedSearchSQLTemplate = `SELECT
     f.session_id,
     f.entry_index,
     COALESCE(e.role, b.role) AS role,
@@ -183,14 +191,14 @@ const UnifiedSearchSQL = `SELECT
     COALESCE(p.canonical_cwd, ''),
     COALESCE(s.git_worktree, '')
 FROM session_search_fts f
-LEFT JOIN session_entries e ON e.rowid = f.rowid AND f.rowid < 1125899906842624
-LEFT JOIN session_entry_bodies b ON b.body_id = f.rowid AND f.rowid >= 1125899906842624
+LEFT JOIN session_entries e ON e.rowid = f.rowid AND f.rowid < %d
+LEFT JOIN session_entry_bodies b ON b.body_id = f.rowid AND f.rowid >= %d
 JOIN sessions s        ON s.session_id = f.session_id
 LEFT JOIN projects p   ON p.project_hash = s.project_hash
 WHERE session_search_fts MATCH ?
   AND (
     (
-      f.rowid < 1125899906842624 AND e.session_id IS NOT NULL
+      f.rowid < %d AND e.session_id IS NOT NULL
       AND COALESCE(e.part_type, '') <> 'pi.carrier'
       AND NOT EXISTS (
         SELECT 1 FROM sessions s2
@@ -208,7 +216,7 @@ WHERE session_search_fts MATCH ?
     )
     OR
     (
-      f.rowid >= 1125899906842624 AND b.session_id IS NOT NULL
+      f.rowid >= %d AND b.session_id IS NOT NULL
       AND COALESCE(b.part_type, '') <> 'pi.carrier'
       AND EXISTS (
         SELECT 1 FROM sessions s2
@@ -234,6 +242,17 @@ WHERE session_search_fts MATCH ?
   )
 ORDER BY rank, f.session_id, f.entry_index
 LIMIT ? OFFSET ?`
+
+// UnifiedSearchSQL is the consolidated transcript search over the one index,
+// built from BodyRowIDBase: a body hit counts only through the digest join,
+// so staged bodies, superseded-only bodies, and earlier-partition bodies
+// never return. The depth-echo de-duplication compares full stored previews,
+// and the mirror branch carries the representation filter so a converted
+// session's leftover mirror rows never duplicate a body hit.
+var UnifiedSearchSQL = fmt.Sprintf(
+	unifiedSearchSQLTemplate,
+	BodyRowIDBase, BodyRowIDBase, BodyRowIDBase, BodyRowIDBase,
+)
 
 // SearchUnifiedOnConn runs the consolidated-index query on the caller's
 // connection. The caller checks the rebuild flag first: while it is set
