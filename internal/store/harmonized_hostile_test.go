@@ -8,6 +8,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -22,6 +24,10 @@ type hostileInputCase struct {
 	DuplicateEntry int      `yaml:"duplicateEntry"`
 	DuplicateOf    int      `yaml:"duplicateOf"`
 	Texts          []string `yaml:"texts"`
+	Ref            string   `yaml:"ref"`
+	ExpectedDigest string   `yaml:"expectedDigest"`
+	ExpectedChunks int      `yaml:"expectedChunks"`
+	ExpectedLength int      `yaml:"expectedLength"`
 }
 
 //go:embed testdata/content_hostile_input.yaml
@@ -115,6 +121,79 @@ func TestHarmonizedHostileInput(t *testing.T) {
 	for _, c := range LoadContentHostileInputFixtures(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			switch c.Operation {
+			case "empty-non-emitted-stages-on-harvest":
+				s, _ := openGenerationStore(t)
+				seedGenerationSession(t, s, string(sid))
+				v2, blobs := hostileBase(t, sid, "gen_empty_staged")
+				ref, err := schema.NewSourceEntryRef(c.Ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				v2.Generation.Content = append(v2.Generation.Content, indexformat.ContentRecord{Ref: ref})
+				blobs[ref] = []byte(c.Content)
+				v2.Generation.Segments = []indexformat.ContextSegment{{
+					Ordinal: 0, PhysicalSourceID: "source-empty-staged",
+					Coordinates: indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
+					Inclusion:   indexformat.SegmentInclusionInherited, CapturedRefs: []schema.SourceEntryRef{ref},
+				}}
+				activation := GenerationActivation{Generation: v2, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1}
+				activation.Prepared, err = s.StageGeneration(t.Context(), activation)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = s.ActivateGeneration(t.Context(), activation); err != nil {
+					t.Fatal(err)
+				}
+				conn, err := s.pool.Take(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				err = sqlitex.Execute(conn, `SELECT digest, byte_length, (SELECT count(*) FROM session_content_chunks c WHERE c.session_id=h.session_id AND c.digest=h.digest) FROM session_content h WHERE session_id=?`, &sqlitex.ExecOptions{
+					Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+						found = true
+						if stmt.ColumnText(0) != c.ExpectedDigest || stmt.ColumnInt(1) != c.ExpectedLength || stmt.ColumnInt(2) != c.ExpectedChunks {
+							t.Errorf("empty header/chunks: got %s/%d/%d", stmt.ColumnText(0), stmt.ColumnInt(1), stmt.ColumnInt(2))
+						}
+						return nil
+					},
+				})
+				s.pool.Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !found {
+					t.Fatal("empty blob header missing")
+				}
+				conn, err = s.pool.Take(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				var record indexformat.ContentRecord
+				err = sqlitex.Execute(conn, `SELECT c.source_entry_ref,c.digest,h.byte_length FROM session_generation_content c JOIN session_content h ON h.session_id=c.session_id AND h.digest=c.digest WHERE c.session_id=? AND c.generation_id=? AND c.source_entry_ref=?`, &sqlitex.ExecOptions{
+					Args: []any{string(sid), v2.Generation.ID, string(ref)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+						record = indexformat.ContentRecord{Ref: ref, Digest: stmt.ColumnText(1), ByteLength: stmt.ColumnInt64(2)}
+						return nil
+					},
+				})
+				if err != nil {
+					s.pool.Put(conn)
+					t.Fatal(err)
+				}
+				if record.Ref != ref {
+					s.pool.Put(conn)
+					t.Fatal("empty blob descriptor missing")
+				}
+				// Non-emitted refs are not hydration fields. The verified blob
+				// reader used by conversion reads their complete header/chunk data.
+				data, err := readMigrateBlobBytes(conn, sid, record.Digest)
+				s.pool.Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(data) != c.Content {
+					t.Fatalf("empty full read returned %q", data)
+				}
 			case "malformed-record":
 				s, _ := openGenerationStore(t)
 				seedGenerationSession(t, s, string(sid))
@@ -257,4 +336,6 @@ func mustDecodePiExtra(t *testing.T) ingest.PiExtra {
 	return extra
 }
 
-func strPtr(text string) *string { return &text }
+func strPtr(text string) *string {
+	return &text
+}

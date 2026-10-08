@@ -295,7 +295,7 @@ func (s *Store) stageBatchTxn(conn *sqlite.Conn, batch stageBatch) error {
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
 	for _, sessionID := range batch.sessions {
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
 			txnErr = fmt.Errorf("store: set the sweep flag for session %s before staging: %w; nothing was staged", sessionID, err)
 			return txnErr
 		}
@@ -333,9 +333,12 @@ func (s *Store) verifyStagedObjects(ctx context.Context, prepared *preparedHarmo
 	defer s.pool.Put(conn)
 	for _, digest := range prepared.bodyDigests {
 		found := false
-		if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_entry_bodies WHERE session_id = ? AND body_digest = ? LIMIT 1`, &sqlitex.ExecOptions{
-			Args:       []any{string(prepared.sessionID), string(digest)},
-			ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+		if err := sqlitex.Execute(conn, `SELECT 1 FROM session_entry_bodies WHERE session_id = ? AND body_digest = ? LIMIT 1`, &sqlitex.ExecOptions{
+			Args: []any{string(prepared.sessionID), string(digest)},
+			ResultFunc: func(*sqlite.Stmt) error {
+				found = true
+				return nil
+			},
 		}); err != nil {
 			return fmt.Errorf("store: verify staged body %s for session %s: %w", digest, prepared.sessionID, err)
 		}
@@ -345,9 +348,12 @@ func (s *Store) verifyStagedObjects(ctx context.Context, prepared *preparedHarmo
 	}
 	for _, blob := range prepared.blobs {
 		found := false
-		if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_content WHERE session_id = ? AND digest = ? LIMIT 1`, &sqlitex.ExecOptions{
-			Args:       []any{string(prepared.sessionID), string(blob.digest)},
-			ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+		if err := sqlitex.Execute(conn, `SELECT 1 FROM session_content WHERE session_id = ? AND digest = ? LIMIT 1`, &sqlitex.ExecOptions{
+			Args: []any{string(prepared.sessionID), string(blob.digest)},
+			ResultFunc: func(*sqlite.Stmt) error {
+				found = true
+				return nil
+			},
 		}); err != nil {
 			return fmt.Errorf("store: verify staged blob %s for session %s: %w", blob.digest, prepared.sessionID, err)
 		}
@@ -367,7 +373,7 @@ func (s *Store) verifyStagedObjects(ctx context.Context, prepared *preparedHarmo
 func insertStagedBodyOnConn(conn *sqlite.Conn, sessionID schema.SessionID, record *EntryRecord) error {
 	digest := string(bodyDigestForRecord(*record))
 	args := bodyInsertArgs(sessionID, digest, record)
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertStagedBody, &sqlitex.ExecOptions{Args: args}); err != nil {
+	if err := sqlitex.Execute(conn, sqlInsertStagedBody, &sqlitex.ExecOptions{Args: args}); err != nil {
 		return fmt.Errorf("store: stage body %s (entry %d) for session %s: %w; nothing in this batch was committed", digest, record.EntryIndex, sessionID, err)
 	}
 	return nil
@@ -470,7 +476,7 @@ func boolToInt64(v bool) int64 {
 // whole or absent, never torn. A re-stage of the same digest writes
 // nothing.
 func insertStagedBlobOnConn(conn *sqlite.Conn, sessionID schema.SessionID, blob *preparedBlob) error {
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_content(session_id, digest, byte_length) VALUES (?, ?, ?) ON CONFLICT(session_id, digest) DO NOTHING`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `INSERT INTO session_content(session_id, digest, byte_length) VALUES (?, ?, ?) ON CONFLICT(session_id, digest) DO NOTHING`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), string(blob.digest), int64(len(blob.data))},
 	}); err != nil {
 		return fmt.Errorf("store: stage blob %s for session %s: %w; nothing in this batch was committed", blob.digest, sessionID, err)
@@ -484,7 +490,7 @@ func insertStagedBlobOnConn(conn *sqlite.Conn, sessionID schema.SessionID, blob 
 			end = len(blob.data)
 		}
 		chunk := blob.data[index*fullContentChunkBytes : end]
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_chunks(session_id, digest, chunk_index, data) VALUES (?, ?, ?, ?) ON CONFLICT(session_id, digest, chunk_index) DO NOTHING`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_content_chunks(session_id, digest, chunk_index, data) VALUES (?, ?, ?, ?) ON CONFLICT(session_id, digest, chunk_index) DO NOTHING`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), string(blob.digest), int64(index), chunk},
 		}); err != nil {
 			return fmt.Errorf("store: stage chunk %d of blob %s for session %s: %w; nothing in this batch was committed", index, blob.digest, sessionID, err)
@@ -645,7 +651,7 @@ func readActiveHarmonizedView(conn *sqlite.Conn, sessionID schema.SessionID) (ac
 // view's record. A row in the file-backed catalog reads as not found: only
 // the harmonized catalog participates in the skip comparison.
 func loadGenerationRecordOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, view *activeHarmonizedView) error {
-	err := sqlitex.ExecuteTransient(conn, `SELECT schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, `SELECT schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			view.found = true
@@ -766,7 +772,7 @@ func indexFormatCompleteness(text string) indexformat.GenerationCompleteness {
 // not (descriptors, aliases).
 func loadGenerationChildrenOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, view *activeHarmonizedView) error {
 	query := func(sql string, fn func(*sqlite.Stmt) error) error {
-		return sqlitex.ExecuteTransient(conn, sql, &sqlitex.ExecOptions{
+		return sqlitex.Execute(conn, sql, &sqlitex.ExecOptions{
 			Args:       []any{string(sessionID), generationID},
 			ResultFunc: fn,
 		})
@@ -969,7 +975,7 @@ func refreshEqualsActive(prepared *preparedHarmonized, active activeHarmonizedVi
 	if !generationRecordsEqual(prepared.record, active.record) {
 		return false
 	}
-	if !reflect.DeepEqual(prepared.children, active.children) {
+	if !reflect.DeepEqual(capturedGenerationChildren(prepared.children), capturedGenerationChildren(active.children)) {
 		return false
 	}
 	if len(prepared.bodyDigests) != len(active.mapping) {
@@ -998,6 +1004,23 @@ func refreshEqualsActive(prepared *preparedHarmonized, active activeHarmonizedVi
 		}
 	}
 	return reflect.DeepEqual(prepared.aliases, active.aliases)
+}
+
+// capturedGenerationChildren excludes retained-stat diagnostics added by the
+// mutable stats upsert. They describe compatibility evidence, not a change in
+// the producer's captured projection, and must not force an unchanged refresh
+// to install another generation. All producer diagnostics still participate.
+func capturedGenerationChildren(children GenerationChildren) GenerationChildren {
+	var diagnostics []GenerationDiagnostic
+	for _, diagnostic := range children.Diagnostics {
+		if diagnostic.ErrorType == "stats-overflow" {
+			continue
+		}
+		diagnostic.Ordinal = len(diagnostics)
+		diagnostics = append(diagnostics, diagnostic)
+	}
+	children.Diagnostics = diagnostics
+	return children
 }
 
 // generationRecordsEqual compares two catalog rows field by field, excluding
@@ -1036,7 +1059,7 @@ func insertHarmonizedGenerationOnConn(conn *sqlite.Conn, prepared *preparedHarmo
 	record.InstalledAtMs = installedAtMs
 	record.ActivatedAtMs = &installedAtMs
 	r := record
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms)
+	if err := sqlitex.Execute(conn, `INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 		string(sessionID), generationID,
 		int64(r.SchemaVersion), string(r.Harness), string(r.Model), r.Version,
@@ -1056,35 +1079,35 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 	}
 	children := prepared.children
 	for _, subagent := range children.Subagents {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_subagents(session_id, generation_id, ordinal, subagent_session_id, parent_uuid) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_subagents(session_id, generation_id, ordinal, subagent_session_id, parent_uuid) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(subagent.Ordinal), string(subagent.SubagentSessionID), string(subagent.ParentUUID),
 		}}); err != nil {
 			return fmt.Errorf("store: install subagent %d for generation %s of session %s: %w; no generation was activated", subagent.Ordinal, generationID, sessionID, err)
 		}
 	}
 	for _, commit := range children.Commits {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_commits(session_id, generation_id, ordinal, hash, message, author_name, author_email, commit_time, author_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_commits(session_id, generation_id, ordinal, hash, message, author_name, author_email, commit_time, author_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(commit.Ordinal), commit.Hash, commit.Message, commit.AuthorName, commit.AuthorEmail, commit.CommitTime, commit.AuthorTime,
 		}}); err != nil {
 			return fmt.Errorf("store: install commit %d for generation %s of session %s: %w; no generation was activated", commit.Ordinal, generationID, sessionID, err)
 		}
 	}
 	for _, association := range children.Associations {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_associations(session_id, generation_id, ordinal, association_id, observed_commit_hash) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_associations(session_id, generation_id, ordinal, association_id, observed_commit_hash) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(association.Ordinal), association.AssociationID, association.ObservedCommitHash,
 		}}); err != nil {
 			return fmt.Errorf("store: install association %d for generation %s of session %s: %w; no generation was activated", association.Ordinal, generationID, sessionID, err)
 		}
 	}
 	for _, diagnostic := range children.Diagnostics {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_diagnostics(session_id, generation_id, ordinal, error_type, location, message, remediation) VALUES (?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_diagnostics(session_id, generation_id, ordinal, error_type, location, message, remediation) VALUES (?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(diagnostic.Ordinal), diagnostic.ErrorType, diagnostic.Location, diagnostic.Message, diagnostic.Remediation,
 		}}); err != nil {
 			return fmt.Errorf("store: install diagnostic %d for generation %s of session %s: %w; no generation was activated", diagnostic.Ordinal, generationID, sessionID, err)
 		}
 	}
 	for i, ref := range children.TitleRefs {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_title_refs(session_id, generation_id, ordinal, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_title_refs(session_id, generation_id, ordinal, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(i), string(ref),
 		}}); err != nil {
 			return fmt.Errorf("store: install title ref %d for generation %s of session %s: %w; no generation was activated", i, generationID, sessionID, err)
@@ -1095,14 +1118,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		if ref := prepared.bodies[i].SourceEntryRef; ref != "" {
 			sourceRef = string(ref)
 		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_entries(session_id, generation_id, partition_id, entry_index, source_entry_ref, body_digest) VALUES (?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_entries(session_id, generation_id, partition_id, entry_index, source_entry_ref, body_digest) VALUES (?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(prepared.partitions[i]), int64(prepared.bodies[i].EntryIndex), sourceRef, string(prepared.bodyDigests[i]),
 		}}); err != nil {
 			return fmt.Errorf("store: map entry %d of partition %d for generation %s of session %s: %w; no generation was activated", prepared.bodies[i].EntryIndex, prepared.partitions[i], generationID, sessionID, err)
 		}
 	}
 	for _, blob := range prepared.blobs {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_content(session_id, generation_id, source_entry_ref, digest) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_content(session_id, generation_id, source_entry_ref, digest) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, string(blob.ref), string(blob.digest),
 		}}); err != nil {
 			return fmt.Errorf("store: install content descriptor %q for generation %s of session %s: %w; no generation was activated", blob.ref, generationID, sessionID, err)
@@ -1114,7 +1137,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 	}
 	sort.Strings(aliasKeys)
 	for _, key := range aliasKeys {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_aliases(session_id, generation_id, native_key, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_projection_aliases(session_id, generation_id, native_key, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, key, string(prepared.aliases[key]),
 		}}); err != nil {
 			return fmt.Errorf("store: install native alias %q for generation %s of session %s: %w; no generation was activated", key, generationID, sessionID, err)
@@ -1125,14 +1148,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		if section.EarlierState != nil {
 			earlierState = string(*section.EarlierState)
 		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_sections(session_id, generation_id, partition_id, earlier_state) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_projection_sections(session_id, generation_id, partition_id, earlier_state) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(section.PartitionID), earlierState,
 		}}); err != nil {
 			return fmt.Errorf("store: install partition %d for generation %s of session %s: %w; no generation was activated", section.PartitionID, generationID, sessionID, err)
 		}
 	}
 	for _, record := range children.NativeMetadata {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_section_native_metadata(session_id, generation_id, partition_id, ordinal, native_id, kind, source_entry_ref, source_type, source_message_role, attachment_turn_index, attachment_tool_call_id, custom_type, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_section_native_metadata(session_id, generation_id, partition_id, ordinal, native_id, kind, source_entry_ref, source_type, source_message_role, attachment_turn_index, attachment_tool_call_id, custom_type, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(record.PartitionID), int64(record.Ordinal),
 			record.NativeID, string(record.Kind), string(record.SourceEntryRef), string(record.SourceType),
 			optNativeRole(record.SourceMessageRole), optInt(record.AttachmentTurnIndex),
@@ -1142,7 +1165,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		}
 	}
 	for _, segment := range children.Segments {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_context_segments(session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_context_segments(session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(segment.Ordinal),
 			optSessionID(segment.LogicalSessionID), segment.PhysicalSourceID, string(segment.CoordinateKind),
 			optInt64(segment.StartCoordinate), optInt64(segment.EndExclusive),
@@ -1153,14 +1176,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		}
 	}
 	for _, ref := range children.SegmentRefs {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_context_segment_refs(session_id, generation_id, segment_ordinal, ordinal, source_entry_ref) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_context_segment_refs(session_id, generation_id, segment_ordinal, ordinal, source_entry_ref) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(ref.SegmentOrdinal), int64(ref.Ordinal), string(ref.SourceEntryRef),
 		}}); err != nil {
 			return fmt.Errorf("store: install segment ref %d of segment %d for generation %s of session %s: %w; no generation was activated", ref.Ordinal, ref.SegmentOrdinal, generationID, sessionID, err)
 		}
 	}
 	for i, relationship := range children.Relationships {
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(i), string(relationship.Kind), string(relationship.TargetState),
 			optSessionID(relationship.TargetLocalID), optString(relationship.Evidence),
 			optAnchorKind(relationship.AnchorKind), optEntryRef(relationship.AnchorSourceEntryRef),
@@ -1275,7 +1298,7 @@ func remapHarmonizedAnnotations(conn *sqlite.Conn, sessionID schema.SessionID, e
 			}
 		}
 	}
-	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM annotation_target_entries WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `DELETE FROM annotation_target_entries WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: clear annotation targets for session %s before the harmonized remap: %w; the prior targets are preserved", sessionID, err)
@@ -1291,7 +1314,7 @@ func remapHarmonizedAnnotations(conn *sqlite.Conn, sessionID schema.SessionID, e
 // body rows, reconstructed through the one row-to-struct function.
 func readHarmonizedBodyAnchors(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]entryTargetAnchor, error) {
 	var anchors []entryTargetAnchor
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := entryFromRow(scanEntryRecord(stmt))
@@ -1319,6 +1342,7 @@ type skipStamps struct {
 	stats              schema.SessionStats
 	seedJSON           string
 	updatedAtMs        int64
+	fullCapture        bool
 }
 
 // stampHarmonizedBookkeeping runs the C4 bookkeeping inside the caller's
@@ -1343,14 +1367,14 @@ func stampHarmonizedBookkeeping(conn *sqlite.Conn, sessionID schema.SessionID, s
 		return err
 	}
 	if stamps.artifactIdentity != nil {
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ? AND artifact_hash IS NULL`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ? AND artifact_hash IS NULL`, &sqlitex.ExecOptions{
 			Args: []any{*stamps.artifactIdentity, string(sessionID)},
 		}); err != nil {
 			return fmt.Errorf("store: record the pair identity for session %s: %w", sessionID, err)
 		}
 	}
 	if stamps.adapterVersion != nil {
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET adapter_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET adapter_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{*stamps.adapterVersion, string(sessionID)},
 		}); err != nil {
 			return fmt.Errorf("store: stamp the adapter revision for session %s: %w", sessionID, err)
@@ -1391,7 +1415,7 @@ func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHar
 		txnErr = errSkipPointerMoved
 		return txnErr
 	}
-	hash, err := computeSessionEntriesHash(prepared.mainEntries)
+	hash, err := sessionEntriesHashDomain(prepared.mainEntries, stamps.fullCapture)
 	if err != nil {
 		txnErr = fmt.Errorf("store: hash main entries for the skip bookkeeping of session %s: %w", prepared.sessionID, err)
 		return txnErr
@@ -1418,9 +1442,12 @@ func repairNeedsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID) (bool,
 		return false, nil
 	}
 	harmonized := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
-		Args:       []any{string(sessionID), *active},
-		ResultFunc: func(*sqlite.Stmt) error { harmonized = true; return nil },
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), *active},
+		ResultFunc: func(*sqlite.Stmt) error {
+			harmonized = true
+			return nil
+		},
 	}); err != nil {
 		return false, fmt.Errorf("store: check the active generation for session %s: %w", sessionID, err)
 	}
@@ -1428,9 +1455,12 @@ func repairNeedsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID) (bool,
 		return false, nil
 	}
 	predicate := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sessions WHERE session_id = ? AND artifact_hash IS NOT NULL AND indexed_input_hash IS NULL LIMIT 1`, &sqlitex.ExecOptions{
-		Args:       []any{string(sessionID)},
-		ResultFunc: func(*sqlite.Stmt) error { predicate = true; return nil },
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM sessions WHERE session_id = ? AND artifact_hash IS NOT NULL AND indexed_input_hash IS NULL LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(*sqlite.Stmt) error {
+			predicate = true
+			return nil
+		},
 	}); err != nil {
 		return false, fmt.Errorf("store: check the repair predicate for session %s: %w", sessionID, err)
 	}
@@ -1457,7 +1487,7 @@ func repairNeedsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID) (bool,
 // This gate and the read path can never disagree about corruption.
 func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, activeID string) (bool, error) {
 	var digests []string
-	if err := sqlitex.ExecuteTransient(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), activeID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digests = append(digests, stmt.ColumnText(0))
@@ -1469,7 +1499,7 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 	for _, digest := range digests {
 		found := false
 		failing := false
-		if err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				found = true
@@ -1487,7 +1517,7 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 		}
 	}
 	var blobDigests []string
-	if err := sqlitex.ExecuteTransient(conn, `SELECT digest FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT digest FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), activeID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			blobDigests = append(blobDigests, stmt.ColumnText(0))
@@ -1499,7 +1529,7 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 	for _, digest := range blobDigests {
 		var byteLength int64
 		header := false
-		if err := sqlitex.ExecuteTransient(conn, `SELECT byte_length FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT byte_length FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				header = true
@@ -1520,7 +1550,7 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 		hasher := sha256.New()
 		var total, chunks int64
 		contiguous := true
-		if err := sqlitex.ExecuteTransient(conn, `SELECT chunk_index, data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT chunk_index, data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				if stmt.ColumnInt64(0) != chunks {
@@ -1572,17 +1602,17 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 	txnErr := error(nil)
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
-	if err := sqlitex.ExecuteTransient(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
 		txnErr = fmt.Errorf("store: defer foreign keys for the repair of session %s: %w", prepared.sessionID, err)
 		return txnErr
 	}
 	defer func() {
-		_ = sqlitex.ExecuteTransient(conn, `PRAGMA defer_foreign_keys = OFF`, nil)
+		_ = sqlitex.Execute(conn, `PRAGMA defer_foreign_keys = OFF`, nil)
 	}()
 	for i := range prepared.bodies {
 		record := prepared.bodies[i]
 		digest := string(prepared.bodyDigests[i])
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(prepared.sessionID), digest},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: delete damaged body %s of session %s for repair: %w", digest, prepared.sessionID, err)
@@ -1594,7 +1624,7 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 		}
 	}
 	for _, blob := range prepared.blobs {
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM session_content WHERE session_id = ? AND digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(prepared.sessionID), string(blob.digest)},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: delete damaged blob %s of session %s for repair: %w", blob.digest, prepared.sessionID, err)
@@ -1607,24 +1637,24 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 		}
 	}
 	for _, blob := range prepared.blobs {
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_generation_content WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM session_generation_content WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(prepared.sessionID), activeID, string(blob.ref)},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: delete descriptor %q of session %s for repair: %w", blob.ref, prepared.sessionID, err)
 			return txnErr
 		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_generation_content(session_id, generation_id, source_entry_ref, digest) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_content(session_id, generation_id, source_entry_ref, digest) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{
 			Args: []any{string(prepared.sessionID), activeID, string(blob.ref), string(blob.digest)},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: rewrite descriptor %q of session %s for repair: %w", blob.ref, prepared.sessionID, err)
 			return txnErr
 		}
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
+	if err := sqlitex.Execute(conn, `UPDATE session_search_state SET needs_rebuild = 1 WHERE id = 1`, nil); err != nil {
 		txnErr = fmt.Errorf("store: flag the search index for rebuild after the repair of session %s: %w", prepared.sessionID, err)
 		return txnErr
 	}
-	hash, err := computeSessionEntriesHash(prepared.mainEntries)
+	hash, err := sessionEntriesHashDomain(prepared.mainEntries, stamps.fullCapture)
 	if err != nil {
 		txnErr = fmt.Errorf("store: hash main entries for the repair of session %s: %w", prepared.sessionID, err)
 		return txnErr
@@ -1652,9 +1682,12 @@ func (s *Store) deleteConvertedMirrorRows(ctx context.Context, sessionID schema.
 	}
 	defer s.pool.Put(conn)
 	harmonized := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sessions s JOIN session_generations g ON g.session_id = s.session_id AND g.generation_id = s.active_generation_id WHERE s.session_id = ? LIMIT 1`, &sqlitex.ExecOptions{
-		Args:       []any{string(sessionID)},
-		ResultFunc: func(*sqlite.Stmt) error { harmonized = true; return nil },
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM sessions s JOIN session_generations g ON g.session_id = s.session_id AND g.generation_id = s.active_generation_id WHERE s.session_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(*sqlite.Stmt) error {
+			harmonized = true
+			return nil
+		},
 	}); err != nil {
 		return fmt.Errorf("store: check the converted guard for session %s: %w", sessionID, err)
 	}
@@ -1670,7 +1703,7 @@ func (s *Store) deleteConvertedMirrorRows(ctx context.Context, sessionID schema.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entries WHERE session_id = ? AND rowid IN (SELECT rowid FROM session_entries WHERE session_id = ? LIMIT ?)`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `DELETE FROM session_entries WHERE session_id = ? AND rowid IN (SELECT rowid FROM session_entries WHERE session_id = ? LIMIT ?)`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), string(sessionID), int64(limit)},
 		}); err != nil {
 			return fmt.Errorf("store: delete converted mirror rows for session %s: %w; the harmonized generation is active and the leftovers are retried on the next harvest", sessionID, err)
@@ -1718,7 +1751,7 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 		if stored != prepared.binding {
 			return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is already installed with a different candidate binding; immutable identifiers cannot be reused; the installed generation is unchanged", v2.Generation.ID, write.SessionID)
 		}
-		hash, err := computeSessionEntriesHash(prepared.mainEntries)
+		hash, err := sessionEntriesHashDomain(prepared.mainEntries, write.RequireFullContent)
 		if err != nil {
 			return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: hash main entries for the idempotent retry of session %s: %w", write.SessionID, err)
 		}
@@ -1751,7 +1784,7 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 func readStoredCandidateDigest(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (string, bool, error) {
 	stored := ""
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT candidate_digest FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT candidate_digest FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -1768,9 +1801,12 @@ func readStoredCandidateDigest(conn *sqlite.Conn, sessionID schema.SessionID, ge
 // the file-backed catalog, which only the migration moves.
 func generationIDIsFileBacked(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (bool, error) {
 	fileBacked := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
-		Args:       []any{string(sessionID), generationID},
-		ResultFunc: func(*sqlite.Stmt) error { fileBacked = true; return nil },
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), generationID},
+		ResultFunc: func(*sqlite.Stmt) error {
+			fileBacked = true
+			return nil
+		},
 	}); err != nil {
 		return false, fmt.Errorf("store: check the file-backed catalog for session %s: %w", sessionID, err)
 	}

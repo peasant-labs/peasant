@@ -62,7 +62,9 @@ func seedFullRead(t *testing.T, n, bytes int) (*store.Store, ingest.SessionID, [
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() {
+		_ = s.Close()
+	})
 	id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
 	seedSession(t, s, string(id))
 	text := strings.Repeat("x", bytes)
@@ -76,8 +78,8 @@ func seedFullRead(t *testing.T, n, bytes int) (*store.Store, ingest.SessionID, [
 
 // The SQLite authorizer observes actual production SELECT compilation, without
 // replacing the reader. entry_type identifies projection/page preparations
-// (including SQLite range-query reauthorization); chunk data identifies each
-// hydrated entry query.
+// (including SQLite range-query reauthorization). It cannot count executions
+// of cached chunk statements; observeFullReadChunks observes those rows instead.
 func observeFullReads(t *testing.T, s *store.Store, observe func(sqlite.Action)) {
 	t.Helper()
 	conn := takeConn(t, s.PoolForTest())
@@ -95,18 +97,64 @@ func observeFullReads(t *testing.T, s *store.Store, observe func(sqlite.Action))
 	})
 }
 
+// observeFullReadChunks adds a transparent view over the fixture's real chunk
+// table. Its scalar callback runs when SQLite reads each chunk's bytes, not
+// when it prepares a statement. The reader, predicates, bytes and digests are
+// unchanged, so caching cannot hide repeated hydration or later cancellation.
+func observeFullReadChunks(t *testing.T, s *store.Store, observe func(int), observeManifest func()) {
+	t.Helper()
+	conn := takeConn(t, s.PoolForTest())
+	defer s.PoolForTest().Put(conn)
+	if err := conn.CreateFunction("observe_full_read_chunk", &sqlite.FunctionImpl{
+		NArgs: 2, AllowIndirect: true,
+		Scalar: func(_ sqlite.Context, args []sqlite.Value) (sqlite.Value, error) {
+			observe(int(args[1].Int64()))
+			return args[0], nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `ALTER TABLE session_entry_full_content_chunks RENAME TO full_read_observed_chunks`, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `CREATE VIEW session_entry_full_content_chunks AS
+SELECT session_id, entry_index, chunk_index, byte_offset, byte_length, chunk_sha256,
+observe_full_read_chunk(data, chunk_index) AS data FROM full_read_observed_chunks`, nil); err != nil {
+		t.Fatal(err)
+	}
+	if observeManifest == nil {
+		return
+	}
+	if err := conn.CreateFunction("observe_full_read_manifest", &sqlite.FunctionImpl{
+		NArgs: 1, AllowIndirect: true,
+		Scalar: func(_ sqlite.Context, args []sqlite.Value) (sqlite.Value, error) {
+			observeManifest()
+			return args[0], nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `ALTER TABLE session_entry_full_content RENAME TO full_read_observed_manifests`, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `CREATE VIEW session_entry_full_content AS
+SELECT session_id, entry_index, full_byte_length, full_sha256, preview_byte_length, preview_sha256,
+observe_full_read_manifest(preview_is_full) AS preview_is_full, chunk_count FROM full_read_observed_manifests`, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFullReaderBudgetAndLinearVerification(t *testing.T) {
 	for _, f := range loadFullReadFixtures(t, fullReadBudgetYAML).Cases {
 		t.Run(f.Name, func(t *testing.T) {
 			s, id, want, _ := seedFullRead(t, f.Entries, f.Bytes)
-			projections, chunks := 0, 0
-			observeFullReads(t, s, func(a sqlite.Action) {
-				if a.Type() == sqlite.OpRead && a.Table() == "session_entries" && a.Column() == "entry_type" {
-					projections++
-				}
-				if a.Type() == sqlite.OpRead && a.Table() == "session_entry_full_content_chunks" && a.Column() == "data" {
+			manifests, chunks := 0, 0
+			observeFullReadChunks(t, s, func(index int) {
+				if index == 0 {
 					chunks++
 				}
+			}, func() {
+				manifests++
 			})
 			got, capture, err := s.LoadFullSessionEntries(t.Context(), id, f.Budget)
 			if err != nil {
@@ -115,15 +163,24 @@ func TestFullReaderBudgetAndLinearVerification(t *testing.T) {
 			if !reflect.DeepEqual(got, want) || capture.EntryCount != len(want) {
 				t.Fatal("full entries changed")
 			}
-			// SQLite reauthorizes parameterized range queries when stepping after
-			// binding (STAT4 planning). The unbounded verification compiles once.
-			if projections != 2*len(f.Pages)+1 {
-				t.Fatalf("projection/page authorizations = %d, want %d (one verification plus range preparations)", projections, 2*len(f.Pages)+1)
+			// Each entry is verified, measured for paging, then hydrated.
+			// A byte-limited page inspects the next manifest too; an entry-cap
+			// boundary stops before that lookup. These are executed row reads,
+			// so repeated verification cannot hide behind a cached statement.
+			lookaheads := 0
+			for _, size := range f.Pages[:len(f.Pages)-1] {
+				if size < 100 {
+					lookaheads++
+				}
+			}
+			wantManifests := 3*len(want) + lookaheads
+			if manifests != wantManifests {
+				t.Fatalf("manifest inspections = %d, want %d (verification, page sizing, hydration and boundary lookahead)", manifests, wantManifests)
 			}
 			if chunks != len(want) {
 				t.Fatalf("chunk hydrations = %d, want %d", chunks, len(want))
 			}
-			projections, chunks = 0, 0
+			manifests, chunks = 0, 0
 			from := 0
 			var sizes []int
 			for {
@@ -143,8 +200,12 @@ func TestFullReaderBudgetAndLinearVerification(t *testing.T) {
 			if !reflect.DeepEqual(sizes, f.Pages) {
 				t.Fatalf("page sizes %v, want %v", sizes, f.Pages)
 			}
-			if projections != 3*len(f.Pages) {
-				t.Fatalf("standalone pages must each independently verify: SELECTs %d", projections)
+			wantManifests = len(want)*(len(f.Pages)+2) + lookaheads
+			if manifests != wantManifests {
+				t.Fatalf("standalone pages must each verify the session once, size their page, and hydrate their own entries: manifest inspections %d, want %d", manifests, wantManifests)
+			}
+			if chunks != len(want) {
+				t.Fatalf("standalone pages repeated or omitted chunk hydration: %d, want %d", chunks, len(want))
 			}
 		})
 	}
@@ -170,6 +231,15 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 			}
 			triggered := false
 			chunkQueries := 0
+			observeFullReadChunks(t, s, func(index int) {
+				if index == 0 {
+					chunkQueries++
+					if f.Action == "cancel_chunk" && chunkQueries == 2 {
+						triggered = true
+						cancel()
+					}
+				}
+			}, nil)
 			observeFullReads(t, s, func(a sqlite.Action) {
 				if a.Type() != sqlite.OpRead {
 					return
@@ -188,13 +258,6 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 				if a.Table() == "session_entry_full_content" && f.Action == "cancel_projection" && !triggered {
 					triggered = true
 					cancel()
-				}
-				if a.Table() == "session_entry_full_content_chunks" && a.Column() == "data" {
-					chunkQueries++
-					if f.Action == "cancel_chunk" && chunkQueries == 2 {
-						triggered = true
-						cancel()
-					}
 				}
 			})
 			budget := int64(1)

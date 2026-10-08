@@ -54,7 +54,7 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 		}
 	}()
 	c.SessionID = id
-	err = sqlitex.ExecuteTransient(conn, `SELECT status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.Execute(conn, `SELECT status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		found = true
 		var e error
 		c.Status, e = ingest.NewContentCaptureStatus(st.ColumnText(0))
@@ -155,7 +155,7 @@ type contentManifest struct {
 
 func readManifest(conn *sqlite.Conn, e schema.SessionEntry) (m contentManifest, err error) {
 	found := false
-	err = sqlitex.ExecuteTransient(conn, `SELECT full_byte_length,full_sha256,preview_byte_length,preview_sha256,preview_is_full,chunk_count FROM session_entry_full_content WHERE session_id=? AND entry_index=?`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.Execute(conn, `SELECT full_byte_length,full_sha256,preview_byte_length,preview_sha256,preview_is_full,chunk_count FROM session_entry_full_content WHERE session_id=? AND entry_index=?`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
 		found = true
 		m = contentManifest{st.ColumnInt(0), st.ColumnText(1), st.ColumnInt(2), st.ColumnText(3), st.ColumnInt(4) == 1, st.ColumnInt(5)}
 		return nil
@@ -166,8 +166,13 @@ func readManifest(conn *sqlite.Conn, e schema.SessionEntry) (m contentManifest, 
 	if (e.ContentPreview != nil) != found {
 		return m, contentIntegrityError()
 	}
-	if found && (m.previewLength != len(*e.ContentPreview) || m.previewHash != contentSHA(*e.ContentPreview) || m.chunks != (m.length+fullContentChunkBytes-1)/fullContentChunkBytes || m.previewFull != (m.length == m.previewLength)) {
-		return m, contentIntegrityError()
+	if found {
+		previewMismatch := m.previewLength != len(*e.ContentPreview) || m.previewHash != contentSHA(*e.ContentPreview)
+		chunkMismatch := m.chunks != (m.length+fullContentChunkBytes-1)/fullContentChunkBytes
+		fullMismatch := m.previewFull != (m.length == m.previewLength)
+		if previewMismatch || chunkMismatch || fullMismatch {
+			return m, contentIntegrityError()
+		}
 	}
 	return m, nil
 }
@@ -184,12 +189,14 @@ func hydrateContent(ctx context.Context, conn *sqlite.Conn, e *schema.SessionEnt
 	}
 	var b strings.Builder
 	count := 0
-	err = sqlitex.ExecuteTransient(conn, `SELECT chunk_index,byte_offset,byte_length,chunk_sha256,data FROM session_entry_full_content_chunks WHERE session_id=? AND entry_index=? ORDER BY chunk_index`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.Execute(conn, `SELECT chunk_index,byte_offset,byte_length,chunk_sha256,data FROM session_entry_full_content_chunks WHERE session_id=? AND entry_index=? ORDER BY chunk_index`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		n := st.ColumnLen(4)
-		if n > fullContentChunkBytes || n != min(fullContentChunkBytes, m.length-b.Len()) || st.ColumnInt(0) != count || st.ColumnInt(1) != b.Len() || st.ColumnInt(2) != n {
+		invalidLength := n > fullContentChunkBytes || n != min(fullContentChunkBytes, m.length-b.Len()) || st.ColumnInt(2) != n
+		invalidPosition := st.ColumnInt(0) != count || st.ColumnInt(1) != b.Len()
+		if invalidLength || invalidPosition {
 			return contentIntegrityError()
 		}
 		data := make([]byte, n)
@@ -205,7 +212,9 @@ func hydrateContent(ctx context.Context, conn *sqlite.Conn, e *schema.SessionEnt
 		return err
 	}
 	text := b.String()
-	if count != m.chunks || len(text) != m.length || contentSHA(text) != m.hash || !utf8.ValidString(text) || contentPreview(text) != *e.ContentPreview {
+	invalidShape := count != m.chunks || len(text) != m.length
+	invalidText := contentSHA(text) != m.hash || !utf8.ValidString(text) || contentPreview(text) != *e.ContentPreview
+	if invalidShape || invalidText {
 		return contentIntegrityError()
 	}
 	e.ContentPreview = &text
@@ -233,7 +242,7 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 		_, err := verifyShimCaptureProjection(ctx, conn, id, c)
 		return err
 	}
-	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
+	err := sqlitex.Execute(conn, sqlListEntries, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -277,7 +286,7 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 		// incomplete_new generation can never back a publishable full
 		// capture, even with zero carriers; full reads refuse it as forged.
 		var completeness string
-		if err := sqlitex.ExecuteTransient(conn, `SELECT completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(id), *active},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				completeness = stmt.ColumnText(0)
@@ -357,7 +366,7 @@ func verifyShimCaptureProjection(ctx context.Context, conn *sqlite.Conn, id inge
 	}
 	if active != nil {
 		var completeness string
-		if err := sqlitex.ExecuteTransient(conn, `SELECT completeness FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT completeness FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(id), *active},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				completeness = stmt.ColumnText(0)
@@ -379,6 +388,9 @@ func verifyShimCaptureProjection(ctx context.Context, conn *sqlite.Conn, id inge
 	}
 	if err := validateUnknownCapture(evidenceEntries, c.Status, c.FailureCode); err != nil {
 		return nil, err
+	}
+	for i := range shaped {
+		shaped[i] = mirrorShape(records[i], false)
 	}
 	return shaped, nil
 }
@@ -587,7 +599,9 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 	}
 	// The omitted-record capture is read whole here too: it carries the same
 	// full-capture proof, and its placeholders are entries like any other.
-	if !found || !PublishableWithOmissions(capture) || capture.FullCaptureSHA256 == "" || capture.SessionID != id {
+	invalidAuthority := !found || !PublishableWithOmissions(capture)
+	invalidCaptureProof := capture.FullCaptureSHA256 == "" || capture.SessionID != id
+	if invalidAuthority || invalidCaptureProof {
 		return fail(ErrContentCaptureIncomplete)
 	}
 	shimmed, shimErr := shimmedOnConn(conn, string(id))

@@ -122,7 +122,9 @@ func openMigrateStore(cmd *cobra.Command, dryRun bool, ownedRoot, dbPath string)
 		if err != nil {
 			return nil, func() {}, err
 		}
-		return db, func() { _ = db.Close() }, nil
+		return db, func() {
+			_ = db.Close()
+		}, nil
 	}
 	dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
@@ -137,7 +139,9 @@ func openMigrateStore(cmd *cobra.Command, dryRun bool, ownedRoot, dbPath string)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open analytics store: %w", err)
 	}
-	return db, func() { _ = db.Close() }, nil
+	return db, func() {
+		_ = db.Close()
+	}, nil
 }
 
 // confirmMigrate asks for consent to an in-place conversion. It refuses
@@ -350,6 +354,7 @@ func writeMigrateResult(cmd *cobra.Command, result store.MigrateResult, jsonOutp
 			"marked":              result.Marked,
 			"skipped":             result.Skipped,
 			"bytes_freed":         result.BytesFreed,
+			"stats_overflow_keys": result.StatsOverflowKeys,
 			"rollbacks":           rollbacks,
 			"warnings":            result.Warnings,
 			"search_consolidated": result.SearchConsolidated,
@@ -363,6 +368,7 @@ func writeMigrateResult(cmd *cobra.Command, result store.MigrateResult, jsonOutp
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "converted %d session(s), rolled back %d, marked %d, skipped %d, %s freed\n",
 		result.Converted, result.RolledBack, result.Marked, result.Skipped, formatMigrateBytes(result.BytesFreed))
+	fmt.Fprintf(out, "stat overflow keys: %v\n", result.StatsOverflowKeys)
 	for _, rollback := range result.Rollbacks {
 		fmt.Fprintf(out, "rolled back %s at %s: %s; marked for re-index\n", rollback.SessionID, rollback.Dimension, rollback.Reason)
 	}

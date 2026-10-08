@@ -185,7 +185,7 @@ func (s *Store) checkImmutableIdentity(ctx context.Context, sessionID schema.Ses
 	defer s.pool.Put(conn)
 	var stored string
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT candidate_digest FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT candidate_digest FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -202,9 +202,12 @@ func (s *Store) checkImmutableIdentity(ctx context.Context, sessionID schema.Ses
 		return &alreadyCommittedError{sessionID: sessionID, generationID: generationID}
 	}
 	fileBacked := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
-		Args:       []any{string(sessionID), generationID},
-		ResultFunc: func(*sqlite.Stmt) error { fileBacked = true; return nil },
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), generationID},
+		ResultFunc: func(*sqlite.Stmt) error {
+			fileBacked = true
+			return nil
+		},
 	}); err != nil {
 		return fmt.Errorf("store: check the file-backed catalog for session %s: %w", sessionID, err)
 	}
@@ -253,7 +256,9 @@ func (s *Store) lockedSkip(ctx context.Context, prepared *preparedHarmonized, co
 	if err != nil {
 		return err
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	return stampSkippedHarmonized(ctx, s, prepared, comparedID, stamps)
 }
 
@@ -266,7 +271,9 @@ func (s *Store) lockedRepair(ctx context.Context, sessionID schema.SessionID, pr
 	if err != nil {
 		return err
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection for the repair guard of session %s: %w", sessionID, err)
@@ -296,6 +303,7 @@ func activationStamps(activation GenerationActivation, prepared *preparedHarmoni
 		stats:              prepared.generation.Metadata.Stats,
 		seedJSON:           seedJSONForStats(prepared.generation.Metadata.Stats),
 		updatedAtMs:        activation.IndexedAtMs,
+		fullCapture:        captureRequiresFullContent(activation.ContentCapture),
 	}
 }
 
@@ -309,7 +317,9 @@ func (s *Store) commitHarmonizedWrite(ctx context.Context, sessionID schema.Sess
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	// Staging complete: hand the candidate to the batched writer. The V2
 	// result carries filled records (completed from the staged bytes) and
 	// the prior evidence beside the generation, so validation sees the
@@ -387,7 +397,10 @@ func (p *PreparedGeneration) NativeGenerationCandidateID() string {
 // claim reports whether the handle can install the requested candidate. A
 // handle is single-use: once claimed it never installs again.
 func (p *PreparedGeneration) claim(sessionID schema.SessionID, generationID string) bool {
-	if p == nil || p.prepared == nil || p.sessionID != sessionID || p.generationID != generationID {
+	if p == nil || p.prepared == nil {
+		return false
+	}
+	if p.sessionID != sessionID || p.generationID != generationID {
 		return false
 	}
 	return p.installed.CompareAndSwap(false, true)
@@ -463,7 +476,7 @@ func (s *Store) activeGenerationID(ctx context.Context, sessionID schema.Session
 func readActiveGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*string, error) {
 	var active *string
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -500,7 +513,9 @@ func (s *Store) CleanupInactiveGeneration(ctx context.Context, sessionID schema.
 	if err != nil {
 		return err
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
 	active, err := s.activeGenerationID(ctx, sessionID)
 	if err != nil {
 		return err
@@ -531,9 +546,12 @@ func (s *Store) verifyOwnedInactiveGeneration(ctx context.Context, sessionID sch
 	}
 	defer s.pool.Put(conn)
 	committed := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
-		Args:       []any{string(sessionID), generationID},
-		ResultFunc: func(*sqlite.Stmt) error { committed = true; return nil },
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), generationID},
+		ResultFunc: func(*sqlite.Stmt) error {
+			committed = true
+			return nil
+		},
 	}); err != nil {
 		return fmt.Errorf("store: verify inactive generation %s for session %s: %w", generationID, sessionID, err)
 	}
@@ -582,7 +600,7 @@ func (s *Store) generationMetadata(ctx context.Context, sessionID schema.Session
 func readGenerationMetadataOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (schema.UnifiedMetadata, error) {
 	var metadata schema.UnifiedMetadata
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT metadata_json FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT metadata_json FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true

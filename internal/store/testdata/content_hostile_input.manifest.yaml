@@ -1,5 +1,6 @@
 # Required-name manifest for content_hostile_input: deletion protection by NAME, never by count.
 requiredNames:
+  - empty-non-emitted-stages-on-harvest
   - malformed-record
   - oversized-record-placeholder
   - invalid-utf8

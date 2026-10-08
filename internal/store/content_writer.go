@@ -21,7 +21,10 @@ const fullContentChunkBytes = 64 * 1024
 
 var ContentBackfillShapeMismatch = ingest.ContentBackfillShapeMismatch
 
-func contentSHA(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+func contentSHA(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
 
 // isManagedGenerationWrite reports whether a write carries a native managed
 // generation (V2 value or pointer). The last-good preview-over-full guard is
@@ -148,7 +151,8 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	// rebuilds opt out explicitly on the same principle as a format
 	// conversion: manual restamp, harvest index --force and Reindex proceed
 	// while accidental/hostile downgrades stay refused.
-	if !w.RequireFullContent && mode != ingest.SessionEntryWriteFormatConversion && mode != ingest.SessionEntryWriteExplicitRebuild && isManagedGenerationWrite(w.Result) {
+	ordinaryWrite := mode != ingest.SessionEntryWriteFormatConversion && mode != ingest.SessionEntryWriteExplicitRebuild
+	if !w.RequireFullContent && ordinaryWrite && isManagedGenerationWrite(w.Result) {
 		if old, found, readErr := readCapture(conn, w.SessionID); readErr == nil && found && PublishableWithOmissions(old) {
 			return out, fmt.Errorf("store content write: preview replacement refused over full read authority; prior capture remains authoritative with byte-identical export; re-index the source for a certified capture")
 		} else if readErr != nil {
@@ -170,7 +174,7 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 		// still describes those exact rows; the caller would then have to
 		// recover full content it never lost.
 		if !hadPriorHash || priorHash != out.sessionEntriesHash {
-			if err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
+			if err = sqlitex.Execute(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
 				return out, err
 			}
 		}
@@ -263,14 +267,15 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 		return out, err
 	}
 	integrityMatch := false
-	if found && old.Status == ingest.ContentCaptureComplete && old.FullCaptureSHA256 == fullHash && projectionMatch {
+	matchingCapture := found && old.Status == ingest.ContentCaptureComplete && old.FullCaptureSHA256 == fullHash
+	if matchingCapture && projectionMatch {
 		integrityMatch = verifyStoredContent(ctx, conn, w.SessionID, old) == nil
 	}
 	if mode != ingest.SessionEntryWriteContentBackfill {
 		// A stored hash is only a cache. If the actual projection differs,
 		// invalidate it before the legacy writer considers its fast skip path.
 		if !projectionMatch {
-			if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_entries_hash=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
+			if err := sqlitex.Execute(conn, `UPDATE sessions SET session_entries_hash=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
 				return out, err
 			}
 		}
@@ -279,7 +284,8 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 			return out, err
 		}
 	}
-	if integrityMatch && out.skipped && old.SourceAuthority == c.SourceAuthority && old.TranscriptOrigin == c.TranscriptOrigin && old.CaptureFormat == c.CaptureFormat {
+	matchingAuthority := old.SourceAuthority == c.SourceAuthority && old.TranscriptOrigin == c.TranscriptOrigin && old.CaptureFormat == c.CaptureFormat
+	if integrityMatch && out.skipped && matchingAuthority {
 		// Identical content need not be rewritten, but a new metadata capture
 		// must be bound even when the bounded index took its hash-skip path.
 		if old.PublicationCaptureRevision == c.PublicationCaptureRevision {
@@ -293,7 +299,7 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 		out.stats.Rewrites++
 	}
 	out.skipped = false
-	if err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
+	if err = sqlitex.Execute(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
 		return out, err
 	}
 	// Prepare the two durable-prose inserts once and re-bind per row. A large
@@ -453,7 +459,7 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 	if _, err := ingest.NewContentCaptureFailureCode(string(c.FailureCode)); err != nil {
 		return err
 	}
-	return sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_format=excluded.capture_format,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), string(c.CaptureFormat), entries, rows, nullString(hash), c.CapturedAtMs, nullString(string(c.FailureCode)), nullString(c.FailureMessage), c.PublicationCaptureRevision}})
+	return sqlitex.Execute(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_format=excluded.capture_format,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), string(c.CaptureFormat), entries, rows, nullString(hash), c.CapturedAtMs, nullString(string(c.FailureCode)), nullString(c.FailureMessage), c.PublicationCaptureRevision}})
 }
 
 // refuseForgedFullClaim reuses the capture assessment to refuse a full write
@@ -575,7 +581,7 @@ func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.Session
 }
 
 func contentBackfillPublicationRevision(conn *sqlite.Conn, id ingest.SessionID) (revision int64, err error) {
-	err = sqlitex.ExecuteTransient(conn, publicationMetadataSelect+` WHERE s.session_id=?`, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, publicationMetadataSelect+` WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			bundle, scanErr := scanPublicationMetadataProof(stmt, id)
 			if scanErr != nil {
@@ -588,6 +594,22 @@ func contentBackfillPublicationRevision(conn *sqlite.Conn, id ingest.SessionID) 
 		},
 	})
 	return revision, err
+}
+
+// sessionEntriesHashDomain retains the mirror writer's hash domain: full
+// captures hash bounded previews; preview-only captures hash raw entries.
+func sessionEntriesHashDomain(entries []schema.SessionEntry, fullCapture bool) (string, error) {
+	if !fullCapture {
+		return computeSessionEntriesHash(entries)
+	}
+	bounded := append([]schema.SessionEntry(nil), entries...)
+	for i := range bounded {
+		if bounded[i].ContentPreview != nil {
+			preview := contentPreview(*bounded[i].ContentPreview)
+			bounded[i].ContentPreview = &preview
+		}
+	}
+	return computeSessionEntriesHash(bounded)
 }
 
 // writeHarmonizedContentOnConn persists the capture certificate for a V2
@@ -637,7 +659,7 @@ func writeHarmonizedContentOnConn(ctx context.Context, conn *sqlite.Conn, w inge
 			return out, readErr
 		}
 	}
-	hash, err := computeSessionEntriesHash(entries)
+	hash, err := sessionEntriesHashDomain(entries, w.RequireFullContent)
 	if err != nil {
 		return out, fmt.Errorf("store: compute session_entries_hash for %s: %w", w.SessionID, err)
 	}

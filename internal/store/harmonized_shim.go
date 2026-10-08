@@ -119,7 +119,7 @@ WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partit
 	}
 	query += ` ORDER BY m.entry_index`
 	var records []EntryRecord
-	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
 		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			row, err := scanBodyRow(stmt, 0)
@@ -153,7 +153,12 @@ func verifyShimRecords(records []EntryRecord) error {
 func shimListEntries(records []EntryRecord, bounded bool) ([]schema.SessionEntry, error) {
 	entries := make([]schema.SessionEntry, 0, len(records))
 	for _, record := range records {
-		entry := legacyShape(record, bounded)
+		entry := mirrorShape(record, bounded)
+		if ext := promotedExtKVs(record); len(ext) > 0 {
+			if err := mergeExtIntoExtra(&entry, ext); err != nil {
+				return nil, err
+			}
+		}
 		if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
 			return nil, err
 		}
@@ -166,7 +171,7 @@ func shimListEntries(records []EntryRecord, bounded bool) ([]schema.SessionEntry
 // session through the shim, bounded exactly as the mirror bounded it.
 func shimFirstUserPreview(conn *sqlite.Conn, sessionID string) (string, error) {
 	preview := ""
-	err := sqlitex.ExecuteTransient(conn, `SELECT b.content_preview FROM session_generation_entries m
+	err := sqlitex.Execute(conn, `SELECT b.content_preview FROM session_generation_entries m
 JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 JOIN sessions s ON s.session_id = m.session_id
@@ -361,7 +366,7 @@ func shimLeadingUserPreviewsBulk(conn *sqlite.Conn, sessionIDs []string, perSess
 // when the session maps nothing.
 func shimMaxEntryIndex(conn *sqlite.Conn, sessionID string) (int, error) {
 	maxIdx := -1
-	err := sqlitex.ExecuteTransient(conn, `SELECT COALESCE(MAX(m.entry_index), -1) FROM session_generation_entries m
+	err := sqlitex.Execute(conn, `SELECT COALESCE(MAX(m.entry_index), -1) FROM session_generation_entries m
 JOIN sessions s ON s.session_id = m.session_id
 WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partition_id = 0`, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
@@ -380,7 +385,7 @@ WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partit
 // or nil when the session maps nothing.
 func shimFirstEntry(conn *sqlite.Conn, sessionID string) (*EntryHead, error) {
 	var head *EntryHead
-	err := sqlitex.ExecuteTransient(conn, `SELECT m.entry_index, b.role FROM session_generation_entries m
+	err := sqlitex.Execute(conn, `SELECT m.entry_index, b.role FROM session_generation_entries m
 JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 JOIN sessions s ON s.session_id = m.session_id

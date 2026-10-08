@@ -56,10 +56,9 @@ func entryFromRow(r EntryRecord) schema.SessionEntry {
 // rebuildExtra folds the promoted columns back into the entry's Extra
 // document. ExtraVerbatim wins outright: it holds the original string
 // whenever the canonical rebuild would not be byte-identical. Otherwise the
-// promoted keys merge over the unknown remainder with sorted-key encoding,
-// which is exactly the shape the mirror's ext merge produced on read
-// (mergeExtIntoExtra marshals a map), so a shimmed row and its mirror row
-// carry byte-identical Extra.
+// promoted keys merge over the unknown remainder with sorted-key encoding.
+// This is the raw full/generation shape; routing applies mergeExtIntoExtra
+// separately to preserve the mirror's extension-read semantics.
 //
 // A remainder that no longer parses is passed through verbatim without the
 // merge. Corruption of that shape is caught by the digest check on full reads
@@ -138,21 +137,9 @@ func SerializeEntryDigest(r EntryRecord) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// legacyShape is the routing shim (design section 6.2 readers 3 and 4): one
-// row-shaping function serves the mirror insert and the shim so the two can
-// never drift apart.
-//
-// With bounded=true it reconstructs the entry exactly as the mirror would
-// have stored it: ContentPreview bounded by contentPreview, and the source
-// ref and provenance left out (the mirror table carries no columns for
-// them), so a shimmed row matches its mirror row field for field. Callers
-// are metrics, classifier inputs, sessions context, the terminal UI, and
-// code map — all unchanged.
-//
-// With bounded=false it returns the full entry: unbounded preview with ref
-// and provenance intact. Publication entries, the review scan, and the
-// wizard preview read this shape, digest-verified, because those are full
-// reads.
+// legacyShape preserves the historical hash domains. Bounded shapes omit
+// provenance and limit ContentPreview; full shapes retain raw fields.
+// Output callers use mirrorShape separately, after full-read verification.
 func legacyShape(row EntryRecord, bounded bool) schema.SessionEntry {
 	entry := entryFromRow(row)
 	if !bounded {
@@ -165,4 +152,31 @@ func legacyShape(row EntryRecord, bounded bool) schema.SessionEntry {
 	entry.SourceEntryRef = ""
 	entry.Provenance = nil
 	return entry
+}
+
+// mirrorShape projects the columns the retired mirror actually carried.
+// Full capture verification and hashing must use legacyShape before this
+// output-only projection removes generation provenance.
+func mirrorShape(row EntryRecord, bounded bool) schema.SessionEntry {
+	entry := legacyShape(row, bounded)
+	entry.SourceEntryRef = ""
+	entry.Provenance = nil
+	return entry
+}
+
+func promotedExtKVs(row EntryRecord) map[string]any {
+	ext := make(map[string]any)
+	if row.ModelID != nil {
+		ext["model_id"] = *row.ModelID
+	}
+	if row.TokensReasoning != nil {
+		ext["tokens_reasoning"] = *row.TokensReasoning
+	}
+	if row.CacheRead != nil {
+		ext["cache_read"] = *row.CacheRead
+	}
+	if row.CacheWrite != nil {
+		ext["cache_write"] = *row.CacheWrite
+	}
+	return ext
 }
