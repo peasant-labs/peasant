@@ -15,8 +15,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -44,19 +44,19 @@ type contentGCFlagSession struct {
 // with no typed fields is a placeholder a later change fills; the loader's
 // manifest check still protects its name.
 type contentGCCase struct {
-	Name                string               `yaml:"name"`
-	WantRowsDeleted     int64                `yaml:"wantRowsDeleted,omitempty"`
-	WantBodiesDeleted   int64                `yaml:"wantBodiesDeleted,omitempty"`
-	WantBlobsDeleted    int64                `yaml:"wantBlobsDeleted,omitempty"`
-	WantDirsRemoved     int64                `yaml:"wantDirsRemoved,omitempty"`
-	WantFlagCleared     *bool                `yaml:"wantFlagCleared,omitempty"`
-	WantRebuilt         *bool                `yaml:"wantRebuilt,omitempty"`
-	WantMirrorRows      *int64               `yaml:"wantMirrorRows,omitempty"`
-	WantFullContentRows *int64               `yaml:"wantFullContentRows,omitempty"`
-	FirstTerms          []string             `yaml:"firstTerms,omitempty"`
-	SecondTerms         []string             `yaml:"secondTerms,omitempty"`
-	MatchFound          []string             `yaml:"matchFound,omitempty"`
-	MatchEmpty          []string             `yaml:"matchEmpty,omitempty"`
+	Name                string                 `yaml:"name"`
+	WantRowsDeleted     int64                  `yaml:"wantRowsDeleted,omitempty"`
+	WantBodiesDeleted   int64                  `yaml:"wantBodiesDeleted,omitempty"`
+	WantBlobsDeleted    int64                  `yaml:"wantBlobsDeleted,omitempty"`
+	WantDirsRemoved     int64                  `yaml:"wantDirsRemoved,omitempty"`
+	WantFlagCleared     *bool                  `yaml:"wantFlagCleared,omitempty"`
+	WantRebuilt         *bool                  `yaml:"wantRebuilt,omitempty"`
+	WantMirrorRows      *int64                 `yaml:"wantMirrorRows,omitempty"`
+	WantFullContentRows *int64                 `yaml:"wantFullContentRows,omitempty"`
+	FirstTerms          []string               `yaml:"firstTerms,omitempty"`
+	SecondTerms         []string               `yaml:"secondTerms,omitempty"`
+	MatchFound          []string               `yaml:"matchFound,omitempty"`
+	MatchEmpty          []string               `yaml:"matchEmpty,omitempty"`
 	Sessions            []contentGCFlagSession `yaml:"sessions,omitempty"`
 }
 

@@ -101,19 +101,19 @@ func reclaimCountField(counts *ReclaimTableCounts, table string) *int64 {
 // catalog. A table outside this set has no count field, so a caller cannot
 // silently accumulate a row count it never reports.
 type ReclaimTableCounts struct {
-	ProjectionEntries    int64
-	ProjectionContent    int64
-	ProjectionAliases    int64
-	ProjectionSections   int64
-	ContextSegments      int64
-	RelationshipEvidence int64
-	Generations          int64
-	SegmentRefs          int64
-	NativeMetadata       int64
-	GenerationEntries    int64
-	GenerationContent    int64
-	GenerationSubagents  int64
-	GenerationCommits    int64
+	ProjectionEntries      int64
+	ProjectionContent      int64
+	ProjectionAliases      int64
+	ProjectionSections     int64
+	ContextSegments        int64
+	RelationshipEvidence   int64
+	Generations            int64
+	SegmentRefs            int64
+	NativeMetadata         int64
+	GenerationEntries      int64
+	GenerationContent      int64
+	GenerationSubagents    int64
+	GenerationCommits      int64
 	GenerationAssociations int64
 	GenerationDiagnostics  int64
 	GenerationTitleRefs    int64

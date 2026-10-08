@@ -14,7 +14,7 @@ import (
 type sweepRecordingStore struct {
 	MetricsStore
 
-	mu            sync.Mutex
+	mu          sync.Mutex
 	activated   []SessionID
 	swept       []SessionID
 	flagged     int
