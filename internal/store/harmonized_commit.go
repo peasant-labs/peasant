@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -545,6 +546,12 @@ func scanEntryRecord(stmt *sqlite.Stmt) EntryRecord {
 }
 
 const sqlSelectBodyColumns = `body_id, session_id, body_digest, entry_index, harness, entry_type, role, timestamp_ms, content_preview, tokens_in, tokens_out, has_tool_use, tool_kind, tool_names_csv, has_thinking, is_error, stop_reason, raw_byte_length, tool_call_id, entry_id, parent_entry_id, depth, parent_index, tool_input, tool_output, model_id, tokens_reasoning, cache_read, cache_write, extra, extra_verbatim, part_type, source_entry_ref, prov_origin, prov_actor, prov_delivery, prov_ownership, prov_evidence, prov_input_modality, prov_submission_ref`
+
+// sqlSelectBodyColumnsJoined is the same column list qualified for the
+// body/mapping join both tables expose session_id under: the unqualified
+// list is ambiguous there, so join sites read through this derived form
+// and the column home stays single.
+var sqlSelectBodyColumnsJoined = "b." + strings.ReplaceAll(sqlSelectBodyColumns, ", ", ", b.")
 
 // hasProvenanceColumns reports whether the row carries any provenance: the
 // six required dimensions are non-NULL together, or all NULL together. A
@@ -1262,7 +1269,7 @@ func remapHarmonizedAnnotations(conn *sqlite.Conn, sessionID schema.SessionID, e
 // body rows, reconstructed through the one row-to-struct function.
 func readHarmonizedBodyAnchors(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]entryTargetAnchor, error) {
 	var anchors []entryTargetAnchor
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := entryFromRow(scanEntryRecord(stmt))
