@@ -1,4 +1,6 @@
 requiredNames:
+  - file-backed-refresh-retains-prior-raw-stats
+  - file-backed-refresh-retains-legacy-only-seed
   - unknown-kind-kept-in-overflow
   - absent-stays-null-through-conversion
   - explicit-zero-stays-zero

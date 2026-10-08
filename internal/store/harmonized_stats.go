@@ -46,7 +46,7 @@ func (s *Store) ReadCapturedStats(ctx context.Context, id schema.SessionID) (Cap
 func readCapturedStatsOnConn(conn *sqlite.Conn, id schema.SessionID) (CapturedStats, error) {
 	stats := CapturedStats{SessionID: id}
 	found := false
-	err := sqlitex.ExecuteTransient(conn, `SELECT `+capturedStatsColumns+` FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, `SELECT `+capturedStatsColumns+` FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -221,7 +221,14 @@ func upsertCapturedStatsOnConn(conn *sqlite.Conn, stats CapturedStats) (bool, er
 	if allowed && stats.SeedJSON != nil {
 		seed = *stats.SeedJSON
 	}
-	if err := sqlitex.ExecuteTransient(conn, sqlUpsertCapturedStats, &sqlitex.ExecOptions{
+	var overflowWarnings []schema.DiagnosticEntry
+	if allowed {
+		stats.Overflow, overflowWarnings, err = retainPriorStatsOverflowOnConn(conn, stats)
+		if err != nil {
+			return false, err
+		}
+	}
+	if err := sqlitex.Execute(conn, sqlUpsertCapturedStats, &sqlitex.ExecOptions{
 		Args: []any{
 			string(stats.SessionID),
 			nullableArg(stats.TurnCount), nullableArg64(stats.InputSubmissionCount),
@@ -236,6 +243,11 @@ func upsertCapturedStatsOnConn(conn *sqlite.Conn, stats CapturedStats) (bool, er
 		return false, fmt.Errorf("store: upsert captured stats for session %s: %w; prior measurements are unchanged", stats.SessionID, err)
 	}
 	applied := conn.Changes() > 0
+	if applied {
+		if err := writeStatsOverflowDiagnosticsOnConn(conn, stats.SessionID, overflowWarnings); err != nil {
+			return false, err
+		}
+	}
 	if err := syncInputSubmissionMirrorOnConn(conn, stats.SessionID); err != nil {
 		return false, err
 	}
@@ -287,6 +299,10 @@ func capturedStatsFromRaw(raw json.RawMessage, harness schema.Harness) (Captured
 	}
 	overflow := string(encoded)
 	stats.Overflow = &overflow
+	return stats, statsOverflowDiagnostics(values, harness), nil
+}
+
+func statsOverflowDiagnostics(values map[string]json.RawMessage, harness schema.Harness) []schema.DiagnosticEntry {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
@@ -300,7 +316,89 @@ func capturedStatsFromRaw(raw json.RawMessage, harness schema.Harness) (Captured
 			Remediation: "promote this stat through the documented compatibility-field promotion workflow; retain overflow until the typed column and readers are deployed",
 		})
 	}
-	return stats, warnings, nil
+	return warnings
+}
+
+// retainPriorStatsOverflowOnConn moves unknown retained seed keys to their
+// compatibility home before a typed refresh replaces the harness seed.
+// Incoming overflow wins collisions; older raw evidence fills missing keys.
+// Known fields remain the current adapter's measurements, including zero.
+func retainPriorStatsOverflowOnConn(conn *sqlite.Conn, update CapturedStats) (*string, []schema.DiagnosticEntry, error) {
+	previous, err := readCapturedStatsOnConn(conn, update.SessionID)
+	if err != nil && !errors.Is(err, ErrNoCapturedStats) {
+		return nil, nil, err
+	}
+	if err == nil && previous.UpdatedAtMs > update.UpdatedAtMs {
+		return update.Overflow, nil, nil
+	}
+	var harness schema.Harness
+	priorSeed := previous.SeedJSON
+	err = sqlitex.Execute(conn, `SELECT model_harness, metric_seed_json FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(update.SessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			for _, known := range schema.Harnesses() {
+				if string(known) == stmt.ColumnText(0) {
+					harness = known
+					break
+				}
+			}
+			if harness == "" {
+				return fmt.Errorf("store: retained stat origin for session %s is not a recognized harness; no stats were replaced; restore the recorded harness before retrying", update.SessionID)
+			}
+			if priorSeed == nil {
+				priorSeed = nullableText(stmt, 1)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: read prior stat seed for session %s before refresh: %w; prior stats remain intact", update.SessionID, err)
+	}
+	var priorRaw CapturedStats
+	if priorSeed != nil {
+		priorRaw, _, err = capturedStatsFromRaw(json.RawMessage(`{"stats":`+*priorSeed+`}`), harness)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	merged := make(map[string]json.RawMessage)
+	for _, raw := range []*string{previous.Overflow, priorRaw.Overflow, update.Overflow} {
+		if raw == nil {
+			continue
+		}
+		var values map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(*raw), &values); err != nil || values == nil {
+			return nil, nil, fmt.Errorf("store: retained stat overflow for session %s is not a JSON object; no stats were replaced; restore the captured overflow object before refreshing", update.SessionID)
+		}
+		for key, value := range values {
+			merged[key] = value
+		}
+	}
+	if len(merged) == 0 {
+		return nil, nil, nil
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: encode prior stat overflow for session %s before refresh: %w; no stats were replaced; restore valid overflow values and retry", update.SessionID, err)
+	}
+	overflow := string(encoded)
+	return &overflow, statsOverflowDiagnostics(merged, harness), nil
+}
+
+func writeStatsOverflowDiagnosticsOnConn(conn *sqlite.Conn, id schema.SessionID, warnings []schema.DiagnosticEntry) error {
+	for _, warning := range warnings {
+		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_diagnostics(session_id, generation_id, ordinal, error_type, location, message, remediation)
+SELECT s.session_id, s.active_generation_id,
+COALESCE((SELECT MAX(d.ordinal) + 1 FROM session_generation_diagnostics d WHERE d.session_id = s.session_id AND d.generation_id = s.active_generation_id), 0), ?, ?, ?, ?
+FROM sessions s WHERE s.session_id = ?
+AND EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id)
+AND NOT EXISTS (SELECT 1 FROM session_generation_diagnostics d WHERE d.session_id = s.session_id AND d.generation_id = s.active_generation_id AND d.error_type = ? AND d.location = ?)`, &sqlitex.ExecOptions{
+			Args: []any{warning.ErrorType, warning.Location, warning.Message, warning.Remediation, string(id), warning.ErrorType, warning.Location},
+		}); err != nil {
+			return fmt.Errorf("store: record retained stat diagnostic %s for session %s during refresh: %w; the stats transaction is refused; restore database access and retry", warning.Location, id, err)
+		}
+	}
+	return nil
 }
 
 // capturedOverflowContains checks raw evidence independently of the typed
@@ -335,7 +433,7 @@ func (s *Store) accumulateMigrateStatsOverflow(ctx context.Context, id schema.Se
 		return fmt.Errorf("store: take connection to report stat overflow for session %s after conversion: %w; conversion is committed; retry migration reporting", id, err)
 	}
 	defer s.pool.Put(conn)
-	return sqlitex.ExecuteTransient(conn, `SELECT d.location FROM session_generation_diagnostics d
+	return sqlitex.Execute(conn, `SELECT d.location FROM session_generation_diagnostics d
 JOIN sessions s ON s.session_id = d.session_id AND s.active_generation_id = d.generation_id
 WHERE d.session_id = ? AND d.error_type = 'stats-overflow'`, &sqlitex.ExecOptions{
 		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -385,7 +483,7 @@ func capturedStatsForHarnessWrite(sessionID schema.SessionID, stats schema.Sessi
 // stale document beside it. Sessions without an active generation are never
 // touched; file-backed generations also retain their seed until conversion.
 func clearLegacySeedOnConn(conn *sqlite.Conn, id schema.SessionID) error {
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET metric_seed_json = NULL
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET metric_seed_json = NULL
 WHERE session_id = ? AND active_generation_id IS NOT NULL AND metric_seed_json IS NOT NULL
 AND EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = sessions.session_id AND g.generation_id = sessions.active_generation_id)`, &sqlitex.ExecOptions{
 		Args: []any{string(id)},
@@ -400,7 +498,7 @@ AND EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = sessions.se
 // a copy of the row's current value: an update that reports no count leaves
 // the mirror exactly where the row already is.
 func syncInputSubmissionMirrorOnConn(conn *sqlite.Conn, id schema.SessionID) error {
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET input_submission_count = (SELECT input_submission_count FROM session_captured_stats WHERE session_id = ?) WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET input_submission_count = (SELECT input_submission_count FROM session_captured_stats WHERE session_id = ?) WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(id), string(id)},
 	}); err != nil {
 		return fmt.Errorf("store: sync input submission mirror for session %s: %w", id, err)
@@ -455,7 +553,7 @@ func readMetricSeedOnConn(conn *sqlite.Conn, id schema.SessionID) (*ingest.Stats
 		return getMetricSeedOnConn(conn, ingest.SessionID(id))
 	}
 	var seed *ingest.StatsInfo
-	err = sqlitex.ExecuteTransient(conn, `SELECT seed_json FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, `SELECT seed_json FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) == sqlite.TypeNull {
@@ -474,10 +572,7 @@ func readMetricSeedOnConn(conn *sqlite.Conn, id schema.SessionID) (*ingest.Stats
 // statistics. Only a JSON object is evidence; anything else fails closed so a
 // malformed document is never mistaken for unknown input.
 func decodeSeedDocument(raw string, seed **ingest.StatsInfo) error {
-	trimmed := raw
-	for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed[0] == '\n' || trimmed[0] == '\r') {
-		trimmed = trimmed[1:]
-	}
+	trimmed := strings.TrimLeft(raw, " \t\n\r")
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return fmt.Errorf("retained metric seed must be a JSON object; NULL alone represents unknown input")
 	}
@@ -490,7 +585,7 @@ func decodeSeedDocument(raw string, seed **ingest.StatsInfo) error {
 // sessions without an active generation keep the legacy representation.
 func isNativeSessionOnConn(conn *sqlite.Conn, id schema.SessionID) (bool, error) {
 	native := false
-	err := sqlitex.ExecuteTransient(conn, `SELECT s.active_generation_id IS NOT NULL FROM sessions s WHERE s.session_id = ?`, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, `SELECT s.active_generation_id IS NOT NULL FROM sessions s WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			native = stmt.ColumnInt(0) == 1

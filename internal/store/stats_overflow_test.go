@@ -4,13 +4,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"github.com/peasant-labs/peasant/internal/indexformat"
-	"github.com/peasant-labs/peasant/internal/ingest"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
@@ -19,14 +20,17 @@ import (
 )
 
 type statsOverflowCase struct {
-	Name         string           `yaml:"name"`
-	StatsJSON    string           `yaml:"statsJson"`
-	Want         v62ExpectedStats `yaml:"want"`
-	Overflow     *string          `yaml:"overflow"`
-	Keys         []string         `yaml:"keys"`
-	Damage       string           `yaml:"damage"`
-	Expect       string           `yaml:"expect"`
-	ReportDriver bool             `yaml:"reportDriver"`
+	Name           string           `yaml:"name"`
+	StatsJSON      string           `yaml:"statsJson"`
+	Want           v62ExpectedStats `yaml:"want"`
+	Overflow       *string          `yaml:"overflow"`
+	Keys           []string         `yaml:"keys"`
+	Damage         string           `yaml:"damage"`
+	Expect         string           `yaml:"expect"`
+	ReportDriver   bool             `yaml:"reportDriver"`
+	Refresh        bool             `yaml:"refresh"`
+	RefreshCount   int              `yaml:"refreshCount"`
+	LegacySeedOnly bool             `yaml:"legacySeedOnly"`
 }
 
 //go:embed testdata/stats_overflow.yaml
@@ -53,6 +57,9 @@ func LoadStatsOverflowFixtures(t *testing.T) []statsOverflowCase {
 	for _, c := range fixtures.Cases {
 		if c.StatsJSON == "" || (c.Expect != "converted" && c.Expect != "rolled-back") {
 			t.Fatalf("incomplete stat fixture %q", c.Name)
+		}
+		if c.Refresh && c.RefreshCount < 1 {
+			t.Fatalf("stat refresh fixture %q has no activation", c.Name)
 		}
 		names = append(names, c.Name)
 	}
@@ -96,7 +103,9 @@ func TestStatsOverflowFamily(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := openGenerationStoreAt(t, dir)
-			t.Cleanup(func() { _ = s.Close() })
+			t.Cleanup(func() {
+				_ = s.Close()
+			})
 			backfilled, err := s.ReadCapturedStats(t.Context(), sid)
 			if err != nil {
 				t.Fatal(err)
@@ -121,10 +130,45 @@ func TestStatsOverflowFamily(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = sqlitex.ExecuteTransient(conn, `UPDATE session_projection_generations SET metadata_json=json_set(metadata_json,'$.stats',json(?)) WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{c.StatsJSON, string(sid)}})
+			err = sqlitex.Execute(conn, `UPDATE session_projection_generations SET metadata_json=json_set(metadata_json,'$.stats',json(?)) WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{c.StatsJSON, string(sid)}})
 			s.pool.Put(conn)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if c.Refresh {
+				if c.LegacySeedOnly {
+					conn, err := s.pool.Take(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					err = sqlitex.Execute(conn, `DELETE FROM session_captured_stats WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+					if err == nil {
+						err = sqlitex.Execute(conn, `UPDATE sessions SET metric_seed_json=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{c.StatsJSON, string(sid)}})
+					}
+					s.pool.Put(conn)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				for ordinal := 1; ordinal <= c.RefreshCount; ordinal++ {
+					v2, blobs := buildTestGeneration(t, sid, fmt.Sprintf("gen_stats_refresh_%d", ordinal), fmt.Sprintf("fresh measured content %d", ordinal), "fresh tool input", "fresh tool output")
+					v2.Generation.Metadata.ModelHarness = schema.HarnessClaudeCode
+					activation := GenerationActivation{Generation: v2, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: int64(1000 + ordinal),
+						ContentCapture: ingest.SessionContentCaptureWrite{
+							Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
+							TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull,
+						},
+					}
+					activation.Prepared, err = s.StageGeneration(t.Context(), activation)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := s.ActivateGeneration(t.Context(), activation); err != nil {
+						t.Fatal(err)
+					}
+					assertRefreshedStatsOverflow(t, s, sid, v2.Generation.Metadata.Stats, c)
+				}
+				return
 			}
 			if c.Damage != "" {
 				if c.Damage != "drop-overflow" {
@@ -132,9 +176,11 @@ func TestStatsOverflowFamily(t *testing.T) {
 				}
 				previous := migrateShadowSeam
 				migrateShadowSeam = func(conn *sqlite.Conn, _ string) error {
-					return sqlitex.ExecuteTransient(conn, `UPDATE session_captured_stats SET overflow=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+					return sqlitex.Execute(conn, `UPDATE session_captured_stats SET overflow=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
 				}
-				t.Cleanup(func() { migrateShadowSeam = previous })
+				t.Cleanup(func() {
+					migrateShadowSeam = previous
+				})
 			}
 			var result MigrateResult
 			var outcome MigrateOutcome
@@ -208,5 +254,60 @@ func TestStatsOverflowFamily(t *testing.T) {
 				t.Fatalf("typed metric seed differs: got %+v; want %+v", seed, typed)
 			}
 		})
+	}
+}
+
+func assertRefreshedStatsOverflow(t *testing.T, s *Store, sid schema.SessionID, measured schema.SessionStats, c statsOverflowCase) {
+	t.Helper()
+	got, err := s.ReadCapturedStats(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Overflow, c.Overflow) {
+		t.Fatalf("refresh dropped retained raw stat overflow: got %v, want %v", got.Overflow, c.Overflow)
+	}
+	seed, err := s.ReadMetricSeed(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(measured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var typed ingest.StatsInfo
+	if err := json.Unmarshal(raw, &typed); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(seed, &typed) {
+		t.Fatalf("refresh seed is not current adapter measurements: got %+v, want %+v", seed, typed)
+	}
+	var keys []string
+	if err := s.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error {
+		for _, warning := range snapshot.Metadata.Diagnostics.Warnings {
+			if warning.ErrorType == "stats-overflow" {
+				keys = append(keys, strings.TrimPrefix(warning.Location, "stats."))
+				if !strings.Contains(warning.Message, "harness claude-code") || warning.Remediation == "" {
+					t.Errorf("refresh stat diagnostic lacks origin/remedy: %+v", warning)
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(keys, c.Keys) {
+		t.Fatalf("refresh diagnostic keys: got %v, want %v", keys, c.Keys)
+	}
+	var report MigrateResult
+	if err := s.accumulateMigrateStatsOverflow(t.Context(), sid, &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.StatsOverflowKeys) != len(c.Keys) {
+		t.Fatalf("refresh diagnostic count membership differs: %+v", report.StatsOverflowKeys)
+	}
+	for _, key := range c.Keys {
+		if report.StatsOverflowKeys[key] != 1 {
+			t.Fatalf("refresh diagnostic %s missing or duplicated: %+v", key, report.StatsOverflowKeys)
+		}
 	}
 }

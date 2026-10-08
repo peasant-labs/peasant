@@ -1,4 +1,23 @@
 cases:
+  - name: file-backed-refresh-retains-prior-raw-stats
+    refresh: true
+    refreshCount: 2
+    statsJson: '{"inputSubmissionCount":1,"futureZ":{"count":7},"futureA":null}'
+    want:
+      inputSubmissionCount: 1
+    overflow: '{"futureA":null,"futureZ":{"count":7}}'
+    keys: [futureA, futureZ]
+    expect: converted
+  - name: file-backed-refresh-retains-legacy-only-seed
+    refresh: true
+    refreshCount: 1
+    legacySeedOnly: true
+    statsJson: '{"inputSubmissionCount":1,"futureLegacy":{"count":3}}'
+    want:
+      inputSubmissionCount: 1
+    overflow: '{"futureLegacy":{"count":3}}'
+    keys: [futureLegacy]
+    expect: converted
   - name: unknown-kind-kept-in-overflow
     statsJson: '{"turnCount":2,"inputSubmissionCount":1,"futureZ":{"count":7},"futureA":null}'
     want:
