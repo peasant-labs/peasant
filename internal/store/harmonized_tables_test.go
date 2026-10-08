@@ -3,12 +3,12 @@ package store
 import (
 	_ "embed"
 	"fmt"
-	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
