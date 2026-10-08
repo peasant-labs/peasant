@@ -589,3 +589,110 @@ func contentBackfillPublicationRevision(conn *sqlite.Conn, id ingest.SessionID) 
 	})
 	return revision, err
 }
+
+// writeHarmonizedContentOnConn persists the capture certificate for a V2
+// harmonized write (design §6.1): it computes fullCaptureHash over the
+// generation's main entries and writes the capture row. It writes no mirror
+// rows and no chunks — the bodies and blobs the staging phase wrote are the
+// only content homes. Every validation the mirror path runs still runs
+// here (unknown-evidence preflight, the incomplete guards, the last-good
+// preview-over-full refusal, the forged-claim refusal, and the full-capture
+// certification), so a V2 write is never a weaker gate than the path it
+// replaces.
+func writeHarmonizedContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.SessionEntryWrite, entries []schema.SessionEntry, generation indexformat.Generation) (sessionEntryWriteOutcome, error) {
+	var out sessionEntryWriteOutcome
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+	mode, err := ingest.NewSessionEntryWriteMode(string(w.Mode))
+	if err != nil {
+		return out, err
+	}
+	for _, e := range entries {
+		if string(e.SessionID) != string(w.SessionID) {
+			return out, fmt.Errorf("store content write: entry belongs to a different session; batch unchanged; supply entries for the requested session")
+		}
+	}
+	evidenceEntries := append([]schema.SessionEntry(nil), entries...)
+	for _, section := range generation.Earlier {
+		evidenceEntries = append(evidenceEntries, section.Content.Entries...)
+	}
+	if err := preflightUnknownEvidence(evidenceEntries, w.RequireFullContent); err != nil {
+		return out, err
+	}
+	if generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+		if w.RequireFullContent || w.ContentCapture.Status == ingest.ContentCaptureComplete || w.ContentCapture.CaptureFormat == ingest.ContentCaptureFormatFull {
+			return out, fmt.Errorf("store content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
+		}
+	}
+	if w.RequireFullContent {
+		if err := refuseForgedFullClaim(w, evidenceEntries); err != nil {
+			return out, err
+		}
+	}
+	if !w.RequireFullContent && mode != ingest.SessionEntryWriteFormatConversion && mode != ingest.SessionEntryWriteExplicitRebuild {
+		if old, found, readErr := readCapture(conn, w.SessionID); readErr == nil && found && PublishableWithOmissions(old) {
+			return out, fmt.Errorf("store content write: preview replacement refused over full read authority; prior capture remains authoritative with byte-identical export; re-index the source for a certified capture")
+		} else if readErr != nil {
+			return out, readErr
+		}
+	}
+	hash, err := computeSessionEntriesHash(entries)
+	if err != nil {
+		return out, fmt.Errorf("store: compute session_entries_hash for %s: %w", w.SessionID, err)
+	}
+	out.sessionEntriesHash = hash
+	if !w.RequireFullContent {
+		c := w.ContentCapture
+		c.PublicationCaptureRevision = 0
+		if c.Status == "" {
+			c.Status = ingest.ContentCaptureIncomplete
+		}
+		if c.Status == ingest.ContentCaptureComplete {
+			return out, fmt.Errorf("store content write: preview-only caller cannot certify completeness; use strict full capture before writing")
+		}
+		if c.SourceAuthority == "" {
+			c.SourceAuthority = ingest.ContentSourceNone
+		}
+		if c.CaptureFormat == "" {
+			c.CaptureFormat = ingest.ContentCaptureFormatPreviewOnly
+		}
+		out.stats.Rewrites++
+		return out, writeCapture(conn, w.SessionID, c, len(entries), 0, "")
+	}
+	c := w.ContentCapture
+	c.PublicationCaptureRevision = w.CaptureRevision
+	if c.Status == "" {
+		c.Status = ingest.ContentCaptureComplete
+	}
+	if c.SourceAuthority == "" {
+		c.SourceAuthority = ingest.ContentSourceNewIngest
+	}
+	if c.CaptureFormat == "" {
+		c.CaptureFormat = ingest.ContentCaptureFormatFull
+	}
+	if !FullCaptureWritable(c) || c.SourceAuthority == ingest.ContentSourceNone {
+		return out, fmt.Errorf("store full content write: capture %q with failure code %q is not a state this writer may certify as full content; prior data unchanged; resolve strict parser failures, or store the tolerant projection as a preview capture, before retrying", c.Status, c.FailureCode)
+	}
+	if err := validateUnknownCapture(evidenceEntries, c.Status, c.FailureCode); err != nil {
+		return out, err
+	}
+	if c.Status == ingest.ContentCaptureComplete && c.FailureMessage != "" {
+		return out, fmt.Errorf("store full content write: a complete capture carries a failure message (%q); prior data unchanged; a complete capture records no failure, so clear the message or store the capture with the code that explains it", c.FailureMessage)
+	}
+	if c.CapturedAtMs == 0 {
+		c.CapturedAtMs = time.Now().UnixMilli()
+	}
+	if _, err := ingest.NewContentSourceAuthority(string(c.SourceAuthority)); err != nil {
+		return out, err
+	}
+	if err := c.TranscriptOrigin.Validate(); err != nil {
+		return out, err
+	}
+	fullHash, err := fullCaptureHash(entries)
+	if err != nil {
+		return out, err
+	}
+	out.stats.Rewrites++
+	return out, writeCapture(conn, w.SessionID, c, len(entries), 0, fullHash)
+}

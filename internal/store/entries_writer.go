@@ -178,6 +178,11 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		results[i].Written = true
 		results[i].Skipped = outcome.skipped
 	}
+	if txnErr == nil {
+		if err := reportHarmonizedWriterSeam(harmonizedSeamAtCommit); err != nil {
+			txnErr = err
+		}
+	}
 
 	return results
 }
@@ -226,30 +231,73 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			return sessionEntryWriteOutcome{}, rollbackErr, fatal
 		}
 	}
-	entries, err := format.Write(ctx, conn, write.SessionID, write.Result)
-	if err == nil {
-		for _, entry := range entries {
-			if entry.SessionID != write.SessionID {
-				err = fmt.Errorf("store: format %d projected entry for session %s into replacement for %s; no replacement was committed; correct the format projection", write.IndexVersion, entry.SessionID, write.SessionID)
-				break
-			}
+	var entries []schema.SessionEntry
+	var outcome sessionEntryWriteOutcome
+	var batchPrepared *preparedHarmonized
+	skippedWrite := false
+	if _, isHarmonized := asV2Value(write.Result); isHarmonized {
+		var skip harmonizedBatchSkip
+		var err error
+		entries, batchPrepared, skip, err = s.harmonizedBatchPrecommit(conn, write)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+		if !skip.commit {
+			// An idempotent retry: the identical candidate is already
+			// installed, so the commit advances only the bookkeeping below
+			// (the same stamps an ordinary commit records) and reports the
+			// write skipped, exactly as the V1 hash-skip does.
+			outcome = skip.outcome
+			skippedWrite = true
 		}
 	}
-	if err != nil {
-		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
-		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	if !skippedWrite {
+		var err error
+		entries, err = format.Write(ctx, conn, write.SessionID, write.Result)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.SessionID != write.SessionID {
+					err = fmt.Errorf("store: format %d projected entry for session %s into replacement for %s; no replacement was committed; correct the format projection", write.IndexVersion, entry.SessionID, write.SessionID)
+					break
+				}
+			}
+		}
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
 	}
 
 	if err := checkPublicationIndexRevision(conn, write.SessionID, write.CaptureRevision); err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
-	outcome, err := writeSessionContentOnConn(ctx, conn, write, entries, stmts)
-	outcome.entriesCount = len(entries)
-	if err != nil {
-		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
-		return outcome, rollbackErr, fatal
+	if skippedWrite {
+		// outcome already carries the skip's hash and stats; the shared
+		// stamps below advance the revision, the proof, and the binding.
+	} else if v2, isHarmonized := asV2Value(write.Result); isHarmonized {
+		var err error
+		outcome, err = writeHarmonizedContentOnConn(ctx, conn, write, entries, v2.Generation)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+		if batchPrepared != nil {
+			if _, err := upsertCapturedStatsOnConn(conn, write.SessionID, batchPrepared.generation.Metadata.Stats, seedJSONForStats(batchPrepared.generation.Metadata.Stats), write.IndexedAtMs); err != nil {
+				rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+				return outcome, rollbackErr, fatal
+			}
+		}
+	} else {
+		var err error
+		outcome, err = writeSessionContentOnConn(ctx, conn, write, entries, stmts)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
 	}
+	outcome.entriesCount = len(entries)
 	if write.Mode != ingest.SessionEntryWriteContentBackfill {
 		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_format_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{write.IndexVersion, string(write.SessionID)}}); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
@@ -287,6 +335,10 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
+	}
+	if err := reportHarmonizedWriterSeam(harmonizedSeamMidActivationBatch); err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
 	if err := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil); err != nil {
 		return outcome, fmt.Errorf("store: release session entry savepoint for %s: %w", write.SessionID, err), true

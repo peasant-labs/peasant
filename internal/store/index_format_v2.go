@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -184,19 +183,29 @@ func (generationIndexFormat) Validate(result indexformat.Result) error {
 	return nil
 }
 
-// Write installs one generation in the caller's transaction. The returned main
-// entries are the canonical search projection the common writer persists; the
-// generation rows are the V2 read authority. It enforces the completeness
-// transition transactionally: an incomplete_new candidate is refused when a
-// complete generation already exists for the session, so a last-good complete
-// generation is never replaced by an incomplete capture. The same guard runs
-// for activation, recovery and direct format writes because all three commit
-// through this handler on the activation connection.
+// Write installs one harmonized generation in the caller's transaction
+// (design §4.1 C1–C6, minus the lock, the batching, and the C4 stamps the
+// common writer owns). The generation's objects are already staged — the
+// foreign keys prove it, so an unstaged candidate refuses here instead of
+// writing partial rows. It enforces the completeness transition
+// transactionally over both catalog tables: an incomplete_new candidate is
+// refused when a complete generation already exists for the session, so a
+// last-good complete generation is never replaced by an incomplete capture.
+// Then it inserts the catalog row with its flattened metadata, the
+// stats-excluded capture anchor, the activation binding, and the prior
+// evidence, plus every child, mapping, descriptor, alias, section, segment,
+// and evidence row; points the session at the new generation; merges the
+// captured stats with the mirror in the same transaction; and remaps the
+// carried annotations against the new main entries. A generation identifier
+// that already names a harmonized row commits only when the stored binding
+// matches (AlreadyCommitted); any other reuse refuses, as does an
+// identifier present in the file-backed table, which only the migration
+// moves.
 func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID, result indexformat.Result) (entries []schema.SessionEntry, retErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	value, ok := result.(indexformat.V2)
+	value, ok := asV2Value(result)
 	if !ok {
 		return nil, generationIndexFormat{}.Validate(result)
 	}
@@ -209,63 +218,65 @@ func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessi
 			return nil, err
 		}
 	}
-	metadataJSON, err := json.Marshal(generation.Metadata)
+	prepared, err := prepareHarmonizedCandidate(sessionID, generation, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store: encode managed generation metadata for session %s: %w; no generation was activated; repair the captured metadata", sessionID, err)
+		return nil, err
 	}
-	titleRefsJSON, err := json.Marshal(generation.TitleRefs)
+	if err := refuseReusedGenerationIdentity(conn, sessionID, generation.ID, prepared.binding); err != nil {
+		return nil, err
+	}
+	previous, err := readActiveGenerationOnConn(conn, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("store: encode managed generation title refs for session %s: %w; no generation was activated", sessionID, err)
+		return nil, err
 	}
-	// Prepare the per-row inserts once and re-bind them for every row. The
-	// projection entry insert dominates: a native session writes one row per
-	// entry, so re-preparing it for every row parses and plans the same SQL
-	// thousands of times.
-	stmts := newGenerationInstallStatements(conn)
-	defer func() { retErr = errors.Join(retErr, stmts.Close()) }()
 	now := time.Now().UnixMilli()
-	if err := deleteGenerationRowsOnConn(conn, sessionID, generation.ID); err != nil {
+	if err := insertHarmonizedGenerationOnConn(conn, prepared, value.PriorEvidence, now); err != nil {
 		return nil, err
 	}
-	if err := insertGenerationRowOnConn(conn, sessionID, generation, metadataJSON, titleRefsJSON, now); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationPartitionsOnConn(stmts, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationSegmentsOnConn(stmts, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationContentOnConn(stmts, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationAliasesOnConn(stmts, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertRelationshipEvidenceOnConn(stmts, sessionID, generation); err != nil {
-		return nil, err
+	var previousHarmonized *string
+	if previous != nil {
+		if generationIsHarmonized(conn, sessionID, *previous) {
+			previousHarmonized = previous
+		}
 	}
 	if err := pointSessionAtGenerationOnConn(conn, sessionID, generation); err != nil {
+		return nil, err
+	}
+	if err := remapHarmonizedAnnotations(conn, sessionID, generation.Main.Entries, previousHarmonized, nil); err != nil {
 		return nil, err
 	}
 	return generation.Main.Entries, nil
 }
 
-// Delete removes every generation-scoped row for a session when the session's
-// representation is replaced by a different format. It deliberately does not
-// touch content blobs: the owned-artifact store removes inactive generation
-// directories under its exclusive lock, after this activation commits.
+// Delete removes every generation-scoped row for a session when the
+// session's representation is replaced by a different format. It sets the
+// sweep flag before removing anything, so a crash leaves the leftovers
+// flagged for the per-session sweep; it removes no objects itself — the
+// unreferenced entry rows and blobs go through the verified sweep (§4.5).
 func (generationIndexFormat) Delete(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+		return fmt.Errorf("store: flag session %s for sweep before representation replacement: %w; the prior representation is preserved", sessionID, err)
+	}
 	for _, statement := range []string{
 		`DELETE FROM session_relationship_evidence WHERE session_id = ?`,
-		`DELETE FROM session_projection_entries WHERE session_id = ?`,
-		`DELETE FROM session_projection_sections WHERE session_id = ?`,
+		`DELETE FROM session_generation_entries WHERE session_id = ?`,
+		`DELETE FROM session_generation_content WHERE session_id = ?`,
+		`DELETE FROM session_generation_subagents WHERE session_id = ?`,
+		`DELETE FROM session_generation_commits WHERE session_id = ?`,
+		`DELETE FROM session_generation_associations WHERE session_id = ?`,
+		`DELETE FROM session_generation_diagnostics WHERE session_id = ?`,
+		`DELETE FROM session_generation_title_refs WHERE session_id = ?`,
+		`DELETE FROM session_context_segment_refs WHERE session_id = ?`,
 		`DELETE FROM session_context_segments WHERE session_id = ?`,
-		`DELETE FROM session_projection_content WHERE session_id = ?`,
+		`DELETE FROM session_section_native_metadata WHERE session_id = ?`,
+		`DELETE FROM session_projection_sections WHERE session_id = ?`,
 		`DELETE FROM session_projection_aliases WHERE session_id = ?`,
+		`DELETE FROM session_projection_entries WHERE session_id = ?`,
+		`DELETE FROM session_projection_content WHERE session_id = ?`,
+		`DELETE FROM session_generations WHERE session_id = ?`,
 		`DELETE FROM session_projection_generations WHERE session_id = ?`,
 		`UPDATE sessions SET active_generation_id = NULL WHERE session_id = ?`,
 	} {
@@ -276,247 +287,53 @@ func (generationIndexFormat) Delete(ctx context.Context, conn *sqlite.Conn, sess
 	return nil
 }
 
-func deleteGenerationRowsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) error {
-	for _, statement := range []string{
-		`DELETE FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_entries WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_sections WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_context_segments WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_content WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_aliases WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`,
-	} {
-		if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{Args: []any{string(sessionID), generationID}}); err != nil {
-			return fmt.Errorf("store: clear prior rows for generation %s of session %s before activation: %w; the transaction was refused", generationID, sessionID, err)
-		}
-	}
-	return nil
+// generationIsHarmonized reports whether the named generation of the
+// session lives in the harmonized catalog (as opposed to the file-backed
+// one Release N still reads).
+func generationIsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) bool {
+	harmonized := false
+	_ = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args:       []any{string(sessionID), generationID},
+		ResultFunc: func(*sqlite.Stmt) error { harmonized = true; return nil },
+	})
+	return harmonized
 }
 
-func insertGenerationRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation, metadataJSON, titleRefsJSON []byte, now int64) error {
-	var inputCount any
-	if generation.Metadata.Stats.InputSubmissionCount != nil {
-		inputCount = *generation.Metadata.Stats.InputSubmissionCount
+// refuseReusedGenerationIdentity enforces the immutable identity (design
+// §4.1): a generation identifier that already has a harmonized row commits
+// only if the stored candidate digest equals the candidate's (the retry is
+// idempotent); any other reuse refuses, because immutable identifiers
+// cannot name two candidates. An identifier present in the file-backed
+// table is always refused, because only the migration moves it.
+// candidate_digest is NOT NULL, so a binding is never unknown.
+func refuseReusedGenerationIdentity(conn *sqlite.Conn, sessionID schema.SessionID, generationID, binding string) error {
+	stored := ""
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT candidate_digest FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			stored = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store: check generation identity for session %s: %w; no generation was activated", sessionID, err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_generations
- (session_id, generation_id, metadata_json, title_refs_json, input_submission_count, source_evidence_digest, completeness, index_format_version, installed_at_ms, activated_at_ms)
- VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-		string(sessionID), generation.ID, string(metadataJSON), string(titleRefsJSON), inputCount, generation.SourceEvidenceDigest,
-		string(generation.Completeness), now, now,
-	}}); err != nil {
-		return fmt.Errorf("store: install generation %s for session %s: %w; no generation was activated", generation.ID, sessionID, err)
-	}
-	return nil
-}
-
-func insertGenerationPartitionsOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
-	// partition_id 0 is the main stream; earlier sections are 1..N in order.
-	mainMetadata, err := json.Marshal(generation.Main.NativeMetadata)
-	if err != nil {
-		return fmt.Errorf("store: encode main native metadata for generation %s: %w; no generation was activated", generation.ID, err)
-	}
-	if err := insertSectionOnConn(stmts, sessionID, generation.ID, 0, "", mainMetadata); err != nil {
-		return err
-	}
-	if err := insertEntriesOnConn(stmts, sessionID, generation.ID, 0, generation.Main.Entries); err != nil {
-		return err
-	}
-	for i := range generation.Earlier {
-		partitionID := i + 1
-		section := generation.Earlier[i]
-		nativeMetadata, err := json.Marshal(section.Content.NativeMetadata)
-		if err != nil {
-			return fmt.Errorf("store: encode earlier[%d] native metadata for generation %s: %w; no generation was activated", i, generation.ID, err)
+	if found {
+		if stored != binding {
+			return fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is already installed with a different candidate binding; immutable identifiers cannot be reused; the installed generation is unchanged", generationID, sessionID)
 		}
-		if err := insertSectionOnConn(stmts, sessionID, generation.ID, partitionID, string(section.State), nativeMetadata); err != nil {
-			return err
-		}
-		if err := insertEntriesOnConn(stmts, sessionID, generation.ID, partitionID, section.Content.Entries); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func insertSectionOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generationID string, partitionID int, earlierState string, nativeMetadata []byte) error {
-	stmt, err := stmts.Section()
-	if err != nil {
-		return fmt.Errorf("store: prepare partition insert for generation %s of session %s: %w; no generation was activated", generationID, sessionID, err)
-	}
-	stmt.BindText(1, string(sessionID))
-	stmt.BindText(2, generationID)
-	stmt.BindInt64(3, int64(partitionID))
-	if earlierState != "" {
-		stmt.BindText(4, earlierState)
-	} else {
-		stmt.BindNull(4)
-	}
-	stmt.BindText(5, string(nativeMetadata))
-	if err := stepAndReset(stmt); err != nil {
-		return fmt.Errorf("store: install partition %d for generation %s of session %s: %w; no generation was activated", partitionID, generationID, sessionID, err)
-	}
-	return nil
-}
-
-func insertEntriesOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generationID string, partitionID int, entries []schema.SessionEntry) error {
-	if len(entries) == 0 {
 		return nil
 	}
-	stmt, err := stmts.Entry()
-	if err != nil {
-		return fmt.Errorf("store: prepare projection entry insert for generation %s: %w; no generation was activated", generationID, err)
+	fileBacked := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args:       []any{string(sessionID), generationID},
+		ResultFunc: func(*sqlite.Stmt) error { fileBacked = true; return nil },
+	}); err != nil {
+		return fmt.Errorf("store: check the file-backed catalog for session %s: %w; no generation was activated", sessionID, err)
 	}
-	for i := range entries {
-		entry := entries[i]
-		if entry.SessionID != sessionID {
-			return fmt.Errorf("store: generation %s partition %d entry %d names session %s; no generation was activated; build entries for the owning session", generationID, partitionID, entry.EntryIndex, entry.SessionID)
-		}
-		encoded, err := json.Marshal(entry)
-		if err != nil {
-			return fmt.Errorf("store: encode entry %d of partition %d for generation %s: %w; no generation was activated", entry.EntryIndex, partitionID, generationID, err)
-		}
-		stmt.BindText(1, string(sessionID))
-		stmt.BindText(2, generationID)
-		stmt.BindInt64(3, int64(partitionID))
-		stmt.BindInt64(4, int64(entry.EntryIndex))
-		if entry.SourceEntryRef != "" {
-			stmt.BindText(5, string(entry.SourceEntryRef))
-		} else {
-			stmt.BindNull(5)
-		}
-		stmt.BindText(6, string(encoded))
-		if err := stepAndReset(stmt); err != nil {
-			return fmt.Errorf("store: install entry %d of partition %d for generation %s: %w; no generation was activated", entry.EntryIndex, partitionID, generationID, err)
-		}
-	}
-	return nil
-}
-
-func insertGenerationSegmentsOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
-	if len(generation.Segments) == 0 {
-		return nil
-	}
-	stmt, err := stmts.Segment()
-	if err != nil {
-		return fmt.Errorf("store: prepare context segment insert for generation %s: %w; no generation was activated", generation.ID, err)
-	}
-	for i := range generation.Segments {
-		segment := generation.Segments[i]
-		refs, err := json.Marshal(segment.CapturedRefs)
-		if err != nil {
-			return fmt.Errorf("store: encode captured refs for segment %d of generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
-		}
-		stmt.BindText(1, string(sessionID))
-		stmt.BindText(2, generation.ID)
-		stmt.BindInt64(3, int64(segment.Ordinal))
-		if segment.LogicalSessionID != nil {
-			stmt.BindText(4, string(*segment.LogicalSessionID))
-		} else {
-			stmt.BindNull(4)
-		}
-		stmt.BindText(5, segment.PhysicalSourceID)
-		stmt.BindText(6, string(segment.Coordinates.Kind))
-		bindNullableInt64Value(stmt, 7, segment.Coordinates.Start)
-		bindNullableInt64Value(stmt, 8, segment.Coordinates.EndExclusive)
-		bindNullableInt64Value(stmt, 9, segment.Coordinates.DecodedByteStart)
-		bindNullableInt64Value(stmt, 10, segment.Coordinates.DecodedByteEndExclusive)
-		stmt.BindText(11, string(segment.Inclusion))
-		stmt.BindText(12, string(refs))
-		if err := stepAndReset(stmt); err != nil {
-			return fmt.Errorf("store: install context segment %d for generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
-		}
-	}
-	return nil
-}
-
-func insertGenerationContentOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
-	if len(generation.Content) == 0 {
-		return nil
-	}
-	stmt, err := stmts.Content()
-	if err != nil {
-		return fmt.Errorf("store: prepare content record insert for generation %s: %w; no generation was activated", generation.ID, err)
-	}
-	for i := range generation.Content {
-		record := generation.Content[i]
-		stmt.BindText(1, string(sessionID))
-		stmt.BindText(2, generation.ID)
-		stmt.BindText(3, string(record.Ref))
-		stmt.BindText(4, record.RelativeBlob)
-		stmt.BindInt64(5, record.ByteLength)
-		stmt.BindText(6, record.Digest)
-		if err := stepAndReset(stmt); err != nil {
-			return fmt.Errorf("store: install content record %s for generation %s: %w; no generation was activated", record.Ref, generation.ID, err)
-		}
-	}
-	return nil
-}
-
-func insertGenerationAliasesOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
-	if len(generation.Aliases) == 0 {
-		return nil
-	}
-	stmt, err := stmts.Alias()
-	if err != nil {
-		return fmt.Errorf("store: prepare native alias insert for generation %s: %w; no generation was activated", generation.ID, err)
-	}
-	for i := range generation.Aliases {
-		alias := generation.Aliases[i]
-		stmt.BindText(1, string(sessionID))
-		stmt.BindText(2, generation.ID)
-		stmt.BindText(3, alias.NativeKey)
-		stmt.BindText(4, string(alias.Ref))
-		if err := stepAndReset(stmt); err != nil {
-			return fmt.Errorf("store: install native alias %q for generation %s: %w; no generation was activated", alias.NativeKey, generation.ID, err)
-		}
-	}
-	return nil
-}
-
-func insertRelationshipEvidenceOnConn(stmts *generationInstallStatements, sessionID schema.SessionID, generation indexformat.Generation) error {
-	if len(generation.Metadata.Relationships) == 0 {
-		return nil
-	}
-	stmt, err := stmts.Evidence()
-	if err != nil {
-		return fmt.Errorf("store: prepare relationship evidence insert for generation %s: %w; no generation was activated", generation.ID, err)
-	}
-	for i := range generation.Metadata.Relationships {
-		relationship := generation.Metadata.Relationships[i]
-		var target string
-		if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
-			target = string(*relationship.TargetLocalID)
-		}
-		var anchor string
-		if relationship.Anchor != nil {
-			encoded, err := json.Marshal(relationship.Anchor)
-			if err != nil {
-				return fmt.Errorf("store: encode anchor for %s relationship of generation %s: %w; no generation was activated", relationship.Kind, generation.ID, err)
-			}
-			anchor = string(encoded)
-		}
-		stmt.BindText(1, string(sessionID))
-		stmt.BindText(2, generation.ID)
-		stmt.BindText(3, string(relationship.Kind))
-		stmt.BindText(4, string(relationship.TargetState))
-		if target != "" {
-			stmt.BindText(5, target)
-		} else {
-			stmt.BindNull(5)
-		}
-		if relationship.Evidence != "" {
-			stmt.BindText(6, string(relationship.Evidence))
-		} else {
-			stmt.BindNull(6)
-		}
-		if anchor != "" {
-			stmt.BindText(7, anchor)
-		} else {
-			stmt.BindNull(7)
-		}
-		if err := stepAndReset(stmt); err != nil {
-			return fmt.Errorf("store: install %s relationship evidence for generation %s: %w; no generation was activated", relationship.Kind, generation.ID, err)
-		}
+	if fileBacked {
+		return fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is installed in the file-backed catalog, which only the migration moves; the installed generation is unchanged", generationID, sessionID)
 	}
 	return nil
 }
@@ -619,19 +436,28 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 
 // refuseIncompleteWhenCompleteExists implements the completeness transition:
 // incomplete_new is the one first-discovery exception and is allowed only when
-// no complete generation exists for the session. Retrying the same incomplete
-// identifier is idempotent and allowed; replacing any other generation while a
-// complete last-good exists is refused transactionally.
+// no complete generation exists for the session, in either catalog. Retrying
+// the same incomplete identifier is idempotent and allowed; replacing any
+// other generation while a complete last-good exists is refused
+// transactionally.
 func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.SessionID, candidateID string) error {
 	completeID := ""
-	if err := sqlitex.ExecuteTransient(conn, `SELECT generation_id FROM session_projection_generations WHERE session_id = ? AND completeness = 'complete' LIMIT 1`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			completeID = stmt.ColumnText(0)
-			return nil
-		},
-	}); err != nil {
+	collect := func(statement string) error {
+		return sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID)},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				completeID = stmt.ColumnText(0)
+				return nil
+			},
+		})
+	}
+	if err := collect(`SELECT generation_id FROM session_generations WHERE session_id = ? AND completeness = 'complete' LIMIT 1`); err != nil {
 		return fmt.Errorf("store: check completeness transition for session %s: %w; no generation was activated", sessionID, err)
+	}
+	if completeID == "" {
+		if err := collect(`SELECT generation_id FROM session_projection_generations WHERE session_id = ? AND completeness = 'complete' LIMIT 1`); err != nil {
+			return fmt.Errorf("store: check completeness transition for session %s: %w; no generation was activated", sessionID, err)
+		}
 	}
 	if completeID != "" && completeID != candidateID {
 		return fmt.Errorf("store: refuse incomplete generation %s for session %s: a complete generation %s is the last-good read authority; incomplete_new is the first-discovery exception only and never replaces it", candidateID, sessionID, completeID)
