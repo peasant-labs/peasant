@@ -172,7 +172,7 @@ func countIngestOccurrences(t *testing.T, substr string) int {
 }
 
 // runWriteBudgetSplitterSingleHome pins the single home of the count and byte
-// terms: exactly one exceedsWriteBudget definition, every grouping site asking
+// terms: exactly one ExceedsWriteBudget definition, every grouping site asking
 // it (at least the fixture's minSites call sites beyond the definition), and
 // none of the retired budget literals left in the write path.
 func runWriteBudgetSplitterSingleHome(t *testing.T, c contentWriteBudgetCase) {
@@ -180,12 +180,12 @@ func runWriteBudgetSplitterSingleHome(t *testing.T, c contentWriteBudgetCase) {
 	if c.MinSites == nil {
 		t.Fatal("splitter-single-home carries no minSites; the guard asserts against nothing")
 	}
-	if got := countIngestOccurrences(t, "func exceedsWriteBudget("); got != 1 {
-		t.Fatalf("exceedsWriteBudget definitions = %d, want exactly 1: the splitter is the single home of the count and byte terms", got)
+	if got := countIngestOccurrences(t, "func ExceedsWriteBudget("); got != 1 {
+		t.Fatalf("ExceedsWriteBudget definitions = %d, want exactly 1: the splitter is the single home of the count and byte terms", got)
 	}
-	calls := countIngestOccurrences(t, "exceedsWriteBudget(") - 1
+	calls := countIngestOccurrences(t, "ExceedsWriteBudget(") - 1
 	if calls < *c.MinSites {
-		t.Fatalf("exceedsWriteBudget call sites = %d, want at least %d: every grouping site asks the one splitter", calls, *c.MinSites)
+		t.Fatalf("ExceedsWriteBudget call sites = %d, want at least %d: every grouping site asks the one splitter", calls, *c.MinSites)
 	}
 	for _, retired := range []string{"exceedsIndexWriteBudget", "indexWriteBatchLimit", "annotationFlushInterval"} {
 		if got := countIngestOccurrences(t, retired); got != 0 {
