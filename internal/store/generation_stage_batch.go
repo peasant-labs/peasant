@@ -12,7 +12,7 @@ func validateActivationBlobSupplies(a GenerationActivation) error {
 			continue
 		}
 		if _, supplied := a.Blobs[record.Ref]; !supplied {
-			return fmt.Errorf("store: generation %s for session %s has no supplied bytes for non-emitted ref %s; supply the content even when it is empty; nothing was staged", a.Generation.Generation.ID, a.Generation.Generation.Metadata.SessionID, record.Ref)
+			return fmt.Errorf("store: a content record of session %s names no emitted entry and carries no staged bytes; no generation was prepared; supply the ref bytes even when empty or drop the record", a.Generation.Generation.Metadata.SessionID)
 		}
 	}
 	return nil

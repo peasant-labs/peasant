@@ -136,7 +136,35 @@ func (s *nativeUnknownFailingStore) ActivateNativeGeneration(ctx context.Context
 	return s.Store.ActivateNativeGeneration(ctx, activation)
 }
 
+func (s *nativeUnknownFailingStore) StageNativeGenerations(ctx context.Context, activations []ingest.NativeGenerationActivation) ([]ingest.NativeGenerationStaged, []error) {
+	if s.fail {
+		activations = append([]ingest.NativeGenerationActivation(nil), activations...)
+		for i := range activations {
+			activations[i] = dropFirstBlob(activations[i])
+		}
+	}
+	staged, errs := s.Store.StageNativeGenerations(ctx, activations)
+	if s.fail {
+		s.stageMu.Lock()
+		s.stageErrs = append(s.stageErrs, errs...)
+		s.stageMu.Unlock()
+	}
+	return staged, errs
+}
+
+func (s *nativeUnknownFailingStore) ActivateStagedNativeGenerations(ctx context.Context, activations []ingest.NativeGenerationActivation, staged []ingest.NativeGenerationStaged) []ingest.NativeActivationResult {
+	if s.fail {
+		activations = append([]ingest.NativeGenerationActivation(nil), activations...)
+		for i := range activations {
+			activations[i] = dropFirstBlob(activations[i])
+		}
+	}
+	return s.Store.ActivateStagedNativeGenerations(ctx, activations, staged)
+}
+
 var (
+	_ ingest.NativeGenerationBatchStager       = (*nativeUnknownFailingStore)(nil)
+	_ ingest.NativeGenerationBatchActivator    = (*nativeUnknownFailingStore)(nil)
 	_ ingest.NativeGenerationActivator         = (*nativeUnknownFailingStore)(nil)
 	_ ingest.NativeGenerationStager            = (*nativeUnknownFailingStore)(nil)
 	_ ingest.NativeGenerationPreparedActivator = (*nativeUnknownFailingStore)(nil)

@@ -30,12 +30,8 @@ var contentWriteBudgetYAML []byte
 //go:embed testdata/content_write_budget.manifest.yaml
 var contentWriteBudgetManifestYAML []byte
 
-// contentWriteBudgetCase is one content_write_budget case: the section-10 name
-// plus, for the cases this change owns, the typed expectations its runner
-// asserts. Cases owned by the writer change carry ownedBy-free placeholders:
-// a case with no typed fields is a placeholder the writer change fills later,
-// following the content_migration convention; the loader's manifest check
-// still protects its name.
+// contentWriteBudgetCase carries configured budgets and executable
+// expectations. Required-name membership protects the fixture inventory.
 type contentWriteBudgetCase struct {
 	Name             string `yaml:"name"`
 	Action           string `yaml:"action,omitempty"`
@@ -125,7 +121,7 @@ func TestContentWriteBudgetFamily(t *testing.T) {
 			case "batch-under-configured-caps":
 				runWriteBudgetBatchUnderConfiguredCaps(t, c)
 			case "worker-headroom-derived":
-				runWriteBudgetBuffersPreallocatedPartitioned(t, c)
+				runWriteBudgetWorkerHeadroom(t, c)
 			case "staged-memory-under-cap":
 				runWriteBudgetStagedMemoryUnderCap(t, c)
 			case "flush-on-interval":
@@ -255,13 +251,12 @@ func runWriteBudgetBatchUnderConfiguredCaps(t *testing.T, c contentWriteBudgetCa
 	}
 }
 
-// runWriteBudgetBuffersPreallocatedPartitioned holds the run-start allocation
-// through the exported pool: one zero-length, full-capacity buffer per worker,
-// pairwise disjoint, each capped at the configured per-worker cap.
-func runWriteBudgetBuffersPreallocatedPartitioned(t *testing.T, c contentWriteBudgetCase) {
+// runWriteBudgetWorkerHeadroom preserves the per-worker scratch
+// term in the derived budget without allocating a separate unused buffer pool.
+func runWriteBudgetWorkerHeadroom(t *testing.T, c contentWriteBudgetCase) {
 	t.Helper()
 	if len(c.Workers) == 0 {
-		t.Fatal("buffers-preallocated-partitioned needs workers")
+		t.Fatal("worker-headroom-derived needs workers")
 	}
 	for _, workers := range c.Workers {
 		cfg := ingest.DefaultWriteConfig(workers)
@@ -271,9 +266,8 @@ func runWriteBudgetBuffersPreallocatedPartitioned(t *testing.T, c contentWriteBu
 	}
 }
 
-// runWriteBudgetStagedMemoryUnderCap asserts the total gate across the worker
-// counts a run can take: what the pool reserves never exceeds the configured
-// total cap, and buffers that alone would breach it refuse the allocation.
+// runWriteBudgetStagedMemoryUnderCap checks configured worker headroom.
+// Live native admission and release are covered by the ingest fixture family.
 func runWriteBudgetStagedMemoryUnderCap(t *testing.T, c contentWriteBudgetCase) {
 	t.Helper()
 	if len(c.Workers) == 0 {
@@ -403,9 +397,8 @@ func runWriteBudgetStateReadCommitsNothing(t *testing.T, fixtures contentWriteBu
 	}
 }
 
-// runWriteBudgetCommitCountBudget proves the ordinary-refresh contract: a
-// harvest refresh of one seeded session — re-mirror, state read, one entry
-// batch — commits at most the fixture's wantMaxCommits frames.
+// runWriteBudgetCommitCountBudget checks the native refresh contract through
+// activation and sweep, counting every real WAL commit frame.
 func runWriteBudgetCommitCountBudget(t *testing.T, fixtures contentWriteBudgetFixtures, c contentWriteBudgetCase) {
 	t.Helper()
 	if c.Action != "refresh" || c.Sessions < 1 || c.WantMaxCommits == nil {
