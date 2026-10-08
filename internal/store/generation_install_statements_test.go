@@ -174,6 +174,110 @@ func assertInstalledSections(t *testing.T, conn *sqlite.Conn, sid schema.Session
 			t.Fatalf("section %d earlier_state = %q, want %q", partition, got[partition], state)
 		}
 	}
+	type nativeRow struct {
+		ordinal     int
+		nativeID    string
+		kind        string
+		entryRef    string
+		sourceType  string
+		messageRole *string
+		turnIndex   *int
+		toolCallID  *string
+		customType  *string
+		data        string
+		dataNull    bool
+	}
+	readNative := func(partition int) []nativeRow {
+		var rows []nativeRow
+		if err := sqlitex.ExecuteTransient(conn, `SELECT ordinal, native_id, kind, source_entry_ref, source_type, source_message_role, attachment_turn_index, attachment_tool_call_id, custom_type, data FROM session_section_native_metadata WHERE session_id = ? AND generation_id = ? AND partition_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
+			Args: []any{string(sid), genID, partition},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				row := nativeRow{
+					ordinal:    stmt.ColumnInt(0),
+					nativeID:   stmt.ColumnText(1),
+					kind:       stmt.ColumnText(2),
+					entryRef:   stmt.ColumnText(3),
+					sourceType: stmt.ColumnText(4),
+					dataNull:   stmt.ColumnType(9) == sqlite.TypeNull,
+				}
+				if stmt.ColumnType(5) != sqlite.TypeNull {
+					role := stmt.ColumnText(5)
+					row.messageRole = &role
+				}
+				if stmt.ColumnType(6) != sqlite.TypeNull {
+					turn := stmt.ColumnInt(6)
+					row.turnIndex = &turn
+				}
+				if stmt.ColumnType(7) != sqlite.TypeNull {
+					toolCallID := stmt.ColumnText(7)
+					row.toolCallID = &toolCallID
+				}
+				if stmt.ColumnType(8) != sqlite.TypeNull {
+					customType := stmt.ColumnText(8)
+					row.customType = &customType
+				}
+				if !row.dataNull {
+					row.data = stmt.ColumnText(9)
+				}
+				rows = append(rows, row)
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read native metadata for partition %d: %v", partition, err)
+		}
+		return rows
+	}
+	checkNative := func(partition int, records []schema.NativeMetadataRecord) {
+		t.Helper()
+		rows := readNative(partition)
+		if len(rows) != len(records) {
+			t.Fatalf("partition %d native metadata rows = %d, want %d", partition, len(rows), len(records))
+		}
+		for i, want := range records {
+			got := rows[i]
+			if got.ordinal != i || got.nativeID != want.ID || got.kind != string(want.Kind) || got.entryRef != string(want.Source.EntryRef) || got.sourceType != string(want.Source.SourceType) {
+				t.Fatalf("partition %d record %d identity = %+v, want id %q kind %q ref %q type %q", partition, i, got, want.ID, want.Kind, want.Source.EntryRef, want.Source.SourceType)
+			}
+			var wantRole *string
+			if want.Source.MessageRole != "" {
+				role := string(want.Source.MessageRole)
+				wantRole = &role
+			}
+			if !equalOptionalStringPtr(got.messageRole, wantRole) {
+				t.Fatalf("partition %d record %d message role = %v, want %v", partition, i, got.messageRole, wantRole)
+			}
+			var wantTurn *int
+			if want.Attachment != nil && want.Attachment.TurnIndex != nil {
+				wantTurn = want.Attachment.TurnIndex
+			}
+			if !equalOptionalIntPtr(got.turnIndex, wantTurn) {
+				t.Fatalf("partition %d record %d turn index = %v, want %v", partition, i, got.turnIndex, wantTurn)
+			}
+			var wantToolCallID *string
+			if want.Attachment != nil && want.Attachment.ToolCallID != "" {
+				toolCallID := want.Attachment.ToolCallID
+				wantToolCallID = &toolCallID
+			}
+			if !equalOptionalStringPtr(got.toolCallID, wantToolCallID) {
+				t.Fatalf("partition %d record %d tool call id = %v, want %v", partition, i, got.toolCallID, wantToolCallID)
+			}
+			var wantCustom *string
+			if want.CustomType != "" {
+				customType := want.CustomType
+				wantCustom = &customType
+			}
+			if !equalOptionalStringPtr(got.customType, wantCustom) {
+				t.Fatalf("partition %d record %d custom type = %v, want %v", partition, i, got.customType, wantCustom)
+			}
+			if got.dataNull || got.data != string(want.Data) {
+				t.Fatalf("partition %d record %d data = %q (null=%v), want %q", partition, i, got.data, got.dataNull, string(want.Data))
+			}
+		}
+	}
+	checkNative(0, candidate.Generation.Main.NativeMetadata)
+	for i, section := range candidate.Generation.Earlier {
+		checkNative(i+1, section.Content.NativeMetadata)
+	}
 }
 
 func assertInstalledContent(t *testing.T, s *Store, conn *sqlite.Conn, sid schema.SessionID, genID string) {
@@ -258,10 +362,10 @@ func assertInstalledSegments(t *testing.T, conn *sqlite.Conn, sid schema.Session
 	}
 	for _, segment := range candidate.Generation.Segments {
 		var (
-			logical, inclusion, capturedJSON     string
+			logical, inclusion                   string
 			start, end, decodedStart, decodedEnd *int64
 		)
-		if err := sqlitex.ExecuteTransient(conn, `SELECT COALESCE(logical_session_id, ''), start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion, captured_refs_json FROM session_context_segments WHERE session_id = ? AND generation_id = ? AND segment_ordinal = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.ExecuteTransient(conn, `SELECT COALESCE(logical_session_id, ''), start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id = ? AND generation_id = ? AND segment_ordinal = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sid), genID, segment.Ordinal},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				logical = stmt.ColumnText(0)
@@ -270,14 +374,17 @@ func assertInstalledSegments(t *testing.T, conn *sqlite.Conn, sid schema.Session
 				decodedStart = nullableColumnInt64ForTest(stmt, 3)
 				decodedEnd = nullableColumnInt64ForTest(stmt, 4)
 				inclusion = stmt.ColumnText(5)
-				capturedJSON = stmt.ColumnText(6)
 				return nil
 			},
 		}); err != nil {
 			t.Fatalf("read segment %d: %v", segment.Ordinal, err)
 		}
-		if logical != "" {
-			t.Fatalf("segment %d logical_session_id = %q, want NULL", segment.Ordinal, logical)
+		var wantLogical string
+		if segment.LogicalSessionID != nil {
+			wantLogical = string(*segment.LogicalSessionID)
+		}
+		if logical != wantLogical {
+			t.Fatalf("segment %d logical_session_id = %q, want %q", segment.Ordinal, logical, wantLogical)
 		}
 		if !equalOptionalInt64Ptr(start, segment.Coordinates.Start) ||
 			!equalOptionalInt64Ptr(end, segment.Coordinates.EndExclusive) ||
@@ -288,23 +395,67 @@ func assertInstalledSegments(t *testing.T, conn *sqlite.Conn, sid schema.Session
 		if inclusion != string(segment.Inclusion) {
 			t.Fatalf("segment %d inclusion = %q, want %q", segment.Ordinal, inclusion, segment.Inclusion)
 		}
-		encodedRefs, err := json.Marshal(segment.CapturedRefs)
-		if err != nil {
-			t.Fatal(err)
+		type storedRef struct {
+			ordinal int
+			ref     string
 		}
-		if capturedJSON != string(encodedRefs) {
-			t.Fatalf("segment %d captured_refs_json = %q, want %q", segment.Ordinal, capturedJSON, string(encodedRefs))
+		var stored []storedRef
+		if err := sqlitex.ExecuteTransient(conn, `SELECT ordinal, source_entry_ref FROM session_context_segment_refs WHERE session_id = ? AND generation_id = ? AND segment_ordinal = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
+			Args: []any{string(sid), genID, segment.Ordinal},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				stored = append(stored, storedRef{ordinal: stmt.ColumnInt(0), ref: stmt.ColumnText(1)})
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read segment %d refs: %v", segment.Ordinal, err)
+		}
+		if len(stored) != len(segment.CapturedRefs) {
+			t.Fatalf("segment %d refs = %d rows, want %d", segment.Ordinal, len(stored), len(segment.CapturedRefs))
+		}
+		for i, want := range segment.CapturedRefs {
+			if stored[i].ordinal != i || stored[i].ref != string(want) {
+				t.Fatalf("segment %d ref %d = (%d,%q), want (%d,%q)", segment.Ordinal, i, stored[i].ordinal, stored[i].ref, i, want)
+			}
 		}
 	}
 }
 
 func assertInstalledRelationshipEvidence(t *testing.T, conn *sqlite.Conn, sid schema.SessionID, genID string, candidate indexformat.V2) {
 	t.Helper()
-	got := map[string]string{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT kind, target_state, COALESCE(target_local_id, ''), COALESCE(evidence, '') FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY kind`, &sqlitex.ExecOptions{
+	type evidenceRow struct {
+		targetState string
+		targetLocal *string
+		evidence    *string
+		anchorKind  *string
+		anchorRef   *string
+		anchorRev   *string
+	}
+	got := map[string]evidenceRow{}
+	if err := sqlitex.ExecuteTransient(conn, `SELECT kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY kind`, &sqlitex.ExecOptions{
 		Args: []any{string(sid), genID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			got[stmt.ColumnText(0)] = stmt.ColumnText(1) + "|" + stmt.ColumnText(2) + "|" + stmt.ColumnText(3)
+			row := evidenceRow{targetState: stmt.ColumnText(1)}
+			if stmt.ColumnType(2) != sqlite.TypeNull {
+				target := stmt.ColumnText(2)
+				row.targetLocal = &target
+			}
+			if stmt.ColumnType(3) != sqlite.TypeNull {
+				evidence := stmt.ColumnText(3)
+				row.evidence = &evidence
+			}
+			if stmt.ColumnType(4) != sqlite.TypeNull {
+				kind := stmt.ColumnText(4)
+				row.anchorKind = &kind
+			}
+			if stmt.ColumnType(5) != sqlite.TypeNull {
+				ref := stmt.ColumnText(5)
+				row.anchorRef = &ref
+			}
+			if stmt.ColumnType(6) != sqlite.TypeNull {
+				rev := stmt.ColumnText(6)
+				row.anchorRev = &rev
+			}
+			got[stmt.ColumnText(0)] = row
 			return nil
 		},
 	}); err != nil {
@@ -313,19 +464,48 @@ func assertInstalledRelationshipEvidence(t *testing.T, conn *sqlite.Conn, sid sc
 	if len(got) != len(candidate.Generation.Metadata.Relationships) {
 		t.Fatalf("installed evidence rows = %v, want %d", got, len(candidate.Generation.Metadata.Relationships))
 	}
-	for _, relationship := range candidate.Generation.Metadata.Relationships {
-		want := string(relationship.TargetState)
-		if relationship.TargetLocalID != nil {
-			want += "|" + string(*relationship.TargetLocalID)
-		} else {
-			want += "|"
+	optStr := func(v *string) string {
+		if v == nil {
+			return "<null>"
 		}
-		want += "|" + string(relationship.Evidence)
-		if got[string(relationship.Kind)] != want {
-			t.Fatalf("evidence %s = %q, want %q", relationship.Kind, got[string(relationship.Kind)], want)
+		return *v
+	}
+	for _, relationship := range candidate.Generation.Metadata.Relationships {
+		row, ok := got[string(relationship.Kind)]
+		if !ok {
+			t.Fatalf("evidence %s missing", relationship.Kind)
+		}
+		if row.targetState != string(relationship.TargetState) {
+			t.Fatalf("evidence %s target_state = %q, want %q", relationship.Kind, row.targetState, relationship.TargetState)
+		}
+		var wantLocal, wantEvidence, wantKind, wantRef, wantRev *string
+		if relationship.TargetLocalID != nil {
+			local := string(*relationship.TargetLocalID)
+			wantLocal = &local
+		}
+		if relationship.Evidence != "" {
+			evidence := string(relationship.Evidence)
+			wantEvidence = &evidence
+		}
+		if relationship.Anchor != nil {
+			kind := string(relationship.Anchor.Kind)
+			wantKind = &kind
+			ref := string(relationship.Anchor.SourceEntryRef)
+			wantRef = &ref
+			if relationship.Anchor.SourceRevisionRef != "" {
+				rev := string(relationship.Anchor.SourceRevisionRef)
+				wantRev = &rev
+			}
+		}
+		if optStr(row.targetLocal) != optStr(wantLocal) || optStr(row.evidence) != optStr(wantEvidence) || optStr(row.anchorKind) != optStr(wantKind) || optStr(row.anchorRef) != optStr(wantRef) || optStr(row.anchorRev) != optStr(wantRev) {
+			t.Fatalf("evidence %s = (%q,%q,%q,%q,%q), want (%q,%q,%q,%q,%q)", relationship.Kind,
+				optStr(row.targetLocal), optStr(row.evidence), optStr(row.anchorKind), optStr(row.anchorRef), optStr(row.anchorRev),
+				optStr(wantLocal), optStr(wantEvidence), optStr(wantKind), optStr(wantRef), optStr(wantRev))
 		}
 	}
 }
+
+// nullableColumnInt64ForTest reads a nullable INTEGER column as a *int64.
 
 // nullableColumnInt64ForTest reads a nullable INTEGER column as a *int64.
 func nullableColumnInt64ForTest(stmt *sqlite.Stmt, col int) *int64 {

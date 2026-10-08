@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,20 +21,46 @@ import (
 // every row. The one-off statements (the generation row, the pointing UPDATE
 // and the metrics upsert) stay on sqlitex.ExecuteTransient.
 const (
-	sqlInsertGenerationSection = `INSERT INTO session_projection_sections (session_id, generation_id, partition_id, earlier_state, native_metadata) VALUES (?, ?, ?, ?, ?)`
+	sqlInsertGenerationSection = `INSERT INTO session_projection_sections (session_id, generation_id, partition_id, earlier_state) VALUES (?, ?, ?, ?)`
+
+	// The reshaped children ride the same install: the file-backed writer
+	// binds the retired JSON documents and shreds them with the migration's
+	// byte-exact expressions, so reads see one shape. This compat lives and
+	// dies with the retired file-backed writer; the harmonized writer fills
+	// the children from its structs.
+	sqlInsertSectionNativeMetadata = `INSERT INTO session_section_native_metadata
+(session_id, generation_id, partition_id, ordinal, native_id, kind, source_entry_ref, source_type,
+ source_message_role, attachment_turn_index, attachment_tool_call_id, custom_type, data)
+SELECT ?, ?, ?, je.key,
+  json_extract(je.value, '$.id'),
+  json_extract(je.value, '$.kind'),
+  json_extract(je.value, '$.source.entryRef'),
+  json_extract(je.value, '$.source.sourceType'),
+  json_extract(je.value, '$.source.messageRole'),
+  json_extract(je.value, '$.attachment.turnIndex'),
+  json_extract(je.value, '$.attachment.toolCallId'),
+  json_extract(je.value, '$.customType'),
+  (je.value -> '$.data')
+FROM json_each(?) AS je`
 
 	sqlInsertGenerationEntry = `INSERT INTO session_projection_entries (session_id, generation_id, partition_id, entry_index, source_entry_ref, entry_json) VALUES (?, ?, ?, ?, ?, ?)`
 
 	sqlInsertGenerationSegment = `INSERT INTO session_context_segments
  (session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind,
-  start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion, captured_refs_json)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	// The captured refs ride alongside into their ordered child rows (see
+	// the section compat above).
+	sqlInsertSegmentRefs = `INSERT INTO session_context_segment_refs
+(session_id, generation_id, segment_ordinal, ordinal, source_entry_ref)
+SELECT ?, ?, ?, je.key, je.value FROM json_each(?) AS je`
 
 	sqlInsertGenerationContent = `INSERT INTO session_projection_content (session_id, generation_id, source_entry_ref, relative_blob, byte_length, integrity_digest) VALUES (?, ?, ?, ?, ?, ?)`
 
 	sqlInsertGenerationAlias = `INSERT INTO session_projection_aliases (session_id, generation_id, native_key, source_entry_ref) VALUES (?, ?, ?, ?)`
 
-	sqlInsertRelationshipEvidence = `INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state, target_local_id, evidence, anchor) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	sqlInsertRelationshipEvidence = `INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, json_extract(?, '$.kind'), json_extract(?, '$.sourceEntryRef'), json_extract(?, '$.sourceRevisionRef'))`
 )
 
 // generationInstallStatements holds the reusable per-row inserts for one
@@ -351,9 +378,17 @@ func insertSectionOnConn(stmts *generationInstallStatements, sessionID schema.Se
 	} else {
 		stmt.BindNull(4)
 	}
-	stmt.BindText(5, string(nativeMetadata))
 	if err := stepAndReset(stmt); err != nil {
 		return fmt.Errorf("store: install partition %d for generation %s of session %s: %w; no generation was activated", partitionID, generationID, sessionID, err)
+	}
+	// Shred the retired native-metadata document into the ordered child
+	// rows (reshape compat; see the statement comment).
+	if doc := bytes.TrimSpace(nativeMetadata); len(doc) > 0 && string(doc) != "null" {
+		if err := sqlitex.ExecuteTransient(stmts.conn, sqlInsertSectionNativeMetadata, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID), generationID, partitionID, string(doc)},
+		}); err != nil {
+			return fmt.Errorf("store: install native metadata for partition %d of generation %s of session %s: %w; no generation was activated", partitionID, generationID, sessionID, err)
+		}
 	}
 	return nil
 }
@@ -421,9 +456,16 @@ func insertGenerationSegmentsOnConn(stmts *generationInstallStatements, sessionI
 		bindNullableInt64Value(stmt, 9, segment.Coordinates.DecodedByteStart)
 		bindNullableInt64Value(stmt, 10, segment.Coordinates.DecodedByteEndExclusive)
 		stmt.BindText(11, string(segment.Inclusion))
-		stmt.BindText(12, string(refs))
 		if err := stepAndReset(stmt); err != nil {
 			return fmt.Errorf("store: install context segment %d for generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
+		}
+		// Shred the retired captured-refs document (reshape compat).
+		if doc := bytes.TrimSpace(refs); len(doc) > 0 && string(doc) != "null" {
+			if err := sqlitex.ExecuteTransient(stmts.conn, sqlInsertSegmentRefs, &sqlitex.ExecOptions{
+				Args: []any{string(sessionID), generation.ID, int64(segment.Ordinal), string(doc)},
+			}); err != nil {
+				return fmt.Errorf("store: install captured refs for segment %d of generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
+			}
 		}
 	}
 	return nil
@@ -487,7 +529,7 @@ func insertRelationshipEvidenceOnConn(stmts *generationInstallStatements, sessio
 		if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
 			target = string(*relationship.TargetLocalID)
 		}
-		var anchor string
+		var anchor any
 		if relationship.Anchor != nil {
 			encoded, err := json.Marshal(relationship.Anchor)
 			if err != nil {
@@ -509,10 +551,14 @@ func insertRelationshipEvidenceOnConn(stmts *generationInstallStatements, sessio
 		} else {
 			stmt.BindNull(6)
 		}
-		if anchor != "" {
-			stmt.BindText(7, anchor)
-		} else {
-			stmt.BindNull(7)
+		// The anchor document shreds inline into its three structured
+		// columns (reshape compat); a NULL document yields NULL columns.
+		for _, param := range []int{7, 8, 9} {
+			if anchor != nil {
+				stmt.BindText(param, anchor.(string))
+			} else {
+				stmt.BindNull(param)
+			}
 		}
 		if err := stepAndReset(stmt); err != nil {
 			return fmt.Errorf("store: install %s relationship evidence for generation %s: %w; no generation was activated", relationship.Kind, generation.ID, err)

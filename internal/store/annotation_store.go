@@ -179,7 +179,7 @@ const (
 ) VALUES (?, (SELECT id FROM target_kinds WHERE name = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	// V16 TPT child table INSERTs (one per target kind).
-	sqlInsertTargetSession     = `INSERT INTO annotation_target_sessions (annotation_id, session_id) VALUES (?, ?)`
+	sqlInsertTargetSession = `INSERT INTO annotation_target_sessions (annotation_id, session_id) VALUES (?, ?)`
 	// sqlInsertTargetEntry is the ONE guarded entry-target insert: it writes
 	// the row only when the target start entry exists in the session's
 	// current representation — the active generation's main-partition mapping

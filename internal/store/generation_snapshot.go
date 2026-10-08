@@ -356,16 +356,14 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	sections := []struct {
 		partitionID int
 		state       string
-		native      string
 	}{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, ''), native_metadata FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sections = append(sections, struct {
 				partitionID int
 				state       string
-				native      string
-			}{stmt.ColumnInt(0), stmt.ColumnText(1), stmt.ColumnText(2)})
+			}{stmt.ColumnInt(0), stmt.ColumnText(1)})
 			return nil
 		},
 	}); err != nil {
@@ -377,10 +375,14 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	}
 	partitions := generationPartitions{}
 	for _, section := range sections {
-		partition, err := partitionFromRows(section.native, entries[section.partitionID], section.partitionID)
+		// Native metadata lives in the structured child rows for both
+		// representations: the reshape backfilled every file-backed
+		// generation, and new rows are written structured.
+		native, err := harmonizedNativeMetadataOnConn(conn, sessionID, generationID, section.partitionID)
 		if err != nil {
-			return generationPartitions{}, err
+			return generationPartitions{}, fmt.Errorf("store: read native metadata for partition %d: %w", section.partitionID, err)
 		}
+		partition := indexformat.Partition{Entries: entries[section.partitionID], NativeMetadata: native}
 		if section.partitionID == 0 {
 			partitions.main = partition
 			continue
@@ -392,16 +394,6 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 		partitions.earlier = append(partitions.earlier, indexformat.EarlierPartition{State: state, Content: partition})
 	}
 	return partitions, nil
-}
-
-func partitionFromRows(nativeJSON string, entries []schema.SessionEntry, partitionID int) (indexformat.Partition, error) {
-	partition := indexformat.Partition{Entries: entries}
-	if nativeJSON != "" && nativeJSON != "null" {
-		if err := json.Unmarshal([]byte(nativeJSON), &partition.NativeMetadata); err != nil {
-			return indexformat.Partition{}, fmt.Errorf("store: decode native metadata for partition %d: %w", partitionID, err)
-		}
-	}
-	return partition, nil
 }
 
 func readGenerationEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (map[int][]schema.SessionEntry, error) {

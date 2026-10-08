@@ -90,6 +90,16 @@ source_evidence_digest, index_format_version, candidate_digest, installed_at_ms)
 VALUES(?, ?, 11, 'opencode', 'snap-model', 'v', 1720000000000, 1720000009000, 'jsonl', 'snap-project', 'snap', 'snap-host',
 ?, ?, 0, 'complete', ?, 2, ?, 1720000009000)`, id, gen, digest, digest, digest, digest)
 	exec(`INSERT INTO session_projection_sections(session_id, generation_id, partition_id) VALUES(?, ?, 0)`, id, gen)
+	// Relationship evidence in the reshaped form: one started_by edge that
+	// makes the target the snapshot's logical parent, plus an anchored
+	// context edge covering the structured anchor assembly.
+	parentID := "0a999aaa-36bc-424c-a789-8be54d9702e9"
+	exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence,
+anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES(?, ?, 'started_by', 'target_known', ?, 'native_typed', NULL, NULL, NULL)`, id, gen, parentID)
+	exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, kind, target_state, target_local_id, evidence,
+anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES(?, ?, 'context_from', 'target_known', ?, 'native_typed', 'before_redacted_entry', 'snap-test:0', 'rev-1')`, id, gen, parentID)
 	texts := []struct {
 		role schema.Role
 		text string
@@ -134,6 +144,12 @@ func TestHarmonizedSnapshotDetail(t *testing.T) {
 	}
 	if payload.TurnCount != 2 {
 		t.Fatalf("TurnCount = %d, want 2", payload.TurnCount)
+	}
+	if len(payload.Relationships) != 2 {
+		t.Fatalf("relationships = %d, want 2", len(payload.Relationships))
+	}
+	if payload.ParentSessionID == nil || string(*payload.ParentSessionID) != "0a999aaa-36bc-424c-a789-8be54d9702e9" {
+		t.Fatalf("logical parent = %v, want the started_by target", payload.ParentSessionID)
 	}
 	var sawHello bool
 	err = s.WithSessionSnapshot(ctx, id, func(snapshot indexformat.ReadSnapshot) error {

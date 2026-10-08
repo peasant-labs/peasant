@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -321,20 +320,13 @@ WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.
 }
 
 // harmonizedRelationshipsOnConn rebuilds the generation's relationships from
-// the evidence rows. The anchor decodes from the stored JSON document.
-//
-// Reshape note: the writer change replaces the anchor document with three
-// structured columns (anchor_kind, anchor_source_entry_ref,
-// anchor_source_revision_ref). When that reshape lands, this query becomes:
-// SELECT kind, target_state, target_local_id, evidence,
-// anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref
-// FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ?
-// ORDER BY kind
-// with the anchor assembled from the three columns (all NULL means no
-// anchor) instead of decoded below.
+// the structured evidence rows. An anchor is present exactly when its kind
+// column is set; the writer binds NULL for an absent anchor and the stored
+// values (possibly empty) for a present one.
 func harmonizedRelationshipsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SessionRelationship, error) {
 	var relationships []schema.SessionRelationship
-	err := sqlitex.ExecuteTransient(conn, `SELECT kind, target_state, target_local_id, evidence, anchor
+	err := sqlitex.ExecuteTransient(conn, `SELECT kind, target_state, target_local_id, evidence,
+anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref
 FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY kind`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -348,9 +340,15 @@ FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? OR
 				relationship.TargetLocalID = &target
 			}
 			if stmt.ColumnType(4) != sqlite.TypeNull {
-				var anchor schema.PublicSourceAnchor
-				if err := json.Unmarshal([]byte(stmt.ColumnText(4)), &anchor); err != nil {
-					return fmt.Errorf("decode relationship anchor: %w", err)
+				anchor := schema.PublicSourceAnchor{
+					Kind: schema.PublicSourceAnchorKind(stmt.ColumnText(4)),
+				}
+				if stmt.ColumnType(5) != sqlite.TypeNull {
+					ref := schema.SourceEntryRef(stmt.ColumnText(5))
+					anchor.SourceEntryRef = ref
+				}
+				if stmt.ColumnType(6) != sqlite.TypeNull {
+					anchor.SourceRevisionRef = schema.PublicRevisionRef(stmt.ColumnText(6))
 				}
 				relationship.Anchor = &anchor
 			}
