@@ -27,15 +27,21 @@ func (s *Store) GenerationSnapshotsSupported() bool {
 	return s != nil && s.generationArtifacts != nil && s.sessionLocker != nil
 }
 
-// WithSessionSnapshot loads ONE immutable read snapshot for a session. It takes
-// the shared per-session OS lock BEFORE the SQLite read transaction, loads the
-// metadata, active generation, main and earlier partitions, contexts and
-// content map in one snapshot, commits the read transaction, returns the pool
-// connection, and then keeps the shared lock for the ENTIRE callback through
-// hydration and serialization. Returning the connection before the callback
-// lets a callback that needs another store lookup proceed without deadlocking
-// at pool size one. A concurrent activation or cleanup takes the exclusive
-// lock and therefore waits until the callback returns.
+// WithSessionSnapshot loads ONE immutable read snapshot for a session.
+//
+// A harmonized session reads from one SQLite read transaction with no
+// session lock: its bodies are immutable and content-addressed, and the
+// sweep can never delete a referenced row, so a concurrent writer cannot
+// disturb the read. A file-backed or legacy session keeps the shared
+// per-session OS lock from before the SQLite read transaction through the
+// callback, because its blobs live on disk and cleanup could retire them.
+//
+// Either way the metadata, active generation, main and earlier partitions,
+// contexts and content map load in one snapshot, the pool connection returns
+// before the callback, and a concurrent activation or cleanup of a
+// file-backed session waits on the exclusive lock until the callback
+// returns. A callback that needs another store lookup proceeds without
+// deadlocking at pool size one.
 //
 // A session with no active generation yields a legacy V1 snapshot whose
 // LegacySource names the retained transcript; the caller uses the unchanged
@@ -44,15 +50,17 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	if s.sessionLocker == nil {
 		return fmt.Errorf("store: managed generation support is not configured; a coherent session snapshot cannot be taken; open the store with WithGenerationArtifacts")
 	}
-	release, err := s.sessionLocker.LockShared(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if releaseErr := release(); releaseErr != nil && retErr == nil {
-			retErr = releaseErr
+	if !isHarmonizedSession(ctx, s, sessionID) {
+		release, err := s.sessionLocker.LockShared(ctx, sessionID)
+		if err != nil {
+			return err
 		}
-	}()
+		defer func() {
+			if releaseErr := release(); releaseErr != nil && retErr == nil {
+				retErr = releaseErr
+			}
+		}()
+	}
 
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -74,10 +82,11 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	return fn(snapshot)
 }
 
-// ReadFullContent resolves one immutable V2 content blob addressed by the
-// captured snapshot identity. It takes the shared session lock so cleanup
-// cannot remove the generation while the blob is read, and it NEVER reparses a
-// mutable native source.
+// ReadFullContent resolves one immutable content address for the captured
+// snapshot identity. It takes the shared session lock so cleanup cannot
+// retire the generation while the bytes are read, and it NEVER reparses a
+// mutable native source. A harmonized generation resolves from its entry
+// rows (digest-verified); a file-backed one reads its immutable blobs.
 func (s *Store) ReadFullContent(ctx context.Context, sessionID schema.SessionID, generationID string, record indexformat.ContentRecord) ([]byte, error) {
 	if s.generationArtifacts == nil || s.sessionLocker == nil {
 		return nil, fmt.Errorf("store: managed generation support is not configured; captured content cannot be resolved; open the store with WithGenerationArtifacts")
@@ -87,7 +96,38 @@ func (s *Store) ReadFullContent(ctx context.Context, sessionID schema.SessionID,
 		return nil, err
 	}
 	defer func() { _ = release() }()
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection for managed content %s: %w", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+	_, harmonized, err := harmonizedActiveOnConn(conn, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if harmonized {
+		return readHarmonizedContentOnConn(conn, sessionID, generationID, record)
+	}
 	return s.generationArtifacts.ReadBlob(ctx, sessionID, generationID, record)
+}
+
+// isHarmonizedSession peeks at the active generation row's location without
+// holding the session lock. It answers the lock question only: the snapshot
+// builder re-dispatches inside its own read transaction, so a conversion
+// between the peek and the read cannot straddle representations (conversion
+// moves file-backed to harmonized, never back). A peek failure takes the
+// locked path, today's behavior, and surfaces there if it is real.
+func isHarmonizedSession(ctx context.Context, s *Store, sessionID schema.SessionID) bool {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return false
+	}
+	defer s.pool.Put(conn)
+	_, harmonized, err := harmonizedActiveOnConn(conn, sessionID)
+	if err != nil {
+		return false
+	}
+	return harmonized
 }
 
 func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (indexformat.ReadSnapshot, error) {
@@ -101,6 +141,24 @@ func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (ind
 	}
 	if active == nil {
 		return legacyReadSnapshot(row), nil
+	}
+	// The dispatch key is the active generation row's location: a row in the
+	// harmonized catalog reads its bodies, a row elsewhere reads the
+	// file-backed tables and blobs. The check runs inside the same read
+	// transaction as every row below, so the snapshot cannot straddle a
+	// conversion.
+	harmonized := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), *active},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			harmonized = true
+			return nil
+		},
+	}); err != nil {
+		return indexformat.ReadSnapshot{}, fmt.Errorf("store: locate active generation %s for session %s: %w; no snapshot was built", *active, sessionID, err)
+	}
+	if harmonized {
+		return harmonizedReadSnapshotOnConn(conn, sessionID, *active)
 	}
 	return generationReadSnapshotOnConn(conn, sessionID, *active, row)
 }
