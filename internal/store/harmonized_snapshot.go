@@ -222,6 +222,7 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 	metadata.Git.Associations = children.associations
 	metadata.Diagnostics.Warnings = children.diagnostics
 	metadata.Relationships = children.relationships
+	legacyPresentCollections(&metadata)
 	stats, err := readCapturedStatsOnConn(conn, sessionID)
 	if err != nil {
 		// A native session always owns a stats row past the v62 backfill;

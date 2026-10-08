@@ -21,6 +21,7 @@ requiredNames:
   - native-capture-hash-mismatch-rolls-back
   - native-session-hash-mismatch-rolls-back
   - null-session-entries-hash-skips-dimension
+  - native-stale-hash-converts
   - native-detail-bytes-mismatch-halts
   - data-rollback-threshold-halts
   - rollback-then-reindex-converts

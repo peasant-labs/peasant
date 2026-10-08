@@ -579,5 +579,6 @@ func mapNativeMetadata(partition, ordinal int, record schema.NativeMetadataRecor
 func statsExcludedMetadataHash(metadata schema.UnifiedMetadata) string {
 	withoutStats := metadata
 	withoutStats.Stats = schema.SessionStats{}
+	legacyPresentCollections(&withoutStats)
 	return schema.ComputeMetadataHash(&withoutStats)
 }

@@ -627,6 +627,35 @@ func applyMigrateDamage(t *testing.T, s *Store, root string, sid schema.SessionI
 	case "null-hash":
 		put(`UPDATE sessions SET session_entries_hash = NULL WHERE session_id = ?`, string(sid))
 		return nil
+	case "stale-hash":
+		// The stored hash predates the current hashed fields (stats and
+		// timestamps move without a rehash), so the rebuilt document can
+		// never reproduce it byte for byte. The conversion still proceeds:
+		// the verify compares hash-excluded bytes and later reads recompute
+		// the fresh hash.
+		raw := get(`SELECT metadata_json FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, string(sid), genID)
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			t.Fatal(err)
+		}
+		doc["metadataHash"] = strings.Repeat("0", 64)
+		modified, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(`UPDATE session_projection_generations SET metadata_json = ? WHERE session_id = ? AND generation_id = ?`, string(modified), string(sid), genID)
+		return func() {
+			conn, err := s.pool.Take(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.pool.Put(conn)
+			if err := sqlitex.ExecuteTransient(conn, `UPDATE session_projection_generations SET metadata_json = ? WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+				Args: []any{raw, string(sid), genID},
+			}); err != nil {
+				t.Fatalf("restore metadata_json: %v", err)
+			}
+		}
 	default:
 		t.Fatalf("unknown migrate damage %q", damage)
 		return nil
