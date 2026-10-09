@@ -15,9 +15,9 @@ import (
 )
 
 // TestPushContent_BoundsAnOversizedToolResult builds the outward publication body
-// for a session holding a tool result larger than the contract lets a transcript
-// document be. The body is assembled, redacted and re-scanned against the SAME
-// contract cap the village enforces, so the assembly succeeding is the proof that
+// for a session holding a tool result larger than the per-field display budget.
+// The body is assembled, redacted and re-scanned against the publication caller's
+// budget, so the assembly succeeding is the proof that
 // the scan in marshalBuiltTranscriptContent passes; the note travels with the
 // document so the receiving UI can say the result was shortened.
 func TestPushContent_BoundsAnOversizedToolResult(t *testing.T) {
@@ -57,8 +57,8 @@ func TestPushContent_BoundsAnOversizedToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the publication body was refused for a session with an oversized record: %v", err)
 	}
-	if len(body) > defaults.SessionDetailDocumentCapBytes {
-		t.Errorf("the publication body is %d bytes, over the contract cap %d", len(body), defaults.SessionDetailDocumentCapBytes)
+	if len(body) > defaults.PushTranscriptDocumentCapBytes {
+		t.Errorf("the publication body is %d bytes, over the caller budget %d", len(body), defaults.PushTranscriptDocumentCapBytes)
 	}
 	if _, err := schema.DecodeTranscriptContentRaw(body); err != nil {
 		t.Fatalf("the publication body does not decode through the contract: %v", err)
