@@ -16,6 +16,13 @@ valid:
         role: user
         snippet: ""
         score: 1
+      - sessionId: sess-whitespace
+        project: /work/alpha-project
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entryIndex: 4
+        role: user
+        snippet: "   "
+        score: 1
   discovery:
     items:
       - sessionId: sess-selected
@@ -24,6 +31,30 @@ valid:
         branch: main
         selectionStatus: selected
       - sessionId: 11111111-1111-1111-1111-111111111111
+        locationLabel: alpha-main
+        repositoryLocationId: opaque-location-a
+        branch: main
+        selectionStatus: selected
+      - sessionId: sess-whitespace
+        locationLabel: alpha-main
+        repositoryLocationId: opaque-location-a
+        branch: main
+        selectionStatus: selected
+
+project_hash:
+  search:
+    query: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    results:
+      - sessionId: sess-from-hash
+        project: ""
+        projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        entryIndex: 3
+        role: user
+        snippet: ""
+        score: 1
+  discovery:
+    items:
+      - sessionId: sess-from-hash
         locationLabel: alpha-main
         repositoryLocationId: opaque-location-a
         branch: main
