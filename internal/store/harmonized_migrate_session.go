@@ -1175,8 +1175,9 @@ func migrateBoundedShapes(records []EntryRecord, full bool) ([]schema.SessionEnt
 	return bounded, fullShape
 }
 
-// verifyMigrateBoundedShape checks legacyShape(bounded) against the mirror
-// rows (ListEntries with the ext merge), entry for entry.
+// verifyMigrateBoundedShape checks the production routing projection against
+// the mirror rows, entry for entry. Preview-only captures keep unbounded
+// previews, but still omit generation-only fields and merge promoted extras.
 func verifyMigrateBoundedShape(conn *sqlite.Conn, oracle *migrateOracle, _ *preparedHarmonized) *migrateShadowMismatch {
 	records, partitions, err := readMigrateStagedBodies(conn, oracle)
 	if err != nil {
@@ -1189,7 +1190,10 @@ func verifyMigrateBoundedShape(conn *sqlite.Conn, oracle *migrateOracle, _ *prep
 		}
 	}
 	full := oracle.captureFound && oracle.capture.CaptureFormat == ingest.ContentCaptureFormatFull
-	bounded, _ := migrateBoundedShapes(main, full)
+	bounded, err := shimListEntries(main, full)
+	if err != nil {
+		return &migrateShadowMismatch{Dimension: "bounded-shape", Reason: err.Error()}
+	}
 	if len(bounded) != len(oracle.mirror) {
 		return &migrateShadowMismatch{Dimension: "bounded-shape", Reason: fmt.Sprintf("the shim shapes %d main entries but the mirror holds %d", len(bounded), len(oracle.mirror))}
 	}

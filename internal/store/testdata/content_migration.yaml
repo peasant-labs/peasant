@@ -55,6 +55,10 @@ cases:
     ownedBy: conversion
     profile: clean
     expect: converted
+  - name: native-preview-only-verifier-omits-generation-fields
+    ownedBy: conversion
+    profile: preview-only
+    expect: converted
   - name: native-superseded-identical-discarded
     ownedBy: conversion
     profile: superseded
