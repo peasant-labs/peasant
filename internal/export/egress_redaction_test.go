@@ -180,12 +180,12 @@ func TestExportRedactionFailureLeavesTargetUntouched(t *testing.T) {
 	}
 }
 
-// TestExportFinalSerializationCaps pins cap checks on actual emitted bytes:
-// an aggregate that is small per record but too large as a document refuses,
-// and the refusal names the transfer limit without raw bytes.
+// TestExportFinalSerializationCaps keeps an aggregate of individually small
+// retained records above the former document cap readable. Retained-record
+// policies are unchanged; only the whole-document transfer limit increased.
 func TestExportFinalSerializationCaps(t *testing.T) {
 	t.Parallel()
-	// Individually small records aggregating over the 8 MiB document cap.
+	// Individually small records aggregating over the former document cap.
 	var records []schema.RetainedUnknownRecord
 	for i := 0; i < 40; i++ {
 		records = append(records, schema.RetainedUnknownRecord{
@@ -202,9 +202,7 @@ func TestExportFinalSerializationCaps(t *testing.T) {
 		Diagnostics:     &schema.InterpretationDiagnostics{Partial: true},
 		Turns:           []schema.TurnDetail{{Index: 0, Role: schema.RoleAssistant, Depth: 0, Content: "closing"}},
 	}
-	if err := export.ValidateExportPayload(payload); err == nil {
-		t.Fatal("aggregate over-cap export validated; want refusal on actual emitted bytes")
-	} else if !strings.Contains(err.Error(), "transfer limit") && !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("cap refusal does not name the transfer limit: %v", err)
+	if err := export.ValidateExportPayload(payload); err != nil {
+		t.Fatalf("aggregate below the new document cap refused: %v", err)
 	}
 }

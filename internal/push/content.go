@@ -542,7 +542,7 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	// Nothing leaks in that case, which is why it is a shape check and not a
 	// second redaction; a body the village stores as a transcript should still be
 	// one.
-	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.SessionDetailDocumentCapBytes, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
+	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.PushTranscriptDocumentCapBytes, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
 		return nil, err
 	}
 	var check schema.TranscriptContent

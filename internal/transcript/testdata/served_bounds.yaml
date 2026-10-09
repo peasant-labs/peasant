@@ -1,7 +1,6 @@
 cases:
-  # 9 MiB is over the contract's 8 MiB served-document policy and under the
-  # 256 MiB record cap ingest now accepts, so this is exactly the record that
-  # used to make the whole session unreadable.
+  # 9 MiB exceeds the per-field display budget and is under the document and
+  # record caps. Keep the formerly unreadable record covered.
   - name: oversized_tool_result_is_bounded_with_a_note
     kind: tool_result
     fill: "x"
@@ -24,73 +23,43 @@ cases:
   # same number of bytes.
   - name: many_large_tool_results_share_one_lowered_bound
     kind: tool_result
-    fill: "x"
+    # JSON escaping expands each byte sixfold, forcing document pressure
+    # without allocating hundreds of MiB of source text.
+    fill: "\u0001"
     fieldBytes:
       [
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
-        262144,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
+        1048576,
       ]
     equalBoundAcrossBoundedFields: true
     allBounded: true
