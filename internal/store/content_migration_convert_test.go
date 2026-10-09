@@ -81,6 +81,15 @@ func seedMigrateProfile(t *testing.T, s *Store, root string, sid schema.SessionI
 	case "clean", "extra-keys", "newer-stats", "rich-metadata", "annotated", "preview-only", "settled-refusal", "two-earlier", "empty-blob", "parent-only-metadata", "parent-row-wins":
 		v2, blobs := buildTestGeneration(t, sid, genID, text, input, output)
 		switch profile {
+		case "preview-only":
+			v2.Generation.Main.Entries[0].Provenance = &schema.ContentProvenance{
+				Origin:        schema.ContentOriginSubmittedInput,
+				Actor:         schema.ActorOriginUnknown,
+				Delivery:      schema.DeliveryOriginSessionAdmission,
+				Ownership:     schema.ContentOwnershipLocal,
+				Evidence:      schema.EvidenceNativeTyped,
+				InputModality: schema.InputModalityText,
+			}
 		case "extra-keys":
 			applyMigrateExtraKeys(t, &v2, blobs)
 		case "rich-metadata":
@@ -1037,6 +1046,33 @@ func assertMigrateProfile(t *testing.T, s *Store, _ string, sid schema.SessionID
 	}
 	defer s.pool.Put(conn)
 	switch c.Profile {
+	case "preview-only":
+		seed := v2.Generation.Main.Entries[0]
+		if seed.SourceEntryRef == "" || seed.Provenance == nil {
+			t.Fatal("preview-only seed must carry both generation fields")
+		}
+		records, err := shimBodyRecordsOnConn(conn, string(sid), nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) == 0 {
+			t.Fatal("converted preview-only generation has no body rows")
+		}
+		if records[0].SourceEntryRef != seed.SourceEntryRef || records[0].Provenance == nil {
+			t.Fatal("conversion discarded generation fields instead of projecting the mirror shape")
+		}
+		entries, err := shimListEntries(records, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if entry.SourceEntryRef != "" || entry.Provenance != nil {
+				t.Fatalf("mirror-shaped entry %d leaks generation fields", entry.EntryIndex)
+			}
+		}
+		if entries[0].ContentPreview == nil || *entries[0].ContentPreview != *seed.ContentPreview {
+			t.Fatal("preview-only mirror shape must preserve the unbounded preview")
+		}
 	case "two-earlier":
 		partitions, records, err := harmonizedPartitionsOnConn(conn, sid, genID)
 		if err != nil {

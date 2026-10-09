@@ -6,6 +6,7 @@ requiredNames:
   - drain-flag-set-before-destructive-step
   - drain-crash-after-intent-clear
   - native-clean
+  - native-preview-only-verifier-omits-generation-fields
   - native-superseded-identical-discarded
   - native-pending-intent-discarded
   - native-non-emitted
