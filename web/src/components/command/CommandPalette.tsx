@@ -96,9 +96,16 @@ export function isDirectLookupResult(result: Pick<SearchResult, 'snippet'>): boo
  * the project display name keep their own casing. A project-hash query
  * resolves to that project's newest session, so the same label identifies the
  * project as well as the session.
+ *
+ * The wire `project` is empty when the store has no recorded working
+ * directory, so fall back to the validated project hash rather than render a
+ * dangling preposition.
  */
-export function directLookupLabel(result: Pick<SearchResult, 'sessionId' | 'project'>): string {
-  return `session ${result.sessionId} in ${displayProject(result.project)}`;
+export function directLookupLabel(
+  result: Pick<SearchResult, 'sessionId' | 'project'>,
+  projectHash: string,
+): string {
+  return `session ${result.sessionId} in ${displayProject(result.project) || projectHash}`;
 }
 
 /** Event name a visible affordance (e.g. the nav ⌘K pill) dispatches to open
@@ -232,7 +239,7 @@ export function CommandPalette() {
         const direct = isDirectLookupResult(r);
         return [{
           id: `${direct ? 'id' : 'msg'}:${r.sessionId}:${r.entryIndex}`,
-          label: direct ? directLookupLabel(r) : messageLabel(r.snippet),
+          label: direct ? directLookupLabel(r, projectHash) : messageLabel(r.snippet),
           group: 'Messages',
           keywords: r.project,
           searchAnnotation: { discovery: r.discovery },
@@ -348,7 +355,7 @@ export function CommandPalette() {
                      i === activeIndex ? 'bg-surface-hover text-ink' : 'text-ink-2'
                    }`}
                  >
-                    <span className="min-w-0 break-words">
+                    <span data-testid="command-label" className="min-w-0 break-words">
                       {c.label}
                     </span>
                    <span className="flex shrink-0 items-center justify-between gap-3 sm:ml-auto sm:justify-end">
