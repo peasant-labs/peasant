@@ -1,12 +1,37 @@
-# content_one_copy — scaffolding for the harmonized session content model
-# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
-# No cases are filled yet; each entry below is a name placeholder so the
-# required-names manifest protects the case inventory from the start.
-# Later issues extend the case shape and the loader struct field-for-field.
+# Counts are the contract for per-session rows, not deletion-protection counts.
 cases:
   - name: activation-writes-no-files
+    mode: activate
+    texts: [onecopyalpha, onecopybeta, onecopygamma]
+    bodies: 3
+    blobs: 0
   - name: refresh-writes-no-files
+    mode: refresh
+    texts: [onecopyalpha, onecopybeta, onecopygamma]
+    nextTexts: [onecopyalpha, onecopybeta, onecopydelta]
+    bodies: 4
+    blobs: 0
   - name: each-content-string-stored-once
+    mode: columns
+    toolRows: true
+    texts: [onecopyalpha, onecopybeta, onecopygamma]
+    bodies: 3
+    blobs: 0
   - name: append-reuses-unchanged-bodies
+    mode: append
+    texts: [onecopyalpha, onecopybeta, onecopygamma]
+    appendText: onecopydelta
+    bodies: 4
+    blobs: 0
   - name: superseded-copy-gone-after-sweep
+    mode: sweep
+    texts: [onecopyalpha, onecopybeta, onecopygamma]
+    nextTexts: [onecopyalpha, onecopydelta, onecopyepsilon]
+    bodies: 3
+    blobs: 0
   - name: non-emitted-bytes-equal-emitted-content
+    mode: collision
+    texts: [onecopyalpha, onecopybeta, onecopygamma]
+    extraBlobs: {e_collision: onecopyalpha}
+    bodies: 3
+    blobs: 1
