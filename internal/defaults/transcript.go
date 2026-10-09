@@ -14,13 +14,13 @@ const TranscriptContinuationReadBytes int64 = 8 << 20
 // literal. Callers may impose their own smaller budgets.
 const SessionDetailDocumentCapBytes int = 128 << 20
 
-// PushTranscriptDocumentCapBytes preserves the publication caller's existing
-// redaction scan budget independently of the schema's larger document limit.
-const PushTranscriptDocumentCapBytes int = 8 << 20
+// PushTranscriptDocumentCapBytes aligns the publication redaction output scan
+// with the wire contract's transcript document cap.
+const PushTranscriptDocumentCapBytes int = 128 << 20
 
 // ServedDetailDocumentMarginBytes is the headroom peasant keeps below the
 // contract cap for transcript-envelope overhead and redaction growth.
-// Publication additionally enforces its independent caller budget.
+// Publication checks redacted output against the same contract document cap.
 const ServedDetailDocumentMarginBytes int = 1 << 20
 
 // ServedDetailDocumentBudgetBytes is the encoded size a served session detail is

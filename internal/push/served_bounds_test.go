@@ -1,6 +1,7 @@
 package push
 
 import (
+	_ "embed"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -12,7 +13,109 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/publication_document_limits.yaml
+var publicationDocumentLimitsYAML []byte
+
+//go:embed testdata/publication_document_limits.manifest.yaml
+var publicationDocumentLimitsManifestYAML []byte
+
+type publicationDocumentLimitCase struct {
+	Name           string `yaml:"name"`
+	InputBytes     int    `yaml:"inputBytes,omitempty"`
+	RedactedBytes  int    `yaml:"redactedBytes"`
+	Accepted       bool   `yaml:"accepted"`
+	RedactorCalled bool   `yaml:"redactorCalled"`
+	Error          string `yaml:"error,omitempty"`
+}
+
+func loadPublicationDocumentLimits(t *testing.T) []publicationDocumentLimitCase {
+	t.Helper()
+	var fixture struct {
+		Cases []publicationDocumentLimitCase `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(publicationDocumentLimitsYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := testutil.DecodeRequiredNamesManifest(publicationDocumentLimitsManifestYAML, "publication document limits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, len(fixture.Cases))
+	for i, c := range fixture.Cases {
+		names[i] = c.Name
+		invalidSizes := c.InputBytes < 0 || c.RedactedBytes <= 0
+		missingRefusal := !c.Accepted && c.Error == ""
+		if invalidSizes || missingRefusal {
+			t.Fatalf("publication document limit fixture %q has invalid sizes or no refusal message", c.Name)
+		}
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "publication document limits"); err != nil {
+		t.Fatal(err)
+	}
+	return fixture.Cases
+}
+
+// expandingPublicationRedactor models redaction growth at the real dependency
+// seam. Only turn text changes; envelope shape and turn identity stay intact.
+type expandingPublicationRedactor struct {
+	contentBytes int
+	called       bool
+}
+
+func (r *expandingPublicationRedactor) RedactJSON(value any) any {
+	r.called = true
+	document := value.(map[string]any)
+	detail := document["sessionDetail"].(map[string]any)
+	turns := detail["turns"].([]any)
+	turns[0].(map[string]any)["content"] = strings.Repeat("x", r.contentBytes)
+	return document
+}
+
+var _ redact.JSONRedactor = (*expandingPublicationRedactor)(nil)
+
+// Drive the production publication marshaler, not a copy of its scan policy.
+// A small input grows during redaction to reach the output cap; the independent
+// 64 MiB input seam remains covered. Large cases run serially without services.
+func TestPushContent_PublicationDocumentLimits(t *testing.T) {
+	for _, c := range loadPublicationDocumentLimits(t) {
+		t.Run(c.Name, func(t *testing.T) {
+			content := schema.TranscriptContent{
+				Kind: schema.ContentKindSessionDetail, ContractVersion: "1.0.0",
+				SessionDetail: &schema.SessionDetailPayload{
+					ID: testutil.TestSessionUUID, Harness: schema.HarnessClaudeCode,
+					Turns: []schema.TurnDetail{{Index: 0, Role: schema.RoleAssistant, Depth: 0, Content: "x"}},
+				},
+			}
+			base, err := json.Marshal(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.InputBytes != 0 {
+				content.SessionDetail.Turns[0].Content = strings.Repeat("x", c.InputBytes-len(base)+1)
+			}
+			redactor := &expandingPublicationRedactor{contentBytes: c.RedactedBytes - len(base) + 1}
+			body, err := marshalBuiltTranscriptContent(content, redactor)
+			if redactor.called != c.RedactorCalled {
+				t.Fatalf("redactor called = %v, want %v", redactor.called, c.RedactorCalled)
+			}
+			if !c.Accepted {
+				if err == nil || err.Error() != c.Error || body != nil {
+					t.Fatalf("publication refusal = %v, emitted %d bytes; want %q and no output", err, len(body), c.Error)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("publication document below or at contract cap refused: %v", err)
+			}
+			if len(body) != c.RedactedBytes {
+				t.Fatalf("publication emitted %d bytes, want %d", len(body), c.RedactedBytes)
+			}
+		})
+	}
+}
 
 // TestPushContent_BoundsAnOversizedToolResult builds the outward publication body
 // for a session holding a tool result larger than the per-field display budget.
