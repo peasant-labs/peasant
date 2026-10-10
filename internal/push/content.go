@@ -426,7 +426,13 @@ func restoreObservedModelExtra(extra *string, value string) (*string, error) {
 // another - which is what had happened, with this comment claiming two seams
 // while the third and largest one called the fail-open primitive directly.
 func redactJSONDocument(redactor redact.JSONRedactor, document []byte, what string) ([]byte, error) {
-	if err := schema.ScanRawJSONDocument(document, schema.RawJSONPathPolicy{MaxDocumentBytes: 64 << 20, MaxDocumentDepth: 64}); err != nil {
+	return redactJSONDocumentWithInputCap(redactor, document, what, 64<<20)
+}
+
+// Metadata uses its own input cap; transcript and entry materialization retain
+// their smaller input boundary. All paths share the same fail-closed redaction.
+func redactJSONDocumentWithInputCap(redactor redact.JSONRedactor, document []byte, what string, maxDocumentBytes int) ([]byte, error) {
+	if err := schema.ScanRawJSONDocument(document, schema.RawJSONPathPolicy{MaxDocumentBytes: maxDocumentBytes, MaxDocumentDepth: 64}); err != nil {
 		return nil, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(document))

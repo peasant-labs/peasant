@@ -1,0 +1,18 @@
+requiredNames:
+  - mapper_input_below_cap
+  - mapper_input_at_cap
+  - mapper_input_above_cap
+  - mapper_input_past_former_cap
+  - mapper_output_below_cap
+  - mapper_output_at_cap
+  - mapper_output_above_cap
+  - mapper_output_past_former_cap
+  - preflight_input_below_cap
+  - preflight_input_at_cap
+  - preflight_input_above_cap
+  - preflight_input_past_former_cap
+  - final_preflight_below_cap
+  - final_preflight_at_cap
+  - final_preflight_above_cap
+  - final_preflight_past_former_cap
+  - many_entry_mapper_to_preflight
