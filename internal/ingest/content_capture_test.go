@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -44,6 +46,7 @@ func (a *captureFixtureAdapter) MaterializeTranscript(ctx context.Context, s ing
 }
 
 type captureFixture struct {
+	Child          bool           `yaml:"child"`
 	Unknown        bool           `yaml:"unknown"`
 	Text           string         `yaml:"text"`
 	Contains       bool           `yaml:"contains"`
@@ -91,6 +94,13 @@ func captureFixtureSource(t *testing.T, fixture captureFixture, fs *testutil.Mem
 	}
 	session := makeClaudeSession(t, fs, testutil.TestSessionUUID, string(data))
 	session.Harness = fixture.Harness
+	if fixture.Child {
+		parent, err := ingest.NewSessionID(testutil.TestSessionUUID2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session.ParentUUID = &parent
+	}
 	session.ContentOmitted = fixture.Omitted
 	switch fixture.Origin {
 	case "":
@@ -214,6 +224,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			meta.ModelHarness = fixture.Harness
 			meta.Source.FilePath = session.SourcePath.String()
 			meta.Source.Format = session.SourceFormat
+			meta.ParentUUID = session.ParentUUID
 			path := storetest.CopyGoldenDB(t)
 			database, err := store.Open(path, store.WithSkipMigrations())
 			if err != nil {
@@ -325,6 +336,101 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			}
 			if !found {
 				t.Fatal("full content unavailable after all sources removed")
+			}
+		})
+	}
+}
+
+// Refused native bytes must not replace the last-good export, certificate or
+// producer claims. An intact replacement subsequently uses the same pipeline.
+func TestRefusedCapturePreservesLastGoodAndRecovers(t *testing.T) {
+	for _, fixture := range loadCaptureFixtures(t) {
+		if !fixture.Reject || fixture.Harness != ingest.HarnessCursor && fixture.Harness != ingest.HarnessClaudeCode {
+			continue
+		}
+		t.Run(fixture.Name, func(t *testing.T) {
+			fs := testutil.NewMemFS()
+			good := fixture
+			good.Source = `{"role":"assistant","type":"assistant","message":{"role":"assistant","content":TEXT}}`
+			session, _ := captureFixtureSource(t, good, fs, "synthetic last-good content")
+			session.ModTime = time.Now().Add(-time.Hour)
+			meta := makeMinimalMeta(t, session.SessionID.String())
+			meta.Project.Hash = testutil.TestProjectHash
+			meta.ModelHarness = fixture.Harness
+			meta.Source.FilePath = session.SourcePath.String()
+			meta.Source.Format = session.SourceFormat
+			db := storetest.OpenWith(t)
+			defer db.Close()
+			if session.ParentUUID != nil {
+				meta.ParentUUID = session.ParentUUID
+				parent := makeMinimalMeta(t, session.ParentUUID.String())
+				parent.Project.Hash = testutil.TestProjectHash
+				if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: parent}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg := makePipelineConfig(testOutputDir)
+			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{fixture.Harness: {Enabled: true, Paths: []ingest.ResolvedPath{session.SourcePath}}}
+			adapters := map[ingest.Harness]ingest.AdapterFactory{fixture.Harness: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta})}
+			run := func() *ingest.PipelineResult {
+				t.Helper()
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(db), ingest.WithMetricsStore(db))
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := pipeline.Run(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				return result
+			}
+			if result := run(); result.Summary.Indexed != 1 {
+				t.Fatalf("seed failed: %+v", result)
+			}
+			page := func() ingest.SessionEntryReadPage {
+				t.Helper()
+				p, err := db.ReadSessionEntries(t.Context(), session.SessionID, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}
+			indexState := func() *ingest.SessionIndexState {
+				t.Helper()
+				state, err := db.ReadIndexState(t.Context(), session.SessionID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return state
+			}
+			exportBytes := func() string {
+				t.Helper()
+				payload, err := export.ExportSession(t.Context(), db, fs, session.SessionID.String())
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err := json.Marshal(payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(data)
+			}
+			beforePage, beforeIndex, beforeExport := page(), indexState(), exportBytes()
+			captureFixtureSource(t, fixture, fs, "synthetic refused content")
+			run()
+			if !reflect.DeepEqual(page(), beforePage) || exportBytes() != beforeExport {
+				t.Fatal("refused source changed full content, certificate or export")
+			}
+			afterIndex := indexState()
+			if afterIndex.IndexerVersion != beforeIndex.IndexerVersion || !reflect.DeepEqual(afterIndex.IndexVersion, beforeIndex.IndexVersion) || !reflect.DeepEqual(afterIndex.IndexedAt, beforeIndex.IndexedAt) {
+				t.Fatal("refused source advanced producer stamps")
+			}
+			captureFixtureSource(t, good, fs, "synthetic recovered content")
+			if result := run(); result.Summary.Indexed != 1 {
+				t.Fatalf("intact source did not recover: %+v", result)
+			}
+			if page().Capture.FullCaptureSHA256 == beforePage.Capture.FullCaptureSHA256 || exportBytes() == beforeExport {
+				t.Fatal("intact source did not replace last-good content")
 			}
 		})
 	}

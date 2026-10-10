@@ -73,7 +73,7 @@ harnesses:
           - {<<: *ignored, kind: tool_reference}
   cursor:
     adapter_version: 1
-    indexer_version: 17
+    indexer_version: 18
     index_version: 1
     fallback: &fallback
       status: retained-unknown
@@ -205,7 +205,7 @@ harnesses:
     adapter_version: 1
     indexer_version: 17
     index_version: 1
-    native_versions: {adapter_version: 2, indexer_version: 18, index_version: 2}
+    native_versions: {adapter_version: 2, indexer_version: 19, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
