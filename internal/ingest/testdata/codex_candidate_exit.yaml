@@ -1,4 +1,18 @@
 cases:
+  - name: wrong-item-content-names-line-kind-and-shape
+    sessionID: "11111111-1111-4111-8111-111111111111"
+    generationID: gen-content-refusal
+    sourceFileName: PRIVATE_PATH_SENTINEL.jsonl
+    privatePathSentinel: PRIVATE_PATH_SENTINEL
+    source: |
+      {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+      {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":42}}}
+    expected:
+      operation: BuildCodexCandidate
+      harness: codex
+      sessionID: "11111111-1111-4111-8111-111111111111"
+      effectContains: no candidate was emitted
+      reasonContains: 'source line 2 item kind "AgentMessage" has refused content field shape number'
   - name: malformed-delivery-names-line-kind-and-shape
     sessionID: "11111111-1111-4111-8111-111111111111"
     generationID: gen-delivery-refusal

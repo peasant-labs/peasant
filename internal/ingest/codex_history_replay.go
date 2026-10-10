@@ -981,6 +981,9 @@ func codexSegmentOwnership(segment codexDecodedSegment, ordinal int64) CodexOwne
 func (state *codexReplayState) replayRecord(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, mode CodexHistoryMode) (resultErr error) {
 	prepared, unknown, err := prepareCodexRecord(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
 	if err != nil {
+		if refusal := codexItemPreparationRefusal(record); refusal != nil {
+			return refusal
+		}
 		return err
 	}
 	if prepared == nil {

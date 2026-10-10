@@ -78,3 +78,45 @@ func codexItemBodyFailure(raw json.RawMessage) string {
 	}
 	return fmt.Sprintf("item kind %q has a refused field shape: %v; no item state was replaced", header.Type, err)
 }
+
+// Preparation validates message blocks before replay. Keep its refusal structural:
+// a raw validator error may contain private role values or source contents.
+func codexItemPreparationRefusal(record codexHistoryRecord) *codexCandidateRefusal {
+	var event struct {
+		Type string `json:"type"`
+		Item struct {
+			Type    string          `json:"type"`
+			Content json.RawMessage `json:"content"`
+		} `json:"item"`
+	}
+	if record.EnvelopeType != codexTypeEventMsg || json.Unmarshal(record.Payload, &event) != nil || event.Type != "item_completed" {
+		return nil
+	}
+	nativeType, _, known := codexItemNativeType(codexItemBody{Type: event.Item.Type})
+	if !known || (nativeType != "message" && nativeType != "reasoning") {
+		return nil
+	}
+	shape := "absent"
+	if raw := bytes.TrimSpace(event.Item.Content); len(raw) > 0 {
+		switch raw[0] {
+		case '[':
+			shape = "array with malformed known blocks"
+		case '{':
+			shape = "object"
+		case '"':
+			shape = "string"
+		case 'n':
+			shape = "null"
+		case 't', 'f':
+			shape = "boolean"
+		default:
+			shape = "number"
+		}
+	}
+	return &codexCandidateRefusal{
+		Operation: "BuildCodexCandidate",
+		Reason:    fmt.Sprintf("source line %d item kind %q has refused content field shape %s during native preparation", record.LineIndex+1, event.Item.Type, shape),
+		Effect:    "no candidate was emitted and the prior generation and producer stamps remain unchanged",
+		Recovery:  "restore intact native message fields and retry harvest",
+	}
+}

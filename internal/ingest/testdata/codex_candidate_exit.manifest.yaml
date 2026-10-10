@@ -1,4 +1,5 @@
 requiredNames:
+  - wrong-item-content-names-line-kind-and-shape
   - malformed-delivery-names-line-kind-and-shape
   - missing-native-source-refusal-keeps-private-location-safe
   - noncanonical-native-identity-refusal-keeps-private-value-safe
