@@ -35,21 +35,22 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 // legacy raw syntax, and cross-record ordering or pointer uniqueness); see
 // storedRetainedPayloadExceedsTransferLimit for the named set.
 //
-// The transfer limit is the unified session-detail document cap. It is wider
-// than schema.ValidateRetainedUnknown's inner 8 MiB per-payload scan, which
-// runs after the checks above on the final projected records; a valid payload
-// between those two bounds therefore passes the transfer probe and the
-// projection backstop and is still refused by the schema safety validator.
+// The transfer limit is the retained-unknown per-payload cap
+// (defaults.RetainedUnknownPayloadCapBytes), which mirrors
+// schema.ValidateRetainedUnknown's inner 8 MiB/depth-64 per-payload scan
+// (schema/retained_unknown.go:72). That validator applies no outer document cap,
+// so the in-place probe, the projection backstop, and the schema scan all bound
+// the same per-payload value.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
 	return projectRetainedUnknownWithinLimit(entries, harness, retainedUnknownTransferLimitBytes)
 }
 
 // projectRetainedUnknownWithinLimit is the transfer-refusal decision and
 // projection with an injectable limit. The exported entry point always passes
-// the unified session-detail cap (retainedUnknownTransferLimitBytes), so this is
-// the single production code path; the parameter exists so the white-box
+// the retained-unknown per-payload cap (retainedUnknownTransferLimitBytes), so
+// this is the single production code path; the parameter exists so the white-box
 // shape/precedence matrix can drive that exact path with a few-KiB payload over
-// a small limit instead of materializing 128 MiB documents. It is not exported
+// a small limit instead of materializing cap-sized documents. It is not exported
 // and has no second production caller.
 func projectRetainedUnknownWithinLimit(entries []schema.SessionEntry, harness Harness, limit int) ([]schema.RetainedUnknownRecord, error) {
 	if storedRetainedPayloadExceedsTransferLimit(entries, harness, limit) {

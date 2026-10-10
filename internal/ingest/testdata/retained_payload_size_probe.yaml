@@ -143,17 +143,18 @@ probeHarness: codex
 
 # transferLimitMiB is the published retained-evidence transfer limit the refusal
 # label must state. It is an independent literal contract pin for the production
-# constant (the unified session-detail document cap), so a source revert to a
-# decoupled 8 MiB limit fails even though the label would still agree with the
+# constant (defaults.RetainedUnknownPayloadCapBytes), which mirrors the schema
+# contract's inner per-payload 8 MiB raw-document bound, so a source revert to a
+# decoupled limit fails even though the label would still agree with the
 # enforcement.
-transferLimitMiB: 128
+transferLimitMiB: 8
 
 # noMaterializationPayloadBytes sizes the allocation proof's over-limit payload.
 # It must exceed the small injected limit the proof passes so the in-place probe
 # refuses before the projection path materializes the payload; at or below the
 # limit the probe would accept and the backstop would copy the payload first. It
 # stays a few tens of KiB, so the proof observes the no-copy invariant on the
-# production decision path without materializing a 128 MiB document. The value
+# production decision path without materializing a cap-sized document. The value
 # is a literal here, never derived from the production constant.
 noMaterializationPayloadBytes: 65536
 
@@ -836,14 +837,13 @@ noMaterializationCases:
   - { name: no_materialization_escaped_key, encoding: escapedKey }
   - { name: no_materialization_escaped_root_key, encoding: escapedRootKey }
 
-# capBoundaryCases drive TestProjectRetainedUnknownAcceptsAtCapPayloads through
-# the public entry at the schema validator's inner 8 MiB per-payload safety
-# bound, which is narrower than the unified transfer limit: each name is a
-# required closed set over the stored encodings crossed with the at-cap and
-# one-over positions. The 8 MiB literals are built in Go; the fixture owns the
-# case inventory so the boundary matrix cannot shrink without failing the
-# required-name manifest. One byte over the schema bound must be refused by the
-# schema safety validator, not by the wider transfer label.
+# capBoundaryCases drive TestProjectRetainedUnknownAtCapPayloads through the
+# production entry with a small injected limit: each name is a required closed
+# set over the stored encodings crossed with the at-cap and one-over positions.
+# The at-cap/one-over mechanics run on few-KiB payloads; the real 8 MiB cap is
+# asserted as data by transferLimitMiB above, and one real cap-sized proof lives
+# in the non-race lane. One byte over the injected limit must be refused by the
+# transfer probe.
 capBoundaryCases:
   - { name: cap_boundary_payload_text_at_cap, encoding: payloadText, position: atCap }
   - { name: cap_boundary_payload_text_one_over, encoding: payloadText, position: oneOver }

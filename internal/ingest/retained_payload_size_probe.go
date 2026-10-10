@@ -13,19 +13,18 @@ import (
 )
 
 // retainedUnknownTransferLimitBytes is the published transfer limit for one
-// retained evidence payload. It is the unified session-detail document cap
-// (defaults.SessionDetailDocumentCapBytes), stated once through the shared
-// constant so the in-place probe and the projection-time backstop cannot drift
-// from the served detail contract; the published refusal label renders this
-// same constant.
+// retained evidence payload. It aliases the retained-unknown per-payload cap
+// (defaults.RetainedUnknownPayloadCapBytes), which mirrors the schema contract's
+// inner per-payload raw-document bound (schema.ValidateRetainedUnknown at
+// schema/retained_unknown.go:72: 8 MiB at depth 64, with no outer document cap).
+// The in-place probe, the projection-time backstop, and the published refusal
+// label all state this one value, so none can drift from the schema bound.
 //
-// This is deliberately NOT schema.ValidateRetainedUnknown's retained-unknown
-// bound: that validator applies an inner per-payload raw-document scan of
-// 8 MiB at depth 64 (schema/retained_unknown.go), and it has no outer document
-// cap. The unified transfer limit does not raise that schema safety bound, so a
-// valid payload between 8 MiB and the transfer limit still passes this probe and
-// the projection backstop and is then refused by the schema validator.
-const retainedUnknownTransferLimitBytes = defaults.SessionDetailDocumentCapBytes
+// This is deliberately separate from the session-detail document cap
+// (defaults.SessionDetailDocumentCapBytes): a retained payload and a detail
+// document are different contracts, and the payload cap must not follow a change
+// to the detail cap.
+const retainedUnknownTransferLimitBytes = defaults.RetainedUnknownPayloadCapBytes
 
 // The in-place probe below must measure exactly the two quantities the
 // authoritative read path measures, or its early refusal drifts from the

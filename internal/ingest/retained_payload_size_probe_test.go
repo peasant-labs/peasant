@@ -392,14 +392,15 @@ func TestProbeRequiredMemberMaskResolves(t *testing.T) {
 }
 
 // TestRetainedUnknownTransferLimitMatchesPublishedLabel pins the enforced probe
-// limit, the unified source of that limit, and the published refusal label. The
-// production constant aliases the unified session-detail document cap, and the
-// refusal renders that same constant through the one human-byte-size formatter,
-// so the message always states the limit the probe enforces. Two independent
-// guards protect the alias: it must equal defaults.SessionDetailDocumentCapBytes
-// (the unified source), and it must equal the fixture's literal transferLimitMiB
+// limit, its defaults source, and the published refusal label. The production
+// constant aliases the retained-unknown per-payload cap
+// (defaults.RetainedUnknownPayloadCapBytes), which mirrors the schema
+// validator's inner 8 MiB/depth-64 per-payload bound, and the refusal renders
+// that same constant through the one human-byte-size formatter. Two independent
+// guards protect the alias: it must equal defaults.RetainedUnknownPayloadCapBytes
+// (the source), and it must equal the fixture's literal transferLimitMiB
 // contract value, which is not derived from the production constant. A source
-// revert to a decoupled 8 MiB literal fails both even though the message and the
+// revert to a decoupled literal fails both even though the message and the
 // enforcement would still agree with each other. The full expected wording is
 // asserted, including the larger-transfers clause, so a formatting-source or
 // wording drift is caught too.
@@ -408,8 +409,8 @@ func TestRetainedUnknownTransferLimitMatchesPublishedLabel(t *testing.T) {
 	if fixtures.TransferLimitMiB <= 0 {
 		t.Fatalf("committed fixture %s needs a positive transferLimitMiB", retainedPayloadSizeProbeFixturePath)
 	}
-	if retainedUnknownTransferLimitBytes != defaults.SessionDetailDocumentCapBytes {
-		t.Fatalf("probe limit is %d bytes, not the unified session-detail cap %d", retainedUnknownTransferLimitBytes, defaults.SessionDetailDocumentCapBytes)
+	if retainedUnknownTransferLimitBytes != defaults.RetainedUnknownPayloadCapBytes {
+		t.Fatalf("probe limit is %d bytes, not the retained-unknown per-payload cap %d", retainedUnknownTransferLimitBytes, defaults.RetainedUnknownPayloadCapBytes)
 	}
 	wantBytes := fixtures.TransferLimitMiB << 20
 	if retainedUnknownTransferLimitBytes != wantBytes {
