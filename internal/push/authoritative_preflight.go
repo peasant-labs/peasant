@@ -3,13 +3,14 @@ package push
 import (
 	"encoding/json"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 )
 
 // Preflight the same current request that transport sends. The frozen legacy
 // validator cannot accept newly published harness identifiers such as Pi.
 func buildAuthoritativeRequest(metadata, content []byte) (schema.AuthoritativePublishRequest, error) {
-	if err := schema.ScanRawJSONDocument(metadata, schema.RawJSONPathPolicy{MaxDocumentBytes: 4 << 20, MaxDocumentDepth: 64}); err != nil {
+	if err := schema.ScanRawJSONDocument(metadata, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.PushMetadataDocumentCapBytes, MaxDocumentDepth: 64}); err != nil {
 		return schema.AuthoritativePublishRequest{}, err
 	}
 	var document map[string]json.RawMessage

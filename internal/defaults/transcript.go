@@ -18,6 +18,10 @@ const SessionDetailDocumentCapBytes int = 128 << 20
 // with the wire contract's transcript document cap.
 const PushTranscriptDocumentCapBytes int = 128 << 20
 
+// PushMetadataDocumentCapBytes mirrors schema's authoritative publish metadata
+// raw-document policy across mapping, redaction output and preflight input.
+const PushMetadataDocumentCapBytes int = 128 << 20
+
 // ServedDetailDocumentMarginBytes is the headroom peasant keeps below the
 // contract cap for transcript-envelope overhead and redaction growth.
 // Publication checks redacted output against the same contract document cap.
