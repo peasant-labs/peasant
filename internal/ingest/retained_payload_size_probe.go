@@ -12,12 +12,19 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// retainedUnknownTransferLimitBytes is the published 8 MiB transfer limit for
-// one retained evidence payload. The schema contract bounds each payload with
-// the same 8 MiB raw-document cap it applies to a session_detail document
-// (schema.ValidateRetainedUnknown), so peasant states the value once through
-// defaults.SessionDetailDocumentCapBytes rather than repeating the literal.
-const retainedUnknownTransferLimitBytes = defaults.SessionDetailDocumentCapBytes
+// retainedUnknownTransferLimitBytes is the published transfer limit for one
+// retained evidence payload. It aliases the retained-unknown per-payload cap
+// (defaults.RetainedUnknownPayloadCapBytes), which mirrors the schema contract's
+// inner per-payload raw-document bound (schema.ValidateRetainedUnknown at
+// schema/retained_unknown.go:72: 8 MiB at depth 64, with no outer document cap).
+// The in-place probe, the projection-time backstop, and the published refusal
+// label all state this one value, so none can drift from the schema bound.
+//
+// This is deliberately separate from the session-detail document cap
+// (defaults.SessionDetailDocumentCapBytes): a retained payload and a detail
+// document are different contracts, and the payload cap must not follow a change
+// to the detail cap.
+const retainedUnknownTransferLimitBytes = defaults.RetainedUnknownPayloadCapBytes
 
 // The in-place probe below must measure exactly the two quantities the
 // authoritative read path measures, or its early refusal drifts from the
@@ -95,8 +102,8 @@ func containsUnpairedSurrogateEscape(raw string) bool {
 
 // storedRetainedPayloadExceedsTransferLimit reports whether every retained
 // evidence record in the entries is a canonical, well-formed envelope and at
-// least one stores a payload whose public transfer size exceeds the published
-// limit. It reads the stored JSON text in place, so a refusal allocates nothing
+// least one stores a payload whose public transfer size exceeds the caller's
+// transfer limit. It reads the stored JSON text in place, so a refusal allocates nothing
 // proportional to the payload: an oversized payload is refused without decoding
 // or copying the payload itself. Sibling extension members are copied once
 // each for the strict re-scan, bounded by each extension value's own extent
@@ -143,14 +150,14 @@ func containsUnpairedSurrogateEscape(raw string) bool {
 //   - cross-record ordering and pointer uniqueness, which the authoritative path
 //     decides over the coordinate-sorted record set while the probe walks each
 //     record once in stored order.
-func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry, harness Harness) bool {
+func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry, harness Harness, limit int) bool {
 	over := false
 	for i := range entries {
 		extra := entries[i].Extra
 		if extra == nil {
 			continue
 		}
-		entryOver, ok := storedRetainedExtraExceedsTransferLimit(*extra, harness, entries[i].Harness, retainedUnknownTransferLimitBytes)
+		entryOver, ok := storedRetainedExtraExceedsTransferLimit(*extra, harness, entries[i].Harness, limit)
 		if !ok {
 			return false
 		}

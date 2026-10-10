@@ -141,6 +141,23 @@ requiredNames:
 # harness matching the export harness and the carrier entry harness.
 probeHarness: codex
 
+# transferLimitMiB is the published retained-evidence transfer limit the refusal
+# label must state. It is an independent literal contract pin for the production
+# constant (defaults.RetainedUnknownPayloadCapBytes), which mirrors the schema
+# contract's inner per-payload 8 MiB raw-document bound, so a source revert to a
+# decoupled limit fails even though the label would still agree with the
+# enforcement.
+transferLimitMiB: 8
+
+# noMaterializationPayloadBytes sizes the allocation proof's over-limit payload.
+# It must exceed the small injected limit the proof passes so the in-place probe
+# refuses before the projection path materializes the payload; at or below the
+# limit the probe would accept and the backstop would copy the payload first. It
+# stays a few tens of KiB, so the proof observes the no-copy invariant on the
+# production decision path without materializing a cap-sized document. The value
+# is a literal here, never derived from the production constant.
+noMaterializationPayloadBytes: 65536
+
 # measureCases drive scanJSONString directly: `raw` is one JSON string literal
 # and `want` is its decoded UTF-8 byte length.
 measureCases:
@@ -809,7 +826,10 @@ probeCases:
 # TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing: each
 # name is a required closed set over the stored encodings, including the
 # escaped-owned-string shape, the escaped-owned-key shape, and the escaped
-# evidence-root-key shape that once lost the early refusal.
+# evidence-root-key shape that once lost the early refusal. The proof payload is
+# sized by noMaterializationPayloadBytes above, over the small injected limit the
+# proof passes, so the in-place probe refuses before the projection path can
+# materialize it.
 noMaterializationCases:
   - { name: no_materialization_payload_text, encoding: payloadText }
   - { name: no_materialization_raw_payload, encoding: rawPayload }
@@ -817,11 +837,13 @@ noMaterializationCases:
   - { name: no_materialization_escaped_key, encoding: escapedKey }
   - { name: no_materialization_escaped_root_key, encoding: escapedRootKey }
 
-# capBoundaryCases drive TestProjectRetainedUnknownAcceptsAtCapPayloads through
-# the public entry at the published cap: each name is a required closed set
-# over the stored encodings crossed with the at-cap and one-over positions.
-# The 8 MiB literals are built in Go; the fixture owns the case inventory so
-# the boundary matrix cannot shrink without failing the required-name manifest.
+# capBoundaryCases drive TestProjectRetainedUnknownAtCapPayloads through the
+# production entry with a small injected limit: each name is a required closed
+# set over the stored encodings crossed with the at-cap and one-over positions.
+# The at-cap/one-over mechanics run on few-KiB payloads; the real 8 MiB cap is
+# asserted as data by transferLimitMiB above, and one real cap-sized proof lives
+# in the non-race lane. One byte over the injected limit must be refused by the
+# transfer probe.
 capBoundaryCases:
   - { name: cap_boundary_payload_text_at_cap, encoding: payloadText, position: atCap }
   - { name: cap_boundary_payload_text_one_over, encoding: payloadText, position: oneOver }

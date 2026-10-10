@@ -1,3 +1,9 @@
+# paddingBytes sizes the unknown payload so it sits over the retained-unknown
+# per-payload transfer limit (defaults.RetainedUnknownPayloadCapBytes, which
+# mirrors the schema validator's inner 8 MiB per-payload bound) and below the
+# 256 MiB source-record bound. That is what makes export and publication refuse
+# for transfer size while the local bytes stay certified and retained. The value
+# is a literal, never derived from the production constant.
 requiredNames:
   - retained_record_above_public_limit
   - managed_record_above_public_limit
