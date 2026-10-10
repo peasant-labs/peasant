@@ -1,0 +1,1 @@
+Error: open analytics store: store: inspect /workspace/peasant-labs/bench-runs/007-2gb/data-home/peasant/peasant.db for dry-run: sqlite: deserialize to "main": memory allocation failure; source files were unchanged; run a normal harvest to initialize or migrate this state, or use a compatible Peasant version

@@ -1,0 +1,18 @@
+You are investigating a critical memory / Village-upload issue in peasant-labs.
+
+Read and fully execute this research plan (including section 8 caller amendments):
+
+/workspace/peasant-labs/2026-09-21 Village Upload Pre-Optimization Benchmarking/research/GROK-RESEARCH-PLAN-bigger-issue.md
+
+Working directory for code: /workspace/peasant-labs/polyrepo/peasant/develop
+Write outputs only under:
+/workspace/peasant-labs/2026-09-21 Village Upload Pre-Optimization Benchmarking/research/
+
+Required deliverables:
+1) FINDINGS-LOG.md — fill the structured logging template (supporting)
+2) GROK-REPORT-bigger-issue.md — your own standalone research report (required)
+3) ISSUE-DRAFT.md — issue-ready draft
+4) Attempt proper workflow with LOCAL Village (not dry-run only) to test whether the failure is harness/dry-run specific; see plan §8.2
+
+Prefer code search + existing 007 artifacts; for live Village use small sets first.
+Begin at Step 7 / §8 immediately.

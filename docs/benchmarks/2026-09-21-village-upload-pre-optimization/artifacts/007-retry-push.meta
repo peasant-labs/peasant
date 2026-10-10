@@ -1,0 +1,6 @@
+PUSH_START: 2026-09-21 22:39:51 MST
+PUSH_END: 2026-09-21 22:40:11 MST
+PUSH_EXIT:3
+PUSH_WALL_MS:20140
+PEAK_RSS_KB:10476284
+NOTE: post-cleanup retry after Box IT linkedin-guest kill + 18 Fork-4 tabs closed; MemAvailable was ~10.5 GiB
