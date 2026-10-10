@@ -9,21 +9,50 @@ recipe:
   end: 2
   entry: '{"sessionId":"11111111-2222-3333-4444-555555555555","entryIndex":0,"harness":"claude-code","entryType":"text","role":"assistant","contentPreview":"x","hasToolUse":false,"hasThinking":false,"isError":false,"depth":0,"extra":"{\"model_id\":\"claude-opus-4-6\"}"}'
   transcript: '{"kind":"session_detail","contractVersion":"1.0.0","sessionDetail":{"id":"11111111-2222-3333-4444-555555555555","harness":"claude-code","startTime":"2026-01-01T00:00:00Z","endTime":"2026-01-01T00:00:01Z","durationMins":0,"totalTokens":0,"tokensIn":0,"tokensOut":0,"turnCount":0,"toolCallCount":0,"turns":[]}}'
+
+# The production caps as literal data. A revert of the 128 MiB metadata cap or a
+# removed mapper/preflight scan fails these checks; only the single real-size
+# case below materializes a full-size document.
+policy:
+  capBytes: 134217728
+  belowCapBytes: 134217727
+  atCapBytes: 134217728
+  aboveCapBytes: 134217729
+  formerCapBytes: 4194304
+  depth: 64
+  refusal: 'raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 134217728 bytes; decoding would exceed the caller boundary; reduce the document'
+
+# Small limits injected through the unexported mapper/preflight seams. The same
+# production paths run with these, so every mechanics case is a few KiB.
+mechanics:
+  limitBytes: 8192
+  formerLimitBytes: 4096
+  depth: 64
+
 cases:
-  - {name: mapper_input_below_cap, path: mapper-input, documentBytes: 134217727, accepted: true, redactorCalled: true}
+  - {name: mapper_input_below_limit, path: mapper-input, documentBytes: 8191, accepted: true, redactorCalled: true}
+  - {name: mapper_input_at_limit, path: mapper-input, documentBytes: 8192, accepted: true, redactorCalled: true}
+  - {name: mapper_input_above_limit, path: mapper-input, documentBytes: 8193, accepted: false, redactorCalled: false, errorContains: 'document exceeds 8192 bytes'}
+  - {name: mapper_input_past_former_cap, path: mapper-input, documentBytes: 4097, accepted: true, redactorCalled: true}
+  - {name: mapper_output_below_limit, path: mapper-output, documentBytes: 8191, accepted: true, redactorCalled: true}
+  - {name: mapper_output_at_limit, path: mapper-output, documentBytes: 8192, accepted: true, redactorCalled: true}
+  - {name: mapper_output_above_limit, path: mapper-output, documentBytes: 8193, accepted: false, redactorCalled: true, errorContains: 'document exceeds 8192 bytes'}
+  - {name: mapper_output_past_former_cap, path: mapper-output, documentBytes: 4097, accepted: true, redactorCalled: true}
+  - {name: preflight_input_below_limit, path: preflight-input, documentBytes: 8191, accepted: true}
+  - {name: preflight_input_at_limit, path: preflight-input, documentBytes: 8192, accepted: true}
+  - {name: preflight_input_above_limit, path: preflight-input, documentBytes: 8193, accepted: false, errorContains: 'document exceeds 8192 bytes'}
+  - {name: preflight_input_past_former_cap, path: preflight-input, documentBytes: 4097, accepted: true}
+  - {name: final_preflight_below_limit, path: final-preflight, documentBytes: 8191, accepted: true}
+  - {name: final_preflight_at_limit, path: final-preflight, documentBytes: 8192, accepted: true}
+  - {name: final_preflight_above_limit, path: final-preflight, documentBytes: 8193, accepted: false, errorContains: 'document exceeds 8192 bytes'}
+  - {name: final_preflight_past_former_cap, path: final-preflight, documentBytes: 4097, accepted: true}
+  - {name: many_entry_mapper_to_preflight, path: many-entries, entryCount: 128, limitBytes: 65536, minimumDocumentBytes: 16384, maximumDocumentBytes: 65536, accepted: true, redactorCalled: true}
+
+# Exactly one real-size case for this document family, run only by the non-race
+# materialization test. It is an ACCEPTED input at the literal 128 MiB cap driven
+# through the public mapper with a non-nil redactor, so it proves the mapper
+# assembled-input scan AND the redaction input cap accept a real-cap document.
+# The former output-only refusal case could not catch a reintroduced smaller
+# metadata input guard, because the input document was grown after that scan.
+realSizeCases:
   - {name: mapper_input_at_cap, path: mapper-input, documentBytes: 134217728, accepted: true, redactorCalled: true}
-  - {name: mapper_input_above_cap, path: mapper-input, documentBytes: 134217729, accepted: false, redactorCalled: false, errorContains: 'schema.ScanRawJSONDocument: document exceeds 134217728 bytes'}
-  - {name: mapper_input_past_former_cap, path: mapper-input, documentBytes: 4194305, accepted: true, redactorCalled: true}
-  - {name: mapper_output_below_cap, path: mapper-output, documentBytes: 134217727, accepted: true, redactorCalled: true}
-  - {name: mapper_output_at_cap, path: mapper-output, documentBytes: 134217728, accepted: true, redactorCalled: true}
-  - {name: mapper_output_above_cap, path: mapper-output, documentBytes: 134217729, accepted: false, redactorCalled: true, errorContains: 'schema.ScanRawJSONDocument: document exceeds 134217728 bytes'}
-  - {name: mapper_output_past_former_cap, path: mapper-output, documentBytes: 4194305, accepted: true, redactorCalled: true}
-  - {name: preflight_input_below_cap, path: preflight-input, documentBytes: 134217727, accepted: true}
-  - {name: preflight_input_at_cap, path: preflight-input, documentBytes: 134217728, accepted: true}
-  - {name: preflight_input_above_cap, path: preflight-input, documentBytes: 134217729, accepted: false, errorContains: 'schema.ScanRawJSONDocument: document exceeds 134217728 bytes'}
-  - {name: preflight_input_past_former_cap, path: preflight-input, documentBytes: 4194305, accepted: true}
-  - {name: final_preflight_below_cap, path: final-preflight, documentBytes: 134217727, accepted: true}
-  - {name: final_preflight_at_cap, path: final-preflight, documentBytes: 134217728, accepted: true}
-  - {name: final_preflight_above_cap, path: final-preflight, documentBytes: 134217729, accepted: false, errorContains: 'schema.ScanRawJSONDocument: document exceeds 134217728 bytes'}
-  - {name: final_preflight_past_former_cap, path: final-preflight, documentBytes: 4194305, accepted: true}
-  - {name: many_entry_mapper_to_preflight, path: many-entries, entryCount: 22619, minimumDocumentBytes: 4194305, maximumDocumentBytes: 134217727, accepted: true, redactorCalled: true}
