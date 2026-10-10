@@ -73,7 +73,7 @@ harnesses:
           - {<<: *ignored, kind: tool_reference}
   cursor:
     adapter_version: 1
-    indexer_version: 17
+    indexer_version: 18
     index_version: 1
     fallback: &fallback
       status: retained-unknown

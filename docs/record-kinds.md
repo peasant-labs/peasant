@@ -252,7 +252,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | content_kind | `network_proxy.rule_saved` | literal | represented | yes | session entries |  | `codex_provenance.go codexContentKindRegistry` |
 | native-generation | content_kind | `user_verification.notice` | literal | represented | yes | session entries |  | `codex_provenance.go codexContentKindRegistry` |
 
-## cursor (adapter 1, indexer 17)
+## cursor (adapter 1, indexer 18)
 
 Baseline index format: 1.
 

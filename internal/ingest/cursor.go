@@ -648,7 +648,11 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			if decodeErr != nil {
 				return nil, decodeErr
 			}
-			if line.Role == "" && line.Message.Role == "" {
+			control, err := validateCursorTurnEnding(line)
+			if err != nil {
+				return nil, err
+			}
+			if !control && line.Role == "" && line.Message.Role == "" {
 				return nil, fmt.Errorf("record has no transcript role")
 			}
 			if err := validateIndexContent(line.content()); err != nil {
