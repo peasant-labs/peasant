@@ -16,4 +16,4 @@ requiredNames:
   - final_preflight_above_limit
   - final_preflight_past_former_cap
   - many_entry_mapper_to_preflight
-  - mapper_output_above_cap
+  - mapper_input_at_cap

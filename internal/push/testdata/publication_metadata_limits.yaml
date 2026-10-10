@@ -11,8 +11,8 @@ recipe:
   transcript: '{"kind":"session_detail","contractVersion":"1.0.0","sessionDetail":{"id":"11111111-2222-3333-4444-555555555555","harness":"claude-code","startTime":"2026-01-01T00:00:00Z","endTime":"2026-01-01T00:00:01Z","durationMins":0,"totalTokens":0,"tokensIn":0,"tokensOut":0,"turnCount":0,"toolCallCount":0,"turns":[]}}'
 
 # The production caps as literal data. A revert of the 128 MiB metadata cap or a
-# removed mapper/preflight scan fails these checks; nothing here materializes a
-# 128 MiB document.
+# removed mapper/preflight scan fails these checks; only the single real-size
+# case below materializes a full-size document.
 policy:
   capBytes: 134217728
   belowCapBytes: 134217727
@@ -49,7 +49,10 @@ cases:
   - {name: many_entry_mapper_to_preflight, path: many-entries, entryCount: 128, limitBytes: 65536, minimumDocumentBytes: 16384, maximumDocumentBytes: 65536, accepted: true, redactorCalled: true}
 
 # Exactly one real-size case for this document family, run only by the non-race
-# materialization test. The literal cap+1 target and the exact refusal string
-# are the mutation tripwires for the production cap.
+# materialization test. It is an ACCEPTED input at the literal 128 MiB cap driven
+# through the public mapper with a non-nil redactor, so it proves the mapper
+# assembled-input scan AND the redaction input cap accept a real-cap document.
+# The former output-only refusal case could not catch a reintroduced smaller
+# metadata input guard, because the input document was grown after that scan.
 realSizeCases:
-  - {name: mapper_output_above_cap, path: mapper-output, documentBytes: 134217729, accepted: false, redactorCalled: true, errorContains: 'schema.ScanRawJSONDocument: document exceeds 134217728 bytes'}
+  - {name: mapper_input_at_cap, path: mapper-input, documentBytes: 134217728, accepted: true, redactorCalled: true}

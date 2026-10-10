@@ -370,11 +370,31 @@ func TestPublicationMetadataLimits(t *testing.T) {
 	}
 }
 
-// TestPublicationMetadataCapMaterialization drives the one real-size case
-// through the production mapper so the literal 128 MiB cap+1 target and its
-// exact refusal string are observed, not just asserted as data. It is serial
-// and runs only in the non-race pass; the race pass observes the same scan
-// through the injected-limit mechanics above.
+// assertMetadataRealCapInput sizes entries[0] so the mapper assembles exactly
+// target bytes, then asserts the serialized mirror length. The document is
+// local, so its buffer is released before the production mapper builds its own.
+func assertMetadataRealCapInput(t *testing.T, base []byte, entries []schema.SessionEntry, target int) {
+	t.Helper()
+	var document publishMirrorDocument
+	if err := json.Unmarshal(base, &document); err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Repeat("x", target-len(base)+1)
+	entries[0].ContentPreview = &text
+	document.Entries = entries
+	if actual := len(encodeMetadataLimitValue(t, document)); actual != target {
+		t.Fatalf("mapper input bytes=%d want %d", actual, target)
+	}
+}
+
+// TestPublicationMetadataCapMaterialization drives the one real-size metadata
+// case through the PUBLIC production mapper: an accepted mirror document of
+// exactly the literal 128 MiB cap, with a non-nil redactor. That proves both the
+// mapper assembled-input scan and the redaction input cap accept a real-cap
+// input. The former output-only refusal case could not observe this: it grew a
+// small input after those scans, so a reintroduced smaller metadata input guard
+// would have slipped through. Serial, non-race only; the race pass observes the
+// same scans through the injected-limit mechanics above.
 func TestPublicationMetadataCapMaterialization(t *testing.T) {
 	if publicationRaceEnabled {
 		t.Skip("the real-size metadata cap materialization runs in the non-race pass only")
@@ -385,26 +405,51 @@ func TestPublicationMetadataCapMaterialization(t *testing.T) {
 	}
 	for _, c := range fixture.RealSizeCases {
 		t.Run(c.Name, func(t *testing.T) {
-			if c.Path != metadataMapperOutput {
-				t.Fatalf("real-size case %q must drive the mapper output path", c.Name)
+			if c.Path != metadataMapperInput {
+				t.Fatalf("real-size case %q must drive the mapper input path", c.Name)
+			}
+			if !c.Accepted || !c.RedactorCalled {
+				t.Fatalf("real-size case %q must be an accepted case that calls the redactor", c.Name)
+			}
+			if c.DocumentBytes != fixture.Policy.AtCapBytes {
+				t.Fatalf("real-size input target=%d want the literal cap %d", c.DocumentBytes, fixture.Policy.AtCapBytes)
 			}
 			opts := metadataLimitOptions(t, fixture, 1)
-			redactor := &metadataLimitRedactor{contentBytes: 1}
-			opts.Redactor = redactor
-			restored, err := MapMetadata(opts)
+			base, err := MapMetadata(opts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			redactor.contentBytes = c.DocumentBytes - len(restored) + 1
-			redactor.called = false
+			// The calibration reuses the small production base, so the test
+			// builds no document beyond the production path's own.
+			assertMetadataRealCapInput(t, base, opts.Entries, c.DocumentBytes)
+			redactor := &metadataLimitRedactor{}
 			opts.Redactor = redactor
 			body, err := MapMetadata(opts)
-			if redactor.called != c.RedactorCalled {
-				t.Fatalf("redactor called=%v want %v", redactor.called, c.RedactorCalled)
+			if !redactor.called {
+				t.Fatalf("the redactor was not called: an at-cap input was refused before redaction: %v", err)
 			}
-			if err == nil || !strings.Contains(err.Error(), c.ErrorContains) || body != nil {
-				t.Fatalf("mapper refusal=%v emitted=%d want %q and no output", err, len(body), c.ErrorContains)
+			if err != nil {
+				t.Fatalf("the mapper refused an at-cap input: %v", err)
 			}
+			// The redactor is the identity, so the accepted output is the
+			// re-serialization of the accepted input: this is the actual input
+			// length observed through the production path.
+			if len(body) != c.DocumentBytes {
+				t.Fatalf("mapper output bytes=%d want the accepted input literal %d", len(body), c.DocumentBytes)
+			}
+			var mirror publishMirrorDocument
+			if err := json.Unmarshal(body, &mirror); err != nil {
+				t.Fatal(err)
+			}
+			if len(mirror.Entries) != len(opts.Entries) {
+				t.Fatalf("mapped entry count=%d want %d", len(mirror.Entries), len(opts.Entries))
+			}
+			for i, entry := range mirror.Entries {
+				if entry.SessionID != opts.Entries[i].SessionID || entry.EntryIndex != i || !reflect.DeepEqual(entry.Extra, opts.Entries[i].Extra) {
+					t.Fatalf("mapped entry %d lost identity or observed model evidence", i)
+				}
+			}
+			t.Logf("at-cap mapper input accepted bytes=%d entries=%d", len(body), len(mirror.Entries))
 		})
 	}
 }
