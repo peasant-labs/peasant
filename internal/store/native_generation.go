@@ -210,7 +210,13 @@ func (s *Store) ReadStoredCaptureAuthority(ctx context.Context, sessionID schema
 	if !found || !PublishableWithOmissions(capture) {
 		return nil, nil
 	}
-	return &ingest.StoredCaptureAuthority{SourceAuthority: capture.SourceAuthority, CaptureFormat: capture.CaptureFormat}, nil
+	return &ingest.StoredCaptureAuthority{
+		Status:           capture.Status,
+		SourceAuthority:  capture.SourceAuthority,
+		TranscriptOrigin: capture.TranscriptOrigin,
+		CaptureFormat:    capture.CaptureFormat,
+		FailureCode:      capture.FailureCode,
+	}, nil
 }
 
 // readHarmonizedPriorOnConn loads the reusable evidence for a harmonized

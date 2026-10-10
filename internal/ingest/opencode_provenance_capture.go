@@ -588,7 +588,8 @@ func (idx *OpenCodeIndexer) BuildNativeGeneration(ctx context.Context, session D
 				diagnostics = append(diagnostics, "a complete last-good generation stays active")
 			}
 			if prior.CaptureAuthority != nil {
-				diagnostics = append(diagnostics, fmt.Sprintf("a stored %s capture certificate of format %q holds last-good full authority and stays active", prior.CaptureAuthority.SourceAuthority, prior.CaptureAuthority.CaptureFormat))
+				authority := prior.CaptureAuthority
+				diagnostics = append(diagnostics, fmt.Sprintf("a stored %s capture certificate of format %q (origin %s, source %s, failure code %q) holds last-good full authority and stays active", authority.Status, authority.CaptureFormat, authority.TranscriptOrigin, authority.SourceAuthority, authority.FailureCode))
 			}
 			if len(snapshot.SourceEvidenceDigest) == 0 {
 				diagnostics = append(diagnostics, "the snapshot carries no evidence digest")

@@ -205,6 +205,22 @@ const (
 	TranscriptOriginOpenCodeCurrentSQLite
 )
 
+// String names one transcript origin for diagnostics and reporting. An origin
+// outside the closed set prints its numeric value rather than a name it does
+// not have.
+func (o TranscriptOrigin) String() string {
+	switch o {
+	case TranscriptOriginFile:
+		return "file"
+	case TranscriptOriginOpenCodeLegacySQLite:
+		return "opencode-legacy-sqlite"
+	case TranscriptOriginOpenCodeCurrentSQLite:
+		return "opencode-current-sqlite"
+	default:
+		return fmt.Sprintf("transcript-origin-%d", uint8(o))
+	}
+}
+
 // Validate rejects unknown origins at the pipeline trust boundary.
 func (o TranscriptOrigin) Validate() error {
 	switch o {

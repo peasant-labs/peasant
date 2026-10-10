@@ -140,13 +140,17 @@ type NativeGenerationPriorReader interface {
 
 // StoredCaptureAuthority names the stored content-capture certificate that
 // stands in for an active managed generation as last-good full authority. It
-// preserves the certificate's own source authority and capture format, so a
-// bridged prior states where its authority came from and is never mistaken for
-// a fabricated V2 generation. It carries no alias table and no captured-prefix
-// proof.
+// preserves the certificate's own state in full: its status, source authority,
+// transcript origin, capture format, and failure code. An accounted
+// incomplete/full certificate therefore reads as what it is rather than being
+// flattened into a complete one. It carries no alias table and no
+// captured-prefix proof.
 type StoredCaptureAuthority struct {
-	SourceAuthority ContentSourceAuthority
-	CaptureFormat   ContentCaptureFormat
+	Status           ContentCaptureStatus
+	SourceAuthority  ContentSourceAuthority
+	TranscriptOrigin TranscriptOrigin
+	CaptureFormat    ContentCaptureFormat
+	FailureCode      ContentCaptureFailureCode
 }
 
 // NativePriorCaptureAuthorityReader reports the stored content-capture
