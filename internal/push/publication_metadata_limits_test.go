@@ -5,10 +5,12 @@ import (
 	_ "embed"
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
@@ -35,6 +37,7 @@ type publicationMetadataLimitCase struct {
 	Name                 string            `yaml:"name"`
 	Path                 metadataLimitPath `yaml:"path"`
 	DocumentBytes        int               `yaml:"documentBytes"`
+	LimitBytes           int               `yaml:"limitBytes"`
 	EntryCount           int               `yaml:"entryCount"`
 	MinimumDocumentBytes int               `yaml:"minimumDocumentBytes"`
 	MaximumDocumentBytes int               `yaml:"maximumDocumentBytes"`
@@ -56,7 +59,22 @@ type publicationMetadataLimitsFixture struct {
 		Entry         string             `yaml:"entry"`
 		Transcript    string             `yaml:"transcript"`
 	} `yaml:"recipe"`
-	Cases []publicationMetadataLimitCase `yaml:"cases"`
+	Policy struct {
+		CapBytes       int    `yaml:"capBytes"`
+		BelowCapBytes  int    `yaml:"belowCapBytes"`
+		AtCapBytes     int    `yaml:"atCapBytes"`
+		AboveCapBytes  int    `yaml:"aboveCapBytes"`
+		FormerCapBytes int    `yaml:"formerCapBytes"`
+		Depth          int    `yaml:"depth"`
+		Refusal        string `yaml:"refusal"`
+	} `yaml:"policy"`
+	Mechanics struct {
+		LimitBytes       int `yaml:"limitBytes"`
+		FormerLimitBytes int `yaml:"formerLimitBytes"`
+		Depth            int `yaml:"depth"`
+	} `yaml:"mechanics"`
+	Cases         []publicationMetadataLimitCase `yaml:"cases"`
+	RealSizeCases []publicationMetadataLimitCase `yaml:"realSizeCases"`
 }
 
 func loadPublicationMetadataLimits(t *testing.T) publicationMetadataLimitsFixture {
@@ -69,8 +87,9 @@ func loadPublicationMetadataLimits(t *testing.T) publicationMetadataLimitsFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := make([]string, len(fixture.Cases))
-	for i, c := range fixture.Cases {
+	all := append(append([]publicationMetadataLimitCase(nil), fixture.Cases...), fixture.RealSizeCases...)
+	names := make([]string, len(all))
+	for i, c := range all {
 		names[i] = c.Name
 		if !c.Accepted && c.ErrorContains == "" {
 			t.Fatalf("metadata limit fixture %q lacks a refusal reason", c.Name)
@@ -92,6 +111,35 @@ func loadPublicationMetadataLimits(t *testing.T) publicationMetadataLimitsFixtur
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+// assertPublicationMetadataPolicy ties the production metadata cap to the
+// literal fixture values. The expected side is the YAML data, never the
+// production constant, so a revert of the cap or a removed boundary literal
+// fails here rather than tautologically agreeing with itself.
+func assertPublicationMetadataPolicy(t *testing.T, f publicationMetadataLimitsFixture) {
+	t.Helper()
+	if defaults.PushMetadataDocumentCapBytes != f.Policy.CapBytes {
+		t.Fatalf("production metadata cap=%d want literal %d", defaults.PushMetadataDocumentCapBytes, f.Policy.CapBytes)
+	}
+	if f.Policy.AtCapBytes != f.Policy.CapBytes || f.Policy.BelowCapBytes != f.Policy.CapBytes-1 || f.Policy.AboveCapBytes != f.Policy.CapBytes+1 {
+		t.Fatalf("policy literals below/at/above=%d/%d/%d are not cap-1/cap/cap+1 of %d", f.Policy.BelowCapBytes, f.Policy.AtCapBytes, f.Policy.AboveCapBytes, f.Policy.CapBytes)
+	}
+	if f.Policy.FormerCapBytes != 4194304 {
+		t.Fatalf("former metadata cap literal=%d want 4194304", f.Policy.FormerCapBytes)
+	}
+	if f.Policy.FormerCapBytes >= f.Policy.CapBytes {
+		t.Fatalf("metadata cap %d does not exceed the former cap %d", f.Policy.CapBytes, f.Policy.FormerCapBytes)
+	}
+	if f.Policy.Depth != 64 || f.Mechanics.Depth != 64 {
+		t.Fatalf("metadata depth literals=%d/%d want 64/64", f.Policy.Depth, f.Mechanics.Depth)
+	}
+	if !strings.Contains(f.Policy.Refusal, "schema.ScanRawJSONDocument") || !strings.Contains(f.Policy.Refusal, strconv.Itoa(f.Policy.CapBytes)) {
+		t.Fatalf("metadata refusal literal %q does not name the scanner and cap %d", f.Policy.Refusal, f.Policy.CapBytes)
+	}
+	if f.Mechanics.LimitBytes <= f.Mechanics.FormerLimitBytes || f.Mechanics.FormerLimitBytes <= 0 {
+		t.Fatalf("mechanics limit=%d must exceed the former analog %d", f.Mechanics.LimitBytes, f.Mechanics.FormerLimitBytes)
+	}
 }
 
 // The double changes only entry text at the real whole-document redactor seam.
@@ -175,22 +223,29 @@ func requireMetadataPreflight(t *testing.T, metadata, content []byte, entries []
 	return request
 }
 
-// Large fixtures are serial: these are memory-only production mapper/preflight
-// paths, with no database, transport, subprocess or concurrent state to model.
+// The mechanics cases run every production mapper/preflight path with a small
+// injected limit, so no 128 MiB document is built. Large fixtures are serial:
+// these are memory-only paths with no database, transport, subprocess or
+// concurrent state to model.
 func TestPublicationMetadataLimits(t *testing.T) {
 	fixture := loadPublicationMetadataLimits(t)
+	assertPublicationMetadataPolicy(t, fixture)
 	content := []byte(fixture.Recipe.Transcript)
 	if _, err := schema.DecodeTranscriptContentRaw(content); err != nil {
 		t.Fatalf("invalid transcript recipe: %v", err)
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			limit := c.LimitBytes
+			if limit == 0 {
+				limit = fixture.Mechanics.LimitBytes
+			}
 			count := c.EntryCount
 			if count == 0 {
 				count = 1
 			}
 			opts := metadataLimitOptions(t, fixture, count)
-			base, err := MapMetadata(opts)
+			base, err := mapMetadataWithPolicy(opts, limit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -213,7 +268,7 @@ func TestPublicationMetadataLimits(t *testing.T) {
 					// mapper first, including the same evidence-removing redactor.
 					redactor.contentBytes = 1
 					opts.Redactor = redactor
-					restored, err := MapMetadata(opts)
+					restored, err := mapMetadataWithPolicy(opts, limit)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -221,7 +276,7 @@ func TestPublicationMetadataLimits(t *testing.T) {
 					redactor.called = false
 				}
 				opts.Redactor = redactor
-				body, err := MapMetadata(opts)
+				body, err := mapMetadataWithPolicy(opts, limit)
 				if redactor.called != c.RedactorCalled {
 					t.Fatalf("redactor called=%v want %v", redactor.called, c.RedactorCalled)
 				}
@@ -260,7 +315,7 @@ func TestPublicationMetadataLimits(t *testing.T) {
 				if len(metadata) != c.DocumentBytes {
 					t.Fatal("preflight input did not reach fixture byte target")
 				}
-				request, err := buildAuthoritativeRequest(metadata, content)
+				request, err := buildAuthoritativeRequestWithPolicy(metadata, content, limit)
 				if !c.Accepted {
 					if err == nil || !strings.Contains(err.Error(), c.ErrorContains) || !reflect.DeepEqual(request, schema.AuthoritativePublishRequest{}) {
 						t.Fatalf("preflight input refusal=%v want %q and no request", err, c.ErrorContains)
@@ -294,10 +349,10 @@ func TestPublicationMetadataLimits(t *testing.T) {
 				delete(document, "contentHash")
 				delete(document, "visibilityIntent")
 				metadata := encodeMetadataLimitValue(t, document)
-				if len(metadata) >= c.DocumentBytes || len(metadata) > 134217728 {
+				if len(metadata) >= c.DocumentBytes || len(metadata) > limit {
 					t.Fatalf("final preflight recipe input bytes=%d must fit before promotion", len(metadata))
 				}
-				actual, err := buildAuthoritativeRequest(metadata, content)
+				actual, err := buildAuthoritativeRequestWithPolicy(metadata, content, limit)
 				if !c.Accepted {
 					if err == nil || !strings.Contains(err.Error(), c.ErrorContains) || !reflect.DeepEqual(actual, schema.AuthoritativePublishRequest{}) {
 						t.Fatalf("final preflight refusal=%v want %q and no request", err, c.ErrorContains)
@@ -310,6 +365,45 @@ func TestPublicationMetadataLimits(t *testing.T) {
 				if len(encodeMetadataLimitValue(t, actual)) != c.DocumentBytes {
 					t.Fatal("final request did not retain fixture encoded length")
 				}
+			}
+		})
+	}
+}
+
+// TestPublicationMetadataCapMaterialization drives the one real-size case
+// through the production mapper so the literal 128 MiB cap+1 target and its
+// exact refusal string are observed, not just asserted as data. It is serial
+// and runs only in the non-race pass; the race pass observes the same scan
+// through the injected-limit mechanics above.
+func TestPublicationMetadataCapMaterialization(t *testing.T) {
+	if publicationRaceEnabled {
+		t.Skip("the real-size metadata cap materialization runs in the non-race pass only")
+	}
+	fixture := loadPublicationMetadataLimits(t)
+	if len(fixture.RealSizeCases) != 1 {
+		t.Fatalf("metadata limits fixture declares %d real-size cases, want exactly 1", len(fixture.RealSizeCases))
+	}
+	for _, c := range fixture.RealSizeCases {
+		t.Run(c.Name, func(t *testing.T) {
+			if c.Path != metadataMapperOutput {
+				t.Fatalf("real-size case %q must drive the mapper output path", c.Name)
+			}
+			opts := metadataLimitOptions(t, fixture, 1)
+			redactor := &metadataLimitRedactor{contentBytes: 1}
+			opts.Redactor = redactor
+			restored, err := MapMetadata(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			redactor.contentBytes = c.DocumentBytes - len(restored) + 1
+			redactor.called = false
+			opts.Redactor = redactor
+			body, err := MapMetadata(opts)
+			if redactor.called != c.RedactorCalled {
+				t.Fatalf("redactor called=%v want %v", redactor.called, c.RedactorCalled)
+			}
+			if err == nil || !strings.Contains(err.Error(), c.ErrorContains) || body != nil {
+				t.Fatalf("mapper refusal=%v emitted=%d want %q and no output", err, len(body), c.ErrorContains)
 			}
 		})
 	}

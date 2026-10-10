@@ -1,5 +1,6 @@
 requiredNames:
-  - redacted_document_one_byte_below_contract_cap
-  - redacted_document_at_contract_cap
-  - redacted_document_one_byte_above_contract_cap
-  - input_redaction_seam_still_refuses_above_64_mib
+  - redacted_document_one_byte_below_output_limit
+  - redacted_document_at_output_limit
+  - redacted_document_one_byte_above_output_limit
+  - input_redaction_seam_still_refuses_above_input_limit
+  - redacted_document_above_contract_cap_at_real_size

@@ -101,7 +101,16 @@ type MapOptions struct {
 // own output - receives redacted entries. This runs where one particular document
 // is assembled. The two cover different populations: remove either and a real
 // path goes unredacted.
-func MapMetadata(opts MapOptions) (_ []byte, err error) {
+func MapMetadata(opts MapOptions) ([]byte, error) {
+	return mapMetadataWithPolicy(opts, defaults.PushMetadataDocumentCapBytes)
+}
+
+// mapMetadataWithPolicy is MapMetadata with its caller-owned raw-document limit
+// injected at all three metadata scans: the assembled input, the redaction
+// input materialization, and the restored output. The production wrapper passes
+// defaults.PushMetadataDocumentCapBytes, and depth stays 64, so this seam
+// changes no production boundary.
+func mapMetadataWithPolicy(opts MapOptions, limitBytes int) (_ []byte, err error) {
 	meta := opts.Meta
 	req := schema.PublishRequest{
 		Identity: schema.SessionIdentity{
@@ -248,14 +257,14 @@ func MapMetadata(opts MapOptions) (_ []byte, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal publish request: %w", err)
 	}
-	if err := schema.ScanRawJSONDocument(result, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.PushMetadataDocumentCapBytes, MaxDocumentDepth: 64}); err != nil {
+	if err := schema.ScanRawJSONDocument(result, schema.RawJSONPathPolicy{MaxDocumentBytes: limitBytes, MaxDocumentDepth: 64}); err != nil {
 		return nil, err
 	}
 	if opts.Redactor == nil {
 		return result, nil
 	}
 	defer observeRedactionDocument(opts.Redactor, &err, redactionMetadataValidation)
-	redacted, err := redactJSONDocumentWithInputCap(opts.Redactor, result, "publish request", defaults.PushMetadataDocumentCapBytes)
+	redacted, err := redactJSONDocumentWithInputCap(opts.Redactor, result, "publish request", limitBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +292,7 @@ func MapMetadata(opts MapOptions) (_ []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := schema.ScanRawJSONDocument(final, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.PushMetadataDocumentCapBytes, MaxDocumentDepth: 64}); err != nil {
+	if err := schema.ScanRawJSONDocument(final, schema.RawJSONPathPolicy{MaxDocumentBytes: limitBytes, MaxDocumentDepth: 64}); err != nil {
 		return nil, err
 	}
 	return final, nil

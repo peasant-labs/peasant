@@ -3,6 +3,7 @@ package push
 import (
 	_ "embed"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,11 +32,26 @@ type publicationDocumentLimitCase struct {
 	Error          string `yaml:"error,omitempty"`
 }
 
-func loadPublicationDocumentLimits(t *testing.T) []publicationDocumentLimitCase {
+type publicationDocumentLimitsFixture struct {
+	Policy struct {
+		OutputCapBytes int    `yaml:"outputCapBytes"`
+		BelowCapBytes  int    `yaml:"belowCapBytes"`
+		AboveCapBytes  int    `yaml:"aboveCapBytes"`
+		InputCapBytes  int    `yaml:"inputCapBytes"`
+		OutputRefusal  string `yaml:"outputRefusal"`
+		InputRefusal   string `yaml:"inputRefusal"`
+	} `yaml:"policy"`
+	Mechanics struct {
+		OutputLimitBytes int `yaml:"outputLimitBytes"`
+		InputLimitBytes  int `yaml:"inputLimitBytes"`
+	} `yaml:"mechanics"`
+	Cases         []publicationDocumentLimitCase `yaml:"cases"`
+	RealSizeCases []publicationDocumentLimitCase `yaml:"realSizeCases"`
+}
+
+func loadPublicationDocumentLimits(t *testing.T) publicationDocumentLimitsFixture {
 	t.Helper()
-	var fixture struct {
-		Cases []publicationDocumentLimitCase `yaml:"cases"`
-	}
+	var fixture publicationDocumentLimitsFixture
 	if err := yaml.Unmarshal(publicationDocumentLimitsYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
@@ -43,8 +59,9 @@ func loadPublicationDocumentLimits(t *testing.T) []publicationDocumentLimitCase 
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := make([]string, len(fixture.Cases))
-	for i, c := range fixture.Cases {
+	all := append(append([]publicationDocumentLimitCase(nil), fixture.Cases...), fixture.RealSizeCases...)
+	names := make([]string, len(all))
+	for i, c := range all {
 		names[i] = c.Name
 		invalidSizes := c.InputBytes < 0 || c.RedactedBytes <= 0
 		missingRefusal := !c.Accepted && c.Error == ""
@@ -55,7 +72,32 @@ func loadPublicationDocumentLimits(t *testing.T) []publicationDocumentLimitCase 
 	if err := testutil.ValidateRequiredNames(manifest, names, "publication document limits"); err != nil {
 		t.Fatal(err)
 	}
-	return fixture.Cases
+	return fixture
+}
+
+// assertPublicationDocumentPolicy ties the production transcript caps to the
+// literal fixture values. The expected side is the YAML data, never the
+// production constant, so a cap revert or a widened input seam fails here.
+func assertPublicationDocumentPolicy(t *testing.T, f publicationDocumentLimitsFixture) {
+	t.Helper()
+	if defaults.PushTranscriptDocumentCapBytes != f.Policy.OutputCapBytes {
+		t.Fatalf("production transcript output cap=%d want literal %d", defaults.PushTranscriptDocumentCapBytes, f.Policy.OutputCapBytes)
+	}
+	if transcriptInputRedactionCapBytes != f.Policy.InputCapBytes {
+		t.Fatalf("production transcript input cap=%d want literal %d", transcriptInputRedactionCapBytes, f.Policy.InputCapBytes)
+	}
+	if f.Policy.BelowCapBytes != f.Policy.OutputCapBytes-1 || f.Policy.AboveCapBytes != f.Policy.OutputCapBytes+1 {
+		t.Fatalf("output boundary literals below/above=%d/%d are not cap-1/cap+1 of %d", f.Policy.BelowCapBytes, f.Policy.AboveCapBytes, f.Policy.OutputCapBytes)
+	}
+	if !strings.Contains(f.Policy.OutputRefusal, "schema.ScanRawJSONDocument") || !strings.Contains(f.Policy.OutputRefusal, strconv.Itoa(f.Policy.OutputCapBytes)) {
+		t.Fatalf("output refusal literal %q does not name the scanner and cap %d", f.Policy.OutputRefusal, f.Policy.OutputCapBytes)
+	}
+	if !strings.Contains(f.Policy.InputRefusal, "schema.ScanRawJSONDocument") || !strings.Contains(f.Policy.InputRefusal, strconv.Itoa(f.Policy.InputCapBytes)) {
+		t.Fatalf("input refusal literal %q does not name the scanner and cap %d", f.Policy.InputRefusal, f.Policy.InputCapBytes)
+	}
+	if f.Mechanics.OutputLimitBytes <= 0 || f.Mechanics.InputLimitBytes <= 0 {
+		t.Fatalf("mechanics limits=%d/%d must be positive", f.Mechanics.OutputLimitBytes, f.Mechanics.InputLimitBytes)
+	}
 }
 
 // expandingPublicationRedactor models redaction growth at the real dependency
@@ -76,19 +118,26 @@ func (r *expandingPublicationRedactor) RedactJSON(value any) any {
 
 var _ redact.JSONRedactor = (*expandingPublicationRedactor)(nil)
 
+func transcriptContentForLimit() schema.TranscriptContent {
+	return schema.TranscriptContent{
+		Kind: schema.ContentKindSessionDetail, ContractVersion: "1.0.0",
+		SessionDetail: &schema.SessionDetailPayload{
+			ID: testutil.TestSessionUUID, Harness: schema.HarnessClaudeCode,
+			Turns: []schema.TurnDetail{{Index: 0, Role: schema.RoleAssistant, Depth: 0, Content: "x"}},
+		},
+	}
+}
+
 // Drive the production publication marshaler, not a copy of its scan policy.
-// A small input grows during redaction to reach the output cap; the independent
-// 64 MiB input seam remains covered. Large cases run serially without services.
+// The mechanics cases inject small limits through the marshaler seam so a small
+// input grows during redaction to reach the injected output cap; the independent
+// input seam remains covered. Large cases run serially without services.
 func TestPushContent_PublicationDocumentLimits(t *testing.T) {
-	for _, c := range loadPublicationDocumentLimits(t) {
+	fixture := loadPublicationDocumentLimits(t)
+	assertPublicationDocumentPolicy(t, fixture)
+	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			content := schema.TranscriptContent{
-				Kind: schema.ContentKindSessionDetail, ContractVersion: "1.0.0",
-				SessionDetail: &schema.SessionDetailPayload{
-					ID: testutil.TestSessionUUID, Harness: schema.HarnessClaudeCode,
-					Turns: []schema.TurnDetail{{Index: 0, Role: schema.RoleAssistant, Depth: 0, Content: "x"}},
-				},
-			}
+			content := transcriptContentForLimit()
 			base, err := json.Marshal(content)
 			if err != nil {
 				t.Fatal(err)
@@ -97,7 +146,7 @@ func TestPushContent_PublicationDocumentLimits(t *testing.T) {
 				content.SessionDetail.Turns[0].Content = strings.Repeat("x", c.InputBytes-len(base)+1)
 			}
 			redactor := &expandingPublicationRedactor{contentBytes: c.RedactedBytes - len(base) + 1}
-			body, err := marshalBuiltTranscriptContent(content, redactor)
+			body, err := marshalBuiltTranscriptContentWithPolicy(content, redactor, fixture.Mechanics.InputLimitBytes, fixture.Mechanics.OutputLimitBytes)
 			if redactor.called != c.RedactorCalled {
 				t.Fatalf("redactor called = %v, want %v", redactor.called, c.RedactorCalled)
 			}
@@ -112,6 +161,38 @@ func TestPushContent_PublicationDocumentLimits(t *testing.T) {
 			}
 			if len(body) != c.RedactedBytes {
 				t.Fatalf("publication emitted %d bytes, want %d", len(body), c.RedactedBytes)
+			}
+		})
+	}
+}
+
+// TestPushContent_TranscriptCapMaterialization drives the one real-size
+// transcript case through the production marshaler so the literal 128 MiB cap+1
+// target and its exact refusal string are observed, not just asserted as data.
+// It is serial and runs only in the non-race pass; the race pass observes the
+// same scan through the injected-limit mechanics above.
+func TestPushContent_TranscriptCapMaterialization(t *testing.T) {
+	if publicationRaceEnabled {
+		t.Skip("the real-size transcript cap materialization runs in the non-race pass only")
+	}
+	fixture := loadPublicationDocumentLimits(t)
+	if len(fixture.RealSizeCases) != 1 {
+		t.Fatalf("publication document limits fixture declares %d real-size cases, want exactly 1", len(fixture.RealSizeCases))
+	}
+	for _, c := range fixture.RealSizeCases {
+		t.Run(c.Name, func(t *testing.T) {
+			content := transcriptContentForLimit()
+			base, err := json.Marshal(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			redactor := &expandingPublicationRedactor{contentBytes: c.RedactedBytes - len(base) + 1}
+			body, err := marshalBuiltTranscriptContent(content, redactor)
+			if redactor.called != c.RedactorCalled {
+				t.Fatalf("redactor called = %v, want %v", redactor.called, c.RedactorCalled)
+			}
+			if err == nil || err.Error() != c.Error || body != nil {
+				t.Fatalf("publication refusal = %v, emitted %d bytes; want %q and no output", err, len(body), c.Error)
 			}
 		})
 	}
