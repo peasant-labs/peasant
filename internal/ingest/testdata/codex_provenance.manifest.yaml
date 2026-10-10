@@ -1,4 +1,12 @@
 requiredNames:
+  - inherited-function-call-local-result
+  - inherited-custom-call-local-result
+  - local-function-pair
+  - local-custom-pair
+  - inherited-function-pair
+  - inherited-custom-pair
+  - result-without-call
+  - inherited-call-result-before-later-local-call
   - aligned-user-context-media-unknown
   - typed-context-kinds
   - context-kind-modality-conflict

@@ -1325,10 +1325,13 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 		delivery = schema.DeliveryOriginInheritedContext
 	}
 	partType := payload.Type
-	if c.callCarriers == nil {
-		c.callCarriers = map[string]string{}
+	// Retained inherited calls are evidence, not emitted parents.
+	if !c.retaining {
+		if c.callCarriers == nil {
+			c.callCarriers = map[string]string{}
+		}
+		c.callCarriers[callKey] = carrierKey
 	}
-	c.callCarriers[callKey] = carrierKey
 	toolInput := codexToolBytes(payload.Arguments, payload.Input)
 	c.emit(ClassifiedBlock{
 		NativeKey:        node.NativeKey + "/call",
@@ -1351,10 +1354,12 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 			InputModality: schema.InputModalityNone,
 		},
 	})
-	if c.useKeys == nil {
-		c.useKeys = map[string]bool{}
+	if !c.retaining {
+		if c.useKeys == nil {
+			c.useKeys = map[string]bool{}
+		}
+		c.useKeys[callKey] = true
 	}
-	c.useKeys[callKey] = true
 }
 
 // classifyToolResult emits the depth-1 tool_result block under the carrier its

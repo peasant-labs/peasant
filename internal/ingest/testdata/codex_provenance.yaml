@@ -1,4 +1,116 @@
 cases:
+  - &boundary_pair
+    name: inherited-function-call-local-result
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-boundary-pair
+    completeness: complete
+    historyMode: paginated
+    copyBoundary: 2
+    ownershipProven: true
+    sources: &function_pair_source
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"function_call","name":"read","call_id":"call_1","arguments":"{}"}}
+        {"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"synthetic result"}}
+    entryRefs: [e_result, e_carrier, e_call]
+    expected: &boundary_expected
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 0
+      main:
+        - &standalone_result
+          ref: e_result
+          role: tool
+          entryType: tool_result
+          toolOutput: synthetic result
+          depth: 0
+          toolCallAbsent: true
+          provenance: {origin: tool_activity, ownership: local, delivery: tool_delivery}
+      retained:
+        - &retained_carrier
+          ref: e_carrier
+          content: ""
+          segmentInclusion: same_thread_surviving_own
+        - &retained_call
+          ref: e_call
+          content: "{}"
+          segmentInclusion: same_thread_surviving_own
+  - <<: *boundary_pair
+    name: inherited-custom-call-local-result
+    sources: &custom_pair_source
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"custom_tool_call","name":"read","call_id":"call_1","input":"{}"}}
+        {"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_1","output":"synthetic result"}}
+  - <<: *boundary_pair
+    name: local-function-pair
+    copyBoundary: 1
+    entryRefs: [e_carrier, e_call, e_result]
+    expected: &local_pair_expected
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 0
+      main:
+        - &local_carrier {ref: e_carrier, role: assistant, entryType: text}
+        - &local_call {ref: e_call, role: assistant, entryType: tool_use, toolInput: "{}", depth: 1, parentIndex: 0}
+        - {ref: e_result, role: tool, entryType: tool_result, toolOutput: synthetic result, depth: 1, parentIndex: 0}
+  - <<: *boundary_pair
+    name: local-custom-pair
+    copyBoundary: 1
+    sources: *custom_pair_source
+    entryRefs: [e_carrier, e_call, e_result]
+    expected: *local_pair_expected
+  - <<: *boundary_pair
+    name: inherited-function-pair
+    copyBoundary: 3
+    entryRefs: [e_carrier, e_call, e_result]
+    expected: &inherited_pair_expected
+      purpose: interaction
+      turnCount: 0
+      inputSubmissionCount: 0
+      retained:
+        - *retained_carrier
+        - *retained_call
+        - {ref: e_result, content: synthetic result, segmentInclusion: same_thread_surviving_own}
+  - <<: *boundary_pair
+    name: inherited-custom-pair
+    copyBoundary: 3
+    sources: *custom_pair_source
+    entryRefs: [e_carrier, e_call, e_result]
+    expected: *inherited_pair_expected
+  - <<: *boundary_pair
+    name: result-without-call
+    copyBoundary: 1
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"synthetic result"}}
+    entryRefs: [e_result]
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 0
+      main: [*standalone_result]
+  - <<: *boundary_pair
+    name: inherited-call-result-before-later-local-call
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"function_call","name":"read","call_id":"call_1","arguments":"{}"}}
+        {"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"synthetic result"}}
+        {"type":"response_item","payload":{"type":"function_call","name":"read","call_id":"call_1","arguments":"{}"}}
+        {"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"later result"}}
+    entryRefs: [e_result, e_local_carrier, e_local_call, e_local_result, e_carrier, e_call]
+    expected:
+      <<: *boundary_expected
+      turnCount: 2
+      main:
+        - *standalone_result
+        - {ref: e_local_carrier, role: assistant, entryType: text}
+        - {ref: e_local_call, role: assistant, entryType: tool_use, toolInput: "{}", depth: 1, parentIndex: 1}
+        - {ref: e_local_result, role: tool, entryType: tool_result, toolOutput: later result, depth: 1, parentIndex: 1}
   - name: aligned-user-context-media-unknown
     stableThreadID: "11111111-1111-4111-8111-111111111111"
     pointer: /synthetic/current.jsonl

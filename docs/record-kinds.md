@@ -107,7 +107,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 
 Baseline index format: 1.
 
-Native generation: adapter 2, indexer 18, index format 2.
+Native generation: adapter 2, indexer 19, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
