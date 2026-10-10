@@ -1,0 +1,16 @@
+# Required-name manifest for content_write_budget: deletion protection by NAME, never by count.
+requiredNames:
+  - unset-staged-memory-derives-from-custom-batch
+  - splitter-single-home
+  - staging-batch-commits-once
+  - activation-batch-commits-once
+  - activation-batch-api-commits-once
+  - oversized-session-stages-alone
+  - skip-commits-nothing
+  - state-read-commits-nothing
+  - commit-count-budget
+  - hold-under-busy-timeout
+  - batch-under-configured-caps
+  - worker-headroom-derived
+  - staged-memory-under-cap
+  - flush-on-interval

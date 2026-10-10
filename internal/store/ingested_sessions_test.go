@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
 )
@@ -18,12 +20,14 @@ const (
 	ingestedSessionWithMetrics    = "50000000-0000-0000-0000-000000000001"
 	ingestedSessionWithoutMetrics = "50000000-0000-0000-0000-000000000002"
 
-	allIngestedSessionsFixturePath      = "internal/store/testdata/reader/all_ingested_sessions.yaml"
-	allIngestedSessionsFixtureCaseCount = 2
+	allIngestedSessionsFixturePath = "internal/store/testdata/reader/all_ingested_sessions.yaml"
 )
 
 //go:embed testdata/reader/all_ingested_sessions.yaml
 var allIngestedSessionsFixtureData []byte
+
+//go:embed testdata/reader/all_ingested_sessions.manifest.yaml
+var allIngestedSessionsManifestData []byte
 
 type allIngestedSessionsFixtures struct {
 	Cases []allIngestedSessionFixture `yaml:"cases"`
@@ -60,8 +64,16 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 	default:
 		return nil, fmt.Errorf("decode trailing YAML content in committed fixture %s: %w; remove or repair the trailing YAML document", allIngestedSessionsFixturePath, err)
 	}
-	if len(fixtures.Cases) != allIngestedSessionsFixtureCaseCount {
-		return nil, fmt.Errorf("committed fixture %s defines %d cases, want exactly %d store read scenarios; add or remove cases and keep the row-count guard current", allIngestedSessionsFixturePath, len(fixtures.Cases), allIngestedSessionsFixtureCaseCount)
+	manifest, err := decodeRecoveryRequiredNames(allIngestedSessionsManifestData)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, c := range fixtures.Cases {
+		names = append(names, c.Name)
+	}
+	if err := validateRecoveryRequiredNames(manifest, names, "all ingested sessions"); err != nil {
+		return nil, err
 	}
 
 	seenNames := make(map[string]struct{}, len(fixtures.Cases))
@@ -110,8 +122,8 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 	if !hasPopulatedColumns || !hasEmptyColumns {
 		return nil, fmt.Errorf("committed fixture %s must include one populated row and one empty-compatible row; keep both read behaviors covered", allIngestedSessionsFixturePath)
 	}
-	if len(seenHarnesses) != allIngestedSessionsFixtureCaseCount {
-		return nil, fmt.Errorf("committed fixture %s defines %d distinct harnesses, want exactly %d; use a different harness per row so harness readback cannot pass with a fixed value", allIngestedSessionsFixturePath, len(seenHarnesses), allIngestedSessionsFixtureCaseCount)
+	if len(seenHarnesses) != len(fixtures.Cases) {
+		return nil, fmt.Errorf("committed fixture %s must use a different harness per row so harness readback cannot pass with a fixed value", allIngestedSessionsFixturePath)
 	}
 	return fixtures.Cases, nil
 }
@@ -295,4 +307,59 @@ func repeatHex(t *testing.T, n int) string {
 		out[i] = digit
 	}
 	return string(out)
+}
+
+// TestInsertSessionsPreservesParentID proves the sessions upsert never
+// clobbers an established parent linkage with a parentless write: harvests
+// that carry no parent evidence must leave sessions.parent_id alone, or the
+// migration's healed parentage rots on the next harvest.
+func TestInsertSessionsPreservesParentID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "parent-preserve.db"), WithPoolSize(1))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	const sid = "60000000-0000-0000-0000-000000000001"
+	entry := makeStoreEntry(t, sid, repeatHex(t, 6), "github.com--peasant-labs--peasant", defaults.HarnessClaudeCode, 1000, 0, 0)
+	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
+		t.Fatalf("InsertSessions: %v", err)
+	}
+	const parent = "60000000-0000-0000-0000-000000000002"
+	seedGenerationSession(t, s, parent)
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET parent_id = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{parent, sid},
+	}); err != nil {
+		s.pool.Put(conn)
+		t.Fatalf("set parent linkage: %v", err)
+	}
+	s.pool.Put(conn)
+	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
+		t.Fatalf("re-insert without parent: %v", err)
+	}
+	conn, err = s.pool.Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	var got string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{sid},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				got = stmt.ColumnText(0)
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got != parent {
+		t.Fatalf("parent_id = %q, want the established %q: a parentless write must not clobber it", got, parent)
+	}
 }

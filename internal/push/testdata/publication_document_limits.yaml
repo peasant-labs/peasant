@@ -1,0 +1,47 @@
+# The production transcript publication caps as literal data. A revert of the
+# 128 MiB output cap, a widened 64 MiB input seam, or a removed scan fails these
+# checks; nothing here materializes a 128 MiB document.
+policy:
+  outputCapBytes: 134217728
+  belowCapBytes: 134217727
+  aboveCapBytes: 134217729
+  inputCapBytes: 67108864
+  outputRefusal: 'raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 134217728 bytes; decoding would exceed the caller boundary; reduce the document'
+  inputRefusal: 'raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 67108864 bytes; decoding would exceed the caller boundary; reduce the document'
+
+# Small limits injected through the unexported transcript marshaler seam. The
+# same production path runs with these, so every mechanics case is a few KiB.
+mechanics:
+  outputLimitBytes: 4096
+  inputLimitBytes: 2048
+
+cases:
+  - name: redacted_document_one_byte_below_output_limit
+    redactedBytes: 4095
+    accepted: true
+    redactorCalled: true
+  - name: redacted_document_at_output_limit
+    redactedBytes: 4096
+    accepted: true
+    redactorCalled: true
+  - name: redacted_document_one_byte_above_output_limit
+    redactedBytes: 4097
+    accepted: false
+    redactorCalled: true
+    error: "raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 4096 bytes; decoding would exceed the caller boundary; reduce the document"
+  - name: input_redaction_seam_still_refuses_above_input_limit
+    inputBytes: 2049
+    redactedBytes: 4095
+    accepted: false
+    redactorCalled: false
+    error: "raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 2048 bytes; decoding would exceed the caller boundary; reduce the document"
+
+# Exactly one real-size case for this document family, run only by the non-race
+# materialization test. The literal cap+1 target and the exact refusal string
+# are the mutation tripwires for the production output cap.
+realSizeCases:
+  - name: redacted_document_above_contract_cap_at_real_size
+    redactedBytes: 134217729
+    accepted: false
+    redactorCalled: true
+    error: "raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 134217728 bytes; decoding would exceed the caller boundary; reduce the document"

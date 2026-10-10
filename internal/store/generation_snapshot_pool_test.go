@@ -36,9 +36,9 @@ func TestSessionSnapshotReleasesPoolConnection(t *testing.T) {
 	}
 	seedGenerationSession(t, s, string(sid))
 	v2, blobs := buildTestGeneration(t, sid, "gen_pool_g1", "pool text", "pool input", "pool output")
-	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: v2, Blobs: blobs}); err != nil {
-		t.Fatalf("activate: %v", err)
-	}
+	// The snapshot reader serves the file-backed representation; the
+	// readers change wires the harmonized catalog rows to it.
+	seedFileBackedGeneration(t, s, root, sid, v2, blobs, false)
 
 	done := make(chan error, 1)
 	go func() {

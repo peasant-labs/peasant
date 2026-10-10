@@ -275,14 +275,11 @@ func TestCodexCommittedWrapperPayloadKeepsLiteralBodies(t *testing.T) {
 	dir := t.TempDir()
 	s := openCodexCommittedPayloadStore(t, dir)
 	storetest.SeedSession(t, s, fixture.Session.ID)
-	if _, err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
-		Generation:     candidate.V2,
-		Blobs:          candidate.Content,
-		IndexerVersion: 1,
-		IndexedAtMs:    1,
-	}); err != nil {
-		t.Fatalf("ActivateGeneration: %v", err)
-	}
+	// The committed readers serve the file-backed representation; the
+	// harmonized catalog rows the writer installs are asserted by the
+	// writer's own round-trip test, and the readers change wires them to
+	// these same consumers.
+	seedFileBackedExternal(t, s, filepath.Join(dir, "generations.db"), filepath.Join(dir, "artifacts"), sessionID, candidate.V2, candidate.Content, false, nil)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
 	}

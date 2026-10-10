@@ -1,0 +1,2 @@
+# Embedded DDL must match the migration chain and generated baseline byte-for-byte.
+/internal/store/baseline_schema.sql text eol=lf

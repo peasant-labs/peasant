@@ -15,6 +15,7 @@
 # the configuration path must be exactly as it was, and the running server
 # must apply what it applied before.
 requiredNames:
+  - a write budget cannot be edited by the dashboard
   - a valid write names the new value in config.yaml
   - a structured write stores the custom patterns
   - a null value unsets the key and the default applies
@@ -40,6 +41,15 @@ requiredNames:
   - a string write names the text
   - a string list write names the list
 cases:
+  - name: a write budget cannot be edited by the dashboard
+    file: |
+      version: 1
+      write:
+        holdTargetMs: 4000
+    body: '{"key": "write.holdTargetMs", "value": 3000}'
+    status: 400
+    key: write.holdTargetMs
+    errorContains: ["edit config.yaml before the next harvest", "Nothing was changed"]
   - name: a valid write names the new value in config.yaml
     file: |
       # written by hand

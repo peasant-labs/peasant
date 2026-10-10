@@ -51,6 +51,30 @@ func readSessionIDsFromFile(path string) ([]string, error) {
 	return ids, nil
 }
 
+// The research sampling turn counts read each session's current
+// representation: mapped body rows for harmonized sessions, mirror rows for
+// everyone else (file-backed sessions still own their mirror). Both the
+// sampling filters and the display columns share these fragments, so one
+// test pins the shipped text for all four sites.
+const sqlResearchUserTurns = `CASE WHEN EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id) THEN
+  (SELECT COUNT(*) FROM session_generation_entries m JOIN session_entry_bodies b
+   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+   WHERE m.session_id = s.session_id AND m.generation_id = s.active_generation_id
+   AND m.partition_id = 0 AND b.role = 'user' AND b.depth = 0)
+ELSE
+  (SELECT COUNT(*) FROM session_entries se
+   WHERE se.session_id = s.session_id AND se.role = 'user' AND se.depth = 0)
+END`
+
+const sqlResearchTotalTurns = `CASE WHEN EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id) THEN
+  (SELECT COUNT(*) FROM session_generation_entries m
+   WHERE m.session_id = s.session_id AND m.generation_id = s.active_generation_id
+   AND m.partition_id = 0)
+ELSE
+  (SELECT COUNT(*) FROM session_entries se
+   WHERE se.session_id = s.session_id)
+END`
+
 func runAnnotateSample(cmd *cobra.Command, _ []string) (retErr error) {
 	count, _ := cmd.Flags().GetInt("count")
 	minUserTurns, _ := cmd.Flags().GetInt("min-user-turns")
@@ -87,18 +111,14 @@ func runAnnotateSample(cmd *cobra.Command, _ []string) (retErr error) {
 	var entryConditions []string
 	var entryArgs []any
 
-	// Filter on depth-0 user turns from session_entries (our indexed schema, correct roles).
+	// Filter on depth-0 user turns through the shared fragment.
 	if minUserTurns > 0 {
-		entryConditions = append(entryConditions,
-			`(SELECT COUNT(*) FROM session_entries se
-			  WHERE se.session_id = s.session_id AND se.role = 'user' AND se.depth = 0) >= ?`)
+		entryConditions = append(entryConditions, `(`+sqlResearchUserTurns+`) >= ?`)
 		entryArgs = append(entryArgs, minUserTurns)
 	}
-	// Filter on total indexed turns from session_entries (all roles, all depths).
+	// Filter on total indexed turns through the shared fragment.
 	if maxTotalTurns > 0 {
-		entryConditions = append(entryConditions,
-			`(SELECT COUNT(*) FROM session_entries se
-			  WHERE se.session_id = s.session_id) <= ?`)
+		entryConditions = append(entryConditions, `(`+sqlResearchTotalTurns+`) <= ?`)
 		entryArgs = append(entryArgs, maxTotalTurns)
 	}
 	if project != "" {
@@ -151,15 +171,17 @@ func runAnnotateSample(cmd *cobra.Command, _ []string) (retErr error) {
 		orderBy = fmt.Sprintf("ORDER BY hex(substr(s.session_id, 1, 8) || '%d')", seed)
 	}
 
-	// The session info query (shared between new sampling and existing lookups)
+	// The session info query (shared between new sampling and existing lookups).
 	selectCols := `s.session_id, COALESCE(p.canonical_cwd, p.project_hash),
-		(SELECT COUNT(*) FROM session_entries se WHERE se.session_id = s.session_id AND se.role = 'user' AND se.depth = 0) as user_turns,
-		(SELECT COUNT(*) FROM session_entries se WHERE se.session_id = s.session_id) as total_turns,
-		COALESCE(m.input_tokens,0)+COALESCE(m.output_tokens,0) as tokens,
-		m.duration_minutes, m.tool_calls`
+		(` + sqlResearchUserTurns + `) as user_turns,
+		(` + sqlResearchTotalTurns + `) as total_turns,
+		COALESCE(m.input_tokens,0)+COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,0) as tokens,
+		CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END,
+		CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END`
 
 	joinClause := `FROM sessions s
 		JOIN session_metrics m ON s.session_id = m.session_id
+		LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 		JOIN projects p ON s.project_hash = p.project_hash`
 
 	// SQLite evaluates WHERE before LIMIT, so filtering happens before sampling —

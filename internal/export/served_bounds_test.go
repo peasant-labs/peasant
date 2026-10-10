@@ -15,7 +15,7 @@ import (
 )
 
 // TestExportSession_BoundsAnOversizedToolResult exports a session whose stored
-// tool result is larger than the wire contract lets a served document be.
+// tool result is larger than the per-field display budget.
 // `peasant export` reads the same projection the viewer reads, so the export
 // carries the same visible note and stays a valid contract document instead of
 // failing the whole session.

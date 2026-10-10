@@ -1,0 +1,48 @@
+cases:
+  - name: identical
+    operation: identical
+    wantDisposition: skipped
+  - name: adapter-only
+    operation: adapter-only
+    adapterVersion: 99
+    wantDisposition: skipped
+  - name: read-visible-metadata
+    operation: read-visible-metadata
+    purpose: interaction
+    wantDisposition: committed
+  - name: one-entry-changed
+    operation: one-entry-changed
+    preview: skip base text altered
+    wantDisposition: committed
+  - name: alias-changed
+    operation: alias-changed
+    aliasKey: native-0
+    aliasRef: e_call1
+    wantDisposition: committed
+  - name: segment-changed
+    operation: segment-changed
+    segmentRef: e_retained_skip
+    segmentSource: skip-source
+    segmentText: retained skip bytes
+    wantDisposition: committed
+  - name: completeness-differs
+    operation: completeness-differs
+    texts: [same text, same input, same output]
+  - name: pointer-moved-fallback
+    operation: pointer-moved-fallback
+    comparedGeneration: gen_moved_elsewhere
+  - name: incomplete-new-never-skips
+    operation: incomplete-new-never-skips
+    texts: [skip base text, skip base input, skip base output]
+  - name: file-backed-never-skips
+    operation: file-backed-never-skips
+    texts: [fb text, fb input, fb output]
+    wantDisposition: committed
+  - name: stats-only-change-updates-in-place
+    operation: stats-only-change-updates-in-place
+    turnCount: 99
+    wantDisposition: skipped
+  - name: metadata-hash-stats-excluded
+    operation: metadata-hash-stats-excluded
+    turnCount: 1000
+    wantDisposition: skipped

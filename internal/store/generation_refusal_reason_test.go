@@ -67,29 +67,16 @@ func TestPreviewOverFullRefusalReasonPrepared(t *testing.T) {
 	requirePreviewOverFullRefusal(t, s, sid, outcome, err)
 }
 
-// TestPreviewOverFullRefusalReasonReplayed replays a recorded intent for the
-// same candidate: the recovery refusal must keep the actionable reason.
+// TestPreviewOverFullRefusalReasonReplayed proves a repeated attempt with
+// the same preview candidate is refused again with the actionable reason:
+// no recovery path exists that could bypass the guard, and the last-good
+// generation stays authoritative across attempts.
 func TestPreviewOverFullRefusalReasonReplayed(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c")
 	activation := previewOverFullActivation(t, s, sid)
-	generation := activation.Generation.Generation
-	digest, err := computeActivationBinding(generation, bindingFromBlobs(activation.Blobs))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.generationArtifacts.Stage(context.Background(), generation, activation.Blobs); err != nil {
-		t.Fatalf("stage: %v", err)
-	}
-	if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
-		SessionID: sid, GenerationID: generation.ID,
-		ManifestPath: "generations/" + generation.ID + "/manifest.json",
-		Completeness: string(generation.Completeness), StagedAtMs: 1,
-		IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: activation.ContentCapture,
-		CandidateDigest: digest,
-	}); err != nil {
-		t.Fatalf("write intent: %v", err)
-	}
-	outcome, err := s.RecoverGenerationActivation(context.Background(), sid)
+	first, err := s.ActivateGeneration(context.Background(), activation)
+	requirePreviewOverFullRefusal(t, s, sid, first, err)
+	outcome, err := s.ActivateGeneration(context.Background(), activation)
 	requirePreviewOverFullRefusal(t, s, sid, outcome, err)
 }

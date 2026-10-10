@@ -1,0 +1,6 @@
+# Required-name manifest for content_promotion: deletion protection by NAME, never by count.
+requiredNames:
+  - promotion-rewrite-preserves-digest-and-refs
+  - stat-kind-promotion-parity
+  - prior-evidence-promotion-parity
+  - native-metadata-promotion-parity

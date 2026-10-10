@@ -24,11 +24,12 @@ const (
 	sqlQueryPrunableSessions = `SELECT
     s.session_id, s.model_harness,
     COALESCE(p.canonical_cwd, p.project_hash, ''), COALESCE(h.git_remote, ''),
-    s.start_ms, COALESCE(m.turn_count, 0), h.host_slug,
+    s.start_ms, COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0), h.host_slug,
     s.project_hash, ` + sqlRecordedDirectory + `,
     COALESCE(s.git_branch, '')
 FROM sessions s
 LEFT JOIN session_metrics m ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 LEFT JOIN projects p ON s.project_hash = p.project_hash
 LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 )
@@ -125,6 +126,19 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
 
+	// Index-health gate before the first delete: when a prior untrusted
+	// delete set the flag, rebuild the whole index first so prune never
+	// compounds stale postings.
+	if state, gateErr := searchStateReadOnConn(conn); gateErr != nil {
+		err = fmt.Errorf("store.PruneSessions: read the search index health: %w", gateErr)
+		return ingest.PruneResult{}, err
+	} else if state.NeedsRebuild {
+		if gateErr := rebuildSearchIndexOnConn(conn); gateErr != nil {
+			err = fmt.Errorf("store.PruneSessions: rebuild the flagged search index before pruning: %w; nothing was pruned", gateErr)
+			return ingest.PruneResult{}, err
+		}
+	}
+
 	// Build IN clause for all queries.
 	placeholders := make([]string, len(sessionIDs))
 	args := make([]any, len(sessionIDs))
@@ -188,6 +202,21 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		}
 	}
 
+	// Delete-time digest check over the harmonized bodies: a row whose
+	// serialization fails to hash-match cannot be trusted for the BEFORE
+	// DELETE un-indexing, so the flag is set on the same transaction and
+	// the whole-index rebuild clears the stale postings. Most body rows
+	// cascade from the sessions delete below, and the trigger fires on the
+	// cascade.
+	pruneIDs := make([]string, len(sessionIDs))
+	for i, id := range sessionIDs {
+		pruneIDs[i] = string(id)
+	}
+	mismatched, err := verifyBodiesForDeleteOnConn(conn, pruneIDs)
+	if err != nil {
+		return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: %w", err)
+	}
+
 	// Phase 2: Delete from tables with session_id in FK-safe order.
 	// session_entries_ext has ON DELETE CASCADE from session_entries,
 	// but we delete explicitly for robustness.
@@ -211,7 +240,19 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		}
 	}
 
-	// Use actual rows affected from the sessions DELETE (last statement).
+	// Use actual rows affected from the sessions DELETE (the last delete
+	// statement): read before the conditional rebuild below runs its own
+	// statements.
 	deleted := conn.Changes()
+
+	// When the delete-time check found an untrusted body, the deletes above
+	// ran with values the trigger cannot un-index exactly. Rebuild through
+	// the one path before committing, so prune never leaves the flag set.
+	if mismatched {
+		if err = rebuildSearchIndexOnConn(conn); err != nil {
+			return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: rebuild the search index after an untrusted delete: %w", err)
+		}
+	}
+
 	return ingest.PruneResult{Deleted: deleted}, nil
 }

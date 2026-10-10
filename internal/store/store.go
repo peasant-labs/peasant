@@ -279,6 +279,9 @@ type Store struct {
 	// the reclaim after its row transaction commits and before any generation
 	// directory is removed. It proves the row-first ordering is crash-safe.
 	reclaimSeam func(stage string) error
+	// writeConfig carries the resolved write.* budgets for the staging and
+	// activation lanes (see WithWriteConfig).
+	writeConfig ingest.WriteConfig
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -313,6 +316,19 @@ type openOptions struct {
 	// log for the life of the pool. It exists so a test can count commits by
 	// reading the log, and is never set on a production open.
 	walAutocheckpointDisabled bool
+	// writeConfig carries the write.* budgets the staging and activation
+	// lanes enforce. Nil means the shipped defaults at the host's worker
+	// count; the pipeline passes its resolved configuration so the store
+	// lanes ask the same splitter over the same knobs.
+	writeConfig *ingest.WriteConfig
+}
+
+// WithWriteConfig gives the store's staging and activation lanes their
+// budgets: every batch bound is read from this configuration through the one
+// splitter, never from a compiled literal. Pass a resolved configuration
+// (WithDefaults applied); a nil option keeps the shipped defaults.
+func WithWriteConfig(cfg ingest.WriteConfig) OpenOption {
+	return func(o *openOptions) { o.writeConfig = &cfg }
 }
 
 // WithSkipMigrations skips the migration-state check on Open. The caller MUST
@@ -432,12 +448,21 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	// DB is already at the current schema (WithSkipMigrations). Skipping avoids
 	// the per-Open migration-state re-check (~16% of store.Open CPU), which is
 	// pure waste for a copy of a freshly-migrated golden DB in tests.
+	conn, err := pool.Take(context.Background())
+	if err != nil {
+		_ = pool.Close()
+		return nil, fmt.Errorf("store: take connection for migration: %w", err)
+	}
+	// A database upgraded by a newer release is refused before any
+	// migration, backfill, or salt load: the migrator only moves forward,
+	// so opening it would silently serve a schema this build cannot
+	// understand.
+	if err := refuseNewerSchemaOnConn(conn, dbPath); err != nil {
+		pool.Put(conn)
+		_ = pool.Close()
+		return nil, err
+	}
 	if !o.skipMigrations {
-		conn, err := pool.Take(context.Background())
-		if err != nil {
-			_ = pool.Close()
-			return nil, fmt.Errorf("store: take connection for migration: %w", err)
-		}
 		if err := refuseUnmappableCaptureFormats(conn); err != nil {
 			pool.Put(conn)
 			_ = pool.Close()
@@ -476,6 +501,11 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			_ = pool.Close()
 			return nil, fmt.Errorf("store: apply V23 data migration: %w", err)
 		}
+	} else {
+		// The caller guarantees the schema: the newer-schema check above
+		// already ran on this connection, so return it before the salt
+		// load takes its own.
+		pool.Put(conn)
 	}
 
 	// Load the installation salt. Required by InsertSessions to compute opaque_host_id.
@@ -486,7 +516,9 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	return &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker}, nil
+	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker}
+	opened.writeConfig = resolveStoreWriteConfig(o.writeConfig)
+	return opened, nil
 }
 
 // readUserVersion returns the PRAGMA user_version value from the pool.

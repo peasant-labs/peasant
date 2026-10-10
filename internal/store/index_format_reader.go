@@ -12,7 +12,9 @@ import (
 const indexFormatReadBatchSize = 256
 
 const sqlIndexFormatState = `SELECT s.session_id, s.index_format_version,
-EXISTS (SELECT 1 FROM session_entries e WHERE e.session_id = s.session_id)
+(EXISTS (SELECT 1 FROM session_entries e WHERE e.session_id = s.session_id)
+ OR EXISTS (SELECT 1 FROM session_generation_entries m
+   WHERE m.session_id = s.session_id AND m.generation_id = s.active_generation_id AND m.partition_id = 0))
 FROM sessions s`
 
 // ValidateIndexFormatsOnConn checks only the requested session IDs in the

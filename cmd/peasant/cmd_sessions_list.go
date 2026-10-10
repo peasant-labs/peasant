@@ -91,7 +91,7 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 	for i, row := range rows {
 		sessionIDs[i] = row.SessionID
 	}
-	previews, pErr := db.FirstUserMessageBulk(ctx, sessionIDs)
+	previews, pErr := readListPreviews(ctx, db, sessionIDs)
 	if pErr != nil {
 		previews = map[string]string{} // degrade gracefully; entries will show empty preview
 	}

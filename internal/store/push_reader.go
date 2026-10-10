@@ -52,16 +52,19 @@ const sqlPushSessionsBase = `SELECT
     s.ingested_ms, s.pushed_at,
     s.source_path, s.source_format,
     s.git_branch, s.tool_version,
-    m.turn_count, m.tool_calls,
-    m.input_tokens, m.output_tokens,
-    COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0),
-    CAST(m.duration_minutes * 60000 AS INTEGER),
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
+    m.input_tokens,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
+    COALESCE(m.input_tokens, 0) + COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END, 0),
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.duration_ms ELSE CAST(m.duration_minutes * 60000 AS INTEGER) END,
     COALESCE(h.git_remote, ''),
     COALESCE(s.parent_id, ''),
     ` + sqlRecordedDirectory + `,
     s.session_origin
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 LEFT JOIN projects p ON s.project_hash = p.project_hash
 LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 

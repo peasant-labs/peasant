@@ -1,0 +1,11 @@
+# Required-name manifest for content_release_guard: deletion protection by NAME, never by count.
+requiredNames:
+  - refuses-nonempty-projection-generations
+  - refuses-nonempty-projection-entries
+  - refuses-nonempty-projection-content
+  - refuses-session-entries-fts-present
+  - refuses-native-full-content-rows
+  - allows-non-native-full-content-rows
+  - allows-all-preconditions-met
+  - fresh-install-needs-consolidation
+  - newer-schema-refused-on-open

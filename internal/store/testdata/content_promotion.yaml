@@ -1,0 +1,21 @@
+# Serializer and repair evidence only: no speculative column-add promotion.
+cases:
+  - name: promotion-rewrite-preserves-digest-and-refs
+    mode: rewrite
+    damage: body-column
+    term: durable
+  - name: stat-kind-promotion-parity
+    mode: stats
+    statsCase: unknown-kind-kept-in-overflow
+    # Adding a real stat column is out of scope until a kind is promoted.
+  - name: prior-evidence-promotion-parity
+    mode: prior
+    priorHex: '00ff80fe7b2261223a317d0a'
+  - name: native-metadata-promotion-parity
+    mode: metadata
+    records:
+      - {kind: pi.custom.data, source: pi.custom, data: ' { "z":2, "a":1 } '}
+      - {kind: pi.custommessage.details, source: pi.custom_message, data: ' { "z":2, "a":1 } '}
+      - {kind: pi.toolresult.details, source: pi.message, data: ' { "z":2, "a":1 } '}
+      - {kind: pi.compaction.details, source: pi.compaction, data: ' { "z":2, "a":1 } '}
+      - {kind: pi.branchsummary.details, source: pi.branch_summary, data: ' { "z":2, "a":1 } '}

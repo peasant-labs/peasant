@@ -1,0 +1,31 @@
+# content_enospc — the harmonized session content model disk-full family
+# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
+# The page-growth cases use a real SQLITE_FULL from PRAGMA max_page_count
+# set just above the current page count before the step — verified on
+# 3.49.2 (`database or disk is full`), driving the production error path
+# with no VFS shim. The three migration-owned cases carry their step; the
+# migration runner caps the database, drives the step, and asserts the old
+# state is intact with orphans flagged. The other cases stay name
+# placeholders their owners fill.
+cases:
+  - name: stage-full
+    owner: harvest
+    step: stage
+    batchBytes: 64
+    textBytes: 65536
+  - name: commit-full
+    owner: harvest
+    step: commit
+    entries: 1500
+  - name: sweep-full
+    owner: harvest
+    step: sweep
+  - name: migrate-body-subtxn-full
+    owner: migration
+    step: body-subtxn
+  - name: migrate-catalog-full
+    owner: migration
+    step: catalog
+  - name: migrate-search-consolidation-full
+    owner: migration
+    step: search-consolidation

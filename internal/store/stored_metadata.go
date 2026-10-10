@@ -22,6 +22,9 @@ func (s *Store) ReadStoredMetadata(ctx context.Context, sid ingest.SessionID) ([
 	}
 	defer s.pool.Put(conn)
 	var data []byte
+	// Native sessions embed the harness-only seed home; sessions without an
+	// active generation keep the legacy sessions column. Either way only a
+	// JSON object (or SQL NULL for unknown) is evidence.
 	err = sqlitex.ExecuteTransient(conn, `SELECT json_patch(json_object(
     'schemaVersion', s.schema_version,
     'sessionId', s.session_id, 'parentUuid', s.parent_id,
@@ -36,11 +39,12 @@ func (s *Store) ReadStoredMetadata(ctx context.Context, sid ingest.SessionID) ([
             'hash', c.commit_hash, 'message', c.message, 'authorName', c.author_name,
             'authorEmail', c.author_email, 'commitTime', c.commit_time, 'authorTime', c.author_time
         )) FROM (SELECT * FROM session_commits WHERE session_id = s.session_id ORDER BY commit_hash) c))
-), json_object('adapterVersion', s.adapter_version, 'stats', json(s.metric_seed_json))),
-json_type(s.metric_seed_json)
+), json_object('adapterVersion', s.adapter_version, 'stats', json(CASE WHEN s.active_generation_id IS NOT NULL THEN cap.seed_json ELSE s.metric_seed_json END))),
+json_type(CASE WHEN s.active_generation_id IS NOT NULL THEN cap.seed_json ELSE s.metric_seed_json END)
 FROM sessions s
 JOIN host_slugs h ON h.opaque_id = s.opaque_host_id
 LEFT JOIN projects p ON p.project_hash = s.project_hash
+LEFT JOIN session_captured_stats cap ON cap.session_id = s.session_id
 WHERE s.session_id = ?1`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {

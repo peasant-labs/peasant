@@ -1,0 +1,14 @@
+required_names: [batch-native-admission, stream-native-admission]
+transcript: |
+  {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+  {"type":"turn_context","payload":{"model":"gpt-5"}}
+  {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"user","id":"message-1","content":[{"type":"input_text","text":"admission content"}]}}
+cases:
+  - name: batch-native-admission
+    mode: batch
+    entries: [2, 2, 2, 2]
+    cap_units: 1
+  - name: stream-native-admission
+    mode: stream
+    entries: [2, 2, 2, 2]
+    cap_units: 1

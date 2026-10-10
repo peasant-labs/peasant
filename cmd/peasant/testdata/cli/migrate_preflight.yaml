@@ -1,0 +1,20 @@
+cases:
+  - name: below-floor
+    storeBytes: 1000
+    freeBytes: 599
+    requiredBytes: 600
+    diskOK: false
+    refuses: true
+    textContains: ['free disk:', 'INSUFFICIENT', '60% of the', 'advisory: no other writer']
+  - name: at-floor
+    storeBytes: 1000
+    freeBytes: 600
+    requiredBytes: 600
+    diskOK: true
+    textContains: ['free disk:', '(OK)', '60% of the', 'advisory: no other writer']
+  - name: unknown-fs
+    storeBytes: 1000
+    freeBytes: -1
+    requiredBytes: 600
+    diskOK: true
+    textContains: ['free disk: unknown', 'check available space', 'advisory: no other writer']

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -562,6 +563,11 @@ type Config struct {
 	Push      PushConfig      `yaml:"push"`
 	Selection SelectionConfig `yaml:"selection"`
 	Display   DisplayConfig   `yaml:"display"`
+	// Write carries the write.* budgets the ingest pipeline enforces
+	// (batch bounds, per-worker buffers, staged-memory caps, and the
+	// flush interval). Unset knobs take the shipped defaults at the
+	// effective worker count; see ingest.WriteConfig.
+	Write ingest.WriteConfig `yaml:"write"`
 
 	// ClaudeRetentionDays is the Claude Code cleanupPeriodDays value the
 	// onboarding flow lets the user choose. It is NOT a peasant setting: it is
@@ -747,7 +753,22 @@ func BaseConfig() *Config {
 		Display: DisplayConfig{
 			Theme: ThemeDark,
 		},
+		// The write budgets resolve to the shipped defaults at load: scalar
+		// knobs are filled here, and the staged-memory cap (which depends on
+		// the run's effective worker count) derives at the use sites, so a
+		// saved file never pins another machine's worker count.
+		Write: defaultWriteConfig(),
 	}
+}
+
+// defaultWriteConfig fills the write.* scalar knobs with the shipped
+// defaults, leaving the staged-memory cap unset so it derives from the run's
+// effective worker count at the use sites. A saved file therefore never pins
+// another machine's worker count.
+func defaultWriteConfig() ingest.WriteConfig {
+	cfg := ingest.DefaultWriteConfig(1)
+	cfg.StagedMemoryBytes = 0
+	return cfg
 }
 
 // Load reads the YAML config file at path, validates it, and returns the result.
@@ -997,6 +1018,15 @@ func validate(cfg *Config) error {
 	// Validate display config.
 	if cfg.Display.Theme != "" && !cfg.Display.Theme.IsValid() {
 		return fmt.Errorf("config: unknown display.theme %q (valid: dark, light)", cfg.Display.Theme)
+	}
+
+	// Validate the write budgets at the run's worker estimate. Unset knobs
+	// take the shipped defaults and the staged-memory cap derives, so a bad
+	// write.* section fails here, before the first session is read, rather
+	// than mid-harvest. The pipeline re-resolves at its own effective worker
+	// count, which only tightens the derived cap.
+	if err := cfg.Write.WithDefaults(runtime.NumCPU()).Validate(); err != nil {
+		return err
 	}
 	return nil
 }

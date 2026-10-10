@@ -43,7 +43,11 @@ tables:
   - session_commands
   - session_commit_associations
   - session_commits
+  - session_captured_stats
+  - session_content
   - session_content_captures
+  - session_content_chunks
+  - session_context_segment_refs
   - session_context_segments
   - session_entries
   - session_entries_ext
@@ -52,9 +56,19 @@ tables:
   - session_entries_fts_data
   - session_entries_fts_docsize
   - session_entries_fts_idx
+  - session_entry_bodies
   - session_entry_full_content
   - session_entry_full_content_chunks
   - session_files
+  - session_generation_associations
+  - session_generation_commits
+  - session_generation_content
+  - session_generation_diagnostics
+  - session_migration_gaps
+  - session_generation_entries
+  - session_generation_subagents
+  - session_generation_title_refs
+  - session_generations
   - session_metrics
   - session_projection_aliases
   - session_projection_content
@@ -63,6 +77,13 @@ tables:
   - session_projection_sections
   - session_publication_metadata
   - session_publications
+  - session_search_fts
+  - session_search_fts_config
+  - session_search_fts_data
+  - session_search_fts_docsize
+  - session_search_fts_idx
+  - session_search_state
+  - session_section_native_metadata
   - session_relationship_evidence
   - sessions
   - target_kinds
@@ -88,6 +109,8 @@ indexes:
   - idx_anntype_status
   - idx_daily_project_hash
   - idx_entries_ext_key
+  - idx_generation_content_digest
+  - idx_generation_entries_body
   - idx_index_log_outcome
   - idx_index_log_session
   - idx_injection_log_project
@@ -112,8 +135,8 @@ indexes:
   - idx_session_entries_role
   - idx_session_entries_type
   - idx_session_files_path
-  - idx_session_projection_entries_partition
   - idx_session_publication_parent_uuid
+  - idx_sessions_sweep_pending
   - idx_session_publications_project
   - idx_sessions_harness
   - idx_sessions_host

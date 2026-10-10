@@ -179,8 +179,25 @@ const (
 ) VALUES (?, (SELECT id FROM target_kinds WHERE name = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	// V16 TPT child table INSERTs (one per target kind).
-	sqlInsertTargetSession     = `INSERT INTO annotation_target_sessions (annotation_id, session_id) VALUES (?, ?)`
-	sqlInsertTargetEntry       = `INSERT INTO annotation_target_entries (annotation_id, session_id, entry_index, end_index) VALUES (?, ?, ?, ?)`
+	sqlInsertTargetSession = `INSERT INTO annotation_target_sessions (annotation_id, session_id) VALUES (?, ?)`
+	// sqlInsertTargetEntry is the ONE guarded entry-target insert: it writes
+	// the row only when the target start entry exists in the session's
+	// current representation — the active generation's main-partition mapping
+	// for harmonized sessions, the mirror for non-native and file-backed
+	// ones. It replaces the retired session_entries foreign key at all five
+	// insert sites. Every executing site checks the affected row count (see
+	// insertAnnotationTargetEntryOnConn); no other production statement may
+	// insert into this table (pinned by the ast-grep guard and its gate
+	// test).
+	sqlInsertTargetEntry = `INSERT INTO annotation_target_entries (annotation_id, session_id, entry_index, end_index)
+SELECT ?1, ?2, ?3, ?4
+ WHERE EXISTS (SELECT 1 FROM sessions s
+                 JOIN session_generation_entries m
+                   ON m.session_id = s.session_id AND m.generation_id = s.active_generation_id
+                  AND m.partition_id = 0 AND m.entry_index = ?3
+                WHERE s.session_id = ?2)
+    OR EXISTS (SELECT 1 FROM session_entries e
+                WHERE e.session_id = ?2 AND e.entry_index = ?3)`
 	sqlInsertTargetAnnotation  = `INSERT INTO annotation_target_annotations (annotation_id, target_annotation_id) VALUES (?, ?)`
 	sqlInsertTargetProject     = `INSERT INTO annotation_target_projects (annotation_id, project_hash) VALUES (?, ?)`
 	sqlInsertTargetAssociation = `INSERT INTO annotation_target_associations (annotation_id, association_id) VALUES (?, ?)`
@@ -685,8 +702,17 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 		return "", fmt.Errorf("store: CreateAnnotation: %w", err)
 	}
 
-	// Insert TPT child row.
-	if err = sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{
+	// Insert TPT child row. Entry targets go through the guarded existence
+	// check; every other kind inserts directly.
+	if params.EntryTarget != nil {
+		endIdx := params.EntryTarget.EndIndex
+		if endIdx == 0 {
+			endIdx = params.EntryTarget.EntryIndex + 1
+		}
+		if err = insertAnnotationTargetEntryOnConn(conn, "CreateAnnotation", newID, params.EntryTarget.SessionID, params.EntryTarget.EntryIndex, endIdx); err != nil {
+			return "", err
+		}
+	} else if err = sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{
 		Args: childArgs,
 	}); err != nil {
 		return "", fmt.Errorf("store: CreateAnnotation: insert target: %w", err)
@@ -702,6 +728,24 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 	}
 
 	return newID, nil
+}
+
+// insertAnnotationTargetEntryOnConn executes the guarded entry-target
+// insert and refuses when the target start entry does not exist: zero rows
+// change, so the check is the affected count, not an error. The refusal
+// carries all six actionable parts; the caller's transaction rolls the
+// parent annotation row back with it.
+func insertAnnotationTargetEntryOnConn(conn *sqlite.Conn, site, annotationID, sessionID string, entryIndex, endIndex int) error {
+	if err := sqlitex.ExecuteTransient(conn, sqlInsertTargetEntry, &sqlitex.ExecOptions{
+		Args: []any{annotationID, sessionID, entryIndex, endIndex},
+	}); err != nil {
+		return fmt.Errorf("store: %s: insert entry annotation target: %w", site, err)
+	}
+	if changed := conn.Changes(); changed != 1 {
+		return fmt.Errorf("store: %s: entry annotation target [%d, %d) for session %s matches no stored entry (what) because the range starts outside the session's stored entries (why) at insert time (when); the annotation was not created (meaning); re-target the annotation onto a stored entry index, or re-index the session (fix)",
+			site, entryIndex, endIndex, sessionID)
+	}
+	return nil
 }
 
 func validateCreateAnnotationTarget(params CreateAnnotationParams) error {
@@ -1310,8 +1354,17 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 		return "", fmt.Errorf("store: CreateAnnotationAndSupersede: insert annotation: %w", err)
 	}
 
-	// 2. Insert TPT child row.
-	if err = sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{
+	// 2. Insert TPT child row. Entry targets go through the guarded
+	// existence check; every other kind inserts directly.
+	if p.EntryTarget != nil {
+		endIdx := p.EntryTarget.EndIndex
+		if endIdx == 0 {
+			endIdx = p.EntryTarget.EntryIndex + 1
+		}
+		if err = insertAnnotationTargetEntryOnConn(conn, "CreateAnnotationAndSupersede", newID, p.EntryTarget.SessionID, p.EntryTarget.EntryIndex, endIdx); err != nil {
+			return "", err
+		}
+	} else if err = sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{
 		Args: childArgs,
 	}); err != nil {
 		return "", fmt.Errorf("store: CreateAnnotationAndSupersede: insert target: %w", err)
@@ -1980,7 +2033,16 @@ func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotati
 	}
 	recordBatchInsertParentProfile(stats, profile, time.Since(parentStarted))
 	targetStarted := annotationBatchProfileStart(stats)
-	if err := sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{Args: childArgs}); err != nil {
+	if p.EntryTarget != nil {
+		endIdx := p.EntryTarget.EndIndex
+		if endIdx == 0 {
+			endIdx = p.EntryTarget.EntryIndex + 1
+		}
+		if err := insertAnnotationTargetEntryOnConn(conn, "classifierAnnotationInsert", newID, p.EntryTarget.SessionID, p.EntryTarget.EntryIndex, endIdx); err != nil {
+			recordBatchInsertTargetProfile(stats, profile, time.Since(targetStarted))
+			return "", err
+		}
+	} else if err := sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{Args: childArgs}); err != nil {
 		recordBatchInsertTargetProfile(stats, profile, time.Since(targetStarted))
 		return "", fmt.Errorf("store: insert classifier annotation target: %w", err)
 	}
@@ -3029,7 +3091,15 @@ func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnot
 			return nil, err
 		}
 
-		if err = sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{
+		if p.EntryTarget != nil {
+			endIdx := p.EntryTarget.EndIndex
+			if endIdx == 0 {
+				endIdx = p.EntryTarget.EntryIndex + 1
+			}
+			if err = insertAnnotationTargetEntryOnConn(conn, fmt.Sprintf("BatchCreateAnnotations[%d]", i), newID, p.EntryTarget.SessionID, p.EntryTarget.EntryIndex, endIdx); err != nil {
+				return nil, err
+			}
+		} else if err = sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{
 			Args: childArgs,
 		}); err != nil {
 			err = fmt.Errorf("store: BatchCreateAnnotations[%d]: insert target: %w", i, err)

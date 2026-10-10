@@ -1,0 +1,18 @@
+id: no-single-line-blocks
+language: Go
+severity: error
+message: >-
+  Single-line block: put the body on its own indented lines. One-line
+  if/for/switch/select/function bodies are hard to read and diff, and gofmt
+  accepts them, so this rule carries the convention.
+note: >-
+  Empty blocks (`{}`) are fine (the no-op closure and `select {}` idioms).
+  Split the braces: the header line ends with `{`, the body is indented, the
+  closing `}` is on its own line.
+rule:
+  kind: block
+  regex: '\A\{[^\n]+\}\z'
+  inside:
+    any:
+      - kind: if_statement
+      - kind: for_statement

@@ -1,0 +1,8 @@
+# Required-name manifest for content_one_copy: deletion protection by NAME, never by count.
+requiredNames:
+  - activation-writes-no-files
+  - refresh-writes-no-files
+  - each-content-string-stored-once
+  - append-reuses-unchanged-bodies
+  - superseded-copy-gone-after-sweep
+  - non-emitted-bytes-equal-emitted-content

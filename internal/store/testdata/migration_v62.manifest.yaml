@@ -1,0 +1,24 @@
+requiredNames:
+  - full-stats-backfilled
+  - partial-stats-keep-null
+  - active-empty-stats-row-nulls
+  - null-active-writes-no-stats-row
+  - no-generations-no-row-no-flag
+  - active-only-unflagged
+  - annotation-target-first
+  - annotation-target-second
+  - evidence-full-anchor
+  - evidence-null-anchor
+  - evidence-kind-only-anchor
+  - evidence-order-first
+  - evidence-order-second
+  - segment-two-refs
+  - segment-no-refs
+  - segment-scalar-refs
+  - section-mixed-metadata
+  - section-null-metadata
+  - section-json-null-metadata
+  - segment-object-refs-accounted
+  - section-object-metadata-accounted
+  - accounted-gap-survives-conversion
+  - accounted-gap-loss-refuses-conversion

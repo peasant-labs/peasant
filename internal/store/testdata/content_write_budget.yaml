@@ -1,0 +1,59 @@
+# content_write_budget — the harmonized session content model write-budget family
+# (design llm/peasant--harmonized-content-model.md section 10, ratified revision 17).
+#
+# Every case carries executable expectations. Native staging and activation
+# gates count real WAL commit frames. Parser headroom remains in the derived
+# budget without allocating an unused scratch pool; native byte admission and
+# the mounted drain's timer are exercised by the ingest fixture families.
+hostSlug: github.com-write-budget-fixture
+projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+transcript: '{"type":"user","message":{"role":"user","content":"write budget fixture"}}'
+cases:
+  - name: unset-staged-memory-derives-from-custom-batch
+    batchBytes: 67108864
+    stagedMemoryBytes: 268435456
+    workers: [8]
+  - name: splitter-single-home
+    minSites: 2
+  - name: staging-batch-commits-once
+    action: stage-batch
+    sessions: 1
+    wantCommits: 1
+  - name: activation-batch-commits-once
+    action: activate-batch
+    sessions: 2
+    wantCommits: 1
+  - name: activation-batch-api-commits-once
+    action: activate-batch
+    sessions: 3
+    wantCommits: 1
+  - name: oversized-session-stages-alone
+    action: stage-oversized
+    sessions: 1
+    wantCommits: 2
+  - name: skip-commits-nothing
+    action: skip-refresh
+    sessions: 1
+    wantMaxCommits: 1
+  - name: state-read-commits-nothing
+    action: read-index-state
+    sessions: 1
+    wantCommits: 0
+  - name: commit-count-budget
+    action: refresh
+    sessions: 1
+    wantMaxCommits: 4
+  - name: hold-under-busy-timeout
+    workers: [1, 8]
+  - name: batch-under-configured-caps
+    batchBytes: 8388608
+    batchSessions: 64
+    stagedMemoryBytes: 150994944
+    workers: [8]
+  - name: worker-headroom-derived
+    workers: [4]
+  - name: staged-memory-under-cap
+    workers: [1, 2, 7, 8, 32]
+  - name: flush-on-interval
+    flushIntervalsMs: [50, 3600000]
+    minSites: 2

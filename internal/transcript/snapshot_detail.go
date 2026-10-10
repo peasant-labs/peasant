@@ -48,7 +48,7 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 	if snapshot.Completeness != "" && snapshot.Completeness != indexformat.GenerationCompletenessComplete {
 		return fail(ErrSnapshotIncomplete)
 	}
-	if resolver == nil {
+	if resolver == nil && !snapshot.FullContentVerified {
 		return fail(fmt.Errorf("no content resolver; a generation read cannot hydrate managed blobs without one"))
 	}
 	if err := ctx.Err(); err != nil {
@@ -145,6 +145,10 @@ func hydratePartitionEntries(ctx context.Context, snapshot indexformat.ReadSnaps
 			return nil, err
 		}
 		entry := entries[i]
+		if snapshot.FullContentVerified {
+			out[i] = entry
+			continue
+		}
 		if entry.SourceEntryRef == "" {
 			out[i] = entry
 			continue
@@ -228,11 +232,10 @@ func unixMilliToTime(ms int64) time.Time {
 }
 
 // BuildSnapshotDetailBytes is the single durable payload-construction boundary
-// shared by detail reads, export and publication packaging. It holds the
-// snapshot's shared lock through hydration, folding, validation AND final
-// serialization, then releases the lock before returning owned bytes. Callers
-// perform no store access and no remote network while holding the lock; they
-// send or write the returned bytes after the lock is released.
+// shared by detail reads, export and publication packaging. DB-backed snapshots
+// already hold full verified fields; file-backed snapshots keep their shared
+// lock through hydration, folding, validation and serialization. Callers send
+// or write the owned bytes only after the callback returns.
 func BuildSnapshotDetailBytes(ctx context.Context, reader indexformat.SnapshotReader, resolver indexformat.ContentResolver, sessionID schema.SessionID) ([]byte, *schema.SessionDetailPayload, error) {
 	if reader == nil {
 		return nil, nil, fmt.Errorf("transcript.BuildSnapshotDetailBytes: no snapshot reader for session %q; a durable payload cannot be built; open the store with generation support", sessionID)
@@ -348,7 +351,11 @@ func BuildSnapshotPreviewBytes(ctx context.Context, reader indexformat.SnapshotR
 	}
 	var owned []byte
 	var payload *schema.SessionDetailPayload
-	err := reader.WithSessionSnapshot(ctx, sessionID, func(snapshot indexformat.ReadSnapshot) error {
+	read := reader.WithSessionSnapshot
+	if previewReader, ok := reader.(indexformat.PreviewSnapshotReader); ok {
+		read = previewReader.WithSessionPreviewSnapshot
+	}
+	err := read(ctx, sessionID, func(snapshot indexformat.ReadSnapshot) error {
 		detail, err := SnapshotToPreviewValidated(ctx, snapshot)
 		if err != nil {
 			return err

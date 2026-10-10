@@ -672,7 +672,7 @@ func seedHelperGroupingEvidence(t *testing.T, db *store.Store, spec helperGroupL
 		target = spec.Owner
 	}
 	if err := sqlitex.ExecuteTransient(conn,
-		`INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state, target_local_id) VALUES (?, ?, 'started_by', ?, ?)`,
+		`INSERT INTO session_relationship_evidence (session_id, generation_id, ordinal, kind, target_state, target_local_id) VALUES (?, ?, 0, 'started_by', ?, ?)`,
 		&sqlitex.ExecOptions{Args: []any{spec.ID, generationID, state, target}}); err != nil {
 		t.Fatalf("seed started_by evidence for %q: %v", spec.ID, err)
 	}

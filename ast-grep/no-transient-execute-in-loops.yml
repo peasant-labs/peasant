@@ -1,0 +1,20 @@
+id: no-transient-execute-in-loops
+language: Go
+severity: error
+message: >-
+  ExecuteTransient inside a loop recompiles the statement on every iteration.
+  Use sqlitex.Execute (the connection-cached variant, same call shape) or a
+  prepared statement with Reset/ClearBindings; keep ExecuteTransient for
+  genuinely one-off or dynamic statements.
+note: >-
+  The rule fires when a `sqlitex.ExecuteTransient(...)` (or its FS variant) call
+  sits inside a for loop. If the statement truly varies per iteration or must
+  not be cached, suppress with
+  `// ast-grep-ignore: no-transient-execute-in-loops -- <reason>`.
+rule:
+  any:
+    - pattern: sqlitex.ExecuteTransient($$$ARGS)
+    - pattern: sqlitex.ExecuteTransientFS($$$ARGS)
+  inside:
+    kind: for_statement
+    stopBy: end

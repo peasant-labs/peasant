@@ -1,0 +1,5 @@
+# Shared corpus sizes match the retained non-native full-content comparator.
+requiredNames: [medium, large]
+cases:
+  - {name: medium, entries: 2000, prefix: 'assistant explanation segment ', repeats: 8}
+  - {name: large, entries: 20000, prefix: 'assistant explanation segment ', repeats: 8}

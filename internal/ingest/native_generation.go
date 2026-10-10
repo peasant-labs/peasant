@@ -100,6 +100,24 @@ type NativeGenerationPreparedActivator interface {
 	ActivateStagedNativeGeneration(context.Context, NativeGenerationActivation, NativeGenerationStaged) (ActivationOutcome, error)
 }
 
+// NativeGenerationBatchStager stages independent candidates in bounded shared
+// transactions. Results retain input order, including refused candidates.
+type NativeGenerationBatchStager interface {
+	StageNativeGenerations(context.Context, []NativeGenerationActivation) ([]NativeGenerationStaged, []error)
+}
+
+// NativeActivationResult is one request's guarded activation outcome.
+type NativeActivationResult struct {
+	Outcome ActivationOutcome
+	Err     error
+}
+
+// NativeGenerationBatchActivator commits staged independent candidates together
+// with per-session savepoints. A nil handle stages that candidate inline.
+type NativeGenerationBatchActivator interface {
+	ActivateStagedNativeGenerations(context.Context, []NativeGenerationActivation, []NativeGenerationStaged) []NativeActivationResult
+}
+
 // NativeGenerationPrior is the last-good evidence a prior activation left for
 // one session. Metadata and Aliases are derived from the committed generation;
 // PriorEvidence is the exact persisted harness document, or nil when none was
@@ -139,6 +157,11 @@ const (
 	// committed before this invocation. The call re-repaired from the
 	// committed row and changed no authority.
 	ActivationAlreadyCommitted
+	// ActivationSkipped reports the requested candidate reproduces the
+	// active harmonized generation exactly: no new generation row was
+	// written and no object was staged, and the call advanced only the
+	// bookkeeping stamps. It counts zero, like AlreadyCommitted.
+	ActivationSkipped
 )
 
 // ActivationOutcome is the request-scoped activation result. RepairPending

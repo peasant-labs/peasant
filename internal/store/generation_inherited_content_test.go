@@ -123,10 +123,10 @@ func TestGenerationInheritedContentSnapshot(t *testing.T) {
 			seedGenerationSession(t, s, fixture.Session.ID)
 
 			candidate, blobs := buildInheritedContentGeneration(t, sid, fixture, tc.WithAlias)
-			if err := activateTestGeneration(t, s, candidate, blobs); err != nil {
-				t.Fatalf("activate a generation with retained inherited content: %v", err)
-			}
-			// The staged manifest is the self-contained durable projection:
+			// The snapshot reader serves the file-backed representation;
+			// the readers change wires the harmonized catalog rows to it.
+			seedFileBackedGeneration(t, s, filepath.Join(dir, "artifacts"), sid, candidate, blobs, false)
+			// The seeded manifest is the self-contained durable projection:
 			// the generation validator must accept retained inherited content,
 			// and the installed manifest must keep that evidence.
 			manifest, err := s.generationArtifacts.ReadManifest(context.Background(), sid, fixture.Generation.ID)

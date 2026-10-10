@@ -3,21 +3,24 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
 
-// TestGenerationEnvelopeRecovery proves recovery replays the persisted
-// activation envelope: the producing revision and time, the captured
-// compare-and-swap state, the input proof and the content-capture evidence. A
-// stale candidate stays inactive for a verified retry instead of bypassing the
-// refusal, and an already-committed candidate is repaired from committed
-// database metadata.
+// TestGenerationEnvelopeRecovery proves an interrupted activation keeps
+// the caller's envelope intact for the retry: the producing revision and
+// time, the captured compare-and-swap state, the input proof and the
+// content-capture evidence all ride the retried activation (nothing is
+// persisted between attempts), and the retry settles on G2 with the
+// original stamps, versions and capture eligibility. A crash between
+// staging and the commit leaves the old generation, the old stamps, and
+// possibly orphan objects with the flag set; the retry re-stages
+// idempotently and commits.
 func TestGenerationEnvelopeRecovery(t *testing.T) {
 	sid, err := schema.NewSessionID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	if err != nil {
@@ -48,7 +51,7 @@ func TestGenerationEnvelopeRecovery(t *testing.T) {
 		t.Fatalf("G1 stamps = (%d,%v), want (11,111)", before.IndexerVersion, before.IndexedAt)
 	}
 
-	// Capture the current state for G2; the envelope must carry it.
+	// Capture the current state for G2; the retry must carry it.
 	current, err := s.ReadIndexState(context.Background(), sid)
 	if err != nil {
 		t.Fatal(err)
@@ -61,9 +64,9 @@ func TestGenerationEnvelopeRecovery(t *testing.T) {
 		SourceAuthority: ingest.ContentSourceNone,
 		CaptureFormat:   ingest.ContentCaptureFormatPreviewOnly,
 	}
-	// Crash after the rename but before the database commit: the intent and
-	// staged candidate survive, the database still shows G1.
-	installRecoveryFault(t, s, "after-rename-before-db")
+	// Crash between staging and the commit: the objects may be staged but
+	// no generation row exists, so the database still shows G1.
+	installHarmonizedFault(t, harmonizedSeamBeforeCommit)
 	failedActivation := GenerationActivation{
 		Generation:     g2,
 		Blobs:          g2Blobs,
@@ -75,58 +78,49 @@ func TestGenerationEnvelopeRecovery(t *testing.T) {
 	if _, err := s.ActivateGeneration(context.Background(), failedActivation); err == nil {
 		t.Fatal("activation across crash seam succeeded; expected interruption")
 	}
-	clearRecoveryFault(t, s, "after-rename-before-db")
-
-	// The persisted envelope carries the original revision, time, expected
-	// state and capture evidence, not the G1 stamps.
-	intent, err := s.generationArtifacts.ReadIntent(context.Background(), sid)
-	if err != nil || intent == nil {
-		t.Fatalf("pending intent missing: %+v (err %v)", intent, err)
-	}
-	if intent.IndexerVersion != 77 || intent.IndexedAtMs != 777 {
-		t.Fatalf("intent stamps = (%d,%d), want (77,777)", intent.IndexerVersion, intent.IndexedAtMs)
-	}
-	if intent.ExpectedState == nil || intent.ExpectedState.IndexerVersion != 11 {
-		t.Fatalf("intent expected state missing G1 revision: %+v", intent.ExpectedState)
-	}
-	if intent.ContentCapture.Status != ingest.ContentCaptureIncomplete || intent.ContentCapture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly {
-		t.Fatalf("intent capture = %+v, want incomplete/preview_only", intent.ContentCapture)
+	clearHarmonizedFault()
+	if got := visibleGeneration(t, s, sid); got != "gen_env_g1" {
+		t.Fatalf("after interruption visible = %q, want G1", got)
 	}
 
-	// Recovery replays the same guarded transaction and settles on G2 with
-	// the original stamps, versions and capture eligibility.
-	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
-		t.Fatalf("recover: %v", err)
+	// The retry carries the original revision, time, expected state and
+	// capture evidence, and settles on G2 with those stamps.
+	if _, err := s.ActivateGeneration(context.Background(), failedActivation); err != nil {
+		t.Fatalf("retry: %v", err)
 	}
 	if got := visibleGeneration(t, s, sid); got != "gen_env_g2" {
-		t.Fatalf("after recovery visible = %q, want gen_env_g2", got)
+		t.Fatalf("after retry visible = %q, want gen_env_g2", got)
 	}
 	after := readIndexStateForTest(t, s, sid)
 	if after.IndexerVersion != 77 || after.IndexedAt == nil || *after.IndexedAt != 777 {
-		t.Fatalf("recovered stamps = (%d,%v), want (77,777)", after.IndexerVersion, after.IndexedAt)
+		t.Fatalf("retried stamps = (%d,%v), want (77,777)", after.IndexerVersion, after.IndexedAt)
 	}
-	err = s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		if snapshot.Session.StartTime.UnixMilli() != 3000 || snapshot.Session.EndTime.UnixMilli() != 4000 {
-			return fmt.Errorf("snapshot timestamps = (%d,%d), want (3000,4000)", snapshot.Session.StartTime.UnixMilli(), snapshot.Session.EndTime.UnixMilli())
-		}
-		for _, entry := range snapshot.Main.Entries {
-			if entry.ContentPreview != nil && strings.Contains(*entry.ContentPreview, "G2") {
-				return nil
-			}
-		}
-		return fmt.Errorf("recovered snapshot carries no G2 content")
-	})
+	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if intent, err := s.generationArtifacts.ReadIntent(context.Background(), sid); err != nil || intent != nil {
-		t.Fatalf("intent not cleared after recovery: %+v (err %v)", intent, err)
+	defer s.pool.Put(conn)
+	var start, end int64
+	if err := sqlitex.ExecuteTransient(conn, `SELECT ts_start, ts_end FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), "gen_env_g2"},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			start, end = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if start != 3000 || end != 4000 {
+		t.Fatalf("committed timestamps = (%d,%d), want (3000,4000)", start, end)
 	}
 }
 
 // TestGenerationStaleRecoveryRefused proves a candidate whose compare-and-swap
-// precondition failed is not committed by a later recovery: it stays inactive
-// pending a verified retry with current state.
+// precondition failed is never committed by a later attempt with the same
+// stale envelope: it stays inactive pending a verified retry with current
+// state. The refused attempt stages objects but writes no generation row,
+// so a second stale attempt is refused again instead of finding phantom
+// authority.
 func TestGenerationStaleRecoveryRefused(t *testing.T) {
 	sid, err := schema.NewSessionID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 	if err != nil {
@@ -150,9 +144,7 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 		t.Fatalf("activate mid: %v", err)
 	}
 
-	// Attempt G2 with the stale precondition: the activation is refused and
-	// the staged candidate is retained, but recovery must refuse it again
-	// rather than bypassing the stale comparison.
+	// Attempt G2 with the stale precondition: the activation is refused.
 	g2, g2Blobs := buildTestGeneration(t, sid, "gen_stale_g2", "stale text G2", "stale input G2", "stale output G2")
 	staleActivation := GenerationActivation{
 		Generation:     g2,
@@ -170,16 +162,16 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 	if got := visibleGeneration(t, s, sid); got != "gen_stale_mid" {
 		t.Fatalf("after stale refusal visible = %q, want mid", got)
 	}
-	// The failed activation staged its candidate and recorded its intent
-	// before the guarded transaction refused it. Recovery replays the same
-	// stale envelope and is refused again; the prior generation stays visible.
-	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err == nil {
-		t.Fatal("stale recovery succeeded; it must stay inactive pending a verified retry")
+	// A second attempt with the same stale envelope is refused again: the
+	// refused staging wrote no generation row, so there is nothing to
+	// replay and the prior generation stays visible.
+	if _, err := s.ActivateGeneration(context.Background(), staleActivation); err == nil {
+		t.Fatal("second stale activation succeeded; it must stay inactive pending a verified retry")
 	} else if !isStaleError(err) {
-		t.Fatalf("stale recovery error is not a stale refusal: %v", err)
+		t.Fatalf("second stale error is not a stale refusal: %v", err)
 	}
 	if got := visibleGeneration(t, s, sid); got != "gen_stale_mid" {
-		t.Fatalf("after stale recovery visible = %q, want mid", got)
+		t.Fatalf("after second stale refusal visible = %q, want mid", got)
 	}
 
 	// A verified retry with current state commits.
@@ -196,7 +188,6 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 		t.Fatalf("after verified retry visible = %q, want G2", got)
 	}
 }
-
 func isStaleError(err error) bool {
 	if err == nil {
 		return false

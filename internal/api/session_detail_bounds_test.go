@@ -40,8 +40,8 @@ func TestHub_SessionDetail_BoundsAnOversizedToolResult(t *testing.T) {
 	sid := ingest.SessionID(sessionID)
 	toolID := "toolu_oversized_1"
 	toolInput := `{"command":"cat huge.log"}`
-	// 9 MiB: over the contract's 8 MiB served-document policy, and well under the
-	// per-record cap ingest accepts, so this is a record the store really holds.
+	// 9 MiB exceeds the per-field display budget, but not the document cap or
+	// the per-record cap ingest accepts; the store really holds the whole record.
 	toolOutput := strings.Repeat("x", 9<<20)
 	preview := "I will read the whole log."
 
