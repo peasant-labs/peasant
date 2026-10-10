@@ -22,7 +22,7 @@ peasant harvest logs [flags]
       --output string           Override output base path
       --session strings         Filter to specific session IDs (repeatable, comma-separated)
       --since string            Filter to sessions from the last N period (e.g. 2w, 3m, 7d)
-      --source-harness string   Override source harness (claude-code, opencode, codex, cursor, strike, pi)
+      --source-harness string   Limit discovery to one harness, using its configured or default path (claude-code, opencode, codex, cursor, strike, pi)
       --source-path string      Override source paths for the harness (replaces config, not additive)
       --verbose                 Show file-level detail
 ```
@@ -34,6 +34,7 @@ peasant harvest logs [flags]
       --config-dir string   Override the config directory (default: $XDG_CONFIG_HOME or ~/.config); config lives under <config-dir>/peasant
       --data-dir string     Override the data directory (default: $XDG_DATA_HOME or ~/.local/share); the DB + peasant-sync live under <data-dir>/peasant
       --state-dir string    Override the state directory (default: $XDG_STATE_HOME or ~/.local/state); logs/PID live under <state-dir>/peasant
+  -v, --version             Print the version
   -v, --version             Print the version
 ```
 
