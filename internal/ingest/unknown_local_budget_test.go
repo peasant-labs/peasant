@@ -28,6 +28,14 @@ import (
 //go:embed testdata/unknown_local_budget.yaml
 var unknownLocalBudgetYAML []byte
 
+// schemaRetainedPayloadBoundBytes mirrors schema.ValidateRetainedUnknown's inner
+// per-payload raw-document scan (schema/retained_unknown.go, 8 MiB at depth 64).
+// The module does not export that bound, so this test states it independently to
+// size a payload over it. The unified retained-evidence transfer limit
+// (defaults.SessionDetailDocumentCapBytes) is wider, so the refusal this test
+// observes is the schema per-payload safety refusal, not the transfer refusal.
+const schemaRetainedPayloadBoundBytes = 8 << 20
+
 func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 	t.Parallel()
 	var fixture struct {
@@ -60,8 +68,8 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			// identifier. The fixture tests byte budgets, not identifier matching.
 			padding := strings.Repeat("x ", c.PaddingBytes/2) + strings.Repeat("x", c.PaddingBytes%2)
 			payload := strings.ReplaceAll(fixture.Payload, "BODY", padding)
-			if len(payload) <= 8<<20 || len(payload) >= defaults.MaxJSONLRecordBytes {
-				t.Fatal("fixture does not straddle transfer/source boundary")
+			if len(payload) <= schemaRetainedPayloadBoundBytes || len(payload) >= defaults.MaxJSONLRecordBytes {
+				t.Fatal("fixture does not straddle the schema per-payload/source-record boundary")
 			}
 			sid := schema.SessionID(testutil.TestSessionUUID)
 			sourcePath := ingest.ResolvedPath(filepath.Join(dir, "source.jsonl"))
@@ -154,8 +162,8 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			if !bytes.Contains(encoded, []byte("opening")) || !bytes.Contains(encoded, []byte("closing")) {
 				t.Fatal("known siblings lost")
 			}
-			if _, err := export.ExportSession(t.Context(), db, fs, string(sid)); err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
-				t.Fatalf("export must explicitly refuse transfer size, not local retention: %v", err)
+			if _, err := export.ExportSession(t.Context(), db, fs, string(sid)); err == nil || !strings.Contains(err.Error(), "schema.ValidateRetainedUnknown") {
+				t.Fatalf("export must explicitly refuse the public per-payload bound, not local retention: %v", err)
 			}
 			publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.0.1", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities}}
 			engine, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
@@ -171,8 +179,8 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(publisher.Calls) != 0 || len(published.Sessions) != 1 || published.Sessions[0].Error == nil || !strings.Contains(published.Sessions[0].Error.Error(), "8 MiB transfer limit") {
-				t.Fatalf("wrong transfer refusal: %+v", published)
+			if len(publisher.Calls) != 0 || len(published.Sessions) != 1 || published.Sessions[0].Error == nil || !strings.Contains(published.Sessions[0].Error.Error(), "schema.ValidateRetainedUnknown") {
+				t.Fatalf("wrong public per-payload refusal: %+v", published)
 			}
 		})
 	}

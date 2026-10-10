@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 )
 
@@ -33,17 +34,34 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 // would name an integrity error (invalid decoded payloadText content, invalid
 // legacy raw syntax, and cross-record ordering or pointer uniqueness); see
 // storedRetainedPayloadExceedsTransferLimit for the named set.
+//
+// The transfer limit is the unified session-detail document cap. It is wider
+// than schema.ValidateRetainedUnknown's inner 8 MiB per-payload scan, which
+// runs after the checks above on the final projected records; a valid payload
+// between those two bounds therefore passes the transfer probe and the
+// projection backstop and is still refused by the schema safety validator.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
-	if storedRetainedPayloadExceedsTransferLimit(entries, harness) {
-		return nil, retainedUnknownTransferLimitError()
+	return projectRetainedUnknownWithinLimit(entries, harness, retainedUnknownTransferLimitBytes)
+}
+
+// projectRetainedUnknownWithinLimit is the transfer-refusal decision and
+// projection with an injectable limit. The exported entry point always passes
+// the unified session-detail cap (retainedUnknownTransferLimitBytes), so this is
+// the single production code path; the parameter exists so the white-box
+// shape/precedence matrix can drive that exact path with a few-KiB payload over
+// a small limit instead of materializing 128 MiB documents. It is not exported
+// and has no second production caller.
+func projectRetainedUnknownWithinLimit(entries []schema.SessionEntry, harness Harness, limit int) ([]schema.RetainedUnknownRecord, error) {
+	if storedRetainedPayloadExceedsTransferLimit(entries, harness, limit) {
+		return nil, retainedUnknownTransferLimitError(limit)
 	}
 	projected, err := CollectRetainedUnknown(entries, harness)
 	if err != nil {
 		return nil, err
 	}
 	for _, record := range projected {
-		if len(record.Payload) > retainedUnknownTransferLimitBytes {
-			return nil, retainedUnknownTransferLimitError()
+		if len(record.Payload) > limit {
+			return nil, retainedUnknownTransferLimitError(limit)
 		}
 	}
 	if len(projected) > 0 {
@@ -55,10 +73,13 @@ func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]s
 }
 
 // retainedUnknownTransferLimitError is the published refusal for a retained
-// evidence payload over the 8 MiB transfer limit. The message is part of the
-// refusal contract; keep it byte-identical.
-func retainedUnknownTransferLimitError() error {
-	return fmt.Errorf("export retained evidence: payload exceeds the published 8 MiB transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available")
+// evidence payload over the enforced transfer limit. The size in the message is
+// rendered from that same limit through the one human-byte-size formatter, so
+// the label always states the limit the probe actually applies instead of a
+// decoupled literal. The rest of the wording is part of the refusal contract;
+// keep it byte-identical, including the larger-transfers clause.
+func retainedUnknownTransferLimitError(limit int) error {
+	return fmt.Errorf("export retained evidence: payload exceeds the published %s transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available", defaults.HumanByteSize(int64(limit)))
 }
 
 // CollectRetainedUnknown certifies LOCAL evidence integrity and source positions.

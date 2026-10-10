@@ -1,3 +1,10 @@
+# paddingBytes sizes the unknown payload so it sits over the schema validator's
+# inner 8 MiB per-payload safety bound (schema/retained_unknown.go) and below the
+# 256 MiB source-record bound. The 8 MiB schema bound is narrower than the
+# unified 128 MiB retained-evidence transfer limit, so export and publication
+# refuse this payload through the schema safety refusal while the local bytes
+# stay certified and retained. The value is a literal, never derived from the
+# production constant.
 requiredNames:
   - retained_record_above_public_limit
   - managed_record_above_public_limit

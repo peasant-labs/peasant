@@ -1,20 +1,25 @@
-package ingest_test
+package ingest
 
 import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
+
+// testRetainedSessionUUID is the deterministic session id the carrier entries
+// use. It is a local literal because this white-box test cannot import
+// internal/testutil: testutil imports this package, so the import would cycle.
+const testRetainedSessionUUID = "99d59925-36bc-424c-a789-8be54d9702ba"
 
 // oversizedPayload builds a valid JSON string payload of exactly size bytes.
 func oversizedPayload(size int) json.RawMessage {
@@ -28,20 +33,28 @@ func oversizedPayload(size int) json.RawMessage {
 // regression that copies even a fraction of a large payload.
 const retainedRefusalAllocationBound = 1 << 20
 
-func publicPosition(record int64) ingest.UnknownSourcePosition {
-	return ingest.UnknownSourcePosition{
+// transferLimitPhrase renders the transfer-limit phrase the published refusal
+// prints for an enforced limit. The refusal renders that limit through the one
+// human-byte-size formatter, so the matrix asserts the phrase for its injected
+// limit instead of a decoupled literal.
+func transferLimitPhrase(limit int) string {
+	return defaults.HumanByteSize(int64(limit)) + " transfer limit"
+}
+
+func publicPosition(record int64) UnknownSourcePosition {
+	return UnknownSourcePosition{
 		Line:   int(record) + 1,
-		Public: &ingest.UnknownPublicPosition{SourceRef: "source-0", RecordIndex: record, Position: record},
+		Public: &UnknownPublicPosition{SourceRef: "source-0", RecordIndex: record, Position: record},
 	}
 }
 
-func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload json.RawMessage) schema.SessionEntry {
+func carrierEntry(t *testing.T, position UnknownSourcePosition, payload json.RawMessage) schema.SessionEntry {
 	t.Helper()
-	record, err := ingest.NewRetainedUnknown(schema.HarnessCodex, "record", "future", position, payload)
+	record, err := NewRetainedUnknown(schema.HarnessCodex, "record", "future", position, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, err := ingest.RetainedUnknownEntry(testutil.TestSessionUUID, 0, record)
+	entry, err := RetainedUnknownEntry(testRetainedSessionUUID, 0, record)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,32 +70,36 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // 1 MiB constant bound that states the real invariant, that the refusal
 // allocates nothing proportional to the payload. The observed deltas are
 // about 1.24-1.46 KiB, so the constant bound stays about 700x+ above the
-// behavior while catching a regression that copies even a fraction of a
-// 64 MiB payload. The closed encoding set is driven by
-// the noMaterializationCases fixture, including the escaped-owned-string,
-// escaped-owned-key, and escaped-evidence-root-key shapes that once lost the
-// early refusal. Every encoding carries a JSON-valid payload, so with the
-// probe forced off each row reaches the projection-time size backstop and
-// fails on the allocation bound rather than on the refusal text.
+// behavior while catching a regression that copies even a fraction of the
+// payload. The closed encoding set is driven by the noMaterializationCases
+// fixture, including the escaped-owned-string, escaped-owned-key, and
+// escaped-evidence-root-key shapes that once lost the early refusal. The payload
+// is sized by the fixture's noMaterializationPayloadBytes over a small injected
+// limit, so the production decision path runs on a few-KiB payload rather than a
+// 128 MiB one; the limit and payload are read from the fixture, never derived
+// from the production constant. Every encoding carries a JSON-valid payload, so
+// with the probe forced off each row reaches the projection-time size backstop
+// and fails on the allocation bound rather than on the refusal text.
 //
-// Calibration: forcing the in-place probe off makes this same 64 MiB payload
-// allocate ~3.5-3.8 GB depending on the encoding before the refusal, so the
-// payload/4 bound sits about 208-228 times (over two orders of magnitude)
-// below the allocation the probe removes. The calibration is therefore
-// reproducible with the one-line probe-off mutation documented here, not from
-// this committed test alone.
+// Calibration: forcing the in-place probe off makes this same payload allocate
+// at least a full copy of it (and its decoded form for the payloadText
+// encodings) before the backstop refuses, which is far above the payload/4
+// bound. The calibration is reproducible with the one-line probe-off mutation
+// documented here, not from this committed test alone.
 func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *testing.T) {
-	const payloadBytes = 64 << 20
+	fixture := loadNoMaterializationCases(t)
+	payloadBytes := fixture.PayloadBytes
+	injectedLimit := payloadBytes / 8
 	overDigits := `"` + strings.Repeat("1", payloadBytes-2) + `"`
 	rawLiteral := `"` + strings.Repeat("x", payloadBytes-2) + `"`
 	rawExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payload":` + rawLiteral + `}]}`
 	escapedKeyExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"pay\u006CoadText":` + overDigits + `}]}`
 	escapedRootKeyExtra := `{"retainedUnk\u006Eown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":` + overDigits + `}]}`
-	escapedRecord, err := ingest.NewRetainedUnknown(schema.HarnessCodex, "record", "future&more", publicPosition(0), oversizedPayload(payloadBytes))
+	escapedRecord, err := NewRetainedUnknown(schema.HarnessCodex, "record", "future&more", publicPosition(0), oversizedPayload(payloadBytes))
 	if err != nil {
 		t.Fatal(err)
 	}
-	escapedEntry, err := ingest.RetainedUnknownEntry(testutil.TestSessionUUID, 0, escapedRecord)
+	escapedEntry, err := RetainedUnknownEntry(testRetainedSessionUUID, 0, escapedRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +114,7 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 	if !strings.Contains(*escapedRootKeyEntry.Extra, `\u006Eown`) {
 		t.Fatal("escapedRootKey entry does not carry an escaped evidence root key in its stored form, so it no longer covers the shape it names")
 	}
-	fixtureCases := loadNoMaterializationCases(t)
+	fixtureCases := fixture.Cases
 	entries := map[string]schema.SessionEntry{
 		"payloadText":    carrierEntry(t, publicPosition(0), oversizedPayload(payloadBytes)),
 		"rawPayload":     {Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &rawExtra},
@@ -105,28 +122,28 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 		"escapedKey":     escapedKeyEntry,
 		"escapedRootKey": escapedRootKeyEntry,
 	}
-	for _, encoding := range ingest.RetainedNoMaterializationEncodings {
+	for _, encoding := range RetainedNoMaterializationEncodings {
 		if _, ok := entries[encoding]; !ok {
-			t.Fatalf("allocation proof has no entry for encoding %q, must cover %s", encoding, strings.Join(ingest.RetainedNoMaterializationEncodings, ", "))
+			t.Fatalf("allocation proof has no entry for encoding %q, must cover %s", encoding, strings.Join(RetainedNoMaterializationEncodings, ", "))
 		}
 	}
 	for _, c := range fixtureCases {
 		t.Run(c.Name, func(t *testing.T) {
 			entry, ok := entries[c.Encoding]
 			if !ok {
-				t.Fatalf("no-materialization case %q encodes %q, must be %s", c.Name, c.Encoding, strings.Join(ingest.RetainedNoMaterializationEncodings, ", "))
+				t.Fatalf("no-materialization case %q encodes %q, must be %s", c.Name, c.Encoding, strings.Join(RetainedNoMaterializationEncodings, ", "))
 			}
 			var before, after runtime.MemStats
 			runtime.GC()
 			runtime.ReadMemStats(&before)
-			_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
+			_, err := projectRetainedUnknownWithinLimit([]schema.SessionEntry{entry}, schema.HarnessCodex, injectedLimit)
 			runtime.ReadMemStats(&after)
 
-			if err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
+			if err == nil || !strings.Contains(err.Error(), transferLimitPhrase(injectedLimit)) {
 				t.Fatalf("oversized payload was not refused with the transfer limit: %v", err)
 			}
 			delta := int64(after.TotalAlloc - before.TotalAlloc)
-			t.Logf("refusal allocated %d bytes for a %d-byte payload", delta, payloadBytes)
+			t.Logf("refusal allocated %d bytes for a %d-byte payload over a %d-byte limit", delta, payloadBytes, injectedLimit)
 			if bound := int64(payloadBytes / 4); delta >= bound {
 				t.Fatalf("refusal allocated %d bytes, not far below the %d-byte payload (bound %d)", delta, payloadBytes, bound)
 			}
@@ -137,22 +154,28 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 	}
 }
 
-//go:embed testdata/retained_payload_size_probe.yaml
-var retainedPayloadSizeProbeFixtureData []byte
-
-const retainedPayloadSizeProbeFixturePath = "internal/ingest/testdata/retained_payload_size_probe.yaml"
+// noMaterializationFixture is the closed encoding set for the allocation proof
+// plus the fixture-owned payload size. PayloadBytes must exceed the injected
+// limit so the in-place probe refuses before the projection path materializes
+// the payload; the fixture pins it independently of the production constant.
+type noMaterializationFixture struct {
+	PayloadBytes int
+	Cases        []struct {
+		Name     string `yaml:"name"`
+		Encoding string `yaml:"encoding"`
+	}
+}
 
 // loadNoMaterializationCases loads the closed encoding set for the allocation
 // proof and enforces its required-name manifest: every name in requiredNames
 // that starts with no_materialization_ must appear here, so deleting an
-// encoding fails while adding one is allowed until its name is required.
-func loadNoMaterializationCases(t *testing.T) []struct {
-	Name     string `yaml:"name"`
-	Encoding string `yaml:"encoding"`
-} {
+// encoding fails while adding one is allowed until its name is required. It
+// also loads the fixture-owned payload size, which must be positive.
+func loadNoMaterializationCases(t *testing.T) noMaterializationFixture {
 	t.Helper()
 	var raw struct {
 		RequiredNames []string `yaml:"requiredNames"`
+		PayloadBytes  int      `yaml:"noMaterializationPayloadBytes"`
 		Cases         []struct {
 			Name     string `yaml:"name"`
 			Encoding string `yaml:"encoding"`
@@ -166,14 +189,17 @@ func loadNoMaterializationCases(t *testing.T) []struct {
 	if len(raw.Cases) == 0 {
 		t.Fatalf("committed fixture %s needs noMaterializationCases", retainedPayloadSizeProbeFixturePath)
 	}
+	if raw.PayloadBytes <= 0 {
+		t.Fatalf("committed fixture %s noMaterializationPayloadBytes is %d, must be positive", retainedPayloadSizeProbeFixturePath, raw.PayloadBytes)
+	}
 	names := make(map[string]bool)
 	for _, c := range raw.Cases {
 		if c.Name == "" || names[c.Name] {
 			t.Fatalf("missing or duplicate no-materialization case name %q", c.Name)
 		}
 		names[c.Name] = true
-		if !ingest.IsRetainedNoMaterializationEncoding(c.Encoding) {
-			t.Fatalf("no-materialization case %q encodes %q, must be %s", c.Name, c.Encoding, strings.Join(ingest.RetainedNoMaterializationEncodings, ", "))
+		if !IsRetainedNoMaterializationEncoding(c.Encoding) {
+			t.Fatalf("no-materialization case %q encodes %q, must be %s", c.Name, c.Encoding, strings.Join(RetainedNoMaterializationEncodings, ", "))
 		}
 	}
 	for _, name := range raw.RequiredNames {
@@ -188,12 +214,12 @@ func loadNoMaterializationCases(t *testing.T) []struct {
 	for _, c := range raw.Cases {
 		covered[c.Encoding] = true
 	}
-	for _, encoding := range ingest.RetainedNoMaterializationEncodings {
+	for _, encoding := range RetainedNoMaterializationEncodings {
 		if !covered[encoding] {
 			t.Fatalf("allocation proof never exercises encoding %q", encoding)
 		}
 	}
-	return raw.Cases
+	return noMaterializationFixture{PayloadBytes: raw.PayloadBytes, Cases: raw.Cases}
 }
 
 // loadCapBoundaryCases loads the at-cap boundary matrix for
@@ -251,28 +277,69 @@ func loadCapBoundaryCases(t *testing.T) []struct {
 	return raw.Cases
 }
 
-// TestProjectRetainedUnknownRefusalMessageStable pins the refusal text through
-// the public entry point.
+// TestRetainedUnknownProbeAtPublishedLimit is the real published-boundary proof
+// for the in-place transfer probe: a canonical raw payload of exactly the
+// unified session-detail cap is not over the limit, and one byte more is. It
+// runs at the actual production size so the decision is proven where the limit
+// is the unified constant, not only at the small injected limits the matrix
+// uses. The schema validator's inner per-payload safety bound (8 MiB at depth
+// 64, schema/retained_unknown.go) is narrower and still refuses larger
+// projected payloads; see TestProjectRetainedUnknownAcceptsAtCapPayloads.
+func TestRetainedUnknownProbeAtPublishedLimit(t *testing.T) {
+	limit := retainedUnknownTransferLimitBytes
+	rawExtra := func(payload string) string {
+		return `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":` + payload + `}]}`
+	}
+	cases := []struct {
+		name     string
+		payload  string
+		wantOver bool
+	}{
+		{"at_published_limit_is_not_over", `"` + strings.Repeat("x", limit-2) + `"`, false},
+		{"one_over_published_limit_is_over", `"` + strings.Repeat("x", limit-1) + `"`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			over, ok := storedRetainedExtraExceedsTransferLimit(rawExtra(c.payload), HarnessCodex, HarnessCodex, limit)
+			if !ok {
+				t.Fatal("canonical payload at the published limit was declined by the probe")
+			}
+			if over != c.wantOver {
+				t.Fatalf("probe over=%v, want %v at the published %d-byte limit", over, c.wantOver, limit)
+			}
+		})
+	}
+}
+
+// TestProjectRetainedUnknownRefusalMessageStable pins the full refusal text
+// through the production decision path with a small injected limit, so the
+// wording stays byte-identical while the message renders the enforced limit. The
+// full published-size label is asserted against the real unified constant by
+// TestRetainedUnknownTransferLimitMatchesPublishedLabel.
 func TestProjectRetainedUnknownRefusalMessageStable(t *testing.T) {
-	entry := carrierEntry(t, publicPosition(0), oversizedPayload(8<<20+64))
-	_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
+	const limit = 1 << 12
+	entry := carrierEntry(t, publicPosition(0), oversizedPayload(limit+64))
+	_, err := projectRetainedUnknownWithinLimit([]schema.SessionEntry{entry}, schema.HarnessCodex, limit)
 	if err == nil {
 		t.Fatal("oversized payload was not refused")
 	}
-	if got, want := err.Error(), "export retained evidence: payload exceeds the published 8 MiB transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available"; got != want {
+	if got, want := err.Error(), fmt.Sprintf("export retained evidence: payload exceeds the published %s transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available", defaults.HumanByteSize(int64(limit))); got != want {
 		t.Fatalf("transfer refusal text changed:\n got: %s\nwant: %s", got, want)
 	}
 }
 
-// TestProjectRetainedUnknownAcceptsAtCapPayloads pins the strict boundary at
-// the published cap through the real entry: a payload of exactly 8 MiB is
-// accepted for both encodings, and one byte over is refused without
-// materializing. The matrix lives in the capBoundaryCases fixture with a
+// TestProjectRetainedUnknownAcceptsAtCapPayloads pins the schema validator's
+// inner 8 MiB per-payload safety boundary through the real entry, which is
+// narrower than the unified transfer limit: a payload of exactly 8 MiB is
+// accepted for both encodings, and one byte over is refused by
+// schema.ValidateRetainedUnknown's payload scan rather than by the wider
+// transfer label. The matrix lives in the capBoundaryCases fixture with a
 // required-name manifest; only this test composes the boundary with the
 // production call site, so a drift that passes limit-1 (refusing legitimate
 // at-cap records) fails here while the fixture rows stay green. The 8 MiB
-// literals are built in Go; the allocation bound is asserted on the refusal
-// side of each encoding.
+// literals are built in Go. The one-over path is not an early refusal: the
+// projection path materializes the payload before the schema validator refuses,
+// so no allocation bound is asserted here.
 func TestProjectRetainedUnknownAcceptsAtCapPayloads(t *testing.T) {
 	const capBytes = 8 << 20
 	// A payloadText value carries two quote bytes around its decoded text, so
@@ -300,7 +367,7 @@ func TestProjectRetainedUnknownAcceptsAtCapPayloads(t *testing.T) {
 				t.Fatalf("cap-boundary case %q encodes %q at %q, must be payloadText/rawPayload at atCap/oneOver", c.Name, c.Encoding, c.Position)
 			}
 			if c.Position == "atCap" {
-				projected, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
+				projected, err := ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
 				if err != nil || len(projected) != 1 {
 					t.Fatalf("at-cap payload was not accepted: records=%d err=%v", len(projected), err)
 				}
@@ -309,16 +376,15 @@ func TestProjectRetainedUnknownAcceptsAtCapPayloads(t *testing.T) {
 				}
 				return
 			}
-			var before, after runtime.MemStats
-			runtime.GC()
-			runtime.ReadMemStats(&before)
-			_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
-			runtime.ReadMemStats(&after)
-			if err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
-				t.Fatalf("one-over payload was not refused for size: %v", err)
+			_, err := ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
+			if err == nil {
+				t.Fatal("one-over payload was not refused")
 			}
-			if delta := int64(after.TotalAlloc - before.TotalAlloc); delta >= retainedRefusalAllocationBound {
-				t.Fatalf("one-over refusal allocated %d bytes, above the %d-byte bound", delta, retainedRefusalAllocationBound)
+			if strings.Contains(err.Error(), "transfer limit") {
+				t.Fatalf("one-over 8 MiB payload must be refused by the schema per-payload safety bound, not the wider transfer label: %v", err)
+			}
+			if !strings.Contains(err.Error(), "schema.ValidateRetainedUnknown") || !strings.Contains(err.Error(), "payload failed JSON syntax or safety validation") {
+				t.Fatalf("one-over payload did not name the schema safety refusal: %v", err)
 			}
 		})
 	}
@@ -332,7 +398,9 @@ const retainedProjectionPrecedenceFixturePath = "internal/ingest/testdata/retain
 type retainedProjectionPrecedenceFixtures struct {
 	RequiredNames []string `yaml:"requiredNames"`
 	// PayloadBytes is the total byte size of the over-limit payload literal
-	// the test builds per token; the 8 MiB payload cannot be written literally.
+	// the test builds per token. It is a few KiB over the small injected limit
+	// the precedence runner passes, so the matrix runs the production decision
+	// path without materializing 128 MiB documents.
 	PayloadBytes int `yaml:"payloadBytes"`
 	Cases        []struct {
 		Name   string   `yaml:"name"`
@@ -442,6 +510,7 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 // row also asserts its authoritative outcome: canonical rows are accepted by
 // CollectRetainedUnknown apart from size, deliberate rows carry an integrity
 // error there.
+//
 // deliberateSizePrecedenceNames is the closed deliberate set named in the
 // probe header: size rows the authoritative path would refuse for integrity,
 // kept on size because deciding them needs the decode or global state the
@@ -470,6 +539,11 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 	if fixtures.PayloadBytes <= 0 {
 		t.Fatalf("precedence fixture %s needs a positive payloadBytes", retainedProjectionPrecedenceFixturePath)
 	}
+	// The matrix drives the production decision path with a few-KiB payload
+	// over a small injected limit instead of materializing 128 MiB documents.
+	// The limit is half the token size, so every over-limit token is over.
+	injectedLimit := fixtures.PayloadBytes / 2
+	limitPhrase := transferLimitPhrase(injectedLimit)
 	marked := make(map[string]bool)
 	for _, c := range fixtures.Cases {
 		if c.DeliberateSizePrecedence {
@@ -546,25 +620,25 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 				extra = strings.ReplaceAll(extra, "{{DEEP}}", deep)
 				entries = append(entries, schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: index, Extra: &extra})
 			}
-			_, err := ingest.ProjectRetainedUnknown(entries, schema.Harness(exportHarness))
+			_, err := projectRetainedUnknownWithinLimit(entries, schema.Harness(exportHarness), injectedLimit)
 			switch c.Want {
 			case "integrity":
-				var target *ingest.EvidenceIntegrityError
+				var target *EvidenceIntegrityError
 				if !errors.As(err, &target) {
 					t.Fatalf("integrity refusal was masked by the transfer refusal: %v", err)
 				}
-				if err != nil && strings.Contains(err.Error(), "8 MiB transfer limit") {
+				if err != nil && strings.Contains(err.Error(), limitPhrase) {
 					t.Fatalf("transfer refusal replaced the integrity refusal: %v", err)
 				}
 			case "legacy":
-				if !errors.Is(err, ingest.ErrUnknownPositionUnavailable) {
+				if !errors.Is(err, ErrUnknownPositionUnavailable) {
 					t.Fatalf("missing coordinates did not outrank the transfer refusal: %v", err)
 				}
-				if err != nil && strings.Contains(err.Error(), "8 MiB transfer limit") {
+				if err != nil && strings.Contains(err.Error(), limitPhrase) {
 					t.Fatalf("transfer refusal replaced the legacy coordinate refusal: %v", err)
 				}
 			case "size":
-				if err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
+				if err == nil || !strings.Contains(err.Error(), limitPhrase) {
 					t.Fatalf("oversized record was not refused for size: %v", err)
 				}
 			}
@@ -573,15 +647,15 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 			// deliberate size rows carry an integrity error there, and every
 			// integrity or legacy row meets the same refusal without the
 			// transfer limit in the way.
-			_, authoritativeErr := ingest.CollectRetainedUnknown(entries, schema.Harness(exportHarness))
+			_, authoritativeErr := CollectRetainedUnknown(entries, schema.Harness(exportHarness))
 			switch c.Want {
 			case "integrity":
-				var target *ingest.EvidenceIntegrityError
+				var target *EvidenceIntegrityError
 				if !errors.As(authoritativeErr, &target) {
 					t.Fatalf("authoritative path did not name integrity for %q: %v", c.Name, authoritativeErr)
 				}
 			case "legacy":
-				if !errors.Is(authoritativeErr, ingest.ErrUnknownPositionUnavailable) {
+				if !errors.Is(authoritativeErr, ErrUnknownPositionUnavailable) {
 					t.Fatalf("authoritative path did not name legacy absence for %q: %v", c.Name, authoritativeErr)
 				}
 			case "size":
@@ -591,7 +665,7 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 						t.Fatalf("authoritative path refused canonical size row %q: %v", c.Name, authoritativeErr)
 					}
 				case "integrity":
-					var target *ingest.EvidenceIntegrityError
+					var target *EvidenceIntegrityError
 					if !errors.As(authoritativeErr, &target) {
 						t.Fatalf("authoritative path did not name integrity for deliberate size row %q: %v", c.Name, authoritativeErr)
 					}
