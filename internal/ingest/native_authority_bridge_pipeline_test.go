@@ -1,6 +1,8 @@
 package ingest_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
@@ -24,17 +27,7 @@ import (
 type storedStamps struct {
 	producer int
 	format   int
-}
-
-// authorityCapture is the stored certificate fields the bridge and the writer
-// both decide on. It is a plain comparable value so a held run can prove the
-// certificate is byte-identical, not merely still present.
-type authorityCapture struct {
-	status          string
-	sourceAuthority string
-	captureFormat   string
-	failureCode     string
-	entryCount      int
+	adapter  int
 }
 
 // runOpenCodeAuthorityBridgePipeline drives the MOUNTED production native
@@ -100,7 +93,7 @@ func runOpenCodeAuthorityBridgePipeline(t *testing.T, tc nativeRefreshRepairCase
 	// the bridge preserves the origin and the status.
 	execBridgeSQL(t, db, `UPDATE session_content_captures SET transcript_origin = ? WHERE session_id = ?`,
 		int64(ingest.TranscriptOriginOpenCodeCurrentSQLite), string(sid))
-	setStoredIndexFormat(t, db, sid, 16, 1)
+	setStoredIndexFormat(t, db, sid, tc.StoredIndexerVersion, tc.StoredIndexFormat)
 	setSessionAdapterVersion(t, db, sid, ingest.NativeGenerationRepairTargets[ingest.HarnessOpenCode].AdapterVersion)
 
 	entriesBefore, err := db.ListEntries(t.Context(), sid)
@@ -112,6 +105,23 @@ func runOpenCodeAuthorityBridgePipeline(t *testing.T, tc nativeRefreshRepairCase
 	}
 	captureBefore := readAuthorityCapture(t, db, sid)
 	stampsBefore := readStoredStamps(t, db, sid)
+	indexBefore, err := db.ReadIndexState(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exportBytes := func() []byte {
+		t.Helper()
+		detail, err := export.ExportSession(t.Context(), db, fs, string(sid))
+		if err != nil {
+			t.Fatalf("export last-good full capture: %v", err)
+		}
+		data, err := json.Marshal(detail)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	exportBefore := exportBytes()
 
 	held := runNativeRepairPipeline(t, db, fs, outputDir)
 	if got := indexedOutcomeFor(held, sid); got == ingest.IndexOutcomeIndexed || got == ingest.IndexOutcomeReindexed {
@@ -125,12 +135,17 @@ func runOpenCodeAuthorityBridgePipeline(t *testing.T, tc nativeRefreshRepairCase
 	if after := readStoredStamps(t, db, sid); after != stampsBefore {
 		t.Fatalf("held maintenance moved historical stamps: %+v -> %+v", stampsBefore, after)
 	}
-	assertHeldDiagnostic(t, held, sid, tc.SessionID, []string{
-		"msg_v2_assistant",
-		"sequence 1",
-		"a stored complete capture certificate",
-		"origin opencode-current-sqlite",
-	})
+	indexAfter, err := db.ReadIndexState(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(indexBefore, indexAfter) {
+		t.Fatalf("held maintenance changed stored index evidence: %+v -> %+v", indexBefore, indexAfter)
+	}
+	if !bytes.Equal(exportBefore, exportBytes()) {
+		t.Fatal("held maintenance changed the last-good full export")
+	}
+	assertHeldDiagnostic(t, held, sid, tc.SessionID, tc.HeldDiagnosticContains)
 
 	// The source settles: the running/streaming tools become terminal. Ordinary
 	// maintenance now activates a complete V2 generation from the same stored
@@ -223,7 +238,7 @@ func execBridgeSQL(t *testing.T, db *store.Store, query string, args ...any) {
 	}
 }
 
-func readAuthorityCapture(t *testing.T, db *store.Store, sid ingest.SessionID) authorityCapture {
+func readAuthorityCapture(t *testing.T, db *store.Store, sid ingest.SessionID) ingest.SessionContentCapture {
 	t.Helper()
 	capture, found, err := db.GetSessionContentCapture(t.Context(), sid)
 	if err != nil {
@@ -232,13 +247,7 @@ func readAuthorityCapture(t *testing.T, db *store.Store, sid ingest.SessionID) a
 	if !found {
 		t.Fatal("stored session carries no content certificate")
 	}
-	return authorityCapture{
-		status:          string(capture.Status),
-		sourceAuthority: string(capture.SourceAuthority),
-		captureFormat:   string(capture.CaptureFormat),
-		failureCode:     string(capture.FailureCode),
-		entryCount:      capture.EntryCount,
-	}
+	return capture
 }
 
 func readStoredStamps(t *testing.T, db *store.Store, sid ingest.SessionID) storedStamps {
@@ -249,11 +258,12 @@ func readStoredStamps(t *testing.T, db *store.Store, sid ingest.SessionID) store
 	}
 	defer db.Pool().Put(conn)
 	var stamps storedStamps
-	if err := sqlitex.ExecuteTransient(conn, `SELECT index_version, index_format_version FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `SELECT index_version, index_format_version, adapter_version FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			stamps.producer = stmt.ColumnInt(0)
 			stamps.format = stmt.ColumnInt(1)
+			stamps.adapter = stmt.ColumnInt(2)
 			return nil
 		},
 	}); err != nil {

@@ -42,7 +42,8 @@ type nativeRefreshRepairCase struct {
 	NativeSource         string         `yaml:"nativeSource"`
 	// UnsettledNativeSource names the native fixture whose assistant row still
 	// carries a running/streaming tool, for the authority-bridge scenario.
-	UnsettledNativeSource string `yaml:"unsettledNativeSource"`
+	UnsettledNativeSource  string   `yaml:"unsettledNativeSource"`
+	HeldDiagnosticContains []string `yaml:"heldDiagnosticContains"`
 }
 
 type nativeRefreshRepairFixture struct {
@@ -429,6 +430,9 @@ func TestNativeRefreshRepair(t *testing.T) {
 		}
 		if tc.Scenario == "opencode_authority_bridge" && (tc.NativeSource == "" || tc.UnsettledNativeSource == "") {
 			t.Fatalf("native_refresh_repair case %q requires nativeSource and unsettledNativeSource", tc.Name)
+		}
+		if tc.Scenario == "opencode_authority_bridge" && (tc.StoredIndexerVersion <= 0 || tc.StoredIndexFormat != 1 || len(tc.HeldDiagnosticContains) == 0) {
+			t.Fatalf("native_refresh_repair case %q requires historical producer, V1 format, and held diagnostic expectations", tc.Name)
 		}
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
