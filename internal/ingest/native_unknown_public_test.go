@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -38,6 +39,10 @@ import (
 var nativeUnknownPublicYAML []byte
 
 type nativeUnknownPublicCase struct {
+	Payload          string         `yaml:"payload"`
+	Expected         string         `yaml:"expected"`
+	Corrupt          string         `yaml:"corrupt"`
+	Kind             string         `yaml:"kind"`
 	KnownTexts       []string       `yaml:"known_texts"`
 	KnownRole        schema.Role    `yaml:"known_role"`
 	RetainedFallback bool           `yaml:"retained_fallback"`
@@ -186,8 +191,19 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			dir := t.TempDir()
 			fs := &ingest.OSFileSystem{}
 			// Replace the secret marker first so padding substitution cannot alter it.
-			payload := strings.ReplaceAll(strings.ReplaceAll(doc.Payload, "SECRET_BODY", strings.Repeat("A", 36)), "BODY", strings.Repeat("synthetic-", 1024))
-			expected := strings.ReplaceAll(doc.Expected, "BODY", strings.Repeat("synthetic-", 1024))
+			payloadTemplate, expectedTemplate := doc.Payload, doc.Expected
+			if c.Payload != "" {
+				payloadTemplate = c.Payload
+			}
+			if c.Expected != "" {
+				expectedTemplate = c.Expected
+			}
+			corrupt := doc.Corrupt[c.Harness]
+			if c.Corrupt != "" {
+				corrupt = c.Corrupt
+			}
+			payload := strings.ReplaceAll(strings.ReplaceAll(payloadTemplate, "SECRET_BODY", strings.Repeat("A", 36)), "BODY", strings.Repeat("synthetic-", 1024))
+			expected := strings.ReplaceAll(expectedTemplate, "BODY", strings.Repeat("synthetic-", 1024))
 			// Raw-at-rest + redact-at-egress: stored index Extra
 			// byte-equals the raw source (asserted below); export and upload
 			// both emit the baseline-redacted egress form.
@@ -210,7 +226,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 					t.Fatal(err)
 				}
 				damageSource = func() {
-					if err := os.WriteFile(path.String(), []byte(source+doc.Corrupt[c.Harness]+"\n"), 0600); err != nil {
+					if err := os.WriteFile(path.String(), []byte(source+corrupt+"\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -437,6 +453,14 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			before, _ := json.Marshal(priorExport)
+			priorCapture, _, err := db.GetSessionContentCapture(t.Context(), sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			priorState, err := db.ReadIndexState(t.Context(), sid)
+			if err != nil {
+				t.Fatal(err)
+			}
 			cfg.Reindex = true
 			writer.fail = true
 			failed := run()
@@ -501,6 +525,27 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				if !bytes.Equal(before, preservedBytes) {
 					t.Fatal("corrupt known source replaced prior export")
 				}
+				if c.Corrupt != "" {
+					capture, _, err := db.GetSessionContentCapture(t.Context(), sid)
+					if err != nil {
+						t.Fatal(err)
+					}
+					state, err := db.ReadIndexState(t.Context(), sid)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(capture, priorCapture) {
+						t.Fatal("malformed delivery replaced the last-good certificate")
+					}
+					if state == nil || priorState == nil {
+						t.Fatal("last-good producer state disappeared")
+					}
+					if state.IndexerVersion != priorState.IndexerVersion ||
+						!reflect.DeepEqual(state.IndexVersion, priorState.IndexVersion) ||
+						!reflect.DeepEqual(state.IndexedAt, priorState.IndexedAt) {
+						t.Fatal("malformed delivery changed last-good producer stamps")
+					}
+				}
 			}
 		})
 	}
@@ -532,9 +577,13 @@ func checkNativeUnknownPublic(t *testing.T, c nativeUnknownPublicCase, expected 
 		t.Fatalf("public opaque evidence missing: %+v", detail)
 	}
 	source := ""
+	kind := c.Kind
+	if kind == "" {
+		kind = "future"
+	}
 	for i, record := range detail.RetainedUnknown {
 		namespaceMismatch := record.Namespace != c.Namespace
-		kindMismatch := record.Kind != "future"
+		kindMismatch := record.Kind != kind
 		recordIndexMismatch := record.RecordIndex != c.RecordIndices[i]
 		positionMismatch := record.Position != c.Positions[i]
 		pointerMismatch := record.Pointer != c.Pointers[i]
