@@ -1,6 +1,8 @@
 requiredNames:
   - opencode-native-unchanged-and-append
   - opencode-native-first-incomplete-install
+  - opencode-native-authority-bridge-names-unsettled
+  - opencode-native-first-discovery-preview
   - opencode-native-fork-bounded-cutoff
   - opencode-native-digest-binds-content
   - opencode-native-projection-refusal-sanitized

@@ -368,6 +368,7 @@ type ocFlowCase struct {
 	Name               string        `yaml:"name"`
 	Kind               string        `yaml:"kind"`
 	SessionID          string        `yaml:"sessionId"`
+	Source             string        `yaml:"source"`
 	Sentinel           string        `yaml:"sentinel"`
 	Fork               *ocFlowFork   `yaml:"fork"`
 	BoundedFork        *ocFlowFork   `yaml:"boundedFork"`
@@ -383,6 +384,10 @@ type ocFlowCase struct {
 	LargeRowPadding    int           `yaml:"largeRowPadding"`
 	ExpectCopies       int           `yaml:"expectCopies"`
 	ExpectStep         string        `yaml:"expectStep"`
+	AuthoritySource    string        `yaml:"authoritySource"`
+	AuthorityFormat    string        `yaml:"authorityFormat"`
+	ExpectMessage      string        `yaml:"expectMessage"`
+	ExpectSequence     int64         `yaml:"expectSequence"`
 }
 
 type ocFlowDocument struct {
@@ -455,6 +460,17 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 		if row.LargeRowPrefix == "" || row.LargeRowPadding <= 0 {
 			return errors.New("the large-row kind requires a prefix and a positive padding size")
 		}
+	case "authority-bridge":
+		if row.AuthoritySource == "" || row.AuthorityFormat == "" {
+			return errors.New("the authority-bridge kind requires the certificate source and format")
+		}
+		if row.ExpectMessage == "" || row.ExpectSequence <= 0 {
+			return errors.New("the authority-bridge kind requires the unsettled message and a positive sequence")
+		}
+	case "first-discovery-preview":
+		if row.Source == "" {
+			return errors.New("the first-discovery-preview kind requires the native source fixture that carries an unfinished own row")
+		}
 	default:
 		return errors.New("kind is outside the closed set")
 	}
@@ -470,7 +486,11 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 func TestOpenCodeProvenanceFlow(t *testing.T) {
 	for _, row := range loadOpenCodeProvenanceFlowDocument(t).Cases {
 		t.Run(row.Name, func(t *testing.T) {
-			source := testfixture.MaterializeByName(t, openCodeFlowSourceFixture)
+			sourceName := row.Source
+			if sourceName == "" {
+				sourceName = openCodeFlowSourceFixture
+			}
+			source := testfixture.MaterializeByName(t, sourceName)
 			switch row.Kind {
 			case "identity":
 				runOpenCodeFlowIdentity(t, source, row)
@@ -494,6 +514,10 @@ func TestOpenCodeProvenanceFlow(t *testing.T) {
 				runOpenCodeFlowLargeRow(t, source, row)
 			case "decode-refusal":
 				runOpenCodeFlowDecodeRefusal(t, row)
+			case "authority-bridge":
+				runOpenCodeFlowAuthorityBridge(t, source, row)
+			case "first-discovery-preview":
+				runOpenCodeFlowFirstDiscoveryPreview(t, source, row)
 			default:
 				t.Fatalf("unsupported flow kind %q", row.Kind)
 			}
@@ -550,6 +574,64 @@ func runOpenCodeFlowIncomplete(t *testing.T, source testfixture.MaterializedSour
 	var incomplete *ingest.OpenCodeIncompleteProvenanceError
 	if !errors.As(err, &incomplete) {
 		t.Fatalf("incomplete replacement error = %v, want OpenCodeIncompleteProvenanceError", err)
+	}
+}
+
+// runOpenCodeFlowAuthorityBridge drives the production candidate exit with a
+// bridged stored-capture authority and an unfinished own native row: the
+// incomplete candidate is refused early with an actionable last-good-held
+// result that names the unsettled message and sequence, and the certificate's
+// own origin and format are preserved.
+func runOpenCodeFlowAuthorityBridge(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	session := openCodeFlowSession(row)
+	prior := ingest.OpenCodeProvenancePrior{
+		Aliases: ingest.NewProjectionPriorState(),
+		CaptureAuthority: &ingest.StoredCaptureAuthority{
+			SourceAuthority: ingest.ContentSourceAuthority(row.AuthoritySource),
+			CaptureFormat:   ingest.ContentCaptureFormat(row.AuthorityFormat),
+		},
+	}
+	config := openCodeFlowProvenanceConfig(source, row.SessionID, prior, nil)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
+	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	var incomplete *ingest.OpenCodeIncompleteProvenanceError
+	if !errors.As(err, &incomplete) {
+		t.Fatalf("authority bridge error = %v, want OpenCodeIncompleteProvenanceError", err)
+	}
+	diagnostics := strings.Join(incomplete.Diagnostics, "; ")
+	if !strings.Contains(diagnostics, row.ExpectMessage) {
+		t.Fatalf("refusal diagnostics %q do not name the unsettled message %q", diagnostics, row.ExpectMessage)
+	}
+	if !strings.Contains(diagnostics, fmt.Sprintf("sequence %d", row.ExpectSequence)) {
+		t.Fatalf("refusal diagnostics %q do not name the unsettled sequence %d", diagnostics, row.ExpectSequence)
+	}
+	if !strings.Contains(diagnostics, row.AuthorityFormat) {
+		t.Fatalf("refusal diagnostics %q do not preserve the certificate format %q", diagnostics, row.AuthorityFormat)
+	}
+	if !strings.Contains(diagnostics, row.AuthoritySource) {
+		t.Fatalf("refusal diagnostics %q do not preserve the certificate origin %q", diagnostics, row.AuthoritySource)
+	}
+}
+
+// runOpenCodeFlowFirstDiscoveryPreview drives the same unfinished native source
+// with no active generation and no stored certificate: the incomplete candidate
+// is a valid first-discovery preview, not a refusal, and the settled own work
+// is still emitted.
+func runOpenCodeFlowFirstDiscoveryPreview(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	session := openCodeFlowSession(row)
+	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
+	candidate, err := indexer.BuildNativeGeneration(context.Background(), session)
+	if err != nil {
+		t.Fatalf("first-discovery preview was refused: %v", err)
+	}
+	if candidate.Result.Generation.Completeness != indexformat.GenerationCompletenessIncompleteNew {
+		t.Fatalf("first-discovery completeness = %q, want incomplete_new", candidate.Result.Generation.Completeness)
+	}
+	if len(candidate.Result.Generation.Main.Entries) == 0 {
+		t.Fatal("first-discovery preview dropped the settled own work")
 	}
 }
 

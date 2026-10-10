@@ -38,6 +38,20 @@ cases:
           timeUpdated: 600
           data: '{"id":"msg_flow_parent_assistant","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_flow_parent","text":"captured parent answer"}],"time":{"created":500,"completed":600}}'
 
+  - name: opencode-native-authority-bridge-names-unsettled
+    kind: authority-bridge
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    source: native-v2-rows
+    authoritySource: provider_source
+    authorityFormat: full
+    expectMessage: msg_v2_assistant
+    expectSequence: 1
+
+  - name: opencode-native-first-discovery-preview
+    kind: first-discovery-preview
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    source: native-v2-rows
+
   - name: opencode-native-fork-bounded-cutoff
     kind: bounded-fork
     sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
