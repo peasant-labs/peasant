@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
@@ -294,7 +295,7 @@ func TestPublicationMetadataLimits(t *testing.T) {
 				delete(document, "contentHash")
 				delete(document, "visibilityIntent")
 				metadata := encodeMetadataLimitValue(t, document)
-				if len(metadata) >= c.DocumentBytes || len(metadata) > 134217728 {
+				if len(metadata) >= c.DocumentBytes || len(metadata) > defaults.PushMetadataDocumentCapBytes {
 					t.Fatalf("final preflight recipe input bytes=%d must fit before promotion", len(metadata))
 				}
 				actual, err := buildAuthoritativeRequest(metadata, content)
