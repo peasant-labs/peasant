@@ -124,9 +124,10 @@ type codexHistoryPhase struct {
 }
 
 type codexHistoryCase struct {
-	Name     string              `yaml:"name"`
-	Unstable bool                `yaml:"unstable"`
-	Phases   []codexHistoryPhase `yaml:"phases"`
+	Name     string                    `yaml:"name"`
+	Delivery *codexDeliveryFixtureCase `yaml:"delivery"`
+	Unstable bool                      `yaml:"unstable"`
+	Phases   []codexHistoryPhase       `yaml:"phases"`
 }
 
 type codexHistoryProjectionFixture struct {
@@ -142,7 +143,7 @@ func decodeCodexHistoryProjectionFixture(data []byte) (codexHistoryProjectionFix
 		if strings.TrimSpace(c.Name) == "" {
 			return codexHistoryProjectionFixture{}, fmt.Errorf("codex history projection fixture has an empty case name")
 		}
-		if c.Unstable {
+		if c.Unstable || c.Delivery != nil {
 			continue
 		}
 		if len(c.Phases) == 0 {
@@ -508,6 +509,9 @@ func normalizeRefs(values []string) []string {
 func TestCodexHistoryProjectionFixtures(t *testing.T) {
 	fixture := loadCodexHistoryProjectionFixture(t)
 	for _, testCase := range fixture.Cases {
+		if testCase.Delivery != nil {
+			continue
+		}
 		t.Run(testCase.Name, func(t *testing.T) {
 			if testCase.Unstable {
 				testCodexUnstableCapture(t, testCase)

@@ -33,7 +33,7 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 // baseline, so the native path is never advertised before its writer and reader
 // exist. When a harness is absent from the baseline it is also absent here.
 var NativeGenerationRepairTargets = map[Harness]HarvesterVersions{
-	HarnessCodex:    {AdapterVersion: 2, IndexerVersion: 19, IndexVersion: 2},
+	HarnessCodex:    {AdapterVersion: 2, IndexerVersion: 20, IndexVersion: 2},
 	HarnessOpenCode: {AdapterVersion: 3, IndexerVersion: 18, IndexVersion: 2},
 }
 

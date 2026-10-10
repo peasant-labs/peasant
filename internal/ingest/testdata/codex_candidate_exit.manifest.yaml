@@ -1,4 +1,5 @@
 requiredNames:
+  - malformed-delivery-names-line-kind-and-shape
   - missing-native-source-refusal-keeps-private-location-safe
   - noncanonical-native-identity-refusal-keeps-private-value-safe
   - noncanonical-session-reference-reports-unidentified

@@ -15,7 +15,7 @@ cases:
     indexer: 15
     indexerOverrides: {claude-code: 18, codex: 17, cursor: 18, strike: 17, opencode: 17, pi: 17}
     nativeTargets:
-      codex: {adapter_version: 2, indexer_version: 19, index_version: 2}
+      codex: {adapter_version: 2, indexer_version: 20, index_version: 2}
       opencode: {adapter_version: 3, indexer_version: 18, index_version: 2}
     index: 1
   - name: injected_subset_without_indexers
