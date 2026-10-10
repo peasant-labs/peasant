@@ -150,6 +150,11 @@ type ClassifiedCapture struct {
 	Blocks        []ClassifiedBlock
 	Segments      []indexformat.ContextSegment
 	Prior         ProjectionPriorState
+	// Diagnostics carries the capture builder's own settled-state notes, such
+	// as the unfinished native message and sequence that left the capture
+	// incomplete, so the refusal that follows can name them without re-reading
+	// the source. It never carries raw content.
+	Diagnostics []string
 }
 
 // resolvedBlock is one classified block with its effective partition and its

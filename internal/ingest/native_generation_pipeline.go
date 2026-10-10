@@ -83,6 +83,43 @@ func (p *Pipeline) priorReader() NativeGenerationPriorReader {
 	return reader
 }
 
+// storedCaptureAuthorityReader returns the store-backed stored-capture
+// authority reader, or nil when the configured store cannot answer it. A store
+// without it bridges nothing and keeps the existing empty-prior behavior.
+func (p *Pipeline) storedCaptureAuthorityReader() NativePriorCaptureAuthorityReader {
+	if p.metricsStore == nil {
+		return nil
+	}
+	reader, _ := p.metricsStore.(NativePriorCaptureAuthorityReader)
+	return reader
+}
+
+// bridgeOpenCodeCaptureAuthority consults the stored content-capture
+// certificate when a session has no active managed generation, so an
+// incomplete native candidate is refused early against the same authority the
+// content writer guards instead of being built and refused later. The bridge
+// preserves the certificate's own origin and format and fabricates no alias or
+// captured-prefix proof. An operator-initiated rebuild (force/reindex)
+// deliberately replaces full read authority with a preview, so the bridge is
+// suppressed for it exactly as the writer's guard is.
+func (p *Pipeline) bridgeOpenCodeCaptureAuthority(ctx context.Context, session DiscoveredSession) (OpenCodeProvenancePrior, error) {
+	if p.config.Force || p.config.Reindex {
+		return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+	}
+	reader := p.storedCaptureAuthorityReader()
+	if reader == nil {
+		return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+	}
+	authority, err := reader.ReadStoredCaptureAuthority(ctx, session.SessionID)
+	if err != nil {
+		return OpenCodeProvenancePrior{}, fmt.Errorf("load stored capture authority for session %s: %w; no candidate was produced and the last good generation stays active", session.SessionID, err)
+	}
+	if authority == nil {
+		return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+	}
+	return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState(), CaptureAuthority: authority}, nil
+}
+
 // codexPriorLoader supplies the last-good graph metadata and reusable alias
 // state a Codex refresh must retain. A session with no active generation yields
 // an empty prior, so a first discovery allocates fresh identities.
@@ -122,7 +159,11 @@ func (p *Pipeline) openCodePriorLoader() func(context.Context, DiscoveredSession
 			return OpenCodeProvenancePrior{}, fmt.Errorf("load OpenCode prior evidence for session %s: %w; no candidate was produced and the last good generation stays active", session.SessionID, err)
 		}
 		if prior == nil {
-			return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+			// No active generation. The stored capture certificate may still
+			// hold last-good full authority; bridge it so an incomplete native
+			// candidate is refused early with an actionable last-good-held
+			// result instead of being built and refused by the store later.
+			return p.bridgeOpenCodeCaptureAuthority(ctx, session)
 		}
 		loaded := OpenCodeProvenancePrior{Aliases: prior.Aliases, HasCompleteGeneration: prior.HasCompleteGeneration}
 		if len(prior.PriorEvidence) > 0 {

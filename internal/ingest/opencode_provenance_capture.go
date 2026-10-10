@@ -335,6 +335,7 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 		Completeness:         materialized.Completeness,
 		Segments:             materialized.Segments,
 		Prior:                prior.Aliases.clone(),
+		Diagnostics:          append([]string(nil), materialized.Diagnostics...),
 	}
 	if needsOpenCodeUncertainSection(materialized.Messages) {
 		capture.EarlierStates = []schema.EarlierHistoryState{schema.EarlierHistoryUncertainUnresolved}
@@ -471,6 +472,14 @@ type OpenCodeProvenancePrior struct {
 	// discovery; replacing a complete generation with an incomplete one is
 	// refused.
 	HasCompleteGeneration bool
+	// CaptureAuthority, when non-nil, names a stored content-capture
+	// certificate that holds last-good full authority although no active
+	// managed generation exists. It is the writer's own publishable-capture
+	// predicate applied to the stored certificate, never a publication
+	// revision, and it is preserved with the certificate's own origin and
+	// format. A bridged prior carries no aliases and no captured-prefix proof:
+	// the bridge never fabricates a V2 generation.
+	CaptureAuthority *StoredCaptureAuthority
 }
 
 // OpenCodeProvenanceIndexerConfig wires the provenance candidate path into an
@@ -564,8 +573,23 @@ func (idx *OpenCodeIndexer) BuildNativeGeneration(ctx context.Context, session D
 		return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
 	}
 	if built.Generation.Completeness != indexformat.GenerationCompletenessComplete {
-		if prior.HasCompleteGeneration {
-			diagnostics := []string{"the capture proves no full generation", "a complete last-good generation stays active"}
+		// An incomplete candidate is refused EARLY, before activation, when any
+		// last-good full authority already exists: a complete V2 generation, or
+		// the stored content-capture certificate the writer's own guard would
+		// protect. The refusal names the unfinished message and sequence from
+		// the capture's own diagnostics, so the held session reads as an
+		// actionable last-good-held result instead of a later opaque store
+		// refusal. The transactional guard stays in place for the race the
+		// prior read cannot close.
+		if prior.HasCompleteGeneration || prior.CaptureAuthority != nil {
+			diagnostics := append([]string(nil), capture.Diagnostics...)
+			diagnostics = append(diagnostics, "the capture proves no full generation")
+			if prior.HasCompleteGeneration {
+				diagnostics = append(diagnostics, "a complete last-good generation stays active")
+			}
+			if prior.CaptureAuthority != nil {
+				diagnostics = append(diagnostics, fmt.Sprintf("a stored %s capture certificate of format %q holds last-good full authority and stays active", prior.CaptureAuthority.SourceAuthority, prior.CaptureAuthority.CaptureFormat))
+			}
 			if len(snapshot.SourceEvidenceDigest) == 0 {
 				diagnostics = append(diagnostics, "the snapshot carries no evidence digest")
 			}

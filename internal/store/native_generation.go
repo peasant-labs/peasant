@@ -21,6 +21,7 @@ var (
 	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
 	_ ingest.NativeGenerationStaged            = (*PreparedGeneration)(nil)
 	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
+	_ ingest.NativePriorCaptureAuthorityReader = (*Store)(nil)
 	_ ingest.ContentSweeper                    = (*Store)(nil)
 )
 
@@ -185,6 +186,31 @@ func (s *Store) ReadNativeGenerationPrior(ctx context.Context, sessionID schema.
 	}
 	prior.PriorEvidence = evidence
 	return prior, nil
+}
+
+// ReadStoredCaptureAuthority reports the stored content-capture certificate
+// that holds last-good full authority for a session with no active managed
+// generation. It reads the same session_content_captures row and applies the
+// same PublishableWithOmissions predicate the content writer uses to guard a
+// preview replacement, so the bridge cannot drift from the transactional
+// guard. The certificate's own source authority and capture format are
+// preserved; a session with no publishable certificate returns (nil, nil), so
+// a genuine first discovery keeps its empty prior. A publication revision is
+// never consulted.
+func (s *Store) ReadStoredCaptureAuthority(ctx context.Context, sessionID schema.SessionID) (*ingest.StoredCaptureAuthority, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection to read the stored capture authority for session %s: %w; the stored certificate was not consulted; restore database access and retry", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+	capture, found, err := readCapture(conn, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: read the stored capture certificate for session %s: %w; the authority bridge was not applied; repair the capture row or use a build that knows its codes", sessionID, err)
+	}
+	if !found || !PublishableWithOmissions(capture) {
+		return nil, nil
+	}
+	return &ingest.StoredCaptureAuthority{SourceAuthority: capture.SourceAuthority, CaptureFormat: capture.CaptureFormat}, nil
 }
 
 // readHarmonizedPriorOnConn loads the reusable evidence for a harmonized
