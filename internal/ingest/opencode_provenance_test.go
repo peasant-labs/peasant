@@ -384,8 +384,11 @@ type ocFlowCase struct {
 	LargeRowPadding    int           `yaml:"largeRowPadding"`
 	ExpectCopies       int           `yaml:"expectCopies"`
 	ExpectStep         string        `yaml:"expectStep"`
+	AuthorityStatus    string        `yaml:"authorityStatus"`
 	AuthoritySource    string        `yaml:"authoritySource"`
+	AuthorityOrigin    string        `yaml:"authorityOrigin"`
 	AuthorityFormat    string        `yaml:"authorityFormat"`
+	AuthorityCode      string        `yaml:"authorityFailureCode"`
 	ExpectMessage      string        `yaml:"expectMessage"`
 	ExpectSequence     int64         `yaml:"expectSequence"`
 }
@@ -461,8 +464,11 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 			return errors.New("the large-row kind requires a prefix and a positive padding size")
 		}
 	case "authority-bridge":
-		if row.AuthoritySource == "" || row.AuthorityFormat == "" {
-			return errors.New("the authority-bridge kind requires the certificate source and format")
+		if row.AuthorityStatus == "" || row.AuthoritySource == "" || row.AuthorityFormat == "" {
+			return errors.New("the authority-bridge kind requires the certificate status, source, and format")
+		}
+		if row.AuthorityOrigin == "" {
+			return errors.New("the authority-bridge kind requires the certificate transcript origin")
 		}
 		if row.ExpectMessage == "" || row.ExpectSequence <= 0 {
 			return errors.New("the authority-bridge kind requires the unsettled message and a positive sequence")
@@ -588,8 +594,11 @@ func runOpenCodeFlowAuthorityBridge(t *testing.T, source testfixture.Materialize
 	prior := ingest.OpenCodeProvenancePrior{
 		Aliases: ingest.NewProjectionPriorState(),
 		CaptureAuthority: &ingest.StoredCaptureAuthority{
-			SourceAuthority: ingest.ContentSourceAuthority(row.AuthoritySource),
-			CaptureFormat:   ingest.ContentCaptureFormat(row.AuthorityFormat),
+			Status:           ingest.ContentCaptureStatus(row.AuthorityStatus),
+			SourceAuthority:  ingest.ContentSourceAuthority(row.AuthoritySource),
+			TranscriptOrigin: openCodeFlowOrigin(t, row.AuthorityOrigin),
+			CaptureFormat:    ingest.ContentCaptureFormat(row.AuthorityFormat),
+			FailureCode:      ingest.ContentCaptureFailureCode(row.AuthorityCode),
 		},
 	}
 	config := openCodeFlowProvenanceConfig(source, row.SessionID, prior, nil)
@@ -606,11 +615,36 @@ func runOpenCodeFlowAuthorityBridge(t *testing.T, source testfixture.Materialize
 	if !strings.Contains(diagnostics, fmt.Sprintf("sequence %d", row.ExpectSequence)) {
 		t.Fatalf("refusal diagnostics %q do not name the unsettled sequence %d", diagnostics, row.ExpectSequence)
 	}
-	if !strings.Contains(diagnostics, row.AuthorityFormat) {
-		t.Fatalf("refusal diagnostics %q do not preserve the certificate format %q", diagnostics, row.AuthorityFormat)
+	for label, want := range map[string]string{
+		"status":  row.AuthorityStatus,
+		"origin":  row.AuthorityOrigin,
+		"format":  row.AuthorityFormat,
+		"source":  row.AuthoritySource,
+		"failure": row.AuthorityCode,
+	} {
+		if want == "" {
+			continue
+		}
+		if !strings.Contains(diagnostics, want) {
+			t.Fatalf("refusal diagnostics %q do not preserve the certificate %s %q", diagnostics, label, want)
+		}
 	}
-	if !strings.Contains(diagnostics, row.AuthoritySource) {
-		t.Fatalf("refusal diagnostics %q do not preserve the certificate origin %q", diagnostics, row.AuthoritySource)
+}
+
+// openCodeFlowOrigin maps a fixture origin name to the closed-set origin the
+// bridged certificate carries and the refusal must state.
+func openCodeFlowOrigin(t *testing.T, name string) ingest.TranscriptOrigin {
+	t.Helper()
+	switch name {
+	case "file":
+		return ingest.TranscriptOriginFile
+	case "opencode-legacy-sqlite":
+		return ingest.TranscriptOriginOpenCodeLegacySQLite
+	case "opencode-current-sqlite":
+		return ingest.TranscriptOriginOpenCodeCurrentSQLite
+	default:
+		t.Fatalf("authority-bridge case names an unknown transcript origin %q", name)
+		return ingest.TranscriptOriginFile
 	}
 }
 

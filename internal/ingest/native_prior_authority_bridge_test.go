@@ -2,10 +2,148 @@ package ingest
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/native_prior_authority_bridge.yaml
+var nativePriorAuthorityBridgeYAML []byte
+
+// bridgeAuthoritySpec is the certificate every authority-present case serves.
+type bridgeAuthoritySpec struct {
+	Status           string `yaml:"status"`
+	SourceAuthority  string `yaml:"sourceAuthority"`
+	TranscriptOrigin string `yaml:"transcriptOrigin"`
+	CaptureFormat    string `yaml:"captureFormat"`
+	FailureCode      string `yaml:"failureCode"`
+}
+
+func (s bridgeAuthoritySpec) authority(t *testing.T) *StoredCaptureAuthority {
+	t.Helper()
+	status, err := NewContentCaptureStatus(s.Status)
+	if err != nil {
+		t.Fatalf("bridge fixture authority status: %v", err)
+	}
+	source, err := NewContentSourceAuthority(s.SourceAuthority)
+	if err != nil {
+		t.Fatalf("bridge fixture authority source: %v", err)
+	}
+	format, err := NewContentCaptureFormat(s.CaptureFormat)
+	if err != nil {
+		t.Fatalf("bridge fixture authority format: %v", err)
+	}
+	code, err := NewContentCaptureFailureCode(s.FailureCode)
+	if err != nil {
+		t.Fatalf("bridge fixture authority failure code: %v", err)
+	}
+	return &StoredCaptureAuthority{Status: status, SourceAuthority: source, TranscriptOrigin: bridgeOrigin(t, s.TranscriptOrigin), CaptureFormat: format, FailureCode: code}
+}
+
+func bridgeOrigin(t *testing.T, name string) TranscriptOrigin {
+	t.Helper()
+	switch name {
+	case "file":
+		return TranscriptOriginFile
+	case "opencode-legacy-sqlite":
+		return TranscriptOriginOpenCodeLegacySQLite
+	case "opencode-current-sqlite":
+		return TranscriptOriginOpenCodeCurrentSQLite
+	default:
+		t.Fatalf("bridge fixture names unknown transcript origin %q", name)
+		return TranscriptOriginFile
+	}
+}
+
+// bridgePriorCase is one named prior-loader scenario. The loader is a pure
+// composition over the active-generation prior reader and the stored-capture
+// authority reader, so each case configures those two seams and the run mode.
+type bridgePriorCase struct {
+	Name                 string `yaml:"name"`
+	Prior                string `yaml:"prior"`
+	Authority            string `yaml:"authority"`
+	StoreKind            string `yaml:"storeKind"`
+	Force                bool   `yaml:"force"`
+	Reindex              bool   `yaml:"reindex"`
+	AuthorityError       bool   `yaml:"authorityError"`
+	WantPrior            string `yaml:"wantPrior"`
+	WantCaptureAuthority bool   `yaml:"wantCaptureAuthority"`
+	WantAuthorityReads   int    `yaml:"wantAuthorityReads"`
+	WantError            bool   `yaml:"wantError"`
+}
+
+type bridgePriorDocument struct {
+	RequiredNames []string            `yaml:"requiredNames"`
+	SessionID     string              `yaml:"sessionId"`
+	Authority     bridgeAuthoritySpec `yaml:"authority"`
+	Cases         []bridgePriorCase   `yaml:"cases"`
+}
+
+func loadBridgePriorDocument(t *testing.T) bridgePriorDocument {
+	t.Helper()
+	decoder := yaml.NewDecoder(strings.NewReader(string(nativePriorAuthorityBridgeYAML)))
+	decoder.KnownFields(true)
+	var document bridgePriorDocument
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode native_prior_authority_bridge.yaml: %v", err)
+	}
+	if len(document.RequiredNames) == 0 {
+		t.Fatal("native_prior_authority_bridge.yaml declares no required names")
+	}
+	seen := make(map[string]bool, len(document.Cases))
+	names := make([]string, 0, len(document.Cases))
+	for _, c := range document.Cases {
+		if strings.TrimSpace(c.Name) == "" || seen[c.Name] {
+			t.Fatalf("native prior authority bridge case name %q is empty or repeated", c.Name)
+		}
+		seen[c.Name] = true
+		switch c.Prior {
+		case "active-complete", "none":
+		default:
+			t.Fatalf("case %q names an unknown prior %q", c.Name, c.Prior)
+		}
+		switch c.Authority {
+		case "present", "absent":
+		default:
+			t.Fatalf("case %q names an unknown authority %q", c.Name, c.Authority)
+		}
+		switch c.StoreKind {
+		case "", "both", "prior-only":
+		default:
+			t.Fatalf("case %q names an unknown store kind %q", c.Name, c.StoreKind)
+		}
+		if c.WantError {
+			if c.WantPrior != "" {
+				t.Fatalf("case %q expects an error and also names a wanted prior %q", c.Name, c.WantPrior)
+			}
+		} else {
+			switch c.WantPrior {
+			case "active", "bridge", "empty":
+			default:
+				t.Fatalf("case %q names an unknown wanted prior %q", c.Name, c.WantPrior)
+			}
+		}
+		names = append(names, c.Name)
+	}
+	required := make(map[string]bool, len(document.RequiredNames))
+	for _, name := range document.RequiredNames {
+		required[name] = true
+	}
+	for _, name := range names {
+		if !required[name] {
+			t.Fatalf("case %q is not declared in requiredNames; add it to the deletion guard", name)
+		}
+	}
+	for _, name := range document.RequiredNames {
+		if !seen[name] {
+			t.Fatalf("requiredNames declares %q, which no case carries", name)
+		}
+	}
+	return document
+}
 
 // bridgePriorStore is a dependency fake for the OpenCode prior loader: it
 // answers the active-generation prior and the stored capture authority from
@@ -15,14 +153,13 @@ type bridgePriorStore struct {
 	MetricsStore
 
 	prior          *NativeGenerationPrior
-	priorErr       error
 	authority      *StoredCaptureAuthority
 	authorityErr   error
 	authorityReads int
 }
 
 func (s *bridgePriorStore) ReadNativeGenerationPrior(context.Context, SessionID) (*NativeGenerationPrior, error) {
-	return s.prior, s.priorErr
+	return s.prior, nil
 }
 
 func (s *bridgePriorStore) ReadStoredCaptureAuthority(context.Context, SessionID) (*StoredCaptureAuthority, error) {
@@ -41,122 +178,95 @@ func (s *priorOnlyStore) ReadNativeGenerationPrior(context.Context, SessionID) (
 	return s.prior, nil
 }
 
-func bridgeTestSession() DiscoveredSession {
-	return DiscoveredSession{SessionID: SessionID("ses_bridge_authority_test"), Harness: HarnessOpenCode}
+// TestOpenCodePriorLoaderBridgesStoredCaptureAuthority drives every named prior
+// loader scenario through the production loader: with no active generation it
+// consults the stored certificate and preserves its state without fabricating
+// aliases, captured-prefix proof, or a complete-generation claim. An active
+// generation wins outright, an operator-initiated rebuild suppresses the
+// bridge, and a store without the authority reader keeps the existing empty
+// prior.
+func TestOpenCodePriorLoaderBridgesStoredCaptureAuthority(t *testing.T) {
+	document := loadBridgePriorDocument(t)
+	session := DiscoveredSession{SessionID: SessionID(document.SessionID), Harness: HarnessOpenCode}
+	ctx := context.Background()
+	for _, tc := range document.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			authority := document.Authority.authority(t)
+			var store MetricsStore
+			var reads *int
+			switch tc.StoreKind {
+			case "prior-only":
+				store = &priorOnlyStore{prior: activePriorFor(tc)}
+			default:
+				fake := &bridgePriorStore{prior: activePriorFor(tc)}
+				if tc.Authority == "present" {
+					fake.authority = authority
+				}
+				if tc.AuthorityError {
+					fake.authorityErr = errors.New("injected authority read failure")
+				}
+				reads = &fake.authorityReads
+				store = fake
+			}
+			p := &Pipeline{metricsStore: store, config: PipelineConfig{Force: tc.Force, Reindex: tc.Reindex}}
+			prior, err := p.openCodePriorLoader()(ctx, session)
+			if tc.WantError {
+				if err == nil {
+					t.Fatal("an authority read failure produced no error")
+				}
+				if !strings.Contains(err.Error(), document.SessionID) {
+					t.Fatalf("the refusal does not name the session: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("openCodePriorLoader: %v", err)
+			}
+			assertBridgePrior(t, tc, prior, authority)
+			if reads != nil && *reads != tc.WantAuthorityReads {
+				t.Fatalf("authority reader consulted %d times, want %d", *reads, tc.WantAuthorityReads)
+			}
+		})
+	}
 }
 
-// TestOpenCodePriorLoaderBridgesStoredCaptureAuthority pins the production prior
-// acquisition: with no active generation it consults the stored capture
-// certificate and preserves its origin and format without fabricating aliases,
-// captured-prefix proof, or a complete-generation claim. An active generation
-// wins outright, an operator-initiated rebuild suppresses the bridge, and a
-// store without the authority reader keeps the existing empty prior.
-func TestOpenCodePriorLoaderBridgesStoredCaptureAuthority(t *testing.T) {
-	ctx := context.Background()
-	session := bridgeTestSession()
+func activePriorFor(tc bridgePriorCase) *NativeGenerationPrior {
+	if tc.Prior != "active-complete" {
+		return nil
+	}
+	return &NativeGenerationPrior{HasCompleteGeneration: true, Aliases: NewProjectionPriorState()}
+}
 
-	t.Run("active-generation-prior-wins", func(t *testing.T) {
-		store := &bridgePriorStore{
-			prior:     &NativeGenerationPrior{HasCompleteGeneration: true, Aliases: NewProjectionPriorState()},
-			authority: &StoredCaptureAuthority{SourceAuthority: ContentSourceProviderSource, CaptureFormat: ContentCaptureFormatFull},
-		}
-		p := &Pipeline{metricsStore: store}
-		prior, err := p.openCodePriorLoader()(ctx, session)
-		if err != nil {
-			t.Fatalf("openCodePriorLoader: %v", err)
-		}
+func assertBridgePrior(t *testing.T, tc bridgePriorCase, prior OpenCodeProvenancePrior, authority *StoredCaptureAuthority) {
+	t.Helper()
+	switch tc.WantPrior {
+	case "active":
 		if !prior.HasCompleteGeneration {
 			t.Fatal("active complete prior was not preserved")
 		}
-		if prior.CaptureAuthority != nil {
-			t.Fatalf("active generation still consulted the stored certificate: %+v", prior.CaptureAuthority)
-		}
-		if store.authorityReads != 0 {
-			t.Fatalf("authority reader consulted %d times with an active generation, want 0", store.authorityReads)
-		}
-	})
-
-	t.Run("no-generation-bridges-authority", func(t *testing.T) {
-		store := &bridgePriorStore{
-			authority: &StoredCaptureAuthority{SourceAuthority: ContentSourceProviderSource, CaptureFormat: ContentCaptureFormatFull},
-		}
-		p := &Pipeline{metricsStore: store}
-		prior, err := p.openCodePriorLoader()(ctx, session)
-		if err != nil {
-			t.Fatalf("openCodePriorLoader: %v", err)
-		}
+	case "bridge":
 		if prior.HasCompleteGeneration {
 			t.Fatal("the bridge claimed a complete generation that does not exist")
 		}
 		if prior.CaptureAuthority == nil {
 			t.Fatal("the stored capture authority was not bridged")
 		}
-		if prior.CaptureAuthority.SourceAuthority != ContentSourceProviderSource || prior.CaptureAuthority.CaptureFormat != ContentCaptureFormatFull {
-			t.Fatalf("bridged authority = %+v, want the certificate's own origin and format", prior.CaptureAuthority)
+		if *prior.CaptureAuthority != *authority {
+			t.Fatalf("bridged authority = %+v, want the certificate's own state %+v", *prior.CaptureAuthority, *authority)
 		}
-		if len(prior.Aliases.Entries) != 0 || len(prior.Aliases.Submissions) != 0 {
-			t.Fatalf("the bridge fabricated aliases: %+v", prior.Aliases)
+	case "empty":
+		if prior.HasCompleteGeneration {
+			t.Fatal("the empty prior claimed a complete generation")
 		}
-		if prior.HasCapturedPrefix || len(prior.CapturedPrefix) != 0 {
-			t.Fatalf("the bridge fabricated captured-prefix proof: has=%v rows=%d", prior.HasCapturedPrefix, len(prior.CapturedPrefix))
-		}
-	})
-
-	t.Run("no-generation-no-authority-keeps-empty-prior", func(t *testing.T) {
-		store := &bridgePriorStore{}
-		p := &Pipeline{metricsStore: store}
-		prior, err := p.openCodePriorLoader()(ctx, session)
-		if err != nil {
-			t.Fatalf("openCodePriorLoader: %v", err)
-		}
-		if prior.HasCompleteGeneration || prior.CaptureAuthority != nil {
-			t.Fatalf("first discovery claimed authority: %+v", prior)
-		}
-		if store.authorityReads != 1 {
-			t.Fatalf("authority reader consulted %d times, want 1", store.authorityReads)
-		}
-	})
-
-	t.Run("explicit-rebuild-suppresses-bridge", func(t *testing.T) {
-		for _, config := range []PipelineConfig{{Force: true}, {Reindex: true}} {
-			store := &bridgePriorStore{
-				authority: &StoredCaptureAuthority{SourceAuthority: ContentSourceProviderSource, CaptureFormat: ContentCaptureFormatFull},
-			}
-			p := &Pipeline{metricsStore: store, config: config}
-			prior, err := p.openCodePriorLoader()(ctx, session)
-			if err != nil {
-				t.Fatalf("openCodePriorLoader: %v", err)
-			}
-			if prior.CaptureAuthority != nil {
-				t.Fatalf("operator-initiated rebuild still bridged the certificate: %+v", prior.CaptureAuthority)
-			}
-			if store.authorityReads != 0 {
-				t.Fatalf("authority reader consulted %d times for an explicit rebuild, want 0", store.authorityReads)
-			}
-		}
-	})
-
-	t.Run("store-without-authority-reader-bridges-nothing", func(t *testing.T) {
-		store := &priorOnlyStore{}
-		p := &Pipeline{metricsStore: store}
-		prior, err := p.openCodePriorLoader()(ctx, session)
-		if err != nil {
-			t.Fatalf("openCodePriorLoader: %v", err)
-		}
-		if prior.CaptureAuthority != nil || prior.HasCompleteGeneration {
-			t.Fatalf("a store without the authority reader bridged something: %+v", prior)
-		}
-	})
-
-	t.Run("authority-reader-error-is-actionable", func(t *testing.T) {
-		store := &bridgePriorStore{authorityErr: errors.New("injected authority read failure")}
-		p := &Pipeline{metricsStore: store}
-		_, err := p.openCodePriorLoader()(ctx, session)
-		if err == nil {
-			t.Fatal("an authority read failure produced no error")
-		}
-		if !strings.Contains(err.Error(), session.SessionID.String()) {
-			t.Fatalf("the refusal does not name the session: %v", err)
-		}
-	})
+	}
+	if got := prior.CaptureAuthority != nil; got != tc.WantCaptureAuthority {
+		t.Fatalf("capture authority present = %v, want %v", got, tc.WantCaptureAuthority)
+	}
+	if len(prior.Aliases.Entries) != 0 || len(prior.Aliases.Submissions) != 0 {
+		t.Fatalf("the loader fabricated aliases: %+v", prior.Aliases)
+	}
+	if prior.HasCapturedPrefix || len(prior.CapturedPrefix) != 0 {
+		t.Fatalf("the loader fabricated captured-prefix proof: has=%v rows=%d", prior.HasCapturedPrefix, len(prior.CapturedPrefix))
+	}
 }

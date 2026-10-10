@@ -40,6 +40,9 @@ type nativeRefreshRepairCase struct {
 	UnrelatedSessionID   string         `yaml:"unrelatedSessionId"`
 	UnrelatedTranscript  string         `yaml:"unrelatedTranscript"`
 	NativeSource         string         `yaml:"nativeSource"`
+	// UnsettledNativeSource names the native fixture whose assistant row still
+	// carries a running/streaming tool, for the authority-bridge scenario.
+	UnsettledNativeSource string `yaml:"unsettledNativeSource"`
 }
 
 type nativeRefreshRepairFixture struct {
@@ -400,6 +403,19 @@ func readMetricsTitle(t *testing.T, db *store.Store, sid ingest.SessionID) strin
 	return *metrics.TitleGenerated
 }
 
+// knownNativeRepairScenario reports whether a fixture case names a scenario the
+// oracle implements. It keeps the dispatch and the fixture in one place instead
+// of a growing boolean chain.
+func knownNativeRepairScenario(scenario string) bool {
+	switch scenario {
+	case "maintenance_repair", "failed_capture", "future_state", "unrelated_harness",
+		"opencode_native_activation", "opencode_authority_bridge":
+		return true
+	default:
+		return false
+	}
+}
+
 // TestNativeRefreshRepair drives the real Pipeline through the named native
 // repair oracle: a stale format-1 Codex projection is repaired into a managed
 // generation with its metadata, a second run is unchanged, a failed native
@@ -408,13 +424,20 @@ func readMetricsTitle(t *testing.T, db *store.Store, sid ingest.SessionID) strin
 func TestNativeRefreshRepair(t *testing.T) {
 	fixture := loadNativeRefreshRepairFixture(t)
 	for _, tc := range fixture.Cases {
-		if tc.Scenario != "maintenance_repair" && tc.Scenario != "failed_capture" && tc.Scenario != "future_state" && tc.Scenario != "unrelated_harness" && tc.Scenario != "opencode_native_activation" {
+		if !knownNativeRepairScenario(tc.Scenario) {
 			t.Fatalf("native_refresh_repair case %q declares unknown scenario %q", tc.Name, tc.Scenario)
+		}
+		if tc.Scenario == "opencode_authority_bridge" && (tc.NativeSource == "" || tc.UnsettledNativeSource == "") {
+			t.Fatalf("native_refresh_repair case %q requires nativeSource and unsettledNativeSource", tc.Name)
 		}
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			if tc.Scenario == "opencode_native_activation" {
 				runOpenCodeNativeActivation(t, tc)
+				return
+			}
+			if tc.Scenario == "opencode_authority_bridge" {
+				runOpenCodeAuthorityBridgePipeline(t, tc)
 				return
 			}
 			sid, err := ingest.NewSessionID(tc.SessionID)

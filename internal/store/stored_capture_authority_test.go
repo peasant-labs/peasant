@@ -27,12 +27,11 @@ type storedCaptureAuthorityCase struct {
 	Present                    bool   `yaml:"present"`
 	Status                     string `yaml:"status"`
 	SourceAuthority            string `yaml:"sourceAuthority"`
+	TranscriptOrigin           string `yaml:"transcriptOrigin"`
 	CaptureFormat              string `yaml:"captureFormat"`
 	FailureCode                string `yaml:"failureCode"`
 	PublicationCaptureRevision int64  `yaml:"publicationCaptureRevision"`
 	WantAuthority              bool   `yaml:"wantAuthority"`
-	WantSourceAuthority        string `yaml:"wantSourceAuthority"`
-	WantCaptureFormat          string `yaml:"wantCaptureFormat"`
 }
 
 type storedCaptureAuthorityFixture struct {
@@ -40,6 +39,23 @@ type storedCaptureAuthorityFixture struct {
 		ID string `yaml:"id"`
 	} `yaml:"session"`
 	Cases []storedCaptureAuthorityCase `yaml:"cases"`
+}
+
+// transcriptOriginFor maps a fixture name to the closed-set origin it seeds and
+// the bridge must preserve.
+func transcriptOriginFor(t *testing.T, name string) ingest.TranscriptOrigin {
+	t.Helper()
+	switch name {
+	case "file":
+		return ingest.TranscriptOriginFile
+	case "opencode-legacy-sqlite":
+		return ingest.TranscriptOriginOpenCodeLegacySQLite
+	case "opencode-current-sqlite":
+		return ingest.TranscriptOriginOpenCodeCurrentSQLite
+	default:
+		t.Fatalf("unknown transcript origin %q; use file, opencode-legacy-sqlite or opencode-current-sqlite", name)
+		return ingest.TranscriptOriginFile
+	}
 }
 
 func loadStoredCaptureAuthorityFixture(t *testing.T) storedCaptureAuthorityFixture {
@@ -72,19 +88,12 @@ func loadStoredCaptureAuthorityFixture(t *testing.T) storedCaptureAuthorityFixtu
 			if _, err := ingest.NewContentSourceAuthority(c.SourceAuthority); err != nil {
 				t.Fatalf("case %q names an unknown source authority %q: %v", c.Name, c.SourceAuthority, err)
 			}
+			transcriptOriginFor(t, c.TranscriptOrigin)
 			if _, err := ingest.NewContentCaptureFormat(c.CaptureFormat); err != nil {
 				t.Fatalf("case %q names an unknown capture format %q: %v", c.Name, c.CaptureFormat, err)
 			}
 			if _, err := ingest.NewContentCaptureFailureCode(c.FailureCode); err != nil {
 				t.Fatalf("case %q names an unknown failure code %q: %v", c.Name, c.FailureCode, err)
-			}
-		}
-		if c.WantAuthority {
-			if _, err := ingest.NewContentSourceAuthority(c.WantSourceAuthority); err != nil {
-				t.Fatalf("case %q names an unknown wanted source authority %q: %v", c.Name, c.WantSourceAuthority, err)
-			}
-			if _, err := ingest.NewContentCaptureFormat(c.WantCaptureFormat); err != nil {
-				t.Fatalf("case %q names an unknown wanted capture format %q: %v", c.Name, c.WantCaptureFormat, err)
 			}
 		}
 		names = append(names, c.Name)
@@ -107,7 +116,7 @@ func seedStoredCaptureAuthority(t *testing.T, s *Store, sid schema.SessionID, tc
 	runProvenanceSQL(t, s, `INSERT INTO session_content_captures
 (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision)
 VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?)`,
-		string(sid), tc.Status, tc.SourceAuthority, int64(0), tc.CaptureFormat, 1, 0,
+		string(sid), tc.Status, tc.SourceAuthority, int64(transcriptOriginFor(t, tc.TranscriptOrigin)), tc.CaptureFormat, 1, 0,
 		strings.Repeat("a", 64), int64(1700000000000), failureCode, tc.PublicationCaptureRevision)
 }
 
@@ -115,8 +124,9 @@ VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?)`,
 // content writer's own publishable-capture predicate: the stored certificate
 // holds last-good full authority exactly when the writer's guard would refuse a
 // preview replacement over it. A publication revision is never proof, and the
-// certificate's own origin and format are preserved so the bridge is never
-// mistaken for a fabricated V2 generation.
+// certificate's own status, source authority, transcript origin, capture
+// format, and failure code are preserved so an accounted incomplete/full
+// certificate is never flattened into a complete one.
 func TestReadStoredCaptureAuthority(t *testing.T) {
 	fixture := loadStoredCaptureAuthorityFixture(t)
 	sid := schema.SessionID(fixture.Session.ID)
@@ -136,15 +146,32 @@ func TestReadStoredCaptureAuthority(t *testing.T) {
 				t.Fatalf("authority present = %v, want %v (authority=%+v)", got, tc.WantAuthority, authority)
 			}
 			if tc.WantAuthority {
-				if authority.SourceAuthority != ingest.ContentSourceAuthority(tc.WantSourceAuthority) {
-					t.Fatalf("authority source = %q, want %q", authority.SourceAuthority, tc.WantSourceAuthority)
-				}
-				if authority.CaptureFormat != ingest.ContentCaptureFormat(tc.WantCaptureFormat) {
-					t.Fatalf("authority format = %q, want %q", authority.CaptureFormat, tc.WantCaptureFormat)
-				}
+				assertStoredAuthorityPreserved(t, tc, authority)
 			}
 			assertStoredCaptureAuthorityMatchesWriterPredicate(t, s, sid, tc.Present)
 		})
+	}
+}
+
+// assertStoredAuthorityPreserved proves the bridge reports the certificate's
+// own state verbatim, so a complete certificate and an accounted
+// incomplete/full certificate are distinguishable.
+func assertStoredAuthorityPreserved(t *testing.T, tc storedCaptureAuthorityCase, authority *ingest.StoredCaptureAuthority) {
+	t.Helper()
+	if authority.Status != ingest.ContentCaptureStatus(tc.Status) {
+		t.Fatalf("authority status = %q, want %q", authority.Status, tc.Status)
+	}
+	if authority.SourceAuthority != ingest.ContentSourceAuthority(tc.SourceAuthority) {
+		t.Fatalf("authority source = %q, want %q", authority.SourceAuthority, tc.SourceAuthority)
+	}
+	if authority.TranscriptOrigin != transcriptOriginFor(t, tc.TranscriptOrigin) {
+		t.Fatalf("authority origin = %s, want %s", authority.TranscriptOrigin, tc.TranscriptOrigin)
+	}
+	if authority.CaptureFormat != ingest.ContentCaptureFormat(tc.CaptureFormat) {
+		t.Fatalf("authority format = %q, want %q", authority.CaptureFormat, tc.CaptureFormat)
+	}
+	if authority.FailureCode != ingest.ContentCaptureFailureCode(tc.FailureCode) {
+		t.Fatalf("authority failure code = %q, want %q", authority.FailureCode, tc.FailureCode)
 	}
 }
 
