@@ -19,9 +19,16 @@ import (
 var claudeIdentityYAML []byte
 
 type claudeIdentityFixtures struct {
+	RequiredCacheUpgradeNames    []string             `yaml:"required_cache_upgrade_names"`
+	CacheUpgrades                []claudeCacheUpgrade `yaml:"cache_upgrades"`
 	RequiredCaseNames            []string             `yaml:"required_case_names"`
 	RequiredRetainedRefusalNames []string             `yaml:"required_retained_refusal_names"`
 	Cases                        []claudeIdentityCase `yaml:"cases"`
+}
+
+type claudeCacheUpgrade struct {
+	Name         string `yaml:"name"`
+	ProofVersion int    `yaml:"proof_version"`
 }
 
 // TestPipelineClaudeIdentityOwnership protects the discovery-to-scheduling-to-
@@ -117,6 +124,13 @@ func LoadClaudeIdentityFixtures(t *testing.T) claudeIdentityFixtures {
 	}
 	names := make(map[string]bool)
 	retainedNames := make(map[string]bool)
+	cacheNames := make(map[string]bool)
+	for _, upgrade := range fixtures.CacheUpgrades {
+		cacheNames[upgrade.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("Claude cached identity", "upgrade", fixtures.RequiredCacheUpgradeNames, cacheNames); err != nil {
+		t.Fatal(err)
+	}
 	for _, fixture := range fixtures.Cases {
 		names[fixture.Name] = true
 		for _, refusal := range fixture.RetainedRefusals {
@@ -133,7 +147,8 @@ func LoadClaudeIdentityFixtures(t *testing.T) claudeIdentityFixtures {
 }
 
 func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
-	for _, fixture := range LoadClaudeIdentityFixtures(t).Cases {
+	fixtures := LoadClaudeIdentityFixtures(t)
+	for _, fixture := range fixtures.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
@@ -216,22 +231,26 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record := records[artifact.SourcePath]
-			record.ProofVersion = 0
-			if err := database.SaveClaudeEvidence(ctx, []ingest.ClaudeTranscriptEvidence{record}, nil); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := adapter.Discover(ctx, cfg); err != nil {
-				t.Fatal(err)
-			}
-			if adapter.ReminedCount() != 1 {
-				t.Fatalf("legacy proof re-mines = %d", adapter.ReminedCount())
-			}
-			if _, err := adapter.Discover(ctx, cfg); err != nil {
-				t.Fatal(err)
-			}
-			if adapter.ReminedCount() != 0 {
-				t.Fatal("proof upgrade repeated")
+			for _, upgrade := range fixtures.CacheUpgrades {
+				t.Run(upgrade.Name, func(t *testing.T) {
+					record := records[artifact.SourcePath]
+					record.ProofVersion = upgrade.ProofVersion
+					if err := database.SaveClaudeEvidence(ctx, []ingest.ClaudeTranscriptEvidence{record}, nil); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := adapter.Discover(ctx, cfg); err != nil {
+						t.Fatal(err)
+					}
+					if adapter.ReminedCount() != 1 {
+						t.Fatalf("prior proof re-mines = %d", adapter.ReminedCount())
+					}
+					if _, err := adapter.Discover(ctx, cfg); err != nil {
+						t.Fatal(err)
+					}
+					if adapter.ReminedCount() != 0 {
+						t.Fatal("proof upgrade repeated")
+					}
+				})
 			}
 			data, err := fs.ReadFile(artifact.SourcePath.String())
 			if err != nil {

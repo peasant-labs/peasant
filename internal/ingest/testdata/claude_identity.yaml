@@ -1,3 +1,7 @@
+required_cache_upgrade_names: [legacy without structural proof, prior uncorrelated spawn proof]
+cache_upgrades:
+  - {name: legacy without structural proof, proof_version: 0}
+  - {name: prior uncorrelated spawn proof, proof_version: 1}
 required_retained_refusal_names:
   - changed multi-source bytes
   - absent multi-source digest with own-only replacement
