@@ -992,6 +992,7 @@ type PruneStore interface {
 // the pipeline panicked before reaching the REPORT stage.
 // It maps 1:1 to a row in the ingest_log table.
 type IngestLogEntry struct {
+	Outcomes          []RunOutcome // payload-free per-session audit, written after the parent row
 	ID                int64
 	StartedAt         int64  // Unix millis — captured at top of Run()
 	FinishedAt        *int64 // Unix millis — nil if pipeline did not complete

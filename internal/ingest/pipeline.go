@@ -369,6 +369,7 @@ type Pipeline struct {
 	discoveryDiagnostics []DiscoveryDiagnostic
 	diagnosticsMu        sync.Mutex
 	diagnostics          []DiagnosticEntry
+	diagnosticSessions   map[sessionDiagnostic]struct{}
 	diagnosticSet        map[DiagnosticEntry]struct{}
 
 	// v2 analytics stages (all optional; nil = skip stage).
@@ -1488,6 +1489,11 @@ func (p *Pipeline) drainLoop(
 					})
 				}
 				sessionResults = append(sessionResults, wr.result)
+				if wr.meta != nil {
+					for _, diagnostic := range wr.meta.Diagnostics.Warnings {
+						p.retainSessionDiagnostic(wr.result.SessionID, diagnostic)
+					}
+				}
 				// A failed parent is never marked committed: admitted children
 				// of a failed parent drain independently with a nil parent
 				// cache instead of waiting on a commit that never lands.
@@ -2068,7 +2074,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 						// build cannot render, an orphan graph part) leaves
 						// content simply missing and stays a preview.
 						result.omissionsRecorded = code == ContentCaptureSourceRecordsOmitted && outputRecordsItsOmissions(tolerant)
-						p.reportDiagnostic(permanentRefusalDiagnostic(im.session.SessionID, code, result.omissionsRecorded, err))
+						p.reportSessionDiagnostic(im.session.SessionID, permanentRefusalDiagnostic(im.session.SessionID, code, result.omissionsRecorded, err))
 						output, err = tolerant, nil
 					}
 				}
@@ -2165,7 +2171,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	if err != nil {
 		var empty *unverifiedEmptyIndexError
 		if errors.As(err, &empty) {
-			p.reportDiagnostic(DiagnosticEntry{ErrorType: "index_empty_unverified", Location: string(im.session.SessionID), Message: empty.Error(), Remediation: "Restore readable source records, or use an indexer that verifies completed-empty input, and retry harvest."})
+			p.reportSessionDiagnostic(im.session.SessionID, DiagnosticEntry{ErrorType: "index_empty_unverified", Location: string(im.session.SessionID), Message: empty.Error(), Remediation: "Restore readable source records, or use an indexer that verifies completed-empty input, and retry harvest."})
 			reason := empty.Error()
 			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 			return result
@@ -2430,9 +2436,9 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			if result.unknownRecorded {
 				remediation = "Export within the public transfer limits, or publish to a receiver supporting retained_unknown_v1 within those limits; complete evidence remains stored locally and interpretation remains partial."
 			}
-			p.reportDiagnostic(DiagnosticEntry{ErrorType: "unknown_data_retained", Location: string(result.im.session.SessionID), Message: result.strictRefusal, Remediation: remediation})
+			p.reportSessionDiagnostic(result.im.session.SessionID, DiagnosticEntry{ErrorType: "unknown_data_retained", Location: string(result.im.session.SessionID), Message: result.strictRefusal, Remediation: remediation})
 		} else if result.omissionsRecorded {
-			p.reportDiagnostic(permanentRefusalDiagnostic(result.im.session.SessionID, result.refusalCode, true, errors.New(result.strictRefusal)))
+			p.reportSessionDiagnostic(result.im.session.SessionID, permanentRefusalDiagnostic(result.im.session.SessionID, result.refusalCode, true, errors.New(result.strictRefusal)))
 		}
 		record(position, indexed, logEntry, p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration))
 	}
@@ -3228,7 +3234,7 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 				return nil, err
 			}
 			for _, diagnostic := range acquired.Diagnostics {
-				p.reportDiagnostic(diagnostic)
+				p.reportSessionDiagnostic(session.SessionID, diagnostic)
 			}
 			captured := MaterializedTranscript{Metadata: acquired.Metadata, Data: acquired.Transcript, SourceFingerprint: acquired.SourceFingerprint, Session: acquired.Session}
 			if acquired.EventSeq != nil {
@@ -3348,6 +3354,13 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		}
 	}
 	rawData, meta := captured.Data, captured.Metadata
+	// Capture metadata warnings even if a later write fails. They are already
+	// source-owned diagnostics; the audit stores only their reason codes.
+	defer func() {
+		for _, diagnostic := range meta.Diagnostics.Warnings {
+			p.retainSessionDiagnostic(session.SessionID, diagnostic)
+		}
+	}()
 	capturedSource := captured.capturedSource
 	if meta.SessionID != session.SessionID {
 		return fail(fmt.Errorf("capture session %s: source metadata identifies a different session; nothing was captured; restore the matching source and run peasant ingest", session.SessionID))
@@ -3637,7 +3650,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		return fail(errors.Join(err, p.fs.RemoveAll(tmpDir)))
 	}
 	if cleanupErr := p.fs.RemoveAll(tmpDir); cleanupErr != nil {
-		p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_cleanup", Location: tmpDir, Message: cleanupErr.Error(), Remediation: "Inspect the retained temporary extraction directory; the saved session was installed."})
+		p.reportSessionDiagnostic(session.SessionID, DiagnosticEntry{ErrorType: "artifact_cleanup", Location: tmpDir, Message: cleanupErr.Error(), Remediation: "Inspect the retained temporary extraction directory; the saved session was installed."})
 	}
 	// The session's project identity may have changed since it was last saved,
 	// which moves its pair to a new directory. Clear the previous location so a
@@ -3646,7 +3659,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		oldDir := filepath.Dir(metadataPath)
 		if filepath.Clean(oldDir) != filepath.Clean(sessionDir) {
 			if relocateErr := p.removeRelocatedSession(oldDir, string(session.SessionID)); relocateErr != nil {
-				p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_relocation", Location: oldDir, Message: relocateErr.Error(), Remediation: "Remove the session's previous project directory by hand; its current pair is saved under its new project."})
+				p.reportSessionDiagnostic(session.SessionID, DiagnosticEntry{ErrorType: "artifact_relocation", Location: oldDir, Message: relocateErr.Error(), Remediation: "Remove the session's previous project directory by hand; its current pair is saved under its new project."})
 			}
 		}
 	}
@@ -4491,6 +4504,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	if p.logger != nil {
 		finishedAt := time.Now().UnixMilli()
 		logEntry := IngestLogEntry{
+			Outcomes:          p.runOutcomes(sessionResults, finishedAt),
 			StartedAt:         start.UnixMilli(),
 			FinishedAt:        &finishedAt,
 			SessionsNew:       pipelineResult.Summary.New,
@@ -5098,7 +5112,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 					continue
 				}
 				if !found {
-					p.reportDiagnostic(DiagnosticEntry{
+					p.reportSessionDiagnostic(t.session.SessionID, DiagnosticEntry{
 						ErrorType: "native_refresh_unavailable", Location: fmt.Sprintf("%s session %s forced refresh", t.session.Harness, t.session.SessionID),
 						Message:     fmt.Sprintf("forced refresh of session %s: native discovery did not offer the session (recorded source %q), so the retained input was indexed instead; the previous artifact and adapter stamp were preserved", t.session.SessionID, t.originalSourcePath),
 						Remediation: "Enable the harness source in the configuration and restore the original source, then rerun harvest index --force to refresh from native input.",

@@ -201,7 +201,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 					return recovered, stoppedOnBudget, remaining, cancelErr
 				}
-				p.reportDiagnostic(DiagnosticEntry{
+				p.reportSessionDiagnostic(id, DiagnosticEntry{
 					ErrorType: "content_recovery_refused", Location: fmt.Sprintf("session %s retained-content recovery", id),
 					Message:     err.Error() + "; recovery was refused before any retained read or store write, so the stored entries and producer evidence were preserved",
 					Remediation: "Use a Peasant build whose indexer is at least the stored producer revision and supports the stored index format, then retry harvest.",
@@ -242,7 +242,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					continue
 				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
-				p.reportDiagnostic(DiagnosticEntry{
+				p.reportSessionDiagnostic(id, DiagnosticEntry{
 					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s retained-content recovery", id),
 					Message:     err.Error() + "; the prior content and producer evidence were preserved; ordinary supported indexing remains eligible",
 					Remediation: "Restore the retained transcript or native source and retry harvest; inspect the recovery error before forcing replacement.",

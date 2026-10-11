@@ -319,7 +319,7 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 			return
 		}
 	}
-	p.reportDiagnostic(DiagnosticEntry{
+	p.reportSessionDiagnostic(sid, DiagnosticEntry{
 		ErrorType:   "pair_repair_unavailable",
 		Location:    fmt.Sprintf("session %s pair repair", sid),
 		Message:     missingPairText(sid, source),
@@ -643,7 +643,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	if p.config.Reindex && p.config.Force {
 		errorType, location = "native_refresh_unavailable", fmt.Sprintf("%s session %s forced refresh", entry.Session.Harness, entry.Session.SessionID)
 	}
-	p.reportDiagnostic(DiagnosticEntry{
+	p.reportSessionDiagnostic(entry.Session.SessionID, DiagnosticEntry{
 		ErrorType: errorType, Location: location,
 		Message:     acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported retained indexing may continue",
 		Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",

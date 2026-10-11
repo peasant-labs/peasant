@@ -39,6 +39,11 @@ func (p *Pipeline) reportMetadataRefusal(location string, err error) {
 	}
 	diagnostic := DiagnosticEntry{ErrorType: "metadata_refused", Location: location, Message: err.Error(), Remediation: remedy}
 	p.reportDiagnostic(diagnostic)
+	// Only a literal session identity is associated here; managed paths are
+	// intentionally not parsed to infer ownership.
+	if sid, err := NewSessionID(location); err == nil {
+		p.reportSessionDiagnostic(sid, diagnostic)
+	}
 }
 
 // reportDiagnostic reports one entry to the user, once.
@@ -65,7 +70,7 @@ func (p *Pipeline) reportDiagnostic(diagnostic DiagnosticEntry) {
 }
 
 func (p *Pipeline) reportIndexRefusal(sessionID SessionID, err error) {
-	p.reportDiagnostic(DiagnosticEntry{
+	p.reportSessionDiagnostic(sessionID, DiagnosticEntry{
 		ErrorType: "index_refused", Location: string(sessionID),
 		Message:     fmt.Sprintf("index session %s: %v; this attempt preserved the last successful index", sessionID, err),
 		Remediation: "Use a compatible Peasant build or fix the reported parser/input/store problem, then retry harvest.",
@@ -77,6 +82,7 @@ func (p *Pipeline) resetDiagnostics() {
 	defer p.diagnosticsMu.Unlock()
 	p.diagnostics = nil
 	p.diagnosticSet = nil
+	p.diagnosticSessions = nil
 }
 
 func (p *Pipeline) snapshotDiagnostics() []DiagnosticEntry {
