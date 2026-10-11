@@ -35,7 +35,7 @@ type RunOutcome struct {
 	RunID      int64
 	SessionID  SessionID
 	Kind       RunOutcomeKind
-	ReasonCode string
+	ReasonCode AuditReason
 	CreatedAt  int64
 }
 
@@ -52,10 +52,10 @@ func (p *Pipeline) runOutcomes(results []SessionResult, createdAt int64) []RunOu
 		}
 		// Untyped worker errors have no existing finer reason code. Reuse the
 		// existing error outcome rather than classifying arbitrary error text.
-		reason := IndexOutcomeError.String()
+		reason := AuditReasonError
 		var acquisition *adapterAcquisitionError
 		if errors.As(result.Error, &acquisition) {
-			reason = "adapter_refresh_unavailable"
+			reason = AuditReasonAdapterRefreshUnavailable
 		}
 		outcomes = append(outcomes, RunOutcome{SessionID: result.SessionID, Kind: RunOutcomeWorkerError, ReasonCode: reason, CreatedAt: createdAt})
 	}
@@ -64,13 +64,17 @@ func (p *Pipeline) runOutcomes(results []SessionResult, createdAt int64) []RunOu
 	associated := make(map[DiagnosticEntry]bool, len(p.diagnosticSessions))
 	for entry := range p.diagnosticSessions {
 		associated[entry.diagnostic] = true
-		outcomes = append(outcomes, RunOutcome{SessionID: entry.sessionID, Kind: RunOutcomeDiagnostic, ReasonCode: entry.diagnostic.ErrorType, CreatedAt: createdAt})
+		// An unknown producer code becomes the invalid zero value, never raw
+		// text. The store rejects it while preserving the independent aggregate.
+		reason, _ := NewAuditReason(entry.diagnostic.ErrorType)
+		outcomes = append(outcomes, RunOutcome{SessionID: entry.sessionID, Kind: RunOutcomeDiagnostic, ReasonCode: reason, CreatedAt: createdAt})
 	}
 	for diagnostic := range p.diagnosticSet {
 		if associated[diagnostic] {
 			continue
 		}
-		outcomes = append(outcomes, RunOutcome{Kind: RunOutcomeDiagnostic, ReasonCode: diagnostic.ErrorType, CreatedAt: createdAt})
+		reason, _ := NewAuditReason(diagnostic.ErrorType)
+		outcomes = append(outcomes, RunOutcome{Kind: RunOutcomeDiagnostic, ReasonCode: reason, CreatedAt: createdAt})
 	}
 	slices.SortFunc(outcomes, func(a, b RunOutcome) int {
 		if order := strings.Compare(string(a.SessionID), string(b.SessionID)); order != 0 {
@@ -79,7 +83,7 @@ func (p *Pipeline) runOutcomes(results []SessionResult, createdAt int64) []RunOu
 		if order := strings.Compare(string(a.Kind), string(b.Kind)); order != 0 {
 			return order
 		}
-		return strings.Compare(a.ReasonCode, b.ReasonCode)
+		return strings.Compare(string(a.ReasonCode), string(b.ReasonCode))
 	})
 	outcomes = slices.Compact(outcomes)
 	return outcomes

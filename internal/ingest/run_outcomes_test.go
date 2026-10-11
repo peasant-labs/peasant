@@ -77,7 +77,11 @@ func TestFinalizeRunOutcomesAudit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want = append(want, RunOutcome{SessionID: sid, Kind: kind, ReasonCode: row.Reason})
+		reason, err := NewAuditReason(row.Reason)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, RunOutcome{SessionID: sid, Kind: kind, ReasonCode: reason})
 		if row.WorkerError {
 			err = errors.New("synthetic source payload must not enter the durable audit")
 			if row.Acquisition {

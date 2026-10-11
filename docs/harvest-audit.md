@@ -8,8 +8,17 @@ index errors are not interchangeable counts.
 Detailed outcomes retain the latest 100 `ingest_log` runs, including successful
 runs without diagnostics. Older aggregate rows remain unchanged. Details are
 written best-effort after the aggregate row exists; an interrupted or failed
-audit write can leave incomplete details. An empty detail set alone is not
-proof that a run succeeded. Runs interrupted before AUDIT have no completed
+audit write can leave incomplete details. Atomicity is per 128-row batch, not
+per run: a later batch failure preserves earlier committed batches. Failures
+scale with discovered sessions and diagnostics can add multiple rows per
+session, so the detail volume has no per-run bound. Bounded transactions keep
+failed harvests from holding the SQLite writer for an unbounded run. Retention
+is attempted even when a detail batch fails.
+
+Neither an empty nor a populated detail set certifies completeness or proves
+that a run succeeded. This ledger supports best-effort local triage, not an
+authoritative completeness consumer; it has no completion marker. Consult the
+aggregate totals independently. Runs interrupted before AUDIT have no completed
 audit record.
 
 Use read-only SQLite queries against the local database to inspect retained
@@ -27,7 +36,10 @@ ORDER BY o.id;'
 
 `worker_error` names failed session processing; `diagnostic` names a nonfatal
 warning, including warnings raised during indexing. Diagnostic reason codes
-reuse the producer's `ErrorType`. Untyped worker failures use the existing
+reuse the producer's `ErrorType`, validated on writes and reads against the
+ingest-owned `AuditReason` vocabulary. Unknown codes (including arbitrary
+messages, paths, and whitespace variants) are rejected without echoing their
+value in the error. Untyped worker failures use the existing
 `error` outcome reason; native acquisition failures use
 `adapter_refresh_unavailable`. Multiple warnings with the same reason for a
 session are represented once per run. A NULL session identity denotes a
