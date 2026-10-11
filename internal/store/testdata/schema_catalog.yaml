@@ -28,6 +28,7 @@ tables:
   - host_slugs
   - index_log
   - ingest_log
+  - ingest_run_outcomes
   - _install_salt
   - lessons
   - lesson_sources
@@ -114,6 +115,7 @@ indexes:
   - idx_generation_entries_body
   - idx_index_log_outcome
   - idx_index_log_session
+  - idx_ingest_run_outcomes_run
   - idx_injection_log_project
   - idx_lessons_annotation
   - idx_lessons_dedup

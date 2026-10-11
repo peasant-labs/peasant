@@ -413,7 +413,7 @@ func (p *Pipeline) nativeGenerationStager() NativeGenerationStager {
 // because the serial activation then stages inline and owns the authoritative
 // refusal or repair outcome.
 func (p *Pipeline) prepareAndStageNativeGeneration(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string, stager NativeGenerationStager) nativeGenerationCommit {
-	ctx = WithWriteAdvisoryReporter(ctx, p.reportDiagnostic)
+	ctx = WithWriteAdvisoryReporter(ctx, p.reportWriteDiagnostic)
 	commit := p.prepareNativeGenerationResult(result, outcome, logPrefix)
 	if !commit.ready || stager == nil {
 		return commit
@@ -512,7 +512,7 @@ func (p *Pipeline) stageAndCommitNativeGenerations(
 // files, the activation installs them, so the writer lane pays only for the
 // intent, rename and database transaction.
 func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared preparedNativeGeneration, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) (indexedMeta, IndexLogEntry, IndexProfileSession) {
-	ctx = WithWriteAdvisoryReporter(ctx, p.reportDiagnostic)
+	ctx = WithWriteAdvisoryReporter(ctx, p.reportWriteDiagnostic)
 	result := prepared.result
 	im := result.im
 	entriesCount := prepared.entriesCount

@@ -9,7 +9,7 @@ import (
 // and activation transaction runs on the serial writer lane. Both windows use
 // the common splitter, with their own configured session caps.
 func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []indexParseResult, positions []int, outcome IndexOutcome, prefix string, lane *storeWriteLane, record func(int, indexedMeta, IndexLogEntry, IndexProfileSession), stager NativeGenerationBatchStager, activator NativeGenerationBatchActivator) {
-	ctx = WithWriteAdvisoryReporter(ctx, p.reportDiagnostic)
+	ctx = WithWriteAdvisoryReporter(ctx, p.reportWriteDiagnostic)
 	jobs := runParallel(func() error {
 		return nil
 	}, positions, parallelWorkers(p.config), func(position int) nativeGenerationCommitJob {

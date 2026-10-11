@@ -44,5 +44,8 @@ func (s *Store) LogIngestRun(ctx context.Context, entry ingest.IngestLogEntry) e
 		return fmt.Errorf("store: insert ingest_log: %w", err)
 	}
 
-	return nil
+	// Read the parent identity on the same connection; another run may insert
+	// concurrently, so MAX(id) is not a safe way to associate outcomes.
+	runID := conn.LastInsertRowID()
+	return s.writeIngestRunOutcomes(ctx, conn, runID, entry.Outcomes)
 }

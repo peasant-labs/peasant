@@ -1,0 +1,13 @@
+requiredNames: [worker-error, session-diagnostic, run-diagnostic]
+outcomes:
+  - name: worker-error
+    sessionId: 59000000-0000-0000-0000-000000000001
+    kind: worker_error
+    reason: error
+  - name: session-diagnostic
+    sessionId: 59000000-0000-0000-0000-000000000002
+    kind: diagnostic
+    reason: record_too_large
+  - name: run-diagnostic
+    kind: diagnostic
+    reason: index_coverage_unavailable
