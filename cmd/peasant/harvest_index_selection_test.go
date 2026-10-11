@@ -303,6 +303,9 @@ func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixtu
 	}
 	meta := ingest.NewUnifiedMetadata()
 	meta.SessionID, meta.ModelHarness = fixture.ID, fixture.Harness
+	// Indexer deltas must not accidentally request adapter maintenance.
+	target := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)[fixture.Harness]
+	meta.AdapterVersion = &target.AdapterVersion
 	meta.HostSlug = ingest.HostSlug(testutil.TestHostSlug)
 	meta.Timestamp.Start = time.Now().Add(-age).UnixMilli()
 	meta.Timestamp.End = meta.Timestamp.Start + 60000
