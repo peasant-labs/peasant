@@ -188,9 +188,13 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 			return fmt.Errorf("store.SaveClaudeEvidence: encode spawns for transcript %q: %w", record.SourcePath, marshalErr)
 		}
 		identityRows := make([]claudeIdentityRecordRow, 0, len(record.Records))
-		for _, identity := range record.Records {
+		for index, identity := range record.Records {
+			id, validationErr := ingest.NewSessionID(identity.SessionID)
+			if validationErr != nil {
+				return fmt.Errorf("store.SaveClaudeEvidence: transcript %q identity record %d has invalid session ID %q; cache transaction rolled back; correct the native recorded ID before retrying: %w", record.SourcePath, index, identity.SessionID, validationErr)
+			}
 			identityRows = append(identityRows, claudeIdentityRecordRow{
-				SessionID: identity.SessionID, UUID: identity.UUID, ParentUUID: identity.ParentUUID,
+				SessionID: id.String(), UUID: identity.UUID, ParentUUID: identity.ParentUUID,
 				Type: identity.Type, Subtype: identity.Subtype, SpawnAgentID: identity.SpawnAgentID, AgentID: identity.AgentID, Sidechain: identity.Sidechain,
 			})
 		}

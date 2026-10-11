@@ -1,3 +1,8 @@
+requiredRejectedWriteNames: [empty-recorded-id, traversal-recorded-id, malformed-recorded-id]
+rejectedWrites:
+  - {name: empty-recorded-id, sessionId: ''}
+  - {name: traversal-recorded-id, sessionId: '../other'}
+  - {name: malformed-recorded-id, sessionId: 'invalid id'}
 requiredNames:
   - root-mixed-records
   - native-agent-valid

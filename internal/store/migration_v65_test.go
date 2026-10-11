@@ -63,11 +63,18 @@ type claudeIdentityMalformedCase struct {
 	JSON string `yaml:"json"`
 }
 
+type claudeIdentityRejectedWrite struct {
+	Name      string `yaml:"name"`
+	SessionID string `yaml:"sessionId"`
+}
+
 type claudeIdentityEvidenceFixtures struct {
-	RequiredNames          []string                      `yaml:"requiredNames"`
-	RequiredMalformedNames []string                      `yaml:"requiredMalformedNames"`
-	Cases                  []claudeIdentityEvidenceCase  `yaml:"cases"`
-	Malformed              []claudeIdentityMalformedCase `yaml:"malformed"`
+	RequiredNames              []string                      `yaml:"requiredNames"`
+	RequiredMalformedNames     []string                      `yaml:"requiredMalformedNames"`
+	Cases                      []claudeIdentityEvidenceCase  `yaml:"cases"`
+	Malformed                  []claudeIdentityMalformedCase `yaml:"malformed"`
+	RequiredRejectedWriteNames []string                      `yaml:"requiredRejectedWriteNames"`
+	RejectedWrites             []claudeIdentityRejectedWrite `yaml:"rejectedWrites"`
 }
 
 func LoadClaudeIdentityEvidenceFixtures(t *testing.T) claudeIdentityEvidenceFixtures {
@@ -89,7 +96,64 @@ func LoadClaudeIdentityEvidenceFixtures(t *testing.T) claudeIdentityEvidenceFixt
 	if err := validateRecoveryRequiredNames(doc.RequiredMalformedNames, malformedNames, "malformed Claude identity evidence"); err != nil {
 		t.Fatal(err)
 	}
+	var rejectedNames []string
+	for _, c := range doc.RejectedWrites {
+		rejectedNames = append(rejectedNames, c.Name)
+	}
+	if err := validateRecoveryRequiredNames(doc.RequiredRejectedWriteNames, rejectedNames, "rejected Claude identity writes"); err != nil {
+		t.Fatal(err)
+	}
 	return doc
+}
+
+func TestClaudeEvidenceRejectsRecordedIDsAndRollsBack(t *testing.T) {
+	fixtures := LoadClaudeIdentityEvidenceFixtures(t)
+	for _, c := range fixtures.RejectedWrites {
+		t.Run(c.Name, func(t *testing.T) {
+			s, err := Open(filepath.Join(t.TempDir(), "evidence.db"), WithPoolSize(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := s.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			seed := fixtures.Cases[0].evidence()
+			if err := s.SaveClaudeEvidence(t.Context(), []ingest.ClaudeTranscriptEvidence{seed}, nil); err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.LoadClaudeEvidence(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := seed
+			changed.ContentDigest = "must-roll-back"
+			invalid := fixtures.Cases[1].evidence()
+			invalid.Records[0].SessionID = c.SessionID
+			if err := s.SaveClaudeEvidence(t.Context(), []ingest.ClaudeTranscriptEvidence{changed, invalid}, []ingest.ResolvedPath{seed.SourcePath}); err == nil {
+				t.Fatal("invalid recorded session ID persisted")
+			}
+			after, err := s.LoadClaudeEvidence(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("rejected identity write changed cache")
+			}
+			conn, err := s.pool.Take(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.pool.Put(conn)
+			if err := sqlitex.ExecuteTransient(conn, `SELECT source_path FROM claude_transcript_evidence WHERE source_path=?`, &sqlitex.ExecOptions{Args: []any{invalid.SourcePath.String()}, ResultFunc: func(*sqlite.Stmt) error {
+				t.Error("rejected row remains on disk despite being skipped on load")
+				return nil
+			}}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestMigrationV65ClaudeEvidence(t *testing.T) {
