@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"io/fs"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -22,6 +24,7 @@ type pairRepairDocument struct {
 	RequiredNames     []string         `yaml:"required_names"`
 	NativeTranscript  string           `yaml:"native_transcript"`
 	DamagedTranscript string           `yaml:"damaged_transcript"`
+	PriorPreview      string           `yaml:"prior_preview"`
 	Cases             []pairRepairCase `yaml:"cases"`
 }
 
@@ -170,6 +173,22 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				}
 			}
 			seedStalePreviewCapture(t, ctx, database, id)
+			if fixture.WantSourceReport {
+				writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+					SessionID: id, IndexVersion: 1, IndexerVersion: 15, IndexedAtMs: 1700000000000,
+					Result: indexformat.V1{Entries: []schema.SessionEntry{{
+						SessionID: id, EntryIndex: 0,
+						EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &document.PriorPreview,
+					}}},
+				}})
+				if len(writes) != 1 || writes[0].Err != nil {
+					t.Fatalf("seed readable prior entries: %+v", writes)
+				}
+			}
+			priorEntries, err := database.ListEntries(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			var fs ingest.FileSystem = memfs
 			if fixture.TranscriptReadFault {
@@ -224,6 +243,20 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 					t.Fatalf("a refused repair indexed %d session(s)", result.Summary.Indexed)
 				}
 				if fixture.WantSourceReport {
+					reason, err := database.ReadSourceUnavailability(ctx, id)
+					if err != nil || reason == nil || *reason != ingest.SourceUnavailableNoSavedCopy {
+						t.Fatalf("unavailable source was not persisted: %v %v", reason, err)
+					}
+					second := run()
+					kept, err := database.ListEntries(ctx, id)
+					if err != nil || !reflect.DeepEqual(kept, priorEntries) {
+						t.Fatalf("unavailable source changed prior readable entries: %v %v", kept, err)
+					}
+					for _, diagnostic := range second.Diagnostics {
+						if diagnostic.ErrorType == "pair_repair_unavailable" {
+							t.Fatalf("unchanged unavailable source warned again: %+v", diagnostic)
+						}
+					}
 					found := false
 					for _, diagnostic := range result.Diagnostics {
 						if diagnostic.ErrorType != "pair_repair_unavailable" ||
@@ -256,6 +289,19 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 					}
 					if string(kept) != document.DamagedTranscript {
 						t.Fatalf("a refused repair overwrote the unreadable transcript: %q", kept)
+					}
+				}
+				if fixture.WantSourceReport {
+					if err := memfs.WriteFile(meta.Source.FilePath, nativeTranscript, 0600); err != nil {
+						t.Fatal(err)
+					}
+					recovered := run()
+					if recovered.Summary.Indexed == 0 {
+						t.Fatal("restored native source was not repaired")
+					}
+					reason, err := database.ReadSourceUnavailability(ctx, id)
+					if err != nil || reason != nil {
+						t.Fatalf("successful repair kept unavailable state: %v %v", reason, err)
 					}
 				}
 				return

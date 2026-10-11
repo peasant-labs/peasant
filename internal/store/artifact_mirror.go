@@ -330,5 +330,8 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	if priorArtifactHash != nil {
 		prior = *priorArtifactHash
 	}
+	if err := sqlitex.ExecuteTransient(conn, "DELETE FROM session_source_unavailability WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{string(meta.SessionID)}}); err != nil {
+		return fmt.Errorf("clear unavailable source after session %s artifact refresh: %w; refresh was rolled back; restore database access and retry harvest", meta.SessionID, err)
+	}
 	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET artifact_hash = ?, indexed_input_hash = CASE WHEN ? IS ? THEN indexed_input_hash ELSE NULL END WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{request.Artifact.ArtifactHash, prior, request.Artifact.ArtifactHash, string(meta.SessionID)}})
 }

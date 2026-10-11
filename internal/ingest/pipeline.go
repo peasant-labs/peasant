@@ -5064,7 +5064,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			// discovery saw it, and fall back to the stored source locator
 			// when discovery did not offer it. A source that is gone is
 			// reported, not silently dropped.
-			if !p.routePairRepair(t, sourceSessions, entryByID, inBatch) {
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5075,7 +5075,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// selected sessions are checked, so no tree is walked and no pair is
 		// read for work this run does not owe.
 		if p.pairNeedsRepair(ctx, t.session.SessionID) {
-			if !p.routePairRepair(t, sourceSessions, entryByID, inBatch) {
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5405,7 +5405,7 @@ func (t reindexTarget) repairMetadataPath() string {
 // re-ingestion. The session as discovery saw it is preferred (workspace,
 // worktree, commit context); the stored source locator is the fallback. It
 // reports and returns false when no source is reachable.
-func (p *Pipeline) routePairRepair(target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool) bool {
+func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool) bool {
 	sid := target.session.SessionID
 	if discovered, found := sourceSessions[sid]; found {
 		entryByID[sid] = DiffEntry{Session: discovered, Status: DiffUpdated, pairRepair: true, repairMetadataPath: target.repairMetadataPath()}
@@ -5420,7 +5420,7 @@ func (p *Pipeline) routePairRepair(target reindexTarget, sourceSessions map[Sess
 			return true
 		}
 	}
-	p.reportPairRepairUnavailable(sid, target.originalSourcePath)
+	p.reportPairRepairUnavailable(ctx, sid, target.originalSourcePath, nil)
 	return false
 }
 

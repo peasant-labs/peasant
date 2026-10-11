@@ -61,6 +61,7 @@ requiredNames:
   - v60-active-generation
   - v61-publication-parent-index
   - v62-harmonized-content
+  - v63-source-unavailability
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle
