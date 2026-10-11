@@ -63,6 +63,7 @@ slots:
   - {name: v62-harmonized-content, slot: 62, needle: "CREATE TABLE session_entry_bodies ("}
   - {name: v63-source-unavailability, slot: 63, needle: "CREATE TABLE session_source_unavailability ("}
   - {name: v64-ingest-run-outcomes, slot: 64, needle: "CREATE TABLE ingest_run_outcomes ("}
+  - {name: v65-claude-identity-proof, slot: 65, needle: "ADD COLUMN identity_records_json TEXT"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

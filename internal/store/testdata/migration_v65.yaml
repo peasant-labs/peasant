@@ -1,0 +1,64 @@
+requiredNames:
+  - root-mixed-records
+  - native-agent-valid
+  - native-agent-invalid
+  - empty-records
+  - legacy-proof
+  - native-spawn
+requiredMalformedNames:
+  - torn-json
+  - object-not-array
+  - wrong-field-type
+  - null-array
+  - null-record
+cases:
+  - name: root-mixed-records
+    scope: root
+    proofVersion: 1
+    contentDigest: synthetic-root-digest
+    records:
+      - {sessionId: own-session, uuid: first, parentUuid: source-tail, type: user, subtype: ''}
+      - {sessionId: source-session, uuid: second, parentUuid: first, type: system, subtype: compact_boundary}
+    recordsJson: '[{"sessionId":"own-session","uuid":"first","parentUuid":"source-tail","type":"user","subtype":""},{"sessionId":"source-session","uuid":"second","parentUuid":"first","type":"system","subtype":"compact_boundary"}]'
+  - name: native-agent-valid
+    scope: subagent
+    proofVersion: 1
+    nativeAgentId: synthetic-agent
+    nativeAgentValid: true
+    contentDigest: synthetic-agent-digest
+    records:
+      - {sessionId: owner-session, uuid: agent-record, parentUuid: '', type: assistant, subtype: ''}
+    recordsJson: '[{"sessionId":"owner-session","uuid":"agent-record","parentUuid":"","type":"assistant","subtype":""}]'
+  - name: native-agent-invalid
+    scope: root
+    proofVersion: 1
+    nativeAgentId: conflicting-agent
+    nativeAgentValid: false
+    contentDigest: synthetic-invalid-agent-digest
+    records:
+      - {sessionId: owner-session, uuid: local-command, parentUuid: '', type: system, subtype: local_command}
+    recordsJson: '[{"sessionId":"owner-session","uuid":"local-command","parentUuid":"","type":"system","subtype":"local_command"}]'
+  - name: empty-records
+    scope: root
+    proofVersion: 1
+    contentDigest: synthetic-empty-digest
+    records: []
+    recordsJson: '[]'
+  - name: legacy-proof
+    scope: subagent
+    proofVersion: 0
+    records: []
+    recordsJson: '[]'
+  - name: native-spawn
+    scope: root
+    proofVersion: 1
+    contentDigest: synthetic-spawn-digest
+    records:
+      - {sessionId: owner-session, uuid: spawn-record, parentUuid: '', type: user, subtype: '', spawnAgentId: abc123}
+    recordsJson: '[{"sessionId":"owner-session","uuid":"spawn-record","parentUuid":"","type":"user","subtype":"","spawnAgentId":"abc123"}]'
+malformed:
+  - {name: torn-json, json: '['}
+  - {name: object-not-array, json: '{}'}
+  - {name: wrong-field-type, json: '[{"sessionId":12}]'}
+  - {name: null-array, json: 'null'}
+  - {name: null-record, json: '[null]'}

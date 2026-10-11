@@ -330,6 +330,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 	}
 
+	sessions = a.linkClaudeNativeAgents(sessions, mined)
 	a.linkClaudeTeammates(ctx, sessions, cached, mined)
 	a.saveMinedEvidence(ctx, cfg, cached, mined, remined)
 	a.reminedCount = len(remined)
@@ -531,6 +532,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{})
 		return evidence, false
 	}
+	beginClaudeIdentity(data, &evidence)
 
 	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
@@ -560,8 +562,10 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		if json.Unmarshal(line, &value) != nil {
 			// A record this build cannot parse fails open.
 			malformed = true
+			evidence.NativeAgentValid = false
 			continue
 		}
+		addClaudeIdentityRecord(value, &evidence)
 		validRecords++
 		if recordType, present := value["type"]; present {
 			text, isText := recordType.(string)
@@ -615,6 +619,8 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	if !invalidIdentity {
 		evidence.Identity = identity
 	}
+	complete := scanner.Err() == nil && len(scanner.Oversized()) == 0
+	evidence.NativeAgentValid = evidence.NativeAgentValid && evidence.NativeAgentID != "" && complete
 	evidence.HasConversationRecord = conversation || malformed || scanner.Err() != nil || validRecords == 0
 	evidence.Title = hints.title
 	evidence.Branch = hints.branch
@@ -759,13 +765,11 @@ func claudeUserRecordText(value map[string]any) (string, bool) {
 	}
 }
 
-// mineClaudeSubagentTranscript checks one subagent transcript for a
-// conversation record. A subagent file carries no teammate identity and no
-// display hints, so the streaming check that stops at the first conversation
-// record stays the cheapest way to read it.
+// mineClaudeSubagentTranscript mines the whole structural distribution, just
+// like root mining, so native owner proof cannot depend on the first record.
 func (a *ClaudeAdapter) mineClaudeSubagentTranscript(path ResolvedPath, info os.FileInfo) ClaudeTranscriptEvidence {
-	evidence := newClaudeEvidence(path, ClaudeEvidenceScopeSubagent, info)
-	evidence.HasConversationRecord = a.hasClaudeConversationRecord(path.String())
+	evidence, _ := a.mineClaudeRootTranscript(path, info)
+	evidence.Scope = ClaudeEvidenceScopeSubagent
 	// A subagent transcript is by definition the child of a root, which is the
 	// first step of the rule. The rule is asked rather than answered for it, so
 	// that step 1 keeps exactly one definition and a change to it reaches this
@@ -932,8 +936,13 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		FilePath: string(session.SourcePath),
 		Format:   SourceFormatJSONL,
 	}
+	allowed, relationships, identityErr := a.verifyClaudeIdentity(data, session)
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	meta.Relationships = relationships
 
-	firstLine, parseErr := parseClaudeTranscriptMetadata(data, &meta)
+	firstLine, parseErr := parseClaudeTranscriptMetadataWithIdentity(data, &meta, allowed)
 	if parseErr != nil {
 		return nil, parseErr
 	}
@@ -1052,6 +1061,10 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 }
 
 func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJSONLLine, error) {
+	return parseClaudeTranscriptMetadataWithIdentity(data, meta, nil)
+}
+
+func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadata, allowed map[string]bool) (*claudeJSONLLine, error) {
 	var (
 		firstLine      claudeJSONLLine
 		literalCWD     string
@@ -1091,7 +1104,7 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 			continue
 		}
 
-		if line.SessionID != "" && line.SessionID != meta.SessionID.String() &&
+		if line.SessionID != "" && !allowed[line.SessionID] && line.SessionID != meta.SessionID.String() &&
 			(meta.ParentUUID == nil || line.SessionID != meta.ParentUUID.String()) {
 			return nil, fmt.Errorf("Claude metadata capture for %s: transcript sessionId disagrees with the discovered session or parent identity; no capture was written; restore the matching source and rerun peasant ingest", meta.SessionID)
 		}

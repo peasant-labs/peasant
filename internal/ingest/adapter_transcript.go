@@ -118,7 +118,11 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
 	parsed.ParentUUID = original.ParentUUID
-	first, parseErr := parseClaudeTranscriptMetadata(data, &parsed)
+	allowed, relationships, identityErr := a.verifyRetainedClaudeIdentity(data, original)
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	first, parseErr := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed)
 	if parseErr != nil {
 		return nil, parseErr
 	}
@@ -129,6 +133,7 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.Relationships = relationships
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount

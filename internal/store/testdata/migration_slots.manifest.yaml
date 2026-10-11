@@ -63,6 +63,7 @@ requiredNames:
   - v62-harmonized-content
   - v63-source-unavailability
   - v64-ingest-run-outcomes
+  - v65-claude-identity-proof
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

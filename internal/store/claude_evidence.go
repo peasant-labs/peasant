@@ -28,13 +28,19 @@ const (
     title,
     branch,
     cwd,
-    origin
+    origin,
+    proof_version,
+    native_agent_id,
+    native_agent_valid,
+    content_digest,
+    identity_records_json
 FROM claude_transcript_evidence`
 
 	sqlUpsertClaudeEvidence = `INSERT OR REPLACE INTO claude_transcript_evidence (
     source_path, scope, mod_time_unix_nano, size_bytes, has_conversation,
-    identity_team, identity_name, spawns_json, title, branch, cwd, origin
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    identity_team, identity_name, spawns_json, title, branch, cwd, origin,
+    proof_version, native_agent_id, native_agent_valid, content_digest, identity_records_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	sqlDeleteClaudeEvidence = `DELETE FROM claude_transcript_evidence WHERE source_path = ?`
 )
@@ -45,6 +51,17 @@ FROM claude_transcript_evidence`
 type claudeSpawnRow struct {
 	Team string `json:"team"`
 	Name string `json:"name"`
+}
+
+// claudeIdentityRecordRow pins the stored layout proof independently of the
+// discovery representation. It contains structural identity, never message text.
+type claudeIdentityRecordRow struct {
+	SessionID    string `json:"sessionId"`
+	UUID         string `json:"uuid"`
+	ParentUUID   string `json:"parentUuid"`
+	Type         string `json:"type"`
+	Subtype      string `json:"subtype"`
+	SpawnAgentID string `json:"spawnAgentId,omitempty"`
 }
 
 // LoadClaudeEvidence returns every cached transcript record, keyed by source
@@ -74,7 +91,7 @@ func (s *Store) LoadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath
 }
 
 // scanClaudeEvidence reads one row. It reports false for a row whose scope this
-// build does not know or whose spawn list does not parse.
+// build does not know or whose spawn or identity record list does not parse.
 func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, bool) {
 	scope := ingest.ClaudeEvidenceScope(stmt.ColumnText(1))
 	if !scope.IsValid() {
@@ -83,6 +100,15 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 	var spawnRows []claudeSpawnRow
 	if err := json.Unmarshal([]byte(stmt.ColumnText(7)), &spawnRows); err != nil {
 		return ingest.ClaudeTranscriptEvidence{}, false
+	}
+	var identityRows []*claudeIdentityRecordRow
+	if err := json.Unmarshal([]byte(stmt.ColumnText(16)), &identityRows); err != nil || identityRows == nil {
+		return ingest.ClaudeTranscriptEvidence{}, false
+	}
+	for _, row := range identityRows {
+		if row == nil {
+			return ingest.ClaudeTranscriptEvidence{}, false
+		}
 	}
 	// Column 11 (origin) is read as raw text and assigned directly, never
 	// through sessionorigin.Parse or Origin.Validate. The empty string is a
@@ -101,6 +127,10 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 		Branch:                stmt.ColumnText(9),
 		CWD:                   stmt.ColumnText(10),
 		Origin:                sessionorigin.Origin(stmt.ColumnText(11)),
+		ProofVersion:          int(stmt.ColumnInt64(12)),
+		NativeAgentID:         stmt.ColumnText(13),
+		NativeAgentValid:      stmt.ColumnInt64(14) == 1,
+		ContentDigest:         stmt.ColumnText(15),
 	}
 	if stmt.ColumnType(5) != sqlite.TypeNull && stmt.ColumnType(6) != sqlite.TypeNull {
 		record.Identity = &ingest.ClaudeTeammateIdentity{
@@ -110,6 +140,12 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 	}
 	for _, row := range spawnRows {
 		record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: row.Team, Name: row.Name})
+	}
+	for _, row := range identityRows {
+		record.Records = append(record.Records, ingest.ClaudeIdentityRecord{
+			SessionID: row.SessionID, UUID: row.UUID, ParentUUID: row.ParentUUID,
+			Type: row.Type, Subtype: row.Subtype, SpawnAgentID: row.SpawnAgentID,
+		})
 	}
 	return record, true
 }
@@ -144,6 +180,17 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 		if marshalErr != nil {
 			return fmt.Errorf("store.SaveClaudeEvidence: encode spawns for transcript %q: %w", record.SourcePath, marshalErr)
 		}
+		identityRows := make([]claudeIdentityRecordRow, 0, len(record.Records))
+		for _, identity := range record.Records {
+			identityRows = append(identityRows, claudeIdentityRecordRow{
+				SessionID: identity.SessionID, UUID: identity.UUID, ParentUUID: identity.ParentUUID,
+				Type: identity.Type, Subtype: identity.Subtype, SpawnAgentID: identity.SpawnAgentID,
+			})
+		}
+		identityJSON, marshalErr := json.Marshal(identityRows)
+		if marshalErr != nil {
+			return fmt.Errorf("store.SaveClaudeEvidence: encode identity records for transcript %q: %w", record.SourcePath, marshalErr)
+		}
 		var team, name any
 		if record.Identity != nil {
 			team = record.Identity.Team
@@ -163,6 +210,11 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 				record.Branch,
 				record.CWD,
 				record.Origin.String(),
+				record.ProofVersion,
+				record.NativeAgentID,
+				boolToInt(record.NativeAgentValid),
+				record.ContentDigest,
+				string(identityJSON),
 			},
 		}); err != nil {
 			return fmt.Errorf("store.SaveClaudeEvidence: write evidence for transcript %q: %w", record.SourcePath, err)
