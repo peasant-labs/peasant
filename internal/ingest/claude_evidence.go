@@ -111,6 +111,8 @@ type ClaudeIdentityRecord struct {
 	Type         string `json:"type"`
 	Subtype      string `json:"subtype"`
 	SpawnAgentID string `json:"spawnAgentId,omitempty"`
+	AgentID      string `json:"agentId,omitempty"`
+	Sidechain    *bool  `json:"isSidechain,omitempty"`
 }
 
 // ClaudeEvidenceCache persists mined Claude transcript evidence between

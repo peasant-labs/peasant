@@ -11,6 +11,7 @@ requiredMalformedNames:
   - wrong-field-type
   - null-array
   - null-record
+  - wrong-sidechain-type
 cases:
   - name: root-mixed-records
     scope: root
@@ -27,8 +28,8 @@ cases:
     nativeAgentValid: true
     contentDigest: synthetic-agent-digest
     records:
-      - {sessionId: owner-session, uuid: agent-record, parentUuid: '', type: assistant, subtype: ''}
-    recordsJson: '[{"sessionId":"owner-session","uuid":"agent-record","parentUuid":"","type":"assistant","subtype":""}]'
+      - {sessionId: owner-session, uuid: agent-record, parentUuid: '', type: assistant, subtype: '', agentId: synthetic-agent, isSidechain: true}
+    recordsJson: '[{"sessionId":"owner-session","uuid":"agent-record","parentUuid":"","type":"assistant","subtype":"","agentId":"synthetic-agent","isSidechain":true}]'
   - name: native-agent-invalid
     scope: root
     proofVersion: 1
@@ -62,3 +63,4 @@ malformed:
   - {name: wrong-field-type, json: '[{"sessionId":12}]'}
   - {name: null-array, json: 'null'}
   - {name: null-record, json: '[null]'}
+  - {name: wrong-sidechain-type, json: '[{"sessionId":"owner-session","isSidechain":"true"}]'}

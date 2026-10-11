@@ -24,6 +24,8 @@ type claudeIdentityRecordFixture struct {
 	Type         string `yaml:"type"`
 	Subtype      string `yaml:"subtype"`
 	SpawnAgentID string `yaml:"spawnAgentId"`
+	AgentID      string `yaml:"agentId"`
+	Sidechain    *bool  `yaml:"isSidechain"`
 }
 
 type claudeIdentityEvidenceCase struct {
@@ -50,7 +52,7 @@ func (c claudeIdentityEvidenceCase) evidence() ingest.ClaudeTranscriptEvidence {
 	}
 	for _, r := range c.Records {
 		e.Records = append(e.Records, ingest.ClaudeIdentityRecord{
-			SessionID: r.SessionID, UUID: r.UUID, ParentUUID: r.ParentUUID, Type: r.Type, Subtype: r.Subtype, SpawnAgentID: r.SpawnAgentID,
+			SessionID: r.SessionID, UUID: r.UUID, ParentUUID: r.ParentUUID, Type: r.Type, Subtype: r.Subtype, SpawnAgentID: r.SpawnAgentID, AgentID: r.AgentID, Sidechain: r.Sidechain,
 		})
 	}
 	return e

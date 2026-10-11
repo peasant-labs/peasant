@@ -11,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,15 +19,16 @@ import (
 var claudeIdentityYAML []byte
 
 type claudeIdentityFixtures struct {
-	RequiredCaseNames []string             `yaml:"required_case_names"`
-	Cases             []claudeIdentityCase `yaml:"cases"`
+	RequiredCaseNames            []string             `yaml:"required_case_names"`
+	RequiredRetainedRefusalNames []string             `yaml:"required_retained_refusal_names"`
+	Cases                        []claudeIdentityCase `yaml:"cases"`
 }
 
 // TestPipelineClaudeIdentityOwnership protects the discovery-to-scheduling-to-
 // store boundary: adapter-only tests cannot observe a later parent overwrite.
 func TestPipelineClaudeIdentityOwnership(t *testing.T) {
 	for _, fixture := range LoadClaudeIdentityFixtures(t).Cases {
-		if fixture.Refuse {
+		if fixture.Refuse || fixture.NativeOnly {
 			continue
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -87,15 +89,24 @@ func TestPipelineClaudeIdentityOwnership(t *testing.T) {
 }
 
 type claudeIdentityCase struct {
-	Name           string               `yaml:"name"`
-	Artifact       string               `yaml:"artifact"`
-	Parent         string               `yaml:"parent"`
-	Relationship   string               `yaml:"relationship"`
-	Target         string               `yaml:"target"`
-	Refuse         bool                 `yaml:"refuse"`
-	Files          []claudeEvidenceFile `yaml:"files"`
-	CaptureStatus  string               `yaml:"capture_status"`
-	CaptureFailure string               `yaml:"capture_failure"`
+	Name             string                  `yaml:"name"`
+	Artifact         string                  `yaml:"artifact"`
+	Parent           string                  `yaml:"parent"`
+	Relationship     string                  `yaml:"relationship"`
+	Target           string                  `yaml:"target"`
+	Refuse           bool                    `yaml:"refuse"`
+	Files            []claudeEvidenceFile    `yaml:"files"`
+	CaptureStatus    string                  `yaml:"capture_status"`
+	CaptureFailure   string                  `yaml:"capture_failure"`
+	NativeOnly       bool                    `yaml:"native_only"`
+	TargetState      string                  `yaml:"target_state"`
+	RetainedRefusals []claudeRetainedRefusal `yaml:"retained_refusals"`
+}
+
+type claudeRetainedRefusal struct {
+	Name        string `yaml:"name"`
+	ClearDigest bool   `yaml:"clear_digest"`
+	Transcript  string `yaml:"transcript"`
 }
 
 func LoadClaudeIdentityFixtures(t *testing.T) claudeIdentityFixtures {
@@ -105,10 +116,17 @@ func LoadClaudeIdentityFixtures(t *testing.T) claudeIdentityFixtures {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
+	retainedNames := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
 		names[fixture.Name] = true
+		for _, refusal := range fixture.RetainedRefusals {
+			retainedNames[refusal.Name] = true
+		}
 	}
 	if err := testutil.RequireFixtureNames("Claude identity", "case", fixtures.RequiredCaseNames, names); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.RequireFixtureNames("Claude retained identity", "case", fixtures.RequiredRetainedRefusalNames, retainedNames); err != nil {
 		t.Fatal(err)
 	}
 	return fixtures
@@ -166,10 +184,17 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 					t.Fatalf("relationships = %+v", metadata.Relationships)
 				}
 				relation := metadata.Relationships[0]
-				if string(relation.Kind) != fixture.Relationship || relation.TargetLocalID == nil || relation.TargetLocalID.String() != fixture.Target {
+				target := ""
+				if relation.TargetLocalID != nil {
+					target = relation.TargetLocalID.String()
+				}
+				if string(relation.Kind) != fixture.Relationship || target != fixture.Target {
 					t.Fatalf("provenance = %+v", relation)
 				}
-				if fixture.Relationship == "context_from" && relation.Anchor == nil {
+				if fixture.TargetState != "" && string(relation.TargetState) != fixture.TargetState {
+					t.Fatalf("target state = %q, want %q", relation.TargetState, fixture.TargetState)
+				}
+				if fixture.Relationship == "context_from" && fixture.Target != "" && relation.Anchor == nil {
 					t.Fatal("missing source anchor")
 				}
 			}
@@ -212,6 +237,7 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			metadata.ContentHash = schema.ComputeTranscriptHash(data)
 			for _, file := range fixture.Files {
 				if err := fs.Remove(claudeEvidenceCacheRoot + "/" + file.Path); err != nil {
 					t.Fatal(err)
@@ -228,6 +254,17 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 			}
 			if retained.SessionID != metadata.SessionID || len(retained.Relationships) != len(metadata.Relationships) {
 				t.Fatal("retained identity/provenance changed")
+			}
+			for _, refusal := range fixture.RetainedRefusals {
+				t.Run(refusal.Name, func(t *testing.T) {
+					original := *metadata
+					if refusal.ClearDigest {
+						original.ContentHash = ""
+					}
+					if _, err := adapter.ExtractMetadataFromTranscript(ctx, []byte(refusal.Transcript), &original); err == nil {
+						t.Fatal("unbound multi-source capture reused last-good provenance")
+					}
+				})
 			}
 		})
 	}

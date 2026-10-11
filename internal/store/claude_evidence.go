@@ -62,6 +62,8 @@ type claudeIdentityRecordRow struct {
 	Type         string `json:"type"`
 	Subtype      string `json:"subtype"`
 	SpawnAgentID string `json:"spawnAgentId,omitempty"`
+	AgentID      string `json:"agentId,omitempty"`
+	Sidechain    *bool  `json:"isSidechain,omitempty"`
 }
 
 // LoadClaudeEvidence returns every cached transcript record, keyed by source
@@ -144,7 +146,7 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 	for _, row := range identityRows {
 		record.Records = append(record.Records, ingest.ClaudeIdentityRecord{
 			SessionID: row.SessionID, UUID: row.UUID, ParentUUID: row.ParentUUID,
-			Type: row.Type, Subtype: row.Subtype, SpawnAgentID: row.SpawnAgentID,
+			Type: row.Type, Subtype: row.Subtype, SpawnAgentID: row.SpawnAgentID, AgentID: row.AgentID, Sidechain: row.Sidechain,
 		})
 	}
 	return record, true
@@ -184,7 +186,7 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 		for _, identity := range record.Records {
 			identityRows = append(identityRows, claudeIdentityRecordRow{
 				SessionID: identity.SessionID, UUID: identity.UUID, ParentUUID: identity.ParentUUID,
-				Type: identity.Type, Subtype: identity.Subtype, SpawnAgentID: identity.SpawnAgentID,
+				Type: identity.Type, Subtype: identity.Subtype, SpawnAgentID: identity.SpawnAgentID, AgentID: identity.AgentID, Sidechain: identity.Sidechain,
 			})
 		}
 		identityJSON, marshalErr := json.Marshal(identityRows)

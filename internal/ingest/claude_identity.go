@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,13 +21,14 @@ import (
 func mineClaudeIdentity(data []byte, evidence *ClaudeTranscriptEvidence) {
 	beginClaudeIdentity(data, evidence)
 	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
+	spawnCalls := make(map[string]bool)
 	for scanner.Scan() {
 		var value map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &value); err != nil {
 			evidence.NativeAgentValid = false
 			continue
 		}
-		addClaudeIdentityRecord(value, evidence)
+		addClaudeIdentityRecord(value, evidence, spawnCalls)
 	}
 	complete := scanner.Err() == nil && len(scanner.Oversized()) == 0
 	evidence.NativeAgentValid = evidence.NativeAgentValid && evidence.NativeAgentID != "" && complete
@@ -39,7 +41,7 @@ func beginClaudeIdentity(data []byte, evidence *ClaudeTranscriptEvidence) {
 	evidence.NativeAgentValid = true
 }
 
-func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvidence) {
+func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvidence, spawnCalls map[string]bool) {
 	var record ClaudeIdentityRecord
 	record.SessionID, _ = value["sessionId"].(string)
 	if record.SessionID == "" {
@@ -49,9 +51,12 @@ func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvi
 	record.ParentUUID, _ = value["parentUuid"].(string)
 	record.Type, _ = value["type"].(string)
 	record.Subtype, _ = value["subtype"].(string)
-	if result, ok := value["toolUseResult"].(map[string]any); ok {
-		record.SpawnAgentID, _ = result["agentId"].(string)
+	record.AgentID, _ = value["agentId"].(string)
+	if raw, present := value["isSidechain"]; present {
+		sidechain, _ := raw.(bool)
+		record.Sidechain = &sidechain
 	}
+	record.SpawnAgentID = claudeCorrelatedNativeSpawn(value, spawnCalls)
 	evidence.Records = append(evidence.Records, record)
 	agent, _ := value["agentId"].(string)
 	sidechain, _ := value["isSidechain"].(bool)
@@ -65,6 +70,84 @@ func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvi
 	}
 }
 
+// Older child transcripts may omit isSidechain. Matching layout and every
+// native agent ID retain that existing flow, but an explicit false/malformed
+// flag or conflicting native agent identity never becomes legacy proof.
+func claudeLegacyAgentProof(proof ClaudeTranscriptEvidence, agentID string) bool {
+	if len(proof.Records) == 0 {
+		return false
+	}
+	for _, record := range proof.Records {
+		if record.AgentID != agentID || record.Sidechain != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func claudeContradictorySidechain(proof ClaudeTranscriptEvidence) bool {
+	for _, record := range proof.Records {
+		if record.Sidechain != nil && !*record.Sidechain {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeAgentAdmissionProof(session DiscoveredSession, proof ClaudeTranscriptEvidence) bool {
+	owner, ok := claudeRecordOwner(proof)
+	if !ok || session.ParentUUID == nil || owner != *session.ParentUUID {
+		return false
+	}
+	if proof.NativeAgentValid {
+		return session.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
+	}
+	layout, hasLayout := claudeLayoutParent(session.SourcePath)
+	if !hasLayout || layout != owner || !claudeLegacyAgentProof(proof, proof.NativeAgentID) {
+		return false
+	}
+	return proof.NativeAgentID == "" || session.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
+}
+
+// A generic tool result may contain arbitrary JSON. Only a result correlated
+// with a native Task/Agent call supplies spawn evidence; prose and uncorrelated
+// agentId fields never authorize a layout override.
+func claudeCorrelatedNativeSpawn(value map[string]any, calls map[string]bool) string {
+	message, ok := value["message"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	blocks, _ := message["content"].([]any)
+	role, _ := message["role"].(string)
+	recordType, _ := value["type"].(string)
+	var correlated bool
+	for _, raw := range blocks {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := block["type"].(string)
+		if recordType == "assistant" && role == "assistant" && kind == "tool_use" {
+			name, _ := block["name"].(string)
+			id, _ := block["id"].(string)
+			if id != "" && (name == "Task" || name == "Agent") {
+				calls[id] = true
+			}
+		}
+		if recordType == "user" && role == "user" && kind == "tool_result" {
+			id, _ := block["tool_use_id"].(string)
+			correlated = correlated || calls[id]
+		}
+	}
+	if correlated {
+		if result, ok := value["toolUseResult"].(map[string]any); ok {
+			agent, _ := result["agentId"].(string)
+			return agent
+		}
+	}
+	return ""
+}
+
 func claudeRecordOwner(evidence ClaudeTranscriptEvidence) (SessionID, bool) {
 	var owner string
 	for _, record := range evidence.Records {
@@ -76,6 +159,15 @@ func claudeRecordOwner(evidence ClaudeTranscriptEvidence) (SessionID, bool) {
 	}
 	id, err := NewSessionID(owner)
 	return id, err == nil
+}
+
+func claudeNamesSession(records []ClaudeIdentityRecord, owner SessionID) bool {
+	for _, record := range records {
+		if record.SessionID == owner.String() {
+			return true
+		}
+	}
+	return false
 }
 
 func claudeProjectDirectory(path ResolvedPath) string {
@@ -107,9 +199,18 @@ func claudeLayoutParent(path ResolvedPath) (SessionID, bool) {
 
 func (a *ClaudeAdapter) claudeIdentitySnapshot(path ResolvedPath) (ClaudeTranscriptEvidence, bool) {
 	if data, err := a.fs.ReadFile(path.String()); err == nil {
+		if err := validateRetainedJSONL(context.Background(), data); err != nil {
+			return ClaudeTranscriptEvidence{}, false
+		}
 		var snapshot ClaudeTranscriptEvidence
 		mineClaudeIdentity(data, &snapshot)
-		return snapshot, true
+		owner, err := NewSessionID(strings.TrimSuffix(filepath.Base(path.String()), defaults.ExtJSONL.String()))
+		if err != nil {
+			return ClaudeTranscriptEvidence{}, false
+		}
+		if claudeNamesSession(snapshot.Records, owner) {
+			return snapshot, true
+		}
 	}
 	return ClaudeTranscriptEvidence{}, false
 }
@@ -220,6 +321,9 @@ func (a *ClaudeAdapter) linkClaudeNativeAgents(sessions []DiscoveredSession, evi
 		if sessions[ownerIndex].SourcePath != claudeSourcePath(child.SourcePath, owner) {
 			continue
 		}
+		if !claudeNamesSession(evidence[sessions[ownerIndex].SourcePath].Records, owner) {
+			continue
+		}
 		if child.ParentUUID != nil && *child.ParentUUID != owner {
 			layoutIndex, known := byID[*child.ParentUUID]
 			ownerRecords := evidence[sessions[ownerIndex].SourcePath].Records
@@ -238,12 +342,8 @@ func (a *ClaudeAdapter) linkClaudeNativeAgents(sessions []DiscoveredSession, evi
 		proof := evidence[session.SourcePath]
 		if index, exists := kept[session.SessionID]; exists && strings.HasPrefix(session.SessionID.String(), defaults.ClaudeSubagentPrefix) {
 			prior := evidence[out[index].SourcePath]
-			owner, ownerOK := claudeRecordOwner(proof)
-			priorOwner, priorOwnerOK := claudeRecordOwner(prior)
-			currentParentMatches := session.ParentUUID != nil && owner == *session.ParentUUID
-			priorParentMatches := out[index].ParentUUID != nil && priorOwner == *out[index].ParentUUID
-			currentProved := proof.NativeAgentValid && ownerOK && currentParentMatches
-			priorProved := prior.NativeAgentValid && priorOwnerOK && priorParentMatches
+			currentProved := claudeAgentAdmissionProof(session, proof)
+			priorProved := claudeAgentAdmissionProof(out[index], prior)
 			if currentProved && !priorProved {
 				out[index] = session
 			} else if proof.ContentDigest != prior.ContentDigest {
@@ -306,22 +406,33 @@ func (a *ClaudeAdapter) verifyClaudeIdentityAgainst(data []byte, session Discove
 		return refuse()
 	}
 	var relationships []schema.SessionRelationship
+	if strings.HasPrefix(session.SessionID.String(), defaults.ClaudeSubagentPrefix) && claudeContradictorySidechain(proof) {
+		return refuse()
+	}
 	if strings.HasPrefix(session.SessionID.String(), defaults.ClaudeSubagentPrefix) && proof.NativeAgentID != "" {
 		owner, ok := claudeRecordOwner(proof)
 		parentMatches := session.ParentUUID != nil && owner == *session.ParentUUID
 		identityMatches := session.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
 		ownerMatches := identityMatches && parentMatches
-		if !proof.NativeAgentValid || !ok || !ownerMatches {
+		layout, hasLayout := claudeLayoutParent(session.SourcePath)
+		legacyLayout := hasLayout && layout == owner && claudeLegacyAgentProof(proof, proof.NativeAgentID)
+		nativeProof := proof.NativeAgentValid || legacyLayout
+		if !nativeProof || !ok || !ownerMatches {
 			return refuse()
 		}
-		ownerProof, available := a.claudeIdentitySnapshot(claudeSourcePath(session.SourcePath, owner))
-		if !available {
-			return refuse()
-		}
-		if layout, present := claudeLayoutParent(session.SourcePath); present && layout != owner && !claudeNativeSpawn(ownerProof.Records, proof.NativeAgentID) {
-			layoutProof, available := a.claudeIdentitySnapshot(claudeSourcePath(session.SourcePath, layout))
-			if !available || !claudeHistoryLink(layoutProof.Records, layout, owner, ownerProof.Records) {
+		// A matching native parent directory is itself independent owner proof.
+		// Its root transcript may have rotated while its session remains stored;
+		// scheduling, not extraction, enforces the stored-parent dependency.
+		if !hasLayout || layout != owner {
+			ownerProof, available := a.claudeIdentitySnapshot(claudeSourcePath(session.SourcePath, owner))
+			if !available {
 				return refuse()
+			}
+			if hasLayout && !claudeNativeSpawn(ownerProof.Records, proof.NativeAgentID) {
+				layoutProof, available := a.claudeIdentitySnapshot(claudeSourcePath(session.SourcePath, layout))
+				if !available || !claudeHistoryLink(layoutProof.Records, layout, owner, ownerProof.Records) {
+					return refuse()
+				}
 			}
 		}
 		target := schema.SessionID(owner)
@@ -352,8 +463,15 @@ func (a *ClaudeAdapter) verifyClaudeIdentityAgainst(data []byte, session Discove
 			return refuse()
 		}
 		allowed[id] = true
-		target := schema.SessionID(source)
+	}
+	if len(ids) == 1 {
+		target, _ := NewSessionID(ids[0]) // validated against the source above
 		relationships = append(relationships, schema.SessionRelationship{Kind: schema.SessionRelationshipContextFrom, TargetState: schema.RelationshipTargetKnown, TargetLocalID: &target, Evidence: schema.EvidenceNativeTyped, Anchor: &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorGeneral}})
+	} else if len(ids) > 1 {
+		// The public graph permits one target per kind. Keep all proved source
+		// IDs and copied coordinates in the local evidence/native capture, and
+		// report the existing conflict state instead of guessing a primary source.
+		relationships = append(relationships, schema.SessionRelationship{Kind: schema.SessionRelationshipContextFrom, TargetState: schema.RelationshipTargetConflictingCurrentNativeEvidence, Evidence: schema.EvidenceConflict})
 	}
 	if err := schema.ValidateSessionRelationships(relationships); err != nil {
 		return nil, nil, fmt.Errorf("Claude metadata capture for %s: structural provenance cannot be represented: %w", session.SessionID, err)
@@ -364,24 +482,41 @@ func (a *ClaudeAdapter) verifyClaudeIdentityAgainst(data []byte, session Discove
 // Retained bytes are already a managed capture, not a new native file. Reuse
 // only the source relations the last-good metadata proved, and still require
 // the captured record chain to connect the artifact to each recorded source.
-func (a *ClaudeAdapter) verifyRetainedClaudeIdentity(data []byte, original *UnifiedMetadata) (map[string]bool, []schema.SessionRelationship, error) {
+func (a *ClaudeAdapter) verifyRetainedClaudeIdentity(data []byte, original *UnifiedMetadata, contentHash string) (map[string]bool, []schema.SessionRelationship, error) {
 	var proof ClaudeTranscriptEvidence
 	mineClaudeIdentity(data, &proof)
 	allowed := map[string]bool{original.SessionID.String(): true}
 	if original.ParentUUID != nil {
 		allowed[original.ParentUUID.String()] = true
 	}
+	if strings.HasPrefix(original.SessionID.String(), defaults.ClaudeSubagentPrefix) && claudeContradictorySidechain(proof) {
+		return nil, nil, fmt.Errorf("Claude retained metadata capture for %s: explicit native sidechain evidence contradicts an agent artifact; keep the last-good capture and restore matching native input", original.SessionID)
+	}
 	if strings.HasPrefix(original.SessionID.String(), defaults.ClaudeSubagentPrefix) && proof.NativeAgentID != "" {
 		owner, ok := claudeRecordOwner(proof)
 		parentMatches := original.ParentUUID != nil && owner == *original.ParentUUID
 		identityMatches := original.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
 		ownerMatches := parentMatches && identityMatches
-		if !proof.NativeAgentValid || !ok || !ownerMatches {
+		legacyProof := claudeLegacyAgentProof(proof, proof.NativeAgentID)
+		nativeProof := proof.NativeAgentValid || legacyProof
+		if !nativeProof || !ok || !ownerMatches {
 			return nil, nil, fmt.Errorf("Claude retained metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
 		}
 	}
 	relationships := append([]schema.SessionRelationship(nil), original.Relationships...)
 	for _, relationship := range original.Relationships {
+		contextConflict := relationship.Kind == schema.SessionRelationshipContextFrom && relationship.TargetState == schema.RelationshipTargetConflictingCurrentNativeEvidence
+		if contextConflict && relationship.Evidence == schema.EvidenceConflict {
+			// A multi-source last-good capture has no single public target. Its
+			// persisted transcript digest binds all structural IDs to the exact
+			// bytes that acquisition proved; changed bytes must acquire anew.
+			if original.ContentHash == "" || original.ContentHash != contentHash {
+				return nil, nil, fmt.Errorf("Claude retained metadata capture for %s: multi-source provenance belongs to different captured bytes; keep the last-good capture and reacquire intact native input", original.SessionID)
+			}
+			for _, record := range proof.Records {
+				allowed[record.SessionID] = true
+			}
+		}
 		if relationship.Kind != schema.SessionRelationshipContextFrom || relationship.TargetLocalID == nil || relationship.Anchor == nil {
 			continue
 		}

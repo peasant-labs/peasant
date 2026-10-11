@@ -539,6 +539,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	var identity *ClaudeTeammateIdentity
 	var invalidIdentity, malformed, conversation bool
 	var validRecords, lineNumber int
+	spawnCalls := make(map[string]bool)
 	var hints claudeSessionHints
 	// The origin captures ride this same scan. Like the identity capture above
 	// them they read every line, because a harness is free to record the launch
@@ -565,7 +566,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 			evidence.NativeAgentValid = false
 			continue
 		}
-		addClaudeIdentityRecord(value, &evidence)
+		addClaudeIdentityRecord(value, &evidence, spawnCalls)
 		validRecords++
 		if recordType, present := value["type"]; present {
 			text, isText := recordType.(string)
