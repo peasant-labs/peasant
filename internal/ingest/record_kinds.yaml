@@ -4,7 +4,7 @@
 version: 3
 harnesses:
   claude-code:
-    adapter_version: 1
+    adapter_version: 2
     indexer_version: 18
     index_version: 1
     fallback: &fallback

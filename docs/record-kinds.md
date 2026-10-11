@@ -57,7 +57,7 @@ integration suites. Publication requires validated retained evidence, partial
 signaling and the receiver's preservation capability; failed or oversized
 transfer must not silently discard evidence. Schema release/tag precedes pins.
 
-## claude-code (adapter 1, indexer 18)
+## claude-code (adapter 2, indexer 18)
 
 Baseline index format: 1.
 
