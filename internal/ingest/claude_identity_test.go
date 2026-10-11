@@ -1,8 +1,11 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -51,13 +54,19 @@ type claudeCacheUpgrade struct {
 // store boundary: adapter-only tests cannot observe a later parent overwrite.
 func TestPipelineClaudeIdentityOwnership(t *testing.T) {
 	for _, fixture := range LoadClaudeIdentityFixtures(t).Cases {
-		if fixture.Refuse || fixture.NativeOnly {
+		if fixture.Refuse {
 			continue
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
 			root := t.TempDir()
 			database := openEvidenceStore(t, filepath.Join(root, "peasant.db"))
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
+			if fixture.NativeOnly {
+				parent := makeMinimalMeta(t, fixture.Parent)
+				if err := database.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: parent}}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			writeClaudeEvidenceFiles(t, fs, fixture.Files)
 			for _, file := range fixture.Files {
 				fs.ModTimes[claudeEvidenceCacheRoot+"/"+file.Path] = time.Now().Add(-2 * time.Hour)
@@ -96,6 +105,14 @@ func TestPipelineClaudeIdentityOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			locations, err := database.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sid})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := ingest.SessionMetadataPath(cfg.OutputDir.String(), string(locations[sid].HostSlug), id, fixture.Parent)
+			if _, err := ingest.ReadManagedPair(fs, cfg.OutputDir.String(), path, sid); err != nil {
+				t.Fatalf("stored ownership does not match installed pair: %v", err)
+			}
 			capture, found, err := database.GetSessionContentCapture(t.Context(), sid)
 			wantStatus := fixture.CaptureStatus
 			if wantStatus == "" {
@@ -106,6 +123,83 @@ func TestPipelineClaudeIdentityOwnership(t *testing.T) {
 			}
 			if capture.CaptureFormat != ingest.ContentCaptureFormatFull || capture.FullCaptureSHA256 == "" || string(capture.FailureCode) != fixture.CaptureFailure {
 				t.Fatalf("capture authority changed: %+v", capture)
+			}
+			if len(fixture.RetainedRefusals) == 0 {
+				return
+			}
+			original, err := fs.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := database.ListEntries(t.Context(), sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) == 0 {
+				t.Fatal("initial native capture did not establish stored entries")
+			}
+			for _, file := range fixture.Files {
+				if err := fs.Remove(claudeEvidenceCacheRoot + "/" + file.Path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, refusal := range fixture.RetainedRefusals {
+				t.Run(refusal.Name, func(t *testing.T) {
+					metadata := original
+					if refusal.ClearDigest {
+						var meta ingest.UnifiedMetadata
+						if err := json.Unmarshal(original, &meta); err != nil {
+							t.Fatal(err)
+						}
+						meta.ContentHash = ""
+						meta.MetadataHash = schema.ComputeMetadataHash(&meta)
+						metadata, err = json.Marshal(&meta)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := fs.WriteFile(path, metadata, 0600); err != nil {
+						t.Fatal(err)
+					}
+					transcriptPath := filepath.Join(filepath.Dir(path), id+"--transcript.jsonl")
+					if err := fs.WriteFile(transcriptPath, []byte(refusal.Transcript), 0600); err != nil {
+						t.Fatal(err)
+					}
+					versions := maps.Clone(ingest.HarvesterVersionRegistry)
+					target := versions[ingest.HarnessClaudeCode]
+					target.AdapterVersion++
+					versions[ingest.HarnessClaudeCode] = target
+					retainedCfg := cfg
+					retainedCfg.Sources = nil
+					retainedCfg.Reindex = true
+					maintenance, err := newTestPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, retainedCfg,
+						ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithHarvesterVersions(versions), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+					if err != nil {
+						t.Fatal(err)
+					}
+					rejected, err := maintenance.Run(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(rejected.Diagnostics) == 0 {
+						t.Fatal("mounted corrupt pair refusal was not reported")
+					}
+					if indexedOutcomeFor(rejected, sid) != ingest.IndexOutcomeError {
+						t.Fatalf("mounted corrupt pair did not refuse indexing: %+v", rejected.IndexLog)
+					}
+					current, err := fs.ReadFile(path)
+					if err != nil || !bytes.Equal(current, metadata) {
+						t.Fatalf("corrupt pair metadata was replaced or stamped: %v", err)
+					}
+					currentEntries, err := database.ListEntries(t.Context(), sid)
+					if err != nil || !reflect.DeepEqual(currentEntries, entries) {
+						t.Fatalf("corrupt retained bytes replaced stored entries: %v", err)
+					}
+					currentCapture, found, err := database.GetSessionContentCapture(t.Context(), sid)
+					if err != nil || !found || !reflect.DeepEqual(currentCapture, capture) {
+						t.Fatalf("corrupt pair changed capture authority: %+v %v", currentCapture, err)
+					}
+				})
 			}
 		})
 	}
@@ -320,6 +414,18 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 					}
 					if !found {
 						t.Fatal("artifact disappeared after cache recovery")
+					}
+					fs.ResetCounts()
+					if _, err := adapter.Discover(ctx, cfg); err != nil {
+						t.Fatal(err)
+					}
+					if adapter.ReminedCount() != 0 {
+						t.Fatal("recovered identity re-mined on warm discovery")
+					}
+					for _, file := range fixture.Files {
+						if fs.ReadCount(claudeEvidenceCacheRoot+"/"+file.Path) != 0 {
+							t.Fatal("warm discovery after corruption recovery read transcript")
+						}
 					}
 				})
 			}

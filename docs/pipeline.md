@@ -296,11 +296,24 @@ stamped with the size and the modification time of the file that produced it.
 Rules:
 
 - Discovery stats each transcript, then reuses the cached record when the scope,
-  the size, and the modification time all agree.
+  the size, and the modification time all agree, the origin is present, and the
+  structural proof version matches this build.
 - A new or changed transcript is mined again, and the fresh record replaces the
   cached one. The ambiguity rule is unchanged.
 - One read now produces every content fact discovery needs: the conversation
-  check, the teammate identity, the spawn records, and the display hints.
+  check, the teammate identity, the spawn records, the display hints, and the
+  structural identity proof. The proof stores recorded session IDs, UUID/parent
+  coordinates, record kinds/subtypes, agent IDs, sidechain flags, correlated
+  native spawn IDs, and the captured content digest; it stores no message text.
+- Legacy or prior-version structural proof is re-mined once even when the file
+  stat is unchanged. After a successful cache write, the next unchanged discovery
+  reads the recovered proof without reading the transcript. Malformed stored
+  identity records are skipped and recovered the same way. Recorded session IDs
+  are validated before writing; an invalid ID rolls back the entire cache update.
+- Cached proof helps discovery select ownership, but does not authorize
+  extraction: the adapter verifies the actual captured bytes. Managed captures
+  can retain previously proved relationships after native files rotate only
+  under the retained-transcript identity and digest checks.
 - Discovery deletes the records of transcripts that are gone, but only under the
   source paths that the run walked.
 - The cache is best effort. A missing or failing cache makes discovery mine every

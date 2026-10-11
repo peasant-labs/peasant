@@ -43,6 +43,7 @@ required_case_names:
   - substituted owner snapshot cannot prove root agent
   - uncorrelated tool output cannot prove agent spawn
   - legacy nested agent without sidechain flag
+  - legacy nested agent without agent id
   - legacy layout wins over unproved root duplicate
   - explicit main-chain record without agent id is refused
   - disconnected local-command divergence
@@ -364,6 +365,14 @@ cases:
       - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
         lines:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","uuid":"legacy-agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy nested agent without agent id
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    files:
+      - *source
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"legacy-agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
   - name: legacy layout wins over unproved root duplicate
     artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
     parent: 11111111-1111-4111-8111-111111111111
