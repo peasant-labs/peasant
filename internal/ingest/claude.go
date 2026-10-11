@@ -1105,8 +1105,10 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 			continue
 		}
 
-		if line.SessionID != "" && !allowed[line.SessionID] && line.SessionID != meta.SessionID.String() &&
-			(meta.ParentUUID == nil || line.SessionID != meta.ParentUUID.String()) {
+		foreignSession := line.SessionID != "" && line.SessionID != meta.SessionID.String()
+		foreignParent := meta.ParentUUID == nil || line.SessionID != meta.ParentUUID.String()
+		identityMismatch := foreignSession && foreignParent && !allowed[line.SessionID]
+		if identityMismatch {
 			return nil, fmt.Errorf("Claude metadata capture for %s: transcript sessionId disagrees with the discovered session or parent identity; no capture was written; restore the matching source and rerun peasant ingest", meta.SessionID)
 		}
 		if literalCWD == "" {

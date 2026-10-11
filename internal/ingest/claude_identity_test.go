@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -19,11 +21,25 @@ import (
 var claudeIdentityYAML []byte
 
 type claudeIdentityFixtures struct {
-	RequiredCacheUpgradeNames    []string             `yaml:"required_cache_upgrade_names"`
-	CacheUpgrades                []claudeCacheUpgrade `yaml:"cache_upgrades"`
-	RequiredCaseNames            []string             `yaml:"required_case_names"`
-	RequiredRetainedRefusalNames []string             `yaml:"required_retained_refusal_names"`
-	Cases                        []claudeIdentityCase `yaml:"cases"`
+	RequiredCacheCorruptionNames []string                             `yaml:"required_cache_corruption_names"`
+	CacheCorruptions             []claudeCacheCorruption              `yaml:"cache_corruptions"`
+	RetainedExpectations         map[string]claudeRetainedExpectation `yaml:"retained_expectations"`
+	RequiredCacheUpgradeNames    []string                             `yaml:"required_cache_upgrade_names"`
+	CacheUpgrades                []claudeCacheUpgrade                 `yaml:"cache_upgrades"`
+	RequiredCaseNames            []string                             `yaml:"required_case_names"`
+	RequiredRetainedRefusalNames []string                             `yaml:"required_retained_refusal_names"`
+	Cases                        []claudeIdentityCase                 `yaml:"cases"`
+}
+
+type claudeCacheCorruption struct {
+	Name        string `yaml:"name"`
+	RecordsJSON string `yaml:"records_json"`
+}
+
+type claudeRetainedExpectation struct {
+	TargetState schema.RelationshipTargetState `yaml:"target_state"`
+	Evidence    schema.EvidenceKind            `yaml:"evidence"`
+	Anchor      *schema.PublicSourceAnchor     `yaml:"anchor"`
 }
 
 type claudeCacheUpgrade struct {
@@ -125,6 +141,13 @@ func LoadClaudeIdentityFixtures(t *testing.T) claudeIdentityFixtures {
 	names := make(map[string]bool)
 	retainedNames := make(map[string]bool)
 	cacheNames := make(map[string]bool)
+	corruptionNames := make(map[string]bool)
+	for _, corruption := range fixtures.CacheCorruptions {
+		corruptionNames[corruption.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("Claude cached identity", "corruption", fixtures.RequiredCacheCorruptionNames, corruptionNames); err != nil {
+		t.Fatal(err)
+	}
 	for _, upgrade := range fixtures.CacheUpgrades {
 		cacheNames[upgrade.Name] = true
 	}
@@ -256,6 +279,50 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			for _, corruption := range fixtures.CacheCorruptions {
+				t.Run(corruption.Name, func(t *testing.T) {
+					conn, err := database.Pool().Take(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					err = sqlitex.ExecuteTransient(conn, `UPDATE claude_transcript_evidence SET identity_records_json=? WHERE source_path=?`, &sqlitex.ExecOptions{Args: []any{corruption.RecordsJSON, artifact.SourcePath.String()}})
+					database.Pool().Put(conn)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cached, err := database.LoadClaudeEvidence(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, found := cached[artifact.SourcePath]; found {
+						t.Fatal("corrupt session identity remained cached")
+					}
+					recovered, err := adapter.Discover(ctx, cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if adapter.ReminedCount() != 1 {
+						t.Fatalf("corrupt identity re-mines = %d", adapter.ReminedCount())
+					}
+					var found bool
+					for _, session := range recovered {
+						if session.SessionID != artifact.SessionID {
+							continue
+						}
+						found = true
+						parent := ""
+						if session.ParentUUID != nil {
+							parent = session.ParentUUID.String()
+						}
+						if parent != fixture.Parent {
+							t.Fatalf("recovered owner = %q, want %q", parent, fixture.Parent)
+						}
+					}
+					if !found {
+						t.Fatal("artifact disappeared after cache recovery")
+					}
+				})
+			}
 			metadata.ContentHash = schema.ComputeTranscriptHash(data)
 			for _, file := range fixture.Files {
 				if err := fs.Remove(claudeEvidenceCacheRoot + "/" + file.Path); err != nil {
@@ -271,8 +338,31 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatalf("retained capture after native removal: %v", err)
 			}
-			if retained.SessionID != metadata.SessionID || len(retained.Relationships) != len(metadata.Relationships) {
-				t.Fatal("retained identity/provenance changed")
+			if retained.SessionID != metadata.SessionID {
+				t.Fatal("retained identity changed")
+			}
+			var expected []schema.SessionRelationship
+			if fixture.Relationship != "" {
+				key := fixture.Relationship
+				if fixture.TargetState != "" {
+					key = fixture.TargetState
+				}
+				want, ok := fixtures.RetainedExpectations[key]
+				if !ok {
+					t.Fatalf("missing retained expectation %q", key)
+				}
+				var target *schema.SessionID
+				if fixture.Target != "" {
+					id, err := ingest.NewSessionID(fixture.Target)
+					if err != nil {
+						t.Fatal(err)
+					}
+					target = &id
+				}
+				expected = []schema.SessionRelationship{{Kind: schema.SessionRelationshipKind(fixture.Relationship), TargetLocalID: target, TargetState: want.TargetState, Evidence: want.Evidence, Anchor: want.Anchor}}
+			}
+			if !reflect.DeepEqual(retained.Relationships, expected) {
+				t.Fatalf("retained provenance = %+v, want %+v", retained.Relationships, expected)
 			}
 			for _, refusal := range fixture.RetainedRefusals {
 				t.Run(refusal.Name, func(t *testing.T) {

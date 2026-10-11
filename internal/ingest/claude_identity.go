@@ -217,8 +217,8 @@ func (a *ClaudeAdapter) claudeIdentitySnapshot(path ResolvedPath) (ClaudeTranscr
 
 // claudeHistoryLink proves a mixed artifact against a real source snapshot.
 // Copied records must match structural coordinates; a chain may continue from
-// that snapshot's tail/boundary. A local-command divergence with re-stamped
-// shared history also proves a fork without inspecting the command's text.
+// that snapshot's tail/boundary. Uncopied records, including local commands,
+// must connect to proved coordinates; their subtype alone proves no fork.
 func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, snapshot []ClaudeIdentityRecord) bool {
 	byUUID := make(map[string]ClaudeIdentityRecord, len(snapshot))
 	for _, record := range snapshot {
@@ -226,7 +226,7 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 			byUUID[record.UUID] = record
 		}
 	}
-	var ownPresent, restamped, command, sourcePresent, transition bool
+	var ownPresent, restamped, sourcePresent, transition bool
 	for _, record := range snapshot {
 		sourcePresent = sourcePresent || record.SessionID == source.String()
 	}
@@ -240,7 +240,6 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 		}
 		if record.SessionID == source.String() {
 			foreign = append(foreign, record)
-			command = command || record.Type == "system" && record.Subtype == "local_command"
 		}
 	}
 	foreignUUIDs := make(map[string]bool, len(foreign))
@@ -268,12 +267,10 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 			linked[record.UUID] = true
 		}
 	}
-	seenRestamped := false
 	for _, record := range records {
 		if record.SessionID == own.String() {
 			if prior, exists := byUUID[record.UUID]; exists && claudeSameCoordinate(prior, record) {
 				linked[record.UUID] = true
-				seenRestamped = true
 			}
 			continue
 		}
@@ -284,10 +281,8 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 		if copied && !claudeSameCoordinate(prior, record) {
 			return false
 		}
-		systemBoundary := record.Type == "system" && (record.Subtype == "local_command" || record.Subtype == "compact_boundary")
-		forkBoundary := seenRestamped && command && systemBoundary
 		chainLinked := record.ParentUUID != "" && linked[record.ParentUUID]
-		if !copied && !forkBoundary && !chainLinked {
+		if !copied && !chainLinked {
 			return false
 		}
 		if record.UUID == "" {

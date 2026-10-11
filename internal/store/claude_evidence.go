@@ -111,6 +111,11 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 		if row == nil {
 			return ingest.ClaudeTranscriptEvidence{}, false
 		}
+		id, err := ingest.NewSessionID(row.SessionID)
+		if err != nil {
+			return ingest.ClaudeTranscriptEvidence{}, false
+		}
+		row.SessionID = id.String()
 	}
 	// Column 11 (origin) is read as raw text and assigned directly, never
 	// through sessionorigin.Parse or Origin.Validate. The empty string is a
