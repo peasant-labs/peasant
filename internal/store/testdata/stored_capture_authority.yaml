@@ -1,0 +1,93 @@
+# Stored content-capture authority oracle for the OpenCode V1 authority bridge.
+# Each case seeds one session_content_captures row (or none) and states whether
+# the stored certificate holds last-good full authority. The bridge applies the
+# writer's own publishable-capture predicate, so a publication revision is never
+# proof; when it reports authority, it must preserve the certificate's status,
+# source authority, transcript origin, capture format, and failure code exactly,
+# so an accounted incomplete/full certificate is never flattened into complete.
+session:
+  id: 9f9f9f9f-9999-4999-8999-9f9f9f9f9f9f
+cases:
+  - name: complete-full-is-authoritative
+    present: true
+    status: complete
+    sourceAuthority: provider_source
+    transcriptOrigin: opencode-current-sqlite
+    captureFormat: full
+    publicationCaptureRevision: 0
+    wantAuthority: true
+  - name: complete-full-with-publication-revision-is-authoritative
+    present: true
+    status: complete
+    sourceAuthority: new_ingest
+    transcriptOrigin: file
+    captureFormat: full
+    publicationCaptureRevision: 7
+    wantAuthority: true
+  - name: complete-preview-only-is-authoritative
+    # A complete capture is certified by its status and the absence of a
+    # failure; the format is not questioned by the shared rule.
+    present: true
+    status: complete
+    sourceAuthority: peasant_snapshot
+    transcriptOrigin: file
+    captureFormat: preview_only
+    publicationCaptureRevision: 0
+    wantAuthority: true
+  - name: incomplete-full-accounted-omissions-is-authoritative
+    present: true
+    status: incomplete
+    sourceAuthority: provider_source
+    transcriptOrigin: opencode-current-sqlite
+    captureFormat: full
+    failureCode: source_records_omitted
+    publicationCaptureRevision: 0
+    wantAuthority: true
+  - name: incomplete-full-retained-unknown-is-authoritative
+    present: true
+    status: incomplete
+    sourceAuthority: provider_source
+    transcriptOrigin: opencode-legacy-sqlite
+    captureFormat: full
+    failureCode: unknown_data_retained
+    publicationCaptureRevision: 0
+    wantAuthority: true
+  - name: incomplete-preview-only-strict-refused-is-not-authoritative
+    present: true
+    status: incomplete
+    sourceAuthority: peasant_snapshot
+    transcriptOrigin: file
+    captureFormat: preview_only
+    failureCode: strict_capture_refused
+    publicationCaptureRevision: 9
+    wantAuthority: false
+  - name: incomplete-preview-only-accounted-code-is-not-authoritative
+    present: true
+    status: incomplete
+    sourceAuthority: provider_source
+    transcriptOrigin: file
+    captureFormat: preview_only
+    failureCode: source_records_omitted
+    publicationCaptureRevision: 0
+    wantAuthority: false
+  - name: incomplete-legacy-preview-only-is-not-authoritative
+    present: true
+    status: incomplete
+    sourceAuthority: peasant_snapshot
+    transcriptOrigin: file
+    captureFormat: legacy_preview_only
+    failureCode: legacy_preview_only
+    publicationCaptureRevision: 0
+    wantAuthority: false
+  - name: failed-is-not-authoritative
+    present: true
+    status: failed
+    sourceAuthority: provider_source
+    transcriptOrigin: file
+    captureFormat: full
+    failureCode: strict_capture_refused
+    publicationCaptureRevision: 12
+    wantAuthority: false
+  - name: absent-is-not-authoritative
+    present: false
+    wantAuthority: false

@@ -1,4 +1,5 @@
 required_names:
+  - codex-native-scalar-delivery-publication
   - codex-native-canonical-user-lexical
   - codex-native-canonical-reasoning-lexical
   - codex-native-response-reasoning-summary-lexical
@@ -29,6 +30,23 @@ corrupt:
   codex: '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":42}]}}'
   opencode: '{"text":42,"time":{"created":1}}'
 cases:
+  - name: codex-native-scalar-delivery-publication
+    harness: codex
+    native: true
+    known_texts: [known answer closing]
+    known_role: assistant
+    kind: native_discriminator
+    payload: '"\u0067hp_SECRET_BODY"'
+    expected: '"\u003cGITHUB_PAT\u003e"'
+    corrupt: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"bad-correlation","delivery":{"target":7},"content":[{"type":"output_text","text":"refused answer"}]}}}'
+    source: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"event_msg","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"delivery-item","delivery":UNKNOWN,"content":[{"type":"output_text","text":"known answer closing"}]}}}
+    namespace: item_delivery
+    record_indices: [2]
+    positions: [6]
+    pointers: [/payload/item/delivery]
   - name: codex-native-canonical-user-lexical
     harness: codex
     native: true

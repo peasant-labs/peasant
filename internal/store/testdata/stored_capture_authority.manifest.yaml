@@ -1,0 +1,14 @@
+# Required case names for the stored capture authority oracle. The test asserts
+# this set equals the fixture's case names exactly, so a deleted or renamed case
+# fails instead of silently shrinking the oracle.
+requiredNames:
+  - complete-full-is-authoritative
+  - complete-full-with-publication-revision-is-authoritative
+  - complete-preview-only-is-authoritative
+  - incomplete-full-accounted-omissions-is-authoritative
+  - incomplete-full-retained-unknown-is-authoritative
+  - incomplete-preview-only-strict-refused-is-not-authoritative
+  - incomplete-preview-only-accounted-code-is-not-authoritative
+  - incomplete-legacy-preview-only-is-not-authoritative
+  - failed-is-not-authoritative
+  - absent-is-not-authoritative

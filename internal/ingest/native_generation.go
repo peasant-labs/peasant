@@ -138,6 +138,31 @@ type NativeGenerationPriorReader interface {
 	ReadNativeGenerationPrior(context.Context, SessionID) (*NativeGenerationPrior, error)
 }
 
+// StoredCaptureAuthority names the stored content-capture certificate that
+// stands in for an active managed generation as last-good full authority. It
+// preserves the certificate's own state in full: its status, source authority,
+// transcript origin, capture format, and failure code. An accounted
+// incomplete/full certificate therefore reads as what it is rather than being
+// flattened into a complete one. It carries no alias table and no
+// captured-prefix proof.
+type StoredCaptureAuthority struct {
+	Status           ContentCaptureStatus
+	SourceAuthority  ContentSourceAuthority
+	TranscriptOrigin TranscriptOrigin
+	CaptureFormat    ContentCaptureFormat
+	FailureCode      ContentCaptureFailureCode
+}
+
+// NativePriorCaptureAuthorityReader reports the stored content-capture
+// certificate that still holds last-good full authority for a session with no
+// active managed generation. It applies the writer's own publishable-capture
+// predicate to the stored certificate; a publication revision is never proof.
+// A session with no publishable certificate returns (nil, nil), so a genuine
+// first discovery keeps its empty prior.
+type NativePriorCaptureAuthorityReader interface {
+	ReadStoredCaptureAuthority(context.Context, SessionID) (*StoredCaptureAuthority, error)
+}
+
 // ActivationDisposition is the lock-derived disposition for the REQUESTED
 // candidate, independent of repair state. It is never inferred from an
 // unlocked read or error text. Counting is per-invocation, never

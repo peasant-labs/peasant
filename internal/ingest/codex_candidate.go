@@ -321,7 +321,12 @@ type CodexCandidateInput struct {
 func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 	for _, diagnostic := range input.History.Diagnostics {
 		if diagnostic.ErrorType == "codex_record_malformed" || diagnostic.ErrorType == "codex_item_body_malformed" {
-			return CodexCandidate{}, fmt.Errorf("build Codex candidate: complete native record is malformed; prior generation remains unchanged; restore intact source and retry")
+			return CodexCandidate{}, &codexCandidateRefusal{
+				Operation: "BuildCodexCandidate",
+				Reason:    fmt.Sprintf("complete native record is malformed at %s: %s", diagnostic.Location, diagnostic.Message),
+				Effect:    "no candidate was emitted and the prior generation and producer stamps remain unchanged",
+				Recovery:  "restore intact native source and retry harvest",
+			}
 		}
 	}
 	if input.History.StableThreadID == "" {

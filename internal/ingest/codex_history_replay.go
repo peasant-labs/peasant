@@ -47,24 +47,24 @@ func (d *codexDeliveryCorrelation) isCorrelated() bool {
 // the exact native bytes; the adapter-private native type is derived from the
 // native discriminator, never from the presence of one text field.
 type codexItemBody struct {
-	Type             string                    `json:"type"`
-	Role             string                    `json:"role"`
-	ID               string                    `json:"id"`
-	CallID           string                    `json:"call_id"`
-	TurnID           string                    `json:"turn_id"`
-	Name             string                    `json:"name"`
-	Content          json.RawMessage           `json:"content"`
-	Summary          json.RawMessage           `json:"summary"`
-	SummaryText      json.RawMessage           `json:"summary_text"`
-	RawContent       json.RawMessage           `json:"raw_content"`
-	Output           json.RawMessage           `json:"output"`
-	Arguments        json.RawMessage           `json:"arguments"`
-	Input            json.RawMessage           `json:"input"`
-	Command          json.RawMessage           `json:"command"`
-	AggregatedOutput json.RawMessage           `json:"aggregated_output"`
-	Stdout           json.RawMessage           `json:"stdout"`
-	Changes          json.RawMessage           `json:"changes"`
-	Delivery         *codexDeliveryCorrelation `json:"delivery"`
+	Type             string          `json:"type"`
+	Role             string          `json:"role"`
+	ID               string          `json:"id"`
+	CallID           string          `json:"call_id"`
+	TurnID           string          `json:"turn_id"`
+	Name             string          `json:"name"`
+	Content          json.RawMessage `json:"content"`
+	Summary          json.RawMessage `json:"summary"`
+	SummaryText      json.RawMessage `json:"summary_text"`
+	RawContent       json.RawMessage `json:"raw_content"`
+	Output           json.RawMessage `json:"output"`
+	Arguments        json.RawMessage `json:"arguments"`
+	Input            json.RawMessage `json:"input"`
+	Command          json.RawMessage `json:"command"`
+	AggregatedOutput json.RawMessage `json:"aggregated_output"`
+	Stdout           json.RawMessage `json:"stdout"`
+	Changes          json.RawMessage `json:"changes"`
+	Delivery         codexDelivery   `json:"delivery"`
 }
 
 // codexItemBodyCarriesPayload reports whether an item body carries any native
@@ -149,19 +149,19 @@ func codexItemIsAdmission(event codexHistoryReplayPayload, body codexItemBody, n
 // payload. It is discriminated by the envelope type and the nested payload
 // type; unrelated fields stay zero.
 type codexHistoryReplayPayload struct {
-	Type     string                    `json:"type"`
-	Role     string                    `json:"role"`
-	ID       string                    `json:"id"`
-	ItemID   string                    `json:"item_id"`
-	CallID   string                    `json:"call_id"`
-	TurnID   string                    `json:"turn_id"`
-	Name     string                    `json:"name"`
-	Summary  *string                   `json:"summary"`
-	NumTurns *int64                    `json:"num_turns"`
-	Ordinal  *int64                    `json:"ordinal"`
-	Content  json.RawMessage           `json:"content"`
-	Item     json.RawMessage           `json:"item"`
-	Delivery *codexDeliveryCorrelation `json:"delivery"`
+	Type     string          `json:"type"`
+	Role     string          `json:"role"`
+	ID       string          `json:"id"`
+	ItemID   string          `json:"item_id"`
+	CallID   string          `json:"call_id"`
+	TurnID   string          `json:"turn_id"`
+	Name     string          `json:"name"`
+	Summary  *string         `json:"summary"`
+	NumTurns *int64          `json:"num_turns"`
+	Ordinal  *int64          `json:"ordinal"`
+	Content  json.RawMessage `json:"content"`
+	Item     json.RawMessage `json:"item"`
+	Delivery codexDelivery   `json:"delivery"`
 	// ReplacementHistory and ReplacementMetadata are the native compaction
 	// baseline arrays. History without metadata is accepted; orphan or
 	// malformed present metadata, and unequal present arrays, mark
@@ -981,6 +981,9 @@ func codexSegmentOwnership(segment codexDecodedSegment, ordinal int64) CodexOwne
 func (state *codexReplayState) replayRecord(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, mode CodexHistoryMode) (resultErr error) {
 	prepared, unknown, err := prepareCodexRecord(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
 	if err != nil {
+		if refusal := codexItemPreparationRefusal(record); refusal != nil {
+			return refusal
+		}
 		return err
 	}
 	if prepared == nil {
@@ -1294,8 +1297,8 @@ func (state *codexReplayState) replayItemCompleted(threadID string, segment code
 	if bodyMalformed {
 		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
 			ErrorType:   "codex_item_body_malformed",
-			Location:    codexRecordLocation(threadID, record),
-			Message:     "a carried canonical item could not be decoded; the completion marker still correlates but no item state was replaced",
+			Location:    fmt.Sprintf("decoded ordinal %d (source line %d)", record.Ordinal, record.LineIndex+1),
+			Message:     codexItemBodyFailure(payload.Item),
 			Remediation: "Repair the native item body and rerun; the existing item state is retained.",
 		})
 	}

@@ -98,7 +98,23 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		err := retain(namespace, variant, "/payload", envelope["payload"])
 		return nil, unknown, err
 	}
+	var delivery codexDelivery
+	if raw := payload["delivery"]; native && len(raw) > 0 && json.Unmarshal(raw, &delivery) == nil && delivery.needsRetention() {
+		if err := retain("item_delivery", string(delivery.Shape), "/payload/delivery", raw); err != nil {
+			return nil, nil, err
+		}
+	}
 	if native && kind == codexTypeEventMsg && variant == "item_completed" && len(payload["item"]) > 0 && string(payload["item"]) != "null" {
+		var deliveryFields struct {
+			Delivery codexDelivery `json:"delivery"`
+		}
+		// Malformed known objects are left to the replay's field-aware refusal.
+		// Retention never replaces a known message with an opaque item.
+		if err := json.Unmarshal(payload["item"], &deliveryFields); err == nil && deliveryFields.Delivery.needsRetention() {
+			if err := retain("item_delivery", string(deliveryFields.Delivery.Shape), "/payload/item/delivery", deliveryFields.Delivery.Raw); err != nil {
+				return nil, nil, err
+			}
+		}
 		var header struct {
 			Type string `json:"type"`
 		}
@@ -126,7 +142,10 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			if err != nil {
 				return nil, nil, err
 			}
-			originalType, originalRole := item["type"], item["role"]
+			originalType, originalRole, originalDelivery := item["type"], item["role"], item["delivery"]
+			// The outer item already retained delivery at its original pointer.
+			// Recursive normalization handles content blocks only.
+			delete(item, "delivery")
 			item["type"], _ = json.Marshal(nativeType)
 			if len(originalRole) == 0 && role != "" {
 				item["role"], _ = json.Marshal(role)
@@ -172,6 +191,9 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 					return nil, nil, err
 				}
 				item["type"] = originalType
+				if len(originalDelivery) > 0 {
+					item["delivery"] = originalDelivery
+				}
 				if len(originalRole) == 0 {
 					delete(item, "role")
 				} else {
@@ -397,6 +419,10 @@ func codexTraversalPointers(raw []byte) map[string]int64 {
 		}
 		if item := object["item"]; len(item) > 0 && string(item) != "null" {
 			visit(item, pointer+"/item")
+		}
+		var delivery codexDelivery
+		if raw := object["delivery"]; len(raw) > 0 && json.Unmarshal(raw, &delivery) == nil && delivery.needsRetention() {
+			positions[pointer+"/delivery"] = int64(len(positions))
 		}
 	}
 	if envelope.Type == codexTypeResponse || envelope.Type == codexTypeEventMsg {
