@@ -61,6 +61,7 @@ slots:
   - {name: v60-active-generation, slot: 60, needle: "ALTER TABLE sessions ADD COLUMN active_generation_id TEXT;"}
   - {name: v61-publication-parent-index, slot: 61, needle: "CREATE INDEX idx_session_publication_parent_uuid"}
   - {name: v62-harmonized-content, slot: 62, needle: "CREATE TABLE session_entry_bodies ("}
+  - {name: v63-source-unavailability, slot: 63, needle: "CREATE TABLE session_source_unavailability ("}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot
