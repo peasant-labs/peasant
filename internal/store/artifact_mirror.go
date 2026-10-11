@@ -62,7 +62,13 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 		return results
 	}
 	defer s.pool.Put(conn)
-	if err = sqlitex.ExecuteTransient(conn, "BEGIN DEFERRED", nil); err != nil {
+	// Acquire the writer before reading prior state. A deferred transaction
+	// takes a read snapshot first and its project insert then needs a lock
+	// upgrade, which can return BUSY immediately despite busy_timeout. The
+	// ingest lane serializes this process's writes; IMMEDIATE also lets SQLite
+	// apply its bounded busy backoff to writers on other connections before
+	// any snapshot or per-session savepoint is created.
+	if err = sqlitex.ExecuteTransient(conn, "BEGIN IMMEDIATE", nil); err != nil {
 		failAll(fmt.Errorf("begin managed artifact mirror transaction: %w; no session was reconciled; restore database access and retry harvest", err))
 		return results
 	}
