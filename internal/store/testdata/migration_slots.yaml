@@ -62,6 +62,7 @@ slots:
   - {name: v61-publication-parent-index, slot: 61, needle: "CREATE INDEX idx_session_publication_parent_uuid"}
   - {name: v62-harmonized-content, slot: 62, needle: "CREATE TABLE session_entry_bodies ("}
   - {name: v63-source-unavailability, slot: 63, needle: "CREATE TABLE session_source_unavailability ("}
+  - {name: v64-ingest-run-outcomes, slot: 64, needle: "CREATE TABLE ingest_run_outcomes ("}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

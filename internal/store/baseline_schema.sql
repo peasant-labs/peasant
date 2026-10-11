@@ -260,6 +260,15 @@ CREATE TABLE ingest_log (
     source_path       TEXT
 ) STRICT;
 
+CREATE TABLE ingest_run_outcomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES ingest_log(id) ON DELETE CASCADE,
+    session_id TEXT,
+    kind TEXT NOT NULL CHECK(kind IN ('worker_error', 'diagnostic')),
+    reason_code TEXT NOT NULL CHECK(length(reason_code) > 0),
+    created_at INTEGER NOT NULL
+) STRICT;
+
 CREATE TABLE lesson_sources (
     id                    TEXT PRIMARY KEY,
     lesson_id             TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
@@ -1028,6 +1037,8 @@ CREATE INDEX idx_index_log_outcome ON index_log(outcome);
 
 CREATE INDEX idx_index_log_session ON index_log(session_id);
 
+CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
+
 CREATE INDEX idx_injection_log_project ON memory_injection_log(project_path, created_at);
 
 CREATE INDEX idx_lesson_sources_lesson ON lesson_sources(lesson_id);
@@ -1252,4 +1263,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 63;
+PRAGMA user_version = 64;

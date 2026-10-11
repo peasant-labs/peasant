@@ -24,7 +24,7 @@ cases:
     kind: v0-objects
   - name: predecessor-upgrades-with-data
     kind: predecessor
-    predecessorSlot: 62
+    predecessorSlot: 63
   - name: stale-probe-recheck
     kind: stale-probe
   - name: concurrent-fresh-open
