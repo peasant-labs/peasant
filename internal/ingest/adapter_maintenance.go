@@ -517,7 +517,11 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 	metadataPath, _ := p.storedMetadataPath(ctx, sid, snap)
 	session, found := native[sid]
 	if !found {
-		reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
+		reconstructed, startMs, _, err := p.reconstructFromSourceInfo(ctx, sid)
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
+			return pairRepairOutcome{damaged: true}
+		}
 		if reconstructed == nil {
 			source := ""
 			return pairRepairOutcome{damaged: true, unavailableSource: &source}
@@ -560,7 +564,11 @@ func (p *Pipeline) pairRepairTargets(ctx context.Context, scanned []reindexTarge
 		if seen[sid] || !p.pairNeedsRepair(ctx, sid) {
 			continue
 		}
-		session, startMs, transcriptPath := p.reconstructFromSourceInfo(ctx, sid)
+		session, startMs, transcriptPath, err := p.reconstructFromSourceInfo(ctx, sid)
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
+			continue
+		}
 		if session == nil {
 			p.reportPairRepairUnavailable(ctx, sid, "", nil)
 			continue
@@ -717,7 +725,11 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 		return false
 	}
 	for _, sid := range staleIDs {
-		session, _, transcriptPath := p.reconstructFromSourceInfo(ctx, sid)
+		session, _, transcriptPath, err := p.reconstructFromSourceInfo(ctx, sid)
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
+			continue
+		}
 		if session == nil {
 			continue
 		}

@@ -12,6 +12,10 @@
 # refused case must report that the session could not be re-ingested and leave
 # the stale state untouched.
 required_names:
+  - ordinary-source-info-fault-preserves-availability
+  - reindex-source-info-fault-preserves-availability
+  - ordinary-location-fault-preserves-availability
+  - reindex-location-fault-preserves-availability
   - ordinary-missing-metadata-repairs
   - ordinary-missing-transcript-repairs
   - ordinary-damaged-pair-repairs
@@ -29,6 +33,28 @@ prior_preview: prior stored transcript remains readable
 damaged_transcript: |
   {"type":"user","message":{"role":"user","content":"a transcript that no longer matches its recorded identity"},"uuid":"u1"}
 cases:
+  - name: ordinary-source-info-fault-preserves-availability
+    pairState: missing-metadata
+    locatorFault: source-info
+    capturedSeed: true
+    wantRepaired: true
+  - name: reindex-source-info-fault-preserves-availability
+    pairState: missing-metadata
+    locatorFault: source-info
+    capturedSeed: true
+    reindex: true
+    wantRepaired: true
+  - name: ordinary-location-fault-preserves-availability
+    pairState: missing-metadata
+    locatorFault: location
+    capturedSeed: true
+    wantRepaired: true
+  - name: reindex-location-fault-preserves-availability
+    pairState: missing-metadata
+    locatorFault: location
+    capturedSeed: true
+    reindex: true
+    wantRepaired: true
   - name: reindex-source-unavailable-reports
     pairState: missing-metadata-source-unavailable
     discovered: false

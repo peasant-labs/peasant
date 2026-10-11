@@ -1320,7 +1320,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				// Fallback: reconstruct from DB source_path/source_format.
 				// This handles sessions (e.g. subagents) that were indexed from
 				// the original source but don't have peasant-sync metadata.
-				reconstructed, startMs, transcriptPath = p.reconstructFromSourceInfo(ctx, sid)
+				reconstructed, startMs, transcriptPath, metadataErr = p.reconstructFromSourceInfo(ctx, sid)
+				if metadataErr != nil {
+					p.reportMetadataRefusal(string(sid), metadataErr)
+					continue
+				}
 				if reconstructed == nil {
 					missingInput++
 					continue
@@ -4795,38 +4799,41 @@ func (p *Pipeline) reconstructFromMetadataIn(ctx context.Context, sid SessionID,
 //
 // The third return value is the peasant-sync output transcript path (not the raw
 // source_path). It requires knowing the host_slug, which is looked up from the DB
-// via LookupSessionLocation. Returns (nil, 0, "") if any required field is missing.
-func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string) {
+// via LookupSessionLocation. A nil session with no error means no source locator
+// was stored. Lookup and validation failures return an error: they do not prove
+// that the native source is unavailable.
+func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string, error) {
 	if p.metricsStore == nil {
-		return nil, 0, ""
+		return nil, 0, "", nil
 	}
 	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
-		slog.Warn("reconstructFromSourceInfo: stored metadata refused", "session_id", sid, "error", err)
-		p.reportMetadataRefusal(string(sid), err)
-		return nil, 0, ""
+		return nil, 0, "", err
 	}
 	sourcePath, sourceFormat, providerStr, err := p.metricsStore.LookupSourceInfo(ctx, sid)
-	if err != nil || sourcePath == "" {
-		return nil, 0, ""
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("reconstruct stored source locator for session %s: source-info lookup failed: %w; native availability was not tested; restore database access and retry harvest", sid, err)
+	}
+	if sourcePath == "" {
+		return nil, 0, "", nil
 	}
 
 	provider := Harness(providerStr)
 	if !provider.IsKnown() {
-		slog.Warn("reconstructFromSourceInfo: invalid provider", "session_id", sid, "provider", providerStr)
-		return nil, 0, ""
+		return nil, 0, "", fmt.Errorf("reconstruct stored source locator for session %s: unknown provider %q; native availability was not tested; repair the stored provider and retry harvest", sid, providerStr)
 	}
 
 	resolvedSrc, err := NewResolvedPath(sourcePath)
 	if err != nil {
-		slog.Warn("reconstructFromSourceInfo: invalid source path", "session_id", sid, "error", err)
-		return nil, 0, ""
+		return nil, 0, "", fmt.Errorf("reconstruct stored source locator for session %s: source path refused: %w; native availability was not tested; repair the stored locator and retry harvest", sid, err)
 	}
 
 	// Look up host_slug and parent_id to construct the peasant-sync output transcript path.
 	hostSlug, parentID, lookupErr := p.metricsStore.LookupSessionLocation(ctx, sid)
-	if lookupErr != nil || hostSlug == "" {
-		slog.Warn("reconstructFromSourceInfo: cannot determine host_slug", "session_id", sid, "error", lookupErr)
-		return nil, 0, ""
+	if lookupErr != nil {
+		return nil, 0, "", fmt.Errorf("reconstruct stored source locator for session %s: location lookup failed: %w; native availability was not tested; restore database access and retry harvest", sid, lookupErr)
+	}
+	if hostSlug == "" {
+		return nil, 0, "", fmt.Errorf("reconstruct stored source locator for session %s: stored host location is missing; native availability was not tested; repair the stored location and retry harvest", sid)
 	}
 
 	outputDir := string(p.config.OutputDir)
@@ -4846,15 +4853,13 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 			origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
 			if recognitionErr != nil {
 				slog.Warn("reconstructFromSourceInfo: managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", outputTranscriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
-				p.reportMetadataRefusal(string(sid), recognitionErr)
-				return nil, 0, ""
+				return nil, 0, "", recognitionErr
 			}
 			transcriptOrigin = origin
 		} else if !errors.Is(readErr, fs.ErrNotExist) {
 			slog.Warn("reconstructFromSourceInfo: managed transcript unreadable", "session_id", sid,
 				"error", managedInputIOError(outputTranscriptPath, readErr))
-			p.reportMetadataRefusal(string(sid), managedInputIOError(outputTranscriptPath, readErr))
-			return nil, 0, ""
+			return nil, 0, "", managedInputIOError(outputTranscriptPath, readErr)
 		}
 	}
 
@@ -4877,7 +4882,7 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 	// metadata file. The database-to-file metadata rebuild is dropped: a lost
 	// metadata beside an intact transcript is reported by `harvest index`, not
 	// silently rebuilt here, so the pair is left for that command to name.
-	return session, 0, outputTranscriptPath
+	return session, 0, outputTranscriptPath, nil
 }
 
 // runReindex implements the --reindex pipeline mode.

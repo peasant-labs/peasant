@@ -1,8 +1,10 @@
 package ingest_test
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"reflect"
@@ -37,6 +39,7 @@ type pairRepairCase struct {
 	TranscriptReadFault bool   `yaml:"transcriptReadFault"`
 	WantRepaired        bool   `yaml:"wantRepaired"`
 	WantSourceReport    bool   `yaml:"wantSourceReport"`
+	LocatorFault        string `yaml:"locatorFault"`
 	// CapturedSeed stores the row with a source-proven publication capture,
 	// the state of every row an ordinary harvest has already captured. Without
 	// it the seed is a pre-capture row, which an ordinary harvest re-reads from
@@ -59,6 +62,11 @@ func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 		case "missing-metadata", "missing-transcript", "damaged", "missing-metadata-source-unavailable":
 		default:
 			t.Fatalf("pair repair fixture %s names unknown pair state %q", fixture.Name, fixture.PairState)
+		}
+		switch fixture.LocatorFault {
+		case "", "source-info", "location":
+		default:
+			t.Fatalf("pair repair fixture %s names unknown locator fault %q", fixture.Name, fixture.LocatorFault)
 		}
 		names[fixture.Name] = true
 	}
@@ -173,7 +181,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				}
 			}
 			seedStalePreviewCapture(t, ctx, database, id)
-			if fixture.WantSourceReport {
+			if fixture.WantSourceReport || fixture.LocatorFault != "" {
 				writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 					SessionID: id, IndexVersion: 1, IndexerVersion: 15, IndexedAtMs: 1700000000000,
 					Result: indexformat.V1{Entries: []schema.SessionEntry{{
@@ -221,12 +229,13 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex = fixture.Reindex
+			locatorStore := &pairRepairLocatorFaultStore{Store: database, sessionID: id, fault: fixture.LocatorFault}
 
 			run := func() *ingest.PipelineResult {
 				t.Helper()
 				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
-					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+					ingest.WithStore(database), ingest.WithMetricsStore(locatorStore), ingest.WithIndexLogger(database))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -238,6 +247,36 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			}
 
 			result := run()
+			if fixture.LocatorFault != "" {
+				reason, err := database.ReadSourceUnavailability(ctx, id)
+				if err != nil || reason != nil {
+					t.Fatalf("locator failure recorded source unavailability: %v %v", reason, err)
+				}
+				if _, err := memfs.Stat(nativePath); err != nil {
+					t.Fatalf("native source must remain present: %v", err)
+				}
+				kept, err := database.ListEntries(ctx, id)
+				if err != nil || !reflect.DeepEqual(kept, priorEntries) {
+					t.Fatalf("locator failure changed prior entries: %v %v", kept, err)
+				}
+				found := false
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.ErrorType == "pair_repair_unavailable" {
+						t.Fatalf("locator failure misreported source availability: %+v", diagnostic)
+					}
+					if strings.Contains(diagnostic.Message, "synthetic locator lookup failure") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("locator failure was not reported: %+v", result.Diagnostics)
+				}
+				if result.Summary.Indexed != 0 {
+					t.Fatalf("locator failure indexed %d sessions", result.Summary.Indexed)
+				}
+				locatorStore.fault = ""
+				result = run()
+			}
 			if !fixture.WantRepaired {
 				if result.Summary.Indexed != 0 {
 					t.Fatalf("a refused repair indexed %d session(s)", result.Summary.Indexed)
@@ -361,6 +400,30 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			}
 		})
 	}
+}
+
+// pairRepairLocatorFaultStore leaves the real stored source intact while a
+// locator query fails. Clearing the fault models database access recovering.
+type pairRepairLocatorFaultStore struct {
+	*store.Store
+	sessionID ingest.SessionID
+	fault     string
+}
+
+var _ ingest.MetricsStore = (*pairRepairLocatorFaultStore)(nil)
+
+func (s *pairRepairLocatorFaultStore) LookupSourceInfo(ctx context.Context, sid ingest.SessionID) (string, ingest.SourceFormat, string, error) {
+	if sid == s.sessionID && s.fault == "source-info" {
+		return "", "", "", fmt.Errorf("synthetic locator lookup failure: source info")
+	}
+	return s.Store.LookupSourceInfo(ctx, sid)
+}
+
+func (s *pairRepairLocatorFaultStore) LookupSessionLocation(ctx context.Context, sid ingest.SessionID) (string, string, error) {
+	if sid == s.sessionID && s.fault == "location" {
+		return "", "", fmt.Errorf("synthetic locator lookup failure: location")
+	}
+	return s.Store.LookupSessionLocation(ctx, sid)
 }
 
 // pairRepairFaultFS fails reads of one path, modelling a transient I/O fault on
