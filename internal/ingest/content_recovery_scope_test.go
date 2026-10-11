@@ -164,6 +164,8 @@ func TestContentRecoveryScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			meta := makeMinimalMeta(t, id.String())
+			adapterVersion := ingest.HarvesterVersionRegistry[meta.ModelHarness].AdapterVersion
+			meta.AdapterVersion = &adapterVersion
 			meta.Project.Hash = testutil.TestProjectHash
 			meta.Source.FilePath = "/synthetic/missing.jsonl"
 			stored := *meta

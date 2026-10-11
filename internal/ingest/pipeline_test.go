@@ -3848,6 +3848,8 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 
 	originalSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
+	adapterVersion := ingest.HarvesterVersionRegistry[meta.ModelHarness].AdapterVersion
+	meta.AdapterVersion = &adapterVersion
 
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
 
@@ -4067,6 +4069,8 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 
 	// Set up two sessions in peasant-sync.
 	meta1 := makeReindexMeta(t, testSessionID, "/nonexistent/1.jsonl")
+	currentAdapter := ingest.HarvesterVersionRegistry[meta1.ModelHarness].AdapterVersion
+	meta1.AdapterVersion = &currentAdapter
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta1)
 
 	meta2 := makeReindexMeta(t, testSessionID2, "/nonexistent/2.jsonl")

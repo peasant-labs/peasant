@@ -106,6 +106,10 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 			transcript := []byte(document.Transcripts[fixture.Transcript])
 			meta := makeMinimalMeta(t, id.String())
 			meta.ModelHarness = harness
+			if harness == ingest.HarnessClaudeCode {
+				adapterVersion := ingest.HarvesterVersionRegistry[harness].AdapterVersion
+				meta.AdapterVersion = &adapterVersion
+			}
 			if !fixture.OmitContentHash {
 				meta.ContentHash = schema.ComputeTranscriptHash(transcript)
 			}
