@@ -99,9 +99,11 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		return nil, unknown, err
 	}
 	var delivery codexDelivery
-	if raw := payload["delivery"]; native && len(raw) > 0 && json.Unmarshal(raw, &delivery) == nil && delivery.needsRetention() {
-		if err := retain("item_delivery", string(delivery.Shape), "/payload/delivery", raw); err != nil {
-			return nil, nil, err
+	if raw := payload["delivery"]; native && len(raw) > 0 {
+		if json.Unmarshal(raw, &delivery) == nil && delivery.needsRetention() {
+			if err := retain("item_delivery", string(delivery.Shape), "/payload/delivery", raw); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if native && kind == codexTypeEventMsg && variant == "item_completed" && len(payload["item"]) > 0 && string(payload["item"]) != "null" {

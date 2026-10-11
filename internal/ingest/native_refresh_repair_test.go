@@ -431,8 +431,13 @@ func TestNativeRefreshRepair(t *testing.T) {
 		if tc.Scenario == "opencode_authority_bridge" && (tc.NativeSource == "" || tc.UnsettledNativeSource == "") {
 			t.Fatalf("native_refresh_repair case %q requires nativeSource and unsettledNativeSource", tc.Name)
 		}
-		if tc.Scenario == "opencode_authority_bridge" && (tc.StoredIndexerVersion <= 0 || tc.StoredIndexFormat != 1 || len(tc.HeldDiagnosticContains) == 0) {
-			t.Fatalf("native_refresh_repair case %q requires historical producer, V1 format, and held diagnostic expectations", tc.Name)
+		if tc.Scenario == "opencode_authority_bridge" {
+			hasHistoricalProducer := tc.StoredIndexerVersion > 0
+			hasV1Format := tc.StoredIndexFormat == 1
+			hasHeldDiagnostics := len(tc.HeldDiagnosticContains) > 0
+			if !hasHistoricalProducer || !hasV1Format || !hasHeldDiagnostics {
+				t.Fatalf("native_refresh_repair case %q requires historical producer, V1 format, and held diagnostic expectations", tc.Name)
+			}
 		}
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
