@@ -924,6 +924,11 @@ CREATE TABLE session_section_native_metadata (
     REFERENCES session_projection_sections(session_id, generation_id, partition_id) ON DELETE CASCADE
 ) STRICT;
 
+CREATE TABLE session_source_unavailability (
+ session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+ reason TEXT NOT NULL CHECK (reason IN ('original-source-unavailable-no-usable-saved-copy'))
+) STRICT;
+
 CREATE TABLE sessions (
     session_id TEXT PRIMARY KEY,
     parent_id TEXT REFERENCES sessions(session_id),
@@ -1247,4 +1252,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 62;
+PRAGMA user_version = 63;

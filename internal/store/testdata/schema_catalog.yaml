@@ -3,6 +3,7 @@
 # comparison. Tables exclude sqlite_% internals; the FTS5 shadow tables are
 # listed because they are real schema objects in this catalog.
 tables:
+  - session_source_unavailability
   - annotation_classes
   - annotation_families
   - annotation_run_state

@@ -8,6 +8,19 @@ reference (constraints, invariants, assumptions), see [AGENTS.md](AGENTS.md).
 
 ## Pipeline Overview
 
+Pair repair records local maintenance evidence in `session_source_unavailability`
+when neither a usable saved pair nor reachable original input can repair a stored
+session. Its closed reason is `original-source-unavailable-no-usable-saved-copy`.
+The first transition reports an actionable diagnostic; subsequent harvests keep
+checking for recovery without repeating that warning. The successful artifact
+mirror clears the evidence in the same transaction as the refresh. Failed
+refreshes preserve both the evidence and prior stored content.
+
+Store consumers can use `ReadSourceUnavailability` to annotate maintenance results.
+No row means no unavailability has been recorded, not a guarantee of current source
+availability. This state does not alter transcript wire metadata, access to stored
+entries, or eligibility to recompute metrics from those entries.
+
 ```
                      MAIN GOROUTINE                        CONCURRENT
                    ┌──────────────────┐         ┌──────────────────────────────────────────┐
