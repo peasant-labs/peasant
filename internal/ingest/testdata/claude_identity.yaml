@@ -45,6 +45,7 @@ required_case_names:
   - legacy nested agent without sidechain flag
   - legacy nested agent without agent id
   - legacy layout wins over unproved root duplicate
+  - empty-id legacy layout wins over unproved root duplicate
   - explicit main-chain record without agent id is refused
   - disconnected local-command divergence
 cases:
@@ -386,6 +387,17 @@ cases:
       - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
         lines:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","uuid":"legacy-agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: empty-id legacy layout wins over unproved root duplicate
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    files:
+      - *source
+      - path: -workspace/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"legacy-agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"legacy-agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
   - name: explicit main-chain record without agent id is refused
     artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
     parent: 11111111-1111-4111-8111-111111111111

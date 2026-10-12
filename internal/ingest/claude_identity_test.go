@@ -291,6 +291,12 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 			if artifact == nil {
 				t.Fatal("artifact not discovered")
 			}
+			if !fixture.Refuse {
+				wantSource := claudeEvidenceCacheRoot + "/" + fixture.Artifact
+				if artifact.SourcePath.String() != wantSource {
+					t.Fatalf("discovered source = %q, want %q", artifact.SourcePath, wantSource)
+				}
+			}
 			parent := ""
 			if artifact.ParentUUID != nil {
 				parent = artifact.ParentUUID.String()
