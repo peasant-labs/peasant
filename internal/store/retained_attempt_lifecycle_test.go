@@ -182,3 +182,76 @@ func TestRetentionSavepointFailureRollsBack(t *testing.T) {
 		t.Fatalf("active capture changed across the rollback: %+v -> %+v", captureBefore, captureAfter)
 	}
 }
+
+// TestRetentionSkipsRepairForCorruptAuthority proves a retention-eligible
+// candidate never enters repair even when the active authority matches the
+// repair predicate, so A's objects are never rewritten from preview bytes.
+func TestRetentionSkipsRepairForCorruptAuthority(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("b6b6b6b6-b6b6-46b6-86b6-b6b6b6b6b6b6")
+	seedFullAuthority(t, s, sid)
+	setStoredArtifactHash(t, s, sid, hexIdentity('c'))
+
+	// Drive the repair predicate: an artifact identity with a cleared input
+	// proof and a stored object that fails self-verification. The authority
+	// still reads; only the mapped body is damaged.
+	damageBodyPreview(t, s, sid, 0)
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	repair, repairErr := repairNeedsHarmonized(conn, sid)
+	s.pool.Put(conn)
+	if repairErr != nil {
+		t.Fatalf("repair predicate: %v", repairErr)
+	}
+	if !repair {
+		t.Fatal("the repair predicate must be active for this case")
+	}
+
+	outcome, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b"))
+	if err != nil {
+		t.Fatalf("retention over a repair-predicate authority: %v", err)
+	}
+	if outcome.Disposition != ingest.ActivationRetainedPreview {
+		t.Fatalf("disposition = %v, want ActivationRetainedPreview (never repair)", outcome.Disposition)
+	}
+	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "gen_full_prior" {
+		t.Fatalf("active = %q (err=%v), want the untouched full authority", active, err)
+	}
+	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("retained generation = %q, want gen_preview_b", pointer.generationID)
+	}
+}
+
+// TestRetentionInvalidCandidateRefusesOnBothRoutes proves an identifier reuse
+// with a different candidate binding is refused on the single route and on the
+// batch route, leaving the installed generation unchanged.
+func TestRetentionInvalidCandidateRefusesOnBothRoutes(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("c7c7c7c7-c7c7-47c7-87c7-c7c7c7c7c7c7")
+	retainPreviewForTest(t, s, sid, hexIdentity('d'))
+
+	// The same identifier as the retained attempt, carrying different content:
+	// the immutable-identity check must refuse it.
+	different, differentBlobs := buildTestGeneration(t, sid, "gen_preview_b", "different text", "different input", "different output")
+	candidate := GenerationActivation{
+		Generation: different, Blobs: differentBlobs, IndexerVersion: 18, IndexedAtMs: 8,
+		ContentCapture: sourceOmittedPreviewWrite(),
+	}
+	outcome, err := s.ActivateGeneration(context.Background(), candidate)
+	if err == nil || !strings.Contains(err.Error(), "different candidate binding") {
+		t.Fatalf("inline refusal = %v, want the immutable-identity refusal", err)
+	}
+	if outcome.Disposition != ingest.ActivationNotCommitted {
+		t.Fatalf("inline disposition = %v, want NotCommitted", outcome.Disposition)
+	}
+
+	results := s.ActivateGenerationBatch(context.Background(), []GenerationActivation{candidate})
+	if len(results) != 1 || results[0].Err == nil || !strings.Contains(results[0].Err.Error(), "different candidate binding") {
+		t.Fatalf("batch refusal = %v, want the immutable-identity refusal", results)
+	}
+	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("retained generation = %q, want the unchanged gen_preview_b", pointer.generationID)
+	}
+}
