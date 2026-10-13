@@ -69,6 +69,16 @@ type fixtureOmitted struct {
 	ToolCallID *string `yaml:"toolCallId"`
 }
 
+// fixtureRetainedUnknown is one retained opaque evidence record a block
+// carries; the projection merges it into the entry's extra document after the
+// adapter's own keys.
+type fixtureRetainedUnknown struct {
+	Namespace string `yaml:"namespace"`
+	Kind      string `yaml:"kind"`
+	SourceID  string `yaml:"sourceId"`
+	Payload   string `yaml:"payload"`
+}
+
 type fixtureBlock struct {
 	NativeKey            string                    `yaml:"nativeKey"`
 	SubmissionKey        string                    `yaml:"submissionKey"`
@@ -97,6 +107,7 @@ type fixtureBlock struct {
 	RawByteLength        *int                      `yaml:"rawByteLength"`
 	Omitted              *fixtureOmitted           `yaml:"omitted"`
 	ToolCallID           *string                   `yaml:"toolCallId"`
+	RetainedUnknown      []fixtureRetainedUnknown  `yaml:"retainedUnknown"`
 }
 
 type fixtureMetadata struct {
@@ -321,6 +332,15 @@ func buildProjectionCapture(in fixtureCapture) ingest.ClassifiedCapture {
 		}
 		block.Extra = row.Extra
 		block.RawByteLength = row.RawByteLength
+		for _, record := range row.RetainedUnknown {
+			block.RetainedUnknown = append(block.RetainedUnknown, ingest.RetainedUnknown{
+				Harness:   ingest.Harness(in.Harness),
+				Namespace: record.Namespace,
+				Kind:      record.Kind,
+				Position:  ingest.UnknownSourcePosition{SourceID: record.SourceID},
+				Payload:   json.RawMessage(record.Payload),
+			})
+		}
 		if row.ToolCallID != nil {
 			value := *row.ToolCallID
 			block.ToolCallID = &value

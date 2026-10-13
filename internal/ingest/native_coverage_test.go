@@ -42,6 +42,7 @@ type nativeCoverageCase struct {
 	Completeness    string                  `yaml:"completeness"`
 	Carriers        []nativeCoverageCarrier `yaml:"carriers"`
 	Prior           string                  `yaml:"prior"`
+	Authoritative   bool                    `yaml:"authoritative"`
 	ForgedFull      bool                    `yaml:"forged_full"`
 	SourceOmitted   bool                    `yaml:"source_omitted"`
 	Unaccounted     bool                    `yaml:"unaccounted"`
@@ -314,7 +315,7 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			v2, blobs := buildCoverageV2(t, sid, genID, c.Completeness, c.Carriers)
 			assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
 				Harness: ingest.Harness("claude-code"), Result: v2,
-				Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+				Policy: ingest.CaptureFreshCandidate, Authoritative: c.Authoritative,
 				SourceOmitted: c.SourceOmitted, Unaccounted: c.Unaccounted,
 			})
 			if err != nil {

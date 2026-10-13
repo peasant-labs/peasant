@@ -506,6 +506,9 @@ func validateClassifiedChannels(index int, block ClassifiedBlock) error {
 		if block.ToolCallID != nil {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder and a direct source tool id; the placeholder carries the id from its own omission record; drop the direct id", index, block.NativeKey)
 		}
+		if block.Omitted.Record.Bytes < 0 || block.Omitted.Record.LimitBytes < 0 {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q omission record carries negative sizes (bytes %d, limitBytes %d); a placeholder stands for a real source record that exceeded a real limit, and negative sizes cannot describe one, so the stored note and extra would misreport why the record is missing; supply the measured size and the limit it exceeded", index, block.NativeKey, block.Omitted.Record.Bytes, block.Omitted.Record.LimitBytes)
+		}
 		if _, err := NewOmittedRecord(block.Omitted.Record.Reason, block.Omitted.Record.Line, block.Omitted.Record.Bytes, block.Omitted.Record.LimitBytes); err != nil {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q omission record is not coherent; the placeholder would not be recognised as an accounted omission and the session would lose the reason it is partial; supply a record built from the omitted source record: %w", index, block.NativeKey, err)
 		}
@@ -657,6 +660,20 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 	// collapses representations to one entry; byte or evidence equality never
 	// does, and an ambiguous first-wins selection never discards content.
 	collapseProvedMirrors(resolved)
+	// An omission placeholder stands at the omitted record's own position in
+	// the main stream. The per-block channel checks refuse the placeholder's
+	// own relocation flags, but another block can still pull it out of main by
+	// naming it as a carrier or by sharing a call identity or a proved
+	// correlation inside an uncertain component. Fail closed on the resolved
+	// result so no route can serve the omission notice inside earlier history.
+	for _, rb := range resolved {
+		if rb.block.Omitted == nil {
+			continue
+		}
+		if rb.section != 0 || rb.block.Uncertain {
+			return nil, fmt.Errorf("ingest.BuildGeneration: native key %q omission placeholder resolved to partition %d; uncertainty elsewhere in its connected carrier/call component moved the placeholder out of the omitted record's own position, where a reader would no longer see it; drop the carrier edge or drop the omission", rb.block.NativeKey, rb.section)
+		}
+	}
 	return resolved, nil
 }
 
@@ -974,6 +991,9 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 		entry.Extra = addModelObservation(entry.Extra, *block.ObservedModel)
 	}
 	if block.RawByteLength != nil {
+		if *block.RawByteLength < 0 {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q rawByteLength %d is negative; a source record's byte size cannot be negative, and the stored entry would carry a false measurement; record the measured nonnegative size or omit the field", block.NativeKey, *block.RawByteLength)
+		}
 		value := *block.RawByteLength
 		entry.RawByteLength = &value
 	}
