@@ -64,12 +64,15 @@ type claudeProducerCase struct {
 	// MaxRecordBytes overrides the per-record limit (0 keeps the production one).
 	MaxRecordBytes int `yaml:"maxRecordBytes"`
 
-	WantRefusal            bool                  `yaml:"wantRefusal"`
-	WantRefusalLocatorFree bool                  `yaml:"wantRefusalLocatorFree"`
-	Completeness           string                `yaml:"completeness"`
-	TurnCount              int                   `yaml:"turnCount"`
-	InputSubmissionCount   int                   `yaml:"inputSubmissionCount"`
-	TitleRefCount          int                   `yaml:"titleRefCount"`
+	WantRefusal            bool   `yaml:"wantRefusal"`
+	WantRefusalLocatorFree bool   `yaml:"wantRefusalLocatorFree"`
+	Completeness           string `yaml:"completeness"`
+	TurnCount              int    `yaml:"turnCount"`
+	InputSubmissionCount   int    `yaml:"inputSubmissionCount"`
+	TitleRefCount          int    `yaml:"titleRefCount"`
+	// DistinctSubmissionRefs requires the admitted submissions' refs to be
+	// pairwise distinct, so two answers never collapse into one group.
+	DistinctSubmissionRefs bool                  `yaml:"distinctSubmissionRefs"`
 	Keys                   []string              `yaml:"keys"`
 	AcceptKeys             []string              `yaml:"acceptKeys"`
 	Entries                []claudeProducerEntry `yaml:"entries"`
@@ -239,6 +242,19 @@ func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candida
 	}
 	assertClaudeProducerKeys(t, row, generation)
 	assertClaudeProducerEntries(t, row, generation.Main.Entries)
+	if row.DistinctSubmissionRefs {
+		_, submissions := claudeAliasIndex(t, candidate)
+		seen := make(map[schema.SubmissionRef]string, len(submissions))
+		for key, ref := range submissions {
+			if ref == "" {
+				t.Fatalf("submission key %q has no submission ref", key)
+			}
+			if other, duplicate := seen[ref]; duplicate {
+				t.Errorf("submission keys %q and %q share the submission ref %q", other, key, ref)
+			}
+			seen[ref] = key
+		}
+	}
 }
 func assertClaudeProducerKeys(t *testing.T, row claudeProducerCase, generation indexformat.Generation) {
 	t.Helper()

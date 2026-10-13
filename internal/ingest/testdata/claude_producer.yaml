@@ -65,27 +65,33 @@ cases:
   - name: ask-user-question-answers
     transcript: |
       {"type":"user","uuid":"q0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"pick one"}}
-      {"type":"assistant","uuid":"q1","parentUuid":"q0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"tool_use","id":"toolu_ask","name":"AskUserQuestion","input":{"questions":[]}}]}}
-      {"type":"user","uuid":"q2","parentUuid":"q1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"answer one"}]}}
+      {"type":"assistant","uuid":"q1","parentUuid":"q0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"tool_use","id":"toolu_ask","name":"AskUserQuestion","input":{"questions":[]}},{"type":"tool_use","id":"toolu_ask2","name":"AskUserQuestion","input":{"questions":[]}}]}}
+      {"type":"user","uuid":"q2","parentUuid":"q1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"answer one"},{"type":"tool_result","tool_use_id":"toolu_ask2","content":"answer two"}]}}
     completeness: complete
     turnCount: 3
-    inputSubmissionCount: 2
-    titleRefCount: 2
+    inputSubmissionCount: 3
+    titleRefCount: 3
+    distinctSubmissionRefs: true
     keys:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q0"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q1"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q1:1"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:1"
     acceptKeys:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q0"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:answer:toolu_ask"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:answer:toolu_ask2"
     entries:
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "pick one"}
       - {depth: 0, role: assistant, entryType: tool_use, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true}
       - {depth: 1, role: assistant, entryType: tool_use, partType: tool_use, parentIndex: 1, toolCallIDFromIndex: 2, preview: '{"questions":[]}'}
+      - {depth: 1, role: assistant, entryType: tool_use, partType: tool_use, parentIndex: 1, toolCallIDFromIndex: 3, preview: '{"questions":[]}'}
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true}
-      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 3, toolCallIDFromIndex: 2, preview: "answer one"}
+      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 2, preview: "answer one"}
+      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 3, preview: "answer two"}
 
   - name: control-records
     transcript: |
