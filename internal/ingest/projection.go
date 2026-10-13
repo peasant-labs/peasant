@@ -509,6 +509,9 @@ func validateClassifiedChannels(index int, block ClassifiedBlock) error {
 		if _, err := NewOmittedRecord(block.Omitted.Record.Reason, block.Omitted.Record.Line, block.Omitted.Record.Bytes, block.Omitted.Record.LimitBytes); err != nil {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q omission record is not coherent; the placeholder would not be recognised as an accounted omission and the session would lose the reason it is partial; supply a record built from the omitted source record: %w", index, block.NativeKey, err)
 		}
+		if block.UncertainSubtree || block.AmbiguousPairKey != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder with uncertain-subtree or ambiguous-pair evidence; the resolver would move the placeholder out of the main stream and it would lose the omitted record's own position; drop the uncertainty flag or drop the omission", index, block.NativeKey)
+		}
 		return nil
 	}
 	if block.ToolCallID != nil {
