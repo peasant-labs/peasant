@@ -60,6 +60,18 @@ func retainedAttemptSettledSQL(alias string) string {
     )`
 }
 
+// retainedAttemptSettledClause returns the settle NOT clause for one harness
+// alias and the arguments it binds (the producer target, then the adapter
+// target), or an empty clause when the harness's targets cannot express a
+// settle decision. A target that cannot settle must never hide work: the
+// caller keeps listing the session, which is the pre-retention behavior.
+func retainedAttemptSettledClause(alias string, target ingest.HarvesterVersions) (string, []any) {
+	if target.IndexerVersion < 1 || target.AdapterVersion < 1 {
+		return "", nil
+	}
+	return "NOT (" + retainedAttemptSettledSQL(alias) + ")", []any{target.IndexerVersion, target.AdapterVersion}
+}
+
 // retentionEligibleOnConn is the store-owned eligibility predicate for
 // retained latest-preview coexistence. It reports whether this write is the
 // assessed unaccounted-SourceOmitted preview over a publishable full
