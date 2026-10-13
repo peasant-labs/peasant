@@ -1391,6 +1391,17 @@ func stampHarmonizedBookkeeping(conn *sqlite.Conn, sessionID schema.SessionID, s
 	if err := stampPublicationIndex(conn, sessionID, stamps.captureRevision); err != nil {
 		return err
 	}
+	// The active authority was finalized in place (skip or repair): the
+	// retained latest attempt is superseded, so its pointer clears in this same
+	// transaction. The retention path never reaches this function, so a
+	// retained attempt survives its own write; an identical-candidate
+	// AlreadyCommitted retry reports through the identity check and never
+	// reaches here either.
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET `+clearRetainedAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+	}); err != nil {
+		return fmt.Errorf("store: clear the retained latest-attempt pointer for session %s: %w", sessionID, err)
+	}
 	return nil
 }
 

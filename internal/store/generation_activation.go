@@ -537,6 +537,11 @@ func (s *Store) CleanupInactiveGeneration(ctx context.Context, sessionID schema.
 	if active == generationID {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s: it is the active read authority; select an inactive generation or leave managed recovery to replace it", generationID, sessionID)
 	}
+	if retained, err := s.retainedGenerationID(ctx, sessionID); err != nil {
+		return err
+	} else if retained == generationID {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s: it is the retained latest attempt; re-index the source or finalize the active authority to release it", generationID, sessionID)
+	}
 	intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
 	if err != nil {
 		return err

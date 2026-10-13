@@ -390,3 +390,61 @@ func (s *Store) releaseRetentionSavepoint(conn *sqlite.Conn, write ingest.Sessio
 	}
 	return nil, false
 }
+
+// clearRetainedAttemptPointer is the column list that clears the retained
+// latest-attempt pointer. The pointer is non-null exactly while a retained
+// attempt newer than the active authority exists, so every successful ACTIVE
+// FINALIZATION clears it in the same transaction. A finalized active authority
+// never leaves a stale pointer behind.
+const clearRetainedAttemptPointer = `latest_attempt_generation_id = NULL, latest_attempt_artifact_hash = NULL, latest_attempt_indexer_version = NULL, latest_attempt_failure_code = NULL, latest_attempt_failure_message = NULL, latest_attempt_captured_at_ms = NULL, latest_attempt_stats_json = NULL`
+
+// supersededGenerationPredicate excludes the two live generations from a
+// superseded-row predicate: the active read authority and the retained latest
+// attempt. Both parameters are bound positionally (active then retained), and
+// IS NOT is NULL-safe, so a session with no retained attempt keeps every
+// non-active generation as superseded.
+const supersededGenerationPredicate = `generation_id IS NOT ? AND generation_id IS NOT ?`
+
+// generationKeepSetOnConn reads the two generation identifiers a sweep or
+// reclaim must keep for one session: the active read authority and the retained
+// latest attempt. Both are live; every other committed generation is
+// superseded.
+func generationKeepSetOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (active, retained string, err error) {
+	found := false
+	if err := sqlitex.Execute(conn, `SELECT active_generation_id, latest_attempt_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				active = stmt.ColumnText(0)
+			}
+			if stmt.ColumnType(1) != sqlite.TypeNull {
+				retained = stmt.ColumnText(1)
+			}
+			return nil
+		},
+	}); err != nil {
+		return "", "", fmt.Errorf("store: read the generation keep set for session %s: %w", sessionID, err)
+	}
+	if !found {
+		return "", "", fmt.Errorf("store: session %s has no metadata row; import the session before sweeping or reclaiming its generations", sessionID)
+	}
+	return active, retained, nil
+}
+
+// generationKeepSet takes a pooled connection and reads the session's keep set.
+func (s *Store) generationKeepSet(ctx context.Context, sessionID schema.SessionID) (string, string, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("store: take connection to read the generation keep set for session %s: %w", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+	return generationKeepSetOnConn(conn, sessionID)
+}
+
+// retainedGenerationID returns the session's retained latest-attempt generation
+// identifier, or the empty string when no attempt is retained.
+func (s *Store) retainedGenerationID(ctx context.Context, sessionID schema.SessionID) (string, error) {
+	_, retained, err := s.generationKeepSet(ctx, sessionID)
+	return retained, err
+}

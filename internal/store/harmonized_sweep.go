@@ -79,13 +79,13 @@ func (s *Store) SweepSession(ctx context.Context, sessionID schema.SessionID) (S
 // cannot deadlock against a non-reentrant file lock.
 func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.SessionID) (SweepResult, error) {
 	var result SweepResult
-	active, err := s.activeGenerationID(ctx, sessionID)
+	active, retained, err := s.generationKeepSet(ctx, sessionID)
 	if err != nil {
 		return result, err
 	}
 	// A session with no active generation keeps nothing: the non-active
 	// predicate below is NULL-safe, so every catalog row counts as
-	// superseded.
+	// superseded. A retained latest attempt is live too, so it is kept.
 	if err := reportContentSweepSeam(contentSweepSeamAfterCommit); err != nil {
 		return result, fmt.Errorf("store: sweep session %s interrupted before any delete: %w; no row was deleted and the sweep flag is unchanged", sessionID, err)
 	}
@@ -93,20 +93,20 @@ func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.Session
 	if limit < 1 {
 		limit = 1
 	}
-	if bounded, applied, err := s.sweepBoundedSession(ctx, sessionID, active, limit); applied || err != nil {
+	if bounded, applied, err := s.sweepBoundedSession(ctx, sessionID, active, retained, limit); applied || err != nil {
 		return bounded, err
 	}
 	if err := reportContentSweepSeam(contentSweepSeamFirstWrite); err != nil {
 		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; free disk space and retry harvest or reclaim", sessionID, err)
 	}
 
-	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, active)
+	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, active, retained)
 	if err != nil {
 		return result, err
 	}
 	result.RowsDeleted = rows.Total()
 
-	dirs, err := s.removeLeftoverGenerationDirs(ctx, sessionID, active)
+	dirs, err := s.removeLeftoverGenerationDirs(ctx, sessionID, active, retained)
 	if err != nil {
 		return result, err
 	}
@@ -370,7 +370,7 @@ func (s *Store) rebuildSearchIndexWhenFlagged(ctx context.Context, sessionID sch
 // Unlike reclaim's standalone contract, the harvest path takes no pending
 // intent guard: a leftover intent is an orphan the sweep discards (the
 // migration drain owns the intent files themselves).
-func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID schema.SessionID, active string) (int64, error) {
+func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID schema.SessionID, active, retained string) (int64, error) {
 	if s.generationArtifacts == nil {
 		return 0, nil
 	}
@@ -383,10 +383,10 @@ func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID sche
 		if err := ctx.Err(); err != nil {
 			return removed, err
 		}
-		if generationID == active {
+		if generationID == active || (retained != "" && generationID == retained) {
 			continue
 		}
-		if err := s.removeLeftoverGenerationDir(ctx, sessionID, generationID, active); err != nil {
+		if err := s.removeLeftoverGenerationDir(ctx, sessionID, generationID, active, retained); err != nil {
 			return removed, err
 		}
 		removed++
@@ -394,23 +394,29 @@ func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID sche
 	return removed, nil
 }
 
-// removeLeftoverGenerationDir removes one non-active generation directory
-// with the lock already held: it re-checks the read authority, proves
-// ownership (a committed file-backed row or a valid staged manifest naming
-// this exact session and generation), and removes the directory through the
-// root-confined no-follow path. An unowned directory refuses instead of
-// deleting: the error names the session and generation, what blocked the
-// removal, and that the next pass retries it.
-func (s *Store) removeLeftoverGenerationDir(ctx context.Context, sessionID schema.SessionID, generationID, active string) error {
+// removeLeftoverGenerationDir removes one non-active, non-retained generation
+// directory with the lock already held: it re-checks the read authority and the
+// retained attempt, proves ownership (a committed file-backed row or a valid
+// staged manifest naming this exact session and generation), and removes the
+// directory through the root-confined no-follow path. An unowned directory
+// refuses instead of deleting: the error names the session and generation, what
+// blocked the removal, and that the next pass retries it.
+func (s *Store) removeLeftoverGenerationDir(ctx context.Context, sessionID schema.SessionID, generationID, active, retained string) error {
 	if generationID == active {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it is the active read authority; select an inactive generation or leave managed recovery to replace it", generationID, sessionID)
 	}
-	current, err := s.activeGenerationID(ctx, sessionID)
+	if retained != "" && generationID == retained {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it is the retained latest attempt; re-index the source or finalize the active authority to release it", generationID, sessionID)
+	}
+	current, currentRetained, err := s.generationKeepSet(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 	if current == generationID {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it became the active read authority during the sweep; the directory was left in place", generationID, sessionID)
+	}
+	if currentRetained == generationID {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it became the retained latest attempt during the sweep; the directory was left in place", generationID, sessionID)
 	}
 	if err := s.verifyOwnedInactiveGeneration(ctx, sessionID, generationID); err != nil {
 		return err
