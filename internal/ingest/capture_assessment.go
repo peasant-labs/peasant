@@ -415,7 +415,7 @@ func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, 
 		// code exists for. Every other unaccounted or non-authoritative shape,
 		// and every incomplete_new path above, is untouched.
 		code := ContentCaptureStrictRefused
-		if facts.SourceOmitted && !hasOmissions {
+		if facts.Unaccounted && facts.SourceOmitted && !hasOmissions {
 			code = ContentCaptureSourceRecordsOmitted
 		}
 		return CaptureAssessment{

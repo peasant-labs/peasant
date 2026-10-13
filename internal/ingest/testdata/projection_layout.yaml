@@ -1972,6 +1972,44 @@ cases:
             - nativeKey: omitted1
               section: {index: 0}
               omitted: {reason: record_too_large, line: 42, bytes: 100, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: uncertain-subtree
+        capture:
+          id: gen-channels-omitted-uncertain-subtree
+          sessionId: sess_chansomitteduncertain
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-uncertain
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomitteduncertain
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              uncertainSubtree: true
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: ambiguous-pair
+        capture:
+          id: gen-channels-omitted-ambiguous-pair
+          sessionId: sess_chansomittedambiguous
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-ambiguous
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedambiguous
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              ambiguousPairKey: probe-pair
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
 
   - name: channels-extra-merge
     steps:
