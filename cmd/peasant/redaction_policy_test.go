@@ -313,7 +313,10 @@ func readRecordedSlug(t *testing.T, world harvestWorld) recordedSlug {
 	}
 	var directories []string
 	for _, entry := range entries {
-		if entry.IsDir() && entry.Name() != ".peasant-state" {
+		// `.peasant-state` is the store's own state directory and `locks` is the
+		// managed-generation lock namespace; neither is a recorded session's slug
+		// directory.
+		if entry.IsDir() && entry.Name() != ".peasant-state" && entry.Name() != "locks" {
 			directories = append(directories, entry.Name())
 		}
 	}

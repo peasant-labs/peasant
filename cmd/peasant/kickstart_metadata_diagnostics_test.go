@@ -72,7 +72,7 @@ func TestKickstartLocalIngestForwardsMetadataDiagnostics(t *testing.T) {
 			if err != nil || first == nil || first.New != 1 {
 				t.Fatalf("seed real local ingestion: %+v %v", first, err)
 			}
-			db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(root).String())
+			db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(root).String(), mustGenerationStoreOptions(t, cfg.Output.BasePath)...)
 			if err != nil {
 				t.Fatal(err)
 			}

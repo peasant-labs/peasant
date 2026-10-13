@@ -295,8 +295,20 @@ func readHarvestIndexSnapshot(t testing.TB, db *store.Store, id ingest.SessionID
 	return snapshot
 }
 
-func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixture harvestIndexSessionFixture, files map[string][]byte) {
+// setHarvestIndexProducerVersion moves one seeded session's stored producer
+// revision to the effective target, so a "current" fixture row reflects the
+// revision the mounted command advertises rather than the retained baseline.
+func setHarvestIndexProducerVersion(t *testing.T, db *store.Store, id ingest.SessionID, version int) error {
 	t.Helper()
+	conn, err := db.Pool().Take(t.Context())
+	if err != nil {
+		return err
+	}
+	defer db.Pool().Put(conn)
+	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET index_version = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{version, string(id)}})
+}
+
+func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixture harvestIndexSessionFixture, files map[string][]byte) {	t.Helper()
 	age, err := time.ParseDuration(fixture.Age)
 	if err != nil {
 		t.Fatal(err)
@@ -328,6 +340,12 @@ func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixtu
 		// A current peer has actually consumed these bytes. A force run may
 		// successfully parse identical output without replacing entry rows.
 		storetest.SeedManagedInput(t, db, &ingest.OSFileSystem{}, output, meta, []byte(fixture.Transcript))
+		// SeedManagedInput leaves the retained baseline revision. The mounted
+		// command advertises the managed-generation targets for a capable store,
+		// so a session that is genuinely current sits at the effective target.
+		if err := setHarvestIndexProducerVersion(t, db, fixture.ID, target.IndexerVersion); err != nil {
+			t.Fatal(err)
+		}
 		for _, path := range []string{metaPath, transcriptPath} {
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -348,7 +366,7 @@ func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixtu
 	}
 	content := "last-good " + fixture.Name
 	entries := []schema.SessionEntry{{SessionID: fixture.ID, Harness: fixture.Harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &content}}
-	results := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: fixture.ID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: ingest.HarvesterVersionRegistry[fixture.Harness].IndexerVersion + fixture.VersionDelta, IndexedAtMs: 1700000001000}})
+	results := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: fixture.ID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: target.IndexerVersion + fixture.VersionDelta, IndexedAtMs: 1700000001000}})
 	if len(results) != 1 || !results[0].Written {
 		t.Fatalf("seed index: %+v", results)
 	}
