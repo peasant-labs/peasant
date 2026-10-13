@@ -29,6 +29,27 @@ func TestNewIndexerRegistry_MatchesAdapterRegistry(t *testing.T) {
 	}
 }
 
+// TestNewIndexerRegistry_OutputCarriesBothSurfaces proves the registry's
+// declared output is the composed Indexer map. A consumer takes the
+// compatibility surface AND the strict capture surface straight out of one
+// value with no runtime type assertion; the typed assignment below is the
+// proof, because it is the compiler - not a test-time check - that guarantees
+// the map's element type exposes both surfaces.
+func TestNewIndexerRegistry_OutputCarriesBothSurfaces(t *testing.T) {
+	t.Parallel()
+	var registry map[ingest.Harness]ingest.Indexer = ingest.NewIndexerRegistry(testutil.NewMemFS(), ingest.IndexerRegistryOptions{})
+	if len(registry) == 0 {
+		t.Fatal("the registry is empty, so this guard proved nothing about any indexer")
+	}
+	for harness, indexer := range registry {
+		var compatibility ingest.TranscriptIndexer = indexer
+		var capture ingest.AuthoritativeTranscriptIndexer = indexer
+		if compatibility == nil || capture == nil {
+			t.Fatalf("registry[%q] (%T) does not carry both surfaces", harness, indexer)
+		}
+	}
+}
+
 // TestNewIndexerRegistry_EveryIndexerDeclaresWhereItsEntriesComeFrom makes
 // forgetting impossible rather than merely refusable.
 //
