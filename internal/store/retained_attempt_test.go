@@ -180,10 +180,17 @@ func TestRetentionRetainsLatestPreviewOverFullAuthority(t *testing.T) {
 	if stored, found := storedArtifactHash(t, s, sid); !found || stored != identity {
 		t.Fatalf("stored artifact hash = %q (found=%v), want the untouched identity", stored, found)
 	}
-	// The active authority's capture is still the full certificate.
-	capture, found, err := s.GetSessionContentCapture(context.Background(), ingest.SessionID(sid))
-	if err != nil || !found {
-		t.Fatalf("read capture: %v (found=%v)", err, found)
+	// The active authority's capture is still the full certificate. It is read
+	// through the authority reader: the display-effective capture read reports
+	// the retained attempt while the pointer is set, so it cannot answer for A.
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	capture, found, captureErr := readCapture(conn, ingest.SessionID(sid))
+	s.pool.Put(conn)
+	if captureErr != nil || !found {
+		t.Fatalf("read authority capture: %v (found=%v)", captureErr, found)
 	}
 	if capture.CaptureFormat != ingest.ContentCaptureFormatFull || capture.Status != ingest.ContentCaptureComplete {
 		t.Fatalf("active capture = %s/%s, want the untouched full certificate", capture.CaptureFormat, capture.Status)

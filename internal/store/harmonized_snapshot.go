@@ -243,6 +243,16 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 		stats = CapturedStats{SessionID: sessionID, Source: StatsSourceHarness}
 	}
 	metadata.Stats = capturedStatsToWire(stats)
+	// The retained latest attempt carries its OWN producer stats document. When
+	// the generation being read IS that attempt, its counts resolve from
+	// latest_attempt_stats_json instead of the active authority's captured stats
+	// row, so the preview-snapshot payload reports the retained attempt's
+	// counts. Any other generation keeps the captured stats row.
+	if retainedStats, ok, err := readRetainedAttemptStatsOnConn(conn, sessionID, generationID); err != nil {
+		return metadata, session, err
+	} else if ok {
+		metadata.Stats = retainedStats
+	}
 	session = schema.SessionDetailPayload{
 		ID:                   string(sessionID),
 		Harness:              metadata.ModelHarness,
@@ -257,6 +267,37 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 		Relationships:        metadata.Relationships,
 	}
 	return metadata, session, nil
+}
+
+// readRetainedAttemptStatsOnConn resolves the retained latest attempt's own
+// producer stats document when the generation being read IS that attempt. Any
+// other generation reports false and keeps the captured stats row, so a full or
+// last-good read of the active authority never reports the retained attempt's
+// counts.
+func readRetainedAttemptStatsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (schema.SessionStats, bool, error) {
+	var retainedID, statsJSON string
+	if err := sqlitex.Execute(conn, `SELECT latest_attempt_generation_id, latest_attempt_stats_json FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				retainedID = stmt.ColumnText(0)
+			}
+			if stmt.ColumnType(1) != sqlite.TypeNull {
+				statsJSON = stmt.ColumnText(1)
+			}
+			return nil
+		},
+	}); err != nil {
+		return schema.SessionStats{}, false, fmt.Errorf("store: read the retained latest-attempt stats for session %s: %w; the snapshot cannot be built", sessionID, err)
+	}
+	if retainedID == "" || retainedID != generationID {
+		return schema.SessionStats{}, false, nil
+	}
+	var stats schema.SessionStats
+	if err := json.Unmarshal([]byte(statsJSON), &stats); err != nil {
+		return schema.SessionStats{}, false, fmt.Errorf("store: decode the retained latest-attempt stats for session %s generation %s: %w; the snapshot cannot be built; repair or clear the retained pointer before reading", sessionID, generationID, err)
+	}
+	return stats, true, nil
 }
 
 // harmonizedChildren carries the generation's ordered 1:N collections for

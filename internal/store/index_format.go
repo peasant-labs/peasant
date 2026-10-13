@@ -145,11 +145,19 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*inges
 	var state *ingest.SessionIndexState
 	// One snapshot, one statement: the publication binding and the content
 	// capture status describe the same instant as the index columns.
+	// The retained latest-attempt fields are read in the same snapshot as the
+	// rest of the index state: the settle comparison must not mix facts from
+	// two states. The adapter revision comes from the retained generation row
+	// through one correlated subquery keyed by the recorded generation id, so
+	// no Go mirror of that id is needed.
 	err := sqlitex.Execute(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
 s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
 `+publicationCaptureRevisionSQL+`,
 CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,
-c.status,c.failure_code
+c.status,c.failure_code,
+s.latest_attempt_artifact_hash,s.latest_attempt_indexer_version,
+(SELECT g.adapter_version FROM session_generations g
+  WHERE g.session_id = s.session_id AND g.generation_id = s.latest_attempt_generation_id)
 FROM sessions s
 LEFT JOIN session_publication_metadata p ON p.session_id = s.session_id
 LEFT JOIN session_content_captures c ON c.session_id = s.session_id
@@ -201,6 +209,18 @@ WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 			if stmt.ColumnType(6) != sqlite.TypeNull {
 				hash := stmt.ColumnText(6)
 				state.SessionEntriesHash = &hash
+			}
+			if stmt.ColumnType(11) != sqlite.TypeNull {
+				hash := stmt.ColumnText(11)
+				state.LatestAttemptArtifactHash = &hash
+			}
+			if stmt.ColumnType(12) != sqlite.TypeNull {
+				version := stmt.ColumnInt(12)
+				state.LatestAttemptIndexerVersion = &version
+			}
+			if stmt.ColumnType(13) != sqlite.TypeNull {
+				version := stmt.ColumnInt(13)
+				state.LatestAttemptAdapterVersion = &version
 			}
 			return nil
 		},

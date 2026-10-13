@@ -185,40 +185,6 @@ LEFT JOIN session_captured_stats c ON c.session_id = s.session_id`
 
 	sqlSessionByID = sqlAllSessions + ` WHERE s.session_id = ?`
 
-	// sqlSessionDetailByID extends sqlAllSessions with extra columns for the detail view.
-	// Columns 0-33: same as sqlAllSessions (scanned by scanSessionRow), including
-	//               column 33 s.indexed_at.
-	// Column 34: h.git_remote (nullable, from host_slugs JOIN on opaque_id)
-	// Column 35: s.pushed_at (nullable)
-	// Column 36: p.canonical_cwd (project working dir, replaces project_path)
-	sqlSessionDetailByID = `SELECT
-    s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
-    s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
-    s.git_branch, s.tool_version,
-    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
-    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
-    m.input_tokens,
-    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
-    COALESCE(m.input_tokens, 0) + COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END, 0),
-    CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END,
-    m.title, m.outcome, m.scope,
-    m.files_touched, m.lines_changed,
-    m.retry_loops, m.retry_tokens_wasted, m.within_session_reverts,
-    m.signal_density, m.spec_quality_score, m.exploration_ratio,
-    m.scope_breadth, m.discovery_turns,
-    s.parent_id,
-    p.canonical_remote,
-    COALESCE(s.git_worktree, ''),
-    s.session_origin,
-    s.indexed_at,
-    h.git_remote, s.pushed_at, COALESCE(p.canonical_cwd, '')
-FROM sessions s
-JOIN session_metrics m ON s.session_id = m.session_id
-JOIN projects p ON s.project_hash = p.project_hash
-LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
-LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
-WHERE s.session_id = ?`
-
 	sqlDashboardAggregates = `SELECT
     COALESCE(SUM(session_count), 0),
     COALESCE(SUM(tokens_total), 0),
@@ -247,6 +213,71 @@ JOIN projects p ON s.project_hash = p.project_hash
 WHERE s.parent_id = ?
 ORDER BY s.start_ms ASC`
 )
+
+// sqlSessionDetailByID extends sqlAllSessions with extra columns for the detail
+// view. Columns 0-33 are the sqlAllSessions shape (scanned by scanSessionRow),
+// including column 33 s.indexed_at; column 34 is h.git_remote (nullable, from
+// the host_slugs JOIN on opaque_id); column 35 is s.pushed_at (nullable); and
+// column 36 is p.canonical_cwd (the project working dir).
+var sqlSessionDetailByID = sqlSessionDetailByIDQuery(false)
+
+// sqlSessionDetailByIDRetained is the available-mode detail row for a session
+// that retains a latest attempt. Its count columns resolve the retained
+// attempt's own producer stats document instead of the active authority's
+// captured stats row, so an available preview reports the retained attempt's
+// counts. Every other detail read uses sqlSessionDetailByID and keeps the
+// active authority's counts: the substitution is scoped to this one query and
+// never reaches a full, export or publication read of the same row.
+var sqlSessionDetailByIDRetained = sqlSessionDetailByIDQuery(true)
+
+// sqlSessionDetailByIDQuery builds the extended detail row. retained selects
+// the available-mode count resolution described above.
+func sqlSessionDetailByIDQuery(retained bool) string {
+	// The authority expressions are the dual-path CASE the stats drop guard
+	// recognizes: a managed active generation reads the captured stats row, and
+	// every other session reads the legacy analysis record.
+	turnAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END"
+	toolAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END"
+	outAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END"
+	durationAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END"
+	retainedExpr := func(key, fallback string) string {
+		if !retained {
+			return fallback
+		}
+		return "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN json_extract(s.latest_attempt_stats_json,'$." + key + "') ELSE " + fallback + " END"
+	}
+	turnCount := retainedExpr("turnCount", turnAuthority)
+	toolCalls := retainedExpr("toolCallCount", toolAuthority)
+	tokensOut := retainedExpr("tokensOut", outAuthority)
+	duration := retainedExpr("durationMs", durationAuthority)
+	return `SELECT
+    s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
+    s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
+    s.git_branch, s.tool_version,
+    ` + turnCount + `,
+    ` + toolCalls + `,
+    m.input_tokens,
+    ` + tokensOut + `,
+    COALESCE(m.input_tokens, 0) + COALESCE(` + tokensOut + `, 0),
+    ` + duration + `,
+    m.title, m.outcome, m.scope,
+    m.files_touched, m.lines_changed,
+    m.retry_loops, m.retry_tokens_wasted, m.within_session_reverts,
+    m.signal_density, m.spec_quality_score, m.exploration_ratio,
+    m.scope_breadth, m.discovery_turns,
+    s.parent_id,
+    p.canonical_remote,
+    COALESCE(s.git_worktree, ''),
+    s.session_origin,
+    s.indexed_at,
+    h.git_remote, s.pushed_at, COALESCE(p.canonical_cwd, '')
+FROM sessions s
+JOIN session_metrics m ON s.session_id = m.session_id
+JOIN projects p ON s.project_hash = p.project_hash
+LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
+WHERE s.session_id = ?`
+}
 
 // ChildSessionRow is a lightweight row for child (subagent) session references.
 type ChildSessionRow struct {
@@ -492,8 +523,20 @@ func (s *Store) SessionDetailByID(ctx context.Context, sessionID string) (*Sessi
 }
 
 func sessionDetailByIDOnConn(conn *sqlite.Conn, sessionID string) (*SessionDetailRow, error) {
+	return sessionDetailByIDOnConnMode(conn, sessionID, false)
+}
+
+// sessionDetailByIDOnConnMode reads the extended detail row. retainedCounts
+// selects the available-mode variant whose count columns resolve the retained
+// latest attempt's own producer stats; it is set only by the available read
+// of a session that actually retains an attempt.
+func sessionDetailByIDOnConnMode(conn *sqlite.Conn, sessionID string, retainedCounts bool) (*SessionDetailRow, error) {
+	query := sqlSessionDetailByID
+	if retainedCounts {
+		query = sqlSessionDetailByIDRetained
+	}
 	var row *SessionDetailRow
-	err := sqlitex.ExecuteTransient(conn, sqlSessionDetailByID, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			r := scanSessionDetailRow(stmt)
