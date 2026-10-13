@@ -1,0 +1,13 @@
+requiredNames:
+  - managed-complete-assessed-stored-identity
+  - managed-complete-assessed-supplied-identity
+  - managed-complete-assessed-no-identity
+  - non-managed-result
+  - incomplete-new-result
+  - other-preview-over-full
+  - mode-empty
+  - mode-explicit-rebuild
+  - mode-format-conversion
+  - mode-content-backfill
+  - certificate-absent
+  - certificate-non-publishable
