@@ -256,6 +256,7 @@ type ReclaimResult struct {
 type reclaimCandidate struct {
 	sessionID schema.SessionID
 	active    string
+	retained  string
 }
 
 // PlanSupersededGenerationReclaim builds the reclaim forecast. For every
@@ -371,7 +372,7 @@ func (s *Store) planSessionReclaim(ctx context.Context, candidate reclaimCandida
 			return ReclaimSession{}, true, nil
 		}
 	}
-	rowCounts, err := s.reclaimRowCounts(ctx, candidate.sessionID, candidate.active)
+	rowCounts, err := s.reclaimRowCounts(ctx, candidate.sessionID, candidate.active, candidate.retained)
 	if err != nil {
 		return ReclaimSession{}, false, err
 	}
@@ -386,7 +387,7 @@ func (s *Store) planSessionReclaim(ctx context.Context, candidate reclaimCandida
 			return ReclaimSession{}, false, fmt.Errorf("store: plan the superseded-generation reclaim for session %s: %w; no generation was inspected", candidate.sessionID, err)
 		}
 	}
-	ids := reclaimGenerationUnion(rowCounts, committed, dirs, candidate.active)
+	ids := reclaimGenerationUnion(rowCounts, committed, dirs, candidate.active, candidate.retained)
 	if len(ids) == 0 {
 		return ReclaimSession{}, false, nil
 	}
@@ -455,7 +456,7 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 		}
 	}()
 
-	active, err := s.activeGenerationID(ctx, candidate.sessionID)
+	active, retained, err := s.generationKeepSet(ctx, candidate.sessionID)
 	if err != nil {
 		return outcome, err
 	}
@@ -468,7 +469,7 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 		return outcome, nil
 	}
 
-	rowCounts, err := s.reclaimRowCounts(ctx, candidate.sessionID, active)
+	rowCounts, err := s.reclaimRowCounts(ctx, candidate.sessionID, active, retained)
 	if err != nil {
 		return outcome, err
 	}
@@ -480,9 +481,9 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 	if err != nil {
 		return outcome, fmt.Errorf("store: reclaim superseded generations for session %s: %w; no row was deleted", candidate.sessionID, err)
 	}
-	ids := reclaimGenerationUnion(rowCounts, committed, dirs, active)
+	ids := reclaimGenerationUnion(rowCounts, committed, dirs, active, retained)
 
-	deleted, err := s.deleteSupersededGenerationRows(ctx, candidate.sessionID, active)
+	deleted, err := s.deleteSupersededGenerationRows(ctx, candidate.sessionID, active, retained)
 	if err != nil {
 		return outcome, err
 	}
@@ -560,16 +561,16 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 	return outcome, nil
 }
 
-// deleteSupersededGenerationRows deletes every non-active generation row for
-// one session across the generation-scoped tables, in bounded batches (the
-// configured write.sweep_rows). The active generation is excluded by a
-// NULL-safe row predicate, so it is never deleted; a session with no active
-// generation keeps nothing. Children go before the parents their foreign
-// keys cascade from, so the per-table counts are exact. Each batch commits
-// on its own, so a crash between batches leaves a partial, safe deletion
-// the next pass completes; the seam fires between batches. The completeness
-// guard keeps the active generation's complete last-good row.
-func (s *Store) deleteSupersededGenerationRows(ctx context.Context, sessionID schema.SessionID, active string) (ReclaimTableCounts, error) {
+// deleteSupersededGenerationRows deletes every non-active, non-retained
+// generation row for one session across the generation-scoped tables, in
+// bounded batches (the configured write.sweep_rows). The live generations are
+// excluded by a NULL-safe row predicate, so neither is ever deleted; a session
+// with no active generation keeps nothing. Children go before the parents their
+// foreign keys cascade from, so the per-table counts are exact. Each batch
+// commits on its own, so a crash between batches leaves a partial, safe
+// deletion the next pass completes; the seam fires between batches. The
+// completeness guard keeps the active generation's complete last-good row.
+func (s *Store) deleteSupersededGenerationRows(ctx context.Context, sessionID schema.SessionID, active, retained string) (ReclaimTableCounts, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return ReclaimTableCounts{}, fmt.Errorf("store: reclaim superseded generation rows for session %s: take connection: %w; no row was deleted", sessionID, err)
@@ -585,7 +586,7 @@ func (s *Store) deleteSupersededGenerationRows(ctx context.Context, sessionID sc
 			if err := ctx.Err(); err != nil {
 				return ReclaimTableCounts{}, err
 			}
-			changed, err := deleteSupersededBatch(conn, table, sessionID, active, limit)
+			changed, err := deleteSupersededBatch(conn, table, sessionID, active, retained, limit)
 			if err != nil {
 				return ReclaimTableCounts{}, err
 			}
@@ -603,18 +604,18 @@ func (s *Store) deleteSupersededGenerationRows(ctx context.Context, sessionID sc
 	return counts, nil
 }
 
-// deleteSupersededBatch deletes one bounded batch of non-active generation
-// rows from one table and reports how many rows went away. The engine has no
-// UPDATE/DELETE LIMIT, so the batch addresses its rows by key: the rowid for
-// rowid tables, the full primary key for the WITHOUT ROWID descriptor
-// table. A batch that deletes nothing ends its table's loop.
-func deleteSupersededBatch(conn *sqlite.Conn, table string, sessionID schema.SessionID, active string, limit int) (int64, error) {
-	statement := `DELETE FROM ` + table + ` WHERE rowid IN (SELECT rowid FROM ` + table + ` WHERE session_id = ? AND generation_id IS NOT ? LIMIT ?)`
+// deleteSupersededBatch deletes one bounded batch of non-active, non-retained
+// generation rows from one table and reports how many rows went away. The
+// engine has no UPDATE/DELETE LIMIT, so the batch addresses its rows by key:
+// the rowid for rowid tables, the full primary key for the WITHOUT ROWID
+// descriptor table. A batch that deletes nothing ends its table's loop.
+func deleteSupersededBatch(conn *sqlite.Conn, table string, sessionID schema.SessionID, active, retained string, limit int) (int64, error) {
+	statement := `DELETE FROM ` + table + ` WHERE rowid IN (SELECT rowid FROM ` + table + ` WHERE session_id = ? AND ` + supersededGenerationPredicate + ` LIMIT ?)`
 	if table == "session_generation_content" {
-		statement = `DELETE FROM session_generation_content WHERE (session_id, generation_id, source_entry_ref) IN (SELECT session_id, generation_id, source_entry_ref FROM session_generation_content WHERE session_id = ? AND generation_id IS NOT ? LIMIT ?)`
+		statement = `DELETE FROM session_generation_content WHERE (session_id, generation_id, source_entry_ref) IN (SELECT session_id, generation_id, source_entry_ref FROM session_generation_content WHERE session_id = ? AND ` + supersededGenerationPredicate + ` LIMIT ?)`
 	}
 	if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), active, int64(limit)},
+		Args: []any{string(sessionID), active, retained, int64(limit)},
 	}); err != nil {
 		return 0, fmt.Errorf("store: reclaim superseded generation rows for session %s in %s: %w; the committed batches stay deleted and the next pass completes the sweep", sessionID, table, err)
 	}
@@ -622,10 +623,10 @@ func deleteSupersededBatch(conn *sqlite.Conn, table string, sessionID schema.Ses
 }
 
 // reclaimRowCounts returns the per-generation, per-table row counts for one
-// session's non-active generations. It reads every generation-scoped table
-// with one grouped query each, so the totals match the delete predicate
-// `generation_id != active` exactly.
-func (s *Store) reclaimRowCounts(ctx context.Context, sessionID schema.SessionID, active string) (map[string]ReclaimTableCounts, error) {
+// session's non-active, non-retained generations. It reads every
+// generation-scoped table with one grouped query each, so the totals match the
+// delete predicate exactly.
+func (s *Store) reclaimRowCounts(ctx context.Context, sessionID schema.SessionID, active, retained string) (map[string]ReclaimTableCounts, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: count superseded generation rows for session %s: take connection: %w", sessionID, err)
@@ -637,7 +638,7 @@ func (s *Store) reclaimRowCounts(ctx context.Context, sessionID schema.SessionID
 			Args: []any{string(sessionID)},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				generationID := stmt.ColumnText(0)
-				if generationID == active {
+				if generationID == active || (retained != "" && generationID == retained) {
 					return nil
 				}
 				entry := counts[generationID]
@@ -695,15 +696,20 @@ func (s *Store) reclaimCandidateSessions(ctx context.Context) ([]reclaimCandidat
 	}
 	defer s.pool.Put(conn)
 	var candidates []reclaimCandidate
-	err = sqlitex.ExecuteTransient(conn, `SELECT session_id, active_generation_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
+	err = sqlitex.ExecuteTransient(conn, `SELECT session_id, active_generation_id, latest_attempt_generation_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			active := ""
 			if stmt.ColumnType(1) != sqlite.TypeNull {
 				active = stmt.ColumnText(1)
 			}
+			retained := ""
+			if stmt.ColumnType(2) != sqlite.TypeNull {
+				retained = stmt.ColumnText(2)
+			}
 			candidates = append(candidates, reclaimCandidate{
 				sessionID: schema.SessionID(stmt.ColumnText(0)),
 				active:    active,
+				retained:  retained,
 			})
 			return nil
 		},
@@ -716,21 +722,25 @@ func (s *Store) reclaimCandidateSessions(ctx context.Context) ([]reclaimCandidat
 
 // reclaimGenerationUnion merges the row-bearing generation identifiers, the
 // committed catalog identifiers and the owned directory names into one sorted
-// set that excludes the active generation.
-func reclaimGenerationUnion(rowCounts map[string]ReclaimTableCounts, committed, dirs []string, active string) []string {
+// set that excludes the two live generations: the active authority and the
+// retained latest attempt.
+func reclaimGenerationUnion(rowCounts map[string]ReclaimTableCounts, committed, dirs []string, active, retained string) []string {
+	keep := func(generationID string) bool {
+		return generationID != "" && (generationID == active || generationID == retained)
+	}
 	seen := make(map[string]struct{}, len(rowCounts)+len(committed)+len(dirs))
 	for generationID := range rowCounts {
-		if generationID != active {
+		if !keep(generationID) {
 			seen[generationID] = struct{}{}
 		}
 	}
 	for _, generationID := range committed {
-		if generationID != active {
+		if !keep(generationID) {
 			seen[generationID] = struct{}{}
 		}
 	}
 	for _, generationID := range dirs {
-		if generationID != active {
+		if !keep(generationID) {
 			seen[generationID] = struct{}{}
 		}
 	}
