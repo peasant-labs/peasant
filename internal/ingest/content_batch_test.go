@@ -759,6 +759,20 @@ func seedBudgetContentSession(t *testing.T, fs FileSystem, store *budgetTargetSt
 	return sid
 }
 
+// weakIndexerMap converts the composed registry output to the pipeline's
+// compatibility-typed seam. A white-box struct literal must spell the field's
+// exact map type (map element types are invariant, and the WithIndexers bridge
+// does not apply to a struct-literal field), so the conversion is explicit and
+// local to this test file. Values are copied, never aliased, matching the
+// bridge's guarantee for the option path.
+func weakIndexerMap(registry map[Harness]Indexer) map[Harness]TranscriptIndexer {
+	indexers := make(map[Harness]TranscriptIndexer, len(registry))
+	for harness, indexer := range registry {
+		indexers[harness] = indexer
+	}
+	return indexers
+}
+
 // TestContentBudgetStopsAfterK proves the content pass is bounded and reports the
 // backlog it leaves. A one-byte budget processes exactly one session (nothing is
 // charged when the pass starts, so one session runs even though it alone exceeds
@@ -783,7 +797,7 @@ func TestContentBudgetStopsAfterK(t *testing.T) {
 		pipeline := &Pipeline{
 			fs:           fs,
 			metricsStore: store,
-			indexers:     NewIndexerRegistry(fs, IndexerRegistryOptions{}),
+			indexers:     weakIndexerMap(NewIndexerRegistry(fs, IndexerRegistryOptions{})),
 			config:       PipelineConfig{OutputDir: ResolvedPath(output), Parallelism: 1, Force: true},
 		}
 
@@ -862,7 +876,7 @@ func TestContentBackfillTargetsSpanPages(t *testing.T) {
 	pipeline := &Pipeline{
 		fs:           fs,
 		metricsStore: store,
-		indexers:     NewIndexerRegistry(fs, IndexerRegistryOptions{}),
+		indexers:     weakIndexerMap(NewIndexerRegistry(fs, IndexerRegistryOptions{})),
 		config:       PipelineConfig{OutputDir: ResolvedPath(output), Parallelism: 1, Force: true},
 	}
 	recovered, stopped, remaining, err := pipeline.backfillIncompleteContent(ctx, 0)

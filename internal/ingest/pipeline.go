@@ -479,11 +479,34 @@ func WithRedactor(r TextRedactor) PipelineOption {
 	return func(p *Pipeline) { p.redactor = r }
 }
 
-// WithIndexers injects per-provider TranscriptIndexers.
+// WithIndexers injects per-provider indexers for one pipeline.
+//
+// T is the caller's map element type, so the composed registry output
+// (map[Harness]Indexer) and a deliberately compatibility-typed map
+// (map[Harness]TranscriptIndexer) both compile unchanged. The pipeline's seam
+// stays compatibility-typed on purpose: every non-nil value is copied into the
+// pipeline's own map, so the pipeline never aliases the caller's map and a later
+// mutation of that map cannot change what a running pipeline dispatches to. A
+// nil map leaves the seam unset.
+//
 // When set (along with MetricsStore), transcripts are parsed into session_entries
 // after disk writes. Indexing errors are non-fatal.
-func WithIndexers(idx map[Harness]TranscriptIndexer) PipelineOption {
-	return func(p *Pipeline) { p.indexers = idx }
+func WithIndexers[T TranscriptIndexer](idx map[Harness]T) PipelineOption {
+	return func(p *Pipeline) {
+		if idx == nil {
+			p.indexers = nil
+			return
+		}
+		copied := make(map[Harness]TranscriptIndexer, len(idx))
+		for harness, indexer := range idx {
+			var seam TranscriptIndexer = indexer
+			if seam == nil {
+				continue
+			}
+			copied[harness] = seam
+		}
+		p.indexers = copied
+	}
 }
 
 // WithMaxJSONLRecordBytes sets the per-record read limit the pre-redaction
