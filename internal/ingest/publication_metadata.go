@@ -56,6 +56,14 @@ type PublicationInputBundle struct {
 	ReceiptProjectHash schema.ProjectHash
 	CaptureRevision    int64
 	Readiness          PublicationReadiness
+	// RetainedAttemptPending reports that the session retains a latest
+	// incomplete preview beside its last-good full generation. Publication is
+	// refused while it is set, because publishing would certify the newer
+	// preview as the session; an explicit last-good read clears it and uploads
+	// the last-good authority instead. The pending fact itself stays visible in
+	// the inventory and in readiness; this flag only names why the refusal
+	// happened, so the caller can report the actionable coexistence reason.
+	RetainedAttemptPending bool
 }
 
 // PublicationInputReader keeps managed content alive through the

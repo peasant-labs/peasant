@@ -24,6 +24,16 @@ var _ ingest.PublicationInputReader = (*Store)(nil)
 // Sessions without a managed generation use the verified legacy capture. A
 // broken or unsupported managed generation fails, never falls back to legacy.
 func (s *Store) WithCommittedPublicationInput(ctx context.Context, id ingest.SessionID, fn func(ingest.PublicationInputBundle) error) (retErr error) {
+	return s.WithCommittedPublicationInputSelected(ctx, id, ingest.SessionReadSelection{}, fn)
+}
+
+// WithCommittedPublicationInputSelected is the explicit-selection form of
+// WithCommittedPublicationInput. A zero selection refuses while a retained
+// latest attempt is pending, exactly like the default read. A LastGood
+// selection bypasses only that refusal and uploads the last-good authority
+// through the unchanged active read; every other publication check still
+// applies, so an active preview remains refused.
+func (s *Store) WithCommittedPublicationInputSelected(ctx context.Context, id ingest.SessionID, selection ingest.SessionReadSelection, fn func(ingest.PublicationInputBundle) error) (retErr error) {
 	if s.GenerationSnapshotsSupported() && !isHarmonizedSession(ctx, s, id) {
 		release, err := s.sessionLocker.LockShared(ctx, id)
 		if err != nil {
@@ -35,14 +45,14 @@ func (s *Store) WithCommittedPublicationInput(ctx context.Context, id ingest.Ses
 			}
 		}()
 	}
-	input, err := s.readCommittedPublicationInput(ctx, id)
+	input, err := s.readCommittedPublicationInput(ctx, id, selection)
 	if err != nil {
 		return err
 	}
 	return fn(input)
 }
 
-func (s *Store) readCommittedPublicationInput(ctx context.Context, id ingest.SessionID) (input ingest.PublicationInputBundle, err error) {
+func (s *Store) readCommittedPublicationInput(ctx context.Context, id ingest.SessionID, selection ingest.SessionReadSelection) (input ingest.PublicationInputBundle, err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return input, fmt.Errorf("store: take connection for committed publication %s: %w", id, err)
@@ -50,7 +60,7 @@ func (s *Store) readCommittedPublicationInput(ctx context.Context, id ingest.Ses
 	defer s.pool.Put(conn)
 	end := sqlitex.Save(conn)
 	defer end(&err)
-	input, err = s.loadPublicationInputOnConn(ctx, conn, id)
+	input, err = s.loadPublicationInputOnConn(ctx, conn, id, selection)
 	if err != nil || input.Readiness != ingest.PublicationReady {
 		return input, err
 	}
