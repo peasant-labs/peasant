@@ -2010,6 +2010,51 @@ cases:
               section: {index: 0}
               ambiguousPairKey: probe-pair
               omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder with a native correlation key
+        capture:
+          id: gen-channels-omitted-native-correlation
+          sessionId: sess_chansomittednativecorrelation
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-native-correlation
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittednativecorrelation
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              nativeCorrelationKey: corr-omitted
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder with a native correlation key
+        capture:
+          id: gen-channels-omitted-correlated-uncertain
+          sessionId: sess_chansomittedcorrelateduncertain
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-correlated-uncertain
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedcorrelateduncertain
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: carrier
+              uncertainSubtree: true
+              nativeCorrelationKey: corr-omitted-union
+            - nativeKey: omitted1
+              section: {index: 0}
+              nativeCorrelationKey: corr-omitted-union
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
 
   - name: channels-extra-merge
     steps:
