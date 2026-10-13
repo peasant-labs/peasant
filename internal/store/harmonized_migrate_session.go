@@ -959,7 +959,14 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 			return false, nil, txnErr
 		}
 	}
-	if err := insertHarmonizedGenerationOnConn(conn, prepared, oracle.priorEvidence, oracle.installedAtMs, oracle.activatedAtMs); err != nil {
+	activated := oracle.activatedAtMs
+	if activated == nil {
+		// The migration installs the active generation, so it carries a stamp
+		// like any other install: the source activation stamp, falling back to
+		// the install instant when the predecessor row recorded none.
+		activated = &oracle.installedAtMs
+	}
+	if err := insertHarmonizedGenerationOnConn(conn, prepared, oracle.priorEvidence, oracle.installedAtMs, activated); err != nil {
 		txnErr = fmt.Errorf("install the harmonized generation: %w", err)
 		return false, nil, txnErr
 	}
