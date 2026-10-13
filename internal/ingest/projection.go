@@ -506,6 +506,9 @@ func validateClassifiedChannels(index int, block ClassifiedBlock) error {
 		if block.ToolCallID != nil {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder and a direct source tool id; the placeholder carries the id from its own omission record; drop the direct id", index, block.NativeKey)
 		}
+		if block.Omitted.Record.Bytes < 0 || block.Omitted.Record.LimitBytes < 0 {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q omission record carries negative sizes (bytes %d, limitBytes %d); a placeholder stands for a real source record that exceeded a real limit, and negative sizes cannot describe one, so the stored note and extra would misreport why the record is missing; supply the measured size and the limit it exceeded", index, block.NativeKey, block.Omitted.Record.Bytes, block.Omitted.Record.LimitBytes)
+		}
 		if _, err := NewOmittedRecord(block.Omitted.Record.Reason, block.Omitted.Record.Line, block.Omitted.Record.Bytes, block.Omitted.Record.LimitBytes); err != nil {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q omission record is not coherent; the placeholder would not be recognised as an accounted omission and the session would lose the reason it is partial; supply a record built from the omitted source record: %w", index, block.NativeKey, err)
 		}
@@ -988,6 +991,9 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 		entry.Extra = addModelObservation(entry.Extra, *block.ObservedModel)
 	}
 	if block.RawByteLength != nil {
+		if *block.RawByteLength < 0 {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q rawByteLength %d is negative; a source record's byte size cannot be negative, and the stored entry would carry a false measurement; record the measured nonnegative size or omit the field", block.NativeKey, *block.RawByteLength)
+		}
 		value := *block.RawByteLength
 		entry.RawByteLength = &value
 	}

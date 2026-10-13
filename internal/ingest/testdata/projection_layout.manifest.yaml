@@ -33,3 +33,4 @@ requiredNames:
   - channels-omitted-incoherent-rejected
   - channels-extra-merge
   - channels-extra-reserved-rejected
+  - channels-raw-byte-length-rejected
