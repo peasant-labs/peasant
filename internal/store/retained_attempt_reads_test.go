@@ -298,6 +298,44 @@ func TestRetainedAttemptIndexStateFields(t *testing.T) {
 	}
 }
 
+// TestRetainedAttemptPublicationReadNamesPendingAttempt proves the committed
+// publication read names the retained attempt and never reports the session
+// ready, and that the explicit last-good selection clears only that refusal.
+func TestRetainedAttemptPublicationReadNamesPendingAttempt(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("99990000-1111-4222-8333-444455556666")
+	seedRetainedCoexistence(t, s, sid)
+	// The publication read parses the stored project identity, so the session
+	// needs a well-formed one: the seeding helper's placeholder is not.
+	projectHash := strings.Repeat("1", 64)
+	execGenerationSQL(t, s, `
+INSERT OR IGNORE INTO projects(project_hash, canonical_cwd, canonical_remote) VALUES('`+projectHash+`','/tmp/gen','github.com/gen/gen');
+UPDATE sessions SET project_hash = '`+projectHash+`' WHERE session_id = '`+string(sid)+`';`)
+	ctx := context.Background()
+
+	bundle, err := s.LoadPublicationInput(ctx, ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("LoadPublicationInput: %v", err)
+	}
+	if !bundle.RetainedAttemptPending {
+		t.Fatal("LoadPublicationInput did not name the pending retained attempt")
+	}
+	if bundle.Readiness == ingest.PublicationReady {
+		t.Fatal("LoadPublicationInput reported a retained session ready for publication")
+	}
+
+	var selected ingest.PublicationInputBundle
+	if err := s.WithCommittedPublicationInputSelected(ctx, ingest.SessionID(sid), ingest.SessionReadSelection{LastGood: true}, func(input ingest.PublicationInputBundle) error {
+		selected = input
+		return nil
+	}); err != nil {
+		t.Fatalf("WithCommittedPublicationInputSelected(LastGood): %v", err)
+	}
+	if selected.RetainedAttemptPending {
+		t.Fatal("the explicit last-good read kept the retained-attempt refusal")
+	}
+}
+
 // TestRetainedAttemptSettleGatesSelection proves the three selection surfaces:
 // a fully settled retained attempt stops being selected, a moved facet keeps it
 // selected, and the repair publication arm keeps listing regardless.
