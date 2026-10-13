@@ -230,6 +230,11 @@ func outputRecordsItsOmissions(output indexformat.Result) bool {
 	switch result := output.(type) {
 	case indexformat.V1:
 		return entriesRecordOmissions(result.Entries)
+	case *indexformat.V1:
+		if result == nil {
+			return false
+		}
+		return entriesRecordOmissions(result.Entries)
 	case indexformat.V2:
 		return generationRecordsItsOmissions(result.Generation)
 	case *indexformat.V2:
