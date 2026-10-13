@@ -279,12 +279,13 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 	for ordinal, entryIndex := range order {
 		record := records[entryIndex]
 		carrier := record.carrier
-		base, err := claudeRecordKey(sessionID, claudeRecordUUID(carrier), ordinal)
+		uuid := claudeRecordUUID(carrier)
+		base, err := claudeRecordKey(sessionID, uuid, ordinal)
 		if err != nil {
 			return nil, err
 		}
 		recordKey := base
-		if uuid := claudeRecordUUID(carrier); uuid != "" {
+		if uuid != "" {
 			seenUUID[uuid]++
 			if seenUUID[uuid] > 1 {
 				recordKey, err = claudeDuplicateRecordKey(base, seenUUID[uuid])
@@ -316,9 +317,9 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 	return blocks, nil
 }
 
-// claudeCarrierBlock builds one depth-0 block from a classified record. A
-// record whose call was never observed as a tool_use stays depth 0 with its
-// source tool id on the direct channel.
+// claudeCarrierBlock builds one depth-0 block from a classified record. An
+// accounted omission takes the omission channel instead, which owns the
+// placeholder's whole shape.
 func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, childCount int) (ClassifiedBlock, error) {
 	block := ClassifiedBlock{
 		NativeKey:   recordKey,

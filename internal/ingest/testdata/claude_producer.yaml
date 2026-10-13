@@ -11,6 +11,13 @@
 #
 # The default session is 99d59925-36bc-424c-a789-8be54d9702ba; a case that
 # names another recorded session or a parent states it.
+#
+# The managed stream is pinned directly rather than by comparing against the
+# retained entry stream: the managed block channels deliberately differ from the
+# retained shape where the plan requires it (a tool result whose call was never
+# observed is demoted to depth 0 and names its source tool id directly, and a
+# tool entry's content preview is the projection's own tool payload), so a
+# field-for-field retained comparison would assert the wrong contract.
 cases:
   - name: root-plain
     transcript: |
