@@ -197,22 +197,39 @@ func claudeLayoutParent(path ResolvedPath) (SessionID, bool) {
 	return "", false
 }
 
-func (a *ClaudeAdapter) claudeIdentitySnapshot(path ResolvedPath) (ClaudeTranscriptEvidence, bool) {
-	if data, err := a.fs.ReadFile(path.String()); err == nil {
-		if err := validateRetainedJSONL(context.Background(), data); err != nil {
-			return ClaudeTranscriptEvidence{}, false
+// claudeIdentitySnapshotSource reads the structural proof of one candidate
+// source file. It is the one filesystem-shaped dependency the retained identity
+// kernel has, so a caller that is not a *ClaudeAdapter (a candidate builder
+// carrying its own FileSystem) threads it explicitly instead of reimplementing
+// the kernel. A missing, malformed, or foreign-owned snapshot reports false and
+// the kernel refuses.
+type claudeIdentitySnapshotSource func(path ResolvedPath) (ClaudeTranscriptEvidence, bool)
+
+// claudeIdentitySnapshotFrom builds the snapshot accessor over a FileSystem. It
+// is the free-function form of ClaudeAdapter.claudeIdentitySnapshot, so the
+// adapter and the candidate builder read structural proof exactly the same way.
+func claudeIdentitySnapshotFrom(fs FileSystem) claudeIdentitySnapshotSource {
+	return func(path ResolvedPath) (ClaudeTranscriptEvidence, bool) {
+		if data, err := fs.ReadFile(path.String()); err == nil {
+			if err := validateRetainedJSONL(context.Background(), data); err != nil {
+				return ClaudeTranscriptEvidence{}, false
+			}
+			var snapshot ClaudeTranscriptEvidence
+			mineClaudeIdentity(data, &snapshot)
+			owner, err := NewSessionID(strings.TrimSuffix(filepath.Base(path.String()), defaults.ExtJSONL.String()))
+			if err != nil {
+				return ClaudeTranscriptEvidence{}, false
+			}
+			if claudeNamesSession(snapshot.Records, owner) {
+				return snapshot, true
+			}
 		}
-		var snapshot ClaudeTranscriptEvidence
-		mineClaudeIdentity(data, &snapshot)
-		owner, err := NewSessionID(strings.TrimSuffix(filepath.Base(path.String()), defaults.ExtJSONL.String()))
-		if err != nil {
-			return ClaudeTranscriptEvidence{}, false
-		}
-		if claudeNamesSession(snapshot.Records, owner) {
-			return snapshot, true
-		}
+		return ClaudeTranscriptEvidence{}, false
 	}
-	return ClaudeTranscriptEvidence{}, false
+}
+
+func (a *ClaudeAdapter) claudeIdentitySnapshot(path ResolvedPath) (ClaudeTranscriptEvidence, bool) {
+	return claudeIdentitySnapshotFrom(a.fs)(path)
 }
 
 // claudeHistoryLink proves a mixed artifact against a real source snapshot.
@@ -388,6 +405,10 @@ func (a *ClaudeAdapter) verifyClaudeIdentity(data []byte, session DiscoveredSess
 }
 
 func (a *ClaudeAdapter) verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native bool) (map[string]bool, []schema.SessionRelationship, error) {
+	return verifyClaudeIdentityAgainst(data, session, native, a.claudeIdentitySnapshot)
+}
+
+func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native bool, snapshot claudeIdentitySnapshotSource) (map[string]bool, []schema.SessionRelationship, error) {
 	var proof ClaudeTranscriptEvidence
 	mineClaudeIdentity(data, &proof)
 	allowed := map[string]bool{session.SessionID.String(): true}
@@ -419,12 +440,12 @@ func (a *ClaudeAdapter) verifyClaudeIdentityAgainst(data []byte, session Discove
 		// Its root transcript may have rotated while its session remains stored;
 		// scheduling, not extraction, enforces the stored-parent dependency.
 		if !hasLayout || layout != owner {
-			ownerProof, available := a.claudeIdentitySnapshot(claudeSourcePath(session.SourcePath, owner))
+			ownerProof, available := snapshot(claudeSourcePath(session.SourcePath, owner))
 			if !available {
 				return refuse()
 			}
 			if hasLayout && !claudeNativeSpawn(ownerProof.Records, proof.NativeAgentID) {
-				layoutProof, available := a.claudeIdentitySnapshot(claudeSourcePath(session.SourcePath, layout))
+				layoutProof, available := snapshot(claudeSourcePath(session.SourcePath, layout))
 				if !available || !claudeHistoryLink(layoutProof.Records, layout, owner, ownerProof.Records) {
 					return refuse()
 				}
@@ -450,11 +471,11 @@ func (a *ClaudeAdapter) verifyClaudeIdentityAgainst(data []byte, session Discove
 			return refuse()
 		}
 		path := claudeSourcePath(session.SourcePath, source)
-		snapshot, available := a.claudeIdentitySnapshot(path)
+		snapshotEvidence, available := snapshot(path)
 		if !available {
 			return refuse()
 		}
-		if !claudeHistoryLink(proof.Records, session.SessionID, source, snapshot.Records) {
+		if !claudeHistoryLink(proof.Records, session.SessionID, source, snapshotEvidence.Records) {
 			return refuse()
 		}
 		allowed[id] = true
@@ -478,6 +499,15 @@ func (a *ClaudeAdapter) verifyClaudeIdentityAgainst(data []byte, session Discove
 // only the source relations the last-good metadata proved, and still require
 // the captured record chain to connect the artifact to each recorded source.
 func (a *ClaudeAdapter) verifyRetainedClaudeIdentity(data []byte, original *UnifiedMetadata, contentHash string) (map[string]bool, []schema.SessionRelationship, error) {
+	return verifyRetainedClaudeIdentityWith(data, original, contentHash, a.claudeIdentitySnapshot)
+}
+
+// verifyRetainedClaudeIdentityWith is the data-in form of the retained identity
+// proof. The legacy fallback for metadata with no captured relationship proof
+// consults structural sibling snapshots through the supplied accessor only,
+// never the captured file itself; a caller that carries its own FileSystem
+// threads that accessor rather than duplicating the kernel.
+func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, contentHash string, snapshot claudeIdentitySnapshotSource) (map[string]bool, []schema.SessionRelationship, error) {
 	var proof ClaudeTranscriptEvidence
 	mineClaudeIdentity(data, &proof)
 	allowed := map[string]bool{original.SessionID.String(): true}
@@ -545,9 +575,9 @@ func (a *ClaudeAdapter) verifyRetainedClaudeIdentity(data []byte, original *Unif
 		if !allowed[record.SessionID] {
 			// Legacy metadata has no captured relationship proof. It may still
 			// recover from an available native source, never from a guessed link.
-			return a.verifyClaudeIdentityAgainst(data, DiscoveredSession{
+			return verifyClaudeIdentityAgainst(data, DiscoveredSession{
 				SessionID: original.SessionID, ParentUUID: original.ParentUUID, SourcePath: ResolvedPath(original.Source.FilePath),
-			}, false)
+			}, false, snapshot)
 		}
 	}
 	for i := range relationships {
