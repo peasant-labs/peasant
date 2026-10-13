@@ -104,12 +104,8 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = in.RecordedMetadata.SessionID
 	parsed.ParentUUID = in.RecordedMetadata.ParentUUID
-	first, err := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed)
-	if err != nil {
+	if _, err := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed); err != nil {
 		return GenerationCandidate{}, err
-	}
-	if first == nil || first.Type == "" {
-		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: the captured transcript for session %s holds no identifiable Claude record; the candidate has no source identity; restore an intact transcript", in.Session.SessionID)
 	}
 	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {
 		return GenerationCandidate{}, err
@@ -264,12 +260,12 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 	for ordinal, entryIndex := range order {
 		record := records[entryIndex]
 		carrier := record.carrier
-		base, err := claudeRecordKey(sessionID, derefString(carrier.EntryID), ordinal)
+		base, err := claudeRecordKey(sessionID, claudeRecordUUID(carrier), ordinal)
 		if err != nil {
 			return nil, err
 		}
 		recordKey := base
-		if uuid := derefString(carrier.EntryID); uuid != "" {
+		if uuid := claudeRecordUUID(carrier); uuid != "" {
 			seenUUID[uuid]++
 			if seenUUID[uuid] > 1 {
 				recordKey, err = claudeDuplicateRecordKey(base, seenUUID[uuid])
@@ -377,10 +373,12 @@ func claudeChildBlock(childKey, recordKey string, entry schema.SessionEntry, see
 		if callKey == "" || !seenCalls[callKey] {
 			// The call was not observed as a tool_use before this result, so
 			// the pair cannot be proven. The result stays depth 0 with its own
-			// key, no carrier, and its source tool id on the direct channel:
-			// stored evidence whose served projection is unchanged.
+			// key, no carrier, no part label, and its source tool id on the
+			// direct channel: stored evidence whose served projection is
+			// unchanged.
 			block.Depth = 0
 			block.CarrierNativeKey = ""
+			block.PartType = nil
 			block.ToolCallID = entry.ToolCallID
 			return block, nil
 		}
@@ -479,6 +477,29 @@ func claudeEntryExtra(entry schema.SessionEntry) ([]RetainedUnknown, *string, st
 		return nil, nil, "", fmt.Errorf("ingest.claudeEntryExtra: entry %d extension could not be re-encoded; the private fields would be lost; report this with the session id: %w", entry.EntryIndex, err)
 	}
 	return retained, observed, string(encoded), nil
+}
+
+// claudeRecordUUID is the record's own uuid, when it has one. A classified
+// record carries it directly; an opaque retained carrier does not, so the uuid
+// is read from the retained record's payload. A record with no uuid anywhere is
+// anchored by its stream ordinal instead.
+func claudeRecordUUID(entry schema.SessionEntry) string {
+	if entry.EntryID != nil && *entry.EntryID != "" {
+		return *entry.EntryID
+	}
+	records, err := RetainedUnknownOf(entry)
+	if err != nil || len(records) == 0 {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(records[0].Payload, &fields) != nil {
+		return ""
+	}
+	var uuid string
+	if raw, present := fields["uuid"]; present {
+		_ = json.Unmarshal(raw, &uuid)
+	}
+	return uuid
 }
 
 func derefString(value *string) string {
