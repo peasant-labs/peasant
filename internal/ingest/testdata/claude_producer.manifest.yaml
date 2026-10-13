@@ -17,4 +17,5 @@ requiredNames:
   - legacy-fallback-sibling-available
   - legacy-fallback-sibling-unavailable
   - proof-failure-refusal
+  - provider-file-absent
   - malformed-refusal

@@ -186,16 +186,20 @@ func validateClaudeProducerRecords(ctx context.Context, session DiscoveredSessio
 	return validateRetainingJSONL(ctx, relaxed, data, claudeCaptureRecordValidator)
 }
 
+// claudeNativeKeyPrefix is the fixed provider prefix of every Claude record and
+// block native key.
+const claudeNativeKeyPrefix = "claude:"
+
 // claudeRecordKey is the stable record identity one classified Claude source
-// record carries: "claude:"+sessionID+":"+(uuid | "pos:"+streamOrdinal). The
-// pos anchor is the record's stream ordinal, which is stable under append; a
-// uuid anchor is stable forever. The key is bounded like every persisted alias
-// key.
+// record carries: the fixed prefix, then the session id, then the uuid or the
+// stream-ordinal anchor. The pos anchor is the record's stream ordinal, which
+// is stable under append; a uuid anchor is stable forever. The key is bounded
+// like every persisted alias key.
 func claudeRecordKey(sessionID SessionID, uuid string, streamOrdinal int) (string, error) {
 	if uuid != "" {
-		return claudeNativeKey("claude", sessionID.String(), uuid)
+		return claudeNativeKey(sessionID.String(), uuid)
 	}
-	return claudeNativeKey("claude", sessionID.String(), "pos", strconv.Itoa(streamOrdinal))
+	return claudeNativeKey(sessionID.String(), "pos", strconv.Itoa(streamOrdinal))
 }
 
 // claudeDuplicateRecordKey derives the prefix-stable duplicate discriminator
@@ -203,16 +207,31 @@ func claudeRecordKey(sessionID SessionID, uuid string, streamOrdinal int) (strin
 // take :dup2, :dup3, ... by occurrence counter, so a later append never re-keys
 // an earlier record.
 func claudeDuplicateRecordKey(base string, occurrence int) (string, error) {
-	return claudeNativeKey(base, "dup"+strconv.Itoa(occurrence))
+	return claudeBoundKey(base + ":dup" + strconv.Itoa(occurrence))
 }
 
-// claudeNativeKey joins the identity parts of one Claude native key and bounds
-// the result exactly as the OpenCode key helper does, so no raw private
-// identity can leak past the persisted alias bound.
+// claudeBlockKey names one content block of a record by its ordinal among the
+// record's classified blocks.
+func claudeBlockKey(recordKey string, blockOrdinal int) (string, error) {
+	return claudeBoundKey(recordKey + ":" + strconv.Itoa(blockOrdinal))
+}
+
+// claudeAnswerKey names one AskUserQuestion answer submission inside its record.
+func claudeAnswerKey(recordKey, toolCallKey string) (string, error) {
+	return claudeBoundKey(recordKey + ":answer:" + toolCallKey)
+}
+
+// claudeNativeKey builds one bounded Claude native key from its identity parts
+// under the fixed provider prefix, so no raw private identity can leak past the
+// persisted alias bound.
 func claudeNativeKey(parts ...string) (string, error) {
-	key := strings.Join(parts, ":")
+	return claudeBoundKey(claudeNativeKeyPrefix + strings.Join(parts, ":"))
+}
+
+// claudeBoundKey enforces the shared alias-key bound on one assembled key.
+func claudeBoundKey(key string) (string, error) {
 	if len(key) > indexformat.MaxNativeAliasKeyBytes {
-		return "", fmt.Errorf("ingest.claudeNativeKey: Claude native key is %d bytes, over the %d-byte bound; a raw private identity may be leaking into persisted identity; encode a shorter opaque native key", len(key), indexformat.MaxNativeAliasKeyBytes)
+		return "", fmt.Errorf("ingest.claudeBoundKey: Claude native key is %d bytes, over the %d-byte bound; a raw private identity may be leaking into persisted identity; encode a shorter opaque native key", len(key), indexformat.MaxNativeAliasKeyBytes)
 	}
 	return key, nil
 }
@@ -280,7 +299,7 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 		}
 		blocks = append(blocks, carrierBlock)
 		for blockOrdinal, child := range record.children {
-			childKey, err := claudeNativeKey(recordKey, strconv.Itoa(blockOrdinal))
+			childKey, err := claudeBlockKey(recordKey, blockOrdinal)
 			if err != nil {
 				return nil, err
 			}
@@ -421,7 +440,7 @@ func claudeAssignSubmission(block *ClassifiedBlock, entry schema.SessionEntry, p
 		if callKey == "" {
 			return
 		}
-		key, err := claudeNativeKey(block.CarrierNativeKey, "answer", callKey)
+		key, err := claudeAnswerKey(block.CarrierNativeKey, callKey)
 		if err != nil {
 			return
 		}

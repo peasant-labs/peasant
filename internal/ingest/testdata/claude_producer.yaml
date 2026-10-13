@@ -82,7 +82,7 @@ cases:
 
   - name: control-records
     transcript: |
-      {"type":"user","uuid":"c1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"<command-name>/aura:epoch</command-name>"}}
+      {"type":"user","uuid":"c1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"<command-name>/demo:skill</command-name>"}}
       {"type":"permission-mode","uuid":"c2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","permissionMode":"acceptEdits"}
       {"type":"user","uuid":"c3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after control"}}
     completeness: complete
@@ -97,7 +97,7 @@ cases:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:c1"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:c3"
     entries:
-      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "<command-name>/aura:epoch</command-name>", extraContains: "command_name"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "<command-name>/demo:skill</command-name>", extraContains: "command_name"}
       - {depth: 0, role: system, entryType: text, partType: permission-mode, parentIndex: -1, toolCallIDFromIndex: -1, preview: "permission mode: acceptEdits", extraContains: "permissionMode"}
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after control"}
 
@@ -345,6 +345,29 @@ cases:
       {"type":"user","uuid":"x1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","agentId":"a3aee4f","isSidechain":false,"message":{"role":"user","content":"agent prompt"}}
     wantRefusal: true
     wantRefusalLocatorFree: true
+
+  - name: provider-file-absent
+    # The recorded source path does not exist and no sibling proof is present,
+    # yet the candidate is built. The ordinary bytes-proven branch reads no
+    # provider source at all, so this case fails if any read were attempted.
+    sourcePath: /native/absent-provider-source.jsonl
+    transcript: |
+      {"type":"user","uuid":"v1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"proven from bytes"}}
+      {"type":"assistant","uuid":"v2","parentUuid":"v1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"no provider read"}]}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v2:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "proven from bytes"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "no provider read"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "no provider read"}
 
   - name: malformed-refusal
     sentinelLocator: private-malformed
