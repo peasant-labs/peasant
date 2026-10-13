@@ -45,7 +45,10 @@ type retentionAttemptFixture struct {
 
 // retentionAttemptCase varies one clause of the eligibility predicate. An
 // omitted field keeps the passing value; Mode is a pointer so the ordinary
-// empty-string mode is distinguishable from an absent field.
+// empty-string mode is distinguishable from an absent field. WantOK marks a
+// row whose ordinary path must commit; it is mutually exclusive with
+// WantErrorContains, and one of the two is required on every negative row so a
+// row cannot pass on an unrelated downstream guard.
 type retentionAttemptCase struct {
 	Name              string   `yaml:"name"`
 	Routes            []string `yaml:"routes"`
@@ -56,6 +59,7 @@ type retentionAttemptCase struct {
 	Certificate       string   `yaml:"certificate"`
 	Identity          string   `yaml:"identity"`
 	WantRetained      bool     `yaml:"want_retained"`
+	WantOK            bool     `yaml:"want_ok"`
 	WantErrorContains string   `yaml:"want_error_contains"`
 }
 
@@ -130,6 +134,9 @@ func TestRetentionEligibilityMatrix(t *testing.T) {
 
 func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c retentionAttemptCase, route string) {
 	t.Helper()
+	if c.WantOK && c.WantErrorContains != "" {
+		t.Fatalf("row %q expects both success and an error; want_ok and want_error_contains are mutually exclusive", c.Name)
+	}
 	result := retentionFixtureDefault(c.Result, "managed")
 	completeness := retentionFixtureDefault(c.Completeness, "complete")
 	captureKind := retentionFixtureDefault(c.Capture, "assessed")
@@ -315,6 +322,12 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 	}
 	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
 		t.Fatalf("retained pointer = %+v, want none", pointer)
+	}
+	if c.WantOK {
+		if routeErr != nil {
+			t.Fatalf("row expects the ordinary path to commit; route error = %v, want nil", routeErr)
+		}
+		return
 	}
 	if c.WantErrorContains != "" {
 		if routeErr == nil || !strings.Contains(routeErr.Error(), c.WantErrorContains) {

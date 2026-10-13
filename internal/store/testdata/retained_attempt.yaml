@@ -1,6 +1,5 @@
-# Case family for the retained-attempt eligibility predicate. Each row varies
-# one clause of the decision; a row states only what it varies, and every other
-# field keeps its passing value. The predicate holds only when ALL hold:
+# Case family for the retained-attempt eligibility predicate. The predicate
+# holds only when ALL hold:
 #   (1) the result is a managed V2 generation;
 #   (2) the candidate is complete (incomplete_new is excluded);
 #   (3) the write carries the ASSESSED unaccounted-omission preview
@@ -11,6 +10,11 @@
 #       PublishableWithOmissions certifies it);
 #   (6) a verified pair identity is available (the stored artifact hash is
 #       non-null, or the write supplies one).
+# Most rows vary exactly one clause, keep every other clause at its passing
+# value, and state the outcome they observe. The two rows marked below can only
+# pin an observable an earlier guard decides, so they state that reachability
+# instead of claiming the clause. Every negative row carries want_ok or
+# want_error_contains, so a row cannot pass on an unrelated downstream refusal.
 # Decoded by the strict loader in retained_attempt_matrix_test.go.
 
 pairIdentity: a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
@@ -40,15 +44,20 @@ cases:
     want_retained: false
     want_error_contains: pair-proof-unavailable
 
+  # Reachability: a non-managed write is refused by the index-format ceiling
+  # before the retention decision, so this row pins the observable "never
+  # retained" with the ceiling's refusal, not the managed-result clause.
   - name: non-managed-result
     routes: [batch_write]
     result: v1
     want_retained: false
+    want_error_contains: newer than output format 1
 
   - name: incomplete-new-result
     routes: [single, batch]
     completeness: incomplete_new
     want_retained: false
+    want_error_contains: last-good read authority
 
   - name: other-preview-over-full
     routes: [single, batch]
@@ -65,7 +74,11 @@ cases:
     routes: [single, batch]
     mode: explicit_rebuild
     want_retained: false
+    want_ok: true
 
+  # Reachability: this row pins the refusal outcome, but the retention branch's
+  # own conversion refusal is the identical observable, so the ordinary-mode
+  # clause is discriminated by mode-explicit-rebuild and mode-content-backfill.
   - name: mode-format-conversion
     routes: [batch_write]
     mode: format_conversion
@@ -76,13 +89,16 @@ cases:
     routes: [batch_write]
     mode: content_backfill
     want_retained: false
+    want_error_contains: preview replacement refused over full read authority
 
   - name: certificate-absent
     routes: [single, batch]
     certificate: absent
     want_retained: false
+    want_ok: true
 
   - name: certificate-non-publishable
     routes: [single, batch]
     certificate: non_publishable
     want_retained: false
+    want_ok: true
