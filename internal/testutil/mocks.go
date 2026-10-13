@@ -1185,6 +1185,7 @@ type StubPushStore struct {
 
 	Sessions            []ingest.PushSessionRow
 	AllSessions         []ingest.PushSessionRow
+	ParentIdentities    []store.ParentIdentityRow
 	HeldSessions        []ingest.HeldSession
 	SavedPublicationIDs []ingest.SessionID
 	// SavedPublicationLicense captures the applied license from the most recent
@@ -1313,6 +1314,12 @@ func (s *StubPushStore) UnpushedSessionsByProvider(_ context.Context, provider s
 		}
 	}
 	return filtered, nil
+}
+
+func (s *StubPushStore) SyncParentIdentities(_ context.Context, _ []ingest.PushSessionRow) ([]store.ParentIdentityRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ParentIdentities, nil
 }
 
 func (s *StubPushStore) AllPushableSessions(_ context.Context) ([]ingest.PushSessionRow, error) {

@@ -5,3 +5,7 @@ requiredNames:
   - active-conflicting-does-not-resurrect-legacy
   - active-different-target-does-not-resurrect-legacy
   - active-target-known-reconciles
+  - heal-resets-codex-child-origin-version
+  - heal-resets-opencode-child-origin-version
+  - invalidate-requeues-codex-parented-child-claude-code-control-untouched
+  - invalidate-requeues-opencode-parented-child-claude-code-control-untouched

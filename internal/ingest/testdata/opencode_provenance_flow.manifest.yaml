@@ -1,4 +1,6 @@
 requiredNames:
+  - opencode-child-real-metadata-started-by
+  - opencode-parentless-real-metadata-no-relationship
   - opencode-native-unchanged-and-append
   - opencode-native-first-incomplete-install
   - opencode-native-authority-bridge-names-unsettled

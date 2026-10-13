@@ -212,12 +212,27 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 		adapter = *generation.Metadata.AdapterVersion
 	}
 	// The logical parent is durable relationship evidence, not the
-	// availability cache. sessions.parent_id is the FK-safe cache: the durable
-	// started_by target when it names a stored session, else NULL so an
-	// admitted child survives an absent, unselected or cyclic parent.
-	logicalParent := durableParentTarget(generation.Metadata.Relationships)
+	// availability cache. sessions.parent_id is the FK-safe cache, and the
+	// write is three-way (hasRelationshipAuthority, shared with the V1 writer's
+	// parentAuthoritative in writer.go so the two writers cannot drift):
+	//
+	//   - The generation carries ANY relationship: the write is authoritative.
+	//     parent_id becomes the durable started_by target when it names a
+	//     stored session, else NULL, so an admitted child survives an absent,
+	//     unselected or cyclic parent, and explicit_none, unknown, conflicting
+	//     and context_from-only evidence clear the cache exactly as the V1
+	//     writer clears it. The same UPDATE resets origin_version to 0: a
+	//     parent link may be repaired after insert (this authoritative
+	//     activation write, the reconcile heal, the bounded invalidation), and
+	//     every repair re-queues the row so the next resolve pass re-judges it
+	//     against its current parent.
+	//   - The generation carries no relationships at all: the write has no
+	//     parent evidence, so parent_id and origin_version are both omitted and
+	//     keep their stored values. A generation that predates relationship
+	//     emission must not clear a healed cache or the verdict judged on it.
+	authoritative := hasRelationshipAuthority(generation.Metadata.Relationships)
 	var parent any
-	if logicalParent != nil {
+	if logicalParent := durableParentTarget(generation.Metadata.Relationships); authoritative && logicalParent != nil {
 		exists := false
 		if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sessions WHERE session_id = ? LIMIT 1`, &sqlitex.ExecOptions{
 			Args:       []any{string(*logicalParent)},
@@ -246,9 +261,13 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	}); err != nil {
 		return fmt.Errorf("store: read recorded publication provenance before pointing session %s at generation %s: %w; no generation was activated; restore database access and retry activation", sessionID, generation.ID, err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{
-		generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), parent, string(sessionID),
-	}}); err != nil {
+	pointSQL := `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ? WHERE session_id = ?`
+	pointArgs := []any{generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), string(sessionID)}
+	if authoritative {
+		pointSQL = `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ?, origin_version = 0 WHERE session_id = ?`
+		pointArgs = []any{generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), parent, string(sessionID)}
+	}
+	if err := sqlitex.ExecuteTransient(conn, pointSQL, &sqlitex.ExecOptions{Args: pointArgs}); err != nil {
 		return fmt.Errorf("store: point session %s at generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 	}
 	if provenance != "" {
@@ -305,6 +324,19 @@ func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.Sess
 		return fmt.Errorf("store: refuse incomplete generation %s for session %s: a complete generation %s is the last-good read authority; incomplete_new is the first-discovery exception only and never replaces it", candidateID, sessionID, completeID)
 	}
 	return nil
+}
+
+// hasRelationshipAuthority reports whether a write's relationship evidence is
+// authoritative for the stored parent cache: any relationship at all, including
+// explicit_none, unknown, conflicting and context_from-only evidence, speaks
+// about the session's parent, so the write sets or clears the cache instead of
+// preserving it. It is the single predicate both parent-cache writers share:
+// the V1 session writer (parentAuthoritative in writer.go, which adds its
+// write-time-only scheduling and legacy ParentUUID disjuncts) and the V2
+// activation write (pointSessionAtGenerationOnConn, which is deliberately
+// relationships-only). Changing it changes both writers together.
+func hasRelationshipAuthority(relationships []schema.SessionRelationship) bool {
+	return len(relationships) > 0
 }
 
 // durableParentTarget returns the durable started_by target when the

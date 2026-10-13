@@ -6,6 +6,21 @@
 # and a case that omits the fields its kind needs are refused, and the required
 # names in the sibling manifest guard deletion.
 cases:
+  - name: opencode-child-real-metadata-started-by
+    kind: started-by-assembly
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    assemblyParentId: ses_flowAssemblyParent
+    expectRelationships:
+      - kind: started_by
+        targetState: target_known
+        targetLocalId: ses_flowAssemblyParent
+        evidence: existing_adapter
+
+  - name: opencode-parentless-real-metadata-no-relationship
+    kind: started-by-assembly
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    expectNoRelationships: true
+
   - name: opencode-native-unchanged-and-append
     kind: identity
     sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
@@ -161,4 +176,3 @@ cases:
       - id: msg_row_type
         type: user
         data: '{"id":"msg_row_type","type":"PRIVATE_NATIVE_SENTINEL","text":"synthetic","time":{"created":1}}'
-

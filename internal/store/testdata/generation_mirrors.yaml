@@ -7,6 +7,8 @@ session:
   harness: claude-code
 parent:
   id: "77777777-7777-4777-8777-777777777777"
+stored_parent:
+  id: "88888888-8888-4888-8888-888888888888"
 generation:
   first_id: gen_mirror_g1
   second_id: gen_mirror_g2
@@ -24,3 +26,116 @@ cases:
     input_count: absent
   - name: zero-input-count-measured
     input_count: zero
+  # Three-way parent cache activation. A generation that carries ANY
+  # relationship is authoritative: sessions.parent_id becomes the durable
+  # started_by target when that target is stored, else NULL, and the same
+  # UPDATE resets origin_version to 0 so the next resolve pass re-judges the
+  # repaired row. A generation that carries no relationships preserves both
+  # parent_id and origin_version. Each case seeds the child row (harness,
+  # parent cache, origin verdict and version) and the stored parent row
+  # (stored_parent.id) before one activation; "stored" names that parent and
+  # "missing" names parent.id, which is never stored.
+  - name: no-relationships-preserves-populated-cache
+    # Mutation: writing parent_id = NULL (or origin_version = 0) when the
+    # generation carries no relationships clears a healed cache and its
+    # settled verdict; this case then reads NULL / version 0 and fails.
+    activation:
+      harness: opencode
+      parent_uuid: stored
+      seed: {parent_cache: stored, origin: unknown, origin_version: 2}
+      expect: {parent_cache: stored, origin: unknown, origin_version: 2}
+  - name: context-from-only-clears-populated-cache
+    # Mutation: making authority started_by-only preserves the cache here,
+    # where the V1 writer clears it; the case then reads the stale parent.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: context_from, target_state: target_known, target: stored, evidence: native_typed}
+      seed: {parent_cache: stored, origin: unknown, origin_version: 2}
+      expect: {parent_cache: none, origin: unknown, origin_version: 0}
+  - name: started-by-known-stored-sets-cache
+    # Mutation: dropping the stored-target lookup (or the authoritative
+    # write) leaves the cache NULL; the case then reads no parent.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: started_by, target_state: target_known, target: stored, evidence: existing_adapter}
+      seed: {parent_cache: none, origin: unknown, origin_version: 2}
+      expect: {parent_cache: stored, origin: unknown, origin_version: 0}
+  - name: started-by-known-retained-stored-sets-cache
+    # Mutation: narrowing the durable target to target_known only leaves the
+    # retained target's cache NULL; the case then reads no parent. Losing only
+    # the retained evidence target after the cache write also fails its read-back.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: started_by, target_state: target_known_retained, target: stored, evidence: retained_last_good}
+      seed: {parent_cache: none, origin: unknown, origin_version: 2}
+      expect: {parent_cache: stored, origin: unknown, origin_version: 0, evidence_target: stored}
+  - name: started-by-known-missing-clears-populated-cache
+    # Mutation: writing the durable target without the stored-row check
+    # breaks the FK, and preserving the cache keeps a parent the evidence
+    # does not name; either fails. The durable evidence still names the
+    # missing target, so a later harvest that stores it heals via reconcile.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: started_by, target_state: target_known, target: missing, evidence: existing_adapter}
+      seed: {parent_cache: stored, origin: unknown, origin_version: 2}
+      expect: {parent_cache: none, origin: unknown, origin_version: 0, evidence_target: missing}
+  - name: started-by-explicit-none-clears-populated-cache
+    # Mutation: treating explicit_none as no evidence preserves the cache;
+    # the case then reads the stale parent.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: started_by, target_state: explicit_none, evidence: native_typed}
+      seed: {parent_cache: stored, origin: unknown, origin_version: 2}
+      expect: {parent_cache: none, origin: unknown, origin_version: 0}
+  - name: started-by-unknown-clears-populated-cache
+    # Mutation: treating an unknown target as no evidence preserves the
+    # cache; the case then reads the stale parent.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: started_by, target_state: unknown, evidence: unknown}
+      seed: {parent_cache: stored, origin: unknown, origin_version: 2}
+      expect: {parent_cache: none, origin: unknown, origin_version: 0}
+  - name: started-by-conflicting-clears-populated-cache
+    # Mutation: treating conflicting evidence as no evidence preserves the
+    # cache; the case then reads the stale parent.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: started_by, target_state: conflicting_current_native_evidence, evidence: conflict}
+      seed: {parent_cache: stored, origin: unknown, origin_version: 2}
+      expect: {parent_cache: none, origin: unknown, origin_version: 0}
+  - name: codex-started-by-explicit-none-clears-populated-cache
+    # Mutation: a harness-scoped authority rule that skips Codex preserves
+    # the cache; the case then reads the stale parent.
+    activation:
+      harness: codex
+      relationships:
+        - {kind: started_by, target_state: explicit_none, evidence: native_typed}
+      seed: {parent_cache: stored, origin: unknown, origin_version: 2}
+      expect: {parent_cache: none, origin: unknown, origin_version: 0}
+  - name: codex-started-by-known-stored-sets-cache
+    # Mutation: a harness-scoped authority rule that skips Codex leaves the
+    # cache NULL; the case then reads no parent.
+    activation:
+      harness: codex
+      relationships:
+        - {kind: started_by, target_state: target_known, target: stored, evidence: native_typed}
+      seed: {parent_cache: none, origin: unknown, origin_version: 2}
+      expect: {parent_cache: stored, origin: unknown, origin_version: 0}
+  - name: authoritative-activation-requeues-origin
+    # Mutation: dropping origin_version = 0 from the authoritative UPDATE
+    # leaves the settled verdict at version 2 even though the write repaired
+    # the parent link; the case then reads version 2. The verdict itself is
+    # left for the resolver to re-judge, so it stays agent.
+    activation:
+      harness: opencode
+      relationships:
+        - {kind: started_by, target_state: target_known, target: stored, evidence: existing_adapter}
+      seed: {parent_cache: none, origin: agent, origin_version: 2}
+      expect: {parent_cache: stored, origin: agent, origin_version: 0}

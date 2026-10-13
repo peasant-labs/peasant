@@ -736,9 +736,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// run writes any session of its own.
 	//
 	// The order is the safety property, not a convenience: the pass sees only
-	// rows a previous run persisted, and a parent identifier is written at
-	// insert time and never updated afterwards, so a row this pass finalises
-	// cannot acquire a parent later. It rides the discovery that has just run,
+	// rows a previous run persisted. A parent link may be repaired after
+	// insert (an authoritative activation write, the reconcile heal, the
+	// bounded invalidation), and every repair resets origin_version to 0, so a
+	// row this pass finalises that a later write re-parents is re-queued and
+	// the next pass re-judges it. It rides the discovery that has just run,
 	// so the evidence cache it reads is already warm and no transcript is opened
 	// twice.
 	if err := ctx.Err(); err != nil {

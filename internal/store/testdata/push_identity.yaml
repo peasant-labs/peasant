@@ -1,0 +1,42 @@
+cases:
+  - name: evidence-known-child
+    state: target_known
+    target: sess_unstoredparent
+    expectParent: sess_unstoredparent
+  - name: evidence-known-retained
+    state: target_known_retained
+    target: sess_retainedparent
+    expectParent: sess_retainedparent
+  - name: explicit-none-despite-snapshot-and-cache
+    state: explicit_none
+    snapshot: sess_snapshotparent
+    cache: sess_cacheparent
+  - name: conflicting
+    state: conflicting_current_native_evidence
+    snapshot: sess_snapshotparent
+    cache: sess_cacheparent
+    expectUnresolved: true
+  - name: unknown
+    state: unknown
+    snapshot: sess_snapshotparent
+    expectUnresolved: true
+  - name: context-from-only-despite-snapshot
+    kind: context_from
+    state: target_known
+    target: sess_contextsource
+    snapshot: sess_snapshotparent
+  - name: snapshot-child-cache-null
+    snapshot: sess_snapshotparent
+    expectParent: sess_snapshotparent
+  - name: cache-only-no-evidence-no-snapshot
+    cache: sess_cacheparent
+    expectParent: sess_cacheparent
+  - name: plain-root
+  - name: inactive-generation-evidence-snapshot-decides
+    snapshot: sess_snapshotparent
+    inactiveEvidence: true
+    expectParent: sess_snapshotparent
+  - name: snapshot-beats-cache-both-present
+    snapshot: sess_snapshotparent
+    cache: sess_cacheparent
+    expectParent: sess_snapshotparent

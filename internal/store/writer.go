@@ -405,10 +405,14 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		// nil), logical parent evidence, or relationship evidence. Durable
 		// evidence of no parent (explicit-none) therefore clears the cache,
 		// while a write with no evidence at all preserves whatever is
-		// stored instead of clearing it.
+		// stored instead of clearing it. The relationship disjunct is
+		// hasRelationshipAuthority, the predicate the V2 activation write
+		// (pointSessionAtGenerationOnConn in index_format_v2.go) shares, so
+		// the two writers cannot drift; the scheduling and legacy ParentUUID
+		// disjuncts exist only at write time and stay here.
 		parentAuthoritative := sorted[i].SchedulingParentResolved ||
 			m.ParentUUID != nil ||
-			len(m.Relationships) > 0
+			hasRelationshipAuthority(m.Relationships)
 		cacheParent := m.ParentUUID
 		if sorted[i].SchedulingParentResolved && ingest.IndependentAdmissionHarness(m.ModelHarness) {
 			scheduling := sorted[i].SchedulingParentID

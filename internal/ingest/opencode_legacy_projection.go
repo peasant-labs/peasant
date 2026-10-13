@@ -909,6 +909,7 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	if session.ParentUUID != nil {
 		parent := *session.ParentUUID
 		metadata.ParentUUID = &parent
+		metadata.Relationships = append(metadata.Relationships, openCodeStartedBy(parent))
 	}
 
 	kind := managedOpenCodeProjectionKind(session.TranscriptOrigin)

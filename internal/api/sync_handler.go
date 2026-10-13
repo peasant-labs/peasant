@@ -103,17 +103,19 @@ func syncUserPatterns(cfg *config.Config) ([]redact.UserPattern, error) {
 // --------------------------------------------------------------------------
 
 type syncSessionResponse struct {
-	ID          string            `json:"id"`
-	Harness     string            `json:"harness"`
-	ProjectName string            `json:"projectName"`
-	ProjectHash string            `json:"projectHash"`
-	HostSlug    string            `json:"hostSlug"`
-	StartTime   string            `json:"startTime"`
-	DurationMs  int64             `json:"durationMs"`
-	TotalTokens int               `json:"totalTokens"`
-	TurnCount   int               `json:"turnCount"`
-	Model       string            `json:"model"`
-	SyncStatus  schema.SyncStatus `json:"syncStatus"`
+	ParentSessionID  *string           `json:"parentSessionId,omitempty"`
+	ParentUnresolved *bool             `json:"parentUnresolved,omitempty"`
+	ID               string            `json:"id"`
+	Harness          string            `json:"harness"`
+	ProjectName      string            `json:"projectName"`
+	ProjectHash      string            `json:"projectHash"`
+	HostSlug         string            `json:"hostSlug"`
+	StartTime        string            `json:"startTime"`
+	DurationMs       int64             `json:"durationMs"`
+	TotalTokens      int               `json:"totalTokens"`
+	TurnCount        int               `json:"turnCount"`
+	Model            string            `json:"model"`
+	SyncStatus       schema.SyncStatus `json:"syncStatus"`
 	// HoldReason says why a held row waits. Only a held row carries one.
 	HoldReason schema.SyncHoldReason `json:"holdReason,omitempty"`
 	// PreviouslyPushed reports that this session was published before, whatever
@@ -148,6 +150,7 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 type syncSessionReader interface {
 	ingest.PublicationMetadataReader
 	AllPushableSessions(context.Context) ([]ingest.PushSessionRow, error)
+	SyncParentIdentities(context.Context, []ingest.PushSessionRow) ([]store.ParentIdentityRow, error)
 	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
 }
 
@@ -170,7 +173,10 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 	result := make([]syncSessionResponse, 0, len(entries))
 	for _, entry := range entries {
 		s := entry.row
+		parentID, unresolved := syncParentMarkers(entry.identity)
 		result = append(result, syncSessionResponse{
+			ParentSessionID:  parentID,
+			ParentUnresolved: unresolved,
 			ID:               s.SessionID,
 			Harness:          s.ModelHarness,
 			ProjectName:      s.ProjectName,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import Link from 'next/link';
 import {
   DataTable,
@@ -8,6 +8,7 @@ import {
   PublishStateLabel,
   Segmented,
   Select,
+  SessionGroupDisclosure,
   Button,
   type DataTableColumn,
 } from '@/lib/ft-ui';
@@ -64,16 +65,74 @@ const EMPTY_FILTER_COPY: Readonly<Record<PublishFilter, string>> = {
   auto: 'no session here publishes automatically.',
 };
 
-interface ListRow extends RootSessionRow {
-  id: string;
-}
+type ListRow = RootSessionRow & { id: string };
+
+const NO_CHILDREN: ReadonlyMap<string, readonly RootSessionRow[]> = new Map();
 
 export interface RootSessionListProps {
   rows: readonly RootSessionRow[];
+  childGroups?: ReadonlyMap<string, readonly RootSessionRow[]>;
   /** sessionId -> generated title (useSessionTitles). */
   titles: ReadonlyMap<string, string>;
   /** sessionId -> first prompt, for sessions without a generated title. */
   previews: ReadonlyMap<string, string>;
+}
+
+interface SessionChildrenGroupProps extends Pick<RootSessionListProps, 'titles' | 'previews'> {
+  parentId: string;
+  children: readonly RootSessionRow[];
+  childGroups: ReadonlyMap<string, readonly RootSessionRow[]>;
+  expandedGroups: ReadonlySet<string>;
+  setExpandedGroups: Dispatch<SetStateAction<ReadonlySet<string>>>;
+  indent?: boolean;
+}
+
+/** Each disclosure constructs only its opened level; folded descendants do no render work. */
+function SessionChildrenGroup({ parentId, children, childGroups, titles, previews, expandedGroups, setExpandedGroups, indent = false }: SessionChildrenGroupProps) {
+  const expanded = expandedGroups.has(parentId);
+  const label = <>subagents <span className="tabular-nums">{children.length.toLocaleString('en-US')}</span></>;
+  const rowsID = `session-group-rows:${parentId}`;
+  return (
+    <div data-session-group={parentId}>
+      <SessionGroupDisclosure
+        label={label}
+        collapsedLabel={label}
+        expanded={expanded}
+        onToggle={() => setExpandedGroups((previous) => {
+          const next = new Set(previous);
+          if (next.has(parentId)) next.delete(parentId);
+          else next.add(parentId);
+          return next;
+        })}
+        rowsID={rowsID}
+        showActionHint={false}
+        bare
+        indent={indent}
+      >
+        {expanded && <ul id={rowsID} className="flex flex-col gap-3 py-3 pl-4">
+          {children.map((child) => {
+            const id = child.sync.id;
+            const hash = parseProjectHash(child.sync.projectHash);
+            const title = rowTitle(id, titles, previews);
+            const nested = childGroups.get(id);
+            return (
+              <li key={id}>
+                <span data-session-group-child={id} className="inline-flex min-w-0 items-start gap-2">
+                  <ProviderIcon harness={child.sync.harness} accent className="mt-1 shrink-0" />
+                  {hash ? (
+                    <Link href={transcriptHref(hash, id)} className="font-[family-name:var(--font-body)] text-base text-ink underline decoration-dotted decoration-[color:var(--ink-4)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--amber)] focus-mono">
+                      {title.text}
+                    </Link>
+                  ) : <span className="font-[family-name:var(--font-body)] text-base text-ink [overflow-wrap:anywhere]">{title.text}</span>}
+                </span>
+                {nested?.length ? <SessionChildrenGroup parentId={id} children={nested} childGroups={childGroups} titles={titles} previews={previews} expandedGroups={expandedGroups} setExpandedGroups={setExpandedGroups} indent /> : null}
+              </li>
+            );
+          })}
+        </ul>}
+      </SessionGroupDisclosure>
+    </div>
+  );
 }
 
 /**
@@ -81,10 +140,11 @@ export interface RootSessionListProps {
  * the publish-state filters and a project filter over the same rows, and
  * `load more`. Every filter count is computed from the rows the filter lists.
  */
-export function RootSessionList({ rows, titles, previews }: RootSessionListProps) {
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews }: RootSessionListProps) {
   const [filter, setFilter] = useState<PublishFilter>('all');
   const [project, setProject] = useState<string>(ALL_PROJECTS);
   const [shown, setShown] = useState(ROOT_LIST_PAGE_SIZE);
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set());
 
   const projects = useMemo(() => {
     const names = new Map<string, string>();
@@ -120,29 +180,33 @@ export function RootSessionList({ rows, titles, previews }: RootSessionListProps
         key: 'session',
         label: 'session',
         render: (_, row) => {
+          const children = childGroups.get(row.id);
           const hash = parseProjectHash(row.sync.projectHash);
           const title = rowTitle(row.id, titles, previews);
           const harness = row.sync.harness.replace(/-/g, ' ');
           return (
-            <span className="inline-flex min-w-0 items-start gap-2" data-session-id={row.id}>
-              <ProviderIcon harness={row.sync.harness} accent className="mt-1 shrink-0" />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                {hash ? (
-                  <Link
-                    href={transcriptHref(hash, row.id)}
-                    className="font-[family-name:var(--font-body)] text-base text-ink underline decoration-dotted decoration-[color:var(--ink-4)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--amber)] focus-mono"
-                  >
-                    {title.text}
-                  </Link>
-                ) : (
-                  <span className="font-[family-name:var(--font-body)] text-base text-ink [overflow-wrap:anywhere]">{title.text}</span>
-                )}
-                <span className="font-mono text-sm text-ink-3">
-                  {title.untitled ? 'untitled · ' : ''}
-                  {harness} · <span className="tabular-nums">{tokenFormat.format(row.sync.totalTokens)}</span> tokens
+            <div className="flex min-w-0 flex-col" data-session-family={row.id}>
+              <span className="inline-flex min-w-0 items-start gap-2" data-session-id={row.id}>
+                <ProviderIcon harness={row.sync.harness} accent className="mt-1 shrink-0" />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  {hash ? (
+                    <Link
+                      href={transcriptHref(hash, row.id)}
+                      className="font-[family-name:var(--font-body)] text-base text-ink underline decoration-dotted decoration-[color:var(--ink-4)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--amber)] focus-mono"
+                    >
+                      {title.text}
+                    </Link>
+                  ) : (
+                    <span className="font-[family-name:var(--font-body)] text-base text-ink [overflow-wrap:anywhere]">{title.text}</span>
+                  )}
+                  <span className="font-mono text-sm text-ink-3">
+                    {title.untitled ? 'untitled · ' : ''}
+                    {harness} · <span className="tabular-nums">{tokenFormat.format(row.sync.totalTokens)}</span> tokens
+                  </span>
                 </span>
               </span>
-            </span>
+              {children?.length ? <SessionChildrenGroup parentId={row.id} children={children} childGroups={childGroups} titles={titles} previews={previews} expandedGroups={expandedGroups} setExpandedGroups={setExpandedGroups} indent /> : null}
+            </div>
           );
         },
       },
@@ -203,7 +267,7 @@ export function RootSessionList({ rows, titles, previews }: RootSessionListProps
         },
       },
     ],
-    [titles, previews, audience],
+    [titles, previews, audience, childGroups, expandedGroups],
   );
 
   const choose = (next: string) => {

@@ -1,7 +1,9 @@
 # GET /api/v1/settings as a peasant server with no config.yaml answers it: every
 # key with its default. Captured from the built binary (peasant web start) and
-# kept as the server answered it, except two machine values: the import folder and the
-# CPU-derived upload count. The page tests mount the page on this answer.
+# kept as the server answered it, except the import folder and two CPU-derived
+# values: the upload count and staged-memory budget use eight CPU cores
+# (2 * batchBytes + 8 * bufferBytes for staged memory).
+# The page tests mount the page on this answer.
 #
 # Its keys must equal requiredNames in internal/api/testdata/settings-keys.yaml;
 # a test fails when they drift, so recapture it when the server gains a key.
@@ -174,6 +176,69 @@ settings:
     effective: 60
     editable: true
     inPeasantConfig: false
+  - key: write.holdTargetMs
+    kind: integer
+    value: null
+    effective: 4000
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.activationSessions
+    kind: integer
+    value: null
+    effective: 64
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.batchBytes
+    kind: integer
+    value: null
+    effective: 33554432
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.batchSessions
+    kind: integer
+    value: null
+    effective: 64
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.bufferBytes
+    kind: integer
+    value: null
+    effective: 16777216
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.stagedMemoryBytes
+    kind: integer
+    value: null
+    effective: 201326592
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.flushIntervalMs
+    kind: integer
+    value: null
+    effective: 500
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.sweepRows
+    kind: integer
+    value: null
+    effective: 5000
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
+  - key: write.harvestTargetMinutes
+    kind: integer
+    value: null
+    effective: 20
+    editable: false
+    inPeasantConfig: false
+    description: write budgets are read when harvest starts; edit config.yaml before the next harvest
   - key: village.url
     kind: string
     value: null

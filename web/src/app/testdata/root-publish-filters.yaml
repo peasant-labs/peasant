@@ -15,6 +15,8 @@
 #   of `load more`. Omitted, the whole list fits on the first page.
 # expectedLabels: the publish state each named row shows.
 requiredNames:
+  - pending-root-read-omits-session-stat
+  - failed-root-read-omits-session-stat
   - all-counts
   - not-published-counts
   - published-counts
@@ -22,7 +24,46 @@ requiredNames:
   - outside-selection-hidden
   - load-more
   - pending-collectives-cannot-read
+  - parent-visible-child-grouped
+  - recursive-family-and-refresh
+  - deep-family-expands-one-level-at-a-time
+  - snapshot-and-evidence-children-with-absent-parents-hidden
+  - unresolved-child-hidden
+  - cache-only-child-grouped
+  - filtered-parent-omits-child
+  - selection-hidden-parent-and-child
+  - fork-without-markers-top-level
+  - paging-keeps-child-with-parent
+  - child-search-keeps-publish-label
 cases:
+  - name: pending-root-read-omits-session-stat
+    readState: pending
+    expectedSessions: null
+    sessions: [{ id: pending-root, project: alpha, syncStatus: new, state: unpublished }]
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [pending-root]
+  - name: failed-root-read-omits-session-stat
+    readState: error
+    expectedSessions: null
+    sessions: [{ id: failed-root, project: alpha, syncStatus: new, state: unpublished }]
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [failed-root]
+  # Synthetic depth stimulus, not a claim about a live corpus or a UI depth cap.
+  # chainLength generates unique <id>-<index> rows, each parented by its predecessor.
+  - name: deep-family-expands-one-level-at-a-time
+    sessions:
+      - { id: deep, chainLength: 20000, project: alpha, syncStatus: new, state: unpublished }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [deep-0]
+    expectedGroups: [deep-0]
+    steps:
+      - { expand: deep-0, children: [deep-1], groups: [deep-0, deep-1] }
+      - { expand: deep-1, children: [deep-1, deep-2], groups: [deep-0, deep-1, deep-2] }
+      - { expand: deep-0, children: [], groups: [deep-0] }
+      - { expand: deep-0, children: [deep-1, deep-2], groups: [deep-0, deep-1, deep-2] }
   - name: all-counts
     sessions:
       - { id: s-new, project: alpha, syncStatus: new, state: unpublished }
@@ -98,3 +139,118 @@ cases:
     expectedLabels:
       s-approved: published · 1 collective · up to date
       s-pending: published · 0 collectives · up to date
+
+  - name: parent-visible-child-grouped
+    sessions:
+      - { id: root, project: alpha, syncStatus: new, state: unpublished }
+      - { id: child, project: beta, syncStatus: synced, state: published, parentSessionId: root, title: Delegate Task }
+      - { id: other, project: alpha, syncStatus: new, state: unpublished }
+      - { id: other-child, project: alpha, syncStatus: new, state: unpublished, parentSessionId: other }
+    filter: all
+    expectedCounts: { all: 2, notPublished: 2, published: 0, auto: 0 }
+    expectedRows: [root, other]
+    expectedGroups: [root, other]
+    steps:
+      - { expand: root, children: [child] }
+    childLabels: { child: Delegate Task }
+
+  - name: recursive-family-and-refresh
+    # Anonymized grandparent -> delegated parent -> delegated child.
+    sessions:
+      - { id: ancestor, project: alpha, syncStatus: synced, state: published }
+      - { id: delegate, project: beta, syncStatus: new, state: unpublished, parentSessionId: ancestor, preview: Inspect the Parser }
+      - { id: nested-agent, project: beta, syncStatus: synced, state: published, parentSessionId: delegate }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 0, published: 1, auto: 0 }
+    expectedRows: [ancestor]
+    expectedGroups: [ancestor]
+    steps:
+      - { expand: ancestor, children: [delegate] }
+      - { expand: delegate, children: [delegate, nested-agent] }
+      - { refresh: true, children: [delegate, nested-agent] }
+    childLabels: { delegate: '“Inspect the Parser”', nested-agent: nested-a }
+
+  - name: snapshot-and-evidence-children-with-absent-parents-hidden
+    sessions:
+      - { id: root, project: alpha, syncStatus: new, state: unpublished }
+      - { id: snapshot-child, project: alpha, syncStatus: synced, state: published, parentSessionId: absent-snapshot-parent }
+      - { id: evidence-child, project: beta, syncStatus: new, state: unpublished, parentSessionId: unstored-evidence-parent }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [root]
+    expectedGroups: []
+
+  - name: unresolved-child-hidden
+    sessions:
+      - { id: root, project: alpha, syncStatus: new, state: unpublished }
+      - { id: unresolved-agent, project: beta, syncStatus: new, state: unpublished, parentUnresolved: true }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [root]
+    expectedGroups: []
+
+  - name: cache-only-child-grouped
+    sessions:
+      - { id: stored-parent, project: alpha, syncStatus: new, state: unpublished }
+      - { id: cache-child, project: beta, syncStatus: new, state: unpublished, parentSessionId: stored-parent }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [stored-parent]
+    expectedGroups: [stored-parent]
+    steps:
+      - { expand: stored-parent, children: [cache-child] }
+    childLabels: { cache-child: cache-ch }
+
+  - name: filtered-parent-omits-child
+    sessions:
+      - { id: shown, project: alpha, syncStatus: synced, state: published }
+      - { id: filtered-parent, project: alpha, syncStatus: new, state: unpublished }
+      - { id: published-child, project: beta, syncStatus: synced, state: published, parentSessionId: filtered-parent }
+    filter: published
+    expectedCounts: { all: 2, notPublished: 1, published: 1, auto: 0 }
+    expectedRows: [shown]
+    expectedGroups: []
+
+  - name: selection-hidden-parent-and-child
+    sessions:
+      - { id: shown, project: alpha, syncStatus: new, state: unpublished }
+      - { id: hidden-parent, project: beta, syncStatus: new, state: unpublished, outsideSelection: true }
+      - { id: visible-child, project: beta, syncStatus: new, state: unpublished, parentSessionId: hidden-parent }
+      - { id: hidden-child, project: alpha, syncStatus: new, state: unpublished, parentSessionId: shown, outsideSelection: true }
+      - { id: unread-child, project: alpha, syncStatus: new, state: unpublished, parentSessionId: shown, publication: false }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [shown]
+    expectedGroups: []
+
+  - name: fork-without-markers-top-level
+    sessions:
+      - { id: fork, project: alpha, syncStatus: new, state: unpublished }
+      - { id: fork-child, project: alpha, syncStatus: new, state: unpublished, parentSessionId: fork }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [fork]
+    expectedGroups: [fork]
+
+  - name: paging-keeps-child-with-parent
+    sessions:
+      - { id: bulk, count: 25, project: alpha, syncStatus: new, state: unpublished }
+      - { id: last-parent, project: beta, syncStatus: synced, state: published }
+      - { id: last-child, project: beta, syncStatus: synced, state: published, parentSessionId: last-parent }
+    filter: all
+    expectedCounts: { all: 26, notPublished: 25, published: 1, auto: 0 }
+    expectedRows: [bulk-00, bulk-01, bulk-02, bulk-03, bulk-04, bulk-05, bulk-06, bulk-07, bulk-08, bulk-09, bulk-10, bulk-11, bulk-12, bulk-13, bulk-14, bulk-15, bulk-16, bulk-17, bulk-18, bulk-19, bulk-20, bulk-21, bulk-22, bulk-23, bulk-24, last-parent]
+    expectedPages: [25, 26]
+    expectedGroups: []
+    steps:
+      - { expand: last-parent, children: [last-child] }
+
+  - name: child-search-keeps-publish-label
+    sessions:
+      - { id: root, project: alpha, syncStatus: new, state: unpublished }
+      - { id: search-child, project: beta, syncStatus: synced, state: published, parentSessionId: root }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [root]
+    expectedGroups: [root]
+    searchChild: search-child
