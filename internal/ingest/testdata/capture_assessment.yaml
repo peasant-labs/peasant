@@ -1,4 +1,4 @@
-# Capture assessment pins (PROPOSAL-3 section 5.2 V1 scope).
+# Capture assessment pins for the V1 capture-scope facts (parser facts, coverage tuple, checked conversion, forged-tuple refusal).
 #
 # Each case independently specifies parser facts and the expected capture
 # tuple. The test builds real V1 entries (known carriers plus retained
