@@ -14,9 +14,10 @@ import (
 // sourceOmittedPreviewWrite is the store write's capture tuple for the
 // unaccounted source-records omission preview: preview_only with the
 // source_records_omitted code. It is the exact tuple the pipeline's
-// AssessCapture + ContentCapture derivation produces for the P15 row-4 facts
-// (SourceOmitted && Unaccounted && !hasOmissions); the eligibility predicate
-// reads these literal fields, so a store test constructs them directly.
+// AssessCapture + ContentCapture derivation produces for the unaccounted
+// source-records omission facts (SourceOmitted && Unaccounted with no
+// placeholder accounting for the gap); the eligibility predicate reads these
+// literal fields, so a store test constructs them directly.
 func sourceOmittedPreviewWrite() ingest.SessionContentCaptureWrite {
 	return ingest.SessionContentCaptureWrite{
 		Status:           ingest.ContentCaptureIncomplete,
