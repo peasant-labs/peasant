@@ -408,9 +408,19 @@ func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, 
 		}, nil
 	}
 	if facts.Unaccounted || !facts.Authoritative {
+		// An unaccounted omission whose own source recorded the omission is the
+		// one tuple that stores the omission code rather than the strict
+		// refusal: its message is accurate, and the same fact tuple on an
+		// existing managed capture keeps the accounted-unknown distinction the
+		// code exists for. Every other unaccounted or non-authoritative shape,
+		// and every incomplete_new path above, is untouched.
+		code := ContentCaptureStrictRefused
+		if facts.SourceOmitted && !hasOmissions {
+			code = ContentCaptureSourceRecordsOmitted
+		}
 		return CaptureAssessment{
 			coverage: CaptureCoveragePreview, policy: facts.Policy,
-			partial: true, failure: ContentCaptureStrictRefused, retained: counts,
+			partial: true, failure: code, retained: counts,
 		}, nil
 	}
 	if facts.SourceOmitted && !hasOmissions {

@@ -31,6 +31,10 @@ type nativeCoverageCarrier struct {
 	Position    int64  `yaml:"position"`
 	Pointer     string `yaml:"pointer"`
 	Payload     string `yaml:"payload"`
+	// Omitted marks a positional omission placeholder: the block stands in for
+	// a source record ingest left out, rather than carrying retained unknown
+	// evidence.
+	Omitted bool `yaml:"omitted"`
 }
 
 type nativeCoverageCase struct {
@@ -134,6 +138,24 @@ func buildCoverageV2(t *testing.T, sid schema.SessionID, genID, completeness str
 	nextIndex := 3
 	var mainCarriers, earlierCarriers []schema.SessionEntry
 	for _, carrier := range carriers {
+		if carrier.Omitted {
+			entry, err := coveragePlaceholderEntry(t, sid, nextIndex)
+			if err != nil {
+				t.Fatalf("omitted carrier: %v", err)
+			}
+			nextIndex++
+			content = append(content, indexformat.ContentRecord{Ref: entry.SourceEntryRef})
+			// The omitted record's bytes are gone: the placeholder owns no full
+			// content, so its record stages a zero-length blob exactly as the
+			// projection writes one.
+			blobs[entry.SourceEntryRef] = []byte("")
+			if carrier.Partition == "earlier" {
+				earlierCarriers = append(earlierCarriers, entry)
+			} else {
+				mainCarriers = append(mainCarriers, entry)
+			}
+			continue
+		}
 		position := ingest.UnknownSourcePosition{
 			Public:   &ingest.UnknownPublicPosition{SourceRef: carrier.SourceRef, RecordIndex: carrier.RecordIndex, Position: carrier.Position},
 			SourceID: carrier.SourceRef,
@@ -187,6 +209,51 @@ func buildCoverageV2(t *testing.T, sid schema.SessionID, genID, completeness str
 		TitleRefs:            []schema.SourceEntryRef{"e_cov_known"},
 	}
 	return indexformat.V2{Generation: generation}, blobs
+}
+
+// coveragePlaceholderEntry builds one positional omission placeholder, the same
+// shape the projection writes for a source record ingest omitted: role tool,
+// entry type tool_result, the typed omission record in Extra, the reader-facing
+// note in ContentPreview, the source tool id and the record's byte size.
+func coveragePlaceholderEntry(t *testing.T, sid schema.SessionID, entryIndex int) (schema.SessionEntry, error) {
+	t.Helper()
+	record, err := ingest.NewOmittedRecord(ingest.OmittedRecordTooLarge, 42, 9000, 8000)
+	if err != nil {
+		return schema.SessionEntry{}, err
+	}
+	extra, err := record.Extra()
+	if err != nil {
+		return schema.SessionEntry{}, err
+	}
+	note := ingest.OmissionPlaceholderNote(record)
+	rawByteLength := int(record.Bytes)
+	toolCallID := "toolu_omitted_placeholder"
+	return schema.SessionEntry{
+		SessionID:      sid,
+		EntryIndex:     entryIndex,
+		Harness:        schema.Harness("claude-code"),
+		Role:           ingest.RoleTool,
+		EntryType:      ingest.EntryTypeToolResult,
+		Depth:          0,
+		SourceEntryRef: "e_cov_placeholder",
+		ContentPreview: &note,
+		Extra:          &extra,
+		ToolCallID:     &toolCallID,
+		RawByteLength:  &rawByteLength,
+	}, nil
+}
+
+// retainedCarrierCount counts the carriers that carry retained unknown
+// evidence. A positional omission placeholder is stored evidence of a different
+// kind and never appears in the export's retained-unknown set.
+func retainedCarrierCount(carriers []nativeCoverageCarrier) int {
+	count := 0
+	for _, carrier := range carriers {
+		if !carrier.Omitted {
+			count++
+		}
+	}
+	return count
 }
 
 func TestNativeCoverageMatrix(t *testing.T) {
@@ -345,8 +412,8 @@ func TestNativeCoverageMatrix(t *testing.T) {
 				if exportErr != nil {
 					t.Fatalf("export refused complete control: %v", exportErr)
 				}
-				if len(exported.RetainedUnknown) != len(c.Carriers) {
-					t.Fatalf("export retained = %d, want %d", len(exported.RetainedUnknown), len(c.Carriers))
+				if len(exported.RetainedUnknown) != retainedCarrierCount(c.Carriers) {
+					t.Fatalf("export retained = %d, want %d", len(exported.RetainedUnknown), retainedCarrierCount(c.Carriers))
 				}
 			case "refused":
 				if exportErr == nil {

@@ -19,6 +19,7 @@ required_names:
   - forged-full-refused
   - complete-source-omitted-accounted
   - complete-source-omitted-unaccounted
+  - complete-source-omitted-placeholder
 cases:
   - name: complete-zero-carriers
     completeness: complete
@@ -177,12 +178,12 @@ cases:
     want_full_read: refused
     want_failure_code: ""
   # Source-omitted native rows (spec section 10: accounted/unaccounted cause).
-  # Both stay preview with refused full read: the omission placeholder
-  # discriminator (outputRecordsItsOmissions) is V1-only by design, so a
-  # native omission never reaches accounted full certification here — the
-  # pipeline derives unaccounted from ContentOmitted for the same reason, and
-  # placeholder-accounted fullossification stays V1-lane owned. These rows pin
-  # the assessed failure-code distinction at the native scope.
+  # The omission discriminator (outputRecordsItsOmissions) reads the stored
+  # partitions, so a managed capture that carries a positional placeholder is
+  # accounted and may certify FULL, exactly as the V1 entries path does; a
+  # capture whose source recorded an omission with no placeholder stays the
+  # bounded preview. These rows pin the assessed failure-code distinction at
+  # the native scope.
   - name: complete-source-omitted-accounted
     completeness: complete
     carriers:
@@ -220,4 +221,17 @@ cases:
     want_occurrences: 1
     want_export: success
     want_full_read: refused
-    want_failure_code: strict_capture_refused
+    want_failure_code: source_records_omitted
+  - name: complete-source-omitted-placeholder
+    completeness: complete
+    carriers:
+      - partition: main
+        omitted: true
+    prior: none
+    source_omitted: true
+    unaccounted: false
+    want_disposition: committed_now
+    want_occurrences: 0
+    want_export: success
+    want_full_read: success
+    want_failure_code: source_records_omitted

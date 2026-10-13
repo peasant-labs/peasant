@@ -19,7 +19,7 @@ cases:
   - name: opencode-omitted-placeholder
     harness: opencode
     session_id: 11111111-1111-4111-8111-111111111111
-    why: Targeted positional omission projection; the placeholder remains visible on every surface.
+    why: Targeted positional omission projection; the placeholder remains visible on every surface and, because it accounts for the omission, the capture certifies full content and is publishable.
     omission: true
     entries:
       - '{"entryIndex":0,"entryType":"tool_result","role":"tool","sourceEntryRef":"e_0","rawByteLength":314572800}'
