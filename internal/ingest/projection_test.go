@@ -555,9 +555,25 @@ func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, 
 	}
 	// A placeholder's content record is a zero-length blob: the note lives in
 	// ContentPreview and the typed record in Extra, never in the full-content
-	// bytes of a record that was omitted. Every other entry owns its content
-	// record and digest.
-	if content != "" && want.Omitted == nil {
+	// bytes of a record that was omitted; the record must still exist so the
+	// snapshot hydrates the ref. Every other entry owns its content record and
+	// digest.
+	if want.Omitted != nil {
+		record, ok := records[want.Ref]
+		if !ok {
+			t.Fatalf("%s ref %q omission placeholder has no content record", label, want.Ref)
+		}
+		empty := sha256.Sum256([]byte(""))
+		if record.ByteLength != 0 {
+			t.Fatalf("%s ref %q omission placeholder content record byteLength = %d, want 0", label, want.Ref, record.ByteLength)
+		}
+		if record.Digest != hex.EncodeToString(empty[:]) {
+			t.Fatalf("%s ref %q omission placeholder content digest = %q, want the empty-string digest", label, want.Ref, record.Digest)
+		}
+		if record.RelativeBlob != "content/"+want.Ref {
+			t.Fatalf("%s ref %q omission placeholder relativeBlob = %q, want %q", label, want.Ref, record.RelativeBlob, "content/"+want.Ref)
+		}
+	} else if content != "" {
 		record, ok := records[want.Ref]
 		if !ok {
 			t.Fatalf("%s ref %q has no content record", label, want.Ref)
