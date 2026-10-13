@@ -64,6 +64,7 @@ requiredNames:
   - v63-source-unavailability
   - v64-ingest-run-outcomes
   - v65-claude-identity-proof
+  - v66-retained-attempt-pointer
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle
