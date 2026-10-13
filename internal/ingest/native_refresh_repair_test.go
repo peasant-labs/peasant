@@ -96,7 +96,7 @@ func nativeRepairStore(t *testing.T, dbPath, root string) *store.Store {
 }
 
 // nativeRepairMeta builds the managed metadata a completed harvest leaves for a
-// native session. Its recorded source locator points at the managed-generation path the
+// native session. Its recorded source locator points at the source path the
 // adapter recorded.
 func nativeRepairMeta(t *testing.T, sessionID string, harness ingest.Harness, nativePath string) *ingest.UnifiedMetadata {
 	t.Helper()

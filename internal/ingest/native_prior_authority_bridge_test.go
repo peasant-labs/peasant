@@ -178,14 +178,14 @@ func (s *priorOnlyStore) ReadGenerationPrior(context.Context, SessionID) (*Gener
 	return s.prior, nil
 }
 
-// TestOpenCodePriorLoaderBridgesStoredCaptureAuthority drives every named prior
+// TestOpenCodeGenerationPriorBridgesStoredCaptureAuthority drives every named prior
 // loader scenario through the production loader: with no active generation it
 // consults the stored certificate and preserves its state without fabricating
 // aliases, captured-prefix proof, or a complete-generation claim. An active
 // generation wins outright, an operator-initiated rebuild suppresses the
 // bridge, and a store without the authority reader keeps the existing empty
 // prior.
-func TestOpenCodePriorLoaderBridgesStoredCaptureAuthority(t *testing.T) {
+func TestOpenCodeGenerationPriorBridgesStoredCaptureAuthority(t *testing.T) {
 	document := loadBridgePriorDocument(t)
 	session := DiscoveredSession{SessionID: SessionID(document.SessionID), Harness: HarnessOpenCode}
 	ctx := context.Background()
@@ -221,7 +221,7 @@ func TestOpenCodePriorLoaderBridgesStoredCaptureAuthority(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("openCodePriorLoader: %v", err)
+				t.Fatalf("openCodeGenerationPrior: %v", err)
 			}
 			assertBridgePrior(t, tc, prior, authority)
 			if reads != nil && *reads != tc.WantAuthorityReads {

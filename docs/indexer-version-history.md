@@ -26,7 +26,7 @@ and indexing share the changed native document decoder, so both revisions change
 Managed-generation overrides are declared independently in
 `GenerationRepairTargets`; never replace them with the format-1 baseline.
 
-| Native-generation harness | Adapter change | Indexer change | Index format | Reason |
+| Managed-generation harness | Adapter change | Indexer change | Index format | Reason |
 |---|---|---|---|---|
 | Codex | unchanged at 2 | 17 → 18 | 2 (unchanged) | Native history replay retains unknown source evidence, canonical item bodies and nested blocks with ownership/traversal coordinates; raw acquisition is unchanged. |
 | OpenCode | 2 → 3 | 17 → 18 | 2 (unchanged) | Current row normalization retains unknown rows and blocks before projection; native indexing carries them through selected main/earlier evidence. |

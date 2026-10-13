@@ -25,9 +25,9 @@ var (
 	_ ingest.ContentSweeper                    = (*Store)(nil)
 )
 
-func (s *Store) StageGenerationCandidates(ctx context.Context, native []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {
-	activations := make([]GenerationActivation, len(native))
-	for i, a := range native {
+func (s *Store) StageGenerationCandidates(ctx context.Context, candidates []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {
+	activations := make([]GenerationActivation, len(candidates))
+	for i, a := range candidates {
 		activations[i] = storeGenerationActivation(a)
 	}
 	handles, errs := s.StageGenerationBatch(ctx, activations)
@@ -40,9 +40,9 @@ func (s *Store) StageGenerationCandidates(ctx context.Context, native []ingest.G
 	return staged, errs
 }
 
-func (s *Store) ActivateStagedGenerationCandidates(ctx context.Context, native []ingest.GenerationActivation, staged []ingest.GenerationStaged) []ingest.NativeActivationResult {
-	activations := make([]GenerationActivation, len(native))
-	for i, a := range native {
+func (s *Store) ActivateStagedGenerationCandidates(ctx context.Context, candidates []ingest.GenerationActivation, staged []ingest.GenerationStaged) []ingest.NativeActivationResult {
+	activations := make([]GenerationActivation, len(candidates))
+	for i, a := range candidates {
 		activations[i] = storeGenerationActivation(a)
 		if i < len(staged) {
 			activations[i].Prepared, _ = staged[i].(*PreparedGeneration)

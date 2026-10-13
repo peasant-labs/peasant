@@ -450,7 +450,7 @@ func WithStore(s SessionStore) PipelineOption {
 	return func(p *Pipeline) { p.store = s }
 }
 
-// WithGenerationID overrides the installed identity assigned to native
+// WithGenerationID overrides the installed identity assigned to
 // managed-generation candidates. Production leaves it unset so every attempt
 // mints a fresh opaque identity; a deterministic caller injects a stable
 // source. The identity must be a single confined path component.
@@ -2032,7 +2032,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// optional surfaces explicitly.
 			usedGenerationCandidate := false
 			if declared != strictIndexFormat {
-				candidate, builder, candidateErr := p.buildGenerationCandidate(ctx, im, input, indexer)
+				candidate, builder, candidateErr := p.buildGenerationCandidate(ctx, input, indexer)
 				if builder {
 					usedGenerationCandidate = true
 					if candidateErr != nil {
