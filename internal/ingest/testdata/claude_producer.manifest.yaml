@@ -19,3 +19,4 @@ requiredNames:
   - proof-failure-refusal
   - provider-file-absent
   - malformed-refusal
+  - control-record-over-cap
