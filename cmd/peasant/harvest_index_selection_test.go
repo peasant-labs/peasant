@@ -308,7 +308,8 @@ func setHarvestIndexProducerVersion(t *testing.T, db *store.Store, id ingest.Ses
 	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET index_version = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{version, string(id)}})
 }
 
-func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixture harvestIndexSessionFixture, files map[string][]byte) {	t.Helper()
+func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixture harvestIndexSessionFixture, files map[string][]byte) {
+	t.Helper()
 	age, err := time.ParseDuration(fixture.Age)
 	if err != nil {
 		t.Fatal(err)
