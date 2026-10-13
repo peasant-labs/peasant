@@ -24,24 +24,24 @@ type mountedNativeStore struct {
 }
 
 var (
-	_ NativeGenerationBatchStager    = (*mountedNativeStore)(nil)
-	_ NativeGenerationBatchActivator = (*mountedNativeStore)(nil)
-	_ NativeGenerationActivator      = (*mountedNativeStore)(nil)
+	_ GenerationBatchStager    = (*mountedNativeStore)(nil)
+	_ GenerationBatchActivator = (*mountedNativeStore)(nil)
+	_ GenerationActivator      = (*mountedNativeStore)(nil)
 )
 
-func (s *mountedNativeStore) StageNativeGenerations(ctx context.Context, a []NativeGenerationActivation) ([]NativeGenerationStaged, []error) {
+func (s *mountedNativeStore) StageGenerationCandidates(ctx context.Context, a []GenerationActivation) ([]GenerationStaged, []error) {
 	for _, activation := range a {
-		s.maxCandidate = max(s.maxCandidate, nativeCandidateWriteBytes(&NativeGenerationCandidate{Result: activation.Generation, Blobs: activation.Blobs}))
+		s.maxCandidate = max(s.maxCandidate, generationCandidateWriteBytes(&GenerationCandidate{Result: activation.Generation, Blobs: activation.Blobs}))
 	}
-	return s.recorder.StageNativeGenerations(ctx, a)
+	return s.recorder.StageGenerationCandidates(ctx, a)
 }
 
-func (s *mountedNativeStore) ActivateStagedNativeGenerations(ctx context.Context, a []NativeGenerationActivation, h []NativeGenerationStaged) []NativeActivationResult {
-	return s.recorder.ActivateStagedNativeGenerations(ctx, a, h)
+func (s *mountedNativeStore) ActivateStagedGenerationCandidates(ctx context.Context, a []GenerationActivation, h []GenerationStaged) []NativeActivationResult {
+	return s.recorder.ActivateStagedGenerationCandidates(ctx, a, h)
 }
 
-func (s *mountedNativeStore) ActivateNativeGeneration(ctx context.Context, a NativeGenerationActivation) (ActivationOutcome, error) {
-	return s.recorder.ActivateNativeGeneration(ctx, a)
+func (s *mountedNativeStore) ActivateGenerationCandidate(ctx context.Context, a GenerationActivation) (ActivationOutcome, error) {
+	return s.recorder.ActivateGenerationCandidate(ctx, a)
 }
 
 func TestNativeMountedAdmission(t *testing.T) {
@@ -74,7 +74,7 @@ func TestNativeMountedAdmission(t *testing.T) {
 			}
 			prepareIndexParallelInputs(t, p, metas)
 			p.indexers = map[Harness]TranscriptIndexer{HarnessCodex: NewCodexIndexer(p.fs)}
-			p.harvesterVersions = NativeGenerationTargets(HarvesterVersionRegistry)
+			p.harvesterVersions = GenerationTargets(HarvesterVersionRegistry)
 			done := make(chan struct{})
 			var indexed []indexedMeta
 			var logs []IndexLogEntry

@@ -14,16 +14,16 @@ import (
 )
 
 var _ AuthoritativeTranscriptIndexer = (*OpenCodeIndexer)(nil)
-var _ RetainedContentCapturer = (*OpenCodeIndexer)(nil)
+var _ StoredContentCapturer = (*OpenCodeIndexer)(nil)
 
-// CaptureRetainedContent reports the retained OpenCode input's own
+// CaptureStoredContent reports the retained OpenCode input's own
 // completeness. A legacy directory-origin session is parsed from the exact
 // native message/part tree captured for it, the same tree an ordinary index
 // run hashes; a message whose part directory is absent means rows the adapter
 // could not read, so that capture is incomplete, never certified. A managed
 // projection is captured through the strict parser, which refuses anything
 // it cannot certify.
-func (idx *OpenCodeIndexer) CaptureRetainedContent(ctx context.Context, s DiscoveredSession) (ContentCaptureResult, error) {
+func (idx *OpenCodeIndexer) CaptureStoredContent(ctx context.Context, s DiscoveredSession) (ContentCaptureResult, error) {
 	if err := ctx.Err(); err != nil {
 		return ContentCaptureResult{}, err
 	}

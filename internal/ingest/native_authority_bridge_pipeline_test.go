@@ -94,7 +94,7 @@ func runOpenCodeAuthorityBridgePipeline(t *testing.T, tc nativeRefreshRepairCase
 	execBridgeSQL(t, db, `UPDATE session_content_captures SET transcript_origin = ? WHERE session_id = ?`,
 		int64(ingest.TranscriptOriginOpenCodeCurrentSQLite), string(sid))
 	setStoredIndexFormat(t, db, sid, tc.StoredIndexerVersion, tc.StoredIndexFormat)
-	setSessionAdapterVersion(t, db, sid, ingest.NativeGenerationRepairTargets[ingest.HarnessOpenCode].AdapterVersion)
+	setSessionAdapterVersion(t, db, sid, ingest.GenerationRepairTargets[ingest.HarnessOpenCode].AdapterVersion)
 
 	entriesBefore, err := db.ListEntries(t.Context(), sid)
 	if err != nil {

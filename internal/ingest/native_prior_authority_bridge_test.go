@@ -152,13 +152,13 @@ func loadBridgePriorDocument(t *testing.T) bridgePriorDocument {
 type bridgePriorStore struct {
 	MetricsStore
 
-	prior          *NativeGenerationPrior
+	prior          *GenerationPrior
 	authority      *StoredCaptureAuthority
 	authorityErr   error
 	authorityReads int
 }
 
-func (s *bridgePriorStore) ReadNativeGenerationPrior(context.Context, SessionID) (*NativeGenerationPrior, error) {
+func (s *bridgePriorStore) ReadGenerationPrior(context.Context, SessionID) (*GenerationPrior, error) {
 	return s.prior, nil
 }
 
@@ -171,10 +171,10 @@ func (s *bridgePriorStore) ReadStoredCaptureAuthority(context.Context, SessionID
 // store without the authority reader bridges nothing and keeps the empty prior.
 type priorOnlyStore struct {
 	MetricsStore
-	prior *NativeGenerationPrior
+	prior *GenerationPrior
 }
 
-func (s *priorOnlyStore) ReadNativeGenerationPrior(context.Context, SessionID) (*NativeGenerationPrior, error) {
+func (s *priorOnlyStore) ReadGenerationPrior(context.Context, SessionID) (*GenerationPrior, error) {
 	return s.prior, nil
 }
 
@@ -210,7 +210,7 @@ func TestOpenCodePriorLoaderBridgesStoredCaptureAuthority(t *testing.T) {
 				store = fake
 			}
 			p := &Pipeline{metricsStore: store, config: PipelineConfig{Force: tc.Force, Reindex: tc.Reindex}}
-			prior, err := p.openCodePriorLoader()(ctx, session)
+			prior, err := openCodeGenerationPrior(ctx, session, generationPriorAccess{p: p, session: session})
 			if tc.WantError {
 				if err == nil {
 					t.Fatal("an authority read failure produced no error")
@@ -231,11 +231,11 @@ func TestOpenCodePriorLoaderBridgesStoredCaptureAuthority(t *testing.T) {
 	}
 }
 
-func activePriorFor(tc bridgePriorCase) *NativeGenerationPrior {
+func activePriorFor(tc bridgePriorCase) *GenerationPrior {
 	if tc.Prior != "active-complete" {
 		return nil
 	}
-	return &NativeGenerationPrior{HasCompleteGeneration: true, Aliases: NewProjectionPriorState()}
+	return &GenerationPrior{HasCompleteGeneration: true, Aliases: NewProjectionPriorState()}
 }
 
 func assertBridgePrior(t *testing.T, tc bridgePriorCase, prior OpenCodeProvenancePrior, authority *StoredCaptureAuthority) {

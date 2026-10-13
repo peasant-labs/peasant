@@ -482,95 +482,57 @@ type OpenCodeProvenancePrior struct {
 	CaptureAuthority *StoredCaptureAuthority
 }
 
-// OpenCodeProvenanceIndexerConfig wires the provenance candidate path into an
-// OpenCodeIndexer. Snapshot supplies the read-only native snapshot, Metadata
-// supplies the pipeline-owned session metadata, and GenerationID assigns the
-// installed generation. Prior optionally supplies the last-good alias state,
-// retained captured prefix, and completeness so unchanged native entries keep
-// their identities. Allocator optionally overrides the opaque-ref allocator
-// (production uses RandomRefAllocator). The path stays disabled until the
-// managed repair activation enables it with real native candidates; while
-// disabled every existing V1 flow is untouched.
-type OpenCodeProvenanceIndexerConfig struct {
-	Enabled      bool
-	Snapshot     func(ctx context.Context, session DiscoveredSession) (OpenCodeHistorySnapshot, error)
-	Metadata     func(session DiscoveredSession) (schema.UnifiedMetadata, error)
-	GenerationID func(session DiscoveredSession) string
-	Prior        func(ctx context.Context, session DiscoveredSession) (OpenCodeProvenancePrior, error)
-	Allocator    RefAllocator
-}
-
-// WithOpenCodeProvenanceCapture enables the provenance candidate path with its
-// injected snapshot, metadata, and generation dependencies.
-func WithOpenCodeProvenanceCapture(config OpenCodeProvenanceIndexerConfig) OpenCodeIndexerOption {
-	return func(idx *OpenCodeIndexer) { idx.provenanceCapture = config }
-}
-
-// IndexOpenCodeProvenanceV2 is the concrete-V2 provenance exit: the same
-// validated candidate BuildNativeGeneration produces, without the captured
-// content map the maintenance composition stages.
-func (idx *OpenCodeIndexer) IndexOpenCodeProvenanceV2(ctx context.Context, session DiscoveredSession) (indexformat.V2, error) {
-	candidate, err := idx.BuildNativeGeneration(ctx, session)
-	if err != nil {
-		return indexformat.V2{}, err
-	}
-	return candidate.Result, nil
-}
-
-// BuildNativeGeneration is the OpenCode provenance production exit that also
-// returns the full captured bytes and the prior document activation persists:
-// one read-only snapshot through native typed classification and fork proof
-// into the shared validated generation contract. The prior dependency supplies
-// the last-good alias state, retained captured prefix, and completeness, so
-// unchanged native entries keep stable refs, an append reuses its identities, a
+// BuildGeneration is the OpenCode producer exit. It reads one recorded snapshot
+// through the typed classification and fork proof into the shared validated
+// generation contract, and returns the full captured bytes and the prior
+// document activation persists. The attempt's prior source supplies the
+// last-good alias state, retained captured prefix, and completeness, so
+// unchanged recorded entries keep stable refs, an append reuses its identities, a
 // retry reuses its allocations, and a deleted parent cannot blank the captured
 // child prefix. An incomplete capture is returned to activation with its
 // validated completeness: a first discovery may install it without success
 // stamps, but replacing an existing complete generation with an incomplete one
 // is refused with OpenCodeIncompleteProvenanceError so the last good generation
-// survives. The candidate is never silently degraded to a thinner V1 result.
-func (idx *OpenCodeIndexer) BuildNativeGeneration(ctx context.Context, session DiscoveredSession) (NativeGenerationCandidate, error) {
-	config := idx.provenanceCapture
-	if !config.Enabled {
-		return NativeGenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the provenance candidate path is disabled", Recovery: "enable the path with a real snapshot before requesting a V2 candidate"}
-	}
-	if config.Snapshot == nil || config.Metadata == nil || config.GenerationID == nil {
-		return NativeGenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its snapshot, metadata, or generation dependency", Recovery: "wire all three dependencies before requesting a V2 candidate"}
+// survives. The candidate is never silently degraded to a thinner V1 result,
+// and every internal failure leaves through the fixed-shape refusal with no
+// source locator, raw dependency cause, or native identifier.
+func (idx *OpenCodeIndexer) BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
+	session := in.Session
+	prior, err := openCodeGenerationPrior(ctx, session, in.Prior)
+	if err != nil {
+		return GenerationCandidate{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "run candidate before the snapshot", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "run candidate before the snapshot", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
 	}
-	prior := OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}
-	if config.Prior != nil {
-		loaded, err := config.Prior(ctx, session)
-		if err != nil {
-			return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load prior evidence", "the last-good alias and captured-prefix evidence could not be loaded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", err)
-		}
-		prior = loaded
-		if prior.Aliases.Entries == nil {
-			prior.Aliases = NewProjectionPriorState()
-		}
+	if in.OpenCode == nil {
+		return GenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its recorded-source access", Recovery: "wire the recorded-source access before requesting a generation"}
 	}
-	snapshot, err := config.Snapshot(ctx, session)
+	if in.GenerationID == "" {
+		return GenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its generation identity", Recovery: "assign the installed generation identity before requesting a generation"}
+	}
+	snapshot, err := in.OpenCode.Snapshot(ctx, recordedSourceLocator(in.RecordedMetadata))
 	if err != nil {
-		return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "snapshot native history", "the read-only native snapshot failed", "verify the native source and retry; no candidate was produced", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "snapshot recorded history", "the read-only recorded-source snapshot failed", "verify the recorded source and retry; no candidate was produced", err)
 	}
-	metadata, err := config.Metadata(session)
+	if snapshot.SessionID != session.SessionID.String() {
+		return GenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "snapshot recorded history", Reason: "the snapshot names a different session", Recovery: "snapshot the session the attempt describes; no candidate was produced"}
+	}
+	metadata, err := openCodeAttemptMetadata(in.RecordedMetadata, session)
 	if err != nil {
-		return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "read session metadata", "the session metadata could not be read", "repair the metadata dependency and retry; no candidate was produced", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "read session metadata", "the session metadata could not be read", "repair the metadata input and retry; no candidate was produced", err)
 	}
-	generationID := config.GenerationID(session)
-	capture, err := BuildOpenCodeProvenanceCapture(snapshot, generationID, metadata, prior)
+	capture, err := BuildOpenCodeProvenanceCapture(snapshot, in.GenerationID, metadata, prior)
 	if err != nil {
-		return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
 	}
-	allocator := config.Allocator
+	allocator := in.Allocator
 	if allocator == nil {
 		allocator = RandomRefAllocator{}
 	}
 	built, content, err := BuildV2WithContent(capture, allocator)
 	if err != nil {
-		return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
 	}
 	if built.Generation.Completeness != indexformat.GenerationCompletenessComplete {
 		// An incomplete candidate is refused EARLY, before activation, when any
@@ -594,7 +556,7 @@ func (idx *OpenCodeIndexer) BuildNativeGeneration(ctx context.Context, session D
 			if len(snapshot.SourceEvidenceDigest) == 0 {
 				diagnostics = append(diagnostics, "the snapshot carries no evidence digest")
 			}
-			return NativeGenerationCandidate{}, &OpenCodeIncompleteProvenanceError{SessionID: snapshot.SessionID, Completeness: built.Generation.Completeness, Diagnostics: diagnostics}
+			return GenerationCandidate{}, &OpenCodeIncompleteProvenanceError{SessionID: snapshot.SessionID, Completeness: built.Generation.Completeness, Diagnostics: diagnostics}
 		}
 		// First discovery: return the validated incomplete candidate to
 		// activation without success stamps. Activation refuses to overwrite a
@@ -602,12 +564,75 @@ func (idx *OpenCodeIndexer) BuildNativeGeneration(ctx context.Context, session D
 	}
 	priorEvidence, err := nextOpenCodeProvenancePrior(built, snapshot)
 	if err != nil {
-		return NativeGenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "persist prior evidence", "the prior document for the validated candidate could not be encoded", "correct the capture or the allocator and retry; no candidate was produced", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "persist prior evidence", "the prior document for the validated candidate could not be encoded", "correct the capture or the allocator and retry; no candidate was produced", err)
 	}
-	return NativeGenerationCandidate{Result: built, Blobs: content, PriorEvidence: priorEvidence}, nil
+	return GenerationCandidate{Result: built, Blobs: content, PriorEvidence: priorEvidence}, nil
 }
 
-var _ NativeGenerationBuilder = (*OpenCodeIndexer)(nil)
+// openCodeGenerationPrior resolves one attempt's prior evidence into the
+// OpenCode prior the candidate consumes. A nil source yields the empty prior of
+// a first discovery. With no active generation it consults the stored capture
+// certificate, so an incomplete candidate is refused early against the same
+// authority the content writer guards. The certificate's own origin and format
+// are preserved; no alias and no captured-prefix proof is fabricated.
+func openCodeGenerationPrior(ctx context.Context, session DiscoveredSession, source GenerationPriorSource) (OpenCodeProvenancePrior, error) {
+	prior := OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}
+	if source == nil {
+		return prior, nil
+	}
+	loaded, err := source.ReadGenerationPrior(ctx)
+	if err != nil {
+		return OpenCodeProvenancePrior{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load prior evidence", "the last-good alias and captured-prefix evidence could not be loaded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", err)
+	}
+	if loaded == nil {
+		authority, authorityErr := source.ReadStoredCaptureAuthority(ctx)
+		if authorityErr != nil {
+			return OpenCodeProvenancePrior{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load stored capture authority", "the stored last-good capture certificate could not be read", "verify the stored capture store and retry; no candidate was produced and the last good generation stays active", authorityErr)
+		}
+		if authority != nil {
+			prior.CaptureAuthority = authority
+		}
+		return prior, nil
+	}
+	translated := OpenCodeProvenancePrior{Aliases: loaded.Aliases, HasCompleteGeneration: loaded.HasCompleteGeneration}
+	if len(loaded.PriorEvidence) > 0 {
+		document, decodeErr := DecodeOpenCodeProvenancePrior(loaded.PriorEvidence)
+		if decodeErr != nil {
+			return OpenCodeProvenancePrior{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load prior evidence", "the retained prior document could not be decoded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", decodeErr)
+		}
+		translated = document
+		translated.Aliases = loaded.Aliases
+		translated.HasCompleteGeneration = loaded.HasCompleteGeneration
+	}
+	translated.Aliases = generationPriorState(loaded)
+	return translated, nil
+}
+
+// recordedSourceLocator returns the recorded source locator the attempt was
+// captured from. An absent metadata document records none, and the access seam
+// refuses the empty locator rather than reading an unrelated path.
+func recordedSourceLocator(metadata *schema.UnifiedMetadata) string {
+	if metadata == nil {
+		return ""
+	}
+	return metadata.Source.FilePath
+}
+
+// openCodeAttemptMetadata resolves the metadata agreement the capture is built
+// from. The committed metadata is the attempt's one authority; a nil or
+// mismatched document refuses rather than building a generation against another
+// session's identity.
+func openCodeAttemptMetadata(metadata *schema.UnifiedMetadata, session DiscoveredSession) (schema.UnifiedMetadata, error) {
+	if metadata == nil {
+		return schema.UnifiedMetadata{}, fmt.Errorf("the committed metadata for session %s is absent; no candidate was produced and the stored generation is unchanged", session.SessionID)
+	}
+	if metadata.SessionID != session.SessionID {
+		return schema.UnifiedMetadata{}, fmt.Errorf("the committed metadata for session %s names session %s; no candidate was produced and the stored generation is unchanged", session.SessionID, metadata.SessionID)
+	}
+	return *metadata, nil
+}
+
+var _ GenerationBuilder = (*OpenCodeIndexer)(nil)
 
 // nextOpenCodeProvenancePrior builds the prior document the activation persists
 // beside the new generation: the new aliases, the retained captured prefix the

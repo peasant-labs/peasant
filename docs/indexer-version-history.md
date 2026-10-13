@@ -24,7 +24,7 @@ Claude Code, Cursor and Strike changes are in capture/indexing, not adapter
 metadata extraction, so their adapter revision does not change. Pi extraction
 and indexing share the changed native document decoder, so both revisions change.
 Managed-generation overrides are declared independently in
-`NativeGenerationRepairTargets`; never replace them with the format-1 baseline.
+`GenerationRepairTargets`; never replace them with the format-1 baseline.
 
 | Native-generation harness | Adapter change | Indexer change | Index format | Reason |
 |---|---|---|---|---|

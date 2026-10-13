@@ -7,11 +7,11 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// NativeGenerationCandidate is one validated managed generation plus the full
+// GenerationCandidate is one validated managed generation plus the full
 // captured bytes its content records address and the opaque prior evidence a
-// reopen needs. A native indexer produces it; only the maintenance activation
+// reopen needs. A harness indexer produces it; only the maintenance activation
 // stages, persists and activates it, so no format target is enabled here.
-type NativeGenerationCandidate struct {
+type GenerationCandidate struct {
 	Result indexformat.V2
 	// Blobs holds the full bytes for every content record the generation
 	// names, including retained inherited evidence, so activation can stage a
@@ -24,19 +24,88 @@ type NativeGenerationCandidate struct {
 	Diagnostics   []DiagnosticEntry
 }
 
-// NativeGenerationBuilder is implemented by a native harness indexer that can
-// produce a managed generation with its captured content. The maintenance
-// composition calls it instead of the retained entry exit when the harness's
-// declared output format is 2.
-type NativeGenerationBuilder interface {
-	BuildNativeGeneration(context.Context, DiscoveredSession) (NativeGenerationCandidate, error)
+// GenerationBuilder is implemented by a harness indexer that can produce a
+// managed generation with its captured content. The maintenance composition
+// asserts it at dispatch instead of switching on concrete indexer types, and
+// calls it instead of the retained entry exit when the harness's declared
+// output format declares a managed generation.
+type GenerationBuilder interface {
+	BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error)
 }
 
-// NativeGenerationActivation is the ingest-owned activation envelope the store
+// GenerationBuildInput carries the per-attempt evidence, identity and access
+// seams one BuildGeneration call needs. It is built per attempt by the
+// composition, so a builder never reaches back into pipeline state and no
+// dependency bag is shared between attempts.
+type GenerationBuildInput struct {
+	// Session is the attempt's session. Codex and OpenCode acquire their own
+	// source from it; the file-sourced builders consume CapturedTranscript.
+	Session DiscoveredSession
+	// GenerationID is the installed identity activation owns. It is empty when
+	// no identity source is wired, and a builder refuses rather than inventing
+	// one.
+	GenerationID string
+	// RecordedMetadata is the committed, identity-validated metadata of the
+	// attempt. It is the publication-capture snapshot and the agreement the
+	// generation indexes; nil only for an attempt built without a committed
+	// artifact.
+	RecordedMetadata *schema.UnifiedMetadata
+	// CapturedTranscript holds the attempt's exact verified bytes. It is
+	// normalized non-nil for file-sourced attempts, so a captured empty
+	// transcript is distinguishable from one that was never captured; it stays
+	// nil when the attempt has no captured bytes.
+	CapturedTranscript []byte
+	// Prior is the per-attempt evidence-access façade. It is never nil when
+	// built by the composition; a builder tolerates nil for a direct caller.
+	Prior GenerationPriorSource
+	// Allocator mints or replays the opaque refs the projection allocates. A
+	// fixture injects a deterministic one; production uses RandomRefAllocator.
+	Allocator RefAllocator
+	// OpenCode is the per-attempt recorded-source access for the OpenCode
+	// builder. It performs no I/O until Snapshot is called and stays nil for a
+	// builder that does not consume it.
+	OpenCode OpenCodeSourceAccess
+}
+
+// GenerationPriorSource is the evidence-access façade for one attempt. It
+// exposes the active generation's reusable evidence and the stored
+// content-capture certificate that stands in for it when there is none, with
+// the mode and capability gates applied by the implementation, so a builder
+// consumes evidence without knowing the store or the run's mode.
+type GenerationPriorSource interface {
+	// ReadGenerationPrior returns the active generation's reusable evidence, or
+	// nil when the session has no active generation.
+	ReadGenerationPrior(ctx context.Context) (*GenerationPrior, error)
+	// ReadStoredCaptureAuthority returns the stored capture certificate that
+	// holds last-good full authority, or nil. It is consulted only when
+	// ReadGenerationPrior returned nil; the implementation returns (nil, nil)
+	// under an operator-initiated rebuild and when no authority reader is
+	// configured.
+	ReadStoredCaptureAuthority(ctx context.Context) (*StoredCaptureAuthority, error)
+}
+
+// OpenCodeSourceAccess snapshots one attempt's recorded OpenCode source. It is
+// bound to the attempt's session; a non-empty locator is required, and the
+// implementation issues SELECTs only.
+type OpenCodeSourceAccess interface {
+	Snapshot(ctx context.Context, locator string) (OpenCodeHistorySnapshot, error)
+}
+
+// generationPriorState normalizes a loaded prior's reusable projection state,
+// so an absent alias table rebuilds an empty state instead of reusing another
+// generation's identities.
+func generationPriorState(prior *GenerationPrior) ProjectionPriorState {
+	if prior == nil || prior.Aliases.Entries == nil {
+		return NewProjectionPriorState()
+	}
+	return prior.Aliases
+}
+
+// GenerationActivation is the ingest-owned activation envelope the store
 // turns into one immutable managed generation. It mirrors the store's own
 // preconditions so the composition can reuse the expected-state compare and
 // the success-stamp rules without importing the store package.
-type NativeGenerationActivation struct {
+type GenerationActivation struct {
 	Generation       indexformat.V2
 	Blobs            map[schema.SourceEntryRef][]byte
 	PriorEvidence    []byte
@@ -59,7 +128,7 @@ type NativeGenerationActivation struct {
 	Capture *PublicationCaptureWrite
 }
 
-// NativeGenerationActivator stages and activates one managed generation in ONE
+// GenerationActivator stages and activates one managed generation in ONE
 // transaction after staging its files (content blobs written, the manifest and
 // the directory fsynced), repairs the exported metadata, and
 // reconciles any interrupted activation. The production store implements it.
@@ -67,43 +136,43 @@ type NativeGenerationActivation struct {
 // not-committed invocations so per-invocation counts stay truthful; a
 // post-commit repair failure returns CommittedNow or AlreadyCommitted with a
 // GenerationRepairPendingError, never a rollback.
-type NativeGenerationActivator interface {
-	ActivateNativeGeneration(context.Context, NativeGenerationActivation) (ActivationOutcome, error)
+type GenerationActivator interface {
+	ActivateGenerationCandidate(context.Context, GenerationActivation) (ActivationOutcome, error)
 }
 
-// NativeGenerationStager prepares one managed generation's files ahead of the
+// GenerationStager prepares one managed generation's files ahead of the
 // activation, so independent sessions can write their content in
 // parallel while only the manifest fsync, the install and the database commit
 // stay on the serialized
 // writer. Preparation records no activation intent and installs nothing: the
-// returned handle is inert until passed to a NativeGenerationPreparedActivator,
+// returned handle is inert until passed to a GenerationPreparedActivator,
 // so a candidate the pipeline later refuses can never be recovered into
 // authority. It is optional: without a stager, activation stages inline. A
 // preparation error is not reported as the candidate's outcome; the activation
 // that follows stages inline and owns the authoritative disposition.
-type NativeGenerationStager interface {
-	StageNativeGeneration(context.Context, NativeGenerationActivation) (NativeGenerationStaged, error)
+type GenerationStager interface {
+	StageGenerationCandidate(context.Context, GenerationActivation) (GenerationStaged, error)
 }
 
-// NativeGenerationStaged is the opaque store-owned handle for one prepared
+// GenerationStaged is the opaque store-owned handle for one prepared
 // candidate. It names the candidate it prepared and carries nothing the
 // pipeline may inspect or persist.
-type NativeGenerationStaged interface {
-	NativeGenerationCandidateID() string
+type GenerationStaged interface {
+	GenerationCandidateID() string
 }
 
-// NativeGenerationPreparedActivator activates one candidate using the files a
-// NativeGenerationStager prepared for it. It applies exactly the guarded
-// activation of NativeGenerationActivator; the handle only saves the file
+// GenerationPreparedActivator activates one candidate using the files a
+// GenerationStager prepared for it. It applies exactly the guarded
+// activation of GenerationActivator; the handle only saves the file
 // writes.
-type NativeGenerationPreparedActivator interface {
-	ActivateStagedNativeGeneration(context.Context, NativeGenerationActivation, NativeGenerationStaged) (ActivationOutcome, error)
+type GenerationPreparedActivator interface {
+	ActivateStagedGenerationCandidate(context.Context, GenerationActivation, GenerationStaged) (ActivationOutcome, error)
 }
 
-// NativeGenerationBatchStager stages independent candidates in bounded shared
+// GenerationBatchStager stages independent candidates in bounded shared
 // transactions. Results retain input order, including refused candidates.
-type NativeGenerationBatchStager interface {
-	StageNativeGenerations(context.Context, []NativeGenerationActivation) ([]NativeGenerationStaged, []error)
+type GenerationBatchStager interface {
+	StageGenerationCandidates(context.Context, []GenerationActivation) ([]GenerationStaged, []error)
 }
 
 // NativeActivationResult is one request's guarded activation outcome.
@@ -112,17 +181,17 @@ type NativeActivationResult struct {
 	Err     error
 }
 
-// NativeGenerationBatchActivator commits staged independent candidates together
+// GenerationBatchActivator commits staged independent candidates together
 // with per-session savepoints. A nil handle stages that candidate inline.
-type NativeGenerationBatchActivator interface {
-	ActivateStagedNativeGenerations(context.Context, []NativeGenerationActivation, []NativeGenerationStaged) []NativeActivationResult
+type GenerationBatchActivator interface {
+	ActivateStagedGenerationCandidates(context.Context, []GenerationActivation, []GenerationStaged) []NativeActivationResult
 }
 
-// NativeGenerationPrior is the last-good evidence a prior activation left for
+// GenerationPrior is the last-good evidence a prior activation left for
 // one session. Metadata and Aliases are derived from the committed generation;
 // PriorEvidence is the exact persisted harness document, or nil when none was
 // written. A nil reader result means the session has no active generation.
-type NativeGenerationPrior struct {
+type GenerationPrior struct {
 	GenerationID          string
 	Metadata              *schema.UnifiedMetadata
 	Aliases               ProjectionPriorState
@@ -130,12 +199,12 @@ type NativeGenerationPrior struct {
 	PriorEvidence         []byte
 }
 
-// NativeGenerationPriorReader loads the active generation's prior evidence for
+// GenerationPriorReader loads the active generation's prior evidence for
 // one session. A session with no active generation returns (nil, nil): a first
 // discovery must build an empty prior state rather than reuse another
 // session's aliases.
-type NativeGenerationPriorReader interface {
-	ReadNativeGenerationPrior(context.Context, SessionID) (*NativeGenerationPrior, error)
+type GenerationPriorReader interface {
+	ReadGenerationPrior(context.Context, SessionID) (*GenerationPrior, error)
 }
 
 // StoredCaptureAuthority names the stored content-capture certificate that

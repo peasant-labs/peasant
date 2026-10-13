@@ -293,7 +293,7 @@ func snapshotInstall(t *testing.T, w installWorld, id ingest.SessionID) installS
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Repair, err = db.ListSessionsNeedingRepair(t.Context(), ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry))
+	s.Repair, err = db.ListSessionsNeedingRepair(t.Context(), ingest.GenerationTargets(ingest.HarvesterVersionRegistry))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func requireInstallSettled(t *testing.T, w installWorld, id ingest.SessionID, tr
 	if err != nil {
 		t.Fatal(err)
 	}
-	versions := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)[defaults.HarnessClaudeCode]
+	versions := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[defaults.HarnessClaudeCode]
 	if a.ArtifactHash != *s.State.ArtifactHash || a.Metadata.SchemaVersion != ingest.CurrentSchemaVersion || a.Metadata.AdapterVersion == nil || *a.Metadata.AdapterVersion != versions.AdapterVersion || s.State.IndexerVersion != versions.IndexerVersion {
 		t.Fatalf("pair/producer state does not match: %+v %+v", a.Metadata, s.State)
 	}

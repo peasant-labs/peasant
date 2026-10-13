@@ -94,8 +94,8 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 				t.Fatal(err)
 			}
 			session := ingest.DiscoveredSession{SessionID: sid, Harness: ingest.HarnessCodex, SourcePath: ingest.ResolvedPath(source)}
-			idx := ingest.NewCodexIndexer(&ingest.OSFileSystem{}, ingest.WithCodexProvenanceCapture(ingest.CodexProvenanceIndexerConfig{Enabled: true, GenerationID: func(ingest.DiscoveredSession) string { return "unknown-native" }}))
-			candidate, err := idx.BuildNativeGeneration(t.Context(), session)
+			idx := ingest.NewCodexIndexer(&ingest.OSFileSystem{})
+			candidate, err := idx.BuildGeneration(t.Context(), ingest.GenerationBuildInput{Session: session, GenerationID: "unknown-native"})
 			if row.CopyBoundary != nil {
 				source := &fixtureCodexSource{authority: ingest.CodexSourceAuthority{StableThreadID: string(sid), Kind: ingest.CodexAuthorityDetachedFile, CurrentPointer: "current", PhysicalSourceID: "synthetic-stream", HistoryMode: json.RawMessage(`"legacy"`), CopyBoundary: row.CopyBoundary, OriginalOwnershipProven: true}, sources: map[string][]byte{"current": []byte(data)}}
 				history, captureErr := ingest.CaptureCodexHistoryWithRetry(t.Context(), source, session, nil)
@@ -103,7 +103,7 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 					t.Fatal(captureErr)
 				}
 				built, buildErr := ingest.BuildCodexCandidate(ingest.CodexCandidateInput{History: history, Base: schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: sid, ModelHarness: ingest.HarnessCodex}, GenerationID: "unknown-native"})
-				candidate = ingest.NativeGenerationCandidate{Result: built.V2, Blobs: built.Content}
+				candidate = ingest.GenerationCandidate{Result: built.V2, Blobs: built.Content}
 				err = buildErr
 			}
 			if row.Error {
@@ -128,8 +128,8 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation := ingest.NativeGenerationActivation{Generation: candidate.Result, Blobs: candidate.Blobs, IndexerVersion: 18, IndexedAtMs: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1}}
-			if _, err := db.ActivateNativeGeneration(t.Context(), activation); err != nil {
+			activation := ingest.GenerationActivation{Generation: candidate.Result, Blobs: candidate.Blobs, IndexerVersion: 18, IndexedAtMs: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1}}
+			if _, err := db.ActivateGenerationCandidate(t.Context(), activation); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
@@ -184,7 +184,7 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 			broken := activation
 			broken.Generation.Generation.ID = "broken-unknown-native"
 			broken.Blobs = map[schema.SourceEntryRef][]byte{}
-			if _, err := db.ActivateNativeGeneration(t.Context(), broken); err == nil {
+			if _, err := db.ActivateGenerationCandidate(t.Context(), broken); err == nil {
 				t.Fatal("missing blobs authorized replacement")
 			}
 			if err := db.WithSessionSnapshot(t.Context(), sid, check); err != nil {

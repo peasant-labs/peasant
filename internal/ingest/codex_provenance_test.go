@@ -1002,19 +1002,16 @@ func TestCodexProvenanceIndexerAdmitsV2Candidate(t *testing.T) {
 		SourcePath:   ingest.ResolvedPath(path),
 		SourceFormat: ingest.SourceFormatJSONL,
 	}
-	indexer := ingest.NewCodexIndexer(&ingest.OSFileSystem{}, ingest.WithCodexProvenanceCapture(ingest.CodexProvenanceIndexerConfig{
-		Enabled:      true,
-		GenerationID: func(ingest.DiscoveredSession) string { return "gen-indexer" },
+	indexer := ingest.NewCodexIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(t.Context(), ingest.GenerationBuildInput{
+		Session:      session,
+		GenerationID: "gen-indexer",
 		Allocator:    &codexScriptedAllocator{entries: []string{"e_u1", "e_ctx1"}, submissions: []string{"s_u1"}},
-	}))
-	result, err := indexer.IndexTranscriptResult(t.Context(), session)
+	})
 	if err != nil {
-		t.Fatalf("IndexTranscriptResult: %v", err)
+		t.Fatalf("BuildGeneration: %v", err)
 	}
-	v2, ok := result.(indexformat.V2)
-	if !ok {
-		t.Fatalf("result = %T, want indexformat.V2", result)
-	}
+	v2 := candidate.Result
 	if v2.Generation.Metadata.Stats.TurnCount != 2 {
 		t.Errorf("turnCount = %d, want 2", v2.Generation.Metadata.Stats.TurnCount)
 	}

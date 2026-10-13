@@ -173,85 +173,61 @@ func retainedGraphTarget(prior *schema.UnifiedMetadata, kind schema.SessionRelat
 	return nil
 }
 
-// CodexProvenanceIndexerConfig wires the native provenance candidate path into
-// a CodexIndexer. Prior supplies the last good graph/alias state (nil before a
-// first install), GenerationID assigns the installed generation identity, and
-// Allocator mints or replays opaque references. The path stays disabled until
-// the maintenance activation enables it; while disabled every retained V1 flow
-// is untouched.
-type CodexProvenanceIndexerConfig struct {
-	Enabled      bool
-	Prior        func(session DiscoveredSession) (*schema.UnifiedMetadata, ProjectionPriorState, error)
-	GenerationID func(session DiscoveredSession) string
-	Allocator    RefAllocator
-}
-
-// IndexCodexCandidateV2 runs the production Codex provenance exit: read-only
+// BuildGeneration runs the production Codex candidate exit: read-only
 // current-history capture with recheck, metadata extraction over the verified
 // incarnation, native classification, canonical graph mapping, and the shared
-// validated generation projection. It returns the concrete format-2 candidate
-// the maintenance activation consumes and enables no format target itself.
-func (idx *CodexIndexer) IndexCodexCandidateV2(ctx context.Context, session DiscoveredSession) (indexformat.V2, error) {
-	config := idx.provenanceCapture
-	if !config.Enabled {
-		return indexformat.V2{}, fmt.Errorf("ingest.CodexIndexer.IndexCodexCandidateV2: the provenance candidate path is disabled for session %s; the retained entry path is unchanged; enable it with a real generation identity before requesting a candidate", session.SessionID)
+// validated generation projection. It returns the validated format-2 candidate
+// together with the full captured bytes its content records address and its
+// source diagnostics, so activation can stage a self-contained generation
+// without reopening the mutable source. It enables no format target itself.
+//
+// Every refusal leaves through the fixed completion diagnostic: the validated
+// harness and session identity plus the fixed operation, reason, effect and
+// recovery categories, never the source locator, a raw validator value, or a
+// wrapped dependency, capture, classifier or filesystem error.
+func (idx *CodexIndexer) BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationCandidate{}, codexCandidateCompletionFailure(in.Session, err)
 	}
-	if config.GenerationID == nil {
-		return indexformat.V2{}, fmt.Errorf("ingest.CodexIndexer.IndexCodexCandidateV2: no generation identity source was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", session.SessionID)
-	}
-	var prior *schema.UnifiedMetadata
-	priorState := NewProjectionPriorState()
-	if config.Prior != nil {
-		loadedPrior, loadedState, err := config.Prior(session)
-		if err != nil {
-			return indexformat.V2{}, err
-		}
-		prior = loadedPrior
-		priorState = loadedState
-	}
-	generationID := config.GenerationID(session)
-	candidate, err := idx.BuildCodexCandidateForSession(ctx, session, prior, priorState, config.Allocator, generationID)
+	candidate, err := idx.buildCodexGeneration(ctx, in)
 	if err != nil {
-		return indexformat.V2{}, err
+		return GenerationCandidate{}, codexCandidateCompletionFailure(in.Session, err)
 	}
-	return candidate.V2, nil
+	return candidate, nil
 }
 
-// BuildNativeGeneration runs the production Codex candidate exit and returns
-// the validated generation together with the full captured bytes its content
-// records address and its source diagnostics. The maintenance composition uses
-// this exit so it can stage a self-contained generation; the concrete-V2 exit
-// above is the same candidate without the content map.
-func (idx *CodexIndexer) BuildNativeGeneration(ctx context.Context, session DiscoveredSession) (NativeGenerationCandidate, error) {
-	config := idx.provenanceCapture
-	if !config.Enabled {
-		return NativeGenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildNativeGeneration: the provenance candidate path is disabled for session %s; the retained entry path is unchanged; enable it with a real generation identity before requesting a candidate", session.SessionID)
-	}
-	if config.GenerationID == nil {
-		return NativeGenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildNativeGeneration: no generation identity source was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", session.SessionID)
+// buildCodexGeneration composes the Codex candidate from the attempt's prior
+// evidence. It never consults the stored-capture authority: a Codex candidate is
+// acquired from the recorded rollout source, and the prior only supplies the
+// last-good graph metadata and the reusable alias state a refresh must retain.
+func (idx *CodexIndexer) buildCodexGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
+	if in.GenerationID == "" {
+		return GenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildGeneration: no generation identity was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", in.Session.SessionID)
 	}
 	var prior *schema.UnifiedMetadata
 	priorState := NewProjectionPriorState()
-	if config.Prior != nil {
-		loadedPrior, loadedState, err := config.Prior(session)
+	if in.Prior != nil {
+		loaded, err := in.Prior.ReadGenerationPrior(ctx)
 		if err != nil {
-			return NativeGenerationCandidate{}, err
+			return GenerationCandidate{}, err
 		}
-		prior = loadedPrior
-		priorState = loadedState
+		if loaded != nil {
+			prior = loaded.Metadata
+			priorState = generationPriorState(loaded)
+		}
 	}
-	candidate, err := idx.BuildCodexCandidateForSession(ctx, session, prior, priorState, config.Allocator, config.GenerationID(session))
+	candidate, err := idx.BuildCodexCandidateForSession(ctx, in.Session, prior, priorState, in.Allocator, in.GenerationID)
 	if err != nil {
-		return NativeGenerationCandidate{}, err
+		return GenerationCandidate{}, err
 	}
-	return NativeGenerationCandidate{
+	return GenerationCandidate{
 		Result:      candidate.V2,
 		Blobs:       candidate.Content,
 		Diagnostics: candidate.Diagnostics,
 	}, nil
 }
 
-var _ NativeGenerationBuilder = (*CodexIndexer)(nil)
+var _ GenerationBuilder = (*CodexIndexer)(nil)
 
 // codexCandidateRefusal is the safe refusal for the Codex candidate boundary.
 // It names a fixed operation, reason, caller effect, and recovery, and never

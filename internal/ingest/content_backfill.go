@@ -37,13 +37,13 @@ type ContentCaptureResult struct {
 	InputBytes int64
 }
 
-// RetainedContentCapturer is implemented by an indexer whose retained capture
+// StoredContentCapturer is implemented by an indexer whose retained capture
 // can tell that rows were filtered or omitted before it parsed them. It is the
 // producer of ContentCaptureResult: the adapter, not the store, declares
 // completeness. Indexers without it are captured through the strict parser,
 // which refuses anything it cannot certify, so their result is complete.
-type RetainedContentCapturer interface {
-	CaptureRetainedContent(context.Context, DiscoveredSession) (ContentCaptureResult, error)
+type StoredContentCapturer interface {
+	CaptureStoredContent(context.Context, DiscoveredSession) (ContentCaptureResult, error)
 }
 
 // UnrepresentedRecordError means a well-formed source record of a kind this
@@ -60,15 +60,15 @@ func (e *UnrepresentedRecordError) Error() string {
 	return fmt.Sprintf("unrepresented %s record %q; this build does not represent it, so the transcript cannot be certified complete", e.Harness, e.Kind)
 }
 
-// RetainedContentIncompleteError means the retained input is insufficient for
+// StoredContentIncompleteError means the retained input is insufficient for
 // a verified complete capture. No row was written: the stored capture stays
 // incomplete and the session stays eligible for a native refresh.
-type RetainedContentIncompleteError struct {
+type StoredContentIncompleteError struct {
 	SessionID SessionID
 	Harness   Harness
 }
 
-func (e *RetainedContentIncompleteError) Error() string {
+func (e *StoredContentIncompleteError) Error() string {
 	return fmt.Sprintf("content recovery %s: the retained %s input omits rows the adapter filtered or could not read, so it cannot certify a complete capture; nothing was written and the stored capture stays incomplete; regenerate harvest from the complete native source", e.SessionID, e.Harness)
 }
 
@@ -374,12 +374,12 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	if !ok {
 		return contentRecovery{}, fmt.Errorf("content backfill %s: harness lacks authoritative parser; upgrade Peasant before retrying", id)
 	}
-	capture, err := p.captureRetainedContent(ctx, indexer, session, authority)
+	capture, err := p.captureStoredContent(ctx, indexer, session, authority)
 	if err != nil {
 		return contentRecovery{}, err
 	}
 	if !capture.Complete {
-		return contentRecovery{}, &RetainedContentIncompleteError{SessionID: id, Harness: session.Harness}
+		return contentRecovery{}, &StoredContentIncompleteError{SessionID: id, Harness: session.Harness}
 	}
 	now := time.Now().UnixMilli()
 	write := SessionEntryWrite{
@@ -425,7 +425,7 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	return contentRecovery{session: session, entries: len(capture.Entries), recoveredAt: now, charged: capture.InputBytes}, nil
 }
 
-// captureRetainedContent produces the ContentCaptureResult for one retained
+// captureStoredContent produces the ContentCaptureResult for one retained
 // session. An indexer that knows about filtered or omitted rows reports its
 // own completeness; every other strict parser either certifies the retained
 // bytes or refuses them. InputHash is the index input digest over the bytes
@@ -435,9 +435,9 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 // path: validated omission stand-ins in the immutable retained stream are the
 // omission evidence, not guessed original bytes. An invalid or unaccounted
 // candidate refuses before any counting or persistence.
-func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {
-	if capturer, ok := indexer.(RetainedContentCapturer); ok {
-		capture, err := capturer.CaptureRetainedContent(ctx, session)
+func (p *Pipeline) captureStoredContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {
+	if capturer, ok := indexer.(StoredContentCapturer); ok {
+		capture, err := capturer.CaptureStoredContent(ctx, session)
 		if err != nil {
 			return ContentCaptureResult{}, err
 		}

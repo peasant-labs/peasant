@@ -574,9 +574,8 @@ func runOpenCodeFlowIncomplete(t *testing.T, source testfixture.MaterializedSour
 	}
 
 	completePrior := ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState(), HasCompleteGeneration: true}
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, completePrior, fork)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, completePrior, fork))
 	var incomplete *ingest.OpenCodeIncompleteProvenanceError
 	if !errors.As(err, &incomplete) {
 		t.Fatalf("incomplete replacement error = %v, want OpenCodeIncompleteProvenanceError", err)
@@ -601,9 +600,8 @@ func runOpenCodeFlowAuthorityBridge(t *testing.T, source testfixture.Materialize
 			FailureCode:      ingest.ContentCaptureFailureCode(row.AuthorityCode),
 		},
 	}
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, prior, nil)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, prior, nil))
 	var incomplete *ingest.OpenCodeIncompleteProvenanceError
 	if !errors.As(err, &incomplete) {
 		t.Fatalf("authority bridge error = %v, want OpenCodeIncompleteProvenanceError", err)
@@ -655,9 +653,8 @@ func openCodeFlowOrigin(t *testing.T, name string) ingest.TranscriptOrigin {
 func runOpenCodeFlowFirstDiscoveryPreview(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
 	t.Helper()
 	session := openCodeFlowSession(row)
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	candidate, err := indexer.BuildNativeGeneration(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil))
 	if err != nil {
 		t.Fatalf("first-discovery preview was refused: %v", err)
 	}
@@ -731,11 +728,10 @@ func runOpenCodeFlowProjectionRefusal(t *testing.T, source testfixture.Materiali
 	t.Helper()
 	applyOpenCodeFlowRowsReplacing(t, source, row.SessionID, row.ReplaceRows)
 	session := openCodeFlowSession(row)
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil))
 	if err == nil {
-		t.Fatal("duplicate native part identities produced a V2 candidate instead of a refusal")
+		t.Fatal("duplicate recorded part identities produced a V2 candidate instead of a refusal")
 	}
 	assertOpenCodeSanitizedRefusal(t, err, row)
 }
@@ -744,10 +740,10 @@ func runOpenCodeFlowAllocatorRefusal(t *testing.T, source testfixture.Materializ
 	t.Helper()
 	applyOpenCodeFlowRowsReplacing(t, source, row.SessionID, row.ReplaceRows)
 	session := openCodeFlowSession(row)
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	config.Allocator = openCodeInvalidRefAllocator{}
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	buildInput := openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
+	buildInput.Allocator = openCodeInvalidRefAllocator{}
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err == nil {
 		t.Fatal("an allocator that returns no valid ref produced a V2 candidate instead of a refusal")
 	}
@@ -757,12 +753,10 @@ func runOpenCodeFlowAllocatorRefusal(t *testing.T, source testfixture.Materializ
 func runOpenCodeFlowDependencyRefusal(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
 	t.Helper()
 	session := openCodeFlowSession(row)
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	config.Prior = func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-		return ingest.OpenCodeProvenancePrior{}, errors.New("prior evidence load failed while reading " + row.Sentinel)
-	}
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	buildInput := openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
+	buildInput.Prior = generationTestPriorSource{priorErr: errors.New("prior evidence load failed while reading " + row.Sentinel)}
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err == nil {
 		t.Fatal("a failing prior dependency produced a V2 candidate instead of a refusal")
 	}
@@ -904,20 +898,21 @@ func openCodeFlowFork(spec *ocFlowFork) *ingest.OpenCodeForkProof {
 	}
 }
 
-func openCodeFlowProvenanceConfig(source testfixture.MaterializedSource, sessionID string, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.OpenCodeProvenanceIndexerConfig {
+// openCodeFlowBuildInput composes one fixture attempt's builder input: the
+// synthetic recorded source the case materialized, the fixture metadata
+// agreement, the case's prior evidence, and the production allocator.
+func openCodeFlowBuildInput(t *testing.T, source testfixture.MaterializedSource, session ingest.DiscoveredSession, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.GenerationBuildInput {
+	t.Helper()
 	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
-	return ingest.OpenCodeProvenanceIndexerConfig{
-		Enabled: true,
-		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
-			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, sessionID, ingest.OpenCodeSnapshotOptions{Fork: fork})
-		},
-		Metadata: func(_ ingest.DiscoveredSession) (schema.UnifiedMetadata, error) {
-			return schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(sessionID), ModelHarness: schema.HarnessOpenCode}, nil
-		},
-		GenerationID: func(_ ingest.DiscoveredSession) string { return "gen-flow-" + sessionID },
-		Prior: func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-			return prior, nil
-		},
+	metadata := schema.UnifiedMetadata{SchemaVersion: 1, SessionID: session.SessionID, ModelHarness: schema.HarnessOpenCode}
+	return ingest.GenerationBuildInput{
+		Session:          session,
+		GenerationID:     "gen-flow-" + session.SessionID.String(),
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorFromOpenCode(t, prior),
+		OpenCode: generationTestOpenCodeSource{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
+			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, session.SessionID.String(), ingest.OpenCodeSnapshotOptions{Fork: fork})
+		}},
 	}
 }
 
@@ -1026,7 +1021,7 @@ func TestOpenCodeProvenanceNativeReadOnlySnapshot(t *testing.T) {
 	if snapshot.SourceEvidenceDigest == "" {
 		t.Fatal("snapshot carries no source evidence digest")
 	}
-	built := buildOpenCodeNativeGeneration(t, snapshot)
+	built := buildOpenCodeGeneration(t, snapshot)
 	if built.Generation.Metadata.Stats.InputSubmissionCount == nil || *built.Generation.Metadata.Stats.InputSubmissionCount != 1 {
 		t.Fatalf("inputSubmissionCount = %v, want 1", built.Generation.Metadata.Stats.InputSubmissionCount)
 	}
@@ -1052,25 +1047,22 @@ func TestOpenCodeProvenanceIndexerWiring(t *testing.T) {
 		Harness:          ingest.HarnessOpenCode,
 		TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite,
 	}
-	config := ingest.OpenCodeProvenanceIndexerConfig{
-		Enabled: true,
-		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
+	metadata := schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(openCodeNativeChild), ModelHarness: schema.HarnessOpenCode}
+	buildInput := ingest.GenerationBuildInput{
+		Session:          session,
+		GenerationID:     "gen-native-wiring",
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorSource{},
+		OpenCode: generationTestOpenCodeSource{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
 			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{})
-		},
-		Metadata: func(_ ingest.DiscoveredSession) (schema.UnifiedMetadata, error) {
-			return schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(openCodeNativeChild), ModelHarness: schema.HarnessOpenCode}, nil
-		},
-		GenerationID: func(_ ingest.DiscoveredSession) string { return "gen-native-wiring" },
+		}},
 	}
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	result, err := indexer.IndexTranscriptResult(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err != nil {
-		t.Fatalf("IndexTranscriptResult: %v", err)
+		t.Fatalf("BuildGeneration: %v", err)
 	}
-	format, ok := result.(indexformat.V2)
-	if !ok {
-		t.Fatalf("IndexTranscriptResult returned %T, want indexformat.V2", result)
-	}
+	format := candidate.Result
 	if format.Generation.Metadata.Stats.InputSubmissionCount == nil || *format.Generation.Metadata.Stats.InputSubmissionCount != 1 {
 		t.Fatalf("inputSubmissionCount = %v, want 1", format.Generation.Metadata.Stats.InputSubmissionCount)
 	}
@@ -1078,9 +1070,15 @@ func TestOpenCodeProvenanceIndexerWiring(t *testing.T) {
 		t.Fatalf("generation id = %q, want gen-native-wiring", format.Generation.ID)
 	}
 
-	missing := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(ingest.OpenCodeProvenanceIndexerConfig{Enabled: true}))
-	if _, err := missing.IndexTranscriptResult(context.Background(), session); err == nil || !strings.Contains(err.Error(), "misses its snapshot, metadata, or generation dependency") {
-		t.Fatalf("IndexTranscriptResult with missing dependencies = %v, want a fail-closed dependency refusal", err)
+	missingInput := buildInput
+	missingInput.OpenCode = nil
+	if _, err := indexer.BuildGeneration(context.Background(), missingInput); err == nil || !strings.Contains(err.Error(), "misses its recorded-source access") {
+		t.Fatalf("BuildGeneration with missing recorded-source access = %v, want a fail-closed configuration refusal", err)
+	}
+	unidentified := buildInput
+	unidentified.GenerationID = ""
+	if _, err := indexer.BuildGeneration(context.Background(), unidentified); err == nil || !strings.Contains(err.Error(), "misses its generation identity") {
+		t.Fatalf("BuildGeneration with no generation identity = %v, want a fail-closed configuration refusal", err)
 	}
 }
 
@@ -1139,33 +1137,29 @@ func TestOpenCodeProvenanceAdmissionThroughNativeSQL(t *testing.T) {
 
 func indexOpenCodeNative(t *testing.T, source testfixture.MaterializedSource, session ingest.DiscoveredSession, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) indexformat.V2 {
 	t.Helper()
-	config := openCodeNativeProvenanceConfig(source, session.SessionID.String(), prior, fork)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	result, err := indexer.IndexTranscriptResult(context.Background(), session)
+	buildInput := openCodeNativeBuildInput(t, source, session, prior, fork)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err != nil {
-		t.Fatalf("IndexTranscriptResult: %v", err)
+		t.Fatalf("BuildGeneration: %v", err)
 	}
-	built, ok := result.(indexformat.V2)
-	if !ok {
-		t.Fatalf("IndexTranscriptResult returned %T, want indexformat.V2", result)
-	}
-	return built
+	return candidate.Result
 }
 
-func openCodeNativeProvenanceConfig(source testfixture.MaterializedSource, sessionID string, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.OpenCodeProvenanceIndexerConfig {
+// openCodeNativeBuildInput composes one attempt's builder input over the shared
+// synthetic native-row fixture.
+func openCodeNativeBuildInput(t *testing.T, source testfixture.MaterializedSource, session ingest.DiscoveredSession, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.GenerationBuildInput {
+	t.Helper()
 	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
-	return ingest.OpenCodeProvenanceIndexerConfig{
-		Enabled: true,
-		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
-			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, sessionID, ingest.OpenCodeSnapshotOptions{Fork: fork})
-		},
-		Metadata: func(_ ingest.DiscoveredSession) (schema.UnifiedMetadata, error) {
-			return schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(sessionID), ModelHarness: schema.HarnessOpenCode}, nil
-		},
-		GenerationID: func(_ ingest.DiscoveredSession) string { return "gen-native-" + sessionID },
-		Prior: func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-			return prior, nil
-		},
+	metadata := schema.UnifiedMetadata{SchemaVersion: 1, SessionID: session.SessionID, ModelHarness: schema.HarnessOpenCode}
+	return ingest.GenerationBuildInput{
+		Session:          session,
+		GenerationID:     "gen-native-" + session.SessionID.String(),
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorFromOpenCode(t, prior),
+		OpenCode: generationTestOpenCodeSource{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
+			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, session.SessionID.String(), ingest.OpenCodeSnapshotOptions{Fork: fork})
+		}},
 	}
 }
 
@@ -1222,12 +1216,12 @@ func assertOpenCodeExistingIdentitiesStable(t *testing.T, label string, before, 
 	}
 }
 
-func buildOpenCodeNativeGeneration(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot) indexformat.V2 {
+func buildOpenCodeGeneration(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot) indexformat.V2 {
 	t.Helper()
-	return buildOpenCodeNativeGenerationPrior(t, snapshot, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()})
+	return buildOpenCodeGenerationPrior(t, snapshot, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()})
 }
 
-func buildOpenCodeNativeGenerationPrior(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot, prior ingest.OpenCodeProvenancePrior) indexformat.V2 {
+func buildOpenCodeGenerationPrior(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot, prior ingest.OpenCodeProvenancePrior) indexformat.V2 {
 	t.Helper()
 	capture, err := ingest.BuildOpenCodeProvenanceCapture(snapshot, "gen-native", schema.UnifiedMetadata{
 		SchemaVersion: 1,

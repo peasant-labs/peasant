@@ -98,13 +98,13 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 	if err := json.Unmarshal([]byte(forecast), &document); err != nil {
 		t.Fatalf("decode dry-run forecast: %v\n%s", err, forecast)
 	}
-	nativeTarget, declared := ingest.NativeGenerationRepairTargets[ingest.HarnessOpenCode]
+	nativeTarget, declared := ingest.GenerationRepairTargets[ingest.HarnessOpenCode]
 	if !declared {
-		t.Fatal("fixture invariant: opencode declares no native generation target")
+		t.Fatal("fixture invariant: opencode declares no managed generation target")
 	}
 	baseline, registered := ingest.HarvesterVersionRegistry[ingest.HarnessOpenCode]
 	if !registered || baseline == nativeTarget {
-		t.Fatalf("fixture invariant: baseline %+v equals native target %+v; the forecast cannot distinguish them", baseline, nativeTarget)
+		t.Fatalf("fixture invariant: baseline %+v equals managed-generation target %+v; the forecast cannot distinguish them", baseline, nativeTarget)
 	}
 	reported, ok := document.Summary.HarvesterVersions[string(ingest.HarnessOpenCode)]
 	if !ok {

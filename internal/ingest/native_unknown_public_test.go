@@ -116,47 +116,47 @@ type nativeUnknownFailingStore struct {
 	stageErrs []error
 }
 
-func dropFirstBlob(activation ingest.NativeGenerationActivation) ingest.NativeGenerationActivation {
+func dropFirstBlob(activation ingest.GenerationActivation) ingest.GenerationActivation {
 	activation.Blobs = maps.Clone(activation.Blobs)
 	delete(activation.Blobs, activation.Generation.Generation.Content[0].Ref)
 	return activation
 }
 
-func (s *nativeUnknownFailingStore) StageNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.NativeGenerationStaged, error) {
+func (s *nativeUnknownFailingStore) StageGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation) (ingest.GenerationStaged, error) {
 	if !s.fail {
-		return s.Store.StageNativeGeneration(ctx, activation)
+		return s.Store.StageGenerationCandidate(ctx, activation)
 	}
 	// Exercise the real artifact preparation's missing-blob failure, not a
 	// prepared success result or a fabricated accounting diagnostic.
-	staged, err := s.Store.StageNativeGeneration(ctx, dropFirstBlob(activation))
+	staged, err := s.Store.StageGenerationCandidate(ctx, dropFirstBlob(activation))
 	s.stageMu.Lock()
 	s.stageErrs = append(s.stageErrs, err)
 	s.stageMu.Unlock()
 	return staged, err
 }
 
-func (s *nativeUnknownFailingStore) ActivateStagedNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation, staged ingest.NativeGenerationStaged) (ingest.ActivationOutcome, error) {
+func (s *nativeUnknownFailingStore) ActivateStagedGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation, staged ingest.GenerationStaged) (ingest.ActivationOutcome, error) {
 	if s.fail {
 		activation = dropFirstBlob(activation)
 	}
-	return s.Store.ActivateStagedNativeGeneration(ctx, activation, staged)
+	return s.Store.ActivateStagedGenerationCandidate(ctx, activation, staged)
 }
 
-func (s *nativeUnknownFailingStore) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
+func (s *nativeUnknownFailingStore) ActivateGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation) (ingest.ActivationOutcome, error) {
 	if s.fail {
 		activation = dropFirstBlob(activation)
 	}
-	return s.Store.ActivateNativeGeneration(ctx, activation)
+	return s.Store.ActivateGenerationCandidate(ctx, activation)
 }
 
-func (s *nativeUnknownFailingStore) StageNativeGenerations(ctx context.Context, activations []ingest.NativeGenerationActivation) ([]ingest.NativeGenerationStaged, []error) {
+func (s *nativeUnknownFailingStore) StageGenerationCandidates(ctx context.Context, activations []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {
 	if s.fail {
-		activations = append([]ingest.NativeGenerationActivation(nil), activations...)
+		activations = append([]ingest.GenerationActivation(nil), activations...)
 		for i := range activations {
 			activations[i] = dropFirstBlob(activations[i])
 		}
 	}
-	staged, errs := s.Store.StageNativeGenerations(ctx, activations)
+	staged, errs := s.Store.StageGenerationCandidates(ctx, activations)
 	if s.fail {
 		s.stageMu.Lock()
 		s.stageErrs = append(s.stageErrs, errs...)
@@ -165,22 +165,22 @@ func (s *nativeUnknownFailingStore) StageNativeGenerations(ctx context.Context, 
 	return staged, errs
 }
 
-func (s *nativeUnknownFailingStore) ActivateStagedNativeGenerations(ctx context.Context, activations []ingest.NativeGenerationActivation, staged []ingest.NativeGenerationStaged) []ingest.NativeActivationResult {
+func (s *nativeUnknownFailingStore) ActivateStagedGenerationCandidates(ctx context.Context, activations []ingest.GenerationActivation, staged []ingest.GenerationStaged) []ingest.NativeActivationResult {
 	if s.fail {
-		activations = append([]ingest.NativeGenerationActivation(nil), activations...)
+		activations = append([]ingest.GenerationActivation(nil), activations...)
 		for i := range activations {
 			activations[i] = dropFirstBlob(activations[i])
 		}
 	}
-	return s.Store.ActivateStagedNativeGenerations(ctx, activations, staged)
+	return s.Store.ActivateStagedGenerationCandidates(ctx, activations, staged)
 }
 
 var (
-	_ ingest.NativeGenerationBatchStager       = (*nativeUnknownFailingStore)(nil)
-	_ ingest.NativeGenerationBatchActivator    = (*nativeUnknownFailingStore)(nil)
-	_ ingest.NativeGenerationActivator         = (*nativeUnknownFailingStore)(nil)
-	_ ingest.NativeGenerationStager            = (*nativeUnknownFailingStore)(nil)
-	_ ingest.NativeGenerationPreparedActivator = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationBatchStager       = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationBatchActivator    = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationActivator         = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationStager            = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationPreparedActivator = (*nativeUnknownFailingStore)(nil)
 )
 
 func TestNativeUnknownSourceToPublication(t *testing.T) {

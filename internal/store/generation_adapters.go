@@ -14,24 +14,24 @@ import (
 )
 
 var (
-	_ ingest.NativeGenerationBatchStager       = (*Store)(nil)
-	_ ingest.NativeGenerationBatchActivator    = (*Store)(nil)
-	_ ingest.NativeGenerationActivator         = (*Store)(nil)
-	_ ingest.NativeGenerationStager            = (*Store)(nil)
-	_ ingest.NativeGenerationPreparedActivator = (*Store)(nil)
-	_ ingest.NativeGenerationStaged            = (*PreparedGeneration)(nil)
-	_ ingest.NativeGenerationPriorReader       = (*Store)(nil)
+	_ ingest.GenerationBatchStager             = (*Store)(nil)
+	_ ingest.GenerationBatchActivator          = (*Store)(nil)
+	_ ingest.GenerationActivator               = (*Store)(nil)
+	_ ingest.GenerationStager                  = (*Store)(nil)
+	_ ingest.GenerationPreparedActivator       = (*Store)(nil)
+	_ ingest.GenerationStaged                  = (*PreparedGeneration)(nil)
+	_ ingest.GenerationPriorReader             = (*Store)(nil)
 	_ ingest.NativePriorCaptureAuthorityReader = (*Store)(nil)
 	_ ingest.ContentSweeper                    = (*Store)(nil)
 )
 
-func (s *Store) StageNativeGenerations(ctx context.Context, native []ingest.NativeGenerationActivation) ([]ingest.NativeGenerationStaged, []error) {
+func (s *Store) StageGenerationCandidates(ctx context.Context, native []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {
 	activations := make([]GenerationActivation, len(native))
 	for i, a := range native {
-		activations[i] = generationActivationFromNative(a)
+		activations[i] = storeGenerationActivation(a)
 	}
 	handles, errs := s.StageGenerationBatch(ctx, activations)
-	staged := make([]ingest.NativeGenerationStaged, len(handles))
+	staged := make([]ingest.GenerationStaged, len(handles))
 	for i, h := range handles {
 		if h != nil {
 			staged[i] = h
@@ -40,10 +40,10 @@ func (s *Store) StageNativeGenerations(ctx context.Context, native []ingest.Nati
 	return staged, errs
 }
 
-func (s *Store) ActivateStagedNativeGenerations(ctx context.Context, native []ingest.NativeGenerationActivation, staged []ingest.NativeGenerationStaged) []ingest.NativeActivationResult {
+func (s *Store) ActivateStagedGenerationCandidates(ctx context.Context, native []ingest.GenerationActivation, staged []ingest.GenerationStaged) []ingest.NativeActivationResult {
 	activations := make([]GenerationActivation, len(native))
 	for i, a := range native {
-		activations[i] = generationActivationFromNative(a)
+		activations[i] = storeGenerationActivation(a)
 		if i < len(staged) {
 			activations[i].Prepared, _ = staged[i].(*PreparedGeneration)
 		}
@@ -56,10 +56,10 @@ func (s *Store) ActivateStagedNativeGenerations(ctx context.Context, native []in
 	return adapted
 }
 
-// generationActivationFromNative mirrors the ingest-owned activation envelope
+// storeGenerationActivation mirrors the ingest-owned activation envelope
 // into the store's own immutable activation. Both entry points (pre-staging and
 // activation) share it so their preconditions cannot drift.
-func generationActivationFromNative(activation ingest.NativeGenerationActivation) GenerationActivation {
+func storeGenerationActivation(activation ingest.GenerationActivation) GenerationActivation {
 	return GenerationActivation{
 		Generation:       activation.Generation,
 		Blobs:            activation.Blobs,
@@ -76,7 +76,7 @@ func generationActivationFromNative(activation ingest.NativeGenerationActivation
 	}
 }
 
-// ActivateNativeGeneration adapts the ingest-owned activation envelope to the
+// ActivateGenerationCandidate adapts the ingest-owned activation envelope to the
 // store's own immutable activation. It stages the content files and fsyncs the
 // manifest and the directory,
 // persists the opaque prior document, installs the generation, counts and
@@ -85,32 +85,32 @@ func generationActivationFromNative(activation ingest.NativeGenerationActivation
 // every other managed activation. The outcome carries the lock-derived
 // disposition for per-invocation counting; a post-commit repair failure
 // returns a GenerationRepairPendingError with committed authority.
-func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
-	outcome, err := s.ActivateGeneration(ctx, generationActivationFromNative(activation))
+func (s *Store) ActivateGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation) (ingest.ActivationOutcome, error) {
+	outcome, err := s.ActivateGeneration(ctx, storeGenerationActivation(activation))
 	return outcome, err
 }
 
-// StageNativeGeneration prepares one managed generation's content files in an
+// StageGenerationCandidate prepares one managed generation's content files in an
 // owned temporary directory without recording an activation intent or
 // installing anything, so independent sessions can write in
 // parallel while only the install and commit stay on the serialized writer.
-// The returned handle is consumed by ActivateStagedNativeGeneration; a handle
+// The returned handle is consumed by ActivateStagedGenerationCandidate; a handle
 // that is dropped (for example after the caller refuses stale input) can
 // never be activated by recovery.
-func (s *Store) StageNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.NativeGenerationStaged, error) {
-	prepared, err := s.StageGeneration(ctx, generationActivationFromNative(activation))
+func (s *Store) StageGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation) (ingest.GenerationStaged, error) {
+	prepared, err := s.StageGeneration(ctx, storeGenerationActivation(activation))
 	if err != nil {
 		return nil, err
 	}
 	return prepared, nil
 }
 
-// ActivateStagedNativeGeneration activates one candidate, installing the
-// files a prior StageNativeGeneration prepared when the handle belongs to this
+// ActivateStagedGenerationCandidate activates one candidate, installing the
+// files a prior StageGenerationCandidate prepared when the handle belongs to this
 // store and candidate. Any other handle is ignored and the candidate is
-// staged inline, exactly as ActivateNativeGeneration does.
-func (s *Store) ActivateStagedNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation, staged ingest.NativeGenerationStaged) (ingest.ActivationOutcome, error) {
-	generationActivation := generationActivationFromNative(activation)
+// staged inline, exactly as ActivateGenerationCandidate does.
+func (s *Store) ActivateStagedGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation, staged ingest.GenerationStaged) (ingest.ActivationOutcome, error) {
+	generationActivation := storeGenerationActivation(activation)
 	if prepared, ok := staged.(*PreparedGeneration); ok {
 		generationActivation.Prepared = prepared
 	}
@@ -148,7 +148,7 @@ func (s *Store) SweepFlaggedSessionsForHarvest(ctx context.Context) (int, []erro
 	return len(report.Sessions), report.Warnings, nil
 }
 
-// ReadNativeGenerationPrior loads the active generation's reusable evidence for
+// ReadGenerationPrior loads the active generation's reusable evidence for
 // one session: its committed metadata, the native-key aliases the projection
 // must reuse, whether a complete generation is already the last-good authority,
 // and the harness-owned prior document when one was persisted. A session with
@@ -157,13 +157,13 @@ func (s *Store) SweepFlaggedSessionsForHarvest(ctx context.Context) (int, []erro
 // structured rows (the metadata rebuilds from the catalog row, the children,
 // and the stats row, with the durable parent from the session row); a
 // file-backed one reads the projection tables and the prior document file.
-func (s *Store) ReadNativeGenerationPrior(ctx context.Context, sessionID schema.SessionID) (*ingest.NativeGenerationPrior, error) {
+func (s *Store) ReadGenerationPrior(ctx context.Context, sessionID schema.SessionID) (*ingest.GenerationPrior, error) {
 	if s.generationArtifacts == nil {
 		return nil, fmt.Errorf("store: managed generation support is not configured; the active generation's prior evidence cannot be loaded for session %s; open the store with WithGenerationArtifacts before refreshing", sessionID)
 	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("store: take connection to read the native generation prior for session %s: %w; no candidate was produced; restore database access and retry", sessionID, err)
+		return nil, fmt.Errorf("store: take connection to read the managed-generation prior for session %s: %w; no candidate was produced; restore database access and retry", sessionID, err)
 	}
 	defer s.pool.Put(conn)
 	active, err := readActiveGenerationOnConn(conn, sessionID)
@@ -225,8 +225,8 @@ func (s *Store) ReadStoredCaptureAuthority(ctx context.Context, sessionID schema
 // parent comes from the session row, since the catalog stores no ParentUUID),
 // the main entries hydrate from their body rows, and the alias table stays
 // the reusable-identity authority exactly as for file-backed generations.
-func readHarmonizedPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (*ingest.NativeGenerationPrior, error) {
-	prior := &ingest.NativeGenerationPrior{
+func readHarmonizedPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (*ingest.GenerationPrior, error) {
+	prior := &ingest.GenerationPrior{
 		GenerationID: generationID,
 		Aliases:      ingest.NewProjectionPriorState(),
 	}
@@ -334,8 +334,8 @@ func readHarmonizedMainEntriesOnConn(conn *sqlite.Conn, sessionID schema.Session
 	return entries, nil
 }
 
-func readGenerationPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (*ingest.NativeGenerationPrior, error) {
-	prior := &ingest.NativeGenerationPrior{
+func readGenerationPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (*ingest.GenerationPrior, error) {
+	prior := &ingest.GenerationPrior{
 		GenerationID: generationID,
 		Aliases:      ingest.NewProjectionPriorState(),
 	}

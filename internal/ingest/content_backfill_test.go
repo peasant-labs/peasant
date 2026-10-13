@@ -22,7 +22,7 @@ import (
 //go:embed testdata/content_backfill.yaml
 var captureBackfillFixtureData []byte
 
-func TestRetainedContentBackfill(t *testing.T) {
+func TestStoredContentBackfill(t *testing.T) {
 	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`

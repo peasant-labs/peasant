@@ -63,25 +63,25 @@ type nativeBatchRecordingStore struct {
 }
 
 var (
-	_ NativeGenerationBatchStager    = (*nativeBatchRecordingStore)(nil)
-	_ NativeGenerationBatchActivator = (*nativeBatchRecordingStore)(nil)
+	_ GenerationBatchStager    = (*nativeBatchRecordingStore)(nil)
+	_ GenerationBatchActivator = (*nativeBatchRecordingStore)(nil)
 )
 
-func (s *nativeBatchRecordingStore) StageNativeGenerations(_ context.Context, a []NativeGenerationActivation) ([]NativeGenerationStaged, []error) {
+func (s *nativeBatchRecordingStore) StageGenerationCandidates(_ context.Context, a []GenerationActivation) ([]GenerationStaged, []error) {
 	s.stageBatches = append(s.stageBatches, len(a))
 	if s.gate != nil {
 		s.gate.mu.Lock()
 		s.maxObserved = max(s.maxObserved, s.gate.used)
 		s.gate.mu.Unlock()
 	}
-	h := make([]NativeGenerationStaged, len(a))
+	h := make([]GenerationStaged, len(a))
 	for i := range a {
 		h[i] = benchStaged(a[i].Generation.Generation.ID)
 	}
 	return h, make([]error, len(a))
 }
 
-func (s *nativeBatchRecordingStore) ActivateStagedNativeGenerations(_ context.Context, a []NativeGenerationActivation, _ []NativeGenerationStaged) []NativeActivationResult {
+func (s *nativeBatchRecordingStore) ActivateStagedGenerationCandidates(_ context.Context, a []GenerationActivation, _ []GenerationStaged) []NativeActivationResult {
 	s.activationBatches = append(s.activationBatches, len(a))
 	r := make([]NativeActivationResult, len(a))
 	for i, a := range a {
@@ -98,7 +98,7 @@ func (s *nativeBatchRecordingStore) ActivateStagedNativeGenerations(_ context.Co
 	return r
 }
 
-func TestNativeGenerationBatchActivation(t *testing.T) {
+func TestGenerationBatchActivation(t *testing.T) {
 	for _, c := range loadNativeLaneFixtures(t, nativeBatchActivationYAML) {
 		t.Run(c.Name, func(t *testing.T) {
 			store := &nativeBatchRecordingStore{sweepRecordingStore: &sweepRecordingStore{}, refuse: c.Refuse, skip: c.Skip}
@@ -106,7 +106,7 @@ func TestNativeGenerationBatchActivation(t *testing.T) {
 			for i, n := range c.Entries {
 				results = append(results, benchNativeResult(t, i, n))
 			}
-			unit := nativeCandidateWriteBytes(results[0].nativeCandidate)
+			unit := generationCandidateWriteBytes(results[0].generationCandidate)
 			p := &Pipeline{metricsStore: store, config: PipelineConfig{Parallelism: 3, Write: WriteConfig{ActivationSessions: c.ActivationCap, BatchBytes: unit * c.ByteCapUnits}}}
 			flush := p.flushIndexParseResults(t.Context(), results, IndexOutcomeIndexed, "harvest", nil)
 			if !reflect.DeepEqual(store.activationBatches, c.Batches) {
@@ -134,10 +134,10 @@ func TestNativeStagedBytesCap(t *testing.T) {
 			var maxWeight int64
 			for i, n := range c.Entries {
 				r := benchNativeResult(t, i, n)
-				maxWeight = max(maxWeight, nativeCandidateWriteBytes(r.nativeCandidate))
+				maxWeight = max(maxWeight, generationCandidateWriteBytes(r.generationCandidate))
 				results = append(results, r)
 			}
-			cap := nativeCandidateWriteBytes(results[0].nativeCandidate) * c.CapUnits
+			cap := generationCandidateWriteBytes(results[0].generationCandidate) * c.CapUnits
 			gate := newStagedBytesGate(cap)
 			store := &nativeBatchRecordingStore{sweepRecordingStore: &sweepRecordingStore{}, refuse: c.Refuse, gate: gate}
 			p := &Pipeline{metricsStore: store, config: PipelineConfig{Parallelism: 3, Write: WriteConfig{BatchBytes: cap, BatchSessions: 10, ActivationSessions: 10}}}
