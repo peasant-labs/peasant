@@ -657,6 +657,20 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 	// collapses representations to one entry; byte or evidence equality never
 	// does, and an ambiguous first-wins selection never discards content.
 	collapseProvedMirrors(resolved)
+	// An omission placeholder stands at the omitted record's own position in
+	// the main stream. The per-block channel checks refuse the placeholder's
+	// own relocation flags, but another block can still pull it out of main by
+	// naming it as a carrier or by sharing a call identity or a proved
+	// correlation inside an uncertain component. Fail closed on the resolved
+	// result so no route can serve the omission notice inside earlier history.
+	for _, rb := range resolved {
+		if rb.block.Omitted == nil {
+			continue
+		}
+		if rb.section != 0 || rb.block.Uncertain {
+			return nil, fmt.Errorf("ingest.BuildGeneration: native key %q omission placeholder resolved to partition %d; uncertainty elsewhere in its connected carrier/call component moved the placeholder out of the omitted record's own position, where a reader would no longer see it; drop the carrier edge or drop the omission", rb.block.NativeKey, rb.section)
+		}
+	}
 	return resolved, nil
 }
 

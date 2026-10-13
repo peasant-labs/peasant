@@ -2055,6 +2055,62 @@ cases:
               section: {index: 0}
               nativeCorrelationKey: corr-omitted-union
               omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x, e_y]
+        wantError: omission placeholder resolved to partition
+        capture:
+          id: gen-channels-omitted-carrier-child-uncertain
+          sessionId: sess_chansomittedcarrierchild
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-carrier-child
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedcarrierchild
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+            - nativeKey: child1
+              section: {index: 0}
+              role: assistant
+              entryType: tool_use
+              depth: 1
+              carrierNativeKey: omitted1
+              toolCallKey: call-child
+              toolName: rg
+              toolArguments: rg parser
+              uncertainSubtree: true
+      - allocator: [e_x, e_y]
+        wantError: omission placeholder resolved to partition
+        capture:
+          id: gen-channels-omitted-carrier-child-ambiguous
+          sessionId: sess_chansomittedcarrierambiguous
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-carrier-child-ambiguous
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedcarrierambiguous
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+            - nativeKey: child1
+              section: {index: 0}
+              role: assistant
+              entryType: tool_use
+              depth: 1
+              carrierNativeKey: omitted1
+              toolCallKey: call-child
+              toolName: rg
+              toolArguments: rg parser
+              ambiguousPairKey: probe-pair
 
   - name: channels-extra-merge
     steps:
