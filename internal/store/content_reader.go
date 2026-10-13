@@ -90,6 +90,7 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 	}})
 	return
 }
+
 // GetSessionContentCapture is the display-effective capture read: a session
 // that retains a latest attempt reports the retained attempt's synthesized
 // capture (incomplete, preview-only, with the recorded failure code and time),
@@ -794,6 +795,9 @@ func loadRetainedAvailableEntriesOnConn(ctx context.Context, conn *sqlite.Conn, 
 	if err != nil {
 		return nil, capture, err
 	}
+	if err := retainedGenerationRowExistsOnConn(conn, id, pointer.generationID); err != nil {
+		return nil, capture, err
+	}
 	records, err := shimBodyRecordsForGenerationOnConn(conn, string(id), pointer.generationID, nil, nil)
 	if err != nil {
 		return nil, capture, err
@@ -807,6 +811,27 @@ func loadRetainedAvailableEntriesOnConn(ctx context.Context, conn *sqlite.Conn, 
 		return nil, capture, fmt.Errorf("store retained available content read: shape the retained attempt's stored evidence for session %s: %w; no preview was served; re-index the source or repair the retained attempt", id, err)
 	}
 	return entries, capture, nil
+}
+
+// retainedGenerationRowExistsOnConn refuses an available read whose retained
+// pointer names no stored generation row. Serving the empty projection instead
+// would draw a partial-flagged transcript with nothing in it, which reads as an
+// empty session rather than as a broken retained attempt.
+func retainedGenerationRowExistsOnConn(conn *sqlite.Conn, id ingest.SessionID, generationID string) error {
+	found := false
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(id), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store retained available content read: locate retained generation %s for session %s: %w; no preview was served; repair or clear the retained pointer", generationID, id, err)
+	}
+	if !found {
+		return fmt.Errorf("store retained available content read: session %s records retained generation %s but no generation row exists; no preview was served; re-index the source to rebuild the retained attempt", id, generationID)
+	}
+	return nil
 }
 
 // retainedAttemptCapture synthesizes the retained latest attempt's capture from
