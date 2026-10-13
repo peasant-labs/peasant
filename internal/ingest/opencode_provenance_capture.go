@@ -594,14 +594,13 @@ func openCodeGenerationPrior(ctx context.Context, session DiscoveredSession, sou
 		}
 		return prior, nil
 	}
-	translated := OpenCodeProvenancePrior{Aliases: loaded.Aliases, HasCompleteGeneration: loaded.HasCompleteGeneration}
+	translated := OpenCodeProvenancePrior{HasCompleteGeneration: loaded.HasCompleteGeneration}
 	if len(loaded.PriorEvidence) > 0 {
 		document, decodeErr := DecodeOpenCodeProvenancePrior(loaded.PriorEvidence)
 		if decodeErr != nil {
 			return OpenCodeProvenancePrior{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load prior evidence", "the retained prior document could not be decoded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", decodeErr)
 		}
 		translated = document
-		translated.Aliases = loaded.Aliases
 		translated.HasCompleteGeneration = loaded.HasCompleteGeneration
 	}
 	translated.Aliases = generationPriorState(loaded)

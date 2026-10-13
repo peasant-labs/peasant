@@ -36,7 +36,7 @@ func (p *Pipeline) generationIdentity(session DiscoveredSession) string {
 // deliberately non-authoritative wrapper never gains a builder surface it did
 // not declare. Activation happens after the parse, in the write path, so no
 // format target is enabled here.
-func (p *Pipeline) buildGenerationCandidate(ctx context.Context, im indexedMeta, input *CapturedIndexInput, indexer TranscriptIndexer) (GenerationCandidate, bool, error) {
+func (p *Pipeline) buildGenerationCandidate(ctx context.Context, input *CapturedIndexInput, indexer TranscriptIndexer) (GenerationCandidate, bool, error) {
 	builder, ok := indexer.(GenerationBuilder)
 	if !ok {
 		return GenerationCandidate{}, false, nil
@@ -70,8 +70,8 @@ func (p *Pipeline) generationBuildInput(input *CapturedIndexInput) GenerationBui
 }
 
 // priorReader returns the store-backed prior inventory, or nil when the
-// configured store cannot answer it. A store without it produces no native
-// candidate work rather than guessing an empty prior.
+// configured store cannot answer it. A store without it produces no
+// managed-generation candidate work rather than guessing an empty prior.
 func (p *Pipeline) priorReader() GenerationPriorReader {
 	if p.metricsStore == nil {
 		return nil
