@@ -256,6 +256,11 @@ const (
 	// written and no object was staged, and the call advanced only the
 	// bookkeeping stamps. It counts zero, like AlreadyCommitted.
 	ActivationSkipped
+	// ActivationRetainedPreview reports the requested candidate was an
+	// unaccounted source-records omission preview over a publishable full
+	// authority: the active generation is unchanged and the candidate was
+	// retained as the latest attempt. It counts zero, like AlreadyCommitted.
+	ActivationRetainedPreview
 )
 
 // ActivationOutcome is the request-scoped activation result. RepairPending

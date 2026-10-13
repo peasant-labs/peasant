@@ -107,26 +107,36 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 		}
 		return notCommitted(err)
 	}
-	if repair, err := s.needsRepair(ctx, sessionID); err != nil {
+	// The retention pre-check is a routing hint; the authoritative decision
+	// re-runs under the session lock inside the commit. A retention-eligible
+	// candidate never enters repair and never compares against the active
+	// view: it is retained, not installed.
+	retained, err := s.retentionEligible(ctx, generationActivationWrite(activation))
+	if err != nil {
 		return notCommitted(err)
-	} else if repair {
-		stamps := activationStamps(activation, prepared)
-		if err := s.lockedRepair(ctx, sessionID, prepared, stamps); err != nil {
-			return notCommitted(err)
-		}
-		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID}, nil
 	}
-	if active, err := s.readActiveView(ctx, sessionID); err != nil {
-		return notCommitted(err)
-	} else if active.found && refreshEqualsActive(prepared, active.view) {
-		stamps := activationStamps(activation, prepared)
-		if err := s.lockedSkip(ctx, prepared, active.generationID, stamps); err != nil {
-			if errors.Is(err, errSkipPointerMoved) {
-				goto writePath
-			}
+	if !retained {
+		if repair, err := s.needsRepair(ctx, sessionID); err != nil {
 			return notCommitted(err)
+		} else if repair {
+			stamps := activationStamps(activation, prepared)
+			if err := s.lockedRepair(ctx, sessionID, prepared, stamps); err != nil {
+				return notCommitted(err)
+			}
+			return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID}, nil
 		}
-		return ingest.ActivationOutcome{Disposition: ingest.ActivationSkipped, CandidateID: requestedID}, nil
+		if active, err := s.readActiveView(ctx, sessionID); err != nil {
+			return notCommitted(err)
+		} else if active.found && refreshEqualsActive(prepared, active.view) {
+			stamps := activationStamps(activation, prepared)
+			if err := s.lockedSkip(ctx, prepared, active.generationID, stamps); err != nil {
+				if errors.Is(err, errSkipPointerMoved) {
+					goto writePath
+				}
+				return notCommitted(err)
+			}
+			return ingest.ActivationOutcome{Disposition: ingest.ActivationSkipped, CandidateID: requestedID}, nil
+		}
 	}
 writePath:
 	if activation.Prepared != nil && activation.Prepared.claim(sessionID, requestedID) {
@@ -146,12 +156,25 @@ writePath:
 	if err := reportHarmonizedWriterSeam(harmonizedSeamBeforeCommit); err != nil {
 		return notCommitted(err)
 	}
-	committed, err := s.commitHarmonizedWrite(ctx, sessionID, activation, prepared)
+	disposition, err := s.commitHarmonizedWrite(ctx, sessionID, activation, prepared)
 	if err != nil {
 		return notCommitted(err)
 	}
-	if !committed {
+	switch disposition {
+	case ingest.ActivationAlreadyCommitted:
 		return ingest.ActivationOutcome{Disposition: ingest.ActivationAlreadyCommitted, CandidateID: requestedID}, nil
+	case ingest.ActivationRetainedPreview:
+		// The single route runs the post-commit seam and the converted-mirror
+		// pass under its real condition: the pass returns early unless the
+		// active generation is harmonized, and its bounded delete normally
+		// removes zero leftover rows.
+		if err := reportHarmonizedWriterSeam(harmonizedSeamAfterCommit); err != nil {
+			return ingest.ActivationOutcome{Disposition: ingest.ActivationRetainedPreview, CandidateID: requestedID}, err
+		}
+		if err := s.deleteConvertedMirrorRows(ctx, sessionID); err != nil {
+			return ingest.ActivationOutcome{Disposition: ingest.ActivationRetainedPreview, CandidateID: requestedID}, err
+		}
+		return ingest.ActivationOutcome{Disposition: ingest.ActivationRetainedPreview, CandidateID: requestedID}, nil
 	}
 	if err := reportHarmonizedWriterSeam(harmonizedSeamAfterCommit); err != nil {
 		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID}, err
@@ -313,12 +336,14 @@ func activationStamps(activation GenerationActivation, prepared *preparedHarmoni
 // commitHarmonizedWrite commits one staged candidate through the batched
 // writer under the exclusive session lock: one outer transaction with a
 // per-session savepoint, so the compare-and-swap refusal and every C-step
-// share the commit. It reports whether the write committed (a concurrent
-// identical commit reports AlreadyCommitted instead).
-func (s *Store) commitHarmonizedWrite(ctx context.Context, sessionID schema.SessionID, activation GenerationActivation, prepared *preparedHarmonized) (bool, error) {
+// share the commit. It reports the disposition for the single route: a
+// concurrent identical commit reports AlreadyCommitted, a retained preview
+// reports ActivationRetainedPreview, and a fresh install reports
+// ActivationCommittedNow.
+func (s *Store) commitHarmonizedWrite(ctx context.Context, sessionID schema.SessionID, activation GenerationActivation, prepared *preparedHarmonized) (ingest.ActivationDisposition, error) {
 	release, err := s.sessionLocker.LockExclusive(ctx, sessionID)
 	if err != nil {
-		return false, err
+		return ingest.ActivationNotCommitted, err
 	}
 	defer func() {
 		_ = release()
@@ -328,42 +353,25 @@ func (s *Store) commitHarmonizedWrite(ctx context.Context, sessionID schema.Sess
 	// the prior evidence beside the generation, so validation sees the
 	// staged shape and the commit persists the evidence in the same
 	// transaction as the catalog row.
-	v2 := activation.Generation
-	v2.Generation.Content = fillContentRecords(v2.Generation.Content, activation.Blobs)
-	v2.PriorEvidence = activation.PriorEvidence
-	mode := ingest.SessionEntryWriteReplaceAll
-	if activation.ExplicitRebuild {
-		mode = ingest.SessionEntryWriteExplicitRebuild
-	}
-	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
-		SessionID:          sessionID,
-		Result:             v2,
-		IndexVersion:       2,
-		Mode:               mode,
-		RequireFullContent: captureRequiresFullContent(activation.ContentCapture),
-		ContentCapture:     activation.ContentCapture,
-		IndexerVersion:     activation.IndexerVersion,
-		IndexedAtMs:        activation.IndexedAtMs,
-		ExpectedState:      activation.ExpectedState,
-		CaptureRevision:    activation.CaptureRevision,
-		IndexedInputHash:   activation.IndexedInputHash,
-		ArtifactIdentity:   activation.ArtifactIdentity,
-		PublicationCapture: activation.Capture,
-	}})
+	write := generationActivationWrite(activation)
+	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{write})
 	if len(results) != 1 {
-		return false, fmt.Errorf("store: activate generation %s for session %s: the batched writer returned %d results; the prior generation is unchanged", prepared.generation.ID, sessionID, len(results))
+		return ingest.ActivationNotCommitted, fmt.Errorf("store: activate generation %s for session %s: the batched writer returned %d results; the prior generation is unchanged", prepared.generation.ID, sessionID, len(results))
 	}
 	if results[0].Err != nil {
 		var stale *ingest.StaleIndexWorkError
 		if errors.As(results[0].Err, &stale) {
-			return false, results[0].Err
+			return ingest.ActivationNotCommitted, results[0].Err
 		}
-		return false, fmt.Errorf("store: activate generation %s for session %s: %w; the database transaction rolled back and the prior generation is visible", prepared.generation.ID, sessionID, results[0].Err)
+		return ingest.ActivationNotCommitted, fmt.Errorf("store: activate generation %s for session %s: %w; the database transaction rolled back and the prior generation is visible", prepared.generation.ID, sessionID, results[0].Err)
+	}
+	if results[0].RetainedPreview {
+		return ingest.ActivationRetainedPreview, nil
 	}
 	if results[0].Skipped {
-		return false, nil
+		return ingest.ActivationAlreadyCommitted, nil
 	}
-	return true, nil
+	return ingest.ActivationCommittedNow, nil
 }
 
 // captureRequiresFullContent reports whether an activation's content capture

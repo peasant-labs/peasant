@@ -959,7 +959,7 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 			return false, nil, txnErr
 		}
 	}
-	if err := insertHarmonizedGenerationOnConn(conn, prepared, oracle.priorEvidence, oracle.installedAtMs); err != nil {
+	if err := insertHarmonizedGenerationOnConn(conn, prepared, oracle.priorEvidence, oracle.installedAtMs, oracle.activatedAtMs); err != nil {
 		txnErr = fmt.Errorf("install the harmonized generation: %w", err)
 		return false, nil, txnErr
 	}

@@ -327,8 +327,13 @@ type SessionEntryWriteResult struct {
 	EntriesCount int  // canonical projection rows committed by the format handler
 	Written      bool // true when the write request completed, including an unchanged-row skip
 	Skipped      bool // true when existing entry projections already matched and no entry rows were replaced
-	Stats        SessionEntryWriteStats
-	Err          error
+	// RetainedPreview reports that the write retained the latest preview
+	// attempt instead of replacing the active authority. The active generation
+	// is unchanged, the retained pointer records the attempt, and the counts
+	// stay zero.
+	RetainedPreview bool
+	Stats           SessionEntryWriteStats
+	Err             error
 }
 
 // SessionEntryBatchStore is required to persist pipeline index results. Metrics

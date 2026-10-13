@@ -1049,14 +1049,18 @@ func generationRecordsEqual(candidate, active GenerationRecord) bool {
 // sections, segments, evidence). The foreign keys prove every referenced
 // object was staged: a sweep that deleted a staged-but-uncommitted object
 // refuses the commit, and the session retries on the next harvest.
-func insertHarmonizedGenerationOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, priorEvidence []byte, installedAtMs int64) error {
+//
+// activatedAtMs is the nullable activation stamp: an ordinary install passes
+// the install instant, while a retained latest attempt passes nil so its
+// generation row records no activation (the column already admits NULL).
+func insertHarmonizedGenerationOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, priorEvidence []byte, installedAtMs int64, activatedAtMs *int64) error {
 	sessionID := prepared.sessionID
 	generationID := prepared.generation.ID
 	record := prepared.record
 	record.CandidateDigest = prepared.binding
 	record.PriorEvidence = append([]byte(nil), priorEvidence...)
 	record.InstalledAtMs = installedAtMs
-	record.ActivatedAtMs = &installedAtMs
+	record.ActivatedAtMs = activatedAtMs
 	r := record
 	if err := sqlitex.Execute(conn, `INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
@@ -1714,10 +1718,13 @@ func (s *Store) deleteConvertedMirrorRows(ctx context.Context, sessionID schema.
 }
 
 // harmonizedBatchSkip is the batch path's precommit decision: commit
-// proceeds to the catalog write, while a skip carries the idempotent
-// retry's outcome (the hash and the stats) straight to the shared stamps.
+// proceeds to the catalog write, retain records the candidate as the retained
+// latest attempt (no catalog write, no active-authority statement), while a
+// skip carries the idempotent retry's outcome (the hash and the stats) straight
+// to the shared stamps.
 type harmonizedBatchSkip struct {
 	commit  bool
+	retain  bool
 	outcome sessionEntryWriteOutcome
 }
 
@@ -1730,7 +1737,12 @@ type harmonizedBatchSkip struct {
 // (they activate in repair mode through ActivateGeneration, which rewrites
 // objects instead of comparing past them). The ordinary write returns the
 // prepared candidate for the commit and the stats merge.
-func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.SessionEntryWrite) ([]schema.SessionEntry, *preparedHarmonized, harmonizedBatchSkip, error) {
+//
+// When retain is set the caller has already decided the write is a retention
+// candidate. The immutable-identity and file-backed checks stay in force, and
+// the retain marker is returned BEFORE the repair refusal: a retention write
+// never enters repair and never rewrites the active authority.
+func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.SessionEntryWrite, retain bool) ([]schema.SessionEntry, *preparedHarmonized, harmonizedBatchSkip, error) {
 	v2, ok := asV2Value(write.Result)
 	if !ok {
 		return nil, nil, harmonizedBatchSkip{}, generationIndexFormat{}.Validate(write.Result)
@@ -1754,8 +1766,13 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 		if err != nil {
 			return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: hash main entries for the idempotent retry of session %s: %w", write.SessionID, err)
 		}
-		if _, err := upsertCapturedStatsOnConn(conn, capturedStatsForHarnessWrite(write.SessionID, v2.Generation.Metadata.Stats, seedJSONForStats(v2.Generation.Metadata.Stats), write.IndexedAtMs)); err != nil {
-			return nil, nil, harmonizedBatchSkip{}, err
+		if !retain {
+			// The idempotent retry of the active authority advances the
+			// captured-stats mirror. A retained candidate is not the active
+			// authority, so its retry must not touch the session's stats.
+			if _, err := upsertCapturedStatsOnConn(conn, capturedStatsForHarnessWrite(write.SessionID, v2.Generation.Metadata.Stats, seedJSONForStats(v2.Generation.Metadata.Stats), write.IndexedAtMs)); err != nil {
+				return nil, nil, harmonizedBatchSkip{}, err
+			}
 		}
 		outcome := sessionEntryWriteOutcome{sessionEntriesHash: hash, skipped: true}
 		outcome.stats.SkippedByCompare++
@@ -1767,6 +1784,9 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 	}
 	if fileBacked {
 		return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is installed in the file-backed catalog, which only the migration moves; the installed generation is unchanged", v2.Generation.ID, write.SessionID)
+	}
+	if retain {
+		return prepared.mainEntries, prepared, harmonizedBatchSkip{retain: true}, nil
 	}
 	repair, err := repairNeedsHarmonized(conn, write.SessionID)
 	if err != nil {

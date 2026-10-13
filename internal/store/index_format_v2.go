@@ -85,7 +85,7 @@ func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessi
 		return nil, err
 	}
 	now := time.Now().UnixMilli()
-	if err := insertHarmonizedGenerationOnConn(conn, prepared, value.PriorEvidence, now); err != nil {
+	if err := insertHarmonizedGenerationOnConn(conn, prepared, value.PriorEvidence, now, &now); err != nil {
 		return nil, err
 	}
 	var previousHarmonized *string
