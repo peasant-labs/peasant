@@ -512,6 +512,9 @@ func validateClassifiedChannels(index int, block ClassifiedBlock) error {
 		if block.UncertainSubtree || block.AmbiguousPairKey != "" {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder with uncertain-subtree or ambiguous-pair evidence; the resolver would move the placeholder out of the main stream and it would lose the omitted record's own position; drop the uncertainty flag or drop the omission", index, block.NativeKey)
 		}
+		if block.NativeCorrelationKey != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder with a native correlation key; the resolver would collapse the placeholder into a mirror group and the omitted record could lose its own position; drop the correlation key or drop the omission", index, block.NativeKey)
+		}
 		return nil
 	}
 	if block.ToolCallID != nil {

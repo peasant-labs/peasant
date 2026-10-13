@@ -1,4 +1,4 @@
-# Native coverage matrix (PROPOSAL-3 sections 5.2 native + 5.3 + 5.5 read split).
+# Native coverage matrix for managed native input: native-input facts, omission accounting, and the read split.
 #
 # Each case independently specifies completeness, retained carriers, prior
 # authority, and Main/Earlier distribution. The test builds a real V2
