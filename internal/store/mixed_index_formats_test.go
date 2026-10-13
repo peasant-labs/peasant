@@ -468,19 +468,38 @@ func TestMixedIndexFormatRegistrationRejectsInvalidEdgesBeforeOpening(t *testing
 	}
 }
 
-type mixedCodexIndexer struct{ *ingest.CodexIndexer }
+// mixedCodexIndexer wraps a real Codex indexer with this fixture's own
+// format-1 packing exit. It delegates the compatibility surface explicitly
+// instead of embedding the concrete indexer: a concrete Codex indexer now
+// implements ingest.GenerationBuilder, and embedding would silently promote
+// that optional surface and change the pipeline's dispatch for this double.
+// The wrapper stays versioned-only on purpose, so the pipeline keeps exercising
+// the versioned exit for a declared-2 indexer that has no builder.
+type mixedCodexIndexer struct{ codex *ingest.CodexIndexer }
 
 var _ ingest.VersionedTranscriptIndexer = (*mixedCodexIndexer)(nil)
 
+func (indexer *mixedCodexIndexer) SourceKind() ingest.TranscriptSourceKind {
+	return indexer.codex.SourceKind()
+}
+
+func (indexer *mixedCodexIndexer) IndexTranscript(ctx context.Context, session ingest.DiscoveredSession) ([]schema.SessionEntry, error) {
+	return indexer.codex.IndexTranscript(ctx, session)
+}
+
+func (indexer *mixedCodexIndexer) IndexTranscriptBytes(ctx context.Context, session ingest.DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
+	return indexer.codex.IndexTranscriptBytes(ctx, session, data)
+}
+
 func (indexer *mixedCodexIndexer) IndexTranscriptResult(ctx context.Context, session ingest.DiscoveredSession) (indexformat.Result, error) {
-	entries, err := indexer.CodexIndexer.IndexTranscript(ctx, session)
+	entries, err := indexer.codex.IndexTranscript(ctx, session)
 	if err != nil {
 		return nil, err
 	}
 	return packCodexFixtureEntries(entries)
 }
 func (indexer *mixedCodexIndexer) IndexTranscriptBytesResult(ctx context.Context, session ingest.DiscoveredSession, data []byte) (indexformat.Result, error) {
-	entries, err := indexer.CodexIndexer.IndexTranscriptBytes(ctx, session, data)
+	entries, err := indexer.codex.IndexTranscriptBytes(ctx, session, data)
 	if err != nil {
 		return nil, err
 	}
@@ -553,7 +572,7 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 			versions[ingest.HarnessCodex] = target
 			indexers := map[ingest.Harness]ingest.TranscriptIndexer{
 				ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs),
-				ingest.HarnessCodex:      &mixedCodexIndexer{ingest.NewCodexIndexer(fs)},
+				ingest.HarnessCodex:      &mixedCodexIndexer{codex: ingest.NewCodexIndexer(fs)},
 			}
 			// First establish real file/SQL mirrors and the unrelated parser's
 			// actual input proof. Unknown historical input requires verification;

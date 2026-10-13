@@ -28,11 +28,11 @@ func TestHarvestSweepPathSetsAndClearsFlag(t *testing.T) {
 	storetest.SeedSession(t, db, string(sid))
 
 	v2, blobs := writeBudgetV2(t, sid, "gen_harvest_sweep_1", []string{"harvest sweep path one", "harvest sweep path two"})
-	native := ingest.NativeGenerationActivation{Generation: v2, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1}
+	native := ingest.GenerationActivation{Generation: v2, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1}
 
 	// The pipeline stages through its stager entry point: the crash flag
 	// is set before the first object write.
-	staged, err := db.StageNativeGeneration(ctx, native)
+	staged, err := db.StageGenerationCandidate(ctx, native)
 	if err != nil {
 		t.Fatalf("stage through the harvest entry point: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestHarvestSweepPathSetsAndClearsFlag(t *testing.T) {
 	// The pipeline activates through its prepared-activator entry point:
 	// the commit is durable and the flag stays set, because the sweep is
 	// the harvest's step, not the store's.
-	outcome, err := db.ActivateStagedNativeGeneration(ctx, native, staged)
+	outcome, err := db.ActivateStagedGenerationCandidate(ctx, native, staged)
 	if err != nil {
 		t.Fatalf("activate through the harvest entry point: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestHarvestSweepPathSetsAndClearsFlag(t *testing.T) {
 	// flag set and no new generation: the harvest-start entry point
 	// recovers them with no commit at all.
 	v2b, blobbs := writeBudgetV2(t, sid, "gen_harvest_sweep_2", []string{"harvest sweep path three", "harvest sweep path four"})
-	if _, err := db.StageNativeGeneration(ctx, ingest.NativeGenerationActivation{Generation: v2b, Blobs: blobbs, IndexerVersion: 2, IndexedAtMs: 2}); err != nil {
+	if _, err := db.StageGenerationCandidate(ctx, ingest.GenerationActivation{Generation: v2b, Blobs: blobbs, IndexerVersion: 2, IndexedAtMs: 2}); err != nil {
 		t.Fatalf("stage the crashed candidate: %v", err)
 	}
 	if got := harvestSweepCount(t, dbPath, `SELECT COUNT(*) FROM session_entry_bodies WHERE session_id = ?`, sid); got != 4 {

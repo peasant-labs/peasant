@@ -25,38 +25,38 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 	HarnessStrike:     {AdapterVersion: 1, IndexerVersion: 17, IndexVersion: 1},
 }
 
-// NativeGenerationRepairTargets declares the adapter, indexer and format
+// GenerationRepairTargets declares the adapter, indexer and format
 // targets that replace the retained baseline ONLY for a store that can persist
 // and read a managed generation: a registered format-2 writer, a configured
-// snapshot reader with its owned-artifact root and lock, a native generation
+// snapshot reader with its owned-artifact root and lock, a managed generation
 // activator and a prior reader. A store that cannot is served by the retained
-// baseline, so the native path is never advertised before its writer and reader
+// baseline, so the managed-generation path is never advertised before its writer and reader
 // exist. When a harness is absent from the baseline it is also absent here.
-var NativeGenerationRepairTargets = map[Harness]HarvesterVersions{
+var GenerationRepairTargets = map[Harness]HarvesterVersions{
 	HarnessCodex:    {AdapterVersion: 2, IndexerVersion: 20, IndexVersion: 2},
 	HarnessOpenCode: {AdapterVersion: 3, IndexerVersion: 18, IndexVersion: 2},
 }
 
-// nativeGenerationSessionSupported reports whether this build can read one
+// generationTargetApplicable reports whether this build can read one
 // stored session's native layout into a managed generation. The OpenCode
 // candidate snapshot reads the current session_message projection; a session
 // stored from the older message/part layout, or from a JSON tree, has no
 // snapshot this build can read, so the retained adapter refresh serves it
-// instead of failing the native lane. A harness without a declared native
+// instead of failing the managed-generation lane. A harness without a declared native
 // target is always served by its retained path.
-func nativeGenerationSessionSupported(session DiscoveredSession) bool {
+func generationTargetApplicable(session DiscoveredSession) bool {
 	if session.Harness != HarnessOpenCode {
 		return true
 	}
 	return session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite
 }
 
-// NativeGenerationTargets overlays the managed-generation targets on a baseline
+// GenerationTargets overlays the managed-generation targets on a baseline
 // registry for a store that supports them, leaving every other harness and any
-// harness without a declared native target exactly as the baseline states.
-func NativeGenerationTargets(baseline map[Harness]HarvesterVersions) map[Harness]HarvesterVersions {
+// harness without a declared managed-generation target exactly as the baseline states.
+func GenerationTargets(baseline map[Harness]HarvesterVersions) map[Harness]HarvesterVersions {
 	targets := maps.Clone(baseline)
-	for harness, target := range NativeGenerationRepairTargets {
+	for harness, target := range GenerationRepairTargets {
 		if _, ok := targets[harness]; ok {
 			targets[harness] = target
 		}
@@ -105,8 +105,8 @@ func (p *Pipeline) validateHarvesterVersions() error {
 	}
 	for harness, versions := range p.indexerTargets() {
 		indexer := p.indexers[harness]
-		if _, versioned := indexer.(VersionedTranscriptIndexer); versions.IndexVersion != 1 && !versioned {
-			return fmt.Errorf("pipeline version registry: harness %q has a slice-returning indexer, which only produces format 1, but declares format %d; use a concrete versioned result before indexing", harness, versions.IndexVersion)
+		if versions.IndexVersion != 1 && !indexerDeclaresManagedOutput(indexer) {
+			return fmt.Errorf("pipeline version registry: harness %q has a slice-returning indexer, which implements neither the versioned result exit nor the generation builder, but declares format %d; register an indexer that can produce the declared representation before indexing", harness, versions.IndexVersion)
 		}
 		support, ok := p.metricsStore.(IndexFormatSupport)
 		if !ok || !support.SupportsIndexFormat(versions.IndexVersion) {
@@ -114,6 +114,19 @@ func (p *Pipeline) validateHarvesterVersions() error {
 		}
 	}
 	return nil
+}
+
+// indexerDeclaresManagedOutput reports whether a registered indexer can produce
+// the representation its harness declares. Two contracts qualify: the versioned
+// result exit, and the generation builder the managed-generation dispatch
+// asserts at runtime. Both are per-harness optional capabilities, asserted at
+// construction and at dispatch, never members of the compatibility surface.
+func indexerDeclaresManagedOutput(indexer TranscriptIndexer) bool {
+	if _, ok := indexer.(VersionedTranscriptIndexer); ok {
+		return true
+	}
+	_, ok := indexer.(GenerationBuilder)
+	return ok
 }
 
 // indexerTargets scopes maintenance by the actual registered indexers and an
@@ -131,14 +144,14 @@ func (p *Pipeline) indexerTargets() map[Harness]HarvesterVersions {
 
 // resolveVersionTargets computes the effective harness targets once. An
 // explicit injection wins; otherwise a store that can persist and read a
-// managed generation activates the native repair targets, and every other store
+// managed generation activates the managed-generation repair targets, and every other store
 // keeps the retained baseline.
 func (p *Pipeline) resolveVersionTargets() map[Harness]HarvesterVersions {
 	if p.harvesterVersions != nil {
 		return p.harvesterVersions
 	}
-	if p.supportsNativeGeneration() {
-		return NativeGenerationTargets(HarvesterVersionRegistry)
+	if p.supportsManagedGenerations() {
+		return GenerationTargets(HarvesterVersionRegistry)
 	}
 	return HarvesterVersionRegistry
 }
@@ -153,15 +166,15 @@ func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {
 }
 
 // sessionVersionTarget returns the effective harvester target for one stored
-// session. When the resolved target is the native-generation override but the
+// session. When the resolved target is the managed-generation override but the
 // session's layout has no native snapshot this build can read, the session
 // keeps the retained baseline target so the ordinary adapter refresh serves it
-// instead of the native lane. An explicitly injected non-native target is
+// instead of the managed-generation lane. An explicitly injected non-managed-generation target is
 // returned unchanged.
 func (p *Pipeline) sessionVersionTarget(session DiscoveredSession) HarvesterVersions {
 	target := p.versionTargets()[session.Harness]
-	native, declared := NativeGenerationRepairTargets[session.Harness]
-	if declared && target == native && !nativeGenerationSessionSupported(session) {
+	native, declared := GenerationRepairTargets[session.Harness]
+	if declared && target == native && !generationTargetApplicable(session) {
 		if baseline, ok := HarvesterVersionRegistry[session.Harness]; ok {
 			return baseline
 		}
@@ -169,27 +182,27 @@ func (p *Pipeline) sessionVersionTarget(session DiscoveredSession) HarvesterVers
 	return target
 }
 
-// managedGenerationSupport is the store capability probe the native-generation
+// managedGenerationSupport is the store capability probe the managed-generation
 // gate needs: a registered format-2 writer and a configured snapshot reader.
 type managedGenerationSupport interface {
 	SupportsIndexFormat(int) bool
 	GenerationSnapshotsSupported() bool
 }
 
-// supportsNativeGeneration reports whether the configured store can stage,
+// supportsManagedGenerations reports whether the configured store can stage,
 // activate and read a managed generation. All four capabilities are required:
 // without the activator the candidate cannot be persisted, without the prior
 // reader a refresh would rekey unchanged source, and without the writer and
 // snapshot reader the format target would advertise a representation no caller
 // can persist or read.
-func (p *Pipeline) supportsNativeGeneration() bool {
+func (p *Pipeline) supportsManagedGenerations() bool {
 	if p.metricsStore == nil {
 		return false
 	}
-	if _, ok := p.metricsStore.(NativeGenerationActivator); !ok {
+	if _, ok := p.metricsStore.(GenerationActivator); !ok {
 		return false
 	}
-	if _, ok := p.metricsStore.(NativeGenerationPriorReader); !ok {
+	if _, ok := p.metricsStore.(GenerationPriorReader); !ok {
 		return false
 	}
 	support, ok := p.metricsStore.(managedGenerationSupport)

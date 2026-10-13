@@ -165,7 +165,7 @@ func generateRecordKindRegistryFrom(vocabularies []recordKindAdapterVocabulary) 
 			IndexVersion:   versions.IndexVersion,
 			Fallback:       lowerRecordKindFallback(RecordKindRetained, "", ""),
 		}
-		if native, ok := NativeGenerationRepairTargets[vocabulary.Harness]; ok {
+		if native, ok := GenerationRepairTargets[vocabulary.Harness]; ok {
 			section.NativeVersions = &RecordKindVersions{AdapterVersion: native.AdapterVersion, IndexerVersion: native.IndexerVersion, IndexVersion: native.IndexVersion}
 		}
 		for _, declaration := range vocabulary.Inventories {
@@ -210,12 +210,12 @@ func (r RecordKindRegistry) validate() error {
 		if !ok || target != (HarvesterVersions{section.AdapterVersion, section.IndexerVersion, section.IndexVersion}) {
 			return fmt.Errorf("record-kind registry: harness %q baseline versions differ; verify against HarvesterVersionRegistry", harness)
 		}
-		native, hasNative := NativeGenerationRepairTargets[harness]
+		native, hasNative := GenerationRepairTargets[harness]
 		if hasNative != (section.NativeVersions != nil) {
 			return fmt.Errorf("record-kind registry: harness %q native version declaration missing or unexpected", harness)
 		}
 		if v := section.NativeVersions; v != nil && native != (HarvesterVersions{v.AdapterVersion, v.IndexerVersion, v.IndexVersion}) {
-			return fmt.Errorf("record-kind registry: harness %q native versions differ; verify against NativeGenerationRepairTargets", harness)
+			return fmt.Errorf("record-kind registry: harness %q native versions differ; verify against GenerationRepairTargets", harness)
 		}
 		fallback := section.Fallback
 		if fallback.Kind != "" || fallback.Match != "" || fallback.Status != RecordKindRetainedUnknown || fallback.Preview != RecordKindPreviewNo || fallback.Payload == "" || fallback.Reason == "" || fallback.Source == "" || fallback.Outcome != indexformat.OutcomeOpaque || fallback.EntryMode != RecordKindEntryModeRetainedEvidence || fallback.Coordinates != RecordKindCoordinatesRequired {

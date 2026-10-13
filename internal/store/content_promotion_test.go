@@ -175,7 +175,7 @@ func runPromotionRewrite(t *testing.T, c contentPromotionCase) {
 
 func assertPromotionPrior(t *testing.T, s *Store, sid schema.SessionID, expected []byte) {
 	t.Helper()
-	prior, err := s.ReadNativeGenerationPrior(t.Context(), sid)
+	prior, err := s.ReadGenerationPrior(t.Context(), sid)
 	if err != nil || prior == nil {
 		t.Fatalf("read prior evidence: %v", err)
 	}

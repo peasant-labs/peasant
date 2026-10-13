@@ -66,10 +66,12 @@ func TestCodexRepeatedSessionMetadata(t *testing.T) {
 			original.Source.Format = ingest.SourceFormatJSONL
 			original.HostSlug = "example.com-team-child"
 			retained, retainedErr := adapter.ExtractMetadataFromTranscript(t.Context(), data, &original)
-			indexer := ingest.NewCodexIndexer(fs, ingest.WithCodexProvenanceCapture(ingest.CodexProvenanceIndexerConfig{
-				Enabled: true, GenerationID: func(ingest.DiscoveredSession) string { return "gen-repeated-metadata" },
-			}))
-			result, candidateErr := indexer.IndexTranscriptResult(t.Context(), session)
+			indexer := ingest.NewCodexIndexer(fs)
+			built, candidateErr := indexer.BuildGeneration(t.Context(), ingest.GenerationBuildInput{Session: session, GenerationID: "gen-repeated-metadata"})
+			var result indexformat.Result
+			if candidateErr == nil {
+				result = built.Result
+			}
 			if c.Refuse {
 				if nativeErr == nil || retainedErr == nil || candidateErr == nil || result != nil {
 					t.Fatalf("mismatched first record accepted: native=%v retained=%v candidate=%v", nativeErr, retainedErr, candidateErr)

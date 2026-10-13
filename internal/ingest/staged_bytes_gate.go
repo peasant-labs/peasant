@@ -8,7 +8,7 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// stagedBytesGate bounds admitted native candidates, not parser scratch. An
+// stagedBytesGate bounds admitted managed-generation candidates, not parser scratch. An
 // oversized candidate is admitted only when no other candidate owns bytes.
 type stagedBytesGate struct {
 	mu              sync.Mutex
@@ -65,7 +65,7 @@ func (g *stagedBytesGate) Peak() int64 {
 	return g.peak
 }
 
-func nativeCandidateWriteBytes(candidate *NativeGenerationCandidate) int64 {
+func generationCandidateWriteBytes(candidate *GenerationCandidate) int64 {
 	if candidate == nil {
 		return 0
 	}
@@ -92,13 +92,13 @@ func nativeCandidateWriteBytes(candidate *NativeGenerationCandidate) int64 {
 }
 
 func (p *Pipeline) admitNativeResult(ctx context.Context, result indexParseResult, gate *stagedBytesGate) indexParseResult {
-	if result.nativeCandidate == nil {
+	if result.generationCandidate == nil {
 		return result
 	}
-	n := nativeCandidateWriteBytes(result.nativeCandidate)
+	n := generationCandidateWriteBytes(result.generationCandidate)
 	if err := gate.acquire(ctx, n); err != nil {
-		_, result.logEntry, _ = p.refuseNativeGeneration(result, result.entryCount, "harvest", err)
-		result.output, result.nativeCandidate = nil, nil
+		_, result.logEntry, _ = p.refuseGeneration(result, result.entryCount, "harvest", err)
+		result.output, result.generationCandidate = nil, nil
 		return result
 	}
 	var once sync.Once

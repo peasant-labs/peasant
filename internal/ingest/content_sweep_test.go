@@ -32,7 +32,7 @@ func (s *sweepRecordingStore) IndexSessionEntryBatch(_ context.Context, writes [
 	return results
 }
 
-func (s *sweepRecordingStore) ActivateNativeGeneration(_ context.Context, activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *sweepRecordingStore) ActivateGenerationCandidate(_ context.Context, activation GenerationActivation) (ActivationOutcome, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := activation.Generation.Generation.Metadata.SessionID
@@ -64,12 +64,12 @@ func (s *sweepRecordingStore) SweepFlaggedSessionsForHarvest(_ context.Context) 
 }
 
 var (
-	_ NativeGenerationActivator = (*sweepRecordingStore)(nil)
-	_ ContentSweeper            = (*sweepRecordingStore)(nil)
+	_ GenerationActivator = (*sweepRecordingStore)(nil)
+	_ ContentSweeper      = (*sweepRecordingStore)(nil)
 )
 
 // TestPipelineSweepsCommittedSession proves the after-commit wiring: a
-// native candidate the store commits is swept through the harvest entry
+// managed-generation candidate the store commits is swept through the harvest entry
 // point before the flush reports it, so the staging flag cannot stay set
 // past its own harvest.
 func TestPipelineSweepsCommittedSession(t *testing.T) {

@@ -95,22 +95,20 @@ func TestCodexCandidateExitRefusalsAreSafe(t *testing.T) {
 				Harness:    ingest.HarnessCodex,
 				SourcePath: ingest.ResolvedPath(path),
 			}
-			config := ingest.CodexProvenanceIndexerConfig{
-				Enabled:      true,
-				GenerationID: func(ingest.DiscoveredSession) string { return testCase.GenerationID },
+			buildInput := ingest.GenerationBuildInput{
+				Session:      session,
+				GenerationID: testCase.GenerationID,
 			}
 			if testCase.PriorFailure {
-				config.Prior = func(ingest.DiscoveredSession) (*schema.UnifiedMetadata, ingest.ProjectionPriorState, error) {
-					return nil, ingest.NewProjectionPriorState(), fmt.Errorf("the retained-state dependency failed for %s", testCase.PrivateDependencySentinel)
-				}
+				buildInput.Prior = generationTestPriorSource{priorErr: fmt.Errorf("the retained-state dependency failed for %s", testCase.PrivateDependencySentinel)}
 			}
-			indexer := ingest.NewCodexIndexer(&ingest.OSFileSystem{}, ingest.WithCodexProvenanceCapture(config))
-			result, err := indexer.IndexTranscriptResult(context.Background(), session)
+			indexer := ingest.NewCodexIndexer(&ingest.OSFileSystem{})
+			candidate, err := indexer.BuildGeneration(context.Background(), buildInput)
 			if err == nil {
-				t.Fatalf("candidate exit accepted the case: result=%#v", result)
+				t.Fatalf("builder accepted the case: candidate=%#v", candidate)
 			}
-			if result != nil {
-				t.Fatalf("refusal returned a result: %#v", result)
+			if candidate.Result.Generation.ID != "" || candidate.Blobs != nil {
+				t.Fatalf("refusal returned a candidate: %#v", candidate)
 			}
 			message := err.Error()
 			if !strings.HasPrefix(message, "ingest."+testCase.Expected.Operation+":") {

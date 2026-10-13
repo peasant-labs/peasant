@@ -367,7 +367,7 @@ func (s *Store) commitHarmonizedWrite(ctx context.Context, sessionID schema.Sess
 }
 
 // captureRequiresFullContent reports whether an activation's content capture
-// certifies the full stored content. A native managed generation carries every
+// certifies the full stored content. A managed generation carries every
 // content record it names, so its activation writes through the full-content
 // path; a caller that supplies no capture keeps the bounded preview default.
 func captureRequiresFullContent(capture ingest.SessionContentCaptureWrite) bool {
@@ -388,9 +388,9 @@ type PreparedGeneration struct {
 	installed    atomic.Bool
 }
 
-// NativeGenerationCandidateID names the candidate the handle prepared. It
+// GenerationCandidateID names the candidate the handle prepared. It
 // marks the handle as a staged harmonized generation.
-func (p *PreparedGeneration) NativeGenerationCandidateID() string {
+func (p *PreparedGeneration) GenerationCandidateID() string {
 	if p == nil {
 		return ""
 	}

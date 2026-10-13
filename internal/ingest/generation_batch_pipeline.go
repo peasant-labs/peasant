@@ -8,14 +8,14 @@ import (
 // stageAndCommitNativeBatches keeps CPU preparation parallel while every stage
 // and activation transaction runs on the serial writer lane. Both windows use
 // the common splitter, with their own configured session caps.
-func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []indexParseResult, positions []int, outcome IndexOutcome, prefix string, lane *storeWriteLane, record func(int, indexedMeta, IndexLogEntry, IndexProfileSession), stager NativeGenerationBatchStager, activator NativeGenerationBatchActivator) {
+func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []indexParseResult, positions []int, outcome IndexOutcome, prefix string, lane *storeWriteLane, record func(int, indexedMeta, IndexLogEntry, IndexProfileSession), stager GenerationBatchStager, activator GenerationBatchActivator) {
 	ctx = WithWriteAdvisoryReporter(ctx, p.reportWriteDiagnostic)
 	jobs := runParallel(func() error {
 		return nil
-	}, positions, parallelWorkers(p.config), func(position int) nativeGenerationCommitJob {
-		return nativeGenerationCommitJob{position: position, commit: p.prepareNativeGenerationResult(results[position], outcome, prefix)}
+	}, positions, parallelWorkers(p.config), func(position int) generationCommitJob {
+		return generationCommitJob{position: position, commit: p.prepareGenerationResult(results[position], outcome, prefix)}
 	})
-	var ready []nativeGenerationCommitJob
+	var ready []generationCommitJob
 	for _, job := range jobs {
 		if job.commit.ready {
 			ready = append(ready, job)
@@ -30,7 +30,7 @@ func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []in
 		end := start
 		var bytes int64
 		for end < len(ready) {
-			n := nativeCandidateWriteBytes(ready[end].commit.prepared.result.nativeCandidate)
+			n := generationCandidateWriteBytes(ready[end].commit.prepared.result.generationCandidate)
 			if ExceedsWriteBudget(cfg, end-start, bytes, n, cfg.BatchSessions) {
 				break
 			}
@@ -38,13 +38,13 @@ func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []in
 			end++
 		}
 		window := ready[start:end]
-		activations := make([]NativeGenerationActivation, len(window))
+		activations := make([]GenerationActivation, len(window))
 		for i, job := range window {
 			activations[i] = job.commit.prepared.activation
 		}
-		var staged []NativeGenerationStaged
+		var staged []GenerationStaged
 		p.runStoreWrite(lane, func() {
-			staged, _ = stager.StageNativeGenerations(ctx, activations)
+			staged, _ = stager.StageGenerationCandidates(ctx, activations)
 		})
 		for i := range window {
 			if i < len(staged) {
@@ -55,7 +55,7 @@ func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []in
 			b := a
 			bytes = 0
 			for b < len(window) {
-				n := nativeCandidateWriteBytes(window[b].commit.prepared.result.nativeCandidate)
+				n := generationCandidateWriteBytes(window[b].commit.prepared.result.generationCandidate)
 				if ExceedsWriteBudget(cfg, b-a, bytes, n, cfg.ActivationSessions) {
 					break
 				}
@@ -69,10 +69,10 @@ func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []in
 	}
 }
 
-func (p *Pipeline) commitNativeBatch(ctx context.Context, jobs []nativeGenerationCommitJob, outcome IndexOutcome, prefix string, lane *storeWriteLane, record func(int, indexedMeta, IndexLogEntry, IndexProfileSession), activator NativeGenerationBatchActivator) {
-	var admitted []nativeGenerationCommitJob
-	var activations []NativeGenerationActivation
-	var staged []NativeGenerationStaged
+func (p *Pipeline) commitNativeBatch(ctx context.Context, jobs []generationCommitJob, outcome IndexOutcome, prefix string, lane *storeWriteLane, record func(int, indexedMeta, IndexLogEntry, IndexProfileSession), activator GenerationBatchActivator) {
+	var admitted []generationCommitJob
+	var activations []GenerationActivation
+	var staged []GenerationStaged
 	var outcomes []NativeActivationResult
 	p.runStoreWrite(lane, func() {
 		// Hold each input guard through the batch call. A refusal excludes only
@@ -82,7 +82,7 @@ func (p *Pipeline) commitNativeBatch(ctx context.Context, jobs []nativeGeneratio
 			if i == len(jobs) {
 				if len(activations) > 0 {
 					p.config.IndexProfiler.RecordActivationSize(len(activations))
-					outcomes = activator.ActivateStagedNativeGenerations(ctx, activations, staged)
+					outcomes = activator.ActivateStagedGenerationCandidates(ctx, activations, staged)
 				}
 				return
 			}
@@ -95,7 +95,7 @@ func (p *Pipeline) commitNativeBatch(ctx context.Context, jobs []nativeGeneratio
 				return nil
 			})
 			if err != nil {
-				im, log, profile := p.finishNativeGenerationResult(ctx, job.commit.prepared, outcome, prefix, ActivationOutcome{}, err)
+				im, log, profile := p.finishGenerationResult(ctx, job.commit.prepared, outcome, prefix, ActivationOutcome{}, err)
 				if record != nil {
 					record(job.position, im, log, profile)
 				}
@@ -109,7 +109,7 @@ func (p *Pipeline) commitNativeBatch(ctx context.Context, jobs []nativeGeneratio
 		if len(outcomes) == len(admitted) {
 			r = outcomes[i]
 		}
-		im, log, profile := p.finishNativeGenerationResult(ctx, job.commit.prepared, outcome, prefix, r.Outcome, r.Err)
+		im, log, profile := p.finishGenerationResult(ctx, job.commit.prepared, outcome, prefix, r.Outcome, r.Err)
 		if record != nil {
 			record(job.position, im, log, profile)
 		}

@@ -26,7 +26,7 @@ const (
 )
 
 // benchNativeStore is a metrics store with simulated staging and commit
-// latencies. The base type has no StageNativeGeneration method, so the
+// latencies. The base type has no StageGenerationCandidate method, so the
 // pipeline takes its inline serial path (stage inside the activation);
 // benchNativeStagingStore adds the method so the pipeline pre-stages in
 // parallel and streams commits.
@@ -64,7 +64,7 @@ func (s *benchNativeStore) stage(blobCount int) {
 }
 
 // commitOnly simulates the database activation transaction.
-func (s *benchNativeStore) commitOnly(activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *benchNativeStore) commitOnly(activation GenerationActivation) (ActivationOutcome, error) {
 	if s.commitCalls.Add(1) == 1 {
 		s.firstCommit.CompareAndSwap(0, time.Now().UnixNano())
 	}
@@ -72,7 +72,7 @@ func (s *benchNativeStore) commitOnly(activation NativeGenerationActivation) (Ac
 	return ActivationOutcome{Disposition: ActivationCommittedNow, CandidateID: activation.Generation.Generation.ID}, nil
 }
 
-func (s *benchNativeStore) ActivateNativeGeneration(_ context.Context, activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *benchNativeStore) ActivateGenerationCandidate(_ context.Context, activation GenerationActivation) (ActivationOutcome, error) {
 	// Inline path: the activation owns the staging.
 	s.stage(len(activation.Blobs))
 	return s.commitOnly(activation)
@@ -87,32 +87,32 @@ type benchNativeStagingStore struct {
 // benchStaged is the inert prepared-files handle the bench stager returns.
 type benchStaged string
 
-func (b benchStaged) NativeGenerationCandidateID() string { return string(b) }
+func (b benchStaged) GenerationCandidateID() string { return string(b) }
 
-func (s *benchNativeStagingStore) StageNativeGeneration(_ context.Context, activation NativeGenerationActivation) (NativeGenerationStaged, error) {
+func (s *benchNativeStagingStore) StageGenerationCandidate(_ context.Context, activation GenerationActivation) (GenerationStaged, error) {
 	s.stage(len(activation.Blobs))
 	return benchStaged(activation.Generation.Generation.ID), nil
 }
 
-func (s *benchNativeStagingStore) ActivateStagedNativeGeneration(_ context.Context, activation NativeGenerationActivation, _ NativeGenerationStaged) (ActivationOutcome, error) {
+func (s *benchNativeStagingStore) ActivateStagedGenerationCandidate(_ context.Context, activation GenerationActivation, _ GenerationStaged) (ActivationOutcome, error) {
 	return s.commitOnly(activation)
 }
 
-func (s *benchNativeStagingStore) ActivateNativeGeneration(ctx context.Context, activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *benchNativeStagingStore) ActivateGenerationCandidate(ctx context.Context, activation GenerationActivation) (ActivationOutcome, error) {
 	// Without a prepared handle the activation stages inline.
-	return s.benchNativeStore.ActivateNativeGeneration(ctx, activation)
+	return s.benchNativeStore.ActivateGenerationCandidate(ctx, activation)
 }
 
 var (
-	_ NativeGenerationStager            = (*benchNativeStagingStore)(nil)
-	_ NativeGenerationPreparedActivator = (*benchNativeStagingStore)(nil)
+	_ GenerationStager            = (*benchNativeStagingStore)(nil)
+	_ GenerationPreparedActivator = (*benchNativeStagingStore)(nil)
 )
 
-// BenchmarkNativeGenerationBatchCommits drives the real native flush over one
+// BenchmarkGenerationBatchCommits drives the real native flush over one
 // giant candidate and eight small ones. "serial-inline" stages inline inside
 // each activation (a store without a stager, one candidate at a time);
 // "streamed" prepares in parallel and commits as each preparation completes.
-func BenchmarkNativeGenerationBatchCommits(b *testing.B) {
+func BenchmarkGenerationBatchCommits(b *testing.B) {
 	results := benchNativeResults(b)
 	for _, tc := range []struct {
 		name  string
@@ -172,7 +172,7 @@ func benchNativeResults(tb testing.TB) []indexParseResult {
 	return results
 }
 
-// benchNativeResult builds one valid native candidate plus the captured input
+// benchNativeResult builds one valid managed-generation candidate plus the captured input
 // the write path verifies: a complete V2 generation, its blobs, and metadata
 // whose content checksum binds the artifact identity the commit re-checks.
 func benchNativeResult(tb testing.TB, index, blobCount int) indexParseResult {
@@ -233,10 +233,10 @@ func benchNativeResult(tb testing.TB, index, blobCount int) indexParseResult {
 		inputHash:    "bench-input-hash",
 	}
 	return indexParseResult{
-		im:              indexedMeta{session: DiscoveredSession{SessionID: sid, Harness: harness}},
-		input:           input,
-		output:          v2,
-		nativeCandidate: &NativeGenerationCandidate{Result: v2, Blobs: blobs},
-		startedAt:       time.Now().UnixMilli(),
+		im:                  indexedMeta{session: DiscoveredSession{SessionID: sid, Harness: harness}},
+		input:               input,
+		output:              v2,
+		generationCandidate: &GenerationCandidate{Result: v2, Blobs: blobs},
+		startedAt:           time.Now().UnixMilli(),
 	}
 }

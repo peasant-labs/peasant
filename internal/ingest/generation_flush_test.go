@@ -45,7 +45,7 @@ func (s *gatedNativeStore) IndexSessionEntryBatch(_ context.Context, writes []Se
 	return results
 }
 
-func (s *gatedNativeStore) StageNativeGeneration(ctx context.Context, activation NativeGenerationActivation) (NativeGenerationStaged, error) {
+func (s *gatedNativeStore) StageGenerationCandidate(ctx context.Context, activation GenerationActivation) (GenerationStaged, error) {
 	if len(activation.Blobs) == gatedLargeBlobs {
 		select {
 		case <-s.gate:
@@ -56,7 +56,7 @@ func (s *gatedNativeStore) StageNativeGeneration(ctx context.Context, activation
 	return benchStaged(activation.Generation.Generation.ID), nil
 }
 
-func (s *gatedNativeStore) activate(activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *gatedNativeStore) activate(activation GenerationActivation) (ActivationOutcome, error) {
 	id := activation.Generation.Generation.ID
 	s.mu.Lock()
 	s.inFlight++
@@ -71,11 +71,11 @@ func (s *gatedNativeStore) activate(activation NativeGenerationActivation) (Acti
 	return ActivationOutcome{Disposition: ActivationCommittedNow, CandidateID: id}, nil
 }
 
-func (s *gatedNativeStore) ActivateStagedNativeGeneration(_ context.Context, activation NativeGenerationActivation, _ NativeGenerationStaged) (ActivationOutcome, error) {
+func (s *gatedNativeStore) ActivateStagedGenerationCandidate(_ context.Context, activation GenerationActivation, _ GenerationStaged) (ActivationOutcome, error) {
 	return s.activate(activation)
 }
 
-func (s *gatedNativeStore) ActivateNativeGeneration(_ context.Context, activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *gatedNativeStore) ActivateGenerationCandidate(_ context.Context, activation GenerationActivation) (ActivationOutcome, error) {
 	return s.activate(activation)
 }
 

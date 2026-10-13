@@ -12,10 +12,10 @@ import (
 // report exactly one progress advance.
 func TestBatchFlushRefusalsEmitProgress(t *testing.T) {
 	withoutInput := benchNativeResult(t, 0, gatedSmallBlobs)
-	withoutInput.nativeCandidate = nil
+	withoutInput.generationCandidate = nil
 	withoutInput.input = nil
 	refusedAssessment := benchNativeResult(t, 1, gatedSmallBlobs)
-	refusedAssessment.nativeCandidate = nil
+	refusedAssessment.generationCandidate = nil
 	refusedAssessment.assessmentReady = true // the zero assessment has unknown coverage
 	results := []indexParseResult{withoutInput, refusedAssessment}
 

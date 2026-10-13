@@ -298,7 +298,7 @@ func activateMountedCandidate(t *testing.T, db *store.Store, sid schema.SessionI
 	if err != nil {
 		t.Fatalf("mounted capture: %v", err)
 	}
-	outcome, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+	outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
 		Generation: v2, Blobs: blobs,
 		IndexerVersion: 1, IndexedAtMs: 1, ContentCapture: capture,
 	})

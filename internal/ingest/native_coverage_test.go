@@ -230,7 +230,7 @@ func TestNativeCoverageMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("prior capture: %v", err)
 				}
-				outcome, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+				outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
 					Generation: priorV2, Blobs: priorBlobs,
 					IndexerVersion: 1, IndexedAtMs: 1, ContentCapture: priorCapture,
 				})
@@ -300,7 +300,7 @@ func TestNativeCoverageMatrix(t *testing.T) {
 					TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 2,
 				}
 			}
-			outcome, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+			outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
 				Generation: v2, Blobs: blobs,
 				IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: capture,
 			})

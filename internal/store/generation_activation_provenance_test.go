@@ -234,7 +234,7 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 			// user entry whose full text it captures, so the activation's
 			// derived title mirror replaces the stale one.
 			complete.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(generationRefs[0])}
-			activation := ingest.NativeGenerationActivation{
+			activation := ingest.GenerationActivation{
 				Generation:      complete,
 				Blobs:           blobs,
 				IndexerVersion:  77,
@@ -261,7 +261,7 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 				activation.Capture = &ingest.PublicationCaptureWrite{Metadata: meta, CWDProvenance: kind}
 			}
 
-			_, activateErr := s.ActivateNativeGeneration(context.Background(), activation)
+			_, activateErr := s.ActivateGenerationCandidate(context.Background(), activation)
 			if tc.WantRefused {
 				if activateErr == nil {
 					t.Fatal("activation with a publication capture that disagrees with the stored session was accepted; want refusal")
@@ -346,7 +346,7 @@ func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 	complete, blobs := buildTestGeneration(t, sid, fixture.Generation.ID, "recovered full text", "recovered tool input", "recovered tool output")
 	complete.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(generationRefs[0])}
 	kind := ingest.CWDSourceExact
-	activation := ingest.NativeGenerationActivation{
+	activation := ingest.GenerationActivation{
 		Generation:     complete,
 		Blobs:          blobs,
 		IndexerVersion: 77,
@@ -362,11 +362,11 @@ func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 	}
 
 	installHarmonizedFault(t, harmonizedSeamBeforeCommit)
-	if _, err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
+	if _, err := s.ActivateGenerationCandidate(context.Background(), activation); err == nil {
 		t.Fatal("activation across the staging seam succeeded; the crash must interrupt it")
 	}
 	clearHarmonizedFault()
-	if _, err := s.ActivateNativeGeneration(context.Background(), activation); err != nil {
+	if _, err := s.ActivateGenerationCandidate(context.Background(), activation); err != nil {
 		t.Fatalf("retry interrupted activation: %v", err)
 	}
 

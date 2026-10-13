@@ -285,13 +285,13 @@ type Pipeline struct {
 	store    SessionStore // nil = skip DB insert (backward compatible)
 	salt     salt.Salt    // per-installation HMAC salt for project hash derivation
 
-	// nativeGenerationIDs optionally assigns the installed identity of each
+	// generationIDs optionally assigns the installed identity of each
 	// managed generation candidate. Production leaves it nil and mints a fresh
 	// opaque identity per attempt; a deterministic caller injects its own.
-	nativeGenerationIDs func(DiscoveredSession) string
+	generationIDs func(DiscoveredSession) string
 
 	// resolvedVersions caches the effective harness targets once, after the
-	// store capability gate has decided whether native generations are enabled.
+	// store capability gate has decided whether managed generations are enabled.
 	// versionTargets is read in hot per-session loops, so the overlay is
 	// resolved once rather than on every lookup.
 	resolvedVersions map[Harness]HarvesterVersions
@@ -450,12 +450,12 @@ func WithStore(s SessionStore) PipelineOption {
 	return func(p *Pipeline) { p.store = s }
 }
 
-// WithNativeGenerationID overrides the installed identity assigned to native
+// WithGenerationID overrides the installed identity assigned to native
 // managed-generation candidates. Production leaves it unset so every attempt
 // mints a fresh opaque identity; a deterministic caller injects a stable
 // source. The identity must be a single confined path component.
-func WithNativeGenerationID(assign func(DiscoveredSession) string) PipelineOption {
-	return func(p *Pipeline) { p.nativeGenerationIDs = assign }
+func WithGenerationID(assign func(DiscoveredSession) string) PipelineOption {
+	return func(p *Pipeline) { p.generationIDs = assign }
 }
 
 // WithSalt injects a per-installation HMAC salt for project hash derivation.
@@ -1739,16 +1739,16 @@ type indexParseResult struct {
 	im              indexedMeta
 	input           *CapturedIndexInput
 	output          indexformat.Result
-	// nativeCandidate carries a validated managed-generation candidate with its
+	// generationCandidate carries a validated managed-generation candidate with its
 	// captured content when the harness's declared output format is a managed
 	// generation. The write path stages and activates it instead of committing
 	// a bare entry replacement.
-	nativeCandidate *NativeGenerationCandidate
-	entryCount      int
-	startedAt       int64
-	logEntry        IndexLogEntry
-	parseDuration   time.Duration
-	bytes           int64
+	generationCandidate *GenerationCandidate
+	entryCount          int
+	startedAt           int64
+	logEntry            IndexLogEntry
+	parseDuration       time.Duration
+	bytes               int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -1861,14 +1861,14 @@ func indexResultWriteBytes(result indexformat.Result) int64 {
 		return fullEntryWriteBytes(v1.Entries)
 	}
 	if v2, ok := result.(indexformat.V2); ok {
-		return nativeCandidateWriteBytes(&NativeGenerationCandidate{Result: v2})
+		return generationCandidateWriteBytes(&GenerationCandidate{Result: v2})
 	}
 	return 0
 }
 
 func indexParseWriteBytes(result indexParseResult) int64 {
-	if result.nativeCandidate != nil {
-		return nativeCandidateWriteBytes(result.nativeCandidate)
+	if result.generationCandidate != nil {
+		return generationCandidateWriteBytes(result.generationCandidate)
 	}
 	return indexResultWriteBytes(result.output)
 }
@@ -2018,24 +2018,33 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		if p.capturedInputNeedsWork(input) {
 			parsed = true
 			// A harness whose declared output format is a managed generation is
-			// produced through its own native candidate exit, which carries the
-			// captured bytes and prior evidence the activation stages. Only the
-			// strict format-1 path keeps the retained parser dispatch.
-			usedNativeCandidate := false
+			// produced through its GenerationBuilder, which carries the captured
+			// bytes and prior evidence the activation stages. Only the strict
+			// format-1 path keeps the retained parser dispatch.
+			//
+			// An indexer that declares a managed format without implementing the
+			// builder keeps the versioned exit below: that combination is a REAL
+			// driver, not a refusal. A registered harness that declares format 2
+			// without a builder adopts the format through its own versioned result
+			// exit; the format-mismatch guard further down remains the backstop.
+			// Wrappers that embed a builder-bearing indexer promote the builder
+			// surface silently and change this dispatch, so a wrapper owns its
+			// optional surfaces explicitly.
+			usedGenerationCandidate := false
 			if declared != strictIndexFormat {
-				candidate, native, candidateErr := p.buildNativeCandidate(ctx, im, input, indexer)
-				if native {
-					usedNativeCandidate = true
+				candidate, builder, candidateErr := p.buildGenerationCandidate(ctx, im, input, indexer)
+				if builder {
+					usedGenerationCandidate = true
 					if candidateErr != nil {
 						err = candidateErr
 					} else {
 						candidateCopy := candidate
-						result.nativeCandidate = &candidateCopy
+						result.generationCandidate = &candidateCopy
 						output = candidate.Result
 					}
 				}
 			}
-			if !usedNativeCandidate {
+			if !usedGenerationCandidate {
 				output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
 			}
 			// A refusal NOTHING ABOUT THIS BUILD CAN LIFT is not an empty store:
@@ -2148,7 +2157,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// heals parent-cache moves and changed-pair mirrors on later
 		// harvests. Genuine refusals still flow through the assessment via
 		// their Unaccounted flag and validated evidence.
-		if _, isV1 := output.(indexformat.V1); isV1 && result.nativeCandidate == nil && authoritative {
+		if _, isV1 := output.(indexformat.V1); isV1 && result.generationCandidate == nil && authoritative {
 			strictAuthoritative := authoritative && declared == strictIndexFormat
 			if assessment, assessErr := AssessCapture(V1CaptureFacts(
 				im.session.Harness, output, strictAuthoritative, im.session.ContentOmitted,
@@ -2213,7 +2222,7 @@ func (p *Pipeline) flushIndexParseResults(ctx context.Context, results []indexPa
 // position. Native candidates emit as soon as their own commit completes, not
 // when the whole batch does, so progress keeps moving while a slow candidate
 // is still preparing. Other result kinds carry no such promise: they may emit
-// only after the native candidates in the same batch drain.
+// only after the managed-generation candidates in the same batch drain.
 func (p *Pipeline) flushIndexParseResultsWithProgress(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
 	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
 	if !ok || len(results) == 0 {
@@ -2273,7 +2282,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, 0))
 			continue
 		}
-		if result.nativeCandidate != nil {
+		if result.generationCandidate != nil {
 			// Managed generations stage and activate their own files and rows;
 			// they never travel through the entry-replacement batch.
 			nativePositions = append(nativePositions, i)
@@ -2408,7 +2417,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	// lane, and each candidate commits through the lane as soon as its own
 	// staging completes: a slow candidate no longer delays the commits of the
 	// others, and every commit reports its own progress immediately.
-	p.stageAndCommitNativeGenerations(ctx, results, nativePositions, outcome, logPrefix, writeLane, func(position int, indexed indexedMeta, logEntry IndexLogEntry, profileSession IndexProfileSession) {
+	p.stageAndCommitGenerations(ctx, results, nativePositions, outcome, logPrefix, writeLane, func(position int, indexed indexedMeta, logEntry IndexLogEntry, profileSession IndexProfileSession) {
 		flush.writeDuration += profileSession.WriteDuration
 		record(position, indexed, logEntry, profileSession)
 	})

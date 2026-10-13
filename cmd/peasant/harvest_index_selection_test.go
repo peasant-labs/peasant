@@ -96,9 +96,9 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 	t.Parallel()
 	sessions, cases := LoadHarvestIndexSelectionFixtures(t)
 	// The mounted command opens its store with the managed-generation writer and
-	// snapshot reader, so the run advertises the activated native targets for the
+	// snapshot reader, so the run advertises the activated managed-generation targets for the
 	// harnesses they cover; a refreshed session settles at those revisions.
-	effectiveTargets := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
+	effectiveTargets := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)
 	for _, fixture := range cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
@@ -304,7 +304,7 @@ func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixtu
 	meta := ingest.NewUnifiedMetadata()
 	meta.SessionID, meta.ModelHarness = fixture.ID, fixture.Harness
 	// Indexer deltas must not accidentally request adapter maintenance.
-	target := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)[fixture.Harness]
+	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[fixture.Harness]
 	meta.AdapterVersion = &target.AdapterVersion
 	meta.HostSlug = ingest.HostSlug(testutil.TestHostSlug)
 	meta.Timestamp.Start = time.Now().Add(-age).UnixMilli()

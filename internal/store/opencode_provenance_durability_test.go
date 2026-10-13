@@ -202,33 +202,34 @@ func TestOpenCodeProvenanceDurablePriorRecovery(t *testing.T) {
 				t.Fatal("native parent rows survived deletion")
 			}
 
-			config := ingest.OpenCodeProvenanceIndexerConfig{
-				Enabled: true,
-				Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
-					return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, tc.SessionID, options)
-				},
-				Metadata: func(_ ingest.DiscoveredSession) (schema.UnifiedMetadata, error) { return metadata, nil },
-				GenerationID: func(_ ingest.DiscoveredSession) string {
-					return tc.RefreshGenerationID
-				},
-				Prior: func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-					return storedPrior, nil
-				},
+			refreshPriorBytes, err := ingest.EncodeOpenCodeProvenancePrior(storedPrior)
+			if err != nil {
+				t.Fatalf("re-encode persisted prior evidence: %v", err)
 			}
-			indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
+			indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
 			session := ingest.DiscoveredSession{
 				SessionID:        ingest.SessionID(tc.SessionID),
 				Harness:          ingest.HarnessOpenCode,
 				TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite,
 			}
-			result, err := indexer.IndexTranscriptResult(ctx, session)
+			candidate, err := indexer.BuildGeneration(ctx, ingest.GenerationBuildInput{
+				Session:          session,
+				GenerationID:     tc.RefreshGenerationID,
+				RecordedMetadata: &metadata,
+				Prior: openCodeDurabilityPriorSource{prior: &ingest.GenerationPrior{
+					GenerationID:          tc.GenerationID,
+					Aliases:               storedPrior.Aliases,
+					HasCompleteGeneration: storedPrior.HasCompleteGeneration,
+					PriorEvidence:         refreshPriorBytes,
+				}},
+				OpenCode: openCodeDurabilitySourceAccess{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
+					return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, tc.SessionID, options)
+				}},
+			})
 			if err != nil {
 				t.Fatalf("refresh after reopening persisted storage: %v", err)
 			}
-			refreshed, ok := result.(indexformat.V2)
-			if !ok {
-				t.Fatalf("refresh returned %T, want indexformat.V2", result)
-			}
+			refreshed := candidate.Result
 			if len(refreshed.Generation.Segments) != 1 {
 				t.Fatalf("refreshed segments = %d, want 1", len(refreshed.Generation.Segments))
 			}
@@ -391,4 +392,31 @@ func openOpenCodeDurabilityNative(t *testing.T, source testfixture.MaterializedS
 		t.Fatalf("open durable synthetic native source: %v", err)
 	}
 	return connection
+}
+
+// openCodeDurabilityPriorSource is a test double for the attempt's evidence
+// access: it serves the persisted prior and never a stored capture authority,
+// which is the production shape for a session with an active generation.
+type openCodeDurabilityPriorSource struct {
+	prior *ingest.GenerationPrior
+}
+
+func (s openCodeDurabilityPriorSource) ReadGenerationPrior(context.Context) (*ingest.GenerationPrior, error) {
+	return s.prior, nil
+}
+
+func (s openCodeDurabilityPriorSource) ReadStoredCaptureAuthority(context.Context) (*ingest.StoredCaptureAuthority, error) {
+	return nil, nil
+}
+
+// openCodeDurabilitySourceAccess is a test double for the attempt's
+// recorded-source access. It ignores the locator because the case owns its
+// synthetic source path; the production locator resolution is covered by the
+// mounted maintenance path.
+type openCodeDurabilitySourceAccess struct {
+	snapshot func(ctx context.Context, locator string) (ingest.OpenCodeHistorySnapshot, error)
+}
+
+func (a openCodeDurabilitySourceAccess) Snapshot(ctx context.Context, locator string) (ingest.OpenCodeHistorySnapshot, error) {
+	return a.snapshot(ctx, locator)
 }

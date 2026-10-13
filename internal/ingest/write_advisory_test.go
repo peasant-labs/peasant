@@ -27,9 +27,9 @@ type advisoryStagingStore struct {
 }
 
 var (
-	_ NativeGenerationStager    = (*advisoryStagingStore)(nil)
-	_ NativeGenerationActivator = (*advisoryNativeStore)(nil)
-	_ NativeGenerationActivator = (*advisoryStagingStore)(nil)
+	_ GenerationStager    = (*advisoryStagingStore)(nil)
+	_ GenerationActivator = (*advisoryNativeStore)(nil)
+	_ GenerationActivator = (*advisoryStagingStore)(nil)
 )
 
 //go:embed testdata/write_advisory.yaml
@@ -44,11 +44,11 @@ type writeAdvisoryCase struct {
 	WantActivationCalls int32  `yaml:"want_activation_calls"`
 }
 
-func nativeWriteTestAdvisory(activation NativeGenerationActivation) DiagnosticEntry {
+func nativeWriteTestAdvisory(activation GenerationActivation) DiagnosticEntry {
 	return DiagnosticEntry{ErrorType: "oversize_write_advisory", Location: string(activation.Generation.Generation.Metadata.SessionID), Message: "no other writer running is recommended"}
 }
 
-func (s *advisoryStagingStore) StageNativeGeneration(ctx context.Context, activation NativeGenerationActivation) (NativeGenerationStaged, error) {
+func (s *advisoryStagingStore) StageGenerationCandidate(ctx context.Context, activation GenerationActivation) (GenerationStaged, error) {
 	s.stageCalls.Add(1)
 	if s.emitStage {
 		ReportWriteAdvisory(ctx, nativeWriteTestAdvisory(activation))
@@ -56,12 +56,12 @@ func (s *advisoryStagingStore) StageNativeGeneration(ctx context.Context, activa
 	return benchStaged(activation.Generation.Generation.ID), nil
 }
 
-func (s *advisoryNativeStore) ActivateNativeGeneration(ctx context.Context, activation NativeGenerationActivation) (ActivationOutcome, error) {
+func (s *advisoryNativeStore) ActivateGenerationCandidate(ctx context.Context, activation GenerationActivation) (ActivationOutcome, error) {
 	s.activationCalls.Add(1)
 	if s.emitActivation {
 		ReportWriteAdvisory(ctx, nativeWriteTestAdvisory(activation))
 	}
-	return s.sweepRecordingStore.ActivateNativeGeneration(ctx, activation)
+	return s.sweepRecordingStore.ActivateGenerationCandidate(ctx, activation)
 }
 
 func TestNativeFlushRetainsWriteAdvisory(t *testing.T) {
@@ -90,7 +90,7 @@ func TestNativeFlushRetainsWriteAdvisory(t *testing.T) {
 			if c.Stager {
 				dependency = staging
 			}
-			if _, hasStager := dependency.(NativeGenerationStager); hasStager != c.Stager {
+			if _, hasStager := dependency.(GenerationStager); hasStager != c.Stager {
 				t.Fatalf("staging capability=%v, want %v", hasStager, c.Stager)
 			}
 			pipeline := &Pipeline{config: PipelineConfig{Parallelism: 1}, metricsStore: dependency}
@@ -105,7 +105,7 @@ func TestNativeFlushRetainsWriteAdvisory(t *testing.T) {
 			if len(flush.indexed) != 1 || !flush.indexed[0].indexed {
 				t.Fatalf("flush must commit its candidate: %+v", flush.indexed)
 			}
-			want := nativeWriteTestAdvisory(NativeGenerationActivation{Generation: result.nativeCandidate.Result})
+			want := nativeWriteTestAdvisory(GenerationActivation{Generation: result.generationCandidate.Result})
 			got := pipeline.snapshotDiagnostics()
 			if len(got) != 1 || got[0] != want {
 				t.Fatalf("harvest diagnostics=%+v, want exactly one retained advisory %+v", got, want)
