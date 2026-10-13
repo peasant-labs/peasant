@@ -2203,6 +2203,51 @@ cases:
                 command_name: /clear
                 model_id: claude-opus-4-6
             - {nativeKey: u1, index: 1, ref: e_u1, role: user, entryType: text, depth: 0, content: next prompt, submissionRef: s_u1, ownership: local}
+      - allocator: [e_a1]
+        capture:
+          id: gen-channels-extra-retained-unknown
+          sessionId: sess_chansextraretainedunknown
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra-retained-unknown
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextraretainedunknown
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: '{"command_name":"/clear"}'
+              retainedUnknown:
+                - namespace: record
+                  kind: future
+                  sourceId: src-retained-merge
+                  payload: '{"x":1}'
+        want:
+          turnCount: 1
+          inputSubmissionCount: 0
+          titleRefs: []
+          main:
+            - nativeKey: a1
+              index: 0
+              ref: e_a1
+              role: assistant
+              entryType: text
+              depth: 0
+              content: control response
+              extra:
+                command_name: /clear
+                retainedUnknown:
+                  - harness: claude-code
+                    namespace: record
+                    kind: future
+                    position: {sourceId: src-retained-merge}
+                    payloadText: '{"x":1}'
 
   - name: channels-raw-byte-length-rejected
     steps:
