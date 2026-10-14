@@ -20,18 +20,18 @@ import (
 // lacked permission.
 var ErrSnapshotNotFound = errors.New("indexformat: session has no stored metadata row")
 
-// ErrRetainedAttemptIncomplete reports that a session holds a retained latest
+// ErrLatestAttemptIncomplete reports that a session holds a latest
 // attempt: a newer, explicitly incomplete preview stands beside the last-good
 // full generation, so the ordinary full read cannot answer for the session.
 //
 // The store returns this sentinel instead of a legacy snapshot, uniformly for a
 // managed V2 authority and for a V1-certificate or file-backed one, BEFORE the
 // read resolves to any representation. Callers recognize it to serve the
-// retained attempt's bounded preview, or to ask for the last-good full read
+// latest attempt's bounded preview, or to ask for the last-good full read
 // explicitly; it never means the session is missing, and it never means the
 // stored content is damaged. transcript.ErrLegacySnapshot stays reserved for an
 // actual legacy V1 snapshot.
-var ErrRetainedAttemptIncomplete = errors.New("indexformat: session holds a retained incomplete latest attempt beside its last-good generation; read the bounded preview or select the last-good explicitly")
+var ErrLatestAttemptIncomplete = errors.New("indexformat: session holds a retained incomplete latest attempt beside its last-good generation; read the bounded preview or select the last-good explicitly")
 
 // MaxNativeAliasKeyBytes bounds one opaque native alias key. Native identity
 // is encoded into this key before it is persisted; the raw private path stays
@@ -430,7 +430,7 @@ func (g Generation) Validate() error {
 	for _, alias := range g.Aliases {
 		if _, ok := entryRefs[alias.Ref]; !ok {
 			if _, retained := retainedRefs[alias.Ref]; !retained {
-				return fmt.Errorf("indexformat.Generation.Validate id %q: native alias key %q targets ref %q outside the emitted partitions and captured segments; the alias cannot be resolved after reopen; map aliases only to retained generation refs", g.ID, alias.NativeKey, alias.Ref)
+				return fmt.Errorf("indexformat.Generation.Validate id %q: native alias key %q targets ref %q outside the emitted partitions and captured segments; the alias cannot be resolved after reopen; map aliases only to latest-attempt generation refs", g.ID, alias.NativeKey, alias.Ref)
 			}
 		}
 	}

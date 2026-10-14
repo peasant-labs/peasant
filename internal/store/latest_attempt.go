@@ -13,26 +13,26 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// retentionEligible takes a pooled connection and evaluates the eligibility
+// latestAttemptEligible takes a pooled connection and evaluates the eligibility
 // predicate. It is the routing hint the activation path uses before it decides
 // between repair, skip and the write path.
-func (s *Store) retentionEligible(ctx context.Context, write ingest.SessionEntryWrite) (bool, error) {
+func (s *Store) latestAttemptEligible(ctx context.Context, write ingest.SessionEntryWrite) (bool, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return false, fmt.Errorf("store: take connection to decide retention for session %s: %w; nothing was written", write.SessionID, err)
 	}
 	defer s.pool.Put(conn)
-	return retentionEligibleOnConn(conn, write)
+	return latestAttemptEligibleOnConn(conn, write)
 }
 
-// errRetentionPairProofUnavailable is the fixed category the retention
+// errLatestAttemptPairProofUnavailable is the fixed category the retention
 // boundary reports when a write qualifies for retention but no verified pair
 // identity is available. The store refuses before any mutation rather than
 // stashing unbound content or recording a binding that can never settle.
-var errRetentionPairProofUnavailable = errors.New("pair-proof-unavailable")
+var errLatestAttemptPairProofUnavailable = errors.New("pair-proof-unavailable")
 
-// retainedAttemptSettledSQL builds the settle fragment for one session alias:
-// the retained latest attempt has fully settled when the pair, the producer
+// latestAttemptSettledSQL builds the settle fragment for one session alias:
+// the latest attempt has fully settled when the pair, the producer
 // revision and the adapter revision all match the current facts. The two
 // positional parameters are the producer target (indexer version) and the
 // adapter target, in that order. A caller splices the fragment into its own
@@ -42,10 +42,10 @@ var errRetentionPairProofUnavailable = errors.New("pair-proof-unavailable")
 //   - pair: the recorded attempt identity is non-null and equals the session's
 //     current artifact hash, which is also non-null;
 //   - producer: the recorded attempt producer revision meets the target;
-//   - adapter: the retained generation row's adapter revision is non-null and
+//   - adapter: the latest-attempt generation row's adapter revision is non-null and
 //     meets the target, read through the correlated EXISTS over
 //     session_generations keyed by latest_attempt_generation_id.
-func retainedAttemptSettledSQL(alias string) string {
+func latestAttemptSettledSQL(alias string) string {
 	return alias + `.latest_attempt_generation_id IS NOT NULL
     AND ` + alias + `.latest_attempt_artifact_hash IS NOT NULL
     AND ` + alias + `.latest_attempt_artifact_hash = ` + alias + `.artifact_hash
@@ -60,33 +60,33 @@ func retainedAttemptSettledSQL(alias string) string {
     )`
 }
 
-// retainedAttemptSettleFragment returns the bare settle fragment for one
+// latestAttemptSettleFragment returns the bare settle fragment for one
 // harness alias and the arguments it binds (the producer target, then the
 // adapter target), or ok=false when the harness's targets cannot express a
 // settle decision. A target that cannot settle must never hide work: the caller
 // keeps listing the session, which is the pre-retention behavior.
-func retainedAttemptSettleFragment(alias string, target ingest.HarvesterVersions) (string, []any, bool) {
+func latestAttemptSettleFragment(alias string, target ingest.HarvesterVersions) (string, []any, bool) {
 	if target.IndexerVersion < 1 || target.AdapterVersion < 1 {
 		return "", nil, false
 	}
-	return retainedAttemptSettledSQL(alias), []any{target.IndexerVersion, target.AdapterVersion}, true
+	return latestAttemptSettledSQL(alias), []any{target.IndexerVersion, target.AdapterVersion}, true
 }
 
-// retainedAttemptSettledClause returns the settle NOT clause for one harness
+// latestAttemptSettledClause returns the settle NOT clause for one harness
 // alias and its bound arguments, or an empty clause when the target cannot
 // express a settle decision.
-func retainedAttemptSettledClause(alias string, target ingest.HarvesterVersions) (string, []any) {
-	fragment, args, ok := retainedAttemptSettleFragment(alias, target)
+func latestAttemptSettledClause(alias string, target ingest.HarvesterVersions) (string, []any) {
+	fragment, args, ok := latestAttemptSettleFragment(alias, target)
 	if !ok {
 		return "", nil
 	}
 	return "NOT (" + fragment + ")", args
 }
 
-// retentionEligibleOnConn is the store-owned eligibility predicate for
-// retained latest-preview coexistence. It reports whether this write is the
+// latestAttemptEligibleOnConn is the store-owned eligibility predicate for
+// latest-attempt coexistence. It reports whether this write is the
 // assessed unaccounted-SourceOmitted preview over a publishable full
-// authority, in which case the write is retained instead of replacing the
+// authority, in which case the write is kept as the latest attempt instead of replacing the
 // active generation.
 //
 // The predicate holds only when ALL of these are true:
@@ -110,9 +110,9 @@ func retainedAttemptSettledClause(alias string, target ingest.HarvesterVersions)
 // A write satisfying 1-5 but failing 6 is refused with the actionable
 // pair-proof-unavailable error BEFORE any mutation, leaving the active
 // authority intact. Legacy rows whose stored hash is NULL bootstrap through the
-// existing WHERE-NULL identity path inside the retention transaction; NULL is
+// existing WHERE-NULL identity path inside the latest-attempt transaction; NULL is
 // never claimed as equality with NULL.
-func retentionEligibleOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite) (bool, error) {
+func latestAttemptEligibleOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite) (bool, error) {
 	v2, ok := asV2Value(write.Result)
 	if !ok {
 		return false, nil
@@ -146,14 +146,14 @@ func retentionEligibleOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite) 
 	if write.ArtifactIdentity != nil && *write.ArtifactIdentity != "" {
 		return true, nil
 	}
-	return false, retentionPairProofUnavailableError(write.SessionID)
+	return false, latestAttemptPairProofUnavailableError(write.SessionID)
 }
 
-// retentionPairProofUnavailableError names the missing proof, why retention
+// latestAttemptPairProofUnavailableError names the missing proof, why retention
 // needs it, and what the caller must do, so a direct caller that omits the
 // identity sees an actionable refusal instead of a silent unbound stash.
-func retentionPairProofUnavailableError(sessionID ingest.SessionID) error {
-	return fmt.Errorf("store: refuse to retain the latest preview for session %s: pair-proof-unavailable; the write is an unaccounted source-records omission preview over a publishable full authority, but neither the stored artifact hash nor the supplied pair identity proves which pair the attempt consumed; nothing was written and the active generation is unchanged; supply the verified pair identity (SessionEntryWrite.ArtifactIdentity) or re-index the source so the stored identity exists, then retry: %w", sessionID, errRetentionPairProofUnavailable)
+func latestAttemptPairProofUnavailableError(sessionID ingest.SessionID) error {
+	return fmt.Errorf("store: refuse to keep the latest attempt for session %s: pair-proof-unavailable; the write is an unaccounted source-records omission preview over a publishable full authority, but neither the stored artifact hash nor the supplied pair identity proves which pair the attempt consumed; nothing was written and the active generation is unchanged; supply the verified pair identity (SessionEntryWrite.ArtifactIdentity) or re-index the source so the stored identity exists, then retry: %w", sessionID, errLatestAttemptPairProofUnavailable)
 }
 
 // readStoredArtifactHashOnConn reads sessions.artifact_hash, distinguishing a
@@ -177,10 +177,10 @@ func readStoredArtifactHashOnConn(conn *sqlite.Conn, sessionID ingest.SessionID)
 	return stored, found, nil
 }
 
-// retainedAttemptPointer is the stored retained-latest-attempt pointer plus the
-// retained generation's own binding and adapter revision, read in one snapshot
-// so the settle comparison cannot mix facts from two states.
-type retainedAttemptPointer struct {
+// latestAttemptPointer is the stored latest-attempt pointer plus the
+// latest-attempt generation's own binding and adapter revision, read in one
+// snapshot so the settle comparison cannot mix facts from two states.
+type latestAttemptPointer struct {
 	generationID   string
 	artifactHash   string
 	indexerVersion int
@@ -188,18 +188,18 @@ type retainedAttemptPointer struct {
 	failureMessage string
 	capturedAtMs   int64
 	statsJSON      string
-	// candidateDigest and adapterVersion come from the retained generation row.
+	// candidateDigest and adapterVersion come from the latest-attempt generation row.
 	candidateDigest string
 	adapterVersion  *int
 }
 
-// found reports whether a retained attempt is recorded.
-func (p retainedAttemptPointer) found() bool { return p.generationID != "" }
+// found reports whether a latest attempt is recorded.
+func (p latestAttemptPointer) found() bool { return p.generationID != "" }
 
-// readRetainedAttemptPointerOnConn reads the session's retained pointer and the
-// retained generation's binding and adapter revision.
-func readRetainedAttemptPointerOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (retainedAttemptPointer, error) {
-	var pointer retainedAttemptPointer
+// readLatestAttemptPointerOnConn reads the session's latest-attempt pointer and the
+// latest-attempt generation's binding and adapter revision.
+func readLatestAttemptPointerOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (latestAttemptPointer, error) {
+	var pointer latestAttemptPointer
 	if err := sqlitex.Execute(conn, `SELECT latest_attempt_generation_id, latest_attempt_artifact_hash, latest_attempt_indexer_version, latest_attempt_failure_code, latest_attempt_failure_message, latest_attempt_captured_at_ms, latest_attempt_stats_json FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -227,7 +227,7 @@ func readRetainedAttemptPointerOnConn(conn *sqlite.Conn, sessionID schema.Sessio
 			return nil
 		},
 	}); err != nil {
-		return pointer, fmt.Errorf("store: read the retained latest-attempt pointer for session %s: %w; nothing was written", sessionID, err)
+		return pointer, fmt.Errorf("store: read the latest-attempt pointer for session %s: %w; nothing was written", sessionID, err)
 	}
 	if !pointer.found() {
 		return pointer, nil
@@ -243,7 +243,7 @@ func readRetainedAttemptPointerOnConn(conn *sqlite.Conn, sessionID schema.Sessio
 			return nil
 		},
 	}); err != nil {
-		return pointer, fmt.Errorf("store: read the retained generation binding for session %s generation %s: %w; nothing was written", sessionID, pointer.generationID, err)
+		return pointer, fmt.Errorf("store: read the latest-attempt generation binding for session %s generation %s: %w; nothing was written", sessionID, pointer.generationID, err)
 	}
 	return pointer, nil
 }
@@ -257,35 +257,35 @@ func deleteGenerationRowsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, g
 		if err := sqlitex.Execute(conn, `DELETE FROM `+table+` WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), generationID},
 		}); err != nil {
-			return fmt.Errorf("store: delete retained generation %s rows from %s for session %s: %w; the retention transaction rolled back and the prior state is unchanged", generationID, table, sessionID, err)
+			return fmt.Errorf("store: delete latest-attempt generation %s rows from %s for session %s: %w; the latest-attempt transaction rolled back and the prior state is unchanged", generationID, table, sessionID, err)
 		}
 	}
 	return nil
 }
 
-// retainHarmonizedAttemptOnConn performs the retention commit inside the
+// retainLatestAttemptOnConn performs the latest-attempt commit inside the
 // caller's transaction (the batch savepoint or the single-route commit). It
-// records the candidate as the retained latest attempt without touching the
+// records the candidate as the latest attempt without touching the
 // active authority: no active pointer move, no content rewrite, no index state,
 // no publication stamp.
 //
-// A TRUE no-op is taken only when a retained attempt already exists AND the
-// candidate binding equals the retained generation's binding AND every settle
+// A TRUE no-op is taken only when a latest attempt already exists AND the
+// candidate binding equals the latest-attempt generation's binding AND every settle
 // facet equals the current facts (the verified pair identity, the producer
 // revision, and the candidate's actual adapter revision). Otherwise the REPLACE
 // branch deletes the previous attempt's rows through the shared inventory and
 // inserts the candidate under its own generation identifier with its own
 // metadata, then records the pointer in one sessions UPDATE. The generation row
 // is INSERTED, never updated in place; the previous attempt's rows go in the
-// same transaction, so one retained attempt at a time is kept.
+// same transaction, so one latest attempt at a time is kept.
 //
 // The candidate's producer stats are recorded (never the active authority's).
 // A failure rolls the caller's transaction back: the pointer and the active
 // generation are unchanged.
-func retainHarmonizedAttemptOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, write ingest.SessionEntryWrite) error {
+func retainLatestAttemptOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, write ingest.SessionEntryWrite) error {
 	v2, ok := asV2Value(write.Result)
 	if !ok {
-		return fmt.Errorf("store: retain the latest preview for session %s: the write carries no managed generation; nothing was written", write.SessionID)
+		return fmt.Errorf("store: keep the latest attempt for session %s: the write carries no managed generation; nothing was written", write.SessionID)
 	}
 	sessionID := write.SessionID
 	// Establish a missing stored pair identity from the supplied verified
@@ -300,7 +300,7 @@ func retainHarmonizedAttemptOnConn(conn *sqlite.Conn, prepared *preparedHarmoniz
 		if err := sqlitex.Execute(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ? AND artifact_hash IS NULL`, &sqlitex.ExecOptions{
 			Args: []any{*write.ArtifactIdentity, string(sessionID)},
 		}); err != nil {
-			return fmt.Errorf("store: establish the pair identity for session %s while retaining the latest preview: %w; the retention transaction rolled back and the prior state is unchanged", sessionID, err)
+			return fmt.Errorf("store: establish the pair identity for session %s while keeping the latest attempt: %w; the latest-attempt transaction rolled back and the prior state is unchanged", sessionID, err)
 		}
 		verifiedIdentity = *write.ArtifactIdentity
 		hasStored = true
@@ -308,9 +308,9 @@ func retainHarmonizedAttemptOnConn(conn *sqlite.Conn, prepared *preparedHarmoniz
 	if !hasStored || verifiedIdentity == "" {
 		// Defensive: eligibility already refused this, so a caller that bypasses
 		// the pre-check still cannot record a NULL binding.
-		return retentionPairProofUnavailableError(sessionID)
+		return latestAttemptPairProofUnavailableError(sessionID)
 	}
-	pointer, err := readRetainedAttemptPointerOnConn(conn, sessionID)
+	pointer, err := readLatestAttemptPointerOnConn(conn, sessionID)
 	if err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func retainHarmonizedAttemptOnConn(conn *sqlite.Conn, prepared *preparedHarmoniz
 		pointer.artifactHash == verifiedIdentity &&
 		pointer.indexerVersion == write.IndexerVersion &&
 		nullableIntEqual(pointer.adapterVersion, candidateAdapter) {
-		// TRUE no-op: the retained attempt already matches the current facts.
+		// TRUE no-op: the latest attempt already matches the current facts.
 		// Nothing is written: no row, no pointer, no object.
 		return nil
 	}
@@ -344,7 +344,7 @@ func retainHarmonizedAttemptOnConn(conn *sqlite.Conn, prepared *preparedHarmoniz
 			capturedAt, seedJSONForStats(v2.Generation.Metadata.Stats), string(sessionID),
 		},
 	}); err != nil {
-		return fmt.Errorf("store: record the retained latest-attempt pointer for session %s: %w; the retention transaction rolled back and the prior state is unchanged", sessionID, err)
+		return fmt.Errorf("store: record the latest-attempt pointer for session %s: %w; the latest-attempt transaction rolled back and the prior state is unchanged", sessionID, err)
 	}
 	return nil
 }
@@ -357,31 +357,31 @@ func nullableIntEqual(a, b *int) bool {
 	return *a == *b
 }
 
-// retainSessionEntryWriteOnConn runs the retention branch of one batch savepoint
+// retainLatestAttemptWriteOnConn runs the latest-attempt branch of one batch savepoint
 // on the caller's connection. It re-runs the immutable-identity check through
-// harmonizedBatchPrecommit with the retain marker, re-runs the unknown-evidence
-// preflight the content writer runs, and commits the retained attempt. It skips
+// harmonizedBatchPrecommit with the latest-attempt marker, re-runs the unknown-evidence
+// preflight the content writer runs, and commits the latest attempt. It skips
 // every active-authority statement and releases the savepoint itself.
 //
 // When the identity check finds the candidate already installed with the
 // identical binding, it reports the idempotent retry without running any
-// active-authority statement, so the active authority and the retained pointer
+// active-authority statement, so the active authority and the latest-attempt pointer
 // stay identical.
-func (s *Store) retainSessionEntryWriteOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite, savepointName string) (sessionEntryWriteOutcome, error, bool) {
+func (s *Store) retainLatestAttemptWriteOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite, savepointName string) (sessionEntryWriteOutcome, error, bool) {
 	var out sessionEntryWriteOutcome
 	_, prepared, skip, err := s.harmonizedBatchPrecommit(conn, write, true)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return out, rollbackErr, fatal
 	}
-	if !skip.retain {
+	if !skip.retainLatestAttempt {
 		out = skip.outcome
-		relErr, fatal := s.releaseRetentionSavepoint(conn, write, savepointName)
+		relErr, fatal := s.releaseLatestAttemptSavepoint(conn, write, savepointName)
 		return out, relErr, fatal
 	}
 	v2, ok := asV2Value(write.Result)
 	if !ok {
-		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: retain the latest preview for session %s: the write carries no managed generation; nothing was written", write.SessionID), write.SessionID)
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: keep the latest attempt for session %s: the write carries no managed generation; nothing was written", write.SessionID), write.SessionID)
 		return out, rollbackErr, fatal
 	}
 	evidence := append([]schema.SessionEntry(nil), prepared.mainEntries...)
@@ -392,19 +392,19 @@ func (s *Store) retainSessionEntryWriteOnConn(conn *sqlite.Conn, write ingest.Se
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return out, rollbackErr, fatal
 	}
-	if err := retainHarmonizedAttemptOnConn(conn, prepared, write); err != nil {
+	if err := retainLatestAttemptOnConn(conn, prepared, write); err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return out, rollbackErr, fatal
 	}
-	out.retainedPreview = true
-	relErr, fatal := s.releaseRetentionSavepoint(conn, write, savepointName)
+	out.latestAttemptPreview = true
+	relErr, fatal := s.releaseLatestAttemptSavepoint(conn, write, savepointName)
 	return out, relErr, fatal
 }
 
-// releaseRetentionSavepoint reports the mid-activation seam and releases the
-// retention savepoint. A seam failure aborts the outer transaction (fatal), so
+// releaseLatestAttemptSavepoint reports the mid-activation seam and releases the
+// latest-attempt savepoint. A seam failure aborts the outer transaction (fatal), so
 // a simulated process loss rolls the retention back.
-func (s *Store) releaseRetentionSavepoint(conn *sqlite.Conn, write ingest.SessionEntryWrite, savepointName string) (error, bool) {
+func (s *Store) releaseLatestAttemptSavepoint(conn *sqlite.Conn, write ingest.SessionEntryWrite, savepointName string) (error, bool) {
 	if err := reportHarmonizedWriterSeam(harmonizedSeamMidActivationBatch); err != nil {
 		return err, true
 	}
@@ -414,25 +414,24 @@ func (s *Store) releaseRetentionSavepoint(conn *sqlite.Conn, write ingest.Sessio
 	return nil, false
 }
 
-// clearRetainedAttemptPointer is the column list that clears the retained
-// latest-attempt pointer. The pointer is non-null exactly while a retained
-// attempt newer than the active authority exists, so every successful ACTIVE
-// FINALIZATION clears it in the same transaction. A finalized active authority
-// never leaves a stale pointer behind.
-const clearRetainedAttemptPointer = `latest_attempt_generation_id = NULL, latest_attempt_artifact_hash = NULL, latest_attempt_indexer_version = NULL, latest_attempt_failure_code = NULL, latest_attempt_failure_message = NULL, latest_attempt_captured_at_ms = NULL, latest_attempt_stats_json = NULL`
+// clearLatestAttemptPointer is the column list that clears the latest-attempt
+// pointer. The pointer is non-null exactly while a latest attempt newer than
+// the active authority exists, so every successful ACTIVE FINALIZATION clears
+// it in the same transaction. A finalized active authority never leaves a stale
+// pointer behind.
+const clearLatestAttemptPointer = `latest_attempt_generation_id = NULL, latest_attempt_artifact_hash = NULL, latest_attempt_indexer_version = NULL, latest_attempt_failure_code = NULL, latest_attempt_failure_message = NULL, latest_attempt_captured_at_ms = NULL, latest_attempt_stats_json = NULL`
 
 // supersededGenerationPredicate excludes the two live generations from a
-// superseded-row predicate: the active read authority and the retained latest
-// attempt. Both parameters are bound positionally (active then retained), and
-// IS NOT is NULL-safe, so a session with no retained attempt keeps every
+// superseded-row predicate: the active read authority and the latest attempt.
+// Both parameters are bound positionally (active then latest attempt), and
+// IS NOT is NULL-safe, so a session with no latest attempt keeps every
 // non-active generation as superseded.
 const supersededGenerationPredicate = `generation_id IS NOT ? AND generation_id IS NOT ?`
 
 // generationKeepSetOnConn reads the two generation identifiers a sweep or
-// reclaim must keep for one session: the active read authority and the retained
-// latest attempt. Both are live; every other committed generation is
-// superseded.
-func generationKeepSetOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (active, retained string, err error) {
+// reclaim must keep for one session: the active read authority and the latest
+// attempt. Both are live; every other committed generation is superseded.
+func generationKeepSetOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (active, latestAttempt string, err error) {
 	found := false
 	if err := sqlitex.Execute(conn, `SELECT active_generation_id, latest_attempt_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
@@ -442,7 +441,7 @@ func generationKeepSetOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (act
 				active = stmt.ColumnText(0)
 			}
 			if stmt.ColumnType(1) != sqlite.TypeNull {
-				retained = stmt.ColumnText(1)
+				latestAttempt = stmt.ColumnText(1)
 			}
 			return nil
 		},
@@ -452,7 +451,7 @@ func generationKeepSetOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (act
 	if !found {
 		return "", "", fmt.Errorf("store: session %s has no metadata row; import the session before sweeping or reclaiming its generations", sessionID)
 	}
-	return active, retained, nil
+	return active, latestAttempt, nil
 }
 
 // generationKeepSet takes a pooled connection and reads the session's keep set.
@@ -465,9 +464,9 @@ func (s *Store) generationKeepSet(ctx context.Context, sessionID schema.SessionI
 	return generationKeepSetOnConn(conn, sessionID)
 }
 
-// retainedGenerationID returns the session's retained latest-attempt generation
-// identifier, or the empty string when no attempt is retained.
-func (s *Store) retainedGenerationID(ctx context.Context, sessionID schema.SessionID) (string, error) {
-	_, retained, err := s.generationKeepSet(ctx, sessionID)
-	return retained, err
+// latestAttemptGenerationID returns the session's latest-attempt generation
+// identifier, or the empty string when no attempt exists.
+func (s *Store) latestAttemptGenerationID(ctx context.Context, sessionID schema.SessionID) (string, error) {
+	_, latestAttempt, err := s.generationKeepSet(ctx, sessionID)
+	return latestAttempt, err
 }

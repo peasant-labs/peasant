@@ -55,7 +55,7 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 
 // WithSessionSnapshotSelected is the explicit-selection form of
 // WithSessionSnapshot. A zero selection is authority mode and behaves exactly
-// like WithSessionSnapshot, including the uniform retained-attempt refusal. A
+// like WithSessionSnapshot, including the uniform latest-attempt refusal. A
 // LastGood selection asks for the last-good full authority explicitly: the
 // store resolves the active generation (or the preserved legacy/certificate
 // read when the session has none) and refuses when the active authority is
@@ -66,9 +66,9 @@ func (s *Store) WithSessionSnapshotSelected(ctx context.Context, sessionID schem
 
 // WithSessionPreviewSnapshot reads display fields without digest verification.
 // Only preview consumers opt in; authoritative reads use WithSessionSnapshot.
-// A session that retains a latest attempt serves the retained attempt's
+// A session with a latest attempt serves the latest attempt's
 // generation here, so the bounded preview and the WS/HTTP detail payload carry
-// the retained attempt's own content and counts.
+// the latest attempt's own content and counts.
 func (s *Store) WithSessionPreviewSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) error {
 	return s.withSessionSnapshot(ctx, sessionID, false, ingest.SessionReadSelection{}, fn)
 }
@@ -95,23 +95,23 @@ func (s *Store) withSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	}
 
 	endSnapshot := sqlitex.Save(conn)
-	// The retained-attempt decision runs BEFORE the read resolves to any
+	// The latest-attempt decision runs BEFORE the read resolves to any
 	// representation, so the refusal is uniform for a managed V2 authority and
 	// for a V1-certificate or file-backed one. It reads the pointer only: the
-	// retained attempt's own rows are touched on the preview path alone.
-	pointer, readErr := readRetainedAttemptPointerOnConn(conn, sessionID)
+	// latest attempt's own rows are touched on the preview path alone.
+	pointer, readErr := readLatestAttemptPointerOnConn(conn, sessionID)
 	var snapshot indexformat.ReadSnapshot
 	if readErr == nil && selection.LastGood {
-		// The last-good authority check is hoisted above the retained-pointer
+		// The last-good authority check is hoisted above the latest-attempt-pointer
 		// branch so it protects every representation: a pointer-absent session
 		// whose active authority is only a preview (an explicit rebuild) refuses
-		// exactly like a retained one. It no-ops for a session with no active
+		// exactly like a latest attempt. It no-ops for a session with no active
 		// generation, so the preserved legacy/certificate read still serves.
 		readErr = validateLastGoodAuthorityOnConn(conn, sessionID)
 	}
 	if readErr == nil {
 		if pointer.found() {
-			snapshot, readErr = readRetainedSnapshotModeOnConn(conn, sessionID, pointer, authoritative, selection)
+			snapshot, readErr = readLatestAttemptSnapshotModeOnConn(conn, sessionID, pointer, authoritative, selection)
 		} else {
 			snapshot, readErr = buildReadSnapshotModeOnConn(conn, sessionID, authoritative)
 		}
@@ -129,27 +129,27 @@ func (s *Store) withSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	return fn(snapshot)
 }
 
-// readRetainedSnapshotModeOnConn resolves the snapshot for a session that
-// retains a latest attempt. The decision is layer-correct and never blends
+// readLatestAttemptSnapshotModeOnConn resolves the snapshot for a session that
+// has a latest attempt. The decision is layer-correct and never blends
 // generations:
 //
-//   - a preview read serves the retained attempt's own generation, so the
-//     bounded preview and the detail payload carry the retained content and
-//     the retained producer's counts;
+//   - a preview read serves the latest attempt's own generation, so the
+//     bounded preview and the detail payload carry the latest attempt's content
+//     and its producer's counts;
 //   - an authoritative read with LastGood serves the last-good full authority
 //     — the active generation when one exists and the certificate certifies it
 //     publishable, and the preserved legacy/certificate read when the session
 //     has no active generation. The caller has already refused an active
 //     authority that is only a preview, so a preview is never served as
 //     last-good;
-//   - every other authoritative read refuses with the retained-attempt
+//   - every other authoritative read refuses with the latest-attempt
 //     sentinel, before any representation is resolved.
-func readRetainedSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, pointer retainedAttemptPointer, authoritative bool, selection ingest.SessionReadSelection) (indexformat.ReadSnapshot, error) {
+func readLatestAttemptSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, pointer latestAttemptPointer, authoritative bool, selection ingest.SessionReadSelection) (indexformat.ReadSnapshot, error) {
 	if !authoritative {
 		return harmonizedReadSnapshotModeOnConn(conn, sessionID, pointer.generationID, false)
 	}
 	if !selection.LastGood {
-		return indexformat.ReadSnapshot{}, retainedAttemptIncompleteError(sessionID)
+		return indexformat.ReadSnapshot{}, latestAttemptIncompleteError(sessionID)
 	}
 	return buildReadSnapshotModeOnConn(conn, sessionID, true)
 }
@@ -158,7 +158,7 @@ func readRetainedSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 // active authority is itself only a preview. A session with no active
 // generation keeps the preserved legacy/certificate read as its last-good
 // authority, which is exactly the state a V1-certificate or file-backed
-// authority keeps while a managed preview is retained beside it.
+// authority keeps while a managed preview is kept beside it.
 func validateLastGoodAuthorityOnConn(conn *sqlite.Conn, sessionID schema.SessionID) error {
 	active, err := readActiveGenerationOnConn(conn, sessionID)
 	if err != nil {
@@ -172,23 +172,23 @@ func validateLastGoodAuthorityOnConn(conn *sqlite.Conn, sessionID schema.Session
 		return err
 	}
 	if !found || !PublishableWithOmissions(capture) {
-		return retainedLastGoodUnavailableError(sessionID)
+		return latestAttemptLastGoodUnavailableError(sessionID)
 	}
 	return nil
 }
 
-// retainedAttemptIncompleteError is the actionable refusal an ordinary full
-// read gets on a session that retains a latest attempt. It names what happened,
+// latestAttemptIncompleteError is the actionable refusal an ordinary full
+// read gets on a session with a latest attempt. It names what happened,
 // why the full read cannot answer, and how to proceed.
-func retainedAttemptIncompleteError(sessionID schema.SessionID) error {
-	return fmt.Errorf("store: session %s holds a retained incomplete latest attempt beside its last-good generation; the full snapshot was not served because the newer capture is an incomplete preview; read the bounded preview or select the last-good explicitly with --last-good: %w", sessionID, indexformat.ErrRetainedAttemptIncomplete)
+func latestAttemptIncompleteError(sessionID schema.SessionID) error {
+	return fmt.Errorf("store: session %s holds a retained incomplete latest attempt beside its last-good generation; the full snapshot was not served because the newer capture is an incomplete preview; read the bounded preview or select the last-good explicitly with --last-good: %w", sessionID, indexformat.ErrLatestAttemptIncomplete)
 }
 
-// retainedLastGoodUnavailableError is the refusal of an explicit last-good read
+// latestAttemptLastGoodUnavailableError is the refusal of an explicit last-good read
 // whose active authority is itself only a preview. Nothing full remains to
 // serve, so the request cannot be answered by falling back to any other read.
-func retainedLastGoodUnavailableError(sessionID schema.SessionID) error {
-	return fmt.Errorf("store: session %s requested the last-good full read but its active authority is only a preview; no last-good full generation remains to serve; re-index the complete source or rebuild from a complete capture before requesting the last-good: %w", sessionID, indexformat.ErrRetainedAttemptIncomplete)
+func latestAttemptLastGoodUnavailableError(sessionID schema.SessionID) error {
+	return fmt.Errorf("store: session %s requested the last-good full read but its active authority is only a preview; no last-good full generation remains to serve; re-index the complete source or rebuild from a complete capture before requesting the last-good: %w", sessionID, indexformat.ErrLatestAttemptIncomplete)
 }
 
 // ReadFullContent resolves one immutable content address for the captured
@@ -555,7 +555,7 @@ func readGenerationContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 // emittedContentRecords keeps only the content records whose refs an emitted
 // main or earlier entry owns. It reconciles a stored generation, which retains
 // content for captured context segments, with the read snapshot, whose content
-// map must stay self-contained. The retained generation rows and immutable
+// map must stay self-contained. The latest-attempt generation rows and immutable
 // blobs are untouched.
 func emittedContentRecords(main indexformat.Partition, earlier []indexformat.EarlierPartition, content []indexformat.ContentRecord) []indexformat.ContentRecord {
 	emitted := make(map[schema.SourceEntryRef]struct{}, len(main.Entries))

@@ -51,10 +51,10 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 		condition := "(s.model_harness = ? AND s.schema_version <= ? AND (COALESCE(s.adapter_version, 1) < ? OR " + refreshClause + ")"
 		args = append(args, string(harness), int(ingest.CurrentSchemaVersion), adapter)
 		args = append(args, refreshArgs...)
-		// A settled retained latest attempt is not adapter-refresh work: its
+		// A settled latest attempt is not adapter-refresh work: its
 		// adapter revision already meets the target, so a state 6/8 authority
 		// with a settled attempt stops being selected.
-		if clause, clauseArgs := retainedAttemptSettledClause("s", targets[harness]); clause != "" {
+		if clause, clauseArgs := latestAttemptSettledClause("s", targets[harness]); clause != "" {
 			condition += " AND " + clause
 			args = append(args, clauseArgs...)
 		}
@@ -90,17 +90,17 @@ func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[inges
 		}
 		harnessPlaceholders = append(harnessPlaceholders, "?")
 		args = append(args, string(harness))
-		// The settle fragment itself requires a retained pointer, so the
+		// The settle fragment itself requires a latest-attempt pointer, so the
 		// surrounding NOT stays false — and the session stays listed — for a
-		// session that retains nothing.
-		if fragment, fragmentArgs, ok := retainedAttemptSettleFragment("s", targets[harness]); ok {
+		// session with nothing.
+		if fragment, fragmentArgs, ok := latestAttemptSettleFragment("s", targets[harness]); ok {
 			settleTerms = append(settleTerms, "(s.model_harness = ? AND "+fragment+")")
 			settleArgs = append(settleArgs, string(harness))
 			settleArgs = append(settleArgs, fragmentArgs...)
 		}
 	}
 	args = append(args, int(ingest.CurrentSchemaVersion))
-	// The settle gate applies to the ARTIFACT arm only: a retained attempt that
+	// The settle gate applies to the ARTIFACT arm only: a latest attempt that
 	// has settled consumed the current pair, so re-reading it for a cleared
 	// input proof is churn. The publication arm keeps LISTING unchanged: the
 	// pending binding is a real fact in the inventory and in readiness, and the

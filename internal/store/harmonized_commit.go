@@ -1005,7 +1005,7 @@ func refreshEqualsActive(prepared *preparedHarmonized, active activeHarmonizedVi
 	return reflect.DeepEqual(prepared.aliases, active.aliases)
 }
 
-// capturedGenerationChildren excludes retained-stat diagnostics added by the
+// capturedGenerationChildren excludes latest-attempt-stat diagnostics added by the
 // mutable stats upsert. They describe compatibility evidence, not a change in
 // the producer's captured projection, and must not force an unchanged refresh
 // to install another generation. All producer diagnostics still participate.
@@ -1051,7 +1051,7 @@ func generationRecordsEqual(candidate, active GenerationRecord) bool {
 // refuses the commit, and the session retries on the next harvest.
 //
 // activatedAtMs is the nullable activation stamp: an ordinary install passes
-// the install instant, while a retained latest attempt passes nil so its
+// the install instant, while a latest attempt passes nil so its
 // generation row records no activation (the column already admits NULL).
 func insertHarmonizedGenerationOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, priorEvidence []byte, installedAtMs int64, activatedAtMs *int64) error {
 	sessionID := prepared.sessionID
@@ -1392,15 +1392,15 @@ func stampHarmonizedBookkeeping(conn *sqlite.Conn, sessionID schema.SessionID, s
 		return err
 	}
 	// The active authority was finalized in place (skip or repair): the
-	// retained latest attempt is superseded, so its pointer clears in this same
+	// latest attempt is superseded, so its pointer clears in this same
 	// transaction. The retention path never reaches this function, so a
-	// retained attempt survives its own write; an identical-candidate
+	// latest attempt survives its own write; an identical-candidate
 	// AlreadyCommitted retry reports through the identity check and never
 	// reaches here either.
-	if err := sqlitex.Execute(conn, `UPDATE sessions SET `+clearRetainedAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET `+clearLatestAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 	}); err != nil {
-		return fmt.Errorf("store: clear the retained latest-attempt pointer for session %s: %w", sessionID, err)
+		return fmt.Errorf("store: clear the latest-attempt pointer for session %s: %w", sessionID, err)
 	}
 	return nil
 }
@@ -1729,14 +1729,14 @@ func (s *Store) deleteConvertedMirrorRows(ctx context.Context, sessionID schema.
 }
 
 // harmonizedBatchSkip is the batch path's precommit decision: commit
-// proceeds to the catalog write, retain records the candidate as the retained
-// latest attempt (no catalog write, no active-authority statement), while a
+// proceeds to the catalog write, retainLatestAttempt records the candidate as
+// the latest attempt (no catalog write, no active-authority statement), while a
 // skip carries the idempotent retry's outcome (the hash and the stats) straight
 // to the shared stamps.
 type harmonizedBatchSkip struct {
-	commit  bool
-	retain  bool
-	outcome sessionEntryWriteOutcome
+	commit              bool
+	retainLatestAttempt bool
+	outcome             sessionEntryWriteOutcome
 }
 
 // harmonizedBatchPrecommit runs the batch path's precommit decision for one
@@ -1749,11 +1749,12 @@ type harmonizedBatchSkip struct {
 // objects instead of comparing past them). The ordinary write returns the
 // prepared candidate for the commit and the stats merge.
 //
-// When retain is set the caller has already decided the write is a retention
-// candidate. The immutable-identity and file-backed checks stay in force, and
-// the retain marker is returned BEFORE the repair refusal: a retention write
-// never enters repair and never rewrites the active authority.
-func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.SessionEntryWrite, retain bool) ([]schema.SessionEntry, *preparedHarmonized, harmonizedBatchSkip, error) {
+// When retainLatestAttempt is set the caller has already decided the write is
+// a latest-attempt candidate. The immutable-identity and file-backed checks
+// stay in force, and the latest-attempt marker is returned BEFORE the repair
+// refusal: a latest-attempt write never enters repair and never rewrites the
+// active authority.
+func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.SessionEntryWrite, retainLatestAttempt bool) ([]schema.SessionEntry, *preparedHarmonized, harmonizedBatchSkip, error) {
 	v2, ok := asV2Value(write.Result)
 	if !ok {
 		return nil, nil, harmonizedBatchSkip{}, generationIndexFormat{}.Validate(write.Result)
@@ -1777,9 +1778,9 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 		if err != nil {
 			return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: hash main entries for the idempotent retry of session %s: %w", write.SessionID, err)
 		}
-		if !retain {
+		if !retainLatestAttempt {
 			// The idempotent retry of the active authority advances the
-			// captured-stats mirror. A retained candidate is not the active
+			// captured-stats mirror. A latest-attempt candidate is not the active
 			// authority, so its retry must not touch the session's stats.
 			if _, err := upsertCapturedStatsOnConn(conn, capturedStatsForHarnessWrite(write.SessionID, v2.Generation.Metadata.Stats, seedJSONForStats(v2.Generation.Metadata.Stats), write.IndexedAtMs)); err != nil {
 				return nil, nil, harmonizedBatchSkip{}, err
@@ -1796,8 +1797,8 @@ func (s *Store) harmonizedBatchPrecommit(conn *sqlite.Conn, write ingest.Session
 	if fileBacked {
 		return nil, nil, harmonizedBatchSkip{}, fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is installed in the file-backed catalog, which only the migration moves; the installed generation is unchanged", v2.Generation.ID, write.SessionID)
 	}
-	if retain {
-		return prepared.mainEntries, prepared, harmonizedBatchSkip{retain: true}, nil
+	if retainLatestAttempt {
+		return prepared.mainEntries, prepared, harmonizedBatchSkip{retainLatestAttempt: true}, nil
 	}
 	repair, err := repairNeedsHarmonized(conn, write.SessionID)
 	if err != nil {

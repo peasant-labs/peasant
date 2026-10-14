@@ -63,8 +63,8 @@ func assessedPreviewActivation(t *testing.T, s *Store, sid schema.SessionID, ide
 }
 
 // requireAssessedPreviewOutcome asserts the store follows the assessed capture
-// tuple and reports whether the attempt was retained. The assessed
-// unaccounted-SourceOmitted preview is retained; a preview carrying any other
+// tuple and reports whether the attempt was kept as the latest attempt. The assessed
+// unaccounted-SourceOmitted preview is kept as the latest attempt; a preview carrying any other
 // code keeps the existing guard refusal, so retention is never a bypass for an
 // accidental preview.
 func requireAssessedPreviewOutcome(t *testing.T, s *Store, sid schema.SessionID, capture ingest.SessionContentCaptureWrite, outcome ingest.ActivationOutcome, err error) bool {
@@ -77,16 +77,16 @@ func requireAssessedPreviewOutcome(t *testing.T, s *Store, sid schema.SessionID,
 		return false
 	}
 	if err != nil {
-		t.Fatalf("retention returned error %v, want a retained preview", err)
+		t.Fatalf("retention returned error %v, want a latest-attempt preview", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("disposition = %v, want ActivationRetainedPreview", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 	if active, readErr := s.activeGenerationID(context.Background(), sid); readErr != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the untouched full prior", active, readErr)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview" {
-		t.Fatalf("retained generation = %q, want gen_preview", pointer.generationID)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview" {
+		t.Fatalf("latest-attempt generation = %q, want gen_preview", pointer.generationID)
 	}
 	return true
 }
@@ -108,7 +108,7 @@ func requirePreviewOverFullRefusal(t *testing.T, s *Store, sid schema.SessionID,
 
 // TestPreviewOverFullAssessedInline proves the store follows the assessed
 // capture on the inline route: the assessed unaccounted-SourceOmitted preview is
-// retained over a publishable full authority, and the retained pointer records
+// kept as the latest attempt over a publishable full authority, and the latest-attempt pointer records
 // the verified pair.
 func TestPreviewOverFullAssessedInline(t *testing.T) {
 	s, _ := openGenerationStore(t)
@@ -119,8 +119,8 @@ func TestPreviewOverFullAssessedInline(t *testing.T) {
 	if !requireAssessedPreviewOutcome(t, s, sid, capture, outcome, err) {
 		return
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.artifactHash != identity {
-		t.Fatalf("retained pair identity = %q, want the verified identity", pointer.artifactHash)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.artifactHash != identity {
+		t.Fatalf("latest-attempt pair identity = %q, want the verified identity", pointer.artifactHash)
 	}
 }
 
@@ -142,7 +142,7 @@ func TestPreviewOverFullAssessedPrepared(t *testing.T) {
 
 // TestPreviewOverFullAssessedReplayed proves a repeated attempt with the same
 // assessed candidate is an idempotent AlreadyCommitted that leaves the authority
-// and the retained pointer unchanged.
+// and the latest-attempt pointer unchanged.
 func TestPreviewOverFullAssessedReplayed(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c")
@@ -152,7 +152,7 @@ func TestPreviewOverFullAssessedReplayed(t *testing.T) {
 	if !requireAssessedPreviewOutcome(t, s, sid, capture, first, err) {
 		return
 	}
-	pointerBefore := retainedPointerFor(t, s, sid)
+	pointerBefore := latestAttemptPointerFor(t, s, sid)
 	outcome, err := s.ActivateGeneration(context.Background(), activation)
 	if err != nil {
 		t.Fatalf("replay: %v", err)
@@ -160,8 +160,8 @@ func TestPreviewOverFullAssessedReplayed(t *testing.T) {
 	if outcome.Disposition != ingest.ActivationAlreadyCommitted {
 		t.Fatalf("replay disposition = %v, want ActivationAlreadyCommitted", outcome.Disposition)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer != pointerBefore {
-		t.Fatalf("retained pointer changed on replay: %+v -> %+v", pointerBefore, pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer != pointerBefore {
+		t.Fatalf("latest-attempt pointer changed on replay: %+v -> %+v", pointerBefore, pointer)
 	}
 }
 
@@ -188,8 +188,8 @@ func TestPreviewOverFullPairProofRefusal(t *testing.T) {
 	if active, readErr := s.activeGenerationID(context.Background(), sid); readErr != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the full prior", active, readErr)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want none", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want none", pointer)
 	}
 }
 
@@ -210,14 +210,14 @@ func TestPreviewOverFullGuardRefusalNotAssessed(t *testing.T) {
 	activation.IndexedAtMs = 2
 	outcome, err := s.ActivateGeneration(context.Background(), activation)
 	requirePreviewOverFullRefusal(t, s, sid, outcome, err)
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want none after a guard refusal", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want none after a guard refusal", pointer)
 	}
 }
 
 // TestPreviewOverFullReplayLeavesAuthorityAndPointer proves the named replay
 // expectation: re-submitting the already-installed active authority's candidate
-// identifier reports AlreadyCommitted and leaves the authority and the retained
+// identifier reports AlreadyCommitted and leaves the authority and the latest-attempt
 // pointer (pointing at the newer attempt) unchanged.
 func TestPreviewOverFullReplayLeavesAuthorityAndPointer(t *testing.T) {
 	s, _ := openGenerationStore(t)
@@ -228,7 +228,7 @@ func TestPreviewOverFullReplayLeavesAuthorityAndPointer(t *testing.T) {
 	if !requireAssessedPreviewOutcome(t, s, sid, capture, first, err) {
 		return
 	}
-	pointerBefore := retainedPointerFor(t, s, sid)
+	pointerBefore := latestAttemptPointerFor(t, s, sid)
 
 	prior, priorBlobs := buildTestGeneration(t, sid, "gen_full_prior", "full text", "full input", "full output")
 	duplicate, err := s.ActivateGeneration(context.Background(), GenerationActivation{
@@ -241,7 +241,7 @@ func TestPreviewOverFullReplayLeavesAuthorityAndPointer(t *testing.T) {
 	if duplicate.Disposition != ingest.ActivationAlreadyCommitted {
 		t.Fatalf("duplicate disposition = %v, want ActivationAlreadyCommitted", duplicate.Disposition)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer != pointerBefore {
-		t.Fatalf("retained pointer changed on an old-authority duplicate: %+v -> %+v", pointerBefore, pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer != pointerBefore {
+		t.Fatalf("latest-attempt pointer changed on an old-authority duplicate: %+v -> %+v", pointerBefore, pointer)
 	}
 }

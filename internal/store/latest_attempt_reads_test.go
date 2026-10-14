@@ -12,19 +12,19 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// This file proves the store-side read contract of retained latest-preview
+// This file proves the store-side read contract of latest-attempt
 // coexistence: which generation each read answers for, which counts it
-// reports, and which selection surfaces treat the retained attempt as settled.
+// reports, and which selection surfaces treat the latest attempt as settled.
 // The mounted and end-to-end evidence over the same seams belongs to the
 // integration family, not here.
 
-// authorityStats and retainedStats are the two DISTINCT literal producer-stat
+// authorityStats and latestAttemptStats are the two DISTINCT literal producer-stat
 // documents the counts-scope assertions use, so a read that reports the wrong
 // generation's counts cannot pass by coincidence. Only the count fields are
 // replaced: a complete generation must keep its input-submission count.
 var (
 	authorityStats = countsFor(11, 22, 33, 66000)
-	retainedStats  = countsFor(44, 55, 66, 132000)
+	latestAttemptStats  = countsFor(44, 55, 66, 132000)
 )
 
 // countsFor builds a producer-stat document with the supplied counts.
@@ -62,9 +62,9 @@ func seedFullAuthorityWithStats(t *testing.T, s *Store, sid schema.SessionID, st
 	}
 }
 
-// retainPreviewWithStats retains one preview attempt over the seeded authority,
+// latestAttemptPreviewWithStats retains one preview attempt over the seeded authority,
 // carrying the supplied producer stats and adapter revision.
-func retainPreviewWithStats(t *testing.T, s *Store, sid schema.SessionID, genID string, stats schema.SessionStats, adapterVersion int, identity string) {
+func latestAttemptPreviewWithStats(t *testing.T, s *Store, sid schema.SessionID, genID string, stats schema.SessionStats, adapterVersion int, identity string) {
 	t.Helper()
 	setStoredArtifactHash(t, s, sid, identity)
 	preview, blobs := buildTestGeneration(t, sid, genID, "preview text", "preview input", "preview output")
@@ -77,30 +77,30 @@ func retainPreviewWithStats(t *testing.T, s *Store, sid schema.SessionID, genID 
 	if err != nil {
 		t.Fatalf("retention: %v", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("retention disposition = %v, want ActivationRetainedPreview", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("retention disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 }
 
-// seedRetainedCoexistence seeds the canonical coexistence state: a managed full
-// authority with distinct counts, plus one retained preview attempt with its
+// seedLatestAttemptCoexistence seeds the canonical coexistence state: a managed full
+// authority with distinct counts, plus one latest-attempt preview attempt with its
 // own distinct counts and adapter revision.
-func seedRetainedCoexistence(t *testing.T, s *Store, sid schema.SessionID) string {
+func seedLatestAttemptCoexistence(t *testing.T, s *Store, sid schema.SessionID) string {
 	t.Helper()
 	seedFullAuthorityWithStats(t, s, sid, authorityStats)
 	identity := hexIdentity('7')
-	retainPreviewWithStats(t, s, sid, "gen_preview_b", retainedStats, 2, identity)
+	latestAttemptPreviewWithStats(t, s, sid, "gen_preview_b", latestAttemptStats, 2, identity)
 	return identity
 }
 
-// TestRetainedAttemptRefusesFullReadsUniformly proves the uniform refusal: an
-// ordinary full snapshot and the full content read both return the retained
+// TestLatestAttemptRefusesFullReadsUniformly proves the uniform refusal: an
+// ordinary full snapshot and the full content read both return the latest-attempt
 // sentinel before any representation is resolved, and an explicit last-good
 // selection serves the active authority instead.
-func TestRetainedAttemptRefusesFullReadsUniformly(t *testing.T) {
+func TestLatestAttemptRefusesFullReadsUniformly(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("11112222-3333-4444-8555-666677778888")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 	ctx := context.Background()
 
 	callbackRan := false
@@ -108,18 +108,18 @@ func TestRetainedAttemptRefusesFullReadsUniformly(t *testing.T) {
 		callbackRan = true
 		return nil
 	})
-	if !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
-		t.Fatalf("WithSessionSnapshot error = %v, want the retained-attempt sentinel", err)
+	if !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("WithSessionSnapshot error = %v, want the latest-attempt sentinel", err)
 	}
 	if callbackRan {
-		t.Fatal("WithSessionSnapshot invoked the callback for a retained session")
+		t.Fatal("WithSessionSnapshot invoked the callback for a session with a latest attempt")
 	}
-	if _, err := s.ReadSessionContent(ctx, string(sid)); !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
-		t.Fatalf("ReadSessionContent error = %v, want the retained-attempt sentinel", err)
+	if _, err := s.ReadSessionContent(ctx, string(sid)); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("ReadSessionContent error = %v, want the latest-attempt sentinel", err)
 	}
 
 	// The explicit last-good selection serves the active authority: its
-	// generation and its own counts, never the retained attempt's.
+	// generation and its own counts, never the latest attempt's.
 	served := ""
 	if err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(snapshot indexformat.ReadSnapshot) error {
 		served = snapshot.GenerationID
@@ -142,26 +142,26 @@ func TestRetainedAttemptRefusesFullReadsUniformly(t *testing.T) {
 	}
 }
 
-// TestRetainedAttemptRefusalIsUniformForCertificateAuthority proves the refusal
+// TestLatestAttemptRefusalIsUniformForCertificateAuthority proves the refusal
 // does not depend on the authority's representation: with the active pointer
 // cleared — the certificate or file-backed authority's state — the ordinary
 // read still refuses, and last-good serves the preserved legacy read.
-func TestRetainedAttemptRefusalIsUniformForCertificateAuthority(t *testing.T) {
+func TestLatestAttemptRefusalIsUniformForCertificateAuthority(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("22223333-4444-4555-8666-777788889999")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 	ctx := context.Background()
 	// Clear the active pointer: the session keeps its certificate and its
-	// retained attempt, exactly the state a V1-certificate or file-backed
-	// authority has while a managed preview is retained beside it.
+	// latest attempt, exactly the state a V1-certificate or file-backed
+	// authority has while a managed preview is kept beside it.
 	execGenerationSQL(t, s, `UPDATE sessions SET active_generation_id = NULL WHERE session_id = '`+string(sid)+`';`)
 
 	err := s.WithSessionSnapshot(ctx, sid, func(indexformat.ReadSnapshot) error {
-		t.Fatal("the callback must not run for a retained session")
+		t.Fatal("the callback must not run for a session with a latest attempt")
 		return nil
 	})
-	if !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
-		t.Fatalf("WithSessionSnapshot error = %v, want the retained-attempt sentinel", err)
+	if !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("WithSessionSnapshot error = %v, want the latest-attempt sentinel", err)
 	}
 	indexVersion := 0
 	if err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(snapshot indexformat.ReadSnapshot) error {
@@ -175,18 +175,18 @@ func TestRetainedAttemptRefusalIsUniformForCertificateAuthority(t *testing.T) {
 	}
 }
 
-// TestRetainedAttemptLastGoodRefusesActivePreview proves the explicit last-good
+// TestLatestAttemptLastGoodRefusesActivePreview proves the explicit last-good
 // selection refuses an active authority that is only a preview, in both shapes:
-// with the retained pointer set and the certificate flipped to a preview, and in
+// with the latest-attempt pointer set and the certificate flipped to a preview, and in
 // the explicit-rebuild shape where the pointer is cleared and the preview is the
 // active authority.
-func TestRetainedAttemptLastGoodRefusesActivePreview(t *testing.T) {
+func TestLatestAttemptLastGoodRefusesActivePreview(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("aaaabbbb-cccc-4ddd-8eee-ffff00001111")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 	ctx := context.Background()
 
-	// Shape 1: the retained pointer stays set; only the certificate becomes an
+	// Shape 1: the latest-attempt pointer stays set; only the certificate becomes an
 	// incomplete preview, so no full generation remains to serve as last-good.
 	execGenerationSQL(t, s, `UPDATE session_content_captures SET status='incomplete', capture_format='preview_only', failure_code='source_records_omitted' WHERE session_id = '`+string(sid)+`';`)
 
@@ -195,17 +195,17 @@ func TestRetainedAttemptLastGoodRefusesActivePreview(t *testing.T) {
 		callbackRan = true
 		return nil
 	})
-	if !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
-		t.Fatalf("last-good snapshot error = %v, want the retained-attempt sentinel", err)
+	if !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("last-good snapshot error = %v, want the latest-attempt sentinel", err)
 	}
 	if callbackRan {
 		t.Fatal("last-good served a snapshot for an active preview")
 	}
-	if _, err := s.ReadSessionContentSelected(ctx, string(sid), ingest.SessionReadSelection{LastGood: true}); !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
-		t.Fatalf("last-good content error = %v, want the retained-attempt sentinel", err)
+	if _, err := s.ReadSessionContentSelected(ctx, string(sid), ingest.SessionReadSelection{LastGood: true}); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("last-good content error = %v, want the latest-attempt sentinel", err)
 	}
 
-	// Shape 2: an explicit rebuild cleared the retained pointer and installed
+	// Shape 2: an explicit rebuild cleared the latest-attempt pointer and installed
 	// the preview as the active authority. The snapshot lane still refuses; the
 	// content lane refuses through its own capture authority, so the two lanes
 	// are independently guarded.
@@ -216,8 +216,8 @@ func TestRetainedAttemptLastGoodRefusesActivePreview(t *testing.T) {
 		callbackRan = true
 		return nil
 	})
-	if !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
-		t.Fatalf("state-9 last-good snapshot error = %v, want the retained-attempt sentinel", err)
+	if !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("state-9 last-good snapshot error = %v, want the latest-attempt sentinel", err)
 	}
 	if callbackRan {
 		t.Fatal("state-9 last-good served a snapshot for an active preview")
@@ -227,54 +227,54 @@ func TestRetainedAttemptLastGoodRefusesActivePreview(t *testing.T) {
 	}
 }
 
-// TestRetainedAttemptAvailableRefusesMissingGenerationRow proves the available
-// read refuses when the retained pointer names a generation row that is gone,
+// TestLatestAttemptAvailableRefusesMissingGenerationRow proves the available
+// read refuses when the latest-attempt pointer names a generation row that is gone,
 // instead of serving a partial-flagged transcript with nothing in it, while the
 // other reads of the same session keep answering.
-func TestRetainedAttemptAvailableRefusesMissingGenerationRow(t *testing.T) {
+func TestLatestAttemptAvailableRefusesMissingGenerationRow(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("bbbbcccc-dddd-4eee-8fff-000011112222")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 	ctx := context.Background()
 	execGenerationSQL(t, s, `DELETE FROM session_generations WHERE session_id = '`+string(sid)+`' AND generation_id = 'gen_preview_b';`)
 
 	if _, err := s.ReadSessionAvailable(ctx, ingest.SessionID(sid)); err == nil {
-		t.Fatal("ReadSessionAvailable served a retained pointer whose generation row is gone")
+		t.Fatal("ReadSessionAvailable served a latest-attempt pointer whose generation row is gone")
 	} else if !strings.Contains(err.Error(), string(sid)) || !strings.Contains(err.Error(), "gen_preview_b") {
-		t.Fatalf("available refusal = %v, want it to name the session and the retained generation", err)
+		t.Fatalf("available refusal = %v, want it to name the session and the latest-attempt generation", err)
 	}
 	if err := s.WithSessionSnapshot(ctx, sid, func(indexformat.ReadSnapshot) error {
-		t.Fatal("the callback must not run for a retained session")
+		t.Fatal("the callback must not run for a session with a latest attempt")
 		return nil
-	}); !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
-		t.Fatalf("default snapshot error = %v, want the retained-attempt sentinel", err)
+	}); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("default snapshot error = %v, want the latest-attempt sentinel", err)
 	}
 	served := ""
 	if err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(snapshot indexformat.ReadSnapshot) error {
 		served = snapshot.GenerationID
 		return nil
 	}); err != nil {
-		t.Fatalf("last-good read after the retained row was removed: %v", err)
+		t.Fatalf("last-good read after the latest-attempt row was removed: %v", err)
 	}
 	if served != "gen_full_prior" {
 		t.Fatalf("last-good generation = %q, want the full authority", served)
 	}
 }
 
-// TestRetainedAttemptAvailableReadBindsRetainedAttempt proves the available
-// read serves the retained attempt: its generation-scoped entries, its
+// TestLatestAttemptAvailableReadBindsLatestAttempt proves the available
+// read serves the latest attempt: its generation-scoped entries, its
 // synthesized capture with the partial state, and its own counts.
-func TestRetainedAttemptAvailableReadBindsRetainedAttempt(t *testing.T) {
+func TestLatestAttemptAvailableReadBindsLatestAttempt(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("33334444-5555-4666-8777-888899990000")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 
 	snapshot, err := s.ReadSessionAvailable(context.Background(), ingest.SessionID(sid))
 	if err != nil {
 		t.Fatalf("ReadSessionAvailable: %v", err)
 	}
 	if !PartialPreviewNeeded(snapshot.Capture) {
-		t.Fatalf("available capture = %s/%s, want the retained partial state", snapshot.Capture.Status, snapshot.Capture.CaptureFormat)
+		t.Fatalf("available capture = %s/%s, want the latest-attempt partial state", snapshot.Capture.Status, snapshot.Capture.CaptureFormat)
 	}
 	if snapshot.Capture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly || snapshot.Capture.Status != ingest.ContentCaptureIncomplete {
 		t.Fatalf("available capture = %s/%s, want preview_only/incomplete", snapshot.Capture.CaptureFormat, snapshot.Capture.Status)
@@ -283,31 +283,31 @@ func TestRetainedAttemptAvailableReadBindsRetainedAttempt(t *testing.T) {
 		t.Fatalf("available capture failure code = %q, want source_records_omitted", snapshot.Capture.FailureCode)
 	}
 	if len(snapshot.Entries) != 3 {
-		t.Fatalf("available entries = %d, want the retained attempt's 3", len(snapshot.Entries))
+		t.Fatalf("available entries = %d, want the latest attempt's 3", len(snapshot.Entries))
 	}
 	if first := snapshot.Entries[0]; first.ContentPreview == nil || !strings.Contains(*first.ContentPreview, "preview text") {
-		t.Fatalf("available entry 0 = %+v, want the retained attempt's own content", first.ContentPreview)
+		t.Fatalf("available entry 0 = %+v, want the latest attempt's own content", first.ContentPreview)
 	}
-	if snapshot.Detail.TurnCount != retainedStats.TurnCount || snapshot.Detail.ToolCalls != retainedStats.ToolCallCount || snapshot.Detail.OutputTokens != retainedStats.TokensOut {
-		t.Fatalf("available counts = %d/%d/%d, want the retained attempt's %d/%d/%d",
+	if snapshot.Detail.TurnCount != latestAttemptStats.TurnCount || snapshot.Detail.ToolCalls != latestAttemptStats.ToolCallCount || snapshot.Detail.OutputTokens != latestAttemptStats.TokensOut {
+		t.Fatalf("available counts = %d/%d/%d, want the latest attempt's %d/%d/%d",
 			snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, snapshot.Detail.OutputTokens,
-			retainedStats.TurnCount, retainedStats.ToolCallCount, retainedStats.TokensOut)
+			latestAttemptStats.TurnCount, latestAttemptStats.ToolCallCount, latestAttemptStats.TokensOut)
 	}
-	// The retained producer document records milliseconds while this detail
+	// The latest-attempt producer document records milliseconds while this detail
 	// column carries minutes, so the available read converts like every other
 	// detail row rather than reporting the raw value.
-	if want := float64(retainedStats.DurationMs) / 60000.0; snapshot.Detail.DurationMinutes != want {
+	if want := float64(latestAttemptStats.DurationMs) / 60000.0; snapshot.Detail.DurationMinutes != want {
 		t.Fatalf("available duration minutes = %v, want %v", snapshot.Detail.DurationMinutes, want)
 	}
 }
 
-// TestRetainedAttemptPreviewSnapshotReportsRetainedStats proves the
-// preview-snapshot read resolves the retained attempt's generation and its
-// counts from the retained attempt's own producer stats document.
-func TestRetainedAttemptPreviewSnapshotReportsRetainedStats(t *testing.T) {
+// TestLatestAttemptPreviewSnapshotReportsItsStats proves the
+// preview-snapshot read resolves the latest attempt's generation and its
+// counts from the latest attempt's own producer stats document.
+func TestLatestAttemptPreviewSnapshotReportsItsStats(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("44445555-6666-4777-8888-999900001111")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 
 	var snapshot indexformat.ReadSnapshot
 	if err := s.WithSessionPreviewSnapshot(context.Background(), sid, func(s indexformat.ReadSnapshot) error {
@@ -317,25 +317,25 @@ func TestRetainedAttemptPreviewSnapshotReportsRetainedStats(t *testing.T) {
 		t.Fatalf("WithSessionPreviewSnapshot: %v", err)
 	}
 	if snapshot.GenerationID != "gen_preview_b" {
-		t.Fatalf("preview snapshot generation = %q, want the retained attempt", snapshot.GenerationID)
+		t.Fatalf("preview snapshot generation = %q, want the latest attempt", snapshot.GenerationID)
 	}
-	if snapshot.Metadata.Stats.TurnCount != retainedStats.TurnCount || snapshot.Metadata.Stats.ToolCallCount != retainedStats.ToolCallCount {
-		t.Fatalf("preview stats = %d/%d, want the retained attempt's %d/%d",
+	if snapshot.Metadata.Stats.TurnCount != latestAttemptStats.TurnCount || snapshot.Metadata.Stats.ToolCallCount != latestAttemptStats.ToolCallCount {
+		t.Fatalf("preview stats = %d/%d, want the latest attempt's %d/%d",
 			snapshot.Metadata.Stats.TurnCount, snapshot.Metadata.Stats.ToolCallCount,
-			retainedStats.TurnCount, retainedStats.ToolCallCount)
+			latestAttemptStats.TurnCount, latestAttemptStats.ToolCallCount)
 	}
-	if snapshot.Session.TurnCount != retainedStats.TurnCount {
-		t.Fatalf("preview session turns = %d, want the retained attempt's %d", snapshot.Session.TurnCount, retainedStats.TurnCount)
+	if snapshot.Session.TurnCount != latestAttemptStats.TurnCount {
+		t.Fatalf("preview session turns = %d, want the latest attempt's %d", snapshot.Session.TurnCount, latestAttemptStats.TurnCount)
 	}
 }
 
-// TestRetainedAttemptCaptureReadIsDisplayEffective proves the display-effective
-// capture read reports the retained attempt, so the mounted partial notice is
+// TestLatestAttemptCaptureReadIsDisplayEffective proves the display-effective
+// capture read reports the latest attempt, so the mounted partial notice is
 // reachable, while the authority read keeps the active certificate.
-func TestRetainedAttemptCaptureReadIsDisplayEffective(t *testing.T) {
+func TestLatestAttemptCaptureReadIsDisplayEffective(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("55556666-7777-4888-8999-000011112222")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 	ctx := context.Background()
 
 	capture, found, err := s.GetSessionContentCapture(ctx, ingest.SessionID(sid))
@@ -343,7 +343,7 @@ func TestRetainedAttemptCaptureReadIsDisplayEffective(t *testing.T) {
 		t.Fatalf("GetSessionContentCapture: %v (found=%v)", err, found)
 	}
 	if !PartialPreviewNeeded(capture) || capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted {
-		t.Fatalf("display capture = %s/%s/%s, want the retained partial state", capture.Status, capture.CaptureFormat, capture.FailureCode)
+		t.Fatalf("display capture = %s/%s/%s, want the latest-attempt partial state", capture.Status, capture.CaptureFormat, capture.FailureCode)
 	}
 	// The authority certificate is untouched and still readable through the
 	// store's own authority read.
@@ -358,13 +358,13 @@ func TestRetainedAttemptCaptureReadIsDisplayEffective(t *testing.T) {
 	}
 }
 
-// TestRetainedAttemptIndexStateFields proves the three latest-attempt fields are
-// populated from the pointer and the retained generation row, and stay nil
-// without a retained attempt.
-func TestRetainedAttemptIndexStateFields(t *testing.T) {
+// TestLatestAttemptIndexStateFields proves the three latest-attempt fields are
+// populated from the pointer and the latest-attempt generation row, and stay nil
+// without a latest attempt.
+func TestLatestAttemptIndexStateFields(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("66667777-8888-4999-8000-111122223333")
-	identity := seedRetainedCoexistence(t, s, sid)
+	identity := seedLatestAttemptCoexistence(t, s, sid)
 
 	state, err := s.ReadIndexState(context.Background(), ingest.SessionID(sid))
 	if err != nil {
@@ -380,26 +380,26 @@ func TestRetainedAttemptIndexStateFields(t *testing.T) {
 		t.Fatalf("latest-attempt adapter revision = %v, want 2", state.LatestAttemptAdapterVersion)
 	}
 
-	// A session with no retained attempt reports all three as NULL.
+	// A session with no latest attempt reports all three as NULL.
 	other := schema.SessionID("77778888-9999-4000-8111-222233334444")
 	seedFullAuthorityWithStats(t, s, other, authorityStats)
 	empty, err := s.ReadIndexState(context.Background(), ingest.SessionID(other))
 	if err != nil {
-		t.Fatalf("ReadIndexState without a retained attempt: %v", err)
+		t.Fatalf("ReadIndexState without a latest attempt: %v", err)
 	}
 	if empty.LatestAttemptArtifactHash != nil || empty.LatestAttemptIndexerVersion != nil || empty.LatestAttemptAdapterVersion != nil {
-		t.Fatalf("latest-attempt fields = %v/%v/%v, want all NULL without a retained attempt",
+		t.Fatalf("latest-attempt fields = %v/%v/%v, want all NULL without a latest attempt",
 			empty.LatestAttemptArtifactHash, empty.LatestAttemptIndexerVersion, empty.LatestAttemptAdapterVersion)
 	}
 }
 
-// TestRetainedAttemptPublicationReadNamesPendingAttempt proves the committed
-// publication read names the retained attempt and never reports the session
+// TestLatestAttemptPublicationReadNamesPendingAttempt proves the committed
+// publication read names the latest attempt and never reports the session
 // ready, and that the explicit last-good selection clears only that refusal.
-func TestRetainedAttemptPublicationReadNamesPendingAttempt(t *testing.T) {
+func TestLatestAttemptPublicationReadNamesPendingAttempt(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("99990000-1111-4222-8333-444455556666")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 	// The publication read parses the stored project identity, so the session
 	// needs a well-formed one: the seeding helper's placeholder is not.
 	projectHash := strings.Repeat("1", 64)
@@ -412,11 +412,11 @@ UPDATE sessions SET project_hash = '`+projectHash+`' WHERE session_id = '`+strin
 	if err != nil {
 		t.Fatalf("LoadPublicationInput: %v", err)
 	}
-	if !bundle.RetainedAttemptPending {
-		t.Fatal("LoadPublicationInput did not name the pending retained attempt")
+	if !bundle.LatestAttemptPending {
+		t.Fatal("LoadPublicationInput did not name the pending latest attempt")
 	}
 	if bundle.Readiness == ingest.PublicationReady {
-		t.Fatal("LoadPublicationInput reported a retained session ready for publication")
+		t.Fatal("LoadPublicationInput reported a session with a latest attempt ready for publication")
 	}
 
 	var selected ingest.PublicationInputBundle
@@ -426,18 +426,18 @@ UPDATE sessions SET project_hash = '`+projectHash+`' WHERE session_id = '`+strin
 	}); err != nil {
 		t.Fatalf("WithCommittedPublicationInputSelected(LastGood): %v", err)
 	}
-	if selected.RetainedAttemptPending {
-		t.Fatal("the explicit last-good read kept the retained-attempt refusal")
+	if selected.LatestAttemptPending {
+		t.Fatal("the explicit last-good read kept the latest-attempt refusal")
 	}
 }
 
-// TestRetainedAttemptSettleGatesSelection proves the three selection surfaces:
-// a fully settled retained attempt stops being selected, a moved facet keeps it
+// TestLatestAttemptSettleGatesSelection proves the three selection surfaces:
+// a fully settled latest attempt stops being selected, a moved facet keeps it
 // selected, and the repair publication arm keeps listing regardless.
-func TestRetainedAttemptSettleGatesSelection(t *testing.T) {
+func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("88889999-0000-4111-8222-333344445555")
-	seedRetainedCoexistence(t, s, sid)
+	seedLatestAttemptCoexistence(t, s, sid)
 	ctx := context.Background()
 	settled := map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.Harness("claude-code"): {IndexerVersion: 18, AdapterVersion: 2},
@@ -513,7 +513,7 @@ func TestRetainedAttemptSettleGatesSelection(t *testing.T) {
 	assertSelected("repair artifact arm (zero adapter target)", ids, true)
 
 	// The publication arm keeps LISTING the pending binding even though the
-	// retained attempt is settled: the pending fact is real, and only the PARSE
+	// latest attempt is settled: the pending fact is real, and only the PARSE
 	// decision short-circuits.
 	execGenerationSQL(t, s, `
 UPDATE sessions SET publication_capture_revision = 7, indexed_publication_capture_revision = 0, cwd_provenance_kind = 'source_exact', session_cwd = '/tmp/gen' WHERE session_id = '`+string(sid)+`';

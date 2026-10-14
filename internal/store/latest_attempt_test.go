@@ -30,17 +30,17 @@ func sourceOmittedPreviewWrite() ingest.SessionContentCaptureWrite {
 	}
 }
 
-// retainedPointerFor reads the stored retained pointer for one session.
-func retainedPointerFor(t *testing.T, s *Store, sid schema.SessionID) retainedAttemptPointer {
+// latestAttemptPointerFor reads the stored latest-attempt pointer for one session.
+func latestAttemptPointerFor(t *testing.T, s *Store, sid schema.SessionID) latestAttemptPointer {
 	t.Helper()
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatalf("Pool.Take: %v", err)
 	}
 	defer s.pool.Put(conn)
-	pointer, err := readRetainedAttemptPointerOnConn(conn, sid)
+	pointer, err := readLatestAttemptPointerOnConn(conn, sid)
 	if err != nil {
-		t.Fatalf("read retained pointer: %v", err)
+		t.Fatalf("read latest-attempt pointer: %v", err)
 	}
 	return pointer
 }
@@ -143,11 +143,12 @@ func hexIdentity(fill byte) string {
 	return strings.Repeat(string([]byte{fill}), 64)
 }
 
-// TestRetentionRetainsLatestPreviewOverFullAuthority proves the core
-// coexistence behavior on the single activation route: the preview is retained,
+// TestLatestAttemptPreviewOverFullAuthority proves the core
+// coexistence behavior on the single activation route: the preview is kept as the
+// latest attempt,
 // the full authority stays active and byte-identical, and the pointer records
 // the attempt.
-func TestRetentionRetainsLatestPreviewOverFullAuthority(t *testing.T) {
+func TestLatestAttemptPreviewOverFullAuthority(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("4d4d4d4d-4d4d-4d4d-8d4d-4d4d4d4d4d4d")
 	identity := hexIdentity('a')
@@ -158,31 +159,31 @@ func TestRetentionRetainsLatestPreviewOverFullAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retention activation: %v", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("disposition = %v, want ActivationRetainedPreview", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 	if active, readErr := s.activeGenerationID(context.Background(), sid); readErr != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the full authority", active, readErr)
 	}
-	pointer := retainedPointerFor(t, s, sid)
+	pointer := latestAttemptPointerFor(t, s, sid)
 	if pointer.generationID != "gen_preview_b" {
-		t.Fatalf("retained generation = %q, want gen_preview_b", pointer.generationID)
+		t.Fatalf("latest-attempt generation = %q, want gen_preview_b", pointer.generationID)
 	}
 	if pointer.artifactHash != identity {
-		t.Fatalf("retained pair identity = %q, want the verified identity", pointer.artifactHash)
+		t.Fatalf("latest-attempt pair identity = %q, want the verified identity", pointer.artifactHash)
 	}
 	if pointer.indexerVersion != 18 {
-		t.Fatalf("retained producer revision = %d, want 18", pointer.indexerVersion)
+		t.Fatalf("latest-attempt producer revision = %d, want 18", pointer.indexerVersion)
 	}
 	if pointer.failureCode != string(ingest.ContentCaptureSourceRecordsOmitted) {
-		t.Fatalf("retained failure code = %q, want source_records_omitted", pointer.failureCode)
+		t.Fatalf("latest-attempt failure code = %q, want source_records_omitted", pointer.failureCode)
 	}
 	if stored, found := storedArtifactHash(t, s, sid); !found || stored != identity {
 		t.Fatalf("stored artifact hash = %q (found=%v), want the untouched identity", stored, found)
 	}
 	// The active authority's capture is still the full certificate. It is read
 	// through the authority reader: the display-effective capture read reports
-	// the retained attempt while the pointer is set, so it cannot answer for A.
+	// the latest attempt while the pointer is set, so it cannot answer for A.
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatalf("Pool.Take: %v", err)
@@ -221,19 +222,19 @@ func TestRetentionFreshIDUnchangedIsTrueNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repeat retention: %v", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("disposition = %v, want ActivationRetainedPreview", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 	if after := generationRowCount(t, s, sid); after != before {
 		t.Fatalf("generation rows = %d, want %d (the true no-op writes nothing)", after, before)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
-		t.Fatalf("retained generation = %q, want the unchanged gen_preview_b", pointer.generationID)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("latest-attempt generation = %q, want the unchanged gen_preview_b", pointer.generationID)
 	}
 }
 
 // TestRetentionChangedFacetReplacesAttempt proves the REPLACE branch: a changed
-// producer facet replaces the retained attempt with a fresh immutable row and
+// producer facet replaces the latest attempt with a fresh immutable row and
 // advances the pointer.
 func TestRetentionChangedFacetReplacesAttempt(t *testing.T) {
 	s, _ := openGenerationStore(t)
@@ -253,18 +254,18 @@ func TestRetentionChangedFacetReplacesAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replacement retention: %v", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("disposition = %v, want ActivationRetainedPreview", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
-	pointer := retainedPointerFor(t, s, sid)
+	pointer := latestAttemptPointerFor(t, s, sid)
 	if pointer.generationID != "gen_preview_b2" {
-		t.Fatalf("retained generation = %q, want the replaced gen_preview_b2", pointer.generationID)
+		t.Fatalf("latest-attempt generation = %q, want the replaced gen_preview_b2", pointer.generationID)
 	}
 	if pointer.indexerVersion != 19 {
-		t.Fatalf("retained producer revision = %d, want 19", pointer.indexerVersion)
+		t.Fatalf("latest-attempt producer revision = %d, want 19", pointer.indexerVersion)
 	}
 	if rows := generationRowCount(t, s, sid); rows != 2 {
-		t.Fatalf("generation rows = %d, want 2 (the full authority and one retained attempt)", rows)
+		t.Fatalf("generation rows = %d, want 2 (the full authority and one latest attempt)", rows)
 	}
 	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the full authority", active, err)
@@ -290,8 +291,8 @@ func TestRetentionPairProofRefusalLeavesAuthority(t *testing.T) {
 	if active, readErr := s.activeGenerationID(context.Background(), sid); readErr != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the full authority", active, readErr)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want none", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want none", pointer)
 	}
 }
 
@@ -313,21 +314,21 @@ func TestRetentionLegacyBootstrapRecordsIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap retention: %v", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("disposition = %v, want ActivationRetainedPreview", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 	if stored, found := storedArtifactHash(t, s, sid); !found || stored != identity {
 		t.Fatalf("stored artifact hash = %q (found=%v), want the bootstrapped identity", stored, found)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.artifactHash != identity {
-		t.Fatalf("retained pair identity = %q, want the bootstrapped identity", pointer.artifactHash)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.artifactHash != identity {
+		t.Fatalf("latest-attempt pair identity = %q, want the bootstrapped identity", pointer.artifactHash)
 	}
 }
 
 // TestRetentionReplayLeavesAuthorityAndPointer proves the named replay
 // expectation: re-submitting the already-installed active authority's candidate
 // identifier reports AlreadyCommitted and leaves both the authority and the
-// retained pointer untouched; a same-identifier retry of the retained candidate
+// latest-attempt pointer untouched; a same-identifier retry of the latest-attempt candidate
 // reports AlreadyCommitted too.
 func TestRetentionReplayLeavesAuthorityAndPointer(t *testing.T) {
 	s, _ := openGenerationStore(t)
@@ -339,7 +340,7 @@ func TestRetentionReplayLeavesAuthorityAndPointer(t *testing.T) {
 	if _, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b")); err != nil {
 		t.Fatalf("retention: %v", err)
 	}
-	pointerBefore := retainedPointerFor(t, s, sid)
+	pointerBefore := latestAttemptPointerFor(t, s, sid)
 	rowsBefore := generationRowCount(t, s, sid)
 
 	prior, priorBlobs := buildTestGeneration(t, sid, "gen_full_prior", "full text", "full input", "full output")
@@ -353,8 +354,8 @@ func TestRetentionReplayLeavesAuthorityAndPointer(t *testing.T) {
 	if duplicate.Disposition != ingest.ActivationAlreadyCommitted {
 		t.Fatalf("old-authority duplicate disposition = %v, want AlreadyCommitted", duplicate.Disposition)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer != pointerBefore {
-		t.Fatalf("retained pointer changed on an old-authority duplicate: %+v -> %+v", pointerBefore, pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer != pointerBefore {
+		t.Fatalf("latest-attempt pointer changed on an old-authority duplicate: %+v -> %+v", pointerBefore, pointer)
 	}
 	if rows := generationRowCount(t, s, sid); rows != rowsBefore {
 		t.Fatalf("generation rows changed on an old-authority duplicate: %d -> %d", rowsBefore, rows)
@@ -362,19 +363,19 @@ func TestRetentionReplayLeavesAuthorityAndPointer(t *testing.T) {
 
 	retried, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b"))
 	if err != nil {
-		t.Fatalf("retained-candidate retry: %v", err)
+		t.Fatalf("latest-attempt-candidate retry: %v", err)
 	}
 	if retried.Disposition != ingest.ActivationAlreadyCommitted {
-		t.Fatalf("retained-candidate retry disposition = %v, want AlreadyCommitted", retried.Disposition)
+		t.Fatalf("latest-attempt-candidate retry disposition = %v, want AlreadyCommitted", retried.Disposition)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer != pointerBefore {
-		t.Fatalf("retained pointer changed on a same-identifier retry: %+v -> %+v", pointerBefore, pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer != pointerBefore {
+		t.Fatalf("latest-attempt pointer changed on a same-identifier retry: %+v -> %+v", pointerBefore, pointer)
 	}
 }
 
-// TestRetentionBatchRouteMapsDisposition proves the batch route maps a retained
-// commit to ActivationRetainedPreview and keeps the authority active.
-func TestRetentionBatchRouteMapsDisposition(t *testing.T) {
+// TestLatestAttemptBatchRouteMapsDisposition proves the batch route maps a latest-attempt
+// commit to ActivationLatestAttemptPreview and keeps the authority active.
+func TestLatestAttemptBatchRouteMapsDisposition(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("adadadad-adad-4dad-8dad-adadadadadad")
 	identity := hexIdentity('f')
@@ -388,13 +389,13 @@ func TestRetentionBatchRouteMapsDisposition(t *testing.T) {
 	if results[0].Err != nil {
 		t.Fatalf("batch retention error: %v", results[0].Err)
 	}
-	if results[0].Outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("batch disposition = %v, want ActivationRetainedPreview", results[0].Outcome.Disposition)
+	if results[0].Outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("batch disposition = %v, want ActivationLatestAttemptPreview", results[0].Outcome.Disposition)
 	}
 	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the full authority", active, err)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
-		t.Fatalf("retained generation = %q, want gen_preview_b", pointer.generationID)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("latest-attempt generation = %q, want gen_preview_b", pointer.generationID)
 	}
 }

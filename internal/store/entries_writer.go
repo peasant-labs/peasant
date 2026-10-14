@@ -99,10 +99,10 @@ ORDER BY entry_index`
 type sessionEntryWriteOutcome struct {
 	entriesCount int
 	skipped      bool
-	// retainedPreview reports that the write retained the latest preview
+	// latestAttemptPreview reports that the write retained the latest preview
 	// attempt instead of replacing the active authority. Counts stay zero and
 	// no active-authority statement ran.
-	retainedPreview    bool
+	latestAttemptPreview    bool
 	sessionEntriesHash string
 	stats              ingest.SessionEntryWriteStats
 }
@@ -190,7 +190,7 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		}
 		results[i].Written = true
 		results[i].Skipped = outcome.skipped
-		results[i].RetainedPreview = outcome.retainedPreview
+		results[i].LatestAttemptPreview = outcome.latestAttemptPreview
 	}
 	if txnErr == nil {
 		if err := reportHarmonizedWriterSeam(harmonizedSeamAtCommit); err != nil {
@@ -230,13 +230,13 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	// capture is persisted and before any format-change delete: a retention
 	// write must not touch the active authority's representation, capture, or
 	// stamps. The decision re-runs the identity checks and never enters repair.
-	retain, err := retentionEligibleOnConn(conn, write)
+	retainLatestAttempt, err := latestAttemptEligibleOnConn(conn, write)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
-	if retain {
-		outcome, err, fatal := s.retainSessionEntryWriteOnConn(conn, write, savepointName)
+	if retainLatestAttempt {
+		outcome, err, fatal := s.retainLatestAttemptWriteOnConn(conn, write, savepointName)
 		if err != nil {
 			return outcome, err, fatal
 		}

@@ -9,9 +9,9 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// retainPreviewForTest seeds a full authority with a stored pair identity and
-// retains one preview attempt, returning the retained generation identifier.
-func retainPreviewForTest(t *testing.T, s *Store, sid schema.SessionID, identity string) {
+// latestAttemptPreviewForTest seeds a full authority with a stored pair identity and
+// retains one preview attempt, returning the latest-attempt generation identifier.
+func latestAttemptPreviewForTest(t *testing.T, s *Store, sid schema.SessionID, identity string) {
 	t.Helper()
 	seedFullAuthority(t, s, sid)
 	setStoredArtifactHash(t, s, sid, identity)
@@ -19,18 +19,18 @@ func retainPreviewForTest(t *testing.T, s *Store, sid schema.SessionID, identity
 	if err != nil {
 		t.Fatalf("retention: %v", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("retention disposition = %v, want ActivationRetainedPreview", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("retention disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 }
 
 // TestRetentionPointerClearsOnActiveMove proves the first pointer-clear site:
-// installing a new active authority clears the retained pointer in the same
+// installing a new active authority clears the latest-attempt pointer in the same
 // transaction.
 func TestRetentionPointerClearsOnActiveMove(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0b0b0")
-	retainPreviewForTest(t, s, sid, hexIdentity('1'))
+	latestAttemptPreviewForTest(t, s, sid, hexIdentity('1'))
 
 	next, nextBlobs := buildTestGeneration(t, sid, "gen_complete_c", "complete text", "complete input", "complete output")
 	outcome, err := s.ActivateGeneration(context.Background(), GenerationActivation{
@@ -43,8 +43,8 @@ func TestRetentionPointerClearsOnActiveMove(t *testing.T) {
 	if outcome.Disposition != ingest.ActivationCommittedNow {
 		t.Fatalf("disposition = %v, want ActivationCommittedNow", outcome.Disposition)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want it cleared by the active move", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want it cleared by the active move", pointer)
 	}
 	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "gen_complete_c" {
 		t.Fatalf("active = %q (err=%v), want gen_complete_c", active, err)
@@ -53,11 +53,11 @@ func TestRetentionPointerClearsOnActiveMove(t *testing.T) {
 
 // TestRetentionPointerClearsOnSkipFinalization proves the third pointer-clear
 // site: an in-place skip finalization of the active authority clears the
-// retained pointer through the shared bookkeeping.
+// latest-attempt pointer through the shared bookkeeping.
 func TestRetentionPointerClearsOnSkipFinalization(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("c1c1c1c1-c1c1-41c1-81c1-c1c1c1c1c1c1")
-	retainPreviewForTest(t, s, sid, hexIdentity('2'))
+	latestAttemptPreviewForTest(t, s, sid, hexIdentity('2'))
 
 	// A fresh identifier carrying the active authority's exact projection:
 	// the skip comparison finds it unchanged and finalizes the active
@@ -73,8 +73,8 @@ func TestRetentionPointerClearsOnSkipFinalization(t *testing.T) {
 	if outcome.Disposition != ingest.ActivationSkipped {
 		t.Fatalf("disposition = %v, want ActivationSkipped", outcome.Disposition)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want it cleared by the skip finalization", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want it cleared by the skip finalization", pointer)
 	}
 	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the unchanged full authority", active, err)
@@ -82,12 +82,12 @@ func TestRetentionPointerClearsOnSkipFinalization(t *testing.T) {
 }
 
 // TestRetentionPointerClearsOnRepresentationReplacement proves the second
-// pointer-clear site: a representation replacement clears the retained pointer
+// pointer-clear site: a representation replacement clears the latest-attempt pointer
 // alongside the active pointer.
 func TestRetentionPointerClearsOnRepresentationReplacement(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2")
-	retainPreviewForTest(t, s, sid, hexIdentity('3'))
+	latestAttemptPreviewForTest(t, s, sid, hexIdentity('3'))
 
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
@@ -98,52 +98,52 @@ func TestRetentionPointerClearsOnRepresentationReplacement(t *testing.T) {
 	if deleteErr != nil {
 		t.Fatalf("representation replacement: %v", deleteErr)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want it cleared by the representation replacement", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want it cleared by the representation replacement", pointer)
 	}
 	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "" {
 		t.Fatalf("active = %q (err=%v), want none after the representation replacement", active, err)
 	}
 }
 
-// TestRetentionSweepKeepsRetainedAttempt proves the shared {active, retained}
-// reference: the ordinary sweep keeps the retained attempt's rows and objects.
-func TestRetentionSweepKeepsRetainedAttempt(t *testing.T) {
+// TestLatestAttemptSweepKeepsIt proves the shared {active, latest attempt}
+// reference: the ordinary sweep keeps the latest attempt's rows and objects.
+func TestLatestAttemptSweepKeepsIt(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("e3e3e3e3-e3e3-43e3-83e3-e3e3e3e3e3e3")
-	retainPreviewForTest(t, s, sid, hexIdentity('4'))
+	latestAttemptPreviewForTest(t, s, sid, hexIdentity('4'))
 
 	if _, err := s.SweepSession(context.Background(), sid); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
-		t.Fatalf("retained generation = %q, want the sweep to keep gen_preview_b", pointer.generationID)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("latest-attempt generation = %q, want the sweep to keep gen_preview_b", pointer.generationID)
 	}
 	if rows := generationRowCount(t, s, sid); rows != 2 {
-		t.Fatalf("generation rows = %d, want 2 (the authority and the retained attempt)", rows)
+		t.Fatalf("generation rows = %d, want 2 (the authority and the latest attempt)", rows)
 	}
 	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the full authority", active, err)
 	}
 }
 
-// TestRetentionCleanupInactiveGenerationRefusesRetained proves the retained
+// TestLatestAttemptCleanupInactiveGenerationRefusesIt proves the latest-attempt
 // pointer is protected from the inactive-generation cleanup.
-func TestRetentionCleanupInactiveGenerationRefusesRetained(t *testing.T) {
+func TestLatestAttemptCleanupInactiveGenerationRefusesIt(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("f4f4f4f4-f4f4-44f4-84f4-f4f4f4f4f4f4")
-	retainPreviewForTest(t, s, sid, hexIdentity('5'))
+	latestAttemptPreviewForTest(t, s, sid, hexIdentity('5'))
 
 	err := s.CleanupInactiveGeneration(context.Background(), sid, "gen_preview_b")
-	if err == nil || !strings.Contains(err.Error(), "retained latest attempt") {
-		t.Fatalf("cleanup error = %v, want a refusal naming the retained latest attempt", err)
+	if err == nil || !strings.Contains(err.Error(), "latest attempt") {
+		t.Fatalf("cleanup error = %v, want a refusal naming the latest attempt", err)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
-		t.Fatalf("retained generation = %q, want it left in place", pointer.generationID)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("latest-attempt generation = %q, want it left in place", pointer.generationID)
 	}
 }
 
-// TestRetentionSavepointFailureRollsBack proves the retention transaction is
+// TestRetentionSavepointFailureRollsBack proves the latest-attempt transaction is
 // atomic: a failure at the mid-activation seam rolls the savepoint back and
 // leaves the pointer and the active authority unchanged.
 func TestRetentionSavepointFailureRollsBack(t *testing.T) {
@@ -165,8 +165,8 @@ func TestRetentionSavepointFailureRollsBack(t *testing.T) {
 	if outcome.Disposition != ingest.ActivationNotCommitted {
 		t.Fatalf("disposition = %v, want NotCommitted", outcome.Disposition)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want it rolled back", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want it rolled back", pointer)
 	}
 	if rows := generationRowCount(t, s, sid); rows != rowsBefore {
 		t.Fatalf("generation rows = %d, want %d after the rollback", rows, rowsBefore)
@@ -213,14 +213,14 @@ func TestRetentionSkipsRepairForCorruptAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retention over a repair-predicate authority: %v", err)
 	}
-	if outcome.Disposition != ingest.ActivationRetainedPreview {
-		t.Fatalf("disposition = %v, want ActivationRetainedPreview (never repair)", outcome.Disposition)
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview (never repair)", outcome.Disposition)
 	}
 	if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the untouched full authority", active, err)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
-		t.Fatalf("retained generation = %q, want gen_preview_b", pointer.generationID)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("latest-attempt generation = %q, want gen_preview_b", pointer.generationID)
 	}
 }
 
@@ -230,9 +230,9 @@ func TestRetentionSkipsRepairForCorruptAuthority(t *testing.T) {
 func TestRetentionInvalidCandidateRefusesOnBothRoutes(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("c7c7c7c7-c7c7-47c7-87c7-c7c7c7c7c7c7")
-	retainPreviewForTest(t, s, sid, hexIdentity('d'))
+	latestAttemptPreviewForTest(t, s, sid, hexIdentity('d'))
 
-	// The same identifier as the retained attempt, carrying different content:
+	// The same identifier as the latest attempt, carrying different content:
 	// the immutable-identity check must refuse it.
 	different, differentBlobs := buildTestGeneration(t, sid, "gen_preview_b", "different text", "different input", "different output")
 	candidate := GenerationActivation{
@@ -251,7 +251,7 @@ func TestRetentionInvalidCandidateRefusesOnBothRoutes(t *testing.T) {
 	if len(results) != 1 || results[0].Err == nil || !strings.Contains(results[0].Err.Error(), "different candidate binding") {
 		t.Fatalf("batch refusal = %v, want the immutable-identity refusal", results)
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
-		t.Fatalf("retained generation = %q, want the unchanged gen_preview_b", pointer.generationID)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("latest-attempt generation = %q, want the unchanged gen_preview_b", pointer.generationID)
 	}
 }
