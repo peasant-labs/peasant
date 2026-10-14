@@ -413,7 +413,12 @@ async function probeGroupAttachment(page, where) {
       sameCell: group.closest('td') === cell && cell.parentElement.firstElementChild === cell,
       order: parent.nextElementSibling === group && group.parentElement === family && !parent.contains(group),
       rootLeak: !!group.querySelector('[data-session-id]'),
-      extraRows: [...document.querySelectorAll('[data-root-session-list] tbody tr')].some((row) => row.querySelectorAll('[data-session-id]').length > 1),
+      // Every list row is either one root row (exactly one session id) or one
+      // child row (no session id, but a child marker); anything else is stray.
+      extraRows: [...document.querySelectorAll('[data-root-session-list] tbody tr')].some((row) => {
+        const sessions = row.querySelectorAll('[data-session-id]').length
+        return sessions > 1 || (sessions === 0 && !row.querySelector('[data-session-group-child]'))
+      }),
       bare: disclosure.classList.contains('sgd-bare'), indented: disclosure.classList.contains('sgd-indent'),
       bareBorder: px(style.borderTopWidth) + px(style.borderRightWidth) + px(style.borderBottomWidth) + px(style.borderLeftWidth),
       indent, padY, padX, target, rules,
@@ -599,9 +604,18 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
         state: cells[5]?.querySelector('.pub-state-text')?.textContent?.trim() ?? '',
       }
     })
+    // The child's own row must show the child's own served values, not its
+    // parent's: turns, duration and when are recomputed from `childSync` the
+    // way the row's own formatters render them.
+    const childTurns = childSync.turnCount.toLocaleString('en-US')
+    const childMinutes = Math.max(0, Math.round(childSync.durationMs / 60_000))
+    const childDuration = childMinutes < 60 ? `${childMinutes}m` : `${Math.floor(childMinutes / 60)}h ${String(childMinutes % 60).padStart(2, '0')}m`
+    const childElapsed = Math.floor(Math.max(0, Date.now() - Date.parse(childSync.startTime)) / 60_000)
+    const childWhen = childElapsed < 1 ? 'just now' : childElapsed < 60 ? `${childElapsed}m ago` : childElapsed < 1440 ? `${Math.floor(childElapsed / 60)}h ago` : `${Math.floor(childElapsed / 1440)}d ago`
     if (childCells.count !== 6 || !childCells.project.includes(childSync.projectName)
-      || !childCells.turns || !childCells.duration || !childCells.when || !childCells.state) {
-      fail(`${where}: the expanded child row does not carry its own column values ${JSON.stringify(childCells)}`)
+      || childCells.turns !== childTurns || childCells.duration !== childDuration
+      || childCells.when !== childWhen || !childCells.state) {
+      fail(`${where}: the expanded child row does not carry its own column values; expected turns ${childTurns}, duration ${childDuration}, when ${childWhen}, a project containing ${childSync.projectName} and a publish state, got ${JSON.stringify(childCells)}`)
     }
     if (await listedRows(page) !== expectedCounts.all) fail(`${where}: expanding a family changed the top-level count`)
     await assertSessionsStat()
