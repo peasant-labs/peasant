@@ -51,6 +51,7 @@ required_case_names:
   - a_degraded_row_stays_retryable_while_a_full_row_is_finalised
   - a_row_already_at_the_current_rule_version_is_skipped
   - a_row_at_the_prior_rule_version_is_reclassified
+  - a_row_seeded_at_the_literal_released_rule_version_is_rejudged
   - a_settled_store_is_written_to_only_once
   - an_interrupted_pass_resumes_without_mis_marking
   - a_degraded_row_never_reaches_agent_on_unrecoverable_markers
@@ -361,6 +362,34 @@ cases:
         origin: user
         finalised: true
         examined: true
+        written: true
+
+  # A row judged by the LITERAL released rule version before the corrected
+  # evidence feed must re-derive. The seed is the literal version a real store
+  # carries, not the build's constant, so the arm fails if the rule-version move
+  # is absent: the row would stay below no line, the pass would not list it, and
+  # its contradicting verdict would stand. The stored parent is the rule's first
+  # source, so the row is judged a child with no file read at all.
+  - name: a_row_seeded_at_the_literal_released_rule_version_is_rejudged
+    arm: literal-released-version
+    rows:
+      - session_id: e0000000-0000-4000-8000-000000000001
+        source_path: /claude/e0000000-0000-4000-8000-000000000001.jsonl
+      - session_id: e0000000-0000-4000-8000-000000000002
+        parent_id: e0000000-0000-4000-8000-000000000001
+        source_path: /claude/e0000000-0000-4000-8000-000000000002.jsonl
+        stored_origin: unknown
+        stored_version: 2
+    expected:
+      # The parent itself has no evidence at all: the degraded control that
+      # makes the child's answer attributable to its parent link.
+      - session_id: e0000000-0000-4000-8000-000000000001
+        origin: unknown
+        finalised: false
+        written: false
+      - session_id: e0000000-0000-4000-8000-000000000002
+        origin: agent
+        finalised: true
         written: true
 
   # Every arm runs the pass twice, but this one is named for it: once the

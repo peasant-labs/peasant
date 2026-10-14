@@ -25,11 +25,15 @@ var (
 	// a stable scan order only; ProjectSummaries re-sorts by display name.
 	sqlAllProjects = `SELECT project_hash, COALESCE(canonical_cwd, ''), COALESCE(canonical_remote, '') FROM projects ORDER BY project_hash`
 
-	// sqlSessionsForProject lists the project's sessions, newest first.
+	// sqlSessionsForProject lists the project's sessions, newest first. Its
+	// parent column answers the logical-parent rule, not the raw availability
+	// cache, so an evidenced child whose cache is NULL is never shown as a
+	// root. The rule's rendering lives in store so this read and every other
+	// parent answer share one spelling; the block is vars, not consts.
 	sqlSessionsForProject = `SELECT
 	s.session_id, s.start_ms, s.end_ms, COALESCE(s.git_branch, ''), s.model_harness,
     COALESCE(p.canonical_remote, ''), COALESCE(p.canonical_cwd, ''),
-    COALESCE(s.git_worktree, ''), COALESCE(s.parent_id, '')
+    COALESCE(s.git_worktree, ''), COALESCE(` + store.LogicalParentSQL("s") + `, '')
 FROM sessions s
 LEFT JOIN projects p ON p.project_hash = s.project_hash
 WHERE s.project_hash = ?

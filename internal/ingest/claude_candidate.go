@@ -103,7 +103,6 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	}
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = in.RecordedMetadata.SessionID
-	parsed.ParentUUID = in.RecordedMetadata.ParentUUID
 	if _, err := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed); err != nil {
 		return GenerationCandidate{}, err
 	}

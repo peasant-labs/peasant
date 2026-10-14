@@ -21,11 +21,12 @@ import (
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
-	fs             FileSystem
-	git            GitResolver
-	salt           salt.Salt
-	evidence       ClaudeEvidenceCache
-	locationLookup SessionLocationLookup
+	fs                  FileSystem
+	git                 GitResolver
+	salt                salt.Salt
+	evidence            ClaudeEvidenceCache
+	locationLookup      SessionLocationLookup
+	logicalParentLookup LogicalParentReader
 	// reminedCount is how many evidence records the most recent Discover had
 	// to mine again. It describes that one call and is overwritten by the next.
 	reminedCount int
@@ -34,6 +35,7 @@ type ClaudeAdapter struct {
 var _ SourceAdapter = (*ClaudeAdapter)(nil)
 var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
 var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
+var _ ClaudeLogicalParentLookupCapable = (*ClaudeAdapter)(nil)
 var _ DiscoveryStatistics = (*ClaudeAdapter)(nil)
 var _ OriginEvidenceMiner = (*ClaudeAdapter)(nil)
 
@@ -49,12 +51,19 @@ func (a *ClaudeAdapter) SetClaudeEvidenceCache(cache ClaudeEvidenceCache) {
 }
 
 // SetSessionLocationLookup gives the adapter a way to confirm whether a
-// candidate cross-run spawner is already persisted, and what parent it
-// already has, so re-parenting can trust data outside this run's own write
-// batch. Without a lookup, cross-run linking never fires (see
-// claudeSessionAlreadyStored and claudeStoredParent).
+// candidate cross-run spawner is already persisted, so re-parenting can trust
+// data outside this run's own write batch. Without a lookup, cross-run linking
+// never fires (see claudeSessionAlreadyStored).
 func (a *ClaudeAdapter) SetSessionLocationLookup(lookup SessionLocationLookup) {
 	a.locationLookup = lookup
+}
+
+// SetLogicalParentLookup gives the adapter the evidence-first accessor it walks
+// an ancestor chain with, so the cycle guard follows a stored session's durable
+// parent even while its availability cache is NULL. Without a lookup the walk
+// stops at this run's own candidate edges (see claudeStoredParent).
+func (a *ClaudeAdapter) SetLogicalParentLookup(lookup LogicalParentReader) {
+	a.logicalParentLookup = lookup
 }
 
 func (a *ClaudeAdapter) Harness() Harness {
