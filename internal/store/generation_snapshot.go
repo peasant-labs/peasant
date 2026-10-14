@@ -101,6 +101,14 @@ func (s *Store) withSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	// retained attempt's own rows are touched on the preview path alone.
 	pointer, readErr := readRetainedAttemptPointerOnConn(conn, sessionID)
 	var snapshot indexformat.ReadSnapshot
+	if readErr == nil && selection.LastGood {
+		// The last-good authority check is hoisted above the retained-pointer
+		// branch so it protects every representation: a pointer-absent session
+		// whose active authority is only a preview (an explicit rebuild) refuses
+		// exactly like a retained one. It no-ops for a session with no active
+		// generation, so the preserved legacy/certificate read still serves.
+		readErr = validateLastGoodAuthorityOnConn(conn, sessionID)
+	}
 	if readErr == nil {
 		if pointer.found() {
 			snapshot, readErr = readRetainedSnapshotModeOnConn(conn, sessionID, pointer, authoritative, selection)
@@ -131,8 +139,9 @@ func (s *Store) withSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 //   - an authoritative read with LastGood serves the last-good full authority
 //     — the active generation when one exists and the certificate certifies it
 //     publishable, and the preserved legacy/certificate read when the session
-//     has no active generation. An active authority that is only a preview
-//     (an explicit rebuild) is refused: a preview is never served as last-good;
+//     has no active generation. The caller has already refused an active
+//     authority that is only a preview, so a preview is never served as
+//     last-good;
 //   - every other authoritative read refuses with the retained-attempt
 //     sentinel, before any representation is resolved.
 func readRetainedSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, pointer retainedAttemptPointer, authoritative bool, selection ingest.SessionReadSelection) (indexformat.ReadSnapshot, error) {
@@ -141,9 +150,6 @@ func readRetainedSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	}
 	if !selection.LastGood {
 		return indexformat.ReadSnapshot{}, retainedAttemptIncompleteError(sessionID)
-	}
-	if err := validateLastGoodAuthorityOnConn(conn, sessionID); err != nil {
-		return indexformat.ReadSnapshot{}, err
 	}
 	return buildReadSnapshotModeOnConn(conn, sessionID, true)
 }

@@ -60,16 +60,27 @@ func retainedAttemptSettledSQL(alias string) string {
     )`
 }
 
-// retainedAttemptSettledClause returns the settle NOT clause for one harness
-// alias and the arguments it binds (the producer target, then the adapter
-// target), or an empty clause when the harness's targets cannot express a
-// settle decision. A target that cannot settle must never hide work: the
-// caller keeps listing the session, which is the pre-retention behavior.
-func retainedAttemptSettledClause(alias string, target ingest.HarvesterVersions) (string, []any) {
+// retainedAttemptSettleFragment returns the bare settle fragment for one
+// harness alias and the arguments it binds (the producer target, then the
+// adapter target), or ok=false when the harness's targets cannot express a
+// settle decision. A target that cannot settle must never hide work: the caller
+// keeps listing the session, which is the pre-retention behavior.
+func retainedAttemptSettleFragment(alias string, target ingest.HarvesterVersions) (string, []any, bool) {
 	if target.IndexerVersion < 1 || target.AdapterVersion < 1 {
+		return "", nil, false
+	}
+	return retainedAttemptSettledSQL(alias), []any{target.IndexerVersion, target.AdapterVersion}, true
+}
+
+// retainedAttemptSettledClause returns the settle NOT clause for one harness
+// alias and its bound arguments, or an empty clause when the target cannot
+// express a settle decision.
+func retainedAttemptSettledClause(alias string, target ingest.HarvesterVersions) (string, []any) {
+	fragment, args, ok := retainedAttemptSettleFragment(alias, target)
+	if !ok {
 		return "", nil
 	}
-	return "NOT (" + retainedAttemptSettledSQL(alias) + ")", []any{target.IndexerVersion, target.AdapterVersion}
+	return "NOT (" + fragment + ")", args
 }
 
 // retentionEligibleOnConn is the store-owned eligibility predicate for
