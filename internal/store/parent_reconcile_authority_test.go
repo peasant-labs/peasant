@@ -23,11 +23,21 @@ var parentReconcileAuthorityYAML []byte
 //go:embed testdata/parent_reconcile_authority.manifest.yaml
 var parentReconcileAuthorityManifest []byte
 
+// The generation identifier the authority cases activate, and the two
+// generation scopes a case can put that generation in: the active authority, or
+// (with no active generation) the session's latest attempt.
+const (
+	authorityRelationshipGeneration = "authority-generation"
+	authorityScopeActive            = "active"
+	authorityScopeLatestAttempt     = "latest-attempt"
+)
+
 type parentReconcileAuthorityCase struct {
 	Name              string `yaml:"name"`
 	LegacyParent      string `yaml:"legacyParent"`
 	AuthorityState    string `yaml:"authorityState"`
 	AuthorityTarget   string `yaml:"authorityTarget"`
+	Scope             string `yaml:"scope"`
 	HarvestTarget     string `yaml:"harvestTarget"`
 	ExpectParentCache string `yaml:"expectParentCache"`
 	ExpectUpdates     int    `yaml:"expectUpdates"`
@@ -108,6 +118,11 @@ func loadParentReconcileAuthorityFixture(t *testing.T) parentReconcileAuthorityF
 		if tc.HarvestTarget == "" {
 			t.Fatalf("authority case %q names no harvest target", tc.Name)
 		}
+		switch tc.Scope {
+		case "", authorityScopeActive, authorityScopeLatestAttempt:
+		default:
+			t.Fatalf("authority case %q declares the unknown generation scope %q", tc.Name, tc.Scope)
+		}
 	}
 	return fixture
 }
@@ -129,6 +144,12 @@ func runParentReconcileAuthorityCase(t *testing.T, fixture parentReconcileAuthor
 	if tc.AuthorityState != "" {
 		authorityTarget := authorityOptionalID(t, fixture, tc.AuthorityTarget)
 		activateAuthorityRelationship(t, db, child, tc.AuthorityState, authorityTarget)
+		if tc.Scope == authorityScopeLatestAttempt {
+			// The generation's evidence is the session's only relationship
+			// authority: no active generation exists, so the reverse lookup
+			// must consult the latest attempt's own evidence.
+			execGenerationSQL(t, db, `UPDATE sessions SET active_generation_id = NULL, latest_attempt_generation_id = '`+authorityRelationshipGeneration+`', latest_attempt_indexer_version = 1 WHERE session_id = '`+string(child)+`';`)
+		}
 	}
 	insertAuthoritySession(t, ctx, db, *harvest, ingest.HarnessCodex, nil)
 
@@ -219,7 +240,7 @@ func activateAuthorityRelationship(t *testing.T, db *Store, child ingest.Session
 		value := schema.SessionID(*target)
 		relationship.TargetLocalID = &value
 	}
-	v2, blobs := authorityGeneration(schema.SessionID(child), "authority-generation", []schema.SessionRelationship{relationship})
+	v2, blobs := authorityGeneration(schema.SessionID(child), authorityRelationshipGeneration, []schema.SessionRelationship{relationship})
 	if err := activateTestGeneration(t, db, v2, blobs); err != nil {
 		t.Fatalf("activate %s relationship for %s: %v", state, child, err)
 	}
