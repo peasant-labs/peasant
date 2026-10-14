@@ -137,6 +137,9 @@ func TestRetainedAttemptRefusesFullReadsUniformly(t *testing.T) {
 	if snapshot.Detail.TurnCount != authorityStats.TurnCount || snapshot.Detail.ToolCalls != authorityStats.ToolCallCount {
 		t.Fatalf("last-good counts = %d/%d, want the authority's %d/%d", snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, authorityStats.TurnCount, authorityStats.ToolCallCount)
 	}
+	if want := float64(authorityStats.DurationMs) / 60000.0; snapshot.Detail.DurationMinutes != want {
+		t.Fatalf("last-good duration minutes = %v, want the authority's %v", snapshot.Detail.DurationMinutes, want)
+	}
 }
 
 // TestRetainedAttemptRefusalIsUniformForCertificateAuthority proves the refusal
@@ -203,6 +206,12 @@ func TestRetainedAttemptAvailableReadBindsRetainedAttempt(t *testing.T) {
 		t.Fatalf("available counts = %d/%d/%d, want the retained attempt's %d/%d/%d",
 			snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, snapshot.Detail.OutputTokens,
 			retainedStats.TurnCount, retainedStats.ToolCallCount, retainedStats.TokensOut)
+	}
+	// The retained producer document records milliseconds while this detail
+	// column carries minutes, so the available read converts like every other
+	// detail row rather than reporting the raw value.
+	if want := float64(retainedStats.DurationMs) / 60000.0; snapshot.Detail.DurationMinutes != want {
+		t.Fatalf("available duration minutes = %v, want %v", snapshot.Detail.DurationMinutes, want)
 	}
 }
 
