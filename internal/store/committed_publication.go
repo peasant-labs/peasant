@@ -69,6 +69,20 @@ func (s *Store) readCommittedPublicationInput(ctx context.Context, id ingest.Ses
 		return input, err
 	}
 	if active == nil {
+		// No managed generation: the legacy capture is the read authority. Its
+		// stored document may predate a parent the session's own evidence now
+		// names (a latest attempt carrying started_by evidence with a NULL
+		// availability cache is exactly that state), so the bundle parent is the
+		// session-level answer when one exists. A nil answer leaves the stored
+		// document's parent in place: this read never clears a parent.
+		parent, err := logicalParentForSessionOnConn(conn, id)
+		if err != nil {
+			return input, err
+		}
+		if parent != nil {
+			value := schema.SessionID(*parent)
+			input.Metadata.ParentUUID = &value
+		}
 		return input, nil
 	}
 	if !s.GenerationSnapshotsSupported() {
@@ -98,6 +112,14 @@ func (s *Store) readCommittedPublicationInput(ctx context.Context, id ingest.Ses
 	}
 	meta.Purpose = snapshot.Metadata.Purpose
 	meta.Relationships = append([]schema.SessionRelationship(nil), snapshot.Metadata.Relationships...)
+	// The generation document is the authority for its own parent answer. The
+	// bundle carries it when the document names one; a nil document parent
+	// leaves the stored capture's parent in place, so this read never clears a
+	// parent it did not answer.
+	if snapshot.Metadata.ParentUUID != nil {
+		parent := *snapshot.Metadata.ParentUUID
+		meta.ParentUUID = &parent
+	}
 	input.Generation = &snapshot
 	return input, nil
 }

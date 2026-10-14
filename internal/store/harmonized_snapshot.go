@@ -118,6 +118,10 @@ func harmonizedReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.Sessio
 func harmonizedMetadataOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (schema.UnifiedMetadata, schema.SessionDetailPayload, error) {
 	var metadata schema.UnifiedMetadata
 	var session schema.SessionDetailPayload
+	// renderedParent holds the session-level parent answer read by the
+	// statement. It is the fallback for the document's ParentUUID, which the
+	// served generation's own evidence overrides below.
+	var renderedParent *schema.SessionID
 	err := sqlitex.Execute(conn, `SELECT
     g.schema_version, g.harness, g.model, g.version,
     g.ts_start, g.ts_end, g.ts_ingested,
@@ -129,7 +133,7 @@ func harmonizedMetadataOnConn(conn *sqlite.Conn, sessionID schema.SessionID, gen
     g.redaction_applied, g.redaction_level, g.redaction_rule_set_version,
     g.redaction_at_ms, g.redaction_content_hash_at_redact,
     g.adapter_version, g.diagnostics_partial,
-    s.parent_id
+    `+LogicalParentSQL("s")+`
 FROM session_generations g
 JOIN sessions s ON s.session_id = g.session_id
 WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
@@ -214,7 +218,7 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 				if err != nil {
 					return fmt.Errorf("stored parent identity is malformed: %w", err)
 				}
-				metadata.ParentUUID = &parent
+				renderedParent = &parent
 			}
 			return nil
 		},
@@ -234,6 +238,30 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 	metadata.Git.Associations = children.associations
 	metadata.Diagnostics.Warnings = children.diagnostics
 	metadata.Relationships = children.relationships
+	// The document's ParentUUID is generation-scoped: the served generation's
+	// OWN started_by target when it answers, otherwise the session-level parent
+	// rendering — never the raw availability cache. This keeps the document and
+	// the legacy projections coherent for the generation being served, which is
+	// what validateParentMirrors checks:
+	//
+	//   - durable target present: ParentUUID = the target, and
+	//     ParentSessionID = snapshotLogicalParent(metadata) = the same target, so
+	//     the mirror check that compares the two legacy projections passes and
+	//     the durable-agreement check passes by construction; the no-evidence
+	//     arm is skipped because the relationships are non-empty.
+	//   - durable target absent: ParentSessionID = snapshotLogicalParent falls
+	//     back to ParentUUID, so the two projections agree by construction and
+	//     the durable-agreement checks are vacuous; any value would pass, and
+	//     the rendering's value is the coherent one because it is the same
+	//     answer every session-level reader gives.
+	//
+	// Reading the raw cache here would inject the availability artifact into a
+	// generation-scoped document and the validator would refuse a retained
+	// generation whose evidence names a different target than the cache.
+	metadata.ParentUUID = renderedParent
+	if target := startedByTarget(children.relationships); target != nil {
+		metadata.ParentUUID = target
+	}
 	legacyPresentCollections(&metadata)
 	stats, err := readCapturedStatsOnConn(conn, sessionID)
 	if err != nil {

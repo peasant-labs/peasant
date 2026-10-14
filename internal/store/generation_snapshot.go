@@ -294,7 +294,7 @@ type snapshotSessionRow struct {
 func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (snapshotSessionRow, error) {
 	row := snapshotSessionRow{sessionID: sessionID}
 	found := false
-	if err := sqlitex.Execute(conn, `SELECT s.model_harness, s.parent_id, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
+	if err := sqlitex.Execute(conn, `SELECT s.model_harness, `+LogicalParentSQL("s")+`, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
  COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
  COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
   FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id

@@ -221,10 +221,11 @@ func (s *Store) ReadStoredCaptureAuthority(ctx context.Context, sessionID schema
 
 // readHarmonizedPriorOnConn loads the reusable evidence for a harmonized
 // active generation: the catalog row plus children, segments, sections, and
-// evidence rebuild the captured metadata beside the stats row (the durable
-// parent comes from the session row, since the catalog stores no ParentUUID),
-// the main entries hydrate from their body rows, and the alias table stays
-// the reusable-identity authority exactly as for file-backed generations.
+// evidence rebuild the captured metadata beside the stats row (the logical
+// parent comes from the session-level parent answer, since the catalog stores
+// no ParentUUID), the main entries hydrate from their body rows, and the alias
+// table stays the reusable-identity authority exactly as for file-backed
+// generations.
 func readHarmonizedPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (*ingest.GenerationPrior, error) {
 	prior := &ingest.GenerationPrior{
 		GenerationID: generationID,
@@ -256,7 +257,11 @@ func readHarmonizedPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, ge
 	if err != nil {
 		return nil, err
 	}
-	if parent := readSessionParentOnConn(conn, sessionID); parent != nil {
+	parent, err := readSessionParentOnConn(conn, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if parent != nil {
 		metadata.ParentUUID = parent
 	}
 	prior.Metadata = &metadata
@@ -300,11 +305,13 @@ func serializedMetadataToUnified(gen GenerationRecord, children GenerationChildr
 	return metadata, nil
 }
 
-// readSessionParentOnConn reads the durable parent target cache: the
-// started_by target when it names a stored session, else NULL.
-func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) *schema.SessionID {
+// readSessionParentOnConn reads the session-level logical parent answer for the
+// prior document: the rendering of the parent rule, not the raw cache. It
+// returns the statement's error so a failed read surfaces instead of
+// masquerading as a nil the rule would treat as "no parent".
+func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*schema.SessionID, error) {
 	var parent *schema.SessionID
-	_ = sqlitex.Execute(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT `+LogicalParentSQL("s")+` FROM sessions s WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) != sqlite.TypeNull {
@@ -313,8 +320,10 @@ func readSessionParentOnConn(conn *sqlite.Conn, sessionID schema.SessionID) *sch
 			}
 			return nil
 		},
-	})
-	return parent
+	}); err != nil {
+		return nil, fmt.Errorf("store: read the logical parent of session %s while rebuilding its prior document: %w; no prior evidence was produced; restore database access and retry", sessionID, err)
+	}
+	return parent, nil
 }
 
 // readHarmonizedMainEntriesOnConn hydrates the active generation's main

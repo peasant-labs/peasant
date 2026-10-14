@@ -20,8 +20,13 @@ import (
 // skipped pass at the pipeline's type assertion.
 var _ ingest.OriginResolverStore = (*Store)(nil)
 
-const sqlListStaleOriginSessions = `SELECT session_id, COALESCE(parent_id, ''), model_harness, source_path, session_origin, origin_version
-FROM sessions WHERE origin_version < ?`
+// sqlListStaleOriginSessions is the resolve pass's work list. Its parent column
+// is the session-level logical-parent answer, not the raw availability cache: a
+// child whose generation carries started_by evidence must be judged parent-linked
+// even while its cache is NULL, or the pass would persist a root verdict that
+// every migrated reader contradicts.
+var sqlListStaleOriginSessions = `SELECT s.session_id, COALESCE(` + LogicalParentSQL("s") + `, ''), s.model_harness, s.source_path, s.session_origin, s.origin_version
+FROM sessions s WHERE s.origin_version < ?`
 
 // ListStaleOriginSessions returns every session whose origin_version is below
 // currentVersion, together with the facts the resolver judges it on. It is the

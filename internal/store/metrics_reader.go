@@ -91,6 +91,11 @@ ORDER BY entry_index, key`
 // LookupSessionLocation returns the host_slug and parent_id for a session.
 // Returns ("", "", nil) if the session is not found in the DB.
 // Used by reconstructFromMetadata to avoid scanning all host directories.
+//
+// The parent_id here is the availability cache, not the parent answer: it says
+// which stored row exists so the caller can locate an on-disk directory. A
+// consumer that answers a parent question must read the parent rule instead
+// (the store's logical-parent reader), never this value.
 func (s *Store) LookupSessionLocation(ctx context.Context, sessionID ingest.SessionID) (hostSlug string, parentID string, err error) {
 	conn, connErr := s.pool.Take(ctx)
 	if connErr != nil {

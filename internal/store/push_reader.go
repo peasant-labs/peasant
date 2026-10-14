@@ -39,6 +39,11 @@ import (
 //	19: duration_ms    (CAST(duration_minutes * 60000 AS INTEGER))
 //	20: git_remote     (from host_slugs JOIN; COALESCE to '' when unknown)
 //	21: parent_id      (nullable FK; COALESCE to '' — empty for root sessions)
+//	                     This is the availability cache, NOT the parent answer:
+//	                     it says which cached row a later join can use. The
+//	                     logical parent is the rendering of the parent rule, and
+//	                     push consumers build on-disk paths from the location,
+//	                     never report this value as a session's parent.
 //	22: project_path   (session worktree, falling back to project canonical cwd)
 //	23: session_origin (NOT NULL over the three-value menu; V46)
 //

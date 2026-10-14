@@ -27,7 +27,7 @@ func (s *Store) ReadStoredMetadata(ctx context.Context, sid ingest.SessionID) ([
 	// JSON object (or SQL NULL for unknown) is evidence.
 	err = sqlitex.ExecuteTransient(conn, `SELECT json_patch(json_object(
     'schemaVersion', s.schema_version,
-    'sessionId', s.session_id, 'parentUuid', s.parent_id,
+    'sessionId', s.session_id, 'parentUuid', `+LogicalParentSQL("s")+`,
     'harness', s.model_harness, 'model', s.model_id, 'version', s.tool_version,
     'hostSlug', h.host_slug,
     'timestamp', json_object('start', s.start_ms, 'end', s.end_ms, 'ingested', s.ingested_ms),

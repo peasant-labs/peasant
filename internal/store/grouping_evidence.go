@@ -23,9 +23,10 @@ type GroupingEvidenceRow struct {
 	// InputSubmissionCount is the durable measured input count for the active
 	// generation. Nil means unknown, which is distinct from a measured zero.
 	InputSubmissionCount *int64
-	// OwnerState is the started_by relationship target state on the active
-	// generation. Empty means no started_by evidence exists at all, which the
-	// caller treats as an unresolved owner rather than a missing one.
+	// OwnerState is the started_by relationship target state on the session's
+	// generation (the active generation, or the latest attempt when no active
+	// generation exists). Empty means no started_by evidence exists at all,
+	// which the caller treats as an unresolved owner rather than a missing one.
 	OwnerState schema.RelationshipTargetState
 	// OwnerTargetLocalID is the immediate started_by target local identifier.
 	// It is present only for a known or retained target; it is nil otherwise,
@@ -33,12 +34,17 @@ type GroupingEvidenceRow struct {
 	OwnerTargetLocalID *string
 }
 
-const groupingEvidenceQuery = `SELECT s.session_id, s.session_purpose, s.input_submission_count, r.target_state, r.target_local_id
+// groupingEvidenceQuery joins the started_by evidence of the session's
+// GENERATION — the active generation, or the latest attempt when no active
+// generation exists — through the one generation-scope spelling, so a
+// latest-attempt-only session reports its owner state instead of looking
+// unresolved. It is a var, not a const, because the scope is spliced in.
+var groupingEvidenceQuery = `SELECT s.session_id, s.session_purpose, s.input_submission_count, r.target_state, r.target_local_id
 FROM sessions s
 LEFT JOIN session_relationship_evidence r
   ON r.session_id = s.session_id
  AND r.kind = 'started_by'
- AND r.generation_id = s.active_generation_id
+ AND r.generation_id = ` + parentGenerationScopeSQL("s") + `
 WHERE s.session_id IN (`
 
 // GroupingEvidenceForSessions reads the active-generation grouping evidence for
