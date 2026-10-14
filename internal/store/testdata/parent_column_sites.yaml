@@ -22,9 +22,9 @@
 #             pair), migration-oracle (the V1 lane's durable logical record),
 #             write-guard (the reverse lookup's own NULL-only and cycle guards),
 #             writers (the four statements that SET the column), ddl (immutable
-#             historical schema and migration text), and cross-package (parent
-#             answers owned by the cross-package reader slice, which moves them
-#             to the routed section when it lands).
+#             historical schema and migration text), and cross-package (a
+#             parent answer owned by a reader outside internal/store, which
+#             moves to the routed section when it renders the rule).
 #   routed    declarations that render the rule: asserted to carry ZERO
 #             token-bearing literals AND to contain a LogicalParentSQL( or
 #             parentGenerationScopeSQL( call.
@@ -35,13 +35,12 @@
 # internal/store/baseline_schema.sql is outside this closure; drift there is
 # caught by its own generator gate.
 #
-# Reconciliation note: the design's routed inventory names ten declarations. Two
-# of them (the codemap project listing and the research root filter) belong to
-# the cross-package reader slice, which lands after this one and rewrites them
-# into a rendered fragment; at this change they still carry the token, so they
-# are listed here as cross-package residual entries. That slice moves them into
-# the routed section in the same change that routes them, and the exact-set
-# assertion fails if it forgets.
+# Reconciliation note: the design's routed inventory names ten declarations.
+# Two of them (the codemap project listing and the research root filter) are
+# parent answers rendered outside internal/store. They were moved from this
+# residual section into the routed section in the same change that routed them,
+# and the exact-set assertion fails if the move is half-done in either
+# direction.
 residual:
   - name: store-logical-parent-renderer
     file: internal/store/parent_reader.go
@@ -208,24 +207,6 @@ residual:
     literals: 1
     class: ddl
     reason: Immutable historical trigger text.
-  - name: codemap-sessions-for-project
-    file: internal/codemap/store_queries.go
-    declaration: sqlSessionsForProject
-    literals: 1
-    class: cross-package
-    reason: >-
-      The Map/Review project listing is a parent answer owned by the
-      cross-package reader slice, which renders it and moves this entry to the
-      routed section.
-  - name: cmd-annotate-research-root-filter
-    file: cmd/peasant/cmd_annotate_research.go
-    declaration: runAnnotateSample
-    literals: 1
-    class: cross-package
-    reason: >-
-      The research root filter is a parent answer owned by the cross-package
-      reader slice, which extracts it into a rendered fragment and moves this
-      entry to the routed section.
 
 routed:
   - name: store-all-sessions
@@ -270,6 +251,20 @@ routed:
     declaration: sqlListStaleOriginSessions
     class: routed
     reason: Stored-origin verdict input, rendered.
+  - name: codemap-sessions-for-project
+    file: internal/codemap/store_queries.go
+    declaration: sqlSessionsForProject
+    class: routed
+    reason: >-
+      The Map/Review project listing's parent column, rendered, so an evidenced
+      child with a NULL cache is not shown as a root.
+  - name: cmd-annotate-research-root-filter
+    file: cmd/peasant/cmd_annotate_research.go
+    declaration: sqlResearchRootSessions
+    class: routed
+    reason: >-
+      The research --only-parent-sessions filter, rendered as an IS NULL over
+      the rule so a NULL cache never proves rootness.
 
 foreign:
   - name: api-websocket-log-attribute

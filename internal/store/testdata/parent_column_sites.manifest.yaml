@@ -26,8 +26,6 @@ requiredResidual:
   - store-migration-v42
   - store-migration-v53
   - store-migration-v51
-  - codemap-sessions-for-project
-  - cmd-annotate-research-root-filter
 requiredRouted:
   - store-all-sessions
   - store-session-detail-query
@@ -37,6 +35,8 @@ requiredRouted:
   - store-read-session-parent
   - store-read-stored-metadata
   - store-list-stale-origin-sessions
+  - codemap-sessions-for-project
+  - cmd-annotate-research-root-filter
 requiredForeign:
   - api-websocket-log-attribute
   - ingest-opencode-candidate

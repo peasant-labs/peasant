@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
 )
@@ -75,6 +76,14 @@ ELSE
    WHERE se.session_id = s.session_id)
 END`
 
+// sqlResearchRootSessions is the --only-parent-sessions filter: a session is a
+// root only when the logical-parent rule answers nothing. A NULL availability
+// cache is not proof of rootness — an evidenced child whose cache is NULL still
+// has a parent — so the filter renders the same rule every other parent answer
+// uses instead of reading the raw column. It is a var, not a const, because it
+// splices the store's canonical rendering.
+var sqlResearchRootSessions = `(` + store.LogicalParentSQL("s") + `) IS NULL`
+
 func runAnnotateSample(cmd *cobra.Command, _ []string) (retErr error) {
 	count, _ := cmd.Flags().GetInt("count")
 	minUserTurns, _ := cmd.Flags().GetInt("min-user-turns")
@@ -126,7 +135,7 @@ func runAnnotateSample(cmd *cobra.Command, _ []string) (retErr error) {
 		args = append(args, project)
 	}
 	if onlyParentSessions {
-		conditions = append(conditions, "s.parent_id IS NULL")
+		conditions = append(conditions, sqlResearchRootSessions)
 	}
 
 	if unannotated {

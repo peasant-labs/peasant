@@ -119,3 +119,55 @@ VALUES(?, ?, 'opencode', 'text', ?, 'turn', 0)`, mirrorID, i, role)
 		t.Fatalf("max-total-turns kept = %d, want 0", within)
 	}
 }
+
+// TestResearchRootFilterAnswersThroughTheLogicalParentRule proves the shipped
+// --only-parent-sessions fragment selects a session as a root only when the
+// logical-parent rule answers nothing. The store holds a true root (no evidence,
+// NULL cache) and an evidenced child whose cache is NULL but whose generation
+// names the root: only the root is selected. A raw `s.parent_id IS NULL`
+// predicate would select both, so this fails on the unfixed filter.
+func TestResearchRootFilterAnswersThroughTheLogicalParentRule(t *testing.T) {
+	dataHome := t.TempDir()
+	db := openSeedStore(t, dataHome, "research-root-filter")
+	defer db.Close()
+	ctx := context.Background()
+	conn, err := db.Pool().Take(ctx)
+	if err != nil {
+		t.Fatalf("take connection: %v", err)
+	}
+	defer db.Pool().Put(conn)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if err := sqlitex.ExecuteTransient(conn, sql, &sqlitex.ExecOptions{Args: args}); err != nil {
+			t.Fatalf("seed research root filter: %v", err)
+		}
+	}
+	exec(`INSERT INTO host_slugs(opaque_id, host_slug) VALUES('research-root-host','research-root-host')`)
+	exec(`INSERT INTO projects(project_hash, canonical_cwd) VALUES('research-root-project','/synthetic/research-root')`)
+	rootID := "0c999bbb-36bc-424c-a789-8be54d9702f1"
+	childID := "0c999bbb-36bc-424c-a789-8be54d9702f2"
+	genID := "gen-research-root-filter"
+	for i, sessionID := range []string{rootID, childID} {
+		exec(`INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, schema_version, index_format_version)
+VALUES(?, 'opencode', 'research-model', 'research-root-host', 'research-root-project', ?, ?, 3, '/synthetic/research-root.jsonl', 'jsonl', 11, 2)`, sessionID, i, i+1)
+	}
+	// The child's generation carries the started_by evidence naming the root;
+	// its availability cache stays NULL, so a raw predicate calls it a root too.
+	exec(`UPDATE sessions SET active_generation_id = ? WHERE session_id = ?`, genID, childID)
+	exec(`INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES (?, ?, 0, 'started_by', 'target_known', ?, 'native_typed', '', '', '')`, childID, genID, rootID)
+
+	var selected []string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT s.session_id FROM sessions s WHERE s.project_hash = ? AND `+sqlResearchRootSessions, &sqlitex.ExecOptions{
+		Args: []any{"research-root-project"},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			selected = append(selected, stmt.ColumnText(0))
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("run the shipped root filter: %v", err)
+	}
+	if len(selected) != 1 || selected[0] != rootID {
+		t.Fatalf("the root filter selected %v, want only the true root %q: an evidenced child with a NULL cache must not be sampled as a root, so the filter renders the logical-parent rule rather than reading the raw column", selected, rootID)
+	}
+}
