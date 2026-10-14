@@ -143,7 +143,8 @@ cases:
   - name: parent-visible-child-grouped
     sessions:
       - { id: root, project: alpha, syncStatus: new, state: unpublished }
-      - { id: child, project: beta, syncStatus: synced, state: published, parentSessionId: root, title: Delegate Task }
+      - { id: child, project: beta, syncStatus: synced, state: published, parentSessionId: root, title: Delegate Task, turnCount: 3, durationMs: 420000, startTime: '2026-05-20T08:00:00.000Z', audience: 1 }
+      - { id: child-two, project: alpha, syncStatus: new, state: unpublished, parentSessionId: root, startTime: '', title: 'Lint Run' }
       - { id: other, project: alpha, syncStatus: new, state: unpublished }
       - { id: other-child, project: alpha, syncStatus: new, state: unpublished, parentSessionId: other }
     filter: all
@@ -151,8 +152,11 @@ cases:
     expectedRows: [root, other]
     expectedGroups: [root, other]
     steps:
-      - { expand: root, children: [child] }
-    childLabels: { child: Delegate Task }
+      - { expand: root, children: [child, child-two] }
+    childLabels: { child: Delegate Task, child-two: 'Lint Run' }
+    expectedLabels:
+      child: 'published · 1 collective · up to date'
+      child-two: 'not published'
 
   - name: recursive-family-and-refresh
     # Anonymized grandparent -> delegated parent -> delegated child.
