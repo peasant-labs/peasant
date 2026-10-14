@@ -252,11 +252,10 @@ func sqlSessionDetailByIDQuery(retained bool) string {
 	// The retained producer stats record the attempt duration in milliseconds
 	// while this detail column carries minutes, so the retained branch converts
 	// exactly like the authority branch beside it.
-	retainedDuration := durationAuthority
+	duration := durationAuthority
 	if retained {
-		retainedDuration = "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN CAST(json_extract(s.latest_attempt_stats_json,'$.durationMs') AS REAL) / 60000.0 ELSE " + durationAuthority + " END"
+		duration = "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN CAST(json_extract(s.latest_attempt_stats_json,'$.durationMs') AS REAL) / 60000.0 ELSE " + durationAuthority + " END"
 	}
-	duration := retainedDuration
 	return `SELECT
     s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
     s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
