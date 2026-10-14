@@ -41,10 +41,10 @@ func (e *claudeCandidateRefusal) Error() string {
 }
 
 // claudeCandidateCompletionFailure translates any candidate-build failure into
-// the one fixed-shape Claude refusal. The underlying failure is classified here
-// and then dropped, so nothing it carries -- a recorded source locator, a raw
-// kernel message, or a wrapped filesystem error -- can reach the diagnostic.
-func claudeCandidateCompletionFailure(session DiscoveredSession, failure error) error {
+// the one fixed-shape Claude refusal. The underlying failure is not carried, so
+// nothing it holds -- a recorded source locator, a raw kernel message, or a
+// wrapped filesystem error -- can reach the diagnostic.
+func claudeCandidateCompletionFailure(session DiscoveredSession) error {
 	return &claudeCandidateRefusal{
 		Operation: "ClaudeIndexer.BuildGeneration",
 		Harness:   string(HarnessClaudeCode),
@@ -68,11 +68,11 @@ func claudeCandidateCompletionFailure(session DiscoveredSession, failure error) 
 // sanitized refusal above, never a raw kernel value or the recorded locator.
 func (idx *ClaudeIndexer) BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
 	if err := ctx.Err(); err != nil {
-		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session, err)
+		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session)
 	}
 	candidate, err := idx.buildClaudeGeneration(ctx, in)
 	if err != nil {
-		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session, err)
+		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session)
 	}
 	return candidate, nil
 }
@@ -294,7 +294,14 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 				}
 			}
 		}
-		carrierBlock, err := claudeCarrierBlock(recordKey, carrier, len(record.children))
+		hasToolResultContent := false
+		for _, child := range record.children {
+			if child.EntryType == EntryTypeToolResult {
+				hasToolResultContent = true
+				break
+			}
+		}
+		carrierBlock, err := claudeCarrierBlock(recordKey, carrier, hasToolResultContent)
 		if err != nil {
 			return nil, err
 		}
@@ -319,8 +326,10 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 
 // claudeCarrierBlock builds one depth-0 block from a classified record. An
 // accounted omission takes the omission channel instead, which owns the
-// placeholder's whole shape.
-func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, childCount int) (ClassifiedBlock, error) {
+// placeholder's whole shape. hasToolResultContent is the record's content
+// shape: a record whose content holds a tool result is a wrapper, never a
+// plain prompt.
+func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, hasToolResultContent bool) (ClassifiedBlock, error) {
 	block := ClassifiedBlock{
 		NativeKey:   recordKey,
 		Role:        entry.Role,
@@ -354,7 +363,9 @@ func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, childCount 
 	block.ObservedModel = observedModel
 	block.Extra = extra
 	claudeAssignContent(&block, entry)
-	claudeAssignSubmission(&block, entry, childCount == 0)
+	if err := claudeAssignSubmission(&block, entry, !hasToolResultContent); err != nil {
+		return ClassifiedBlock{}, err
+	}
 	return block, nil
 }
 
@@ -405,7 +416,9 @@ func claudeChildBlock(childKey, recordKey string, entry schema.SessionEntry, see
 		block.ToolCallKey = callKey
 	}
 	if entry.EntryType == EntryTypeToolResult {
-		claudeAssignSubmission(&block, entry, false)
+		if err := claudeAssignSubmission(&block, entry, false); err != nil {
+			return ClassifiedBlock{}, err
+		}
 	}
 	return block, nil
 }
@@ -429,25 +442,27 @@ func claudeAssignContent(block *ClassifiedBlock, entry schema.SessionEntry) {
 // by the discriminating record identity. An AskUserQuestion answer -- a
 // depth-1 user tool_result with a validated tool_use id -- is its own
 // submission, keyed per record and answer. Mixed wrappers, harness content and
-// tool activity carry no provenance.
-func claudeAssignSubmission(block *ClassifiedBlock, entry schema.SessionEntry, plainPrompt bool) {
+// tool activity carry no provenance. An over-bound answer key is refused, never
+// dropped: every key this classifier assembles respects the persisted bound.
+func claudeAssignSubmission(block *ClassifiedBlock, entry schema.SessionEntry, plainPrompt bool) error {
 	if plainPrompt && entry.Role == RoleUser && entry.EntryType == EntryTypeText {
 		block.Provenance = claudeSubmissionProvenance()
 		block.SubmissionKey = block.NativeKey
-		return
+		return nil
 	}
 	if entry.Role == RoleUser && entry.EntryType == EntryTypeToolResult {
 		callKey := derefString(entry.ToolCallID)
 		if callKey == "" {
-			return
+			return nil
 		}
 		key, err := claudeAnswerKey(block.CarrierNativeKey, callKey)
 		if err != nil {
-			return
+			return err
 		}
 		block.Provenance = claudeSubmissionProvenance()
 		block.SubmissionKey = key
 	}
+	return nil
 }
 
 // claudeSubmissionProvenance is the full six-dimension tuple every admitted

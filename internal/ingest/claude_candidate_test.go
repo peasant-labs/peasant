@@ -24,21 +24,32 @@ var claudeProducerManifestYAML []byte
 // match inside the same case, so the fixture states structure without carrying
 // opaque refs it cannot know.
 type claudeProducerEntry struct {
-	Depth               int    `yaml:"depth"`
-	Role                string `yaml:"role"`
-	EntryType           string `yaml:"entryType"`
-	PartType            string `yaml:"partType"`
-	HasThinking         bool   `yaml:"hasThinking"`
-	ParentIndex         int    `yaml:"parentIndex"`
-	Preview             string `yaml:"preview"`
-	PreviewAbsent       bool   `yaml:"previewAbsent"`
-	PreviewContains     string `yaml:"previewContains"`
-	PreviewUnchecked    bool   `yaml:"previewUnchecked"`
-	ToolCallIDFromIndex int    `yaml:"toolCallIDFromIndex"`
-	ToolCallIDLiteral   string `yaml:"toolCallIDLiteral"`
-	ExtraContains       string `yaml:"extraContains"`
-	RawByteLength       int    `yaml:"rawByteLength"`
-	RawByteLengthSet    bool   `yaml:"rawByteLengthSet"`
+	Depth               int                       `yaml:"depth"`
+	Role                string                    `yaml:"role"`
+	EntryType           string                    `yaml:"entryType"`
+	PartType            string                    `yaml:"partType"`
+	HasThinking         bool                      `yaml:"hasThinking"`
+	ParentIndex         int                       `yaml:"parentIndex"`
+	Preview             string                    `yaml:"preview"`
+	PreviewAbsent       bool                      `yaml:"previewAbsent"`
+	PreviewContains     string                    `yaml:"previewContains"`
+	PreviewUnchecked    bool                      `yaml:"previewUnchecked"`
+	ToolCallIDFromIndex int                       `yaml:"toolCallIDFromIndex"`
+	ToolCallIDLiteral   string                    `yaml:"toolCallIDLiteral"`
+	ExtraContains       string                    `yaml:"extraContains"`
+	RawByteLength       int                       `yaml:"rawByteLength"`
+	Provenance          *claudeProducerProvenance `yaml:"provenance"`
+}
+
+// claudeProducerProvenance is the six-dimension provenance tuple one admitted
+// submission must carry, stated literally so no dimension can drift.
+type claudeProducerProvenance struct {
+	Origin        string `yaml:"origin"`
+	Actor         string `yaml:"actor"`
+	Delivery      string `yaml:"delivery"`
+	Ownership     string `yaml:"ownership"`
+	Evidence      string `yaml:"evidence"`
+	InputModality string `yaml:"inputModality"`
 }
 
 type claudeProducerCase struct {
@@ -63,6 +74,9 @@ type claudeProducerCase struct {
 	ContentOmitted bool `yaml:"contentOmitted"`
 	// MaxRecordBytes overrides the per-record limit (0 keeps the production one).
 	MaxRecordBytes int `yaml:"maxRecordBytes"`
+	// SiblingReadCounts pins the exact read count of each structural sibling
+	// proof file; the source path itself must never be read.
+	SiblingReadCounts map[string]int `yaml:"siblingReadCounts"`
 
 	WantRefusal            bool   `yaml:"wantRefusal"`
 	WantRefusalLocatorFree bool   `yaml:"wantRefusalLocatorFree"`
@@ -130,7 +144,10 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 		sourcePath = "/private/" + row.SentinelLocator + "/" + sessionID + ".jsonl"
 	}
 
-	mfs := testutil.NewMemFS()
+	// The counting decorator proves the ordinary bytes-proven branch reads no
+	// provider source at all, and that the legacy fallback reads only the
+	// structural siblings it consults.
+	mfs := testutil.NewCountingFS(testutil.NewMemFS())
 	for path, content := range row.Siblings {
 		if err := mfs.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write sibling proof %q: %v", path, err)
@@ -180,6 +197,14 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 		RecordedMetadata:   metadata,
 		CapturedTranscript: []byte(row.Transcript),
 	})
+	if got := mfs.Count(testutil.FSOpReadFile, sourcePath); got != 0 {
+		t.Fatalf("provider-source reads of %q = %d, want 0: the ordinary branch proves the candidate from the captured bytes", sourcePath, got)
+	}
+	for path, want := range row.SiblingReadCounts {
+		if got := mfs.Count(testutil.FSOpReadFile, path); got != want {
+			t.Fatalf("sibling proof %q reads = %d, want %d", path, got, want)
+		}
+	}
 	if row.WantRefusal {
 		assertClaudeProducerRefusal(t, row, err, sessionID, sourcePath)
 		return
@@ -365,9 +390,21 @@ func assertClaudeProducerEntries(t *testing.T, row claudeProducerCase, entries [
 				t.Errorf("%s rawByteLength = %v, want %d", where, entry.RawByteLength, want.RawByteLength)
 			}
 		}
-		if want.RawByteLengthSet {
-			if entry.RawByteLength == nil || *entry.RawByteLength <= 0 {
-				t.Errorf("%s rawByteLength = %v, want a positive measured size", where, entry.RawByteLength)
+		if want.Provenance != nil {
+			if entry.Provenance == nil {
+				t.Errorf("%s has no provenance, want the submitted-input tuple", where)
+			} else {
+				got := claudeProducerProvenance{
+					Origin:        string(entry.Provenance.Origin),
+					Actor:         string(entry.Provenance.Actor),
+					Delivery:      string(entry.Provenance.Delivery),
+					Ownership:     string(entry.Provenance.Ownership),
+					Evidence:      string(entry.Provenance.Evidence),
+					InputModality: string(entry.Provenance.InputModality),
+				}
+				if got != *want.Provenance {
+					t.Errorf("%s provenance = %+v, want %+v", where, got, *want.Provenance)
+				}
 			}
 		}
 	}
