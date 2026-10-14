@@ -11,6 +11,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -232,11 +234,29 @@ func authorityTargetStateKnown(state string) bool {
 	return false
 }
 
+// assertAuthorityParentCache reads the availability cache directly. It is a
+// test-local statement by design: the store no longer exposes a method that
+// returns the raw column as a parent answer, and this assertion needs the raw
+// column to prove the cache stayed NULL while the accessor answers evidence.
 func assertAuthorityParentCache(t *testing.T, ctx context.Context, db *Store, child ingest.SessionID, want *ingest.SessionID) {
 	t.Helper()
-	got, err := db.ParentCacheForSession(ctx, child)
+	conn, err := db.pool.Take(ctx)
 	if err != nil {
-		t.Fatalf("ParentCacheForSession(%s): %v", child, err)
+		t.Fatalf("take connection to read the parent cache of %s: %v", child, err)
+	}
+	defer db.pool.Put(conn)
+	var got *string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(child)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				v := stmt.ColumnText(0)
+				got = &v
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read the parent cache of %s: %v", child, err)
 	}
 	if want == nil {
 		if got != nil {

@@ -582,21 +582,13 @@ func emittedContentRecords(main indexformat.Partition, earlier []indexformat.Ear
 }
 
 // snapshotLogicalParent derives the snapshot's logical parent from durable
-// relationship evidence, never from the availability cache. A known or
-// retained started_by target is the logical parent; otherwise the legacy
-// ParentUUID carries the parent when the generation records one.
+// relationship evidence, never from the availability cache. It is the
+// in-memory spelling of the parent-answer rule (startedByTarget) with the
+// legacy ParentUUID fallback: a known or retained started_by target is the
+// logical parent, otherwise the generation's own ParentUUID carries it.
 func snapshotLogicalParent(metadata schema.UnifiedMetadata) *schema.SessionID {
-	for i := range metadata.Relationships {
-		relationship := metadata.Relationships[i]
-		if relationship.Kind != schema.SessionRelationshipStartedBy {
-			continue
-		}
-		if relationship.TargetState == schema.RelationshipTargetKnown || relationship.TargetState == schema.RelationshipTargetKnownRetained {
-			if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
-				target := *relationship.TargetLocalID
-				return &target
-			}
-		}
+	if target := startedByTarget(metadata.Relationships); target != nil {
+		return target
 	}
 	return metadata.ParentUUID
 }

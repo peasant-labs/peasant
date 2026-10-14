@@ -2,6 +2,7 @@ package store
 
 import (
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
 )
 
 // Parent-cache resolution for independently admitted children.
@@ -35,6 +36,33 @@ func DesiredParentCacheID(child ingest.SessionID, logicalParent *ingest.SessionI
 	}
 	cp := *logicalParent
 	return &cp
+}
+
+// startedByTarget is the ONE in-memory spelling of the parent-answer rule: the
+// first started_by relationship whose target state is known or
+// target_known_retained and whose target local identifier is non-nil and
+// non-empty. Its only SQL mirror is LogicalParentSQL (parent_reader.go); the
+// validator layer keeps its own pinned copy in
+// indexformat.durableStartedByTarget because indexformat sits below store and
+// cannot import it.
+//
+// It is used only where the relationships are already in memory: the activation
+// value computation, the standalone cache writer, and the served-generation
+// document derivation. It never reads the availability cache.
+func startedByTarget(relationships []schema.SessionRelationship) *schema.SessionID {
+	for i := range relationships {
+		relationship := relationships[i]
+		if relationship.Kind != schema.SessionRelationshipStartedBy {
+			continue
+		}
+		if relationship.TargetState == schema.RelationshipTargetKnown || relationship.TargetState == schema.RelationshipTargetKnownRetained {
+			if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
+				target := *relationship.TargetLocalID
+				return &target
+			}
+		}
+	}
+	return nil
 }
 
 // BatchParentCycles returns the session IDs whose logical parent edge
