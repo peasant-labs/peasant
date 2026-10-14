@@ -306,9 +306,7 @@ func (s *Store) ReconcileParentCache(ctx context.Context, updates []ingest.Paren
 		}
 		parent := update.Parent
 		effective[update.Child] = &parent
-		if execErr := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET parent_id = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
-			Args: []any{string(update.Parent), string(update.Child)},
-		}); execErr != nil {
+		if execErr := writeParentCacheOnConn(conn, update.Child, &parent); execErr != nil {
 			return fmt.Errorf("store: reconcile parent cache for child %s: %w; no cache update in this reconciliation was committed; retry harvest", update.Child, execErr)
 		}
 	}

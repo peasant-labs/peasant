@@ -951,10 +951,12 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 	if oracle.parentID != nil {
 		// Persist the healed parentage before the verify: the harmonized
 		// snapshot readers rebuild the parent from sessions.parent_id, and
-		// the NULL guard never clobbers a linkage set after the oracle read.
-		if err := sqlitex.Execute(conn, `UPDATE sessions SET parent_id = ? WHERE session_id = ? AND parent_id IS NULL`, &sqlitex.ExecOptions{
-			Args: []any{*oracle.parentID, string(oracle.sessionID)},
-		}); err != nil {
+		// the writer's NULL guard never clobbers a linkage set after the
+		// oracle read. The writer also refuses an unstored parent, so a
+		// document parent that names no stored session leaves the cache NULL
+		// instead of failing the conversion.
+		parent := ingest.SessionID(*oracle.parentID)
+		if err := writeParentCacheOnConn(conn, ingest.SessionID(oracle.sessionID), &parent); err != nil {
 			txnErr = fmt.Errorf("carry the parent linkage for session %s: %w; the catalog transaction rolled back and the old representation is intact", oracle.sessionID, err)
 			return false, nil, txnErr
 		}
