@@ -227,6 +227,40 @@ func TestRetainedAttemptLastGoodRefusesActivePreview(t *testing.T) {
 	}
 }
 
+// TestRetainedAttemptAvailableRefusesMissingGenerationRow proves the available
+// read refuses when the retained pointer names a generation row that is gone,
+// instead of serving a partial-flagged transcript with nothing in it, while the
+// other reads of the same session keep answering.
+func TestRetainedAttemptAvailableRefusesMissingGenerationRow(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("bbbbcccc-dddd-4eee-8fff-000011112222")
+	seedRetainedCoexistence(t, s, sid)
+	ctx := context.Background()
+	execGenerationSQL(t, s, `DELETE FROM session_generations WHERE session_id = '`+string(sid)+`' AND generation_id = 'gen_preview_b';`)
+
+	if _, err := s.ReadSessionAvailable(ctx, ingest.SessionID(sid)); err == nil {
+		t.Fatal("ReadSessionAvailable served a retained pointer whose generation row is gone")
+	} else if !strings.Contains(err.Error(), string(sid)) || !strings.Contains(err.Error(), "gen_preview_b") {
+		t.Fatalf("available refusal = %v, want it to name the session and the retained generation", err)
+	}
+	if err := s.WithSessionSnapshot(ctx, sid, func(indexformat.ReadSnapshot) error {
+		t.Fatal("the callback must not run for a retained session")
+		return nil
+	}); !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
+		t.Fatalf("default snapshot error = %v, want the retained-attempt sentinel", err)
+	}
+	served := ""
+	if err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(snapshot indexformat.ReadSnapshot) error {
+		served = snapshot.GenerationID
+		return nil
+	}); err != nil {
+		t.Fatalf("last-good read after the retained row was removed: %v", err)
+	}
+	if served != "gen_full_prior" {
+		t.Fatalf("last-good generation = %q, want the full authority", served)
+	}
+}
+
 // TestRetainedAttemptAvailableReadBindsRetainedAttempt proves the available
 // read serves the retained attempt: its generation-scoped entries, its
 // synthesized capture with the partial state, and its own counts.
