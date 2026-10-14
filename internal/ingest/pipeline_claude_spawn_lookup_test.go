@@ -115,7 +115,7 @@ func TestPipeline_ClaudeSpawnLinkingConsultsTheStoreAcrossRuns(t *testing.T) {
 //
 // Run 1 stores the spawner P from host-a alone. P is then given a started_by
 // relationship to the child C whose availability cache stays NULL — the state a
-// retained generation produces. Run 2 is a FRESH pipeline whose scan root is
+// latest-attempt generation produces. Run 2 is a FRESH pipeline whose scan root is
 // host-b only, where the child C declares the identity P spawned. Linking would
 // point C at P, but P's durable parent is C, so the edge closes a cycle and
 // must be refused. A walk that read the raw cache would see P as a root, accept
@@ -168,7 +168,7 @@ func TestPipeline_ClaudeCycleWalkFollowsTheEvidenceFirstParent(t *testing.T) {
 	}
 
 	// Give the stored spawner a durable relationship to the child while its
-	// availability cache stays NULL. This is the retained-generation state the
+	// availability cache stays NULL. This is the latest-attempt state the
 	// walk must follow; a raw-cache read would call the spawner a root.
 	conn, err := database.Pool().Take(ctx)
 	if err != nil {
