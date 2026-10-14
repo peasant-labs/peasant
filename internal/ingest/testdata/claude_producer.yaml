@@ -411,3 +411,56 @@ cases:
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "before control"}
       - {depth: 0, role: system, entryType: text, partType: frame-link, parentIndex: -1, toolCallIDFromIndex: -1, previewContains: "frame-link: AAAA", extraContains: "rawBytes"}
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after control"}
+
+  - name: plain-prompt-text-array
+    # A user prompt carried as a text-block array is a plain prompt, not a
+    # mixed tool-result wrapper: it keeps its submission, provenance and title
+    # ref exactly like a string-content prompt beside it.
+    transcript: |
+      {"type":"user","uuid":"ta1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"text","text":"array prompt"}]}}
+      {"type":"assistant","uuid":"ta2","parentUuid":"ta1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"array reply"}]}}
+      {"type":"user","uuid":"ta3","parentUuid":"ta2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"string prompt"}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta2:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta3"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta3"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "array prompt", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
+      - {depth: 1, role: user, entryType: text, partType: text, parentIndex: 0, toolCallIDFromIndex: -1, preview: "array prompt"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "array reply"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 2, toolCallIDFromIndex: -1, preview: "array reply"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "string prompt", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
+
+  - name: plain-prompt-text-and-image-array
+    # A prompt whose content array carries a text block and an image block is
+    # still a plain prompt: no tool_result content is present, the image is
+    # retained as evidence on the carrier, and the record keeps its submission,
+    # provenance and title ref.
+    transcript: |
+      {"type":"user","uuid":"ia1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"text","text":"look at this"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}}
+      {"type":"assistant","uuid":"ia2","parentUuid":"ia1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"image reply"}]}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia2:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "look at this", extraContains: "retainedUnknown", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
+      - {depth: 1, role: user, entryType: text, partType: text, parentIndex: 0, toolCallIDFromIndex: -1, preview: "look at this"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "image reply"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 2, toolCallIDFromIndex: -1, preview: "image reply"}

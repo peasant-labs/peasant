@@ -294,7 +294,14 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 				}
 			}
 		}
-		carrierBlock, err := claudeCarrierBlock(recordKey, carrier, len(record.children))
+		hasToolResultContent := false
+		for _, child := range record.children {
+			if child.EntryType == EntryTypeToolResult {
+				hasToolResultContent = true
+				break
+			}
+		}
+		carrierBlock, err := claudeCarrierBlock(recordKey, carrier, hasToolResultContent)
 		if err != nil {
 			return nil, err
 		}
@@ -319,8 +326,10 @@ func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) 
 
 // claudeCarrierBlock builds one depth-0 block from a classified record. An
 // accounted omission takes the omission channel instead, which owns the
-// placeholder's whole shape.
-func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, childCount int) (ClassifiedBlock, error) {
+// placeholder's whole shape. hasToolResultContent is the record's content
+// shape: a record whose content holds a tool result is a wrapper, never a
+// plain prompt.
+func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, hasToolResultContent bool) (ClassifiedBlock, error) {
 	block := ClassifiedBlock{
 		NativeKey:   recordKey,
 		Role:        entry.Role,
@@ -354,7 +363,7 @@ func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, childCount 
 	block.ObservedModel = observedModel
 	block.Extra = extra
 	claudeAssignContent(&block, entry)
-	claudeAssignSubmission(&block, entry, childCount == 0)
+	claudeAssignSubmission(&block, entry, !hasToolResultContent)
 	return block, nil
 }
 

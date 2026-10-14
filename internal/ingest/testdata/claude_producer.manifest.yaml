@@ -20,3 +20,5 @@ requiredNames:
   - provider-file-absent
   - malformed-refusal
   - control-record-over-cap
+  - plain-prompt-text-array
+  - plain-prompt-text-and-image-array
