@@ -123,7 +123,7 @@ func (generationIndexFormat) Delete(ctx context.Context, conn *sqlite.Conn, sess
 			return fmt.Errorf("store: clear managed generations for session %s before representation replacement: %w; the transaction was refused and the prior representation is preserved", sessionID, err)
 		}
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = NULL, `+clearRetainedAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = NULL, `+clearLatestAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
 		return fmt.Errorf("store: clear the active generation for session %s before representation replacement: %w; the transaction was refused and the prior representation is preserved", sessionID, err)
 	}
 	return nil
@@ -246,7 +246,7 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	}); err != nil {
 		return fmt.Errorf("store: read recorded publication provenance before pointing session %s at generation %s: %w; no generation was activated; restore database access and retry activation", sessionID, generation.ID, err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ?, `+clearRetainedAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ?, `+clearLatestAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{
 		generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), parent, string(sessionID),
 	}}); err != nil {
 		return fmt.Errorf("store: point session %s at generation %s: %w; no generation was activated", sessionID, generation.ID, err)
@@ -308,8 +308,9 @@ func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.Sess
 }
 
 // durableParentTarget returns the durable started_by target when the
-// relationship evidence names a known retained session. It mirrors the
-// snapshot's logical-parent derivation so activation and reads agree.
+// relationship evidence names a session whose target state is known or
+// target_known_retained. It mirrors the snapshot's logical-parent derivation so
+// activation and reads agree.
 func durableParentTarget(relationships []schema.SessionRelationship) *schema.SessionID {
 	for i := range relationships {
 		relationship := relationships[i]

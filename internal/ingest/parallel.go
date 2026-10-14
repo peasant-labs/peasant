@@ -171,7 +171,7 @@ type workerResult struct {
 	// session, carried beside transcriptData so the index forms one snapshot
 	// from a single validated read. It is NOT an artifact and does not claim
 	// this run committed a pair, so the mirror and the published flag stay
-	// false for a fallback that only reuses retained input.
+	// false for a fallback that only reuses stored input.
 	retainedMetadataJSON []byte
 	// transcriptData holds the already-read bytes for the in-memory index path.
 	// Nil on error or skip.

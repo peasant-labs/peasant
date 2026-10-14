@@ -11,7 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
-// walkManagedMetadata yields the metadata locator of every retained session
+// walkManagedMetadata yields the metadata locator of every stored session
 // under output, each parent before its nested children. It opens no
 // transcript and no database. It is the one reader of the whole tree, and
 // only `harvest index` runs it: the ordinary harvest selects its work from

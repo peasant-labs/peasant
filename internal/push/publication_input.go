@@ -40,16 +40,16 @@ func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputRea
 // ValidatePublicationInput checks the publication policy shared by upload,
 // wizard preview and Share scan. The store checks database capture integrity.
 func ValidatePublicationInput(input ingest.PublicationInputBundle) error {
-	// The retained-attempt refusal is reported with its own actionable reason
+	// The latest-attempt refusal is reported with its own actionable reason
 	// before the generic not-ready text: the caller must know that the session
 	// is readable and publishable as last-good, and exactly how to proceed.
-	if input.RetainedAttemptPending {
+	if input.LatestAttemptPending {
 		return fmt.Errorf("load publication input from peasant.db: %w; latest capture is an incomplete preview; re-index the complete source, or publish the last-good explicitly with --last-good; nothing uploaded", ErrMetadataMissing)
 	}
 	if input.Readiness != ingest.PublicationReady {
 		return fmt.Errorf("load publication input from peasant.db: %w; metadata and indexed entries are not a verified capture; nothing uploaded; "+
 			"incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; "+
-			"run peasant ingest with the retained source available and retry", ErrMetadataMissing)
+			"run peasant ingest with the stored source available and retry", ErrMetadataMissing)
 	}
 	if input.Metadata.Model == "" {
 		return fmt.Errorf("load publication input from peasant.db: %w; nothing uploaded; run peasant ingest with source model evidence and retry", ErrNoModel)

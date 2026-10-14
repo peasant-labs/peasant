@@ -18,7 +18,7 @@ var _ ingest.PublicationInputReader = (*Store)(nil)
 var _ ingest.PublicationCaptureStore = (*Store)(nil)
 
 func publicationRepairError(reason string) error {
-	return fmt.Errorf("store: %s during publication metadata capture/read; publication is held to avoid mixing source evidence; run peasant ingest with retained sources and retry", reason)
+	return fmt.Errorf("store: %s during publication metadata capture/read; publication is held to avoid mixing source evidence; run peasant ingest with stored sources and retry", reason)
 }
 
 // Bulk discovery uses the same integrity rules without acquiring a connection
@@ -388,19 +388,19 @@ const publicationMetadataSelect = `SELECT s.project_hash,s.session_origin,s.publ
 
 // Both the full bundle and list projection validate exactly the same evidence.
 //
-// A session that retains a latest attempt is refused while the attempt is
+// A session with a latest attempt is refused while the attempt is
 // pending: publishing would certify the newer incomplete preview as the
-// session. allowRetained is set only by an explicit last-good read, which
+// session. allowLatestAttempt is set only by an explicit last-good read, which
 // answers for the last-good authority instead and therefore clears the flag.
-func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID, allowRetained bool) (bundle ingest.PublicationInputBundle, err error) {
+func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID, allowLatestAttempt bool) (bundle ingest.PublicationInputBundle, err error) {
 	bundle, err = scanPublicationMetadataProof(stmt, id)
 	eligible, captureErr := publicationContentEligible(stmt, 15, bundle.CaptureRevision)
 	if err != nil || captureErr != nil || !eligible {
 		bundle.Readiness = ingest.PublicationNeedsIngest
 	}
-	if bundle.RetainedAttemptPending {
-		if allowRetained {
-			bundle.RetainedAttemptPending = false
+	if bundle.LatestAttemptPending {
+		if allowLatestAttempt {
+			bundle.LatestAttemptPending = false
 		} else {
 			bundle.Readiness = ingest.PublicationNeedsIngest
 		}
@@ -474,11 +474,11 @@ func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (
 // It does not require a previous full capture: that is the state being repaired.
 func scanPublicationMetadataProof(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
 	bundle.Readiness = ingest.PublicationNeedsIngest
-	// A non-null retained pointer means a newer incomplete preview stands beside
+	// A non-null latest-attempt pointer means a newer incomplete preview stands beside
 	// the last-good full generation: publication must refuse while it is
 	// pending. The flag is read in the same snapshot as every other evidence
 	// column, so readiness cannot observe a half-changed state.
-	bundle.RetainedAttemptPending = stmt.ColumnType(20) != sqlite.TypeNull
+	bundle.LatestAttemptPending = stmt.ColumnType(20) != sqlite.TypeNull
 	err = func() error {
 		var parseErr error
 		bundle.ReceiptProjectHash, parseErr = schema.NewProjectHash(stmt.ColumnText(0))

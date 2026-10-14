@@ -107,15 +107,15 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 		}
 		return notCommitted(err)
 	}
-	// The retention pre-check is a routing hint; the authoritative decision
-	// re-runs under the session lock inside the commit. A retention-eligible
+	// The latest-attempt pre-check is a routing hint; the authoritative decision
+	// re-runs under the session lock inside the commit. A latest-attempt-eligible
 	// candidate never enters repair and never compares against the active
-	// view: it is retained, not installed.
-	retained, err := s.retentionEligible(ctx, generationActivationWrite(activation))
+	// view: it is kept as the latest attempt, not installed.
+	latestAttemptEligible, err := s.latestAttemptEligible(ctx, generationActivationWrite(activation))
 	if err != nil {
 		return notCommitted(err)
 	}
-	if !retained {
+	if !latestAttemptEligible {
 		if repair, err := s.needsRepair(ctx, sessionID); err != nil {
 			return notCommitted(err)
 		} else if repair {
@@ -163,18 +163,18 @@ writePath:
 	switch disposition {
 	case ingest.ActivationAlreadyCommitted:
 		return ingest.ActivationOutcome{Disposition: ingest.ActivationAlreadyCommitted, CandidateID: requestedID}, nil
-	case ingest.ActivationRetainedPreview:
+	case ingest.ActivationLatestAttemptPreview:
 		// The single route runs the post-commit seam and the converted-mirror
 		// pass under its real condition: the pass returns early unless the
 		// active generation is harmonized, and its bounded delete normally
 		// removes zero leftover rows.
 		if err := reportHarmonizedWriterSeam(harmonizedSeamAfterCommit); err != nil {
-			return ingest.ActivationOutcome{Disposition: ingest.ActivationRetainedPreview, CandidateID: requestedID}, err
+			return ingest.ActivationOutcome{Disposition: ingest.ActivationLatestAttemptPreview, CandidateID: requestedID}, err
 		}
 		if err := s.deleteConvertedMirrorRows(ctx, sessionID); err != nil {
-			return ingest.ActivationOutcome{Disposition: ingest.ActivationRetainedPreview, CandidateID: requestedID}, err
+			return ingest.ActivationOutcome{Disposition: ingest.ActivationLatestAttemptPreview, CandidateID: requestedID}, err
 		}
-		return ingest.ActivationOutcome{Disposition: ingest.ActivationRetainedPreview, CandidateID: requestedID}, nil
+		return ingest.ActivationOutcome{Disposition: ingest.ActivationLatestAttemptPreview, CandidateID: requestedID}, nil
 	}
 	if err := reportHarmonizedWriterSeam(harmonizedSeamAfterCommit); err != nil {
 		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID}, err
@@ -337,8 +337,8 @@ func activationStamps(activation GenerationActivation, prepared *preparedHarmoni
 // writer under the exclusive session lock: one outer transaction with a
 // per-session savepoint, so the compare-and-swap refusal and every C-step
 // share the commit. It reports the disposition for the single route: a
-// concurrent identical commit reports AlreadyCommitted, a retained preview
-// reports ActivationRetainedPreview, and a fresh install reports
+// concurrent identical commit reports AlreadyCommitted, a latest-attempt preview
+// reports ActivationLatestAttemptPreview, and a fresh install reports
 // ActivationCommittedNow.
 func (s *Store) commitHarmonizedWrite(ctx context.Context, sessionID schema.SessionID, activation GenerationActivation, prepared *preparedHarmonized) (ingest.ActivationDisposition, error) {
 	release, err := s.sessionLocker.LockExclusive(ctx, sessionID)
@@ -365,8 +365,8 @@ func (s *Store) commitHarmonizedWrite(ctx context.Context, sessionID schema.Sess
 		}
 		return ingest.ActivationNotCommitted, fmt.Errorf("store: activate generation %s for session %s: %w; the database transaction rolled back and the prior generation is visible", prepared.generation.ID, sessionID, results[0].Err)
 	}
-	if results[0].RetainedPreview {
-		return ingest.ActivationRetainedPreview, nil
+	if results[0].LatestAttemptPreview {
+		return ingest.ActivationLatestAttemptPreview, nil
 	}
 	if results[0].Skipped {
 		return ingest.ActivationAlreadyCommitted, nil
@@ -537,10 +537,10 @@ func (s *Store) CleanupInactiveGeneration(ctx context.Context, sessionID schema.
 	if active == generationID {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s: it is the active read authority; select an inactive generation or leave managed recovery to replace it", generationID, sessionID)
 	}
-	if retained, err := s.retainedGenerationID(ctx, sessionID); err != nil {
+	if latestAttempt, err := s.latestAttemptGenerationID(ctx, sessionID); err != nil {
 		return err
-	} else if retained == generationID {
-		return fmt.Errorf("store: refuse to remove generation %s for session %s: it is the retained latest attempt; re-index the source or finalize the active authority to release it", generationID, sessionID)
+	} else if latestAttempt == generationID {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s: it is the latest attempt; re-index the source or finalize the active authority to release it", generationID, sessionID)
 	}
 	intent, err := s.generationArtifacts.ReadIntent(ctx, sessionID)
 	if err != nil {

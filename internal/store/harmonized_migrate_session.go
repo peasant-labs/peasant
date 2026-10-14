@@ -270,7 +270,7 @@ func (s *Store) migrateDataRollback(ctx context.Context, sessionID schema.Sessio
 // its captured stats, the stored hashes, the durable parent, and the
 // prior evidence. A session the legacy readers themselves cannot read is
 // a data rollback: the old representation is damaged, and re-indexing
-// from the retained transcripts is the fix.
+// from the stored transcripts is the fix.
 func (s *Store) readMigrateOracle(ctx context.Context, sessionID schema.SessionID, generationID string) (*migrateOracle, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {

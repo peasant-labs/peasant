@@ -12,44 +12,44 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/retained_attempt.yaml
-var retainedAttemptYAML []byte
+//go:embed testdata/latest_attempt.yaml
+var latestAttemptYAML []byte
 
-//go:embed testdata/retained_attempt.manifest.yaml
-var retainedAttemptManifestYAML []byte
+//go:embed testdata/latest_attempt.manifest.yaml
+var latestAttemptManifestYAML []byte
 
 // The route names a matrix row may exercise. single and batch drive the two
 // activation entry points; batch_write drives the batched writer directly, the
 // only route that can carry a non-managed result or a non-ordinary mode far
 // enough to reach the predicate.
 const (
-	retentionRouteSingle     = "single"
-	retentionRouteBatch      = "batch"
-	retentionRouteBatchWrite = "batch_write"
+	latestAttemptRouteSingle     = "single"
+	latestAttemptRouteBatch      = "batch"
+	latestAttemptRouteBatchWrite = "batch_write"
 )
 
 // The generation identifiers the matrix builds and asserts.
 const (
-	retentionMatrixFullPrior  = "gen_full_prior"
-	retentionMatrixCandidate  = "gen_matrix_candidate"
-	retentionMatrixPreviewPri = "gen_matrix_preview_prior"
+	latestAttemptMatrixFullPrior  = "gen_full_prior"
+	latestAttemptMatrixCandidate  = "gen_matrix_candidate"
+	latestAttemptMatrixPreviewPri = "gen_matrix_preview_prior"
 )
 
-type retentionAttemptFixture struct {
+type latestAttemptFixture struct {
 	PairIdentity string `yaml:"pairIdentity"`
 	Session      struct {
 		ID string `yaml:"id"`
 	} `yaml:"session"`
-	Cases []retentionAttemptCase `yaml:"cases"`
+	Cases []latestAttemptCase `yaml:"cases"`
 }
 
-// retentionAttemptCase varies one clause of the eligibility predicate. An
+// latestAttemptCase varies one clause of the eligibility predicate. An
 // omitted field keeps the passing value; Mode is a pointer so the ordinary
 // empty-string mode is distinguishable from an absent field. WantOK marks a
 // row whose ordinary path must commit; it is mutually exclusive with
 // WantErrorContains, and one of the two is required on every negative row so a
 // row cannot pass on an unrelated downstream guard.
-type retentionAttemptCase struct {
+type latestAttemptCase struct {
 	Name              string   `yaml:"name"`
 	Routes            []string `yaml:"routes"`
 	Result            string   `yaml:"result"`
@@ -58,28 +58,28 @@ type retentionAttemptCase struct {
 	Mode              *string  `yaml:"mode"`
 	Certificate       string   `yaml:"certificate"`
 	Identity          string   `yaml:"identity"`
-	WantRetained      bool     `yaml:"want_retained"`
+	WantLatestAttempt bool     `yaml:"want_latest_attempt"`
 	WantOK            bool     `yaml:"want_ok"`
 	WantErrorContains string   `yaml:"want_error_contains"`
 }
 
-func loadRetentionAttemptFixture(t testing.TB) retentionAttemptFixture {
+func loadLatestAttemptFixture(t testing.TB) latestAttemptFixture {
 	t.Helper()
-	var fixture retentionAttemptFixture
-	decoder := yaml.NewDecoder(strings.NewReader(string(retainedAttemptYAML)))
+	var fixture latestAttemptFixture
+	decoder := yaml.NewDecoder(strings.NewReader(string(latestAttemptYAML)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("decode retained_attempt.yaml: %v", err)
+		t.Fatalf("decode latest_attempt.yaml: %v", err)
 	}
-	manifest, err := decodeRecoveryRequiredNames(retainedAttemptManifestYAML)
+	manifest, err := decodeRecoveryRequiredNames(latestAttemptManifestYAML)
 	if err != nil {
-		t.Fatalf("decode retained_attempt manifest: %v", err)
+		t.Fatalf("decode latest_attempt manifest: %v", err)
 	}
 	actual := make([]string, 0, len(fixture.Cases))
 	for _, c := range fixture.Cases {
 		actual = append(actual, c.Name)
 	}
-	if err := validateRecoveryRequiredNames(manifest, actual, "retained attempt eligibility"); err != nil {
+	if err := validateRecoveryRequiredNames(manifest, actual, "latest attempt eligibility"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
@@ -108,44 +108,44 @@ func assessedStrictRefusedPreview(t testing.TB, v2 indexformat.V2) ingest.Sessio
 	return capture
 }
 
-func retentionFixtureDefault(value, fallback string) string {
+func latestAttemptFixtureDefault(value, fallback string) string {
 	if value == "" {
 		return fallback
 	}
 	return value
 }
 
-// TestRetentionEligibilityMatrix runs the clause-complete eligibility fixture:
+// TestLatestAttemptEligibilityMatrix runs the clause-complete eligibility fixture:
 // each row varies one clause of the predicate, keeps every other clause at its
-// passing value, and asserts the disposition plus the retained-pointer state on
+// passing value, and asserts the disposition plus the latest-attempt-pointer state on
 // every route it names.
-func TestRetentionEligibilityMatrix(t *testing.T) {
-	fixture := loadRetentionAttemptFixture(t)
+func TestLatestAttemptEligibilityMatrix(t *testing.T) {
+	fixture := loadLatestAttemptFixture(t)
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			for _, route := range c.Routes {
 				t.Run(route, func(t *testing.T) {
-					runRetentionMatrixRoute(t, fixture, c, route)
+					runLatestAttemptMatrixRoute(t, fixture, c, route)
 				})
 			}
 		})
 	}
 }
 
-func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c retentionAttemptCase, route string) {
+func runLatestAttemptMatrixRoute(t *testing.T, fixture latestAttemptFixture, c latestAttemptCase, route string) {
 	t.Helper()
 	if c.WantOK && c.WantErrorContains != "" {
 		t.Fatalf("row %q expects both success and an error; want_ok and want_error_contains are mutually exclusive", c.Name)
 	}
-	result := retentionFixtureDefault(c.Result, "managed")
-	completeness := retentionFixtureDefault(c.Completeness, "complete")
-	captureKind := retentionFixtureDefault(c.Capture, "assessed")
+	result := latestAttemptFixtureDefault(c.Result, "managed")
+	completeness := latestAttemptFixtureDefault(c.Completeness, "complete")
+	captureKind := latestAttemptFixtureDefault(c.Capture, "assessed")
 	mode := string(ingest.SessionEntryWriteReplaceAll)
 	if c.Mode != nil {
 		mode = *c.Mode
 	}
-	certificate := retentionFixtureDefault(c.Certificate, "publishable")
-	identity := retentionFixtureDefault(c.Identity, "stored")
+	certificate := latestAttemptFixtureDefault(c.Certificate, "publishable")
+	identity := latestAttemptFixtureDefault(c.Identity, "stored")
 
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID(fixture.Session.ID)
@@ -157,7 +157,7 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 		seedGenerationSession(t, s, string(sid))
 	case "non_publishable":
 		seedGenerationSession(t, s, string(sid))
-		if _, err := s.ActivateGeneration(context.Background(), testActivation(t, sid, retentionMatrixPreviewPri)); err != nil {
+		if _, err := s.ActivateGeneration(context.Background(), testActivation(t, sid, latestAttemptMatrixPreviewPri)); err != nil {
 			t.Fatalf("seed the non-publishable certificate: %v", err)
 		}
 	default:
@@ -182,9 +182,9 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 		expected = readIndexStateFor(t, s, sid)
 	}
 
-	v2, blobs := buildTestGeneration(t, sid, retentionMatrixCandidate, "matrix text", "matrix input", "matrix output")
+	v2, blobs := buildTestGeneration(t, sid, latestAttemptMatrixCandidate, "matrix text", "matrix input", "matrix output")
 	if completeness == "incomplete_new" {
-		v2, blobs = buildIncompleteGeneration(t, sid, retentionMatrixCandidate, "matrix text", "matrix input", "matrix output")
+		v2, blobs = buildIncompleteGeneration(t, sid, latestAttemptMatrixCandidate, "matrix text", "matrix input", "matrix output")
 	} else if completeness != "complete" {
 		t.Fatalf("unknown completeness %q", completeness)
 	}
@@ -223,11 +223,11 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 	}
 
 	var (
-		retained bool
-		routeErr error
+		latestAttempt bool
+		routeErr      error
 	)
 	switch route {
-	case retentionRouteSingle, retentionRouteBatch:
+	case latestAttemptRouteSingle, latestAttemptRouteBatch:
 		activation := GenerationActivation{
 			Generation:       v2,
 			Blobs:            blobs,
@@ -238,19 +238,19 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 			ExpectedState:    expected,
 			ArtifactIdentity: suppliedIdentity,
 		}
-		if route == retentionRouteSingle {
+		if route == latestAttemptRouteSingle {
 			outcome, err := s.ActivateGeneration(context.Background(), activation)
-			retained = outcome.Disposition == ingest.ActivationRetainedPreview
+			latestAttempt = outcome.Disposition == ingest.ActivationLatestAttemptPreview
 			routeErr = err
 		} else {
 			results := s.ActivateGenerationBatch(context.Background(), []GenerationActivation{activation})
 			if len(results) != 1 {
 				t.Fatalf("batch returned %d results, want 1", len(results))
 			}
-			retained = results[0].Outcome.Disposition == ingest.ActivationRetainedPreview
+			latestAttempt = results[0].Outcome.Disposition == ingest.ActivationLatestAttemptPreview
 			routeErr = results[0].Err
 		}
-	case retentionRouteBatchWrite:
+	case latestAttemptRouteBatchWrite:
 		var stored indexformat.Result = filledCandidateForValidation(t, v2, blobs)
 		indexVersion := 2
 		if result == "v1" {
@@ -290,38 +290,38 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 		if len(results) != 1 {
 			t.Fatalf("batch write returned %d results, want 1", len(results))
 		}
-		retained = results[0].RetainedPreview
+		latestAttempt = results[0].LatestAttemptPreview
 		routeErr = results[0].Err
 	default:
 		t.Fatalf("unknown route %q", route)
 	}
 
-	if c.WantRetained {
+	if c.WantLatestAttempt {
 		if routeErr != nil {
-			t.Fatalf("retained row returned error %v", routeErr)
+			t.Fatalf("latest-attempt row returned error %v", routeErr)
 		}
-		if !retained {
-			t.Fatal("write was not retained, want a retained latest attempt")
+		if !latestAttempt {
+			t.Fatal("write did not produce a latest attempt, want one")
 		}
-		pointer := retainedPointerFor(t, s, sid)
-		if pointer.generationID != retentionMatrixCandidate {
-			t.Fatalf("retained generation = %q, want %q", pointer.generationID, retentionMatrixCandidate)
+		pointer := latestAttemptPointerFor(t, s, sid)
+		if pointer.generationID != latestAttemptMatrixCandidate {
+			t.Fatalf("latest-attempt generation = %q, want %q", pointer.generationID, latestAttemptMatrixCandidate)
 		}
 		if pointer.artifactHash != fixture.PairIdentity {
-			t.Fatalf("retained pair identity = %q, want %q", pointer.artifactHash, fixture.PairIdentity)
+			t.Fatalf("latest-attempt pair identity = %q, want %q", pointer.artifactHash, fixture.PairIdentity)
 		}
 		if certificate == "publishable" {
-			if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != retentionMatrixFullPrior {
+			if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != latestAttemptMatrixFullPrior {
 				t.Fatalf("active = %q (err=%v), want the untouched full prior", active, err)
 			}
 		}
 		return
 	}
-	if retained {
-		t.Fatal("write was retained, want the predicate to refuse it")
+	if latestAttempt {
+		t.Fatal("write produced a latest attempt, want the predicate to refuse it")
 	}
-	if pointer := retainedPointerFor(t, s, sid); pointer.found() {
-		t.Fatalf("retained pointer = %+v, want none", pointer)
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want none", pointer)
 	}
 	if c.WantOK {
 		if routeErr != nil {

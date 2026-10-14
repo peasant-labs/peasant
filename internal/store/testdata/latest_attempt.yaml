@@ -1,4 +1,4 @@
-# Case family for the retained-attempt eligibility predicate. The predicate
+# Case family for the latest-attempt eligibility predicate. The predicate
 # holds only when ALL hold:
 #   (1) the result is a managed V2 generation;
 #   (2) the candidate is complete (incomplete_new is excluded);
@@ -15,7 +15,7 @@
 # pin an observable an earlier guard decides, so they state that reachability
 # instead of claiming the clause. Every negative row carries want_ok or
 # want_error_contains, so a row cannot pass on an unrelated downstream refusal.
-# Decoded by the strict loader in retained_attempt_matrix_test.go.
+# Decoded by the strict loader in latest_attempt_matrix_test.go.
 
 pairIdentity: a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
 session:
@@ -31,49 +31,49 @@ cases:
     mode: replace_all
     certificate: publishable
     identity: stored
-    want_retained: true
+    want_latest_attempt: true
 
   - name: managed-complete-assessed-supplied-identity
     routes: [single, batch]
     identity: supplied
-    want_retained: true
+    want_latest_attempt: true
 
   - name: managed-complete-assessed-no-identity
     routes: [single, batch]
     identity: none
-    want_retained: false
+    want_latest_attempt: false
     want_error_contains: pair-proof-unavailable
 
   # Reachability: a non-managed write is refused by the index-format ceiling
-  # before the retention decision, so this row pins the observable "never
-  # retained" with the ceiling's refusal, not the managed-result clause.
+  # before the latest-attempt decision, so this row pins the observable "never
+  # a latest attempt" with the ceiling's refusal, not the managed-result clause.
   - name: non-managed-result
     routes: [batch_write]
     result: v1
-    want_retained: false
+    want_latest_attempt: false
     want_error_contains: newer than output format 1
 
   - name: incomplete-new-result
     routes: [single, batch]
     completeness: incomplete_new
-    want_retained: false
+    want_latest_attempt: false
     want_error_contains: last-good read authority
 
   - name: other-preview-over-full
     routes: [single, batch]
     capture: strict_refused
-    want_retained: false
+    want_latest_attempt: false
     want_error_contains: preview replacement refused over full read authority
 
   - name: mode-empty
     routes: [batch_write]
     mode: ""
-    want_retained: true
+    want_latest_attempt: true
 
   - name: mode-explicit-rebuild
     routes: [single, batch]
     mode: explicit_rebuild
-    want_retained: false
+    want_latest_attempt: false
     want_ok: true
 
   # Reachability: this row pins the refusal outcome, but the retention branch's
@@ -82,23 +82,23 @@ cases:
   - name: mode-format-conversion
     routes: [batch_write]
     mode: format_conversion
-    want_retained: false
+    want_latest_attempt: false
     want_error_contains: no V2 conversion is registered
 
   - name: mode-content-backfill
     routes: [batch_write]
     mode: content_backfill
-    want_retained: false
+    want_latest_attempt: false
     want_error_contains: preview replacement refused over full read authority
 
   - name: certificate-absent
     routes: [single, batch]
     certificate: absent
-    want_retained: false
+    want_latest_attempt: false
     want_ok: true
 
   - name: certificate-non-publishable
     routes: [single, batch]
     certificate: non_publishable
-    want_retained: false
+    want_latest_attempt: false
     want_ok: true

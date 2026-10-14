@@ -256,7 +256,7 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	entry.SourceFingerprint = request.SourceFingerprint
 	entry.CommitCaptureComplete = request.CommitCaptureComplete
 	if entry.CWDProvenance == "" {
-		// Retained extraction can preserve source facts already proven by a
+		// Stored extraction can preserve source facts already proven by a
 		// database capture. A historical file alone does not establish them.
 		err := sqlitex.ExecuteTransient(conn, `SELECT p.metadata_json,s.cwd_provenance_kind FROM session_publication_metadata p JOIN sessions s USING(session_id) WHERE s.session_id=? AND p.capture_revision=s.publication_capture_revision`, &sqlitex.ExecOptions{
 			Args: []any{string(meta.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {

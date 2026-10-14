@@ -495,7 +495,7 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 	return allowed, relationships, nil
 }
 
-// Retained bytes are already a managed capture, not a new native file. Reuse
+// Stored bytes are already a managed capture, not a new native file. Reuse
 // only the source relations the last-good metadata proved, and still require
 // the captured record chain to connect the artifact to each recorded source.
 func (a *ClaudeAdapter) verifyRetainedClaudeIdentity(data []byte, original *UnifiedMetadata, contentHash string) (map[string]bool, []schema.SessionRelationship, error) {
@@ -515,7 +515,7 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 		allowed[original.ParentUUID.String()] = true
 	}
 	if strings.HasPrefix(original.SessionID.String(), defaults.ClaudeSubagentPrefix) && claudeContradictorySidechain(proof) {
-		return nil, nil, fmt.Errorf("Claude retained metadata capture for %s: explicit native sidechain evidence contradicts an agent artifact; keep the last-good capture and restore matching native input", original.SessionID)
+		return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: explicit native sidechain evidence contradicts an agent artifact; keep the last-good capture and restore matching native input", original.SessionID)
 	}
 	if strings.HasPrefix(original.SessionID.String(), defaults.ClaudeSubagentPrefix) && proof.NativeAgentID != "" {
 		owner, ok := claudeRecordOwner(proof)
@@ -525,7 +525,7 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 		legacyProof := claudeLegacyAgentProof(proof, proof.NativeAgentID)
 		nativeProof := proof.NativeAgentValid || legacyProof
 		if !nativeProof || !ok || !ownerMatches {
-			return nil, nil, fmt.Errorf("Claude retained metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
+			return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
 		}
 	}
 	relationships := append([]schema.SessionRelationship(nil), original.Relationships...)
@@ -536,7 +536,7 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 			// persisted transcript digest binds all structural IDs to the exact
 			// bytes that acquisition proved; changed bytes must acquire anew.
 			if original.ContentHash == "" || original.ContentHash != contentHash {
-				return nil, nil, fmt.Errorf("Claude retained metadata capture for %s: multi-source provenance belongs to different captured bytes; keep the last-good capture and reacquire intact native input", original.SessionID)
+				return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: multi-source provenance belongs to different captured bytes; keep the last-good capture and reacquire intact native input", original.SessionID)
 			}
 			for _, record := range proof.Records {
 				allowed[record.SessionID] = true

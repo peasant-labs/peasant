@@ -15,12 +15,12 @@ type DetailLoadOptions struct {
 }
 
 // LoadEntriesForDetail materializes full entries without consulting provider or
-// retained files. The mandatory reader owns snapshot consistency and integrity.
+// stored files. The mandatory reader owns snapshot consistency and integrity.
 func LoadEntriesForDetail(ctx context.Context, r ingest.FullSessionEntryReader, id ingest.SessionID, opts DetailLoadOptions) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
 	var entries []schema.SessionEntry
 	var capture ingest.SessionContentCapture
 	fail := func(err error) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
-		return nil, capture, fmt.Errorf("transcript full-content load for session %q failed before detail/export/publication: %w; no complete transcript is available; run 'peasant harvest index --force' with retained artifacts to rebuild the capture, then retry", id, err)
+		return nil, capture, fmt.Errorf("transcript full-content load for session %q failed before detail/export/publication: %w; no complete transcript is available; run 'peasant harvest index --force' with stored artifacts to rebuild the capture, then retry", id, err)
 	}
 	if opts.SoftMaxBytes < 0 {
 		return fail(fmt.Errorf("negative page budget; use zero defaults or a positive override"))

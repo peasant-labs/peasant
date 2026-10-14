@@ -427,11 +427,11 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			skipDB = true
 			// The notice says HOW the forecast decides, not what it will
 			// decide. With no stored row each session is classified from the
-			// retained artifacts under the output tree, so on a tree that still
+			// stored artifacts under the output tree, so on a tree that still
 			// holds an earlier harvest the report says unchanged or updated, and
 			// a notice that promised "new" would contradict the report printed
 			// under it.
-			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s. This dry run creates none; each discovered session is compared against the retained artifacts on disk, and is reported as new when there are none. Run 'peasant harvest' to create it.\n", dbPath)
+			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s. This dry run creates none; each discovered session is compared against the stored artifacts on disk, and is reported as new when there are none. Run 'peasant harvest' to create it.\n", dbPath)
 		}
 	}
 

@@ -221,18 +221,18 @@ ORDER BY s.start_ms ASC`
 // column 36 is p.canonical_cwd (the project working dir).
 var sqlSessionDetailByID = sqlSessionDetailByIDQuery(false)
 
-// sqlSessionDetailByIDRetained is the available-mode detail row for a session
-// that retains a latest attempt. Its count columns resolve the retained
+// sqlSessionDetailByIDLatestAttempt is the available-mode detail row for a session
+// that has a latest attempt. Its count columns resolve the latest
 // attempt's own producer stats document instead of the active authority's
-// captured stats row, so an available preview reports the retained attempt's
+// captured stats row, so an available preview reports the latest attempt's
 // counts. Every other detail read uses sqlSessionDetailByID and keeps the
 // active authority's counts: the substitution is scoped to this one query and
 // never reaches a full, export or publication read of the same row.
-var sqlSessionDetailByIDRetained = sqlSessionDetailByIDQuery(true)
+var sqlSessionDetailByIDLatestAttempt = sqlSessionDetailByIDQuery(true)
 
-// sqlSessionDetailByIDQuery builds the extended detail row. retained selects
-// the available-mode count resolution described above.
-func sqlSessionDetailByIDQuery(retained bool) string {
+// sqlSessionDetailByIDQuery builds the extended detail row. latestAttemptCounts
+// selects the available-mode count resolution described above.
+func sqlSessionDetailByIDQuery(latestAttemptCounts bool) string {
 	// The authority expressions are the dual-path CASE the stats drop guard
 	// recognizes: a managed active generation reads the captured stats row, and
 	// every other session reads the legacy analysis record.
@@ -240,20 +240,20 @@ func sqlSessionDetailByIDQuery(retained bool) string {
 	toolAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END"
 	outAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END"
 	durationAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END"
-	retainedExpr := func(key, fallback string) string {
-		if !retained {
+	latestAttemptExpr := func(key, fallback string) string {
+		if !latestAttemptCounts {
 			return fallback
 		}
 		return "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN json_extract(s.latest_attempt_stats_json,'$." + key + "') ELSE " + fallback + " END"
 	}
-	turnCount := retainedExpr("turnCount", turnAuthority)
-	toolCalls := retainedExpr("toolCallCount", toolAuthority)
-	tokensOut := retainedExpr("tokensOut", outAuthority)
-	// The retained producer stats record the attempt duration in milliseconds
-	// while this detail column carries minutes, so the retained branch converts
-	// exactly like the authority branch beside it.
+	turnCount := latestAttemptExpr("turnCount", turnAuthority)
+	toolCalls := latestAttemptExpr("toolCallCount", toolAuthority)
+	tokensOut := latestAttemptExpr("tokensOut", outAuthority)
+	// The latest attempt's producer stats record the attempt duration in
+	// milliseconds while this detail column carries minutes, so the
+	// latest-attempt branch converts exactly like the authority branch beside it.
 	duration := durationAuthority
-	if retained {
+	if latestAttemptCounts {
 		duration = "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN CAST(json_extract(s.latest_attempt_stats_json,'$.durationMs') AS REAL) / 60000.0 ELSE " + durationAuthority + " END"
 	}
 	return `SELECT
@@ -532,14 +532,14 @@ func sessionDetailByIDOnConn(conn *sqlite.Conn, sessionID string) (*SessionDetai
 	return sessionDetailByIDOnConnMode(conn, sessionID, false)
 }
 
-// sessionDetailByIDOnConnMode reads the extended detail row. retainedCounts
-// selects the available-mode variant whose count columns resolve the retained
-// latest attempt's own producer stats; it is set only by the available read
-// of a session that actually retains an attempt.
-func sessionDetailByIDOnConnMode(conn *sqlite.Conn, sessionID string, retainedCounts bool) (*SessionDetailRow, error) {
+// sessionDetailByIDOnConnMode reads the extended detail row. latestAttemptCounts
+// selects the available-mode variant whose count columns resolve the latest
+// attempt's own producer stats; it is set only by the available read
+// of a session that actually has an attempt.
+func sessionDetailByIDOnConnMode(conn *sqlite.Conn, sessionID string, latestAttemptCounts bool) (*SessionDetailRow, error) {
 	query := sqlSessionDetailByID
-	if retainedCounts {
-		query = sqlSessionDetailByIDRetained
+	if latestAttemptCounts {
+		query = sqlSessionDetailByIDLatestAttempt
 	}
 	var row *SessionDetailRow
 	err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{

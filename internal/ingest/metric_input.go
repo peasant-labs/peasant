@@ -23,7 +23,7 @@ type MetricInput struct {
 	Existing     *SessionMetrics    `json:"-"`
 	DatabaseHash string             `json:"-"`
 	// GenerationID binds a computation to the active managed generation it
-	// captured. It is empty for a retained V1 session, so the retained input
+	// captured. It is empty for a stored V1 session, so the stored input
 	// hash is unchanged, and it is folded into Hash for a generation-backed
 	// session: a computation captured before an activation cannot save after it,
 	// because the captured generation no longer matches the stored one.

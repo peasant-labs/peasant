@@ -64,7 +64,7 @@ const (
 	// input under the recorded producer, and the tolerant projection was stored
 	// instead. Previews show it; nothing certifies it.
 	ContentCaptureStrictRefused ContentCaptureFailureCode = "strict_capture_refused"
-	// ContentCaptureSourceRecordsOmitted means the retained transcript is KNOWN
+	// ContentCaptureSourceRecordsOmitted means the stored transcript is KNOWN
 	// to be missing source records: ingest wrote the artifact without them.
 	//
 	// It is named for what its predicate attests and no more. Three ingest
@@ -165,7 +165,7 @@ const (
 	SessionEntryWriteContentBackfill SessionEntryWriteMode = "content_backfill"
 	// SessionEntryWriteFormatConversion rewrites the stored representation of
 	// entries that a prior parser run already produced. It is not a parser run:
-	// it preserves the producing indexer, its timestamp and the retained input
+	// it preserves the producing indexer, its timestamp and the stored input
 	// proof.
 	SessionEntryWriteFormatConversion SessionEntryWriteMode = "format_conversion"
 	// SessionEntryWriteExplicitRebuild marks an operator-initiated rebuild

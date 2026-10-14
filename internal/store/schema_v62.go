@@ -43,7 +43,7 @@ const BodyRowIDBase = 1 << 50
 //     bytes through the -> operator, so both raw embedding and re-marshal
 //     round-trip).
 //     As with captured refs, null means absent and other non-array types
-//     leave an accounted gap recoverable from the retained transcript.
+//     leave an accounted gap recoverable from the stored transcript.
 //   - annotation_target_entries is rebuilt without its session_entries
 //     foreign key; the insert-time existence check replaces the key.
 //

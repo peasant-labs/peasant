@@ -239,7 +239,7 @@ type SourceConfig struct {
 
 // DiscoveredSession represents a session found during discovery.
 type DiscoveredSession struct {
-	// ContentOmitted is carried from retained metadata when ingestion removed
+	// ContentOmitted is carried from stored metadata when ingestion removed
 	// source records. A filtered artifact cannot certify a complete capture.
 	ContentOmitted bool
 	SessionID      SessionID

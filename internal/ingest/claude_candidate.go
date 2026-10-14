@@ -12,13 +12,13 @@ import (
 )
 
 // ClaudeCode's managed-generation producer. It composes the retained identity
-// kernel and the retained metadata extraction over the attempt's captured bytes
+// kernel and the stored metadata extraction over the attempt's captured bytes
 // and recorded metadata, classifies the captured records into the shared
 // projection's blocks, and emits a genuine format-2 candidate. No provider
 // source is reopened on the ordinary bytes-proven branch: every byte the
 // classifier reads comes from the capture, and only the legacy missing-proof
 // fallback consults structural sibling snapshots through the same accessor the
-// retained adapter uses.
+// stored adapter uses.
 
 var _ GenerationBuilder = (*ClaudeIndexer)(nil)
 
@@ -56,7 +56,7 @@ func claudeCandidateCompletionFailure(session DiscoveredSession) error {
 }
 
 // BuildGeneration runs the production Claude candidate exit: retained identity
-// proof over the captured bytes, retained metadata extraction, strict record
+// proof over the captured bytes, stored metadata extraction, strict record
 // validation, tolerant classification, and the shared validated generation
 // projection. It returns the validated format-2 candidate together with the
 // full captured bytes its content records address, so activation can stage a
@@ -176,7 +176,7 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 
 // validateClaudeProducerRecords runs the shared strict Claude record validator
 // over the captured bytes for the managed producer. It intercepts the
-// positional omission stand-ins exactly as the retained capture exit does, but
+// positional omission stand-ins exactly as the stored capture exit does, but
 // it never refuses a capture that carries the source-omitted flag without a
 // stand-in: the flag is the disposition input the shared assessment reads, not
 // a validation failure.

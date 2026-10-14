@@ -988,7 +988,7 @@ func TestHarvestCmd_DryRunWithRetainedArtifactsAndNoDatabase(t *testing.T) {
 	// answer.
 	for _, want := range []string{
 		"This dry run creates none",
-		"compared against the retained artifacts on disk",
+		"compared against the stored artifacts on disk",
 		"reported as new when there are none",
 	} {
 		if !strings.Contains(output, want) {

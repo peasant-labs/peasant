@@ -80,13 +80,13 @@ func (p *Pipeline) nativeSessionForTarget(target reindexTarget, metadata *Unifie
 	return session
 }
 
-// Saved discovery selection does not suppress maintenance of retained sessions.
+// Saved discovery selection does not suppress maintenance of stored sessions.
 // Explicit harness/session/age filters still apply through adapterTargetMetadata.
 //
 // The inventory is database-driven: ListStaleAdapterSessions returns exactly
 // the sessions whose stored adapter revision is behind this build, or whose
 // stored schema this build re-extracts, reading no file. Each hit reconstructs
-// its session from its stored location and its own retained pair.
+// its session from its stored location and its own stored pair.
 //
 // The candidates' locations are read with one bulk query, and the
 // per-candidate reconstruction runs on the bounded worker pool. Outcomes are
@@ -147,10 +147,10 @@ func (p *Pipeline) storedAdapterEntry(ctx context.Context, sid SessionID, native
 		return nil
 	}
 	// The stored metadata carries the original native source locator. A
-	// retained-input reconstruction has no native session, so the target
+	// stored-input reconstruction has no native session, so the target
 	// must carry it forward: without it the reconstructed session's source
 	// path is empty and reads as native input that moved, which forces a
-	// native re-extraction the retained pair could have served.
+	// native re-extraction the stored pair could have served.
 	if metadata != nil {
 		target.originalSourcePath = metadata.Source.FilePath
 	}
@@ -404,7 +404,7 @@ func (p *Pipeline) queuedForNativeChange(session DiscoveredSession) bool {
 
 // appendPairRepairWork appends the stored sessions whose saved pair is missing
 // or damaged as native re-ingest work. The repair used to be an explicit
-// `--force --session` action; a session with no usable retained input has
+// `--force --session` action; a session with no usable stored input has
 // nothing to protect, so the ordinary harvest performs it automatically. A
 // session already queued for other work is marked for repair in place, so a
 // database-first "unchanged" verdict cannot leave the damaged pair behind. The
@@ -601,7 +601,7 @@ func (e *adapterAcquisitionError) Error() string { return e.cause.Error() }
 func (e *adapterAcquisitionError) Unwrap() error { return e.cause }
 
 // processSession keeps adapter preparation separate from publication failure.
-// Only failed native acquisition permits the last-good retained index fallback.
+// Only failed native acquisition permits the last-good stored index fallback.
 func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLane *storeWriteLane) workerResult {
 	var metadata *UnifiedMetadata
 	var metadataErr error
@@ -609,7 +609,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	var pathErr error
 	if entry.pairRepair {
 		// The repair already resolved the session's owned locator, and a pair
-		// that cannot be read has no retained-first path to prefer. Both
+		// that cannot be read has no stored-first path to prefer. Both
 		// lookups are skipped so a missing sidecar cannot fall through to a
 		// whole-tree lookup.
 		metadataPath = entry.repairMetadataPath
@@ -618,7 +618,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		metadataPath, pathErr = p.findMetadataPath(ctx, entry.Session)
 	}
 	// A forced run is an explicit manual refresh and tries native input first;
-	// routine version-driven maintenance prefers sufficient retained input.
+	// routine version-driven maintenance prefers sufficient stored input.
 	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !p.config.Force && !entry.pairRepair && !p.nativeInputChanged(entry.Session, metadata) {
 		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath, writeLane)
 		var insufficient *InsufficientRetainedInputError
@@ -629,7 +629,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	var result workerResult
 	if entry.retainedOnly && metadata != nil && (metadata.Redaction.Applied || len(metadata.Subagents) > 0) {
 		result.result = SessionResult{SessionID: entry.Session.SessionID, Harness: entry.Session.Harness, ParentUUID: entry.Session.ParentUUID, Status: entry.Status,
-			Error: &adapterAcquisitionError{cause: fmt.Errorf("refresh retained session %s from native input: required original discovery context is unavailable or redacted; no native attribution or child paths were guessed; restore native discovery and retry harvest", entry.Session.SessionID)}}
+			Error: &adapterAcquisitionError{cause: fmt.Errorf("refresh stored session %s from native input: required original discovery context is unavailable or redacted; no native attribution or child paths were guessed; restore native discovery and retry harvest", entry.Session.SessionID)}}
 	} else {
 		result = p.processNativeSession(ctx, entry, writeLane)
 	}
@@ -638,7 +638,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		return result
 	}
 	if entry.pairRepair {
-		// A repair has no usable retained pair by definition: when the native
+		// A repair has no usable stored pair by definition: when the native
 		// source cannot be acquired, the failure is the outcome. Falling back
 		// would try to read the missing or damaged pair and hide the error.
 		p.reportPairRepairUnavailable(ctx, entry.Session.SessionID, string(entry.Session.SourcePath), writeLane)
@@ -653,7 +653,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	}
 	p.reportSessionDiagnostic(entry.Session.SessionID, DiagnosticEntry{
 		ErrorType: errorType, Location: location,
-		Message:     acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported retained indexing may continue",
+		Message:     acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported stored indexing may continue",
 		Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",
 	})
 	result.result.Error = nil
@@ -664,7 +664,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		return result
 	}
 	// No new file commit or DB success is claimed. The normal index capture
-	// guards independently verify that this retained pair matches its stored state.
+	// guards independently verify that this stored pair matches its stored state.
 	result.meta = &retained.Metadata
 	result.transcriptData = retained.Transcript
 	// Carry the exact metadata bytes this read validated, beside the
@@ -683,7 +683,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 
 // hasUsableRetainedSession decides, only when native discovery FAILED, whether
 // the harvest can still maintain a session it saved earlier. It is the one
-// place the retained tree is read on the ordinary path, and only on a
+// place the stored tree is read on the ordinary path, and only on a
 // discovery failure: it walks the saved sessions and returns true as soon as
 // one pair reads and validates. A missing or corrupt pair is skipped, and the
 // stored recovery candidates are then given their guarded read before native
@@ -734,7 +734,7 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 			continue
 		}
 		// A lost metadata file beside an intact transcript is still a usable
-		// retained session: the index-recovery pass reconstructs it from stored
+		// stored session: the index-recovery pass reconstructs it from stored
 		// source information and rebuilds the pair. The recoverable evidence is
 		// the transcript, not the metadata the recovery will rewrite, so confirm
 		// the transcript reads before declaring native discovery failure fatal.

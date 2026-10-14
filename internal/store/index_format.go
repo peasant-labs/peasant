@@ -83,7 +83,7 @@ func (s *Store) SupportsIndexFormat(version int) bool {
 
 // targetVersionRegistry returns the harness targets this store's capability
 // supports. A store that can persist and read a managed generation reports the
-// managed-generation repair targets; every other store reports the retained baseline, so an
+// managed-generation repair targets; every other store reports the stored baseline, so an
 // entry-only caller's safety ceiling never exceeds what this build can store.
 func (s *Store) targetVersionRegistry() map[ingest.Harness]ingest.HarvesterVersions {
 	if s.SupportsIndexFormat(2) && s.GenerationSnapshotsSupported() {

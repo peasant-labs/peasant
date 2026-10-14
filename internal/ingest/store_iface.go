@@ -49,8 +49,8 @@ type SessionLocation struct {
 	IndexedInputHash *string
 }
 
-// MetricSeedStore reads retained adapter statistics independently of computed
-// results. A nil seed means no retained input has been reconciled yet.
+// MetricSeedStore reads stored adapter statistics independently of computed
+// results. A nil seed means no stored input has been reconciled yet.
 type MetricSeedStore interface {
 	GetMetricSeed(ctx context.Context, sessionID SessionID) (*StatsInfo, error)
 }
@@ -301,16 +301,16 @@ type SessionIndexState struct {
 	// build's parser already refused, which is what lets the selector give a
 	// refusal a steady state instead of re-parsing it every harvest.
 	ContentFailureCode ContentCaptureFailureCode
-	// LatestAttemptArtifactHash is the retained latest attempt's recorded pair
-	// identity, or nil when no attempt is retained. It is read-only evidence
+	// LatestAttemptArtifactHash is the latest attempt's recorded pair
+	// identity, or nil when no attempt exists. It is read-only evidence
 	// for the settle comparison; the store never derives a full read from it.
 	LatestAttemptArtifactHash *string
-	// LatestAttemptIndexerVersion is the producer revision the retained latest
-	// attempt was parsed with, or nil when no attempt is retained.
+	// LatestAttemptIndexerVersion is the producer revision the latest
+	// attempt was parsed with, or nil when no attempt exists.
 	LatestAttemptIndexerVersion *int
 	// LatestAttemptAdapterVersion is the adapter revision recorded on the
-	// retained latest attempt's generation row, or nil when no attempt is
-	// retained or the row carries none.
+	// latest attempt's generation row, or nil when no attempt
+	// exists or the row carries none.
 	LatestAttemptAdapterVersion *int
 }
 
@@ -331,13 +331,13 @@ func (e *StaleIndexWorkError) Error() string {
 // legacy/certificate read when the session has none.
 //
 // LastGood asks for the last-good FULL authority explicitly, bypassing the
-// retained-attempt block so export and publication can serve the active
-// generation while a newer incomplete preview is retained beside it. The
+// latest-attempt block so export and publication can serve the active
+// generation while a newer incomplete preview is kept beside it. The
 // selector deliberately carries no generation identifier: the store resolves
 // the generation internally, so no caller-supplied id can select a full read.
 type SessionReadSelection struct {
 	// LastGood selects the last-good full authority instead of refusing on a
-	// retained latest attempt. The store still refuses when the active
+	// latest attempt. The store still refuses when the active
 	// authority is itself only a preview.
 	LastGood bool
 }
@@ -354,13 +354,13 @@ type SessionEntryWriteResult struct {
 	EntriesCount int  // canonical projection rows committed by the format handler
 	Written      bool // true when the write request completed, including an unchanged-row skip
 	Skipped      bool // true when existing entry projections already matched and no entry rows were replaced
-	// RetainedPreview reports that the write retained the latest preview
+	// LatestAttemptPreview reports that the write retained the latest preview
 	// attempt instead of replacing the active authority. The active generation
-	// is unchanged, the retained pointer records the attempt, and the counts
+	// is unchanged, the latest-attempt pointer records the attempt, and the counts
 	// stay zero.
-	RetainedPreview bool
-	Stats           SessionEntryWriteStats
-	Err             error
+	LatestAttemptPreview bool
+	Stats                SessionEntryWriteStats
+	Err                  error
 }
 
 // SessionEntryBatchStore is required to persist pipeline index results. Metrics
@@ -1095,7 +1095,7 @@ type AnnotationPushRow struct {
 
 // StaleAdapterSessionLister is the database-driven inventory of sessions whose
 // stored adapter revision is behind this build, or whose stored schema this
-// build re-extracts from native input. It replaces the retained-tree walk the
+// build re-extracts from native input. It replaces the stored-tree walk the
 // ordinary harvest used to run to find adapter-refresh work. The production
 // store implements it; a store that does not is treated as having no such work.
 type StaleAdapterSessionLister interface {

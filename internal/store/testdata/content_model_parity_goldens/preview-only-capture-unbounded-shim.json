@@ -14,13 +14,13 @@
   "publish": {
     "error": {
       "identity": "push.ErrMetadataMissing",
-      "message": "load publication input from peasant.db: database publication metadata needs ingest; metadata and indexed entries are not a verified capture; nothing uploaded; incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; run peasant ingest with the retained source available and retry"
+      "message": "load publication input from peasant.db: database publication metadata needs ingest; metadata and indexed entries are not a verified capture; nothing uploaded; incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; run peasant ingest with the stored source available and retry"
     }
   },
   "publishEntries": {
     "error": {
       "identity": "push.ErrMetadataMissing",
-      "message": "load publication input from peasant.db: database publication metadata needs ingest; metadata and indexed entries are not a verified capture; nothing uploaded; incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; run peasant ingest with the retained source available and retry"
+      "message": "load publication input from peasant.db: database publication metadata needs ingest; metadata and indexed entries are not a verified capture; nothing uploaded; incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; run peasant ingest with the stored source available and retry"
     }
   },
   "preview": {

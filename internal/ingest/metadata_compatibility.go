@@ -183,7 +183,7 @@ func (e *UnsupportedMetadataVersionError) Error() string {
 
 // AdapterVersionError refuses invalid producer evidence or an adapter rewrite
 // that would erase a newer producer's work. A future positive adapter revision
-// does not by itself prevent reading supported metadata for retained indexing.
+// does not by itself prevent reading supported metadata for stored indexing.
 type AdapterVersionError struct {
 	Path    string
 	Version int

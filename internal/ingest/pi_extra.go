@@ -81,7 +81,7 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	}
 	raw := []byte(*extra)
 	// Source limits already apply before retention; redaction and JSON escaping
-	// can expand retained bytes. Never impose a smaller private payload budget.
+	// can expand stored bytes. Never impose a smaller private payload budget.
 	if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: max(len(raw), 8<<20), MaxDocumentDepth: 136, OpaqueMetadataPointers: []string{"/metadata/*/data"}}); err != nil {
 		return value, false, piEvidenceError(err)
 	}

@@ -376,7 +376,7 @@ type IndexConversionLossError struct {
 }
 
 func (e *IndexConversionLossError) Error() string {
-	return fmt.Sprintf("store index format conversion: session %s cannot be converted losslessly because %s; the conversion was refused before any row changed, so the stored representation, full content and producer history are unchanged; re-index the session from its retained input instead of converting it", e.SessionID, e.Reason)
+	return fmt.Sprintf("store index format conversion: session %s cannot be converted losslessly because %s; the conversion was refused before any row changed, so the stored representation, full content and producer history are unchanged; re-index the session from its stored input instead of converting it", e.SessionID, e.Reason)
 }
 
 // convertStoredContentOnConn persists a representation change and nothing else.

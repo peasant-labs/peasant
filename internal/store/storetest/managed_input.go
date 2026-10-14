@@ -15,7 +15,7 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// SeedManagedArtifact writes a test-owned retained pair under output and
+// SeedManagedArtifact writes a test-owned stored pair under output and
 // records it in the database with MirrorArtifacts, then stops. It leaves the
 // state a completed harvest leaves before indexing: files on disk and a row,
 // but no index evidence, which is the retained-but-not-yet-indexed session a
@@ -61,7 +61,7 @@ func SeedManagedArtifact(t *testing.T, db *store.Store, filesystem ingest.FileSy
 	return session, path
 }
 
-// MirrorRetainedPair reads a retained pair already written under output and
+// MirrorRetainedPair reads a stored pair already written under output and
 // records its row in the database with MirrorArtifacts. It is the replacement
 // for the old reconcile-from-files step: a test that has written the pair and
 // inserted the base row calls this to establish the pair's artifact identity.
@@ -73,12 +73,12 @@ func MirrorRetainedPair(t *testing.T, db *store.Store, filesystem ingest.FileSys
 	}
 	results := db.MirrorArtifacts(t.Context(), []ingest.ArtifactMirrorRequest{{Artifact: artifact}})
 	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
-		t.Fatalf("mirror retained pair for %s: %+v", sid, results)
+		t.Fatalf("mirror stored pair for %s: %+v", sid, results)
 	}
 }
 
 // SeedManagedInput establishes actual publication and parser evidence for a
-// test-owned retained transcript. It never stamps a proof over manual rows.
+// test-owned stored transcript. It never stamps a proof over manual rows.
 func SeedManagedInput(t *testing.T, db *store.Store, filesystem ingest.FileSystem, output string, meta ingest.UnifiedMetadata, data []byte) []schema.SessionEntry {
 	t.Helper()
 	ctx := t.Context()

@@ -55,7 +55,7 @@ func (i *PiIndexer) IndexTranscriptForCapture(ctx context.Context, session Disco
 
 func (i *PiIndexer) IndexTranscriptBytesForCapture(ctx context.Context, session DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
 	if session.ContentOmitted {
-		return TranscriptCaptureResult{}, captureFailure(session, 0, fmt.Errorf("retained transcript omitted source content"))
+		return TranscriptCaptureResult{}, captureFailure(session, 0, fmt.Errorf("stored transcript omitted source content"))
 	}
 	doc, err := parsePiDocument(ctx, data)
 	if err != nil {

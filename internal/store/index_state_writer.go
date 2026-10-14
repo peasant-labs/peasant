@@ -95,11 +95,11 @@ func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID i
 // ListStaleIndexSessions selects only registered harness targets. The legacy SQL
 // index_version column records the actual indexer revision, not an index format.
 //
-// A session whose retained latest attempt has fully settled against the
+// A session whose latest attempt has fully settled against the
 // harness's producer and adapter targets is excluded: its attempt is known to
 // consume the current pair under the current build, so re-parsing it would be
 // pure churn. A facet that moved (a newer pair, a producer or adapter target
-// bump) keeps the session selected, and the following run replaces the retained
+// bump) keeps the session selected, and the following run replaces the latest
 // attempt once.
 func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
 	if len(targets) == 0 {
@@ -114,7 +114,7 @@ func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.H
 		}
 		condition := "(s.model_harness = ? AND s.index_version < ?"
 		args = append(args, string(harness), version)
-		if clause, clauseArgs := retainedAttemptSettledClause("s", targets[harness]); clause != "" {
+		if clause, clauseArgs := latestAttemptSettledClause("s", targets[harness]); clause != "" {
 			condition += " AND " + clause
 			args = append(args, clauseArgs...)
 		}

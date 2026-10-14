@@ -21,7 +21,7 @@ func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTar
 	artifact, err := readArtifactPair(p.fs, string(p.config.OutputDir), adapterTargetMetadataPath(target), target.session.SessionID)
 	if err != nil {
 		slog.Warn("reindex: cannot read managed capture", "session_id", target.session.SessionID, "error", err,
-			"impact", "no publication proof will be assigned", "fix", "restore the retained source and run peasant ingest")
+			"impact", "no publication proof will be assigned", "fix", "restore the stored source and run peasant ingest")
 		// Do not retry a failed read later against a potentially different file.
 		im.transcriptData = []byte{}
 		return im
