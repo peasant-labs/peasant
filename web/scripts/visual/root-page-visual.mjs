@@ -507,7 +507,16 @@ async function runNestedAlignment(browser, gate, theme, viewport, answers) {
   const family = YAML.parse(readFileSync(join(WEB, 'src/app/testdata/root-publish-filters.yaml'), 'utf8')).cases.find((entry) => entry.name === 'recursive-family-and-refresh')
   if (!family?.sessions?.length) fail('recursive-family-and-refresh fixture is missing; restore the named nested family before visual:root-page')
   const nested = { ...answers,
-    sync: family.sessions.map((row) => ({ ...answers.sync[0], id: row.id, parentSessionId: row.parentSessionId, syncStatus: row.syncStatus, firstPrompt: row.preview ?? row.id })),
+    sync: family.sessions.map((row) => ({
+      ...answers.sync[0],
+      id: row.id,
+      parentSessionId: row.parentSessionId,
+      syncStatus: row.syncStatus,
+      firstPrompt: row.preview ?? row.id,
+      turnCount: row.turnCount ?? answers.sync[0].turnCount,
+      durationMs: row.durationMs ?? answers.sync[0].durationMs,
+      startTime: row.startTime ?? answers.sync[0].startTime,
+    })),
     publications: new Map(family.sessions.map((row) => [row.id, { ...answers.publications.values().next().value, sessionId: row.id, state: row.state, outsideSelection: false }])),
   }
   const page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers: nested, diagnostics: [] })
