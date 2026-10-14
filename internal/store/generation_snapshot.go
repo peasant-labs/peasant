@@ -181,7 +181,7 @@ func validateLastGoodAuthorityOnConn(conn *sqlite.Conn, sessionID schema.Session
 // read gets on a session with a latest attempt. It names what happened,
 // why the full read cannot answer, and how to proceed.
 func latestAttemptIncompleteError(sessionID schema.SessionID) error {
-	return fmt.Errorf("store: session %s holds a retained incomplete latest attempt beside its last-good generation; the full snapshot was not served because the newer capture is an incomplete preview; read the bounded preview or select the last-good explicitly with --last-good: %w", sessionID, indexformat.ErrLatestAttemptIncomplete)
+	return fmt.Errorf("store: session %s holds an incomplete latest attempt beside its last-good generation; the full snapshot was not served because the newer capture is an incomplete preview; read the bounded preview or select the last-good explicitly with --last-good: %w", sessionID, indexformat.ErrLatestAttemptIncomplete)
 }
 
 // latestAttemptLastGoodUnavailableError is the refusal of an explicit last-good read
