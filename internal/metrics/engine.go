@@ -282,14 +282,14 @@ func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.Session
 			SessionID: sid,
 		}
 
-		// Retained adapter statistics are inputs, not prior computed output.
+		// Stored adapter statistics are inputs, not prior computed output.
 		// Missing historical seeds stay unknown; current metrics functions can
 		// still derive their supported fields from indexed entries.
 		if seeds, ok := e.store.(ingest.MetricSeedStore); ok {
 			seed, seedErr := seeds.GetMetricSeed(ctx, sid)
 			if seedErr != nil {
 				if reportFailures {
-					return computed, fmt.Errorf("read retained adapter inputs before recomputing metrics for session %s: %w; prior metrics were preserved; reconcile valid managed metadata and retry", sid, seedErr)
+					return computed, fmt.Errorf("read stored adapter inputs before recomputing metrics for session %s: %w; prior metrics were preserved; reconcile valid managed metadata and retry", sid, seedErr)
 				}
 				slog.Warn("metrics: read retained seed; prior metrics preserved", "session_id", sid, "error", seedErr)
 				continue

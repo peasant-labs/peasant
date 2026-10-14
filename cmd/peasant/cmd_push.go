@@ -2440,7 +2440,7 @@ func printRedactionReport(w io.Writer, record redactionRecord) {
 	}
 	if record.MissingMetadataCount > 0 {
 		entries = append(entries, redactionRecordEntry("note:",
-			fmt.Sprintf("%d session(s) need database metadata and matching entries - run 'peasant ingest' with the retained source available before upload",
+			fmt.Sprintf("%d session(s) need database metadata and matching entries - run 'peasant ingest' with the stored source available before upload",
 				record.MissingMetadataCount)))
 	}
 	fmt.Fprintln(w, strings.Join(entries, redactionRecordEntrySeparator))

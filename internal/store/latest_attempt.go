@@ -19,14 +19,14 @@ import (
 func (s *Store) latestAttemptEligible(ctx context.Context, write ingest.SessionEntryWrite) (bool, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return false, fmt.Errorf("store: take connection to decide retention for session %s: %w; nothing was written", write.SessionID, err)
+		return false, fmt.Errorf("store: take connection to decide the latest attempt for session %s: %w; nothing was written", write.SessionID, err)
 	}
 	defer s.pool.Put(conn)
 	return latestAttemptEligibleOnConn(conn, write)
 }
 
-// errLatestAttemptPairProofUnavailable is the fixed category the retention
-// boundary reports when a write qualifies for retention but no verified pair
+// errLatestAttemptPairProofUnavailable is the fixed category the latest-attempt
+// boundary reports when a write qualifies as a latest attempt but no verified pair
 // identity is available. The store refuses before any mutation rather than
 // stashing unbound content or recording a binding that can never settle.
 var errLatestAttemptPairProofUnavailable = errors.New("pair-proof-unavailable")
@@ -64,7 +64,7 @@ func latestAttemptSettledSQL(alias string) string {
 // harness alias and the arguments it binds (the producer target, then the
 // adapter target), or ok=false when the harness's targets cannot express a
 // settle decision. A target that cannot settle must never hide work: the caller
-// keeps listing the session, which is the pre-retention behavior.
+// keeps listing the session, which is the pre-latest-attempt behavior.
 func latestAttemptSettleFragment(alias string, target ingest.HarvesterVersions) (string, []any, bool) {
 	if target.IndexerVersion < 1 || target.AdapterVersion < 1 {
 		return "", nil, false
@@ -149,7 +149,7 @@ func latestAttemptEligibleOnConn(conn *sqlite.Conn, write ingest.SessionEntryWri
 	return false, latestAttemptPairProofUnavailableError(write.SessionID)
 }
 
-// latestAttemptPairProofUnavailableError names the missing proof, why retention
+// latestAttemptPairProofUnavailableError names the missing proof, why the latest attempt
 // needs it, and what the caller must do, so a direct caller that omits the
 // identity sees an actionable refusal instead of a silent unbound stash.
 func latestAttemptPairProofUnavailableError(sessionID ingest.SessionID) error {
@@ -250,7 +250,7 @@ func readLatestAttemptPointerOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 
 // deleteGenerationRowsOnConn deletes every generation-scoped row of one exact
 // (session, generation) pair through the shared reclaimTableNames inventory, so
-// the retention replace branch and the reclaim/sweep paths cannot drift apart.
+// the latest-attempt replace branch and the reclaim/sweep paths cannot drift apart.
 // It runs inside the caller's transaction.
 func deleteGenerationRowsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) error {
 	for _, table := range reclaimTableNames {
@@ -403,7 +403,7 @@ func (s *Store) retainLatestAttemptWriteOnConn(conn *sqlite.Conn, write ingest.S
 
 // releaseLatestAttemptSavepoint reports the mid-activation seam and releases the
 // latest-attempt savepoint. A seam failure aborts the outer transaction (fatal), so
-// a simulated process loss rolls the retention back.
+// a simulated process loss rolls the latest attempt back.
 func (s *Store) releaseLatestAttemptSavepoint(conn *sqlite.Conn, write ingest.SessionEntryWrite, savepointName string) (error, bool) {
 	if err := reportHarmonizedWriterSeam(harmonizedSeamMidActivationBatch); err != nil {
 		return err, true

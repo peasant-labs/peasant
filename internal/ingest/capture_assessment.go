@@ -153,7 +153,7 @@ func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, ori
 		}, nil
 	case CaptureCoveragePreview:
 		// Preview-only activation is reported as a preview operation, never as
-		// a successful full or retained capture. The store's absent-value
+		// a successful full or stored capture. The store's absent-value
 		// defaults must never promote this to full: the format is explicit.
 		// A preview with no recorded failure keeps the empty code: it is
 		// first-discovery incompleteness (for example native incomplete_new),

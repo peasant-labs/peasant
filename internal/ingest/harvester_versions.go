@@ -26,7 +26,7 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 }
 
 // GenerationRepairTargets declares the adapter, indexer and format
-// targets that replace the retained baseline ONLY for a store that can persist
+// targets that replace the stored baseline ONLY for a store that can persist
 // and read a managed generation: a registered format-2 writer, a configured
 // snapshot reader with its owned-artifact root and lock, a managed generation
 // activator and a prior reader. A store that cannot is served by the retained
@@ -42,7 +42,7 @@ var GenerationRepairTargets = map[Harness]HarvesterVersions{
 // stored session's native layout into a managed generation. The OpenCode
 // candidate snapshot reads the current session_message projection; a session
 // stored from the older message/part layout, or from a JSON tree, has no
-// snapshot this build can read, so the retained adapter refresh serves it
+// snapshot this build can read, so the stored adapter refresh serves it
 // instead of failing the managed-generation lane. A harness without a declared native
 // target is always served by its retained path.
 func generationTargetApplicable(session DiscoveredSession) bool {
@@ -146,7 +146,7 @@ func (p *Pipeline) indexerTargets() map[Harness]HarvesterVersions {
 // resolveVersionTargets computes the effective harness targets once. An
 // explicit injection wins; otherwise a store that can persist and read a
 // managed generation activates the managed-generation repair targets, and every other store
-// keeps the retained baseline.
+// keeps the stored baseline.
 func (p *Pipeline) resolveVersionTargets() map[Harness]HarvesterVersions {
 	if p.harvesterVersions != nil {
 		return p.harvesterVersions
@@ -169,7 +169,7 @@ func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {
 // sessionVersionTarget returns the effective harvester target for one stored
 // session. When the resolved target is the managed-generation override but the
 // session's layout has no native snapshot this build can read, the session
-// keeps the retained baseline target so the ordinary adapter refresh serves it
+// keeps the stored baseline target so the ordinary adapter refresh serves it
 // instead of the managed-generation lane. An explicitly injected non-managed-generation target is
 // returned unchanged.
 func (p *Pipeline) sessionVersionTarget(session DiscoveredSession) HarvesterVersions {

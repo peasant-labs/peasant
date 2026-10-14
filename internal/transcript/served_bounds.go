@@ -153,7 +153,7 @@ func BoundServedDetail(detail *schema.SessionDetailPayload, budget ServedDocumen
 
 // collectServedTextFields walks the payload once, in document order, so the
 // bound is deterministic for a given payload. Main turns come first, then each
-// earlier-history section in order, so retained history is served under the
+// earlier-history section in order, so stored history is served under the
 // same single bound application as current turns.
 func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextField {
 	fields := make([]servedTextField, 0, len(detail.Turns))

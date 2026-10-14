@@ -77,7 +77,7 @@ remain errors, not successful unknown-kind captures.
   Each adapter vocabulary is compared exactly with its runtime dispatch/census;
   a source pointer is never parsed as Go syntax. Census observations are not an
   accept-list.
-- **Versions** are verification targets: baseline and native overrides match
+- **Versions** are verification targets: baseline and managed-generation overrides match
   their actual producer registries. They are not session producer stamps.
 
 ## Reporting and verification

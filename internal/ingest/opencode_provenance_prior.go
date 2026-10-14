@@ -17,7 +17,7 @@ const openCodeProvenancePriorFormatVersion = 2
 
 // openCodeProvenancePriorDocument is the durable, activation-owned form of
 // OpenCodeProvenancePrior. It carries the alias and submission maps as ordered
-// records so the encoding is deterministic, plus the retained captured-prefix
+// records so the encoding is deterministic, plus the stored captured-prefix
 // rows the indexer needs when the live fork source no longer carries them.
 type openCodeProvenancePriorDocument struct {
 	Version           int                        `json:"version"`
@@ -41,7 +41,7 @@ type openCodePriorAcceptAlias struct {
 // EncodeOpenCodeProvenancePrior serializes the activation-owned prior evidence
 // into a stable document the activation persists beside the managed generation.
 // The indexer never generates this evidence; the encoding exists so a reopen
-// can load the same aliases and retained captured-prefix rows from durable
+// can load the same aliases and stored captured-prefix rows from durable
 // storage instead of from memory.
 func EncodeOpenCodeProvenancePrior(prior OpenCodeProvenancePrior) ([]byte, error) {
 	document := openCodeProvenancePriorDocument{

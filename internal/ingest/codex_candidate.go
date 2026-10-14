@@ -421,7 +421,7 @@ func (idx *CodexIndexer) BuildCodexCandidateForSession(ctx context.Context, sess
 }
 
 // extractCandidateMetadata extracts the metadata base from the verified
-// capture bytes using the retained extraction kernel: model, version,
+// capture bytes using the stored extraction kernel: model, version,
 // timestamps, token totals, and recorded working-directory and git context.
 // Counts, purpose, relationships, and identity come from the candidate
 // projection, never from this legacy extraction. It never reopens the mutable

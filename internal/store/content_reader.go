@@ -37,7 +37,7 @@ func nullString(s string) any {
 var ErrContentCaptureIncomplete = errors.New("session capture is incomplete; bounded previews are not authoritative")
 
 func contentIntegrityError() error {
-	return fmt.Errorf("store full content read: capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted; run harvest index --force from retained artifacts to repair")
+	return fmt.Errorf("store full content read: capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted; run harvest index --force from stored artifacts to repair")
 }
 
 // readCapture returns the stored capture, or NOTHING.
@@ -461,7 +461,7 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 		// record's place, so it is read whole here. Every other incompleteness
 		// is refused exactly as before.
 		if !found || !PublishableWithOmissions(c) {
-			return page, fmt.Errorf("store full content read: %w; run harvest index --force with retained artifacts before viewing, exporting or publishing full content", ErrContentCaptureIncomplete)
+			return page, fmt.Errorf("store full content read: %w; run harvest index --force with stored artifacts before viewing, exporting or publishing full content", ErrContentCaptureIncomplete)
 		}
 		shimmed, shimErr := shimmedOnConn(conn, string(id))
 		if shimErr != nil {
@@ -602,7 +602,7 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 		if ctx.Err() != nil {
 			cause = ctx.Err()
 		}
-		return nil, capture, fmt.Errorf("store complete content read: verification or hydration failed; no complete transcript returned: %w; retry or run harvest index --force from retained artifacts to repair", cause)
+		return nil, capture, fmt.Errorf("store complete content read: verification or hydration failed; no complete transcript returned: %w; retry or run harvest index --force from stored artifacts to repair", cause)
 	}
 	if softMaxBytes < 0 {
 		return fail(fmt.Errorf("negative page budget; use zero defaults or a positive override"))

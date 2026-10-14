@@ -90,7 +90,7 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 	if err := json.Unmarshal(encoded, &metadata); err != nil {
 		return nil, insufficient("original metadata could not be decoded: " + err.Error())
 	}
-	// Hash once at the retained extraction boundary. Identity verification and
+	// Hash once at the stored extraction boundary. Identity verification and
 	// the publisher reuse this digest of the supplied bytes, not the prior claim.
 	metadata.ContentHash = schema.ComputeTranscriptHash(data)
 	return &metadata, nil
@@ -106,11 +106,11 @@ func validateRetainedJSONL(ctx context.Context, data []byte) error {
 		}
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) != 0 && (!json.Valid(raw) || raw[0] != '{') {
-			return fmt.Errorf("a retained JSONL record is malformed or is not an object")
+			return fmt.Errorf("a stored JSONL record is malformed or is not an object")
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("retained JSONL could not be completely scanned: %w", err)
+		return fmt.Errorf("stored JSONL could not be completely scanned: %w", err)
 	}
 	return ctx.Err()
 }
@@ -132,7 +132,7 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 		return nil, parseErr
 	}
 	if first == nil || first.Type == "" {
-		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "retained input has no identifiable Claude record"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "stored input has no identifiable Claude record"}
 	}
 	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {
 		return nil, err
@@ -159,7 +159,7 @@ func (a *CodexAdapter) ExtractMetadataFromTranscript(ctx context.Context, data [
 		return nil, err
 	}
 	if sessionMeta == nil {
-		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessCodex, Reason: "retained input has no usable session_meta record"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessCodex, Reason: "stored input has no usable session_meta record"}
 	}
 	if err := transcriptMetadataParsingError(HarnessCodex, &parsed); err != nil {
 		return nil, err

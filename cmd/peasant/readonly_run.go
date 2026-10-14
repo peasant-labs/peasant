@@ -71,8 +71,8 @@ func generationStoreOptions(ownedRoot string) ([]store.OpenOption, error) {
 // generationStoreOptionsReadOnly wires the managed-generation reader for a
 // dry-run store. It never creates the owned root: a dry run changes no file.
 // The reader is what lets a dry run resolve the same native harness targets a
-// real run uses instead of reporting the retained baseline and false
-// newer-producer refusals. A missing owned root yields the retained baseline,
+// real run uses instead of reporting the stored baseline and false
+// newer-producer refusals. A missing owned root yields the stored baseline,
 // which is the target set a fresh store resolves anyway.
 func generationStoreOptionsReadOnly(ownedRoot string) ([]store.OpenOption, error) {
 	options := contentIndexFormats()

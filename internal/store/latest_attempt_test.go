@@ -157,7 +157,7 @@ func TestLatestAttemptPreviewOverFullAuthority(t *testing.T) {
 
 	outcome, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b"))
 	if err != nil {
-		t.Fatalf("retention activation: %v", err)
+		t.Fatalf("latest-attempt activation: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
@@ -198,10 +198,10 @@ func TestLatestAttemptPreviewOverFullAuthority(t *testing.T) {
 	}
 }
 
-// TestRetentionFreshIDUnchangedIsTrueNoOp proves the TRUE no-op: a fresh
+// TestLatestAttemptFreshIDUnchangedIsTrueNoOp proves the TRUE no-op: a fresh
 // identifier carrying the same binding and facets writes nothing and leaves the
 // pointer on the original attempt.
-func TestRetentionFreshIDUnchangedIsTrueNoOp(t *testing.T) {
+func TestLatestAttemptFreshIDUnchangedIsTrueNoOp(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e")
 	identity := hexIdentity('b')
@@ -209,7 +209,7 @@ func TestRetentionFreshIDUnchangedIsTrueNoOp(t *testing.T) {
 	setStoredArtifactHash(t, s, sid, identity)
 
 	if _, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b")); err != nil {
-		t.Fatalf("first retention: %v", err)
+		t.Fatalf("first latest-attempt write: %v", err)
 	}
 	before := generationRowCount(t, s, sid)
 	// A fresh identifier with the same projection and facets: the binding
@@ -220,7 +220,7 @@ func TestRetentionFreshIDUnchangedIsTrueNoOp(t *testing.T) {
 		ContentCapture: sourceOmittedPreviewWrite(),
 	})
 	if err != nil {
-		t.Fatalf("repeat retention: %v", err)
+		t.Fatalf("repeat latest-attempt write: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
@@ -233,10 +233,10 @@ func TestRetentionFreshIDUnchangedIsTrueNoOp(t *testing.T) {
 	}
 }
 
-// TestRetentionChangedFacetReplacesAttempt proves the REPLACE branch: a changed
+// TestLatestAttemptChangedFacetReplacesAttempt proves the REPLACE branch: a changed
 // producer facet replaces the latest attempt with a fresh immutable row and
 // advances the pointer.
-func TestRetentionChangedFacetReplacesAttempt(t *testing.T) {
+func TestLatestAttemptChangedFacetReplacesAttempt(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f")
 	identity := hexIdentity('c')
@@ -244,7 +244,7 @@ func TestRetentionChangedFacetReplacesAttempt(t *testing.T) {
 	setStoredArtifactHash(t, s, sid, identity)
 
 	if _, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b")); err != nil {
-		t.Fatalf("first retention: %v", err)
+		t.Fatalf("first latest-attempt write: %v", err)
 	}
 	replacement, blobs := buildTestGeneration(t, sid, "gen_preview_b2", "preview text", "preview input", "preview output")
 	outcome, err := s.ActivateGeneration(context.Background(), GenerationActivation{
@@ -252,7 +252,7 @@ func TestRetentionChangedFacetReplacesAttempt(t *testing.T) {
 		ContentCapture: sourceOmittedPreviewWrite(),
 	})
 	if err != nil {
-		t.Fatalf("replacement retention: %v", err)
+		t.Fatalf("replacement latest-attempt write: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
@@ -272,11 +272,11 @@ func TestRetentionChangedFacetReplacesAttempt(t *testing.T) {
 	}
 }
 
-// TestRetentionPairProofRefusalLeavesAuthority proves clause 6: a legacy row
+// TestLatestAttemptPairProofRefusalLeavesAuthority proves clause 6: a legacy row
 // with no stored identity and no supplied identity is refused at the store
 // boundary with the actionable pair-proof-unavailable error, and the authority
 // is intact.
-func TestRetentionPairProofRefusalLeavesAuthority(t *testing.T) {
+func TestLatestAttemptPairProofRefusalLeavesAuthority(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a")
 	seedFullAuthority(t, s, sid)
@@ -296,10 +296,10 @@ func TestRetentionPairProofRefusalLeavesAuthority(t *testing.T) {
 	}
 }
 
-// TestRetentionLegacyBootstrapRecordsIdentity proves the legacy NULL bootstrap:
+// TestLatestAttemptLegacyBootstrapRecordsIdentity proves the legacy NULL bootstrap:
 // a stored hash of NULL with a supplied verified identity establishes the
 // session identity and records it non-null on the pointer.
-func TestRetentionLegacyBootstrapRecordsIdentity(t *testing.T) {
+func TestLatestAttemptLegacyBootstrapRecordsIdentity(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b")
 	seedFullAuthority(t, s, sid)
@@ -312,7 +312,7 @@ func TestRetentionLegacyBootstrapRecordsIdentity(t *testing.T) {
 	candidate.ArtifactIdentity = &identity
 	outcome, err := s.ActivateGeneration(context.Background(), candidate)
 	if err != nil {
-		t.Fatalf("bootstrap retention: %v", err)
+		t.Fatalf("bootstrap latest-attempt write: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
@@ -325,12 +325,12 @@ func TestRetentionLegacyBootstrapRecordsIdentity(t *testing.T) {
 	}
 }
 
-// TestRetentionReplayLeavesAuthorityAndPointer proves the named replay
+// TestLatestAttemptReplayLeavesAuthorityAndPointer proves the named replay
 // expectation: re-submitting the already-installed active authority's candidate
 // identifier reports AlreadyCommitted and leaves both the authority and the
 // latest-attempt pointer untouched; a same-identifier retry of the latest-attempt candidate
 // reports AlreadyCommitted too.
-func TestRetentionReplayLeavesAuthorityAndPointer(t *testing.T) {
+func TestLatestAttemptReplayLeavesAuthorityAndPointer(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("9c9c9c9c-9c9c-4c9c-8c9c-9c9c9c9c9c9c")
 	identity := hexIdentity('e')
@@ -338,7 +338,7 @@ func TestRetentionReplayLeavesAuthorityAndPointer(t *testing.T) {
 	setStoredArtifactHash(t, s, sid, identity)
 
 	if _, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b")); err != nil {
-		t.Fatalf("retention: %v", err)
+		t.Fatalf("latest-attempt write: %v", err)
 	}
 	pointerBefore := latestAttemptPointerFor(t, s, sid)
 	rowsBefore := generationRowCount(t, s, sid)
@@ -387,7 +387,7 @@ func TestLatestAttemptBatchRouteMapsDisposition(t *testing.T) {
 		t.Fatalf("results = %d, want 1", len(results))
 	}
 	if results[0].Err != nil {
-		t.Fatalf("batch retention error: %v", results[0].Err)
+		t.Fatalf("batch latest-attempt error: %v", results[0].Err)
 	}
 	if results[0].Outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("batch disposition = %v, want ActivationLatestAttemptPreview", results[0].Outcome.Disposition)

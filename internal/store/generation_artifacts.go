@@ -188,7 +188,7 @@ func NewOSGenerationArtifactStore(root string) (GenerationArtifactStore, error) 
 // read-only planning. It never creates the root: a dry run promises to change
 // no file, and a store without an owned tree has no staged generation to read.
 // A missing root is returned as fs.ErrNotExist so the caller can fall back to
-// the retained baseline, which is the target set a fresh store resolves anyway.
+// the stored baseline, which is the target set a fresh store resolves anyway.
 func NewOSGenerationArtifactStoreExisting(root string) (GenerationArtifactStore, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("store: generation artifact root is empty in NewOSGenerationArtifactStoreExisting; managed content cannot be read; configure the owned-artifact root")
@@ -407,7 +407,7 @@ func (a *osGenerationArtifactStore) RemoveReservedStagingDirs(ctx context.Contex
 
 // RemoveConvertedSessionFiles removes the managed files a converted session
 // no longer reads: the whole generations subtree, the exported generation
-// metadata document, and the activation intent. Retained transcripts, pair
+// metadata document, and the activation intent. Stored transcripts, pair
 // files, and lock files stay. Every removal tolerates absence, so an
 // interrupted run repeats safely. The caller proves conversion from the
 // database before calling; the per-component no-follow walk still guards

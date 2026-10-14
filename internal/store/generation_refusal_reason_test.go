@@ -43,7 +43,7 @@ func assessedSourceOmittedPreview(t *testing.T, v2 indexformat.V2) ingest.Sessio
 // assessedPreviewActivation commits a full prior generation for a fresh session
 // and returns a complete candidate carrying the REAL assessed
 // unaccounted-SourceOmitted preview plus the capture it was built from. When
-// identity is non-nil the stored pair identity is seeded, so the retention
+// identity is non-nil the stored pair identity is seeded, so the latest-attempt
 // boundary has a verified pair to record.
 func assessedPreviewActivation(t *testing.T, s *Store, sid schema.SessionID, identity *string) (GenerationActivation, ingest.SessionContentCaptureWrite) {
 	t.Helper()
@@ -65,7 +65,7 @@ func assessedPreviewActivation(t *testing.T, s *Store, sid schema.SessionID, ide
 // requireAssessedPreviewOutcome asserts the store follows the assessed capture
 // tuple and reports whether the attempt was kept as the latest attempt. The assessed
 // unaccounted-SourceOmitted preview is kept as the latest attempt; a preview carrying any other
-// code keeps the existing guard refusal, so retention is never a bypass for an
+// code keeps the existing guard refusal, so the latest attempt is never a bypass for an
 // accidental preview.
 func requireAssessedPreviewOutcome(t *testing.T, s *Store, sid schema.SessionID, capture ingest.SessionContentCaptureWrite, outcome ingest.ActivationOutcome, err error) bool {
 	t.Helper()
@@ -77,7 +77,7 @@ func requireAssessedPreviewOutcome(t *testing.T, s *Store, sid schema.SessionID,
 		return false
 	}
 	if err != nil {
-		t.Fatalf("retention returned error %v, want a latest-attempt preview", err)
+		t.Fatalf("latest-attempt write returned error %v, want a preview", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
@@ -174,7 +174,7 @@ func TestPreviewOverFullPairProofRefusal(t *testing.T) {
 	activation, capture := assessedPreviewActivation(t, s, sid, nil)
 	outcome, err := s.ActivateGeneration(context.Background(), activation)
 	if capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted {
-		// The assessed tuple is not the retention tuple, so the guard refusal
+		// The assessed tuple is not the latest-attempt tuple, so the guard refusal
 		// stands before the pair-proof clause is reached.
 		requirePreviewOverFullRefusal(t, s, sid, outcome, err)
 		return
@@ -195,7 +195,7 @@ func TestPreviewOverFullPairProofRefusal(t *testing.T) {
 
 // TestPreviewOverFullGuardRefusalNotAssessed proves a preview-over-full write
 // whose capture is NOT the assessed unaccounted-SourceOmitted tuple keeps the
-// existing guard refusal: retention is never a bypass for an accidental preview.
+// existing guard refusal: the latest attempt is never a bypass for an accidental preview.
 func TestPreviewOverFullGuardRefusalNotAssessed(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e")

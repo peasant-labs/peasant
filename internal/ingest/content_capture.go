@@ -220,7 +220,7 @@ func captureTranscriptFile(ctx context.Context, fs FileSystem, idx Authoritative
 // refuses, so nothing is silently certified from an empty projection.
 func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data []byte, validate func([]byte) (*IgnoredSourceRecord, error)) ([]IgnoredSourceRecord, error) {
 	if session.ContentOmitted {
-		return nil, captureFailure(session, 0, fmt.Errorf("the retained transcript omits source records that ingest left out before writing it, so a strict capture cannot certify it as the source's own"))
+		return nil, captureFailure(session, 0, fmt.Errorf("the stored transcript omits source records that ingest left out before writing it, so a strict capture cannot certify it as the source's own"))
 	}
 	var ignored []IgnoredSourceRecord
 	var refusal *UnrepresentedRecordError
@@ -392,7 +392,7 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 }
 
 // claudeCaptureRecordValidator validates one Claude source record against the
-// strict capture vocabulary. The retained capture exit and the
+// strict capture vocabulary. The stored capture exit and the
 // managed-generation producer share it, so both certify exactly the same
 // records and neither drifts from the other.
 func claudeCaptureRecordValidator(raw []byte) (*IgnoredSourceRecord, error) {

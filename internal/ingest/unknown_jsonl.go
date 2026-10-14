@@ -279,7 +279,7 @@ func validateRetainingJSONL(ctx context.Context, session DiscoveredSession, data
 		return nil, &captureCorruptionError{err: err}
 	}
 	if err == nil && omitted && !sawOmission {
-		return nil, captureFailure(session, 0, fmt.Errorf("the retained transcript omits source records without positional evidence; restore the source before certifying capture"))
+		return nil, captureFailure(session, 0, fmt.Errorf("the stored transcript omits source records without positional evidence; restore the source before certifying capture"))
 	}
 	return ignored, err
 }

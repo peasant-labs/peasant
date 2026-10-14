@@ -167,7 +167,7 @@ type EarlierPartition struct {
 // owner names the generation or snapshot session every entry must carry.
 func (e EarlierPartition) Validate(index int, sessionID schema.SessionID, harness schema.Harness) error {
 	if !e.State.IsValid() {
-		return fmt.Errorf("indexformat.EarlierPartition.Validate earlier[%d]: state %q is outside the closed earlier-history set; retained history cannot be explained; use a published state", index, e.State)
+		return fmt.Errorf("indexformat.EarlierPartition.Validate earlier[%d]: state %q is outside the closed earlier-history set; stored history cannot be explained; use a published state", index, e.State)
 	}
 	return e.Content.Validate(fmt.Sprintf("earlier[%d]", index), sessionID, harness)
 }
@@ -746,7 +746,7 @@ func (s ReadSnapshot) validateLegacy() error {
 		return fmt.Errorf("indexformat.ReadSnapshot.Validate: completeness %q is set at index version 1; a legacy read has no managed generation; clear it", s.Completeness)
 	}
 	if s.LegacySource.IsZero() {
-		return fmt.Errorf("indexformat.ReadSnapshot.Validate: index version 1 carries no legacy source; the reader cannot locate the retained transcript; set the local harness and path")
+		return fmt.Errorf("indexformat.ReadSnapshot.Validate: index version 1 carries no legacy source; the reader cannot locate the stored transcript; set the local harness and path")
 	}
 	hasMainContent := len(s.Main.Entries) > 0 || len(s.Main.NativeMetadata) > 0
 	hasOtherContent := len(s.Earlier) > 0 || len(s.Content) > 0

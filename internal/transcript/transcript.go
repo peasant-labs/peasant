@@ -815,7 +815,7 @@ func turnsToDetail(folded []ingest.Turn) []schema.TurnDetail {
 }
 
 // earlierHistoryToDetail converts retained earlier-history partitions to wire
-// sections. Nil input stays nil so sessions without retained history omit the
+// sections. Nil input stays nil so sessions without stored history omit the
 // field; an explicitly empty retained set is preserved as-is by the caller.
 func earlierHistoryToDetail(sections []ingest.EarlierHistorySection) []schema.EarlierHistorySection {
 	if sections == nil {

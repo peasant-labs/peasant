@@ -312,7 +312,7 @@ func Sessions() []ingest.Session {
 	sessions = append(sessions, heroTitleFixtureSessions()...)
 	// Additive mounted current-parent navigation fixture — appended last for the
 	// same reason. See context_navigation.yaml for the stored sessions, their
-	// resolved context/source and parent links and retained history.
+	// resolved context/source and parent links and stored history.
 	sessions = append(sessions, canonicalContextNavigationFixture.storedSessions()...)
 	return sessions
 }

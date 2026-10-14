@@ -16,7 +16,7 @@ import (
 var _ AuthoritativeTranscriptIndexer = (*OpenCodeIndexer)(nil)
 var _ StoredContentCapturer = (*OpenCodeIndexer)(nil)
 
-// CaptureStoredContent reports the retained OpenCode input's own
+// CaptureStoredContent reports the stored OpenCode input's own
 // completeness. A legacy directory-origin session is parsed from the exact
 // native message/part tree captured for it, the same tree an ordinary index
 // run hashes; a message whose part directory is absent means rows the adapter

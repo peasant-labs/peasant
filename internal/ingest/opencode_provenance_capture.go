@@ -418,7 +418,7 @@ func (idx *OpenCodeIndexer) OpenCodeHistoricalProvenanceBlocks(_ context.Context
 }
 
 // loadOpenCodeHistoricalSemanticMessages reads a legacy or semantic session
-// through the same readers the retained indexer uses: the managed projection
+// through the same readers the stored indexer uses: the managed projection
 // for a managed origin, and the message/part files for a file origin. It never
 // reparses a current typed row, and it never writes to the source.
 func (idx *OpenCodeIndexer) loadOpenCodeHistoricalSemanticMessages(session DiscoveredSession) ([]openCodeSemanticMessage, error) {
@@ -452,7 +452,7 @@ func (idx *OpenCodeIndexer) loadOpenCodeHistoricalSemanticMessages(session Disco
 	}
 }
 
-// OpenCodeProvenancePrior carries the alias state, retained captured prefix, and
+// OpenCodeProvenancePrior carries the alias state, stored captured prefix, and
 // generation completeness a prior candidate or activation left behind. The
 // indexer consults it before allocating, so a re-run, an append, a retry, or a
 // reopen reuses every identity and every inherited block it already proved.
@@ -486,7 +486,7 @@ type OpenCodeProvenancePrior struct {
 // through the typed classification and fork proof into the shared validated
 // generation contract, and returns the full captured bytes and the prior
 // document activation persists. The attempt's prior source supplies the
-// last-good alias state, retained captured prefix, and completeness, so
+// last-good alias state, stored captured prefix, and completeness, so
 // unchanged recorded entries keep stable refs, an append reuses its identities, a
 // retry reuses its allocations, and a deleted parent cannot blank the captured
 // child prefix. An incomplete capture is returned to activation with its
@@ -634,7 +634,7 @@ func openCodeAttemptMetadata(metadata *schema.UnifiedMetadata, session Discovere
 var _ GenerationBuilder = (*OpenCodeIndexer)(nil)
 
 // nextOpenCodeProvenancePrior builds the prior document the activation persists
-// beside the new generation: the new aliases, the retained captured prefix the
+// beside the new generation: the new aliases, the stored captured prefix the
 // candidate settled on, and whether a complete generation now exists.
 func nextOpenCodeProvenancePrior(built indexformat.V2, snapshot OpenCodeHistorySnapshot) ([]byte, error) {
 	state, err := PriorStateFromGeneration(built.Generation)

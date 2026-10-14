@@ -308,8 +308,9 @@ func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.Sess
 }
 
 // durableParentTarget returns the durable started_by target when the
-// relationship evidence names a known retained session. It mirrors the
-// snapshot's logical-parent derivation so activation and reads agree.
+// relationship evidence names a session whose target state is known or
+// target_known_retained. It mirrors the snapshot's logical-parent derivation so
+// activation and reads agree.
 func durableParentTarget(relationships []schema.SessionRelationship) *schema.SessionID {
 	for i := range relationships {
 		relationship := relationships[i]

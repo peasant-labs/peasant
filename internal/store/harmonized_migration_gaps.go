@@ -43,11 +43,11 @@ func verifyMigrateCarriedGaps(conn *sqlite.Conn, oracle *migrateOracle) *migrate
 		return &migrateShadowMismatch{Dimension: "carried-gaps", Reason: fmt.Sprintf("read migration gap accounting: %v", err)}
 	}
 	if len(stored) != len(oracle.gaps) {
-		return &migrateShadowMismatch{Dimension: "carried-gaps", Reason: fmt.Sprintf("session holds %d accounted gaps, want %d; missing children require durable accounting and re-harvest from the retained transcript", len(stored), len(oracle.gaps))}
+		return &migrateShadowMismatch{Dimension: "carried-gaps", Reason: fmt.Sprintf("session holds %d accounted gaps, want %d; missing children require durable accounting and re-harvest from the stored transcript", len(stored), len(oracle.gaps))}
 	}
 	for i, want := range oracle.gaps {
 		if stored[i] != want {
-			return &migrateShadowMismatch{Dimension: "carried-gaps", Reason: fmt.Sprintf("accounted gap %d for %s.%s changed; preserve accounting and re-harvest from the retained transcript", want.id, want.sourceTable, want.sourceColumn)}
+			return &migrateShadowMismatch{Dimension: "carried-gaps", Reason: fmt.Sprintf("accounted gap %d for %s.%s changed; preserve accounting and re-harvest from the stored transcript", want.id, want.sourceTable, want.sourceColumn)}
 		}
 	}
 	return nil

@@ -70,7 +70,7 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 // bound to the current publication metadata capture. A managed transcript's
 // bytes are what the capture hashed, so a file input binds. A directory tree
 // is read beside a header the capture hashed without the tree, so a tree read
-// from retained input has no byte proof against the capture and its index is
+// from stored input has no byte proof against the capture and its index is
 // held unbound; the tree this run captured with the artifact is the tree the
 // capture saw, and binds.
 func (input *CapturedIndexInput) bindsPublication() bool {
@@ -173,7 +173,7 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 // refusal once. A session with no stored pair identity is selected so the
 // index path can establish it. The caller supplies the session's effective
 // target, so a session with no readable native snapshot compares against the
-// retained baseline instead of being selected forever against the native
+// stored baseline instead of being selected forever against the native
 // override.
 func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target HarvesterVersions) bool {
 	if state == nil || state.ArtifactHash == nil {
@@ -191,7 +191,7 @@ func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target Harveste
 			!permanentRefusalIsSettled(state, target))
 }
 
-// scanPeasantSyncSessions walks the retained tree and returns one target per
+// scanPeasantSyncSessions walks the stored tree and returns one target per
 // session it holds. It is the whole-tree reader, and only `harvest index`
 // runs it: the ordinary harvest selects its work from the database. It opens
 // no transcript and takes no lock; the pair is read only when a chosen target

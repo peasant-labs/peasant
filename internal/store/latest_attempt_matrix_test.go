@@ -30,26 +30,26 @@ const (
 
 // The generation identifiers the matrix builds and asserts.
 const (
-	retentionMatrixFullPrior  = "gen_full_prior"
+	latestAttemptMatrixFullPrior  = "gen_full_prior"
 	latestAttemptMatrixCandidate  = "gen_matrix_candidate"
-	retentionMatrixPreviewPri = "gen_matrix_preview_prior"
+	latestAttemptMatrixPreviewPri = "gen_matrix_preview_prior"
 )
 
-type retentionAttemptFixture struct {
+type latestAttemptFixture struct {
 	PairIdentity string `yaml:"pairIdentity"`
 	Session      struct {
 		ID string `yaml:"id"`
 	} `yaml:"session"`
-	Cases []retentionAttemptCase `yaml:"cases"`
+	Cases []latestAttemptCase `yaml:"cases"`
 }
 
-// retentionAttemptCase varies one clause of the eligibility predicate. An
+// latestAttemptCase varies one clause of the eligibility predicate. An
 // omitted field keeps the passing value; Mode is a pointer so the ordinary
 // empty-string mode is distinguishable from an absent field. WantOK marks a
 // row whose ordinary path must commit; it is mutually exclusive with
 // WantErrorContains, and one of the two is required on every negative row so a
 // row cannot pass on an unrelated downstream guard.
-type retentionAttemptCase struct {
+type latestAttemptCase struct {
 	Name              string   `yaml:"name"`
 	Routes            []string `yaml:"routes"`
 	Result            string   `yaml:"result"`
@@ -58,14 +58,14 @@ type retentionAttemptCase struct {
 	Mode              *string  `yaml:"mode"`
 	Certificate       string   `yaml:"certificate"`
 	Identity          string   `yaml:"identity"`
-	WantLatestAttempt      bool     `yaml:"want_latest_attempt"`
+	WantLatestAttempt bool     `yaml:"want_latest_attempt"`
 	WantOK            bool     `yaml:"want_ok"`
 	WantErrorContains string   `yaml:"want_error_contains"`
 }
 
-func loadLatestAttemptFixture(t testing.TB) retentionAttemptFixture {
+func loadLatestAttemptFixture(t testing.TB) latestAttemptFixture {
 	t.Helper()
-	var fixture retentionAttemptFixture
+	var fixture latestAttemptFixture
 	decoder := yaml.NewDecoder(strings.NewReader(string(latestAttemptYAML)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
@@ -108,7 +108,7 @@ func assessedStrictRefusedPreview(t testing.TB, v2 indexformat.V2) ingest.Sessio
 	return capture
 }
 
-func retentionFixtureDefault(value, fallback string) string {
+func latestAttemptFixtureDefault(value, fallback string) string {
 	if value == "" {
 		return fallback
 	}
@@ -125,27 +125,27 @@ func TestLatestAttemptEligibilityMatrix(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			for _, route := range c.Routes {
 				t.Run(route, func(t *testing.T) {
-					runRetentionMatrixRoute(t, fixture, c, route)
+					runLatestAttemptMatrixRoute(t, fixture, c, route)
 				})
 			}
 		})
 	}
 }
 
-func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c retentionAttemptCase, route string) {
+func runLatestAttemptMatrixRoute(t *testing.T, fixture latestAttemptFixture, c latestAttemptCase, route string) {
 	t.Helper()
 	if c.WantOK && c.WantErrorContains != "" {
 		t.Fatalf("row %q expects both success and an error; want_ok and want_error_contains are mutually exclusive", c.Name)
 	}
-	result := retentionFixtureDefault(c.Result, "managed")
-	completeness := retentionFixtureDefault(c.Completeness, "complete")
-	captureKind := retentionFixtureDefault(c.Capture, "assessed")
+	result := latestAttemptFixtureDefault(c.Result, "managed")
+	completeness := latestAttemptFixtureDefault(c.Completeness, "complete")
+	captureKind := latestAttemptFixtureDefault(c.Capture, "assessed")
 	mode := string(ingest.SessionEntryWriteReplaceAll)
 	if c.Mode != nil {
 		mode = *c.Mode
 	}
-	certificate := retentionFixtureDefault(c.Certificate, "publishable")
-	identity := retentionFixtureDefault(c.Identity, "stored")
+	certificate := latestAttemptFixtureDefault(c.Certificate, "publishable")
+	identity := latestAttemptFixtureDefault(c.Identity, "stored")
 
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID(fixture.Session.ID)
@@ -157,7 +157,7 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 		seedGenerationSession(t, s, string(sid))
 	case "non_publishable":
 		seedGenerationSession(t, s, string(sid))
-		if _, err := s.ActivateGeneration(context.Background(), testActivation(t, sid, retentionMatrixPreviewPri)); err != nil {
+		if _, err := s.ActivateGeneration(context.Background(), testActivation(t, sid, latestAttemptMatrixPreviewPri)); err != nil {
 			t.Fatalf("seed the non-publishable certificate: %v", err)
 		}
 	default:
@@ -224,7 +224,7 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 
 	var (
 		latestAttempt bool
-		routeErr error
+		routeErr      error
 	)
 	switch route {
 	case latestAttemptRouteSingle, latestAttemptRouteBatch:
@@ -311,7 +311,7 @@ func runRetentionMatrixRoute(t *testing.T, fixture retentionAttemptFixture, c re
 			t.Fatalf("latest-attempt pair identity = %q, want %q", pointer.artifactHash, fixture.PairIdentity)
 		}
 		if certificate == "publishable" {
-			if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != retentionMatrixFullPrior {
+			if active, err := s.activeGenerationID(context.Background(), sid); err != nil || active != latestAttemptMatrixFullPrior {
 				t.Fatalf("active = %q (err=%v), want the untouched full prior", active, err)
 			}
 		}

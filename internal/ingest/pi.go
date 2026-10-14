@@ -199,7 +199,7 @@ func (a *PiAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSessi
 }
 
 // piTranscriptMetadata reads only the captured document; native project and Git
-// attribution stay in ExtractMetadata and are preserved during retained refresh.
+// attribution stay in ExtractMetadata and are preserved during stored refresh.
 func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMetadata, error) {
 	rows, err := NewPiIndexer(nil).project(doc, session.SessionID)
 	if err != nil {

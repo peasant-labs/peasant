@@ -33,14 +33,14 @@ const (
 // OpenCodeProvenanceFile is one native file attached to a user message. The
 // display text follows the same precedence the row normalizer uses (name,
 // then URI, then description) so the classified media block shows what the
-// retained transcript shows.
+// stored transcript shows.
 type OpenCodeProvenanceFile struct {
 	Name        string
 	URI         string
 	Description string
 }
 
-// DisplayText reports the media label the retained transcript shows.
+// DisplayText reports the media label the stored transcript shows.
 func (f OpenCodeProvenanceFile) DisplayText() string {
 	if f.Name != "" {
 		return f.Name
@@ -196,7 +196,7 @@ func ClassifyOpenCodeMessage(msg OpenCodeProvenanceMessage, attr OpenCodeMessage
 		return nil, fmt.Errorf("ingest.ClassifyOpenCodeMessage: session identity is empty for message %q; the block cannot be scoped; supply the native session id", msg.MessageID)
 	}
 	if !attr.Ownership.IsValid() {
-		return nil, fmt.Errorf("ingest.ClassifyOpenCodeMessage: message %q ownership %q is outside the closed set; retained history cannot be explained; use a published ownership", msg.MessageID, attr.Ownership)
+		return nil, fmt.Errorf("ingest.ClassifyOpenCodeMessage: message %q ownership %q is outside the closed set; stored history cannot be explained; use a published ownership", msg.MessageID, attr.Ownership)
 	}
 	if msg.Shape != OpenCodeProvenanceCurrent && msg.Shape != OpenCodeProvenanceV2 &&
 		msg.Shape != OpenCodeProvenanceLegacy && msg.Shape != OpenCodeProvenanceSemantic {

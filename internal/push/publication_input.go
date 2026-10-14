@@ -49,7 +49,7 @@ func ValidatePublicationInput(input ingest.PublicationInputBundle) error {
 	if input.Readiness != ingest.PublicationReady {
 		return fmt.Errorf("load publication input from peasant.db: %w; metadata and indexed entries are not a verified capture; nothing uploaded; "+
 			"incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; "+
-			"run peasant ingest with the retained source available and retry", ErrMetadataMissing)
+			"run peasant ingest with the stored source available and retry", ErrMetadataMissing)
 	}
 	if input.Metadata.Model == "" {
 		return fmt.Errorf("load publication input from peasant.db: %w; nothing uploaded; run peasant ingest with source model evidence and retry", ErrNoModel)

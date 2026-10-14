@@ -102,9 +102,9 @@ type sessionEntryWriteOutcome struct {
 	// latestAttemptPreview reports that the write retained the latest preview
 	// attempt instead of replacing the active authority. Counts stay zero and
 	// no active-authority statement ran.
-	latestAttemptPreview    bool
-	sessionEntriesHash string
-	stats              ingest.SessionEntryWriteStats
+	latestAttemptPreview bool
+	sessionEntriesHash   string
+	stats                ingest.SessionEntryWriteStats
 }
 
 // IndexSessionEntries atomically replaces all session_entries for a session.
@@ -206,7 +206,7 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
-	// A forced retained-content repair replaces the projection, but still uses
+	// A forced stored-content repair replaces the projection, but still uses
 	// the same proven metadata/index revision as a content-only backfill. Resolve
 	// it inside this savepoint before replacement can invalidate the old proof.
 	// An explicit rebuild carries the same repair semantics as an ordinary
@@ -226,8 +226,8 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
-	// The authoritative retention decision runs here, BEFORE the publication
-	// capture is persisted and before any format-change delete: a retention
+	// The authoritative latest-attempt decision runs here, BEFORE the publication
+	// capture is persisted and before any format-change delete: a latest-attempt
 	// write must not touch the active authority's representation, capture, or
 	// stamps. The decision re-runs the identity checks and never enters repair.
 	retainLatestAttempt, err := latestAttemptEligibleOnConn(conn, write)

@@ -1393,7 +1393,7 @@ func stampHarmonizedBookkeeping(conn *sqlite.Conn, sessionID schema.SessionID, s
 	}
 	// The active authority was finalized in place (skip or repair): the
 	// latest attempt is superseded, so its pointer clears in this same
-	// transaction. The retention path never reaches this function, so a
+	// transaction. The latest-attempt path never reaches this function, so a
 	// latest attempt survives its own write; an identical-candidate
 	// AlreadyCommitted retry reports through the identity check and never
 	// reaches here either.

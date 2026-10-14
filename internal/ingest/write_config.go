@@ -39,7 +39,7 @@ type WriteConfig struct {
 	// BufferBytes is per-worker parser scratch headroom in the derived staged
 	// budget. It does not allocate a separate buffer pool. YAML: bufferBytes.
 	BufferBytes int64 `yaml:"bufferBytes"`
-	// StagedMemoryBytes bounds admitted native candidates. Parser scratch has
+	// StagedMemoryBytes bounds admitted generation candidates. Parser scratch has
 	// separate per-worker headroom. Zero means derive: 2×BatchBytes (staging and
 	// activation lanes' in-flight bounded batches) plus one BufferBytes per
 	// effective worker. The prepare side blocks at the cap. YAML:

@@ -17,17 +17,17 @@ func latestAttemptPreviewForTest(t *testing.T, s *Store, sid schema.SessionID, i
 	setStoredArtifactHash(t, s, sid, identity)
 	outcome, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b"))
 	if err != nil {
-		t.Fatalf("retention: %v", err)
+		t.Fatalf("latest-attempt write: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
-		t.Fatalf("retention disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
+		t.Fatalf("latest-attempt disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 }
 
-// TestRetentionPointerClearsOnActiveMove proves the first pointer-clear site:
+// TestLatestAttemptPointerClearsOnActiveMove proves the first pointer-clear site:
 // installing a new active authority clears the latest-attempt pointer in the same
 // transaction.
-func TestRetentionPointerClearsOnActiveMove(t *testing.T) {
+func TestLatestAttemptPointerClearsOnActiveMove(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0b0b0")
 	latestAttemptPreviewForTest(t, s, sid, hexIdentity('1'))
@@ -51,10 +51,10 @@ func TestRetentionPointerClearsOnActiveMove(t *testing.T) {
 	}
 }
 
-// TestRetentionPointerClearsOnSkipFinalization proves the third pointer-clear
+// TestLatestAttemptPointerClearsOnSkipFinalization proves the third pointer-clear
 // site: an in-place skip finalization of the active authority clears the
 // latest-attempt pointer through the shared bookkeeping.
-func TestRetentionPointerClearsOnSkipFinalization(t *testing.T) {
+func TestLatestAttemptPointerClearsOnSkipFinalization(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("c1c1c1c1-c1c1-41c1-81c1-c1c1c1c1c1c1")
 	latestAttemptPreviewForTest(t, s, sid, hexIdentity('2'))
@@ -81,10 +81,10 @@ func TestRetentionPointerClearsOnSkipFinalization(t *testing.T) {
 	}
 }
 
-// TestRetentionPointerClearsOnRepresentationReplacement proves the second
+// TestLatestAttemptPointerClearsOnRepresentationReplacement proves the second
 // pointer-clear site: a representation replacement clears the latest-attempt pointer
 // alongside the active pointer.
-func TestRetentionPointerClearsOnRepresentationReplacement(t *testing.T) {
+func TestLatestAttemptPointerClearsOnRepresentationReplacement(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2")
 	latestAttemptPreviewForTest(t, s, sid, hexIdentity('3'))
@@ -143,10 +143,10 @@ func TestLatestAttemptCleanupInactiveGenerationRefusesIt(t *testing.T) {
 	}
 }
 
-// TestRetentionSavepointFailureRollsBack proves the latest-attempt transaction is
+// TestLatestAttemptSavepointFailureRollsBack proves the latest-attempt transaction is
 // atomic: a failure at the mid-activation seam rolls the savepoint back and
 // leaves the pointer and the active authority unchanged.
-func TestRetentionSavepointFailureRollsBack(t *testing.T) {
+func TestLatestAttemptSavepointFailureRollsBack(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("a5a5a5a5-a5a5-45a5-85a5-a5a5a5a5a5a5")
 	seedFullAuthority(t, s, sid)
@@ -160,7 +160,7 @@ func TestRetentionSavepointFailureRollsBack(t *testing.T) {
 	installHarmonizedFault(t, harmonizedSeamMidActivationBatch)
 	outcome, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b"))
 	if err == nil {
-		t.Fatal("retention must fail at the injected seam")
+		t.Fatal("latest attempt must fail at the injected seam")
 	}
 	if outcome.Disposition != ingest.ActivationNotCommitted {
 		t.Fatalf("disposition = %v, want NotCommitted", outcome.Disposition)
@@ -183,10 +183,10 @@ func TestRetentionSavepointFailureRollsBack(t *testing.T) {
 	}
 }
 
-// TestRetentionSkipsRepairForCorruptAuthority proves a retention-eligible
+// TestLatestAttemptSkipsRepairForCorruptAuthority proves a latest-attempt-eligible
 // candidate never enters repair even when the active authority matches the
 // repair predicate, so A's objects are never rewritten from preview bytes.
-func TestRetentionSkipsRepairForCorruptAuthority(t *testing.T) {
+func TestLatestAttemptSkipsRepairForCorruptAuthority(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("b6b6b6b6-b6b6-46b6-86b6-b6b6b6b6b6b6")
 	seedFullAuthority(t, s, sid)
@@ -211,7 +211,7 @@ func TestRetentionSkipsRepairForCorruptAuthority(t *testing.T) {
 
 	outcome, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b"))
 	if err != nil {
-		t.Fatalf("retention over a repair-predicate authority: %v", err)
+		t.Fatalf("latest attempt over a repair-predicate authority: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview (never repair)", outcome.Disposition)
@@ -224,10 +224,10 @@ func TestRetentionSkipsRepairForCorruptAuthority(t *testing.T) {
 	}
 }
 
-// TestRetentionInvalidCandidateRefusesOnBothRoutes proves an identifier reuse
+// TestLatestAttemptInvalidCandidateRefusesOnBothRoutes proves an identifier reuse
 // with a different candidate binding is refused on the single route and on the
 // batch route, leaving the installed generation unchanged.
-func TestRetentionInvalidCandidateRefusesOnBothRoutes(t *testing.T) {
+func TestLatestAttemptInvalidCandidateRefusesOnBothRoutes(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("c7c7c7c7-c7c7-47c7-87c7-c7c7c7c7c7c7")
 	latestAttemptPreviewForTest(t, s, sid, hexIdentity('d'))

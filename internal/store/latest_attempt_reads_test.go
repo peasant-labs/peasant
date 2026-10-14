@@ -23,8 +23,8 @@ import (
 // generation's counts cannot pass by coincidence. Only the count fields are
 // replaced: a complete generation must keep its input-submission count.
 var (
-	authorityStats = countsFor(11, 22, 33, 66000)
-	latestAttemptStats  = countsFor(44, 55, 66, 132000)
+	authorityStats     = countsFor(11, 22, 33, 66000)
+	latestAttemptStats = countsFor(44, 55, 66, 132000)
 )
 
 // countsFor builds a producer-stat document with the supplied counts.
@@ -75,10 +75,10 @@ func latestAttemptPreviewWithStats(t *testing.T, s *Store, sid schema.SessionID,
 		ContentCapture: sourceOmittedPreviewWrite(),
 	})
 	if err != nil {
-		t.Fatalf("retention: %v", err)
+		t.Fatalf("latest-attempt write: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
-		t.Fatalf("retention disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
+		t.Fatalf("latest-attempt disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 }
 
@@ -489,7 +489,7 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 
 	// A target that cannot express a settle decision must never hide work: the
 	// settle clause is omitted, so the session stays listed exactly as it did
-	// before retention existed.
+	// before the latest attempt existed.
 	zeroAdapter := map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.Harness("claude-code"): {IndexerVersion: 18, AdapterVersion: 0},
 	}

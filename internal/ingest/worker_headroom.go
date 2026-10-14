@@ -3,7 +3,7 @@ package ingest
 import "fmt"
 
 // checkCapacities checks per-worker parser headroom without allocating unused
-// scratch buffers. Native candidates have separate byte admission accounting.
+// scratch buffers. Generation candidates have separate byte admission accounting.
 func (w WriteConfig) checkCapacities(workers int) error {
 	reserved := int64(workers) * w.BufferBytes
 	if reserved > w.StagedMemoryBytes {

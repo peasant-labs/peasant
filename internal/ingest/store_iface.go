@@ -49,8 +49,8 @@ type SessionLocation struct {
 	IndexedInputHash *string
 }
 
-// MetricSeedStore reads retained adapter statistics independently of computed
-// results. A nil seed means no retained input has been reconciled yet.
+// MetricSeedStore reads stored adapter statistics independently of computed
+// results. A nil seed means no stored input has been reconciled yet.
 type MetricSeedStore interface {
 	GetMetricSeed(ctx context.Context, sessionID SessionID) (*StatsInfo, error)
 }
@@ -359,8 +359,8 @@ type SessionEntryWriteResult struct {
 	// is unchanged, the latest-attempt pointer records the attempt, and the counts
 	// stay zero.
 	LatestAttemptPreview bool
-	Stats           SessionEntryWriteStats
-	Err             error
+	Stats                SessionEntryWriteStats
+	Err                  error
 }
 
 // SessionEntryBatchStore is required to persist pipeline index results. Metrics
@@ -1095,7 +1095,7 @@ type AnnotationPushRow struct {
 
 // StaleAdapterSessionLister is the database-driven inventory of sessions whose
 // stored adapter revision is behind this build, or whose stored schema this
-// build re-extracts from native input. It replaces the retained-tree walk the
+// build re-extracts from native input. It replaces the stored-tree walk the
 // ordinary harvest used to run to find adapter-refresh work. The production
 // store implements it; a store that does not is treated as having no such work.
 type StaleAdapterSessionLister interface {

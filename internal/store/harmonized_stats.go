@@ -258,11 +258,11 @@ func upsertCapturedStatsOnConn(conn *sqlite.Conn, stats CapturedStats) (bool, er
 }
 
 // capturedStatsFromRaw preserves measurements' presence and unmodeled kinds
-// before a retained metadata document is decoded through the wire struct.
+// before a stored metadata document is decoded through the wire struct.
 func capturedStatsFromRaw(raw json.RawMessage, harness schema.Harness) (CapturedStats, []schema.DiagnosticEntry, error) {
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return CapturedStats{}, nil, fmt.Errorf("store: decode retained metadata stats for harness %s before capture: %w; no measurements were written; restore valid retained metadata and retry", harness, err)
+		return CapturedStats{}, nil, fmt.Errorf("store: decode stored metadata stats for harness %s before capture: %w; no measurements were written; restore valid stored metadata and retry", harness, err)
 	}
 	stats := CapturedStats{Source: StatsSourceHarness}
 	seed, present := document["stats"]

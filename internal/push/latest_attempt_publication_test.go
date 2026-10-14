@@ -15,7 +15,7 @@ import (
 // so the coexistence reason must win and must name the way out.
 func TestValidatePublicationInputReportsLatestAttemptCoexistence(t *testing.T) {
 	bundle := ingest.PublicationInputBundle{
-		Readiness:              ingest.PublicationNeedsIngest,
+		Readiness:            ingest.PublicationNeedsIngest,
 		LatestAttemptPending: true,
 	}
 	err := push.ValidatePublicationInput(bundle)

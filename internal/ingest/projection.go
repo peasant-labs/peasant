@@ -318,7 +318,7 @@ func validateRetainedProvenance(resolved []*resolvedBlock) error {
 // attachRetainedSegmentRefs attaches every retained block's allocated ref to
 // the captured context segment its native node belongs to. The segment already
 // carries the capture's own refs; this adds the classified identity so the
-// retained content record and alias resolve through the durable generation.
+// stored content record and alias resolve through the durable generation.
 func attachRetainedSegmentRefs(segments []indexformat.ContextSegment, resolved []*resolvedBlock) ([]indexformat.ContextSegment, error) {
 	if len(resolved) == 0 {
 		return segments, nil
@@ -385,7 +385,7 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 	}
 	for i, state := range capture.EarlierStates {
 		if !state.IsValid() {
-			return fmt.Errorf("ingest.BuildGeneration: earlier[%d] state %q is outside the closed set; retained history cannot be explained; use a published state", i+1, state)
+			return fmt.Errorf("ingest.BuildGeneration: earlier[%d] state %q is outside the closed set; stored history cannot be explained; use a published state", i+1, state)
 		}
 	}
 	for i := range capture.Blocks {

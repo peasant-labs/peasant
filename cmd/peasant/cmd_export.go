@@ -626,7 +626,7 @@ func buildExportSessionsCommand() *cobra.Command {
 		Short: "Export session transcripts as JSON",
 		Long: `Export session transcripts as JSON files with full turn content.
 
-Each session uses a coherent snapshot of retained input and indexed coordinates,
+Each session uses a coherent snapshot of stored input and indexed coordinates,
 producing a JSON envelope with full content. Stale or unproven inputs are refused.
 
 Requires either --session for a single session or --session-from-file for a batch.`,

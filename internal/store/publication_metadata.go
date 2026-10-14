@@ -18,7 +18,7 @@ var _ ingest.PublicationInputReader = (*Store)(nil)
 var _ ingest.PublicationCaptureStore = (*Store)(nil)
 
 func publicationRepairError(reason string) error {
-	return fmt.Errorf("store: %s during publication metadata capture/read; publication is held to avoid mixing source evidence; run peasant ingest with retained sources and retry", reason)
+	return fmt.Errorf("store: %s during publication metadata capture/read; publication is held to avoid mixing source evidence; run peasant ingest with stored sources and retry", reason)
 }
 
 // Bulk discovery uses the same integrity rules without acquiring a connection

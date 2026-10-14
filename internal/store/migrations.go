@@ -388,7 +388,7 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V52: full transcript content
 		{DisableForeignKeys: true}, // V53: widen the two harness CHECK mirrors
 		nil,                        // V54: nullable actual index representation evidence
-		nil,                        // V55: retained adapter and artifact evidence
+		nil,                        // V55: stored adapter and artifact evidence
 		nil,                        // V56: nullable consumed index input evidence
 		nil,                        // V57: nullable metrics input/output evidence
 		nil,                        // V58: retained annotation retirement

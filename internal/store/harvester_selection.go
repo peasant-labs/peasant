@@ -20,7 +20,7 @@ var (
 // ListStaleAdapterSessions selects the sessions whose stored adapter revision
 // is behind this build's target for their harness, or whose stored schema is
 // one this build re-extracts from native input. It is the database-driven
-// replacement for the retained-tree walk that used to find adapter-refresh
+// replacement for the stored-tree walk that used to find adapter-refresh
 // work: it reads no file, and a NULL adapter_version counts as revision 1, so
 // at target 1 no legacy row is selected and nothing is re-extracted every run.
 //

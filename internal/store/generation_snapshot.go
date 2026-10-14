@@ -47,7 +47,7 @@ func (s *Store) GenerationSnapshotsSupported() bool {
 // deadlocking at pool size one.
 //
 // A session with no active generation yields a legacy V1 snapshot whose
-// LegacySource names the retained transcript; the caller uses the unchanged
+// LegacySource names the stored transcript; the caller uses the unchanged
 // legacy callback and never falls back to mutable native data for a V2 read.
 func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) (retErr error) {
 	return s.withSessionSnapshot(ctx, sessionID, true, ingest.SessionReadSelection{}, fn)
@@ -344,7 +344,7 @@ func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID)
 }
 
 // legacyReadSnapshot builds the unchanged V1 read: no managed generation, the
-// retained transcript named by LegacySource, and empty generation partitions so
+// stored transcript named by LegacySource, and empty generation partitions so
 // the caller uses the legacy overlay callback.
 func legacyReadSnapshot(row snapshotSessionRow) indexformat.ReadSnapshot {
 	session := schema.SessionDetailPayload{
