@@ -38,7 +38,6 @@ type claudeProducerEntry struct {
 	ToolCallIDLiteral   string `yaml:"toolCallIDLiteral"`
 	ExtraContains       string `yaml:"extraContains"`
 	RawByteLength       int    `yaml:"rawByteLength"`
-	RawByteLengthSet    bool   `yaml:"rawByteLengthSet"`
 }
 
 type claudeProducerCase struct {
@@ -363,11 +362,6 @@ func assertClaudeProducerEntries(t *testing.T, row claudeProducerCase, entries [
 		if want.RawByteLength > 0 {
 			if entry.RawByteLength == nil || *entry.RawByteLength != want.RawByteLength {
 				t.Errorf("%s rawByteLength = %v, want %d", where, entry.RawByteLength, want.RawByteLength)
-			}
-		}
-		if want.RawByteLengthSet {
-			if entry.RawByteLength == nil || *entry.RawByteLength <= 0 {
-				t.Errorf("%s rawByteLength = %v, want a positive measured size", where, entry.RawByteLength)
 			}
 		}
 	}

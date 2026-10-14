@@ -192,7 +192,7 @@ cases:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:g3"
     entries:
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "small"}
-      - {depth: 0, role: tool, entryType: tool_result, parentIndex: -1, toolCallIDFromIndex: -1, toolCallIDLiteral: "toolu_big", extraContains: "omittedRecord", rawByteLengthSet: true, previewContains: "over the"}
+      - {depth: 0, role: tool, entryType: tool_result, parentIndex: -1, toolCallIDFromIndex: -1, toolCallIDLiteral: "toolu_big", extraContains: "omittedRecord", rawByteLength: 482, previewContains: "over the"}
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after big"}
 
   - name: lost-tool-use-result
