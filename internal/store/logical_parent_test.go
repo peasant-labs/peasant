@@ -38,12 +38,12 @@ type logicalParentCase struct {
 }
 
 type logicalParentFixture struct {
-	Child                   string             `yaml:"child"`
-	Target                  string             `yaml:"target"`
-	Alternate               string             `yaml:"alternate"`
-	ActiveGeneration        string             `yaml:"activeGeneration"`
-	LatestAttemptGeneration string             `yaml:"latestAttemptGeneration"`
-	RequiredNames           []string           `yaml:"requiredNames"`
+	Child                   string              `yaml:"child"`
+	Target                  string              `yaml:"target"`
+	Alternate               string              `yaml:"alternate"`
+	ActiveGeneration        string              `yaml:"activeGeneration"`
+	LatestAttemptGeneration string              `yaml:"latestAttemptGeneration"`
+	RequiredNames           []string            `yaml:"requiredNames"`
 	Cases                   []logicalParentCase `yaml:"cases"`
 }
 
