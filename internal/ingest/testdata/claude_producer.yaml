@@ -1,0 +1,413 @@
+# Claude managed-generation producer fixtures.
+#
+# Each case captures one Claude transcript as bytes and states, literally, the
+# generation the production builder must emit from it: the classifier's record
+# and block native keys (observed as the persisted `block:` aliases, in resolved
+# order), the admitted submission keys (the `accept:` aliases), the shared
+# counts, the prose-title refs, and each stored entry's role, entry type, part
+# type, thinking flag, depth, parent link, tool correlation, private extension,
+# raw size and preview. A refusal case states that the builder must refuse and
+# that the refusal must not carry the recorded locator or a raw kernel cause.
+#
+# The default session is 99d59925-36bc-424c-a789-8be54d9702ba; a case that
+# names another recorded session or a parent states it.
+#
+# The managed stream is pinned directly rather than by comparing against the
+# retained entry stream: the managed block channels deliberately differ from the
+# retained shape where the plan requires it (a tool result whose call was never
+# observed is demoted to depth 0 and names its source tool id directly, and a
+# tool entry's content preview is the projection's own tool payload), so a
+# field-for-field retained comparison would assert the wrong contract.
+cases:
+  - name: root-plain
+    transcript: |
+      {"type":"user","uuid":"u1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello there"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"I will read it"}]}}
+      {"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"second question"}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u2"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u2"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "hello there"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "I will read it"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "I will read it"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "second question"}
+
+  - name: system-injected-meta
+    transcript: |
+      {"type":"user","uuid":"m1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","isMeta":true,"message":{"role":"user","content":"[Image: original 100x100, displayed at 100x100]"}}
+      {"type":"user","uuid":"r1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"<system-reminder>be careful</system-reminder>"}}
+      {"type":"user","uuid":"p1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"real prompt"}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:m1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:r1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:p1"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:p1"
+    entries:
+      - {depth: 0, role: system, entryType: system, parentIndex: -1, toolCallIDFromIndex: -1, preview: "[Image: original 100x100, displayed at 100x100]"}
+      - {depth: 0, role: system, entryType: system, parentIndex: -1, toolCallIDFromIndex: -1, preview: "<system-reminder>be careful</system-reminder>"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "real prompt"}
+
+  - name: ask-user-question-answers
+    transcript: |
+      {"type":"user","uuid":"q0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"pick one"}}
+      {"type":"assistant","uuid":"q1","parentUuid":"q0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"tool_use","id":"toolu_ask","name":"AskUserQuestion","input":{"questions":[]}},{"type":"tool_use","id":"toolu_ask2","name":"AskUserQuestion","input":{"questions":[]}}]}}
+      {"type":"user","uuid":"q2","parentUuid":"q1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"answer one"},{"type":"tool_result","tool_use_id":"toolu_ask2","content":"answer two"}]}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 3
+    titleRefCount: 3
+    distinctSubmissionRefs: true
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q1:1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:1"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:answer:toolu_ask"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:q2:answer:toolu_ask2"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "pick one"}
+      - {depth: 0, role: assistant, entryType: tool_use, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true}
+      - {depth: 1, role: assistant, entryType: tool_use, partType: tool_use, parentIndex: 1, toolCallIDFromIndex: 2, preview: '{"questions":[]}'}
+      - {depth: 1, role: assistant, entryType: tool_use, partType: tool_use, parentIndex: 1, toolCallIDFromIndex: 3, preview: '{"questions":[]}'}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true}
+      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 2, preview: "answer one"}
+      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 3, preview: "answer two"}
+
+  - name: control-records
+    transcript: |
+      {"type":"user","uuid":"c1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"<command-name>/demo:skill</command-name>"}}
+      {"type":"permission-mode","uuid":"c2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","permissionMode":"acceptEdits"}
+      {"type":"user","uuid":"c3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after control"}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:c1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:c2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:c3"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:c1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:c3"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "<command-name>/demo:skill</command-name>", extraContains: "command_name"}
+      - {depth: 0, role: system, entryType: text, partType: permission-mode, parentIndex: -1, toolCallIDFromIndex: -1, preview: "permission mode: acceptEdits", extraContains: "permissionMode"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after control"}
+
+  - name: continuation
+    transcript: |
+      {"type":"user","uuid":"k1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"before compact"}}
+      {"type":"system","uuid":"k2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","subtype":"compact_boundary","compactMetadata":{"trigger":"auto"}}
+      {"type":"user","uuid":"k3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after compact"}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:k1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:k2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:k3"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:k1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:k3"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "before compact"}
+      - {depth: 0, role: system, entryType: system, partType: compact-boundary, parentIndex: -1, toolCallIDFromIndex: -1, preview: "Context compacted (auto)", extraContains: "compactMetadata"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after compact"}
+
+  - name: unknown-kind-retained
+    transcript: |
+      {"type":"user","uuid":"z1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"known"}}
+      {"type":"mystery-kind","uuid":"z2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","payload":{"secret":"kept"}}
+    completeness: complete
+    turnCount: 1
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:z1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:z2"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:z1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "known"}
+      - {depth: 0, role: system, entryType: system, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true, extraContains: "retainedUnknown"}
+
+  - name: accounted-omission-placeholder
+    transcript: |
+      {"type":"user","uuid":"o1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"before omission"}}
+      {"peasantOmittedRecord":{"reason":"record_too_large","line":2,"bytes":300000000,"limitBytes":268435456,"toolCallId":"toolu_omit"}}
+      {"type":"user","uuid":"o2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after omission"}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:o1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:o2"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:o1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:o2"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "before omission"}
+      - {depth: 0, role: tool, entryType: tool_result, parentIndex: -1, toolCallIDFromIndex: -1, toolCallIDLiteral: "toolu_omit", extraContains: "omittedRecord", rawByteLength: 300000000, previewContains: "over the"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after omission"}
+
+  - name: raw-oversized-placeholder
+    maxRecordBytes: 200
+    transcript: |
+      {"type":"user","uuid":"g1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"small"}}
+      {"type":"user","uuid":"g2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_big","content":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}}
+      {"type":"user","uuid":"g3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after big"}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:g1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:g3"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:g1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:g3"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "small"}
+      - {depth: 0, role: tool, entryType: tool_result, parentIndex: -1, toolCallIDFromIndex: -1, toolCallIDLiteral: "toolu_big", extraContains: "omittedRecord", rawByteLengthSet: true, previewContains: "over the"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after big"}
+
+  - name: lost-tool-use-result
+    transcript: |
+      {"type":"user","uuid":"l1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"ask"}}
+      {"type":"user","uuid":"l2","parentUuid":"l1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_missing","content":"orphan output"}]}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:l1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:l2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:l2:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:l1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "ask"}
+      - {depth: 0, role: tool, entryType: tool_result, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true}
+      - {depth: 0, role: tool, entryType: tool_result, parentIndex: -1, toolCallIDFromIndex: -1, toolCallIDLiteral: "toolu_missing", preview: "orphan output"}
+
+  - name: flag-without-stand-in
+    contentOmitted: true
+    transcript: |
+      {"type":"user","uuid":"f1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"one"}}
+      {"type":"assistant","uuid":"f2","parentUuid":"f1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"two"}]}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:f1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:f2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:f2:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:f1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "one"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "two"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "two"}
+
+  - name: repeated-uuid-distinct-groups
+    transcript: |
+      {"type":"user","uuid":"dup-1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"first occurrence"}}
+      {"type":"user","uuid":"dup-1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"second occurrence"}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:dup-1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:dup-1:dup2"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:dup-1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:dup-1:dup2"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "first occurrence"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "second occurrence"}
+
+  - name: uuid-less-anchor
+    transcript: |
+      {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"no uuid one"}}
+      {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"no uuid two"}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:1"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "no uuid one"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "no uuid two"}
+
+  - name: empty-transcript
+    transcript: ""
+    completeness: complete
+    turnCount: 0
+    inputSubmissionCount: 0
+    titleRefCount: 0
+    keys: []
+    acceptKeys: []
+    entries: []
+
+  - name: subagent-agent-file
+    recordedSessionId: agent-a3aee4f
+    recordedParent: 99d59925-36bc-424c-a789-8be54d9702ba
+    transcript: |
+      {"type":"user","uuid":"sa1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","agentId":"a3aee4f","isSidechain":true,"message":{"role":"user","content":"agent prompt"}}
+      {"type":"assistant","uuid":"sa2","parentUuid":"sa1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","agentId":"a3aee4f","isSidechain":true,"message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"agent reply"}]}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:agent-a3aee4f:sa1"
+      - "claude:agent-a3aee4f:sa2"
+      - "claude:agent-a3aee4f:sa2:0"
+    acceptKeys:
+      - "claude:agent-a3aee4f:sa1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "agent prompt"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "agent reply"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "agent reply"}
+
+  - name: fork-restamped-copies
+    recordedContextFrom: 22222222-2222-4222-8222-222222222222
+    transcript: |
+      {"type":"user","uuid":"w1","parentUuid":"v1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"forked from foreign"}}
+      {"type":"user","uuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"foreign copied"}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:w1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:w1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "forked from foreign"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "foreign copied"}
+
+  - name: legacy-fallback-sibling-available
+    sourcePath: /projects/proj/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+    siblings:
+      /projects/proj/22222222-2222-4222-8222-222222222222.jsonl: |
+        {"type":"user","uuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"foreign copied"}}
+    transcript: |
+      {"type":"user","uuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"foreign copied"}}
+      {"type":"user","uuid":"w1","parentUuid":"v1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"restamped copy"}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:w1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:w1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "foreign copied"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "restamped copy"}
+
+  - name: legacy-fallback-sibling-unavailable
+    sourcePath: /projects/proj/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+    transcript: |
+      {"type":"user","uuid":"w1","parentUuid":"v1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"restamped copy"}}
+      {"type":"user","uuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"foreign copied"}}
+    wantRefusal: true
+    wantRefusalLocatorFree: true
+
+  - name: proof-failure-refusal
+    recordedSessionId: agent-a3aee4f
+    recordedParent: 99d59925-36bc-424c-a789-8be54d9702ba
+    sentinelLocator: private-agent-proof
+    transcript: |
+      {"type":"user","uuid":"x1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","agentId":"a3aee4f","isSidechain":false,"message":{"role":"user","content":"agent prompt"}}
+    wantRefusal: true
+    wantRefusalLocatorFree: true
+
+  - name: provider-file-absent
+    # The recorded source path does not exist and no sibling proof is present,
+    # yet the candidate is built. The ordinary bytes-proven branch reads no
+    # provider source at all, so this case fails if any read were attempted.
+    sourcePath: /native/absent-provider-source.jsonl
+    transcript: |
+      {"type":"user","uuid":"v1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"proven from bytes"}}
+      {"type":"assistant","uuid":"v2","parentUuid":"v1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"no provider read"}]}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v2:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:v1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "proven from bytes"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "no provider read"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "no provider read"}
+
+  - name: malformed-refusal
+    sentinelLocator: private-malformed
+    transcript: '{"type":"user"'
+    wantRefusal: true
+    wantRefusalLocatorFree: true
+
+  - name: control-record-over-cap
+    # A represented control record whose retained payload is over the control
+    # cap: the stored extension becomes the bounded identity object, so a single
+    # oversized control cannot bloat the index.
+    transcript: |
+      {"type":"user","uuid":"oc1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"before control"}}
+      {"type":"frame-link","uuid":"oc2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","payload":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+      {"type":"user","uuid":"oc3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after control"}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 2
+    titleRefCount: 2
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:oc1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:oc2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:oc3"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:oc1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:oc3"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "before control"}
+      - {depth: 0, role: system, entryType: text, partType: frame-link, parentIndex: -1, toolCallIDFromIndex: -1, previewContains: "frame-link: AAAA", extraContains: "rawBytes"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "after control"}

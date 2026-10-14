@@ -1,0 +1,22 @@
+requiredNames:
+  - root-plain
+  - system-injected-meta
+  - ask-user-question-answers
+  - control-records
+  - continuation
+  - unknown-kind-retained
+  - accounted-omission-placeholder
+  - raw-oversized-placeholder
+  - lost-tool-use-result
+  - flag-without-stand-in
+  - repeated-uuid-distinct-groups
+  - uuid-less-anchor
+  - empty-transcript
+  - subagent-agent-file
+  - fork-restamped-copies
+  - legacy-fallback-sibling-available
+  - legacy-fallback-sibling-unavailable
+  - proof-failure-refusal
+  - provider-file-absent
+  - malformed-refusal
+  - control-record-over-cap

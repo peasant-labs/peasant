@@ -88,7 +88,11 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			harvest()
 			dbPath := string(defaults.ResolveDBFilePathWith(dir))
 			open := func() *store.Store {
-				db, err := openPreparedStore(t, dbPath)
+				options, err := generationStoreOptions(output)
+				if err != nil {
+					t.Fatal(err)
+				}
+				db, err := openPreparedStore(t, dbPath, options...)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -181,7 +185,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
-					json.NewEncoder(w).Encode(schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1}})
+					json.NewEncoder(w).Encode(schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilitySessionGraphProvenanceV1}})
 					return
 				}
 				captured.record(t, r)

@@ -375,81 +375,7 @@ func (idx *ClaudeIndexer) IndexTranscriptForCapture(ctx context.Context, s Disco
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
-		var line claudeIndexLine
-		if err := json.Unmarshal(raw, &line); err != nil {
-			return nil, err
-		}
-		if line.Type == "" {
-			// A missing discriminator is corruption, not vocabulary:
-			// settling it would hide an actionable malformed record.
-			return nil, fmt.Errorf("record lacks its type")
-		}
-		// The kinds slice governs reachability: a case body below cannot run
-		// for an unlisted kind, so extending the vocabulary means extending
-		// this production census.
-		if !slices.Contains(claudeStrictRecordKinds(), line.Type) && !isClaudeControlRecordType(line.Type) {
-			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
-		}
-		switch line.Type {
-		case "user", "assistant", "human":
-			if line.Message.Role != "" {
-				if err := validateCaptureRole(line.Message.Role); err != nil {
-					return nil, err
-				}
-			}
-			return nil, validateMessageContent(HarnessClaudeCode, line.Message.Content)
-		case "system":
-			content := line.Content
-			if len(content) == 0 {
-				content = line.Message.Content
-			}
-			if len(content) == 0 && !slices.Contains(claudeStrictSystemSubtypes(), line.Subtype) {
-				return nil, validateMessageContent(HarnessClaudeCode, content)
-			}
-			if len(content) == 0 {
-				switch line.Subtype {
-				case "turn_duration", "compact_boundary", "stop_hook_summary":
-					return &IgnoredSourceRecord{Kind: line.Subtype, Reason: IgnoredRecordControl}, nil
-				case "api_error":
-					if len(line.Error) == 0 || bytes.Equal(line.Error, []byte("null")) {
-						return nil, fmt.Errorf("api_error requires error payload")
-					}
-					return nil, nil
-				}
-			}
-			return nil, validateMessageContent(HarnessClaudeCode, content)
-		case "summary":
-			if line.Summary == nil {
-				return nil, fmt.Errorf("summary requires text")
-			}
-			return nil, nil
-		case "result":
-			return nil, validateMessageContent(HarnessClaudeCode, line.Result)
-		case "progress", "queue-operation", "file-history-snapshot":
-			if len(line.Message.Content) > 0 || len(line.Content) > 0 {
-				return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
-			}
-			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordControl}, nil
-		case "last-prompt":
-			// A mirror of the prompt already represented by the user turn. It
-			// carries no payload of its own, so it is recorded as metadata.
-			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordMetadata}, nil
-		default:
-			// A represented control record. The indexer retains its kind and
-			// payload as a depth=0 row, so the capture can certify. The gate
-			// above refused every other unlisted kind; the refusal below is
-			// defense in depth.
-			if isClaudeControlRecordType(line.Type) {
-				return nil, nil
-			}
-			// A well-formed record kind this build does not represent. The
-			// refusal is typed so the ordinary index path can store the
-			// represented entries as an incomplete capture with a terminal
-			// code, bump the producer and settle (see permanentRefusalCode).
-			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
-		}
-	})
+	ignored, err := validateRetainingJSONL(ctx, s, data, claudeCaptureRecordValidator)
 	if err != nil {
 		return TranscriptCaptureResult{}, err
 	}
@@ -463,6 +389,86 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	}
 	unknown, err := retainedUnknownEntries(entries)
 	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
+}
+
+// claudeCaptureRecordValidator validates one Claude source record against the
+// strict capture vocabulary. The retained capture exit and the
+// managed-generation producer share it, so both certify exactly the same
+// records and neither drifts from the other.
+func claudeCaptureRecordValidator(raw []byte) (*IgnoredSourceRecord, error) {
+	var line claudeIndexLine
+	if err := json.Unmarshal(raw, &line); err != nil {
+		return nil, err
+	}
+	if line.Type == "" {
+		// A missing discriminator is corruption, not vocabulary:
+		// settling it would hide an actionable malformed record.
+		return nil, fmt.Errorf("record lacks its type")
+	}
+	// The kinds slice governs reachability: a case body below cannot run
+	// for an unlisted kind, so extending the vocabulary means extending
+	// this production census.
+	if !slices.Contains(claudeStrictRecordKinds(), line.Type) && !isClaudeControlRecordType(line.Type) {
+		return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
+	}
+	switch line.Type {
+	case "user", "assistant", "human":
+		if line.Message.Role != "" {
+			if err := validateCaptureRole(line.Message.Role); err != nil {
+				return nil, err
+			}
+		}
+		return nil, validateMessageContent(HarnessClaudeCode, line.Message.Content)
+	case "system":
+		content := line.Content
+		if len(content) == 0 {
+			content = line.Message.Content
+		}
+		if len(content) == 0 && !slices.Contains(claudeStrictSystemSubtypes(), line.Subtype) {
+			return nil, validateMessageContent(HarnessClaudeCode, content)
+		}
+		if len(content) == 0 {
+			switch line.Subtype {
+			case "turn_duration", "compact_boundary", "stop_hook_summary":
+				return &IgnoredSourceRecord{Kind: line.Subtype, Reason: IgnoredRecordControl}, nil
+			case "api_error":
+				if len(line.Error) == 0 || bytes.Equal(line.Error, []byte("null")) {
+					return nil, fmt.Errorf("api_error requires error payload")
+				}
+				return nil, nil
+			}
+		}
+		return nil, validateMessageContent(HarnessClaudeCode, content)
+	case "summary":
+		if line.Summary == nil {
+			return nil, fmt.Errorf("summary requires text")
+		}
+		return nil, nil
+	case "result":
+		return nil, validateMessageContent(HarnessClaudeCode, line.Result)
+	case "progress", "queue-operation", "file-history-snapshot":
+		if len(line.Message.Content) > 0 || len(line.Content) > 0 {
+			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
+		}
+		return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordControl}, nil
+	case "last-prompt":
+		// A mirror of the prompt already represented by the user turn. It
+		// carries no payload of its own, so it is recorded as metadata.
+		return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordMetadata}, nil
+	default:
+		// A represented control record. The indexer retains its kind and
+		// payload as a depth=0 row, so the capture can certify. The gate
+		// above refused every other unlisted kind; the refusal below is
+		// defense in depth.
+		if isClaudeControlRecordType(line.Type) {
+			return nil, nil
+		}
+		// A well-formed record kind this build does not represent. The
+		// refusal is typed so the ordinary index path can store the
+		// represented entries as an incomplete capture with a terminal
+		// code, bump the producer and settle (see permanentRefusalCode).
+		return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
+	}
 }
 
 func (idx *CursorIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
