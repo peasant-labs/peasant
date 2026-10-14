@@ -29,12 +29,13 @@ var logicalParentManifestYAML []byte
 // generation (the eligibility predicate always keeps the active authority).
 // The evidence rows themselves are always production-written.
 type logicalParentCase struct {
-	Name                  string `yaml:"name"`
-	State                 string `yaml:"state"`
-	ActiveEvidence        string `yaml:"activeEvidence"`
-	LatestAttemptEvidence string `yaml:"latestAttemptEvidence"`
-	CacheParent           string `yaml:"cacheParent"`
-	DocumentParent        string `yaml:"documentParent"`
+	Name                   string `yaml:"name"`
+	State                  string `yaml:"state"`
+	ActiveEvidence         string `yaml:"activeEvidence"`
+	LatestAttemptEvidence  string `yaml:"latestAttemptEvidence"`
+	CacheParent            string `yaml:"cacheParent"`
+	DocumentParent         string `yaml:"documentParent"`
+	UnstoredDocumentParent bool   `yaml:"unstoredDocumentParent"`
 }
 
 type logicalParentFixture struct {
@@ -119,6 +120,9 @@ func loadLogicalParentFixture(t *testing.T) logicalParentFixture {
 			default:
 				t.Fatalf("logical parent case %q names the unknown id token %q", tc.Name, token)
 			}
+		}
+		if tc.UnstoredDocumentParent && tc.State != logicalParentStateConvertedPair {
+			t.Fatalf("logical parent case %q marks an unstored document parent outside the converted-pair state", tc.Name)
 		}
 		actual = append(actual, tc.Name)
 	}
@@ -636,7 +640,9 @@ func runLogicalParentConvertedPair(t *testing.T, ctx context.Context, db *Store,
 	if documentParent == nil {
 		t.Fatalf("case %q names no document parent", tc.Name)
 	}
-	insertLogicalParentSession(t, ctx, db, *documentParent)
+	if !tc.UnstoredDocumentParent {
+		insertLogicalParentSession(t, ctx, db, *documentParent)
+	}
 	seedGenerationSession(t, db, string(child))
 
 	// A V1 pair: the document carries the logical parent and the generation
@@ -652,6 +658,20 @@ func runLogicalParentConvertedPair(t *testing.T, ctx context.Context, db *Store,
 	execGenerationSQL(t, db, `UPDATE sessions SET parent_id = NULL WHERE session_id = '`+string(child)+`';`)
 
 	outcome, err := db.MigrateSession(ctx, child)
+	if tc.UnstoredDocumentParent {
+		// The availability cache cannot hold an unstored parent, so the
+		// conversion must refuse explicitly instead of dropping the linkage.
+		if err == nil {
+			t.Fatalf("MigrateSession(%s) converted a document parent that names no stored session; want the actionable unstored-parent refusal", child)
+		}
+		if !strings.Contains(err.Error(), "carry the parent linkage") {
+			t.Fatalf("MigrateSession(%s) refusal = %v, want the actionable unstored-parent refusal", child, err)
+		}
+		assertLogicalParentCache(t, ctx, db, child, nil)
+		assertLogicalParentAnswer(t, ctx, db, child, nil)
+		assertLogicalParentStoredDocumentParent(t, ctx, db, child, documentParent)
+		return
+	}
 	if err != nil {
 		t.Fatalf("MigrateSession(%s): %v", child, err)
 	}
@@ -660,6 +680,43 @@ func runLogicalParentConvertedPair(t *testing.T, ctx context.Context, db *Store,
 	}
 	assertLogicalParentAnswer(t, ctx, db, child, documentParent)
 	assertLogicalParentCache(t, ctx, db, child, documentParent)
+}
+
+// assertLogicalParentStoredDocumentParent proves the old representation is
+// intact after a refused conversion: the projection generation row is still
+// there and its stored document still names the parent the conversion could not
+// carry.
+func assertLogicalParentStoredDocumentParent(t *testing.T, ctx context.Context, db *Store, child schema.SessionID, want *schema.SessionID) {
+	t.Helper()
+	conn, err := db.pool.Take(ctx)
+	if err != nil {
+		t.Fatalf("take connection to read the stored document of %s: %v", child, err)
+	}
+	defer db.pool.Put(conn)
+	var document struct {
+		ParentUUID *string `json:"parentUuid"`
+	}
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT metadata_json FROM session_projection_generations WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(child)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			return json.Unmarshal([]byte(stmt.ColumnText(0)), &document)
+		},
+	}); err != nil {
+		t.Fatalf("read the stored document of %s: %v", child, err)
+	}
+	if !found {
+		t.Fatalf("the refused conversion removed the stored document of %s; the old representation must stay intact", child)
+	}
+	got := (*schema.SessionID)(nil)
+	if document.ParentUUID != nil {
+		value := schema.SessionID(*document.ParentUUID)
+		got = &value
+	}
+	if !logicalParentEqual(got, want) {
+		t.Fatalf("stored document parent of %s = %s, want %s (the old representation must stay intact)", child, logicalParentString(got), logicalParentString(want))
+	}
 }
 
 func runLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {

@@ -6,6 +6,7 @@ requiredNames:
   - managed-target-unstored-prior-answers-target
   - written-cache-agrees-with-accessor
   - converted-pair-answers-document-parent
+  - converted-pair-unstored-document-parent-refused
   - publication-bundle-parent-from-evidence-lastgood
   - availability-readers-keep-raw
   - origin-listing-answers-latest-attempt-evidence

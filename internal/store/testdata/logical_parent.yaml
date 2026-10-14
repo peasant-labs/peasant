@@ -36,7 +36,12 @@
 #                         latest-attempt-only state is the documented
 #                         exception (the cache stays NULL by design).
 #   converted-pair        a V1 pair converted through the real migration: the
-#                         document parent becomes the answer.
+#                         document parent becomes the answer. A document parent
+#                         that names no stored session is REFUSED: the
+#                         availability cache cannot hold an unstored parent, so
+#                         the conversion stops explicitly and the old
+#                         representation is left intact.
+#                         `unstoredDocumentParent` marks that refusing shape.
 #   publication-bundle    the publication bundle's parent, for both the
 #                         no-active and the managed halves, under an explicit
 #                         last-good selection.
@@ -92,6 +97,10 @@ cases:
   - name: converted-pair-answers-document-parent
     state: converted-pair
     documentParent: target
+  - name: converted-pair-unstored-document-parent-refused
+    state: converted-pair
+    documentParent: alternate
+    unstoredDocumentParent: true
   - name: publication-bundle-parent-from-evidence-lastgood
     state: publication-bundle
     latestAttemptEvidence: target
