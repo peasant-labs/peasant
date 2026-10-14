@@ -90,12 +90,30 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 	}})
 	return
 }
+
+// GetSessionContentCapture is the display-effective capture read: a session
+// that retains a latest attempt reports the retained attempt's synthesized
+// capture (incomplete, preview-only, with the recorded failure code and time),
+// so the mounted kickstart notice and the share preview report the partial
+// state. The store's own decisions keep using readCapture, which serves the
+// active authority's certificate.
 func (s *Store) GetSessionContentCapture(ctx context.Context, id ingest.SessionID) (ingest.SessionContentCapture, bool, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return ingest.SessionContentCapture{}, false, err
 	}
 	defer s.pool.Put(conn)
+	pointer, err := readRetainedAttemptPointerOnConn(conn, schema.SessionID(id))
+	if err != nil {
+		return ingest.SessionContentCapture{}, false, err
+	}
+	if pointer.found() {
+		capture, err := retainedAttemptCapture(id, pointer)
+		if err != nil {
+			return ingest.SessionContentCapture{}, false, err
+		}
+		return capture, true, nil
+	}
 	return readCapture(conn, id)
 }
 
@@ -755,6 +773,87 @@ func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, i
 		return nil, capture, fmt.Errorf("store available content read: stored retained evidence is corrupt; no preview was served; re-index the source with a position-aware adapter")
 	}
 	return entries, capture, nil
+}
+
+// loadRetainedAvailableEntriesOnConn serves the retained latest attempt to an
+// available (mounted preview) read. It binds the read to the retained
+// generation's own rows, so the preview carries the newer bounded projection
+// and never the active authority's full content, and it synthesizes the
+// retained attempt's capture from the recorded pointer so PartialPreviewNeeded
+// and BoundedPreview are true.
+//
+// The capture is deliberately synthesized from the pointer, not read from
+// session_content_captures: that row is the active authority's certificate, and
+// reading it here would certify the preview with the full authority's state.
+// The internal authority read (readCapture) keeps serving the active authority
+// for the store's own decisions.
+func loadRetainedAvailableEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, pointer retainedAttemptPointer) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, capture, err
+	}
+	capture, err = retainedAttemptCapture(id, pointer)
+	if err != nil {
+		return nil, capture, err
+	}
+	if err := retainedGenerationRowExistsOnConn(conn, id, pointer.generationID); err != nil {
+		return nil, capture, err
+	}
+	records, err := shimBodyRecordsForGenerationOnConn(conn, string(id), pointer.generationID, nil, nil)
+	if err != nil {
+		return nil, capture, err
+	}
+	bounded, err := shimBoundedOnConn(conn, string(id))
+	if err != nil {
+		return nil, capture, err
+	}
+	entries, err = shimListEntries(records, bounded)
+	if err != nil {
+		return nil, capture, fmt.Errorf("store retained available content read: shape the retained attempt's stored evidence for session %s: %w; no preview was served; re-index the source or repair the retained attempt", id, err)
+	}
+	return entries, capture, nil
+}
+
+// retainedGenerationRowExistsOnConn refuses an available read whose retained
+// pointer names no stored generation row. Serving the empty projection instead
+// would draw a partial-flagged transcript with nothing in it, which reads as an
+// empty session rather than as a broken retained attempt.
+func retainedGenerationRowExistsOnConn(conn *sqlite.Conn, id ingest.SessionID, generationID string) error {
+	found := false
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(id), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store retained available content read: locate retained generation %s for session %s: %w; no preview was served; repair or clear the retained pointer", generationID, id, err)
+	}
+	if !found {
+		return fmt.Errorf("store retained available content read: session %s records retained generation %s but no generation row exists; no preview was served; re-index the source to rebuild the retained attempt", id, generationID)
+	}
+	return nil
+}
+
+// retainedAttemptCapture synthesizes the retained latest attempt's capture from
+// its recorded pointer: incomplete, preview-only, with the failure code and
+// message the retention commit recorded and the time the source was captured.
+// The failure code is parsed through its constructor, so a code this build
+// cannot name refuses instead of reading as "no failure".
+func retainedAttemptCapture(id ingest.SessionID, pointer retainedAttemptPointer) (ingest.SessionContentCapture, error) {
+	code, err := ingest.NewContentCaptureFailureCode(pointer.failureCode)
+	if err != nil {
+		return ingest.SessionContentCapture{}, fmt.Errorf("store retained available content read: the retained latest attempt for session %s records failure code %q, which this build cannot name; no preview was served; restore valid capture state or use a Peasant build that knows this code: %w", id, pointer.failureCode, err)
+	}
+	return ingest.SessionContentCapture{
+		SessionID:        id,
+		Status:           ingest.ContentCaptureIncomplete,
+		SourceAuthority:  ingest.ContentSourceNewIngest,
+		TranscriptOrigin: ingest.TranscriptOriginFile,
+		CaptureFormat:    ingest.ContentCaptureFormatPreviewOnly,
+		CapturedAtMs:     pointer.capturedAtMs,
+		FailureCode:      code,
+		FailureMessage:   pointer.failureMessage,
+	}, nil
 }
 
 func entryStringBytes(e schema.SessionEntry) int64 {

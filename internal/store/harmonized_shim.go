@@ -88,10 +88,20 @@ func shimBoundedOnConn(conn *sqlite.Conn, sessionID string) (bool, error) {
 	return capture.CaptureFormat == ingest.ContentCaptureFormatFull, nil
 }
 
-// shimBodyRecordsOnConn reads one session's partition-0 body rows in entry
-// order with their stored digests. A your-range variant filters by entry
-// index; a nil bound leaves that side open.
+// shimBodyRecordsOnConn reads one session's ACTIVE generation's partition-0
+// body rows in entry order with their stored digests. A your-range variant
+// filters by entry index; a nil bound leaves that side open.
 func shimBodyRecordsOnConn(conn *sqlite.Conn, sessionID string, minIndex, maxIndex *int) ([]EntryRecord, error) {
+	return shimBodyRecordsForGenerationOnConn(conn, sessionID, "", minIndex, maxIndex)
+}
+
+// shimBodyRecordsForGenerationOnConn reads one generation's partition-0 body
+// rows in entry order with their stored digests. An empty generationID selects
+// the session's active generation, which is the ordinary read; a named one
+// binds the read to that exact generation, so a retained latest attempt's rows
+// serve without the active pointer ever being consulted. A your-range variant
+// filters by entry index; a nil bound leaves that side open.
+func shimBodyRecordsForGenerationOnConn(conn *sqlite.Conn, sessionID, generationID string, minIndex, maxIndex *int) ([]EntryRecord, error) {
 	query := `SELECT
     b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
     b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
@@ -107,8 +117,14 @@ FROM session_generation_entries m
 JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 JOIN sessions s ON s.session_id = m.session_id
-WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partition_id = 0`
+WHERE m.session_id = ? AND m.partition_id = 0`
 	args := []any{sessionID}
+	if generationID == "" {
+		query += ` AND m.generation_id = s.active_generation_id`
+	} else {
+		query += ` AND m.generation_id = ?`
+		args = append(args, generationID)
+	}
 	if minIndex != nil {
 		query += ` AND m.entry_index >= ?`
 		args = append(args, *minIndex)

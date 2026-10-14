@@ -26,8 +26,23 @@ type SessionContentSnapshot struct {
 // connection. Content is database-authoritative; no managed files are consulted.
 // An incomplete capture is refused with ErrContentCaptureIncomplete: export and
 // publication use this reader. Previewers use ReadSessionAvailable instead.
+//
+// A session that retains a latest attempt is refused with the
+// indexformat.ErrRetainedAttemptIncomplete sentinel before any representation is
+// resolved, so an incomplete preview never reaches export as a full transcript;
+// ReadSessionContentSelected with LastGood asks for the last-good authority
+// explicitly.
 func (s *Store) ReadSessionContent(ctx context.Context, sessionID string) (*SessionContentSnapshot, error) {
-	return s.readSessionSnapshot(ctx, sessionID, ingest.SessionEntryReadFullContent)
+	return s.readSessionSnapshot(ctx, sessionID, ingest.SessionEntryReadFullContent, ingest.SessionReadSelection{})
+}
+
+// ReadSessionContentSelected is the explicit-selection form of
+// ReadSessionContent. A zero selection behaves exactly like ReadSessionContent,
+// including the retained-attempt refusal. A LastGood selection serves the
+// last-good full authority and still refuses when the active authority is only
+// a preview.
+func (s *Store) ReadSessionContentSelected(ctx context.Context, sessionID string, selection ingest.SessionReadSelection) (*SessionContentSnapshot, error) {
+	return s.readSessionSnapshot(ctx, sessionID, ingest.SessionEntryReadFullContent, selection)
 }
 
 // ReadSessionAvailable reads the session and the content the database actually
@@ -43,11 +58,17 @@ func (s *Store) ReadSessionContent(ctx context.Context, sessionID string) (*Sess
 // ingest.NewSessionID at its own input boundary and passes the result, rather
 // than every reader re-casting a string it cannot vouch for. The sibling reads
 // on this store take the same type.
+//
+// A session that retains a latest attempt serves the retained attempt here:
+// its generation-scoped entries, its synthesized capture (incomplete,
+// preview_only, with the recorded failure code and time) so
+// PartialPreviewNeeded and BoundedPreview are true, and its own counts. Full
+// and export reads of the same session never substitute.
 func (s *Store) ReadSessionAvailable(ctx context.Context, id ingest.SessionID) (*SessionContentSnapshot, error) {
-	return s.readSessionSnapshot(ctx, string(id), ingest.SessionEntryReadAvailable)
+	return s.readSessionSnapshot(ctx, string(id), ingest.SessionEntryReadAvailable, ingest.SessionReadSelection{})
 }
 
-func (s *Store) readSessionSnapshot(ctx context.Context, sessionID string, mode ingest.SessionEntryReadMode) (_ *SessionContentSnapshot, retErr error) {
+func (s *Store) readSessionSnapshot(ctx context.Context, sessionID string, mode ingest.SessionEntryReadMode, selection ingest.SessionReadSelection) (_ *SessionContentSnapshot, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take session content connection: %w", err)
@@ -55,11 +76,27 @@ func (s *Store) readSessionSnapshot(ctx context.Context, sessionID string, mode 
 	defer s.pool.Put(conn)
 	endSnapshot := sqlitex.Save(conn)
 	defer endSnapshot(&retErr)
-	detail, err := sessionDetailByIDOnConn(conn, sessionID)
+	sid := ingest.SessionID(sessionID)
+	pointer, err := readRetainedAttemptPointerOnConn(conn, schema.SessionID(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	retained := pointer.found()
+	if retained && mode != ingest.SessionEntryReadAvailable {
+		// The full-content lane refuses uniformly, before any representation is
+		// resolved, so an incomplete preview never reaches export as a full
+		// transcript. Only an explicit last-good request may proceed.
+		if !selection.LastGood {
+			return nil, retainedAttemptIncompleteError(schema.SessionID(sessionID))
+		}
+		if err := validateLastGoodAuthorityOnConn(conn, schema.SessionID(sessionID)); err != nil {
+			return nil, err
+		}
+	}
+	detail, err := sessionDetailByIDOnConnMode(conn, sessionID, retained && mode == ingest.SessionEntryReadAvailable)
 	if err != nil || detail == nil {
 		return nil, err
 	}
-	sid := ingest.SessionID(sessionID)
 	snapshot := &SessionContentSnapshot{Detail: detail}
 	snapshot.IndexState, err = readIndexStateOnConn(conn, sid)
 	if err != nil {
@@ -69,7 +106,11 @@ func (s *Store) readSessionSnapshot(ctx context.Context, sessionID string, mode 
 		return nil, err
 	}
 	if mode == ingest.SessionEntryReadAvailable {
-		snapshot.Entries, snapshot.Capture, err = loadAvailableSessionEntriesOnConn(ctx, conn, sid)
+		if retained {
+			snapshot.Entries, snapshot.Capture, err = loadRetainedAvailableEntriesOnConn(ctx, conn, sid, pointer)
+		} else {
+			snapshot.Entries, snapshot.Capture, err = loadAvailableSessionEntriesOnConn(ctx, conn, sid)
+		}
 	} else {
 		snapshot.Entries, snapshot.Capture, err = loadFullSessionEntriesOnConn(ctx, conn, sid, 0)
 	}

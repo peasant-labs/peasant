@@ -48,9 +48,17 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 		if !harness.IsKnown() || adapter < 1 {
 			return nil, fmt.Errorf("store: select stale adapters: harness %q has invalid adapter target %d; supply registered positive harvester versions", harness, adapter)
 		}
-		conditions = append(conditions, "(s.model_harness = ? AND s.schema_version <= ? AND (COALESCE(s.adapter_version, 1) < ? OR "+refreshClause+"))")
+		condition := "(s.model_harness = ? AND s.schema_version <= ? AND (COALESCE(s.adapter_version, 1) < ? OR " + refreshClause + ")"
 		args = append(args, string(harness), int(ingest.CurrentSchemaVersion), adapter)
 		args = append(args, refreshArgs...)
+		// A settled retained latest attempt is not adapter-refresh work: its
+		// adapter revision already meets the target, so a state 6/8 authority
+		// with a settled attempt stops being selected.
+		if clause, clauseArgs := retainedAttemptSettledClause("s", targets[harness]); clause != "" {
+			condition += " AND " + clause
+			args = append(args, clauseArgs...)
+		}
+		conditions = append(conditions, condition+")")
 	}
 	return s.selectSessionIDs(ctx, "SELECT s.session_id FROM sessions s WHERE "+strings.Join(conditions, " OR ")+" ORDER BY s.session_id", args)
 }
@@ -73,6 +81,8 @@ func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[inges
 		return nil, nil
 	}
 	harnessPlaceholders := make([]string, 0, len(targets))
+	settleTerms := make([]string, 0, len(targets))
+	settleArgs := make([]any, 0, len(targets)*3)
 	args := make([]any, 0, len(targets)+1)
 	for _, harness := range slices.Sorted(maps.Keys(targets)) {
 		if !harness.IsKnown() {
@@ -80,13 +90,30 @@ func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[inges
 		}
 		harnessPlaceholders = append(harnessPlaceholders, "?")
 		args = append(args, string(harness))
+		// The settle fragment itself requires a retained pointer, so the
+		// surrounding NOT stays false — and the session stays listed — for a
+		// session that retains nothing.
+		if target := targets[harness]; target.IndexerVersion >= 1 && target.AdapterVersion >= 1 {
+			settleTerms = append(settleTerms, "(s.model_harness = ? AND "+retainedAttemptSettledSQL("s")+")")
+			settleArgs = append(settleArgs, string(harness), target.IndexerVersion, target.AdapterVersion)
+		}
 	}
 	args = append(args, int(ingest.CurrentSchemaVersion))
+	// The settle gate applies to the ARTIFACT arm only: a retained attempt that
+	// has settled consumed the current pair, so re-reading it for a cleared
+	// input proof is churn. The publication arm keeps LISTING unchanged: the
+	// pending binding is a real fact in the inventory and in readiness, and the
+	// PARSE decision is what short-circuits for a known-settled attempt.
+	artifactSettle := ""
+	if len(settleTerms) > 0 {
+		artifactSettle = " AND NOT (" + strings.Join(settleTerms, " OR ") + ")"
+		args = append(args, settleArgs...)
+	}
 	query := `SELECT s.session_id FROM sessions s
 WHERE s.model_harness IN (` + strings.Join(harnessPlaceholders, ",") + `)
  AND s.schema_version <= ?
  AND (
-   (s.artifact_hash IS NOT NULL AND s.indexed_input_hash IS NULL)
+   (s.artifact_hash IS NOT NULL AND s.indexed_input_hash IS NULL` + artifactSettle + `)
    OR (s.publication_capture_revision > 0
        AND s.indexed_publication_capture_revision <> s.publication_capture_revision
        AND s.cwd_provenance_kind != 'not_recovered'

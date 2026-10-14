@@ -20,6 +20,19 @@ import (
 // lacked permission.
 var ErrSnapshotNotFound = errors.New("indexformat: session has no stored metadata row")
 
+// ErrRetainedAttemptIncomplete reports that a session holds a retained latest
+// attempt: a newer, explicitly incomplete preview stands beside the last-good
+// full generation, so the ordinary full read cannot answer for the session.
+//
+// The store returns this sentinel instead of a legacy snapshot, uniformly for a
+// managed V2 authority and for a V1-certificate or file-backed one, BEFORE the
+// read resolves to any representation. Callers recognize it to serve the
+// retained attempt's bounded preview, or to ask for the last-good full read
+// explicitly; it never means the session is missing, and it never means the
+// stored content is damaged. transcript.ErrLegacySnapshot stays reserved for an
+// actual legacy V1 snapshot.
+var ErrRetainedAttemptIncomplete = errors.New("indexformat: session holds a retained incomplete latest attempt beside its last-good generation; read the bounded preview or select the last-good explicitly")
+
 // MaxNativeAliasKeyBytes bounds one opaque native alias key. Native identity
 // is encoded into this key before it is persisted; the raw private path stays
 // in root-confined artifact bookkeeping and never in the alias key.

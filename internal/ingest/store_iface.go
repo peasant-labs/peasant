@@ -301,6 +301,17 @@ type SessionIndexState struct {
 	// build's parser already refused, which is what lets the selector give a
 	// refusal a steady state instead of re-parsing it every harvest.
 	ContentFailureCode ContentCaptureFailureCode
+	// LatestAttemptArtifactHash is the retained latest attempt's recorded pair
+	// identity, or nil when no attempt is retained. It is read-only evidence
+	// for the settle comparison; the store never derives a full read from it.
+	LatestAttemptArtifactHash *string
+	// LatestAttemptIndexerVersion is the producer revision the retained latest
+	// attempt was parsed with, or nil when no attempt is retained.
+	LatestAttemptIndexerVersion *int
+	// LatestAttemptAdapterVersion is the adapter revision recorded on the
+	// retained latest attempt's generation row, or nil when no attempt is
+	// retained or the row carries none.
+	LatestAttemptAdapterVersion *int
 }
 
 // StaleIndexWorkError means the captured SQL state changed before the index
@@ -313,6 +324,22 @@ var _ error = (*StaleIndexWorkError)(nil)
 
 func (e *StaleIndexWorkError) Error() string {
 	return fmt.Sprintf("store: captured index state for session %s changed before replacement; this parser result was refused and current entries and producer evidence were preserved; capture current input and retry indexing", e.SessionID)
+}
+
+// SessionReadSelection selects WHICH generation a store read answers for. The
+// zero value is authority mode: the active generation, or the preserved
+// legacy/certificate read when the session has none.
+//
+// LastGood asks for the last-good FULL authority explicitly, bypassing the
+// retained-attempt block so export and publication can serve the active
+// generation while a newer incomplete preview is retained beside it. The
+// selector deliberately carries no generation identifier: the store resolves
+// the generation internally, so no caller-supplied id can select a full read.
+type SessionReadSelection struct {
+	// LastGood selects the last-good full authority instead of refusing on a
+	// retained latest attempt. The store still refuses when the active
+	// authority is itself only a preview.
+	LastGood bool
 }
 
 // SessionIndexStateReader captures SQL evidence only. The indexing caller must
