@@ -322,6 +322,8 @@ cases:
 
   - name: legacy-fallback-sibling-available
     sourcePath: /projects/proj/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+    siblingReadCounts:
+      /projects/proj/22222222-2222-4222-8222-222222222222.jsonl: 1
     siblings:
       /projects/proj/22222222-2222-4222-8222-222222222222.jsonl: |
         {"type":"user","uuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"foreign copied"}}
