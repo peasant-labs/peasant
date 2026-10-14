@@ -28,7 +28,7 @@ import (
 // data calls that do NOT re-preflight the pull window.
 type VillageReader interface {
 	NegotiatePull(ctx context.Context) error
-	ListPullableTranscripts(ctx context.Context, page, limit int) (*schema.PullListResponse, error)
+	ListPullableTranscripts(ctx context.Context, opts village.PullListOptions) (*schema.PullListResponse, error)
 	GetPullTranscript(ctx context.Context, id schema.TranscriptID) (*schema.PullTranscriptInfo, error)
 	GetPullTranscriptContent(ctx context.Context, id schema.TranscriptID, ifNoneMatch string) (io.ReadCloser, string, error)
 	GetPullTranscriptAnnotations(ctx context.Context, id schema.TranscriptID) ([]schema.PullAnnotation, error)

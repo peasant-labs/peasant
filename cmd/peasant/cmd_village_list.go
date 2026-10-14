@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
@@ -91,7 +92,7 @@ func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool) error 
 		return err
 	}
 
-	resp, err := client.ListPullableTranscripts(cmd.Context(), 1, villageListDefaultLimit)
+	resp, err := client.ListPullableTranscripts(cmd.Context(), village.PullListOptions{Page: 1, Limit: villageListDefaultLimit})
 	if err != nil {
 		return fmt.Errorf("list pullable transcripts: %w", err)
 	}

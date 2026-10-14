@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
@@ -145,14 +148,38 @@ func (c *VillageClient) NegotiatePull(ctx context.Context) error {
 // ListPullableTranscripts. This keeps transport (client) separate from
 // policy/stage orchestration (pipeline), matching the push split.
 
+// PullListOptions controls one page read of the village's pullable listing.
+type PullListOptions struct {
+	// Page and Limit are the offset pagination pair. Limit is capped by the
+	// village.
+	Page  int
+	Limit int
+	// Collectives, when non-empty, narrows the listing to transcripts with an
+	// approved share into any listed collective the requester is a member of. The
+	// identifiers travel as one comma-separated parameter, the shape the village
+	// declares. An empty slice lists every pullable transcript.
+	Collectives []schema.VillageUUID
+}
+
 // ListPullableTranscripts fetches one page of the village's pullable-transcript
 // listing (own + group-shared; public excluded by the village's canPullTranscript
 // policy). It issues an authed GET to /api/v1/pull/transcripts with offset
-// pagination (page/limit query params). A non-2xx status is returned as an
-// actionable error. The caller is responsible for running NegotiatePull once
-// before the FETCH stages — this method does NOT preflight the pull window.
-func (c *VillageClient) ListPullableTranscripts(ctx context.Context, page, limit int) (*schema.PullListResponse, error) {
-	endpoint := fmt.Sprintf("%s%s?page=%d&limit=%d", c.baseURL, pullTranscriptsEndpoint, page, limit)
+// pagination (page/limit query params), plus the optional collectives filter. A
+// non-2xx status is returned as an actionable error. The caller is responsible
+// for running NegotiatePull once before the FETCH stages — this method does NOT
+// preflight the pull window.
+func (c *VillageClient) ListPullableTranscripts(ctx context.Context, opts PullListOptions) (*schema.PullListResponse, error) {
+	query := url.Values{}
+	query.Set("page", strconv.Itoa(opts.Page))
+	query.Set("limit", strconv.Itoa(opts.Limit))
+	if len(opts.Collectives) > 0 {
+		identifiers := make([]string, 0, len(opts.Collectives))
+		for _, collective := range opts.Collectives {
+			identifiers = append(identifiers, collective.String())
+		}
+		query.Set("collectives", strings.Join(identifiers, ","))
+	}
+	endpoint := c.baseURL + pullTranscriptsEndpoint + "?" + query.Encode()
 	req, err := c.newAuthedGet(ctx, endpoint)
 	if err != nil {
 		return nil, err
