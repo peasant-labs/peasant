@@ -294,7 +294,7 @@ type snapshotSessionRow struct {
 func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (snapshotSessionRow, error) {
 	row := snapshotSessionRow{sessionID: sessionID}
 	found := false
-	if err := sqlitex.Execute(conn, `SELECT s.model_harness, s.parent_id, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
+	if err := sqlitex.Execute(conn, `SELECT s.model_harness, `+LogicalParentSQL("s")+`, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
  COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
  COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
   FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
@@ -582,21 +582,13 @@ func emittedContentRecords(main indexformat.Partition, earlier []indexformat.Ear
 }
 
 // snapshotLogicalParent derives the snapshot's logical parent from durable
-// relationship evidence, never from the availability cache. A known or
-// retained started_by target is the logical parent; otherwise the legacy
-// ParentUUID carries the parent when the generation records one.
+// relationship evidence, never from the availability cache. It is the
+// in-memory spelling of the parent-answer rule (startedByTarget) with the
+// legacy ParentUUID fallback: a known or retained started_by target is the
+// logical parent, otherwise the generation's own ParentUUID carries it.
 func snapshotLogicalParent(metadata schema.UnifiedMetadata) *schema.SessionID {
-	for i := range metadata.Relationships {
-		relationship := metadata.Relationships[i]
-		if relationship.Kind != schema.SessionRelationshipStartedBy {
-			continue
-		}
-		if relationship.TargetState == schema.RelationshipTargetKnown || relationship.TargetState == schema.RelationshipTargetKnownRetained {
-			if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
-				target := *relationship.TargetLocalID
-				return &target
-			}
-		}
+	if target := startedByTarget(metadata.Relationships); target != nil {
+		return target
 	}
 	return metadata.ParentUUID
 }

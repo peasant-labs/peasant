@@ -52,3 +52,18 @@ cases:
     harvestTarget: legacy
     expectParentCache: legacy
     expectUpdates: 1
+  - name: latest-attempt-evidence-child-reconciles
+    legacyParent: legacy
+    authorityState: target_known
+    authorityTarget: alternate
+    scope: latest-attempt
+    harvestTarget: alternate
+    expectParentCache: alternate
+    expectUpdates: 1
+  - name: latest-attempt-authority-not-resurrected-from-legacy
+    legacyParent: legacy
+    authorityState: explicit_none
+    scope: latest-attempt
+    harvestTarget: legacy
+    expectParentCache: null
+    expectUpdates: 0

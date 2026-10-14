@@ -214,8 +214,11 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	// The logical parent is durable relationship evidence, not the
 	// availability cache. sessions.parent_id is the FK-safe cache: the durable
 	// started_by target when it names a stored session, else NULL so an
-	// admitted child survives an absent, unselected or cyclic parent.
-	logicalParent := durableParentTarget(generation.Metadata.Relationships)
+	// admitted child survives an absent, unselected or cyclic parent. The
+	// value computation is the shared one (startedByTarget + DesiredParentCacheID)
+	// and the FK-existence check is its availability input, so activation and
+	// the standalone cache writer cannot disagree about the same edge.
+	logicalParent := startedByTarget(generation.Metadata.Relationships)
 	var parent any
 	if logicalParent != nil {
 		exists := false
@@ -225,8 +228,8 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 		}); err != nil {
 			return fmt.Errorf("store: resolve logical parent for session %s generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 		}
-		if exists {
-			parent = string(*logicalParent)
+		if cache := DesiredParentCacheID(sessionID, logicalParent, exists); cache != nil {
+			parent = string(*cache)
 		}
 	}
 	// The pointing UPDATE names session facts the row-version trigger watches
@@ -303,26 +306,6 @@ func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.Sess
 	}
 	if completeID != "" && completeID != candidateID {
 		return fmt.Errorf("store: refuse incomplete generation %s for session %s: a complete generation %s is the last-good read authority; incomplete_new is the first-discovery exception only and never replaces it", candidateID, sessionID, completeID)
-	}
-	return nil
-}
-
-// durableParentTarget returns the durable started_by target when the
-// relationship evidence names a session whose target state is known or
-// target_known_retained. It mirrors the snapshot's logical-parent derivation so
-// activation and reads agree.
-func durableParentTarget(relationships []schema.SessionRelationship) *schema.SessionID {
-	for i := range relationships {
-		relationship := relationships[i]
-		if relationship.Kind != schema.SessionRelationshipStartedBy {
-			continue
-		}
-		if relationship.TargetState == schema.RelationshipTargetKnown || relationship.TargetState == schema.RelationshipTargetKnownRetained {
-			if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
-				target := *relationship.TargetLocalID
-				return &target
-			}
-		}
 	}
 	return nil
 }

@@ -11,6 +11,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -21,11 +23,21 @@ var parentReconcileAuthorityYAML []byte
 //go:embed testdata/parent_reconcile_authority.manifest.yaml
 var parentReconcileAuthorityManifest []byte
 
+// The generation identifier the authority cases activate, and the two
+// generation scopes a case can put that generation in: the active authority, or
+// (with no active generation) the session's latest attempt.
+const (
+	authorityRelationshipGeneration = "authority-generation"
+	authorityScopeActive            = "active"
+	authorityScopeLatestAttempt     = "latest-attempt"
+)
+
 type parentReconcileAuthorityCase struct {
 	Name              string `yaml:"name"`
 	LegacyParent      string `yaml:"legacyParent"`
 	AuthorityState    string `yaml:"authorityState"`
 	AuthorityTarget   string `yaml:"authorityTarget"`
+	Scope             string `yaml:"scope"`
 	HarvestTarget     string `yaml:"harvestTarget"`
 	ExpectParentCache string `yaml:"expectParentCache"`
 	ExpectUpdates     int    `yaml:"expectUpdates"`
@@ -106,6 +118,11 @@ func loadParentReconcileAuthorityFixture(t *testing.T) parentReconcileAuthorityF
 		if tc.HarvestTarget == "" {
 			t.Fatalf("authority case %q names no harvest target", tc.Name)
 		}
+		switch tc.Scope {
+		case "", authorityScopeActive, authorityScopeLatestAttempt:
+		default:
+			t.Fatalf("authority case %q declares the unknown generation scope %q", tc.Name, tc.Scope)
+		}
 	}
 	return fixture
 }
@@ -127,6 +144,12 @@ func runParentReconcileAuthorityCase(t *testing.T, fixture parentReconcileAuthor
 	if tc.AuthorityState != "" {
 		authorityTarget := authorityOptionalID(t, fixture, tc.AuthorityTarget)
 		activateAuthorityRelationship(t, db, child, tc.AuthorityState, authorityTarget)
+		if tc.Scope == authorityScopeLatestAttempt {
+			// The generation's evidence is the session's only relationship
+			// authority: no active generation exists, so the reverse lookup
+			// must consult the latest attempt's own evidence.
+			execGenerationSQL(t, db, `UPDATE sessions SET active_generation_id = NULL, latest_attempt_generation_id = '`+authorityRelationshipGeneration+`', latest_attempt_indexer_version = 1 WHERE session_id = '`+string(child)+`';`)
+		}
 	}
 	insertAuthoritySession(t, ctx, db, *harvest, ingest.HarnessCodex, nil)
 
@@ -217,7 +240,7 @@ func activateAuthorityRelationship(t *testing.T, db *Store, child ingest.Session
 		value := schema.SessionID(*target)
 		relationship.TargetLocalID = &value
 	}
-	v2, blobs := authorityGeneration(schema.SessionID(child), "authority-generation", []schema.SessionRelationship{relationship})
+	v2, blobs := authorityGeneration(schema.SessionID(child), authorityRelationshipGeneration, []schema.SessionRelationship{relationship})
 	if err := activateTestGeneration(t, db, v2, blobs); err != nil {
 		t.Fatalf("activate %s relationship for %s: %v", state, child, err)
 	}
@@ -232,11 +255,29 @@ func authorityTargetStateKnown(state string) bool {
 	return false
 }
 
+// assertAuthorityParentCache reads the availability cache directly. It is a
+// test-local statement by design: the store no longer exposes a method that
+// returns the raw column as a parent answer, and this assertion needs the raw
+// column to prove the cache stayed NULL while the accessor answers evidence.
 func assertAuthorityParentCache(t *testing.T, ctx context.Context, db *Store, child ingest.SessionID, want *ingest.SessionID) {
 	t.Helper()
-	got, err := db.ParentCacheForSession(ctx, child)
+	conn, err := db.pool.Take(ctx)
 	if err != nil {
-		t.Fatalf("ParentCacheForSession(%s): %v", child, err)
+		t.Fatalf("take connection to read the parent cache of %s: %v", child, err)
+	}
+	defer db.pool.Put(conn)
+	var got *string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(child)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				v := stmt.ColumnText(0)
+				got = &v
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read the parent cache of %s: %v", child, err)
 	}
 	if want == nil {
 		if got != nil {
