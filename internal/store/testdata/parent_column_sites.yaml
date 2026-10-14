@@ -35,7 +35,7 @@
 # internal/store/baseline_schema.sql is outside this closure; drift there is
 # caught by its own generator gate.
 #
-# Reconciliation note: the plan's routed inventory names ten declarations. Two
+# Reconciliation note: the design's routed inventory names ten declarations. Two
 # of them (the codemap project listing and the research root filter) belong to
 # the cross-package reader slice, which lands after this one and rewrites them
 # into a rendered fragment; at this change they still carry the token, so they
