@@ -37,7 +37,7 @@ cases:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u2"
     entries:
-      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "hello there"}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "hello there", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
       - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "I will read it"}
       - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "I will read it"}
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "second question"}
@@ -90,8 +90,8 @@ cases:
       - {depth: 1, role: assistant, entryType: tool_use, partType: tool_use, parentIndex: 1, toolCallIDFromIndex: 2, preview: '{"questions":[]}'}
       - {depth: 1, role: assistant, entryType: tool_use, partType: tool_use, parentIndex: 1, toolCallIDFromIndex: 3, preview: '{"questions":[]}'}
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true}
-      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 2, preview: "answer one"}
-      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 3, preview: "answer two"}
+      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 2, preview: "answer one", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
+      - {depth: 1, role: user, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 3, preview: "answer two", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
 
   - name: control-records
     transcript: |

@@ -24,20 +24,32 @@ var claudeProducerManifestYAML []byte
 // match inside the same case, so the fixture states structure without carrying
 // opaque refs it cannot know.
 type claudeProducerEntry struct {
-	Depth               int    `yaml:"depth"`
-	Role                string `yaml:"role"`
-	EntryType           string `yaml:"entryType"`
-	PartType            string `yaml:"partType"`
-	HasThinking         bool   `yaml:"hasThinking"`
-	ParentIndex         int    `yaml:"parentIndex"`
-	Preview             string `yaml:"preview"`
-	PreviewAbsent       bool   `yaml:"previewAbsent"`
-	PreviewContains     string `yaml:"previewContains"`
-	PreviewUnchecked    bool   `yaml:"previewUnchecked"`
-	ToolCallIDFromIndex int    `yaml:"toolCallIDFromIndex"`
-	ToolCallIDLiteral   string `yaml:"toolCallIDLiteral"`
-	ExtraContains       string `yaml:"extraContains"`
-	RawByteLength       int    `yaml:"rawByteLength"`
+	Depth               int                       `yaml:"depth"`
+	Role                string                    `yaml:"role"`
+	EntryType           string                    `yaml:"entryType"`
+	PartType            string                    `yaml:"partType"`
+	HasThinking         bool                      `yaml:"hasThinking"`
+	ParentIndex         int                       `yaml:"parentIndex"`
+	Preview             string                    `yaml:"preview"`
+	PreviewAbsent       bool                      `yaml:"previewAbsent"`
+	PreviewContains     string                    `yaml:"previewContains"`
+	PreviewUnchecked    bool                      `yaml:"previewUnchecked"`
+	ToolCallIDFromIndex int                       `yaml:"toolCallIDFromIndex"`
+	ToolCallIDLiteral   string                    `yaml:"toolCallIDLiteral"`
+	ExtraContains       string                    `yaml:"extraContains"`
+	RawByteLength       int                       `yaml:"rawByteLength"`
+	Provenance          *claudeProducerProvenance `yaml:"provenance"`
+}
+
+// claudeProducerProvenance is the six-dimension provenance tuple one admitted
+// submission must carry, stated literally so no dimension can drift.
+type claudeProducerProvenance struct {
+	Origin        string `yaml:"origin"`
+	Actor         string `yaml:"actor"`
+	Delivery      string `yaml:"delivery"`
+	Ownership     string `yaml:"ownership"`
+	Evidence      string `yaml:"evidence"`
+	InputModality string `yaml:"inputModality"`
 }
 
 type claudeProducerCase struct {
@@ -362,6 +374,23 @@ func assertClaudeProducerEntries(t *testing.T, row claudeProducerCase, entries [
 		if want.RawByteLength > 0 {
 			if entry.RawByteLength == nil || *entry.RawByteLength != want.RawByteLength {
 				t.Errorf("%s rawByteLength = %v, want %d", where, entry.RawByteLength, want.RawByteLength)
+			}
+		}
+		if want.Provenance != nil {
+			if entry.Provenance == nil {
+				t.Errorf("%s has no provenance, want the submitted-input tuple", where)
+			} else {
+				got := claudeProducerProvenance{
+					Origin:        string(entry.Provenance.Origin),
+					Actor:         string(entry.Provenance.Actor),
+					Delivery:      string(entry.Provenance.Delivery),
+					Ownership:     string(entry.Provenance.Ownership),
+					Evidence:      string(entry.Provenance.Evidence),
+					InputModality: string(entry.Provenance.InputModality),
+				}
+				if got != *want.Provenance {
+					t.Errorf("%s provenance = %+v, want %+v", where, got, *want.Provenance)
+				}
 			}
 		}
 	}
