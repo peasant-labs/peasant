@@ -1,0 +1,40 @@
+# Deterministic read/write interleaves and the single cross-process activation
+# proof. Every case executes a production store entry point.
+cases:
+  - name: reader-during-stage
+    mode: reader-stage
+    seam: snapshot-callback
+    expect: original-detail
+    firstText: original reader bytes
+    nextText: staged reader bytes
+  - name: reader-during-commit
+    mode: reader-commit
+    seam: snapshot-callback
+    expect: original-detail-after-sweep
+    firstText: original reader bytes
+    nextText: committed reader bytes
+  - name: two-harvests-same-session
+    mode: same-candidate
+    seam: before-commit
+    expect: committed-once
+    crossProcess: true
+  - name: concurrent-staging-same-session
+    mode: staged-cas
+    seam: after-staging
+    expect: stale-state-refused
+  - name: harvest-vs-reclaim
+    mode: reclaim
+    seam: activation
+    expect: settled-no-orphans
+  - name: harvest-vs-migrate
+    mode: migrate
+    seam: exclusive-lock
+    expect: lock-refused-then-committed
+  - name: sweep-vs-stage
+    mode: sweep
+    seam: after-staging
+    expect: fk-refused-then-committed
+  - name: harvest-during-search-consolidation
+    mode: consolidation
+    seam: sqlite-authorizer
+    expect: committed-body-searchable

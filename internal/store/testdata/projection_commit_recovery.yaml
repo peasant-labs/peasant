@@ -1,11 +1,13 @@
-# Crash-seam oracle for the immutable V2 activation protocol. Each named case
+# Crash-seam oracle for the harmonized V2 activation protocol. Each named case
 # interrupts the real activation at one durable boundary and asserts exactly G1
 # (the prior generation) or G2 (the new generation) is visible, that no success
-# is stamped before the activation commit, and that recovery or retry settles on
-# G2 with the same generation identity. `seam` names the boundary; `visible`
-# names the generation a reader must see immediately after the interruption;
-# `recovery` names how G2 is completed (`recover` reconciles the pending intent,
-# `retry` re-runs activation after the fault clears).
+# is stamped before the activation commit, and that retry settles on G2 with
+# the same generation identity. `seam` names the writer seam; `visible` names
+# the generation a reader must see immediately after the interruption;
+# `recovery` names how G2 is completed (`retry` re-runs activation after the
+# fault clears, `complete` runs the post-commit pass when the commit is
+# already durable). `tiny_budget` forces budget-split staging so the
+# between-transactions seam can fire.
 session:
   id: "11111111-1111-4111-8111-111111111111"
   harness: claude-code
@@ -17,59 +19,24 @@ generation:
   # bounded preview cannot be mistaken for the committed full content.
   long_text_padding: 4096
 cases:
-  - name: before-temporary-fsync
-    seam: before-temp-fsync
+  - name: after-prepare
+    seam: after-prepare
     visible: g1
     recovery: retry
-  - name: after-fsync-before-rename
-    seam: after-fsync-before-rename
+  - name: between-stage-txns
+    seam: between-stage-txns
     visible: g1
     recovery: retry
-  - name: after-rename-before-db
-    seam: after-rename-before-db
+    tiny_budget: true
+  - name: before-commit
+    seam: before-commit
     visible: g1
-    recovery: recover
-  - name: during-activation-transaction
-    seam: during-activation-transaction
+    recovery: retry
+  - name: commit-rollback
+    seam: at-commit
     visible: g1
-    recovery: recover
-  - name: after-db-before-metadata
-    seam: after-db-before-metadata
+    recovery: retry
+  - name: after-commit-before-sweep
+    seam: after-commit
     visible: g2
-    recovery: recover
-  - name: after-metadata-before-intent-clear
-    seam: after-metadata-before-intent-clear
-    visible: g2
-    recovery: recover
-  # A rejected or corrupted durable envelope must not be replayed: after the
-  # staged candidate is renamed into place, change ONLY the persisted intent's
-  # candidate binding. Recovery must refuse the mismatched binding, leaving the
-  # last-good generation and its success stamps unchanged and the candidate and
-  # intent retained for a verified retry.
-  - name: mismatched-durable-intent-digest-refused
-    seam: after-rename-before-db
-    visible: g1
-    recovery: mismatched-digest
-  # The staged candidate's bytes are verified at recovery. Damage one blob
-  # after the rename and before the commit: the candidate can never replay, so
-  # recovery must discard its pending intent instead of wedging the session,
-  # keep the last-good generation, retain the damaged directory for cleanup,
-  # and let a fresh candidate stage and activate.
-  - name: unverifiable-candidate-discarded
-    seam: after-rename-before-db
-    visible: g1
-    recovery: discard-unverifiable
-  # A manifest that exists but cannot be decoded can never replay either.
-  # Recovery must discard its intent so a fresh candidate can stage, exactly as
-  # for a blob that no longer verifies. The undecodable directory stays in
-  # place because ownership cannot be proven for cleanup.
-  - name: undecodable-manifest-discarded
-    seam: after-rename-before-db
-    visible: g1
-    recovery: discard-undecodable-manifest
-# A committed generation whose content blob is damaged after the commit must be
-# refused with an actionable managed-recovery error, never served as partial or
-# empty content.
-corrupt_artifact:
-  name: corrupt-artifact
-  entry_ref: e_u1
+    recovery: complete

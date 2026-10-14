@@ -7,3 +7,4 @@ requiredNames:
   - codex_future_state_refused
   - codex_unrelated_harness_unchanged
   - opencode_stale_v1_native_activation
+  - opencode_v1_full_authority_holds_unfinished_native

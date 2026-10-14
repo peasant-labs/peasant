@@ -3,13 +3,9 @@ package store
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -74,7 +70,7 @@ func TestGenerationDiagnosticSafety(t *testing.T) {
 
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			s, root := openGenerationStore(t)
+			s, _ := openGenerationStore(t)
 			seedGenerationSession(t, s, fixture.Session.ID)
 			complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, "diag text G1", "diag input G1", "diag output G1")
 			if err := activateTestGeneration(t, s, complete, completeBlobs); err != nil {
@@ -94,97 +90,69 @@ func TestGenerationDiagnosticSafety(t *testing.T) {
 				assertPrivateDetailRefused(t, activationErr, fixture.PrivateIdentity, "activation")
 				assertLastGoodRetained(t, s, id, before, fixture.Generation.CompleteID)
 			case "installed-candidate":
-				// An installed inactive candidate whose content reference is a
-				// private path and whose digest is cleared cannot be bound, so
-				// restaging the same identifier is refused without echoing the
-				// path and without rewriting the installed bytes.
+				// Install a candidate, then restage the same identifier with
+				// a mutated content reference (a private path) and a cleared
+				// digest. The immutable identifier refuses the collision
+				// without echoing the path and without rewriting the
+				// installed rows.
 				installed, installedBlobs := buildTestGeneration(t, id, fixture.Generation.InstalledID, "diag text installed", "diag input installed", "diag output installed")
-				if _, err := s.generationArtifacts.Stage(context.Background(), installed.Generation, installedBlobs); err != nil {
-					t.Fatalf("stage installed candidate: %v", err)
+				if err := activateTestGeneration(t, s, installed, installedBlobs); err != nil {
+					t.Fatalf("activate installed candidate: %v", err)
 				}
-				manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.InstalledID, "manifest.json")
-				installedBytes, err := os.ReadFile(manifestPath)
-				if err != nil {
-					t.Fatalf("read installed manifest: %v", err)
-				}
-				var decoded indexformat.Generation
-				if err := json.Unmarshal(installedBytes, &decoded); err != nil {
-					t.Fatalf("decode installed manifest: %v", err)
-				}
-				decoded.Content[0].Ref = schema.SourceEntryRef(fixture.PrivateIdentity)
-				decoded.Content[0].Digest = ""
-				mutated, err := json.Marshal(decoded)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(manifestPath, mutated, 0o600); err != nil {
-					t.Fatal(err)
-				}
+				installedState := readIndexStateForTest(t, s, id)
+				beforeInstalled := countMappingRows(t, s, id, fixture.Generation.InstalledID)
 				collision, collisionBlobs := buildTestGeneration(t, id, fixture.Generation.InstalledID, "diag text retry", "diag input retry", "diag output retry")
+				collision.Generation.Content[0].Ref = schema.SourceEntryRef(fixture.PrivateIdentity)
+				collision.Generation.Content[0].Digest = ""
 				restageErr := activateTestGeneration(t, s, collision, collisionBlobs)
 				assertPrivateDetailRefused(t, restageErr, fixture.PrivateIdentity, "installed-candidate verification")
-				afterBytes, err := os.ReadFile(manifestPath)
-				if err != nil {
-					t.Fatalf("installed manifest missing after refused restage: %v", err)
+				if got := countMappingRows(t, s, id, fixture.Generation.InstalledID); got != beforeInstalled {
+					t.Fatal("refused restage changed the installed mapping rows; they must be unchanged")
 				}
-				if string(afterBytes) != string(mutated) {
-					t.Fatal("refused restage rewrote the installed candidate bytes; they must be unchanged")
-				}
-				assertLastGoodRetained(t, s, id, before, fixture.Generation.CompleteID)
+				assertLastGoodRetained(t, s, id, installedState, fixture.Generation.InstalledID)
 			case "recovery":
-				// Interrupt a real activation after the atomic rename, then
-				// rewrite only the staged manifest's content reference to a
-				// private path and clear its digest. Recovery must refuse the
-				// unverifiable binding without echoing the path, keep the
-				// last-good generation, and retain the candidate and intent.
-				installRecoveryFault(t, s, "after-rename-before-db")
+				// Interrupt a real activation before the commit, then retry
+				// with a mutated content reference (a private path) and a
+				// cleared digest. The retry must refuse the unverifiable
+				// binding without echoing the path and keep the last-good
+				// generation; the interrupted staging wrote no generation
+				// row, so there is nothing to replay.
+				installHarmonizedFault(t, harmonizedSeamBeforeCommit)
 				failed, failedBlobs := buildTestGeneration(t, id, fixture.Generation.CandidateID, "diag text G2", "diag input G2", "diag output G2")
 				if err := activateTestGeneration(t, s, failed, failedBlobs); err == nil {
 					t.Fatal("activation across the crash seam succeeded; expected interruption")
 				}
-				clearRecoveryFault(t, s, "after-rename-before-db")
-				manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.CandidateID, "manifest.json")
-				manifest, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.CandidateID)
-				if err != nil {
-					t.Fatalf("read staged candidate manifest: %v", err)
-				}
-				manifest.Content[0].Ref = schema.SourceEntryRef(fixture.PrivateIdentity)
-				manifest.Content[0].Digest = ""
-				data, err := json.Marshal(manifest)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(manifestPath, data, 0o600); err != nil {
-					t.Fatal(err)
-				}
-				_, recoveryErr := s.RecoverGenerationActivation(context.Background(), id)
+				clearHarmonizedFault()
+				mutated, mutatedBlobs := buildTestGeneration(t, id, fixture.Generation.CandidateID, "diag text G2", "diag input G2", "diag output G2")
+				mutated.Generation.Content[0].Ref = schema.SourceEntryRef(fixture.PrivateIdentity)
+				mutated.Generation.Content[0].Digest = ""
+				_, recoveryErr := s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation:     mutated,
+					Blobs:          mutatedBlobs,
+					IndexerVersion: 1,
+					IndexedAtMs:    1,
+				})
 				assertPrivateDetailRefused(t, recoveryErr, fixture.PrivateIdentity, "recovery")
 				assertLastGoodRetained(t, s, id, before, fixture.Generation.CompleteID)
-				retained, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.CandidateID)
-				if err != nil {
-					t.Fatalf("staged candidate was not retained after refused recovery: %v", err)
-				}
-				if retained.ID != fixture.Generation.CandidateID {
-					t.Fatalf("retained candidate manifest = %q, want %q", retained.ID, fixture.Generation.CandidateID)
-				}
-				pending, err := s.generationArtifacts.ReadIntent(context.Background(), id)
-				if err != nil {
-					t.Fatalf("read pending intent after refused recovery: %v", err)
-				}
-				if pending == nil || pending.GenerationID != fixture.Generation.CandidateID {
-					t.Fatalf("pending intent was not retained after refused recovery: %+v", pending)
+				if rowPresent(t, s, id, fixture.Generation.CandidateID) {
+					t.Fatal("refused retry wrote a generation row; nothing must be installed")
 				}
 			case "recovery-replay":
-				// A refused activation leaves the staged candidate and its
-				// intent behind. A later recovery replays the same managed
-				// transaction, so it must refuse the invalid candidate without
+				// A refused activation stages objects but writes no
+				// generation row and records no intent. A later attempt with
+				// the same invalid candidate must refuse again without
 				// echoing the private title reference it carries.
 				candidate, candidateBlobs := buildTestGeneration(t, id, fixture.Generation.CandidateID, "diag text G2", "diag input G2", "diag output G2")
 				candidate.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(fixture.PrivateIdentity)}
 				if err := activateTestGeneration(t, s, candidate, candidateBlobs); err == nil {
 					t.Fatal("activation of a candidate with a private title ref succeeded; it must be refused")
 				}
-				_, replayErr := s.RecoverGenerationActivation(context.Background(), id)
+				_, replayErr := s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation:     candidate,
+					Blobs:          candidateBlobs,
+					IndexerVersion: 1,
+					IndexedAtMs:    1,
+				})
 				assertPrivateDetailRefused(t, replayErr, fixture.PrivateIdentity, "recovery replay")
 				assertLastGoodRetained(t, s, id, before, fixture.Generation.CompleteID)
 			default:

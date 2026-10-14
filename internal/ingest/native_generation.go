@@ -100,6 +100,24 @@ type NativeGenerationPreparedActivator interface {
 	ActivateStagedNativeGeneration(context.Context, NativeGenerationActivation, NativeGenerationStaged) (ActivationOutcome, error)
 }
 
+// NativeGenerationBatchStager stages independent candidates in bounded shared
+// transactions. Results retain input order, including refused candidates.
+type NativeGenerationBatchStager interface {
+	StageNativeGenerations(context.Context, []NativeGenerationActivation) ([]NativeGenerationStaged, []error)
+}
+
+// NativeActivationResult is one request's guarded activation outcome.
+type NativeActivationResult struct {
+	Outcome ActivationOutcome
+	Err     error
+}
+
+// NativeGenerationBatchActivator commits staged independent candidates together
+// with per-session savepoints. A nil handle stages that candidate inline.
+type NativeGenerationBatchActivator interface {
+	ActivateStagedNativeGenerations(context.Context, []NativeGenerationActivation, []NativeGenerationStaged) []NativeActivationResult
+}
+
 // NativeGenerationPrior is the last-good evidence a prior activation left for
 // one session. Metadata and Aliases are derived from the committed generation;
 // PriorEvidence is the exact persisted harness document, or nil when none was
@@ -118,6 +136,31 @@ type NativeGenerationPrior struct {
 // session's aliases.
 type NativeGenerationPriorReader interface {
 	ReadNativeGenerationPrior(context.Context, SessionID) (*NativeGenerationPrior, error)
+}
+
+// StoredCaptureAuthority names the stored content-capture certificate that
+// stands in for an active managed generation as last-good full authority. It
+// preserves the certificate's own state in full: its status, source authority,
+// transcript origin, capture format, and failure code. An accounted
+// incomplete/full certificate therefore reads as what it is rather than being
+// flattened into a complete one. It carries no alias table and no
+// captured-prefix proof.
+type StoredCaptureAuthority struct {
+	Status           ContentCaptureStatus
+	SourceAuthority  ContentSourceAuthority
+	TranscriptOrigin TranscriptOrigin
+	CaptureFormat    ContentCaptureFormat
+	FailureCode      ContentCaptureFailureCode
+}
+
+// NativePriorCaptureAuthorityReader reports the stored content-capture
+// certificate that still holds last-good full authority for a session with no
+// active managed generation. It applies the writer's own publishable-capture
+// predicate to the stored certificate; a publication revision is never proof.
+// A session with no publishable certificate returns (nil, nil), so a genuine
+// first discovery keeps its empty prior.
+type NativePriorCaptureAuthorityReader interface {
+	ReadStoredCaptureAuthority(context.Context, SessionID) (*StoredCaptureAuthority, error)
 }
 
 // ActivationDisposition is the lock-derived disposition for the REQUESTED
@@ -139,6 +182,11 @@ const (
 	// committed before this invocation. The call re-repaired from the
 	// committed row and changed no authority.
 	ActivationAlreadyCommitted
+	// ActivationSkipped reports the requested candidate reproduces the
+	// active harmonized generation exactly: no new generation row was
+	// written and no object was staged, and the call advanced only the
+	// bookkeeping stamps. It counts zero, like AlreadyCommitted.
+	ActivationSkipped
 )
 
 // ActivationOutcome is the request-scoped activation result. RepairPending

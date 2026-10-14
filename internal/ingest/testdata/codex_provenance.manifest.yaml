@@ -3,6 +3,14 @@ requiredNames:
   - turn-context-effort-high
   - turn-context-effort-absent-invalid
   - turn-context-effort-edge-whitespace-dropped
+  - inherited-function-call-local-result
+  - inherited-custom-call-local-result
+  - local-function-pair
+  - local-custom-pair
+  - inherited-function-pair
+  - inherited-custom-pair
+  - result-without-call
+  - inherited-call-result-before-later-local-call
   - aligned-user-context-media-unknown
   - typed-context-kinds
   - context-kind-modality-conflict

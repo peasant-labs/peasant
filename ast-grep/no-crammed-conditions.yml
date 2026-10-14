@@ -1,0 +1,18 @@
+id: no-crammed-conditions
+language: Go
+severity: warning
+message: >-
+  Condition crams many terms onto one line. Split the chain across lines or
+  extract named booleans / a helper; four or more `||`/`&&` terms in one line
+  is not readable.
+note: >-
+  The check flags the outermost boolean expression when a single line carries
+  three or more `||`/`&&` operators. A chain that legitimately needs many
+  terms belongs in a named helper with one term per line.
+rule:
+  kind: binary_expression
+  regex: '(\|\||&&)[^\n]*(\|\||&&)[^\n]*(\|\||&&)'
+  not:
+    inside:
+      kind: binary_expression
+      stopBy: end

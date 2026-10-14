@@ -104,7 +104,7 @@ func committedPublicationGraph(meta *schema.UnifiedMetadata, present bool) {
 	}
 }
 
-func seedCommittedPublication(t *testing.T, db *store.Store, c committedPublicationCase, model, text string) *schema.UnifiedMetadata {
+func seedCommittedPublication(t *testing.T, db *store.Store, dbPath, root string, c committedPublicationCase, model, text string) *schema.UnifiedMetadata {
 	t.Helper()
 	entry := publicationEntry(t, testutil.TestSessionUUID)
 	meta := entry.Metadata
@@ -120,11 +120,29 @@ func seedCommittedPublication(t *testing.T, db *store.Store, c committedPublicat
 	projection.Stats.TurnCount = len(entries)
 	projection.Stats.InputSubmissionCount = c.GenerationCount
 	committedPublicationGraph(&projection, c.GenerationGraph)
-	storetest.SeedGenerationPublication(t, db, meta, indexformat.V2{Generation: indexformat.Generation{
+	meta.SchemaVersion = ingest.CurrentSchemaVersion
+	projection.SchemaVersion = ingest.CurrentSchemaVersion
+	meta.MetadataHash = schema.ComputeMetadataHash(meta)
+	cwdKind := ingest.CWDSourceAbsent
+	if meta.CWD != "" {
+		cwdKind = ingest.CWDSourceExact
+	}
+	revisions, err := db.InsertSessionsWithRevisions(t.Context(), []ingest.StoreEntry{{
+		Metadata: meta, PublicationCapture: true, CWDProvenance: cwdKind,
+	}})
+	if err != nil {
+		t.Fatalf("seed committed publication session row: %v", err)
+	}
+	revision := revisions[meta.SessionID]
+	// The committed readers serve the file-backed representation; the
+	// readers change wires the harmonized catalog rows to them.
+	seedFileBackedExternal(t, db, dbPath, root, meta.SessionID, indexformat.V2{Generation: indexformat.Generation{
 		ID: "g-committed", Completeness: indexformat.GenerationCompletenessComplete,
 		Metadata: projection, Main: indexformat.Partition{Entries: entries},
 		SourceEvidenceDigest: strings.Repeat("a", 64),
-	}}, nil)
+	}}, nil, true, &fileBackedPublicationBind{
+		revision: revision,
+	})
 	return meta
 }
 
@@ -135,7 +153,7 @@ func TestCommittedPublicationInput(t *testing.T) {
 			dir := t.TempDir()
 			path, root := filepath.Join(dir, "publication.db"), filepath.Join(dir, "artifacts")
 			db, _ := openCommittedPublicationStore(t, path, root, true)
-			meta := seedCommittedPublication(t, db, c, f.Concurrency.FirstModel, f.Concurrency.FirstText)
+			meta := seedCommittedPublication(t, db, path, root, c, f.Concurrency.FirstModel, f.Concurrency.FirstText)
 			before, err := db.LoadPublicationInput(t.Context(), meta.SessionID)
 			if err != nil {
 				t.Fatal(err)
@@ -199,7 +217,7 @@ func TestCommittedPublicationInputPinsOneDatabaseSnapshot(t *testing.T) {
 	path, root := filepath.Join(dir, "publication.db"), filepath.Join(dir, "artifacts")
 	reader, _ := openCommittedPublicationStore(t, path, root, true)
 	writer, _ := openCommittedPublicationStore(t, path, root, true)
-	meta := seedCommittedPublication(t, reader, committedPublicationCase{Managed: true, GenerationCount: &f.Count}, f.FirstModel, f.FirstText)
+	meta := seedCommittedPublication(t, reader, path, root, committedPublicationCase{Managed: true, GenerationCount: &f.Count}, f.FirstModel, f.FirstText)
 	replacement := *meta
 	replacement.Model = schema.ModelID(f.SecondModel)
 	replacement.MetadataHash = schema.ComputeMetadataHash(&replacement)
@@ -233,7 +251,7 @@ func TestCommittedPublicationInputReleasesConnectionAndRetainsLock(t *testing.T)
 	f := loadCommittedPublicationFixtures(t).Concurrency
 	dir := t.TempDir()
 	db, locker := openCommittedPublicationStore(t, filepath.Join(dir, "publication.db"), filepath.Join(dir, "artifacts"), true)
-	meta := seedCommittedPublication(t, db, committedPublicationCase{Managed: true, GenerationCount: &f.Count}, f.FirstModel, f.FirstText)
+	meta := seedCommittedPublication(t, db, filepath.Join(dir, "publication.db"), filepath.Join(dir, "artifacts"), committedPublicationCase{Managed: true, GenerationCount: &f.Count}, f.FirstModel, f.FirstText)
 	sentinel := errors.New("callback failure")
 	err := db.WithCommittedPublicationInput(t.Context(), meta.SessionID, func(input ingest.PublicationInputBundle) error {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

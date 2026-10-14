@@ -32,6 +32,10 @@
 #     the same stored message, differing only in whether the read succeeds
 #   - the no-miner arm pairs a harness this build cannot re-read with a Claude
 #     control that is otherwise identical, so the two must settle differently
+#   - the post-heal arm is an OpenCode row (no origin miner) whose parent link
+#     was repaired after it was judged unknown, so the repair left it unknown at
+#     version 0; an implementation that ran the no-miner fallback before the
+#     parent link, or kept the stale verdict, would answer unknown, not agent
 #   - the all-unreadable arm is the trap: an implementation that marked
 #     everything final fails every one of its rows
 
@@ -45,6 +49,7 @@ required_case_names:
   - a_scaffolding_run_past_the_cap_stops_at_unknown
   - a_harness_without_a_miner_keeps_its_first_stored_record
   - parent_linked_row_resolves_without_reading_any_transcript
+  - a_repaired_parent_link_on_a_harness_without_a_miner_resolves_agent
   - cached_menu_origin_is_reused_without_reading_the_transcript
   - live_transcript_is_mined_in_full
   - missing_transcript_resolves_from_the_stored_first_user_message
@@ -221,6 +226,34 @@ cases:
         origin: unknown
         finalised: false
         written: false
+
+  # A repaired parent link. The row was judged unknown before its parent link
+  # existed; the repair set the link and reset its origin version to 0 while
+  # keeping the stale verdict. It is an OpenCode row, which has no origin miner,
+  # and there is no transcript on disk and no stored message, so only the
+  # parent link can answer agent. The parent is stored ahead of it in the same
+  # list so the link lands; it has no evidence and settles unknown through the
+  # no-miner path.
+  - name: a_repaired_parent_link_on_a_harness_without_a_miner_resolves_agent
+    arm: repaired-parent-link
+    rows:
+      - session_id: 18000000-0000-4000-8000-000000000001
+        harness: opencode
+        source_path: /opencode/18000000-0000-4000-8000-000000000001.json
+      - session_id: 18000000-0000-4000-8000-000000000002
+        harness: opencode
+        parent_id: 18000000-0000-4000-8000-000000000001
+        source_path: /opencode/18000000-0000-4000-8000-000000000002.json
+        stored_origin: unknown
+    expected:
+      - session_id: 18000000-0000-4000-8000-000000000002
+        origin: agent
+        finalised: true
+        written: true
+      - session_id: 18000000-0000-4000-8000-000000000001
+        origin: unknown
+        finalised: true
+        written: true
 
   # Source two. The transcript is NOT on disk, so only the cache can answer.
   - name: cached_menu_origin_is_reused_without_reading_the_transcript

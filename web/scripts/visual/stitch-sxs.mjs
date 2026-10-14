@@ -138,7 +138,7 @@ const captionsFor = (surface) => {
       // fairtrade-demo reference (a glancer seeing just "reference" could conflate
       // the two; see scripts/visual/baseline/smoke-baseline/).
       ref: process.env.REF_LABEL || `committed app baseline (regression ref) · ${name}`,
-      app: process.env.APP_LABEL || `real bin/peasant · ${name}`,
+      app: process.env.APP_LABEL || `real ./peasant · ${name}`,
     }
   }
   return { ref: REF_LABEL, app: APP_LABEL }

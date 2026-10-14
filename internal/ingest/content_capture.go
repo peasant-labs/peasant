@@ -142,6 +142,34 @@ func isCursorSpecialRecordKind(kind string) bool {
 	return slices.Contains(cursorStrictRecordKinds(), kind)
 }
 
+// validateCursorTurnEnding recognizes only established native control shapes.
+// Both content locations are checked so a nested field cannot hide a sibling
+// payload that the projection would otherwise leave unrepresented.
+func validateCursorTurnEnding(line cursorJSONLLine) (bool, error) {
+	if !isCursorSpecialRecordKind(line.Type) {
+		return false, nil
+	}
+	if len(line.Content) != 0 || len(line.Message.Content) != 0 {
+		return true, fmt.Errorf("%s turn carries unrepresented conversation content", line.Status)
+	}
+	switch line.Status {
+	case "success":
+		if line.Role != "" || line.Message.Role != "" {
+			return true, fmt.Errorf("successful turn ending must not carry a conversation role")
+		}
+		if line.Error != nil && *line.Error != "" {
+			return true, fmt.Errorf("successful turn ending carries unrepresented error text")
+		}
+	case "aborted":
+		if line.Error == nil || *line.Error == "" {
+			return true, fmt.Errorf("aborted turn requires recorded error text")
+		}
+	default:
+		return true, fmt.Errorf("unsupported turn ending status %q; restore a supported success or aborted control and retry capture", line.Status)
+	}
+	return true, nil
+}
+
 type TranscriptCaptureResult struct {
 	Entries        []schema.SessionEntry
 	IgnoredRecords []IgnoredSourceRecord
@@ -446,14 +474,8 @@ func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 		if err := json.Unmarshal(raw, &line); err != nil {
 			return nil, err
 		}
-		if isCursorSpecialRecordKind(line.Type) && line.Status == "aborted" {
-			if len(line.content()) != 0 {
-				return nil, fmt.Errorf("aborted turn carries unrepresented conversation content")
-			}
-			if line.Error == nil || *line.Error == "" {
-				return nil, fmt.Errorf("aborted turn requires recorded error text")
-			}
-			return nil, nil
+		if control, err := validateCursorTurnEnding(line); control {
+			return nil, err
 		}
 		role := firstNonEmpty(line.Role, line.Message.Role)
 		if !slices.Contains(cursorCaptureRoleKinds(), role) {

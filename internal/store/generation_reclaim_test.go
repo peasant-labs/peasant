@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -45,25 +46,28 @@ func loadGenerationReclaimFixture(t *testing.T) generationReclaimFixture {
 // seedSupersededReclaimSession seeds one session, activates the superseded
 // generation and then the active one, and returns both generation identifiers.
 // Activation installs the superseded generation's rows and directory first, so
-// the later activation leaves it a real inactive generation to reclaim.
-func seedSupersededReclaimSession(t *testing.T, s *Store, fixture generationReclaimFixture) schema.SessionID {
+// the later activation leaves it a real inactive generation to reclaim. The
+// helper sets the sweep flag for the session, exactly as the v62 backfill
+// does for sessions with a non-active projection row: the reclaim selects
+// candidates through the flag, so an unflagged session is never a candidate.
+func seedSupersededReclaimSession(t *testing.T, s *Store, root string, fixture generationReclaimFixture) schema.SessionID {
 	t.Helper()
 	id, err := schema.NewSessionID(fixture.Session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	seedGenerationSession(t, s, fixture.Session.ID)
+	// The reclaim under test retires file-backed generations; seed both
+	// generations into the file-backed catalog so the forecast, the row
+	// deletes, and the directory removals run against real state.
 	superseded, supersededBlobs := buildTestGeneration(t, id, fixture.Generation.SupersededID, "superseded user text", "superseded tool input", "superseded tool output")
-	if err := activateTestGeneration(t, s, superseded, supersededBlobs); err != nil {
-		t.Fatalf("activate superseded generation: %v", err)
-	}
+	seedFileBackedGeneration(t, s, root, id, superseded, supersededBlobs, false)
 	active, activeBlobs := buildTestGeneration(t, id, fixture.Generation.ActiveID, "active user text", "active tool input", "active tool output")
-	if err := activateTestGeneration(t, s, active, activeBlobs); err != nil {
-		t.Fatalf("activate active generation: %v", err)
-	}
+	seedFileBackedGeneration(t, s, root, id, active, activeBlobs, false)
 	if visible := visibleGeneration(t, s, id); visible != fixture.Generation.ActiveID {
 		t.Fatalf("visible generation = %q, want active %q", visible, fixture.Generation.ActiveID)
 	}
+	execGenerationSQL(t, s, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = '`+fixture.Session.ID+`';`)
 	return id
 }
 
@@ -176,7 +180,7 @@ func assertReclaimIntegrity(t *testing.T, s *Store) {
 func TestSupersededGenerationReclaimForecastAndApply(t *testing.T) {
 	fixture := loadGenerationReclaimFixture(t)
 	s, root := openGenerationStore(t)
-	id := seedSupersededReclaimSession(t, s, fixture)
+	id := seedSupersededReclaimSession(t, s, root, fixture)
 
 	wantCounts := nonActiveReclaimCounts(t, s, id, fixture.Generation.ActiveID)
 	if wantCounts.Total() == 0 {
@@ -250,8 +254,8 @@ func TestSupersededGenerationReclaimForecastAndApply(t *testing.T) {
 // next, and a final pass finds no work.
 func TestSupersededGenerationReclaimLimitResumes(t *testing.T) {
 	fixture := loadGenerationReclaimFixture(t)
-	s, _ := openGenerationStore(t)
-	seedSupersededReclaimSession(t, s, fixture)
+	s, root := openGenerationStore(t)
+	seedSupersededReclaimSession(t, s, root, fixture)
 
 	secondID, err := schema.NewSessionID("bbbb4444-4444-4444-8444-444444444444")
 	if err != nil {
@@ -297,9 +301,9 @@ func TestSupersededGenerationReclaimLimitResumes(t *testing.T) {
 func TestSupersededGenerationReclaimSkipsPendingIntent(t *testing.T) {
 	fixture := loadGenerationReclaimFixture(t)
 	s, root := openGenerationStore(t)
-	id := seedSupersededReclaimSession(t, s, fixture)
+	id := seedSupersededReclaimSession(t, s, root, fixture)
 
-	if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
+	if err := writePendingIntentFile(t, root, id, GenerationIntent{
 		SessionID:    id,
 		GenerationID: fixture.Generation.PendingID,
 		ManifestPath: "generations/" + fixture.Generation.PendingID + "/manifest.json",
@@ -345,7 +349,7 @@ func TestSupersededGenerationReclaimSkipsPendingIntent(t *testing.T) {
 func TestSupersededGenerationReclaimCrashLeavesRetryableOrphan(t *testing.T) {
 	fixture := loadGenerationReclaimFixture(t)
 	s, root := openGenerationStore(t)
-	id := seedSupersededReclaimSession(t, s, fixture)
+	id := seedSupersededReclaimSession(t, s, root, fixture)
 
 	s.reclaimSeam = func(stage string) error {
 		if stage == reclaimSeamAfterRows {
@@ -384,4 +388,20 @@ func TestSupersededGenerationReclaimCrashLeavesRetryableOrphan(t *testing.T) {
 		t.Fatalf("visible generation = %q after retry, want active %q", visible, fixture.Generation.ActiveID)
 	}
 	assertReclaimIntegrity(t, s)
+}
+
+// writePendingIntentFile plants one pending activation intent the way the
+// pre-harmonized writer left it: the reclaim's pre-delete guard reads it,
+// and no writer records one anymore.
+func writePendingIntentFile(t *testing.T, root string, id schema.SessionID, intent GenerationIntent) error {
+	t.Helper()
+	encoded, err := json.Marshal(intent)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(root, string(id))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "generation-intent.json"), encoded, 0o600)
 }

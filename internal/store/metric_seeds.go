@@ -1,27 +1,28 @@
 package store
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 var _ ingest.MetricSeedStore = (*Store)(nil)
 
-// GetMetricSeed returns adapter statistics retained with the current metadata.
-// Computed metrics are never interpreted as recovered native evidence.
+// GetMetricSeed returns adapter statistics retained with the current
+// metadata: the harness-only seed home for native sessions, the legacy
+// sessions column otherwise. Computed metrics are never interpreted as
+// recovered native evidence.
 func (s *Store) GetMetricSeed(ctx context.Context, sid ingest.SessionID) (*ingest.StatsInfo, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: read retained metric seed for session %s: %w; retry when database access is available", sid, err)
 	}
 	defer s.pool.Put(conn)
-	return getMetricSeedOnConn(conn, sid)
+	return readMetricSeedOnConn(conn, schema.SessionID(sid))
 }
 
 func getMetricSeedOnConn(conn *sqlite.Conn, sid ingest.SessionID) (*ingest.StatsInfo, error) {
@@ -31,12 +32,7 @@ func getMetricSeedOnConn(conn *sqlite.Conn, sid ingest.SessionID) (*ingest.Stats
 			if stmt.ColumnType(0) == sqlite.TypeNull {
 				return nil
 			}
-			raw := bytes.TrimSpace([]byte(stmt.ColumnText(0)))
-			if len(raw) == 0 || raw[0] != '{' {
-				return fmt.Errorf("retained metric seed must be a JSON object; NULL alone represents unknown input")
-			}
-			seed = &ingest.StatsInfo{}
-			return json.Unmarshal(raw, seed)
+			return decodeSeedDocument(stmt.ColumnText(0), &seed)
 		},
 	})
 	if err != nil {

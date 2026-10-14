@@ -1,0 +1,12 @@
+requiredNames:
+  - evidence-known-child
+  - evidence-known-retained
+  - explicit-none-despite-snapshot-and-cache
+  - conflicting
+  - unknown
+  - context-from-only-despite-snapshot
+  - snapshot-child-cache-null
+  - cache-only-no-evidence-no-snapshot
+  - plain-root
+  - inactive-generation-evidence-snapshot-decides
+  - snapshot-beats-cache-both-present

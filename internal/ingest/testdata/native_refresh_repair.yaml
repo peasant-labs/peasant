@@ -53,3 +53,22 @@ cases:
     scenario: opencode_native_activation
     sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
     nativeSource: native-current-rows
+  # A stored V1 full certificate with historical producer/format stamps and no
+  # active managed generation, over a native source whose assistant row still
+  # carries a running/streaming tool. Ordinary maintenance must hold the last
+  # good full authority, install no V2 generation, and name the unsettled
+  # message and sequence; after the tool settles, the same maintenance must
+  # activate a complete V2 generation.
+  - name: opencode_v1_full_authority_holds_unfinished_native
+    harness: opencode
+    scenario: opencode_authority_bridge
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    nativeSource: native-current-rows
+    unsettledNativeSource: native-v2-rows
+    storedIndexerVersion: 16
+    storedIndexFormat: 1
+    heldDiagnosticContains:
+      - msg_v2_assistant
+      - sequence 1
+      - a stored complete capture certificate
+      - origin opencode-current-sqlite

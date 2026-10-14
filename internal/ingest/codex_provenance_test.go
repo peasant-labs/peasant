@@ -66,6 +66,7 @@ type codexEntryFixture struct {
 	ToolInput        string                 `yaml:"toolInput"`
 	ToolOutput       string                 `yaml:"toolOutput"`
 	ToolCallID       string                 `yaml:"toolCallId"`
+	ToolCallAbsent   bool                   `yaml:"toolCallAbsent"`
 	SubmissionRef    string                 `yaml:"submissionRef"`
 	Provenance       codexProvenanceFixture `yaml:"provenance"`
 }
@@ -525,6 +526,9 @@ func codexAssertEntries(t *testing.T, label string, want []codexEntryFixture, go
 		if w.ToolCallID != "" && (g.ToolCallID == nil || *g.ToolCallID != w.ToolCallID) {
 			t.Errorf("%s toolCallId = %v, want %q", where, g.ToolCallID, w.ToolCallID)
 		}
+		if w.ToolCallAbsent && g.ToolCallID != nil {
+			t.Errorf("%s toolCallId = %v, want absent", where, g.ToolCallID)
+		}
 		codexAssertProvenance(t, where, w.Provenance, g.Provenance)
 		if w.SubmissionRef != "" {
 			if g.Provenance == nil || string(g.Provenance.SubmissionRef) != w.SubmissionRef {
@@ -630,6 +634,17 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 		codexAssertEntries(t, fmt.Sprintf("earlier[%d]", i), want.Entries, generation.Earlier[i].Content.Entries)
 	}
 	codexAssertRetained(t, candidate, c.Expected.Retained)
+	// Every allocated content identity, including retained call evidence, must
+	// remain reachable through the native alias catalog.
+	aliased := make(map[schema.SourceEntryRef]bool)
+	for _, alias := range generation.Aliases {
+		aliased[alias.Ref] = true
+	}
+	for _, record := range generation.Content {
+		if !aliased[record.Ref] {
+			t.Errorf("content ref %q lost its native alias", record.Ref)
+		}
+	}
 }
 
 // codexAssertRetained proves that inherited evidence stays recoverable from the

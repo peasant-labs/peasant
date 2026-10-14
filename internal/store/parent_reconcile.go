@@ -203,6 +203,42 @@ func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ing
 	return updates, nil
 }
 
+// sqlHealParentCache sets one child's FK availability cache and resets its
+// origin watermark in the same statement, so the repaired row is re-judged by
+// the next origin resolve pass.
+const sqlHealParentCache = `UPDATE sessions SET parent_id = ?, origin_version = 0 WHERE session_id = ?`
+
+// sqlInvalidateStaleParentOrigins re-queues every settled, parent-linked,
+// independently admitted row whose verdict is still unknown at the current
+// origin rule version. The predicate is whole-population and idempotent: once a
+// row is reset to version 0 it no longer matches, and the resolve pass moves it
+// back to the rule version with its parent-link verdict.
+const sqlInvalidateStaleParentOrigins = `UPDATE sessions SET origin_version = 0
+WHERE session_origin = 'unknown'
+  AND parent_id IS NOT NULL
+  AND origin_version = ?
+  AND model_harness IN (?, ?)`
+
+// InvalidateStaleParentOrigins re-queues the stored codex and opencode rows that
+// carry a parent link but kept an unknown origin verdict at the current rule
+// version — verdicts judged before their parent link was repaired. It resets
+// only origin_version, never the verdict, the link, or any other column, and
+// returns the number of rows re-queued; a second application returns zero.
+// Claude Code rows and parentless roots are never touched.
+func (s *Store) InvalidateStaleParentOrigins(ctx context.Context) (int64, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store: take connection to re-queue stale parent-linked origin verdicts: %w; no origin verdict was re-queued; restore database access and rerun harvest", err)
+	}
+	defer s.pool.Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, sqlInvalidateStaleParentOrigins, &sqlitex.ExecOptions{
+		Args: []any{ingest.OriginRuleVersion, ingest.HarnessCodex.String(), ingest.HarnessOpenCode.String()},
+	}); err != nil {
+		return 0, fmt.Errorf("store: re-queue stale parent-linked origin verdicts at rule version %d: %w; no origin verdict was re-queued; restore database access and rerun harvest", ingest.OriginRuleVersion, err)
+	}
+	return int64(conn.Changes()), nil
+}
+
 // ReconcileParentCache atomically applies a bounded set of child-to-parent
 // cache updates. Each update is applied only when the child and parent rows
 // exist, the edge is not a self-parent, and following the parent cache from
@@ -306,7 +342,11 @@ func (s *Store) ReconcileParentCache(ctx context.Context, updates []ingest.Paren
 		}
 		parent := update.Parent
 		effective[update.Child] = &parent
-		if execErr := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET parent_id = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+		// The heal and the origin requeue move in ONE statement: a child can
+		// never be found with a repaired parent link still carrying the origin
+		// verdict judged before the link existed, so the next resolve pass
+		// re-judges it.
+		if execErr := sqlitex.ExecuteTransient(conn, sqlHealParentCache, &sqlitex.ExecOptions{
 			Args: []any{string(update.Parent), string(update.Child)},
 		}); execErr != nil {
 			return fmt.Errorf("store: reconcile parent cache for child %s: %w; no cache update in this reconciliation was committed; retry harvest", update.Child, execErr)

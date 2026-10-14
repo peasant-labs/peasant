@@ -14,7 +14,7 @@ import { applyDeterminism } from './determinism.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const OUT = process.env.CAPTURES || join(HERE, 'review-capture', 'search-share')
 const PORT = process.env.PEASANT_SEARCH_SHARE_PORT || '8718'
 const ORIGIN = `http://localhost:${PORT}`

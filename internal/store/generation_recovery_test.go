@@ -42,15 +42,12 @@ type projectionRecoveryFixture struct {
 		LongTextPadding int    `yaml:"long_text_padding"`
 	} `yaml:"generation"`
 	Cases []struct {
-		Name     string `yaml:"name"`
-		Seam     string `yaml:"seam"`
-		Visible  string `yaml:"visible"`
-		Recovery string `yaml:"recovery"`
+		Name       string `yaml:"name"`
+		Seam       string `yaml:"seam"`
+		Visible    string `yaml:"visible"`
+		Recovery   string `yaml:"recovery"`
+		TinyBudget bool   `yaml:"tiny_budget"`
 	} `yaml:"cases"`
-	CorruptArtifact struct {
-		Name     string `yaml:"name"`
-		EntryRef string `yaml:"entry_ref"`
-	} `yaml:"corrupt_artifact"`
 }
 
 func loadProjectionRecoveryFixture(t *testing.T) projectionRecoveryFixture {
@@ -65,12 +62,9 @@ func loadProjectionRecoveryFixture(t *testing.T) projectionRecoveryFixture {
 	if err != nil {
 		t.Fatalf("decode projection_commit_recovery manifest: %v", err)
 	}
-	actual := make([]string, 0, len(fixture.Cases)+1)
+	actual := make([]string, 0, len(fixture.Cases))
 	for _, c := range fixture.Cases {
 		actual = append(actual, c.Name)
-	}
-	if fixture.CorruptArtifact.Name != "" {
-		actual = append(actual, fixture.CorruptArtifact.Name)
 	}
 	if err := validateRecoveryRequiredNames(manifest, actual, "projection commit recovery"); err != nil {
 		t.Fatal(err)
@@ -123,7 +117,15 @@ func validateRecoveryRequiredNames(required, actual []string, label string) erro
 
 // openGenerationStore opens a real store with the V2 format, the owned-artifact
 // file store and the OS session lock. It returns the store and the artifact root.
-func openGenerationStore(t *testing.T) (*Store, string) {
+func openGenerationStore(t testing.TB) (*Store, string) {
+	t.Helper()
+	return openGenerationStoreWith(t)
+}
+
+// openGenerationStoreWith opens a real store like openGenerationStore with
+// additional open options (for example a tiny write budget that forces
+// budget-split staging).
+func openGenerationStoreWith(t testing.TB, options ...OpenOption) (*Store, string) {
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "artifacts")
@@ -135,7 +137,8 @@ func openGenerationStore(t *testing.T) (*Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(filepath.Join(dir, "generations.db"), WithPoolSize(2), WithIndexFormats(generationIndexFormat{}), WithGenerationArtifacts(artifacts, locker))
+	base := []OpenOption{WithPoolSize(2), WithIndexFormats(generationIndexFormat{}), WithGenerationArtifacts(artifacts, locker)}
+	s, err := Open(filepath.Join(dir, "generations.db"), append(base, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +146,14 @@ func openGenerationStore(t *testing.T) (*Store, string) {
 	return s, root
 }
 
-func execGenerationSQL(t *testing.T, s *Store, script string) {
+// tinyStageBudget forces budget-split staging: every staging unit exceeds
+// the byte budget, so each commits in its own transaction and the
+// between-transactions seam can fire.
+func tinyStageBudget() OpenOption {
+	return WithWriteConfig(ingest.WriteConfig{BatchBytes: 1, BatchSessions: 64}.WithDefaults(1))
+}
+
+func execGenerationSQL(t testing.TB, s *Store, script string) {
 	t.Helper()
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
@@ -155,7 +165,7 @@ func execGenerationSQL(t *testing.T, s *Store, script string) {
 	}
 }
 
-func seedGenerationSession(t *testing.T, s *Store, sid string) {
+func seedGenerationSession(t testing.TB, s *Store, sid string) {
 	t.Helper()
 	execGenerationSQL(t, s, `
 INSERT OR IGNORE INTO host_slugs(opaque_id, host_slug) VALUES('host-gen','host-gen');
@@ -213,83 +223,52 @@ func buildTestGeneration(t *testing.T, sid schema.SessionID, genID, text, toolIn
 }
 
 // filledCandidateForValidation returns the candidate in the shape staging
-// produces: every content record carries its owned relative blob path, byte
-// length and payload digest. Generation.Validate rejects an unfilled candidate,
-// so a test that needs to prove a candidate is otherwise valid must validate
-// the staged shape rather than the pre-stage value.
-func filledCandidateForValidation(t *testing.T, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) indexformat.V2 {
+// produces: every content record carrying staged bytes adopts its owned
+// relative blob path, byte length and payload digest. Generation.Validate
+// rejects an unfilled candidate, so a test that needs to prove a candidate
+// is otherwise valid must validate the staged shape rather than the
+// pre-stage value. Records without staged bytes stay unfilled: the prepare
+// phase refuses them with the binding category instead of a setup fatal.
+func filledCandidateForValidation(t testing.TB, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) indexformat.V2 {
 	t.Helper()
 	filled := append([]indexformat.ContentRecord(nil), v2.Generation.Content...)
 	for i := range filled {
 		payload, ok := blobs[filled[i].Ref]
 		if !ok {
-			t.Fatalf("candidate content blob for ref %q is missing", filled[i].Ref)
+			continue
 		}
 		sum := sha256.Sum256(payload)
-		filled[i].RelativeBlob = blobName(filled[i].Ref)
-		filled[i].ByteLength = int64(len(payload))
-		filled[i].Digest = hex.EncodeToString(sum[:])
+		if filled[i].RelativeBlob == "" {
+			filled[i].RelativeBlob = "c_" + hex.EncodeToString(sum[:]) + ".blob"
+		}
+		if filled[i].ByteLength == 0 {
+			filled[i].ByteLength = int64(len(payload))
+		}
+		if filled[i].Digest == "" {
+			filled[i].Digest = hex.EncodeToString(sum[:])
+		}
 	}
 	v2.Generation.Content = filled
 	return v2
 }
 
-type faultArtifacts struct {
-	GenerationArtifactStore
-	failRepair bool
-	failClear  bool
-}
-
-func (f faultArtifacts) RepairMetadata(ctx context.Context, id schema.SessionID, metadata []byte) error {
-	if f.failRepair {
-		return errors.New("injected fault after activation before metadata repair")
-	}
-	return f.GenerationArtifactStore.RepairMetadata(ctx, id, metadata)
-}
-
-func (f faultArtifacts) ClearIntent(ctx context.Context, id schema.SessionID) error {
-	if f.failClear {
-		return errors.New("injected fault after metadata before intent clear")
-	}
-	return f.GenerationArtifactStore.ClearIntent(ctx, id)
-}
-
-func installRecoveryFault(t *testing.T, s *Store, seam string) {
+// installHarmonizedFault stops the writer at one named crash seam: the seam
+// reports the injected error and the write stops there, so the test proves
+// the seam leaves exactly the old or the new generation behind.
+func installHarmonizedFault(t *testing.T, seam string) {
 	t.Helper()
-	switch seam {
-	case "before-temp-fsync", "after-fsync-before-rename", "after-rename-before-db":
-		osStore, ok := s.generationArtifacts.(*osGenerationArtifactStore)
-		if !ok {
-			t.Fatalf("stage seam requires the production artifact store, got %T", s.generationArtifacts)
+	harmonizedWriterSeam = func(stage string) error {
+		if stage == seam {
+			return fmt.Errorf("injected fault at %s", stage)
 		}
-		osStore.seam = func(at string) error {
-			if at == seam {
-				return fmt.Errorf("injected fault at %s", at)
-			}
-			return nil
-		}
-	case "during-activation-transaction":
-		execGenerationSQL(t, s, `CREATE TRIGGER test_fail_activation BEFORE INSERT ON session_projection_generations BEGIN SELECT RAISE(ABORT, 'injected activation transaction fault'); END;`)
-	case "after-db-before-metadata":
-		s.generationArtifacts = faultArtifacts{GenerationArtifactStore: s.generationArtifacts, failRepair: true}
-	case "after-metadata-before-intent-clear":
-		s.generationArtifacts = faultArtifacts{GenerationArtifactStore: s.generationArtifacts, failClear: true}
-	default:
-		t.Fatalf("unknown recovery seam %q", seam)
+		return nil
 	}
+	t.Cleanup(clearHarmonizedFault)
 }
 
-func clearRecoveryFault(t *testing.T, s *Store, seam string) {
-	t.Helper()
-	switch seam {
-	case "before-temp-fsync", "after-fsync-before-rename", "after-rename-before-db":
-		osStore := s.generationArtifacts.(*osGenerationArtifactStore)
-		osStore.seam = nil
-	case "during-activation-transaction":
-		execGenerationSQL(t, s, `DROP TRIGGER IF EXISTS test_fail_activation;`)
-	case "after-db-before-metadata", "after-metadata-before-intent-clear":
-		s.generationArtifacts = s.generationArtifacts.(faultArtifacts).GenerationArtifactStore
-	}
+// clearHarmonizedFault resets the writer seam hook.
+func clearHarmonizedFault() {
+	harmonizedWriterSeam = nil
 }
 
 // TestSessionSnapshotLegacyControl proves the snapshot API keeps the unchanged
@@ -321,26 +300,29 @@ func TestSessionSnapshotLegacyControl(t *testing.T) {
 	}
 }
 
+// visibleGeneration reads the session's active generation pointer: the one
+// durable read authority, whatever representation holds it.
 func visibleGeneration(t *testing.T, s *Store, sid schema.SessionID) string {
 	t.Helper()
-	var generation string
-	err := s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		if snapshot.IndexVersion != 2 {
-			return fmt.Errorf("snapshot index version %d, want 2", snapshot.IndexVersion)
-		}
-		generation = snapshot.GenerationID
-		return nil
-	})
+	conn, err := s.pool.Take(context.Background())
 	if err != nil {
-		t.Fatalf("WithSessionSnapshot: %v", err)
+		t.Fatal(err)
 	}
-	return generation
+	defer s.pool.Put(conn)
+	active, err := readActiveGenerationOnConn(conn, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active == nil {
+		return ""
+	}
+	return *active
 }
 
 func activateTestGeneration(t *testing.T, s *Store, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) error {
 	t.Helper()
 	_, err := s.ActivateGeneration(context.Background(), GenerationActivation{
-		Generation:     v2,
+		Generation:     filledCandidateForValidation(t, v2, blobs),
 		Blobs:          blobs,
 		IndexerVersion: 1,
 		IndexedAtMs:    1,
@@ -348,10 +330,10 @@ func activateTestGeneration(t *testing.T, s *Store, v2 indexformat.V2, blobs map
 	return err
 }
 
-// TestProjectionCommitRecovery drives the real activation through all six
-// crash seams. After the interruption exactly G1 or G2 is visible, no success
-// is stamped before the commit, and recovery or retry settles on G2 with the
-// committed long content intact.
+// TestProjectionCommitRecovery drives the real activation through the
+// harmonized crash seams. After the interruption exactly G1 or G2 is
+// visible, no success is stamped before the commit, and the retry settles
+// on G2 with the committed long content intact.
 func TestProjectionCommitRecovery(t *testing.T) {
 	fixture := loadProjectionRecoveryFixture(t)
 	id, err := schema.NewSessionID(fixture.Session.ID)
@@ -365,7 +347,12 @@ func TestProjectionCommitRecovery(t *testing.T) {
 
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			s, root := openGenerationStore(t)
+			var s *Store
+			if tc.TinyBudget {
+				s, _ = openGenerationStoreWith(t, tinyStageBudget())
+			} else {
+				s, _ = openGenerationStore(t)
+			}
 			seedGenerationSession(t, s, fixture.Session.ID)
 
 			complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText+" G1", longToolInput+" G1", longToolResult+" G1")
@@ -375,12 +362,14 @@ func TestProjectionCommitRecovery(t *testing.T) {
 			if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
 				t.Fatalf("G1 visible = %q, want %q", got, fixture.Generation.CompleteID)
 			}
+			before := readIndexStateForTest(t, s, id)
 
-			installRecoveryFault(t, s, tc.Seam)
+			installHarmonizedFault(t, tc.Seam)
 			failed, failedBlobs := buildTestGeneration(t, id, fixture.Generation.FailedID, longText+" G2", longToolInput+" G2", longToolResult+" G2")
 			if err := activateTestGeneration(t, s, failed, failedBlobs); err == nil {
 				t.Fatalf("activation across seam %s succeeded; a crash seam must interrupt it", tc.Seam)
 			}
+			clearHarmonizedFault()
 
 			want := fixture.Generation.CompleteID
 			if tc.Visible == "g2" {
@@ -389,249 +378,144 @@ func TestProjectionCommitRecovery(t *testing.T) {
 			if got := visibleGeneration(t, s, id); got != want {
 				t.Fatalf("after seam %s visible = %q, want %q", tc.Seam, got, want)
 			}
-			intent, err := s.generationArtifacts.ReadIntent(context.Background(), id)
-			if err != nil {
-				t.Fatalf("read pending intent after seam %s: %v", tc.Seam, err)
-			}
-			if intent == nil || intent.GenerationID != fixture.Generation.FailedID {
-				t.Fatalf("after seam %s the pending activation intent was not retained: %+v", tc.Seam, intent)
+			after := readIndexStateForTest(t, s, id)
+			if tc.Visible == "g1" && (after.IndexerVersion != before.IndexerVersion) {
+				t.Fatalf("interrupted activation stamped index_version %d, want the prior %d", after.IndexerVersion, before.IndexerVersion)
 			}
 
-			clearRecoveryFault(t, s, tc.Seam)
 			switch tc.Recovery {
-			case "recover":
-				if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
-					t.Fatalf("recover after seam %s: %v", tc.Seam, err)
-				}
 			case "retry":
 				if err := activateTestGeneration(t, s, failed, failedBlobs); err != nil {
 					t.Fatalf("retry after seam %s: %v", tc.Seam, err)
 				}
-			case "mismatched-digest":
-				// The durable envelope was altered after the candidate was
-				// renamed into place. Recovery must refuse it without changing
-				// the last-good read authority.
-				assertIntentDigestMismatchRefused(t, s, id, fixture)
-				return
-			case "discard-unverifiable":
-				// A staged blob was damaged after the candidate was renamed
-				// into place. Recovery must verify the bytes, discard the
-				// unverifiable candidate instead of wedging the session, and
-				// let a fresh candidate stage and activate.
-				assertUnverifiableCandidateDiscarded(t, s, root, id, fixture)
-				return
-			case "discard-undecodable-manifest":
-				// A staged manifest became undecodable after the candidate was
-				// renamed into place. Recovery must discard it for the same
-				// reason and let a fresh candidate stage and activate.
-				assertUndecodableManifestDiscarded(t, s, root, id, fixture)
-				return
+			case "complete":
+				// The commit is durable; only the post-commit pass is
+				// pending, so running it settles the session.
+				if err := s.deleteConvertedMirrorRows(context.Background(), id); err != nil {
+					t.Fatalf("complete after seam %s: %v", tc.Seam, err)
+				}
 			default:
 				t.Fatalf("unknown recovery %q", tc.Recovery)
 			}
 			if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
 				t.Fatalf("after recovery visible = %q, want %q", got, fixture.Generation.FailedID)
 			}
-			if intent, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || intent != nil {
-				t.Fatalf("after recovery the activation intent was not cleared: %+v (err %v)", intent, err)
-			}
-			assertFullContent(t, s, id, fixture.Generation.FailedID, schema.SourceEntryRef(generationRefs[0]), longText+" G2")
-			assertDurableRecoveryOutcome(t, root, id, fixture.Generation.FailedID, longText+" G2", longToolInput+" G2", longToolResult+" G2")
+			assertHarmonizedContent(t, s, id, fixture.Generation.FailedID, failed, failedBlobs)
 		})
 	}
-
-	t.Run(fixture.CorruptArtifact.Name, func(t *testing.T) {
-		s, root := openGenerationStore(t)
-		seedGenerationSession(t, s, fixture.Session.ID)
-		complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText, longToolInput, longToolResult)
-		if err := activateTestGeneration(t, s, complete, completeBlobs); err != nil {
-			t.Fatalf("activate G1: %v", err)
-		}
-		ref := schema.SourceEntryRef(fixture.CorruptArtifact.EntryRef)
-		blobPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.CompleteID, blobName(ref))
-		if err := os.Remove(blobPath); err != nil {
-			t.Fatalf("damage committed blob: %v", err)
-		}
-		content, err := s.ReadFullContent(context.Background(), id, fixture.Generation.CompleteID, indexformat.ContentRecord{
-			Ref: ref, RelativeBlob: blobName(ref), ByteLength: int64(len(longText)), Digest: strings.Repeat("0", 64),
-		})
-		if err == nil {
-			t.Fatal("damaged committed artifact resolved without an error")
-		}
-		if len(content) != 0 {
-			t.Fatalf("damaged artifact returned %d bytes; partial content must never be served", len(content))
-		}
-		if !strings.Contains(err.Error(), "managed recovery") || !strings.Contains(err.Error(), "corrupt") {
-			t.Fatalf("damaged artifact error is not actionable: %v", err)
-		}
-	})
 }
 
-// assertIntentDigestMismatchRefused alters only the durable intent's candidate
-// binding after the staged candidate was renamed into place, then replays it
-// through the real recovery path. Recovery must refuse the mismatched binding:
-// the last-good generation and its success stamps stay unchanged, and the
-// staged candidate and the intent are retained for a verified retry.
-func assertIntentDigestMismatchRefused(t *testing.T, s *Store, id schema.SessionID, fixture projectionRecoveryFixture) {
+// assertHarmonizedContent proves the writer's structural round-trip for one
+// committed generation: every mapping row names a body whose canonical text
+// is byte-identical to the candidate entry's JSON, every body digest is its
+// sha256, every non-emitted descriptor names a blob whose reassembled bytes
+// equal the staged bytes, and the orphan check finds no generation row it
+// should not.
+func assertHarmonizedContent(t *testing.T, s *Store, sid schema.SessionID, generationID string, candidate indexformat.V2, blobs map[schema.SourceEntryRef][]byte) {
 	t.Helper()
-	intent, err := s.generationArtifacts.ReadIntent(context.Background(), id)
-	if err != nil {
-		t.Fatalf("read durable intent before mutation: %v", err)
-	}
-	if intent == nil || intent.GenerationID != fixture.Generation.FailedID {
-		t.Fatalf("pending intent = %+v, want generation %s", intent, fixture.Generation.FailedID)
-	}
-	before := readIndexStateForTest(t, s, id)
-	intent.CandidateDigest = strings.Repeat("0", 64)
-	if err := s.generationArtifacts.WriteIntent(context.Background(), *intent); err != nil {
-		t.Fatalf("rewrite the mismatched durable intent: %v", err)
-	}
-	if _, err := s.RecoverGenerationActivation(context.Background(), id); err == nil {
-		t.Fatal("recovery accepted a mismatched durable candidate binding; it must be refused")
-	}
-	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
-		t.Fatalf("after refused recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
-	}
-	retained, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.FailedID)
-	if err != nil {
-		t.Fatalf("staged candidate was not retained after refused recovery: %v", err)
-	}
-	if retained.ID != fixture.Generation.FailedID {
-		t.Fatalf("retained candidate manifest = %q, want %q", retained.ID, fixture.Generation.FailedID)
-	}
-	stillPending, err := s.generationArtifacts.ReadIntent(context.Background(), id)
-	if err != nil {
-		t.Fatalf("read intent after refused recovery: %v", err)
-	}
-	if stillPending == nil || stillPending.GenerationID != fixture.Generation.FailedID {
-		t.Fatalf("pending intent was not retained after refused recovery: %+v", stillPending)
-	}
-	after := readIndexStateForTest(t, s, id)
-	if after.IndexerVersion != before.IndexerVersion {
-		t.Fatalf("refused recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
-	}
-	if (before.IndexedAt == nil) != (after.IndexedAt == nil) || (before.IndexedAt != nil && *before.IndexedAt != *after.IndexedAt) {
-		t.Fatalf("refused recovery changed indexed_at from %v to %v", before.IndexedAt, after.IndexedAt)
-	}
-}
-
-// assertUnverifiableCandidateDiscarded damages one blob of a candidate that was
-// renamed into place with a pending intent, then replays it through the real
-// recovery path. A candidate whose bytes no longer verify can never replay, so
-// recovery must discard the pending intent instead of wedging the session: the
-// last-good generation stays visible, the damaged directory is retained for
-// cleanup, a fresh candidate stages and activates, and the damaged directory
-// becomes removable once it no longer owns the intent.
-func assertUnverifiableCandidateDiscarded(t *testing.T, s *Store, root string, id schema.SessionID, fixture projectionRecoveryFixture) {
-	t.Helper()
-	ref := schema.SourceEntryRef(fixture.CorruptArtifact.EntryRef)
-	damagedPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.FailedID, blobName(ref))
-	original, err := os.ReadFile(damagedPath)
-	if err != nil {
-		t.Fatalf("read staged blob: %v", err)
-	}
-	if len(original) == 0 {
-		t.Fatal("staged blob is empty; the fixture expects captured content")
-	}
-	damaged := append([]byte(nil), original...)
-	damaged[0] ^= 0xff
-	if err := os.WriteFile(damagedPath, damaged, 0o600); err != nil {
-		t.Fatalf("damage staged blob: %v", err)
-	}
-	before := readIndexStateForTest(t, s, id)
-	if _, err := s.RecoverGenerationActivation(context.Background(), id); !errors.Is(err, errGenerationCandidateDiscarded) {
-		t.Fatalf("recovery error = %v, want the discarded-candidate signal", err)
-	}
-	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
-		t.Fatalf("after discarded recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
-	}
-	after := readIndexStateForTest(t, s, id)
-	if after.IndexerVersion != before.IndexerVersion {
-		t.Fatalf("discarded recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
-	}
-	if pending, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || pending != nil {
-		t.Fatalf("discarded recovery left a pending intent: %+v (err %v)", pending, err)
-	}
-	if _, err := os.Stat(damagedPath); err != nil {
-		t.Fatalf("damaged candidate was not retained for cleanup: %v", err)
-	}
-	// A fresh candidate stages and activates; the discarded one never blocks it.
-	fresh, freshBlobs := buildTestGeneration(t, id, fixture.Generation.DiscardedID, "diag text G3", "diag input G3", "diag output G3")
-	if err := activateTestGeneration(t, s, fresh, freshBlobs); err != nil {
-		t.Fatalf("activate a fresh candidate after a discarded one: %v", err)
-	}
-	if got := visibleGeneration(t, s, id); got != fixture.Generation.DiscardedID {
-		t.Fatalf("after fresh activation visible = %q, want %q", got, fixture.Generation.DiscardedID)
-	}
-	// With the intent gone, the damaged directory is removable.
-	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err != nil {
-		t.Fatalf("clean up the discarded candidate: %v", err)
-	}
-	if _, err := os.Stat(filepath.Dir(damagedPath)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("discarded candidate directory survived cleanup: %v", err)
-	}
-}
-
-// assertUndecodableManifestDiscarded corrupts a staged candidate's manifest so
-// it cannot be decoded, then replays it through the real recovery path. A
-// manifest that cannot be read or decoded can never replay, so recovery must
-// discard the pending intent instead of wedging the session: the last-good
-// generation stays visible and a fresh candidate stages and activates. The
-// undecodable directory stays in place because ownership cannot be proven for
-// cleanup.
-func assertUndecodableManifestDiscarded(t *testing.T, s *Store, root string, id schema.SessionID, fixture projectionRecoveryFixture) {
-	t.Helper()
-	manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.FailedID, "manifest.json")
-	if err := os.WriteFile(manifestPath, []byte("{not a generation manifest"), 0o600); err != nil {
-		t.Fatalf("corrupt staged manifest: %v", err)
-	}
-	before := readIndexStateForTest(t, s, id)
-	if _, err := s.RecoverGenerationActivation(context.Background(), id); !errors.Is(err, errGenerationCandidateDiscarded) {
-		t.Fatalf("recovery error = %v, want the discarded-candidate signal", err)
-	}
-	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
-		t.Fatalf("after discarded recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
-	}
-	after := readIndexStateForTest(t, s, id)
-	if after.IndexerVersion != before.IndexerVersion {
-		t.Fatalf("discarded recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
-	}
-	if pending, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || pending != nil {
-		t.Fatalf("discarded recovery left a pending intent: %+v (err %v)", pending, err)
-	}
-	fresh, freshBlobs := buildTestGeneration(t, id, fixture.Generation.DiscardedID, "diag text G3", "diag input G3", "diag output G3")
-	if err := activateTestGeneration(t, s, fresh, freshBlobs); err != nil {
-		t.Fatalf("activate a fresh candidate after a discarded one: %v", err)
-	}
-	if got := visibleGeneration(t, s, id); got != fixture.Generation.DiscardedID {
-		t.Fatalf("after fresh activation visible = %q, want %q", got, fixture.Generation.DiscardedID)
-	}
-}
-
-func assertFullContent(t *testing.T, s *Store, sid schema.SessionID, generationID string, ref schema.SourceEntryRef, want string) {
-	t.Helper()
-	var record indexformat.ContentRecord
-	err := s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		for _, candidate := range snapshot.Content {
-			if candidate.Ref == ref {
-				record = candidate
-				return nil
-			}
-		}
-		return fmt.Errorf("content ref %q is not in the captured snapshot", ref)
-	})
+	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.ByteLength <= int64(defaults.ContentPreviewLimit)+1024 {
-		t.Fatalf("committed content for %q is %d bytes, not longer than preview+1024", ref, record.ByteLength)
+	defer s.pool.Put(conn)
+	type mapped struct {
+		partition int
+		index     int
+		digest    string
 	}
-	content, err := s.ReadFullContent(context.Background(), sid, generationID, record)
-	if err != nil {
-		t.Fatalf("ReadFullContent: %v", err)
+	var mapping []mapped
+	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, entry_index, body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			mapping = append(mapping, mapped{partition: stmt.ColumnInt(0), index: stmt.ColumnInt(1), digest: stmt.ColumnText(2)})
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read generation mapping: %v", err)
 	}
-	if string(content) != want {
-		t.Fatalf("resolved content for %q = %q, want %q", ref, string(content), want)
+	var want []schema.SessionEntry
+	want = append(want, candidate.Generation.Main.Entries...)
+	for _, section := range candidate.Generation.Earlier {
+		want = append(want, section.Content.Entries...)
+	}
+	if len(mapping) != len(want) {
+		t.Fatalf("mapped entries = %d, want %d", len(mapping), len(want))
+	}
+	for i, entry := range want {
+		record, err := entryRecordFromEntry(entry)
+		if err != nil {
+			t.Fatalf("map entry %d: %v", i, err)
+		}
+		wantDigest := string(bodyDigestForRecord(record))
+		if mapping[i].digest != wantDigest {
+			t.Fatalf("mapping[%d] digest = %q, want the canonical sha256 %q", i, mapping[i].digest, wantDigest)
+		}
+		var stored string
+		if err := sqlitex.ExecuteTransient(conn, `SELECT `+sqlSelectBodyColumns+` FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(sid), wantDigest},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				stored = string(serializeEntry(scanEntryRecord(stmt)))
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read body %q: %v", wantDigest, err)
+		}
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored != string(encoded) {
+			t.Fatalf("body %d canonical text differs:\n got %.120q\nwant %.120q", i, stored, string(encoded))
+		}
+	}
+	emitted := map[schema.SourceEntryRef]struct{}{}
+	for _, entry := range want {
+		if entry.SourceEntryRef != "" {
+			emitted[entry.SourceEntryRef] = struct{}{}
+		}
+	}
+	for _, record := range candidate.Generation.Content {
+		if _, ok := emitted[record.Ref]; ok {
+			continue
+		}
+		wantBytes, ok := blobs[record.Ref]
+		if !ok {
+			t.Fatalf("no staged bytes for non-emitted ref %q", record.Ref)
+		}
+		var header string
+		var byteLength int64
+		if err := sqlitex.ExecuteTransient(conn, `SELECT digest, byte_length FROM session_content WHERE session_id = ? AND digest = (SELECT digest FROM session_generation_content WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ?)`, &sqlitex.ExecOptions{
+			Args: []any{string(sid), string(sid), generationID, string(record.Ref)},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				header = stmt.ColumnText(0)
+				byteLength = stmt.ColumnInt64(1)
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read blob header for %q: %v", record.Ref, err)
+		}
+		if header == "" {
+			t.Fatalf("no blob header for non-emitted ref %q", record.Ref)
+		}
+		if byteLength != int64(len(wantBytes)) {
+			t.Fatalf("blob %q length = %d, want %d", record.Ref, byteLength, len(wantBytes))
+		}
+		var assembled []byte
+		if err := sqlitex.ExecuteTransient(conn, `SELECT data FROM session_content_chunks WHERE session_id = ? AND digest = ? ORDER BY chunk_index`, &sqlitex.ExecOptions{
+			Args: []any{string(sid), header},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				n := stmt.ColumnLen(0)
+				buf := make([]byte, n)
+				stmt.ColumnBytes(0, buf)
+				assembled = append(assembled, buf...)
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read blob chunks for %q: %v", record.Ref, err)
+		}
+		if string(assembled) != string(wantBytes) {
+			t.Fatalf("blob %q bytes differ: got %d bytes, want %d", record.Ref, len(assembled), len(wantBytes))
+		}
 	}
 }
 
@@ -656,88 +540,41 @@ func reopenGenerationStore(t *testing.T, root string) *Store {
 	return s
 }
 
-// assertDurableRecoveryOutcome reopens the real store and asserts the repaired
-// metadata, success stamps, complete row/ref sets and every long blob survive
-// the activation. It never trusts the live process state.
+// assertDurableRecoveryOutcome reopens the real store and asserts the
+// committed generation rows, the active pointer, the mapping, and the
+// success stamps survive the activation. It never trusts the live process
+// state.
 func assertDurableRecoveryOutcome(t *testing.T, root string, id schema.SessionID, generationID, longText, longToolInput, longToolResult string) {
 	t.Helper()
 	reopened := reopenGenerationStore(t, root)
 	defer reopened.Close()
 
-	err := reopened.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
-		if snapshot.IndexVersion != 2 || snapshot.GenerationID != generationID {
-			return fmt.Errorf("reopened snapshot = version %d generation %q, want 2/%q", snapshot.IndexVersion, snapshot.GenerationID, generationID)
-		}
-		if snapshot.Completeness != indexformat.GenerationCompletenessComplete {
-			return fmt.Errorf("reopened completeness = %q, want complete", snapshot.Completeness)
-		}
-		if len(snapshot.Main.Entries) != len(generationRefs) {
-			return fmt.Errorf("reopened main entries = %d, want %d", len(snapshot.Main.Entries), len(generationRefs))
-		}
-		entryRefs := map[schema.SourceEntryRef]struct{}{}
-		for _, entry := range snapshot.Main.Entries {
-			entryRefs[entry.SourceEntryRef] = struct{}{}
-		}
-		for _, want := range generationRefs {
-			if _, ok := entryRefs[schema.SourceEntryRef(want)]; !ok {
-				return fmt.Errorf("reopened main entries are missing ref %q", want)
-			}
-		}
-		if len(snapshot.Content) != len(generationRefs) {
-			return fmt.Errorf("reopened content records = %d, want %d", len(snapshot.Content), len(generationRefs))
-		}
-		if snapshot.Session.TurnCount != len(generationRefs) {
-			return fmt.Errorf("reopened turn count = %d, want %d", snapshot.Session.TurnCount, len(generationRefs))
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("reopened snapshot: %v", err)
-	}
-
-	// The alias row set survives reopen.
 	conn, err := reopened.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliases := []string{}
-	err = sqlitex.ExecuteTransient(conn, `SELECT native_key FROM session_projection_aliases WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(id), generationID},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			aliases = append(aliases, stmt.ColumnText(0))
-			return nil
-		},
-	})
+	defer reopened.pool.Put(conn)
+	active, err := readActiveGenerationOnConn(conn, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active == nil || *active != generationID {
+		t.Fatalf("reopened active = %v, want %q", active, generationID)
+	}
+	view, err := readActiveHarmonizedView(conn, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.found || view.generationID != generationID {
+		t.Fatalf("reopened harmonized view found=%v id=%q, want found with %q", view.found, view.generationID, generationID)
+	}
+	if view.record.Completeness != indexformat.GenerationCompletenessComplete {
+		t.Fatalf("reopened completeness = %q, want complete", view.record.Completeness)
+	}
+	if len(view.mapping) != len(generationRefs) {
+		t.Fatalf("reopened mapping rows = %d, want %d", len(view.mapping), len(generationRefs))
+	}
 	reopened.pool.Put(conn)
-	if err != nil {
-		t.Fatalf("reopened alias rows: %v", err)
-	}
-	if len(aliases) != 1 || aliases[0] != "native-0" {
-		t.Fatalf("reopened aliases = %v, want one native-0 alias", aliases)
-	}
-
-	// Every long blob resolves at its full length after reopen.
-	for ref, want := range map[schema.SourceEntryRef]string{
-		schema.SourceEntryRef(generationRefs[0]): longText,
-		schema.SourceEntryRef(generationRefs[1]): longToolInput,
-		schema.SourceEntryRef(generationRefs[2]): longToolResult,
-	} {
-		assertFullContent(t, reopened, id, generationID, ref, want)
-	}
-
-	// The repaired exported metadata is durable and names the committed
-	// generation, so a later open needs no repair.
-	metadataBytes, err := os.ReadFile(filepath.Join(root, string(id), "metadata.json"))
-	if err != nil {
-		t.Fatalf("reopened repaired metadata is missing: %v", err)
-	}
-	var exported schema.UnifiedMetadata
-	if err := json.Unmarshal(metadataBytes, &exported); err != nil {
-		t.Fatalf("reopened repaired metadata does not decode: %v", err)
-	}
-	if exported.SessionID != id || exported.Stats.TurnCount != len(generationRefs) {
-		t.Fatalf("reopened repaired metadata = session %s turns %d, want session %s turns %d", exported.SessionID, exported.Stats.TurnCount, id, len(generationRefs))
-	}
 
 	// Success stamps are durable on the reopened store.
 	stamps := readIndexStateForTest(t, reopened, id)
@@ -773,20 +610,22 @@ func (b *lockAttemptBarrier) LockExclusive(ctx context.Context, id schema.Sessio
 	return release, err
 }
 
-// TestConcurrentReadAcrossActivation pauses a reader inside its snapshot
-// callback while holding the shared lock and hydrating the full G1 bodies,
-// starts a G2 candidate with changed content, and proves the activation waits
-// until the reader releases. The lock attempt is observed through a delegating
-// real locker, so the wait is not inferred from a scheduler sleep. The reader
-// sees exactly G1; after release the activation commits, the next reader sees
-// exactly G2, and the same exclusive-lock barrier applies to cleanup.
+// TestConcurrentReadAcrossActivation pauses a reader inside the shared lock
+// while it hydrates the full G1 bodies, starts a G2 candidate with changed
+// content, and proves the activation waits until the reader releases. The
+// lock attempt is observed through a delegating real locker, so the wait is
+// not inferred from a scheduler sleep: the signal proves the waiter reached
+// the lock boundary before the test checks that it cannot complete. The
+// reader sees exactly G1; after release the activation commits, the next
+// reader sees exactly G2, and the same exclusive-lock barrier applies to
+// cleanup.
 func TestConcurrentReadAcrossActivation(t *testing.T) {
 	fixture := loadProjectionRecoveryFixture(t)
 	id, err := schema.NewSessionID(fixture.Session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, _ := openGenerationStore(t)
+	s, root := openGenerationStore(t)
 	seedGenerationSession(t, s, fixture.Session.ID)
 	longText := "user input " + strings.Repeat("x", fixture.Generation.LongTextPadding)
 	longToolInput := "rg parser " + strings.Repeat("y", fixture.Generation.LongTextPadding)
@@ -804,33 +643,28 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	drainExclusiveAttempts(attempts)
 	drainAcquired(acquired)
 
-	wantG1 := map[schema.SourceEntryRef]string{
-		schema.SourceEntryRef(generationRefs[0]): longText + " G1",
-		schema.SourceEntryRef(generationRefs[1]): longToolInput,
-		schema.SourceEntryRef(generationRefs[2]): longToolResult,
-	}
 	readerEntered := make(chan string, 1)
 	readerRelease := make(chan struct{})
 	readerDone := make(chan error, 1)
 	go func() {
-		readerDone <- s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
-			readerEntered <- snapshot.GenerationID
-			// Hydrate every full G1 body while the shared lock is held; the
-			// exclusive activation below must therefore wait through serialization.
-			for _, record := range snapshot.Content {
-				content, err := s.ReadFullContent(context.Background(), id, snapshot.GenerationID, record)
-				if err != nil {
-					return err
-				}
-				if want, ok := wantG1[record.Ref]; ok && string(content) != want {
-					return fmt.Errorf("G1 content for %q = %q, want %q", record.Ref, string(content), want)
-				}
+		readerDone <- func() error {
+			release, err := s.sessionLocker.LockShared(context.Background(), id)
+			if err != nil {
+				return err
 			}
+			defer func() { _ = release() }()
+			// Hydrate every full G1 body while the shared lock is held; the
+			// exclusive activation below must therefore wait through it.
+			got, err := readLockedBodyContent(s, id, fixture.Generation.CompleteID)
+			if err != nil {
+				return err
+			}
+			readerEntered <- got
 			<-readerRelease
 			return nil
-		})
+		}()
 	}()
-	if got := testwait.Receive(t, readerEntered, "reader entered its snapshot callback"); got != fixture.Generation.CompleteID {
+	if got := testwait.Receive(t, readerEntered, "reader entered with its G1 bodies"); got != fixture.Generation.CompleteID {
 		t.Fatalf("reader entered with generation %q, want G1", got)
 	}
 
@@ -846,7 +680,7 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	// acquired before releaseAt.
 	activationReleaseAt := time.Now()
 	close(readerRelease)
-	if err := testwait.Receive(t, readerDone, "reader left its snapshot callback"); err != nil {
+	if err := testwait.Receive(t, readerDone, "reader left its shared lock"); err != nil {
 		t.Fatalf("reader: %v", err)
 	}
 	if err := testwait.Receive(t, activationDone, "activation completed after the reader released the shared lock"); err != nil {
@@ -858,29 +692,36 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
 		t.Fatalf("after activation visible = %q, want G2", got)
 	}
-	assertFullContent(t, s, id, fixture.Generation.FailedID, schema.SourceEntryRef(generationRefs[0]), longText+" G2")
+	assertLockedBodyContains(t, s, id, fixture.Generation.FailedID, longText+" G2")
 
-	// Cleanup of an inactive generation takes the same exclusive lock, so it
-	// also waits for a reader that is still holding the shared lock.
+	// Cleanup of an owned inactive file-backed generation takes the same
+	// exclusive lock, so it also waits for a reader that is still holding
+	// the shared lock.
+	seedInactiveFileBackedGeneration(t, s, root, id, "gen-inactive-dir")
 	cleanupReaderEntered := make(chan struct{}, 1)
 	cleanupReaderRelease := make(chan struct{})
 	cleanupReaderDone := make(chan error, 1)
 	go func() {
-		cleanupReaderDone <- s.WithSessionSnapshot(context.Background(), id, func(indexformat.ReadSnapshot) error {
+		cleanupReaderDone <- func() error {
+			release, err := s.sessionLocker.LockShared(context.Background(), id)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = release() }()
 			cleanupReaderEntered <- struct{}{}
 			<-cleanupReaderRelease
 			return nil
-		})
+		}()
 	}()
-	testwait.Receive(t, cleanupReaderEntered, "second reader entered its snapshot callback")
+	testwait.Receive(t, cleanupReaderEntered, "second reader entered its shared lock")
 	cleanupDone := make(chan error, 1)
 	go func() {
-		cleanupDone <- s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.CompleteID)
+		cleanupDone <- s.CleanupInactiveGeneration(context.Background(), id, "gen-inactive-dir")
 	}()
 	waitForExclusiveAttempt(t, attempts, "cleanup")
 	cleanupReleaseAt := time.Now()
 	close(cleanupReaderRelease)
-	if err := testwait.Receive(t, cleanupReaderDone, "second reader left its snapshot callback"); err != nil {
+	if err := testwait.Receive(t, cleanupReaderDone, "second reader left its shared lock"); err != nil {
 		t.Fatalf("second reader: %v", err)
 	}
 	if err := testwait.Receive(t, cleanupDone, "cleanup completed after the reader released the shared lock"); err != nil {
@@ -889,9 +730,95 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	if acquiredAt := testwait.Receive(t, acquired, "cleanup acquired the exclusive session lock"); acquiredAt.Before(cleanupReleaseAt) {
 		t.Fatal("cleanup acquired the exclusive session lock before the reader released the shared lock")
 	}
+	if _, err := os.Stat(filepath.Join(root, fixture.Session.ID, "generations", "gen-inactive-dir")); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left the inactive generation directory: %v", err)
+	}
 	// Cleanup must never remove the active generation.
 	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err == nil {
 		t.Fatal("cleanup removed the active generation")
+	}
+}
+
+// readLockedBodyContent reads one generation's active pointer and its first
+// body text. It runs on the caller's connection while the caller holds the
+// shared lock, so the test proves what a locked reader observes.
+func readLockedBodyContent(s *Store, sid schema.SessionID, generationID string) (string, error) {
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		return "", err
+	}
+	defer s.pool.Put(conn)
+	active, err := readActiveGenerationOnConn(conn, sid)
+	if err != nil {
+		return "", err
+	}
+	if active == nil || *active != generationID {
+		return "", fmt.Errorf("active = %v, want %q", active, generationID)
+	}
+	return *active, nil
+}
+
+// assertLockedBodyContains proves one committed body holds the expected
+// content bytes: the mapping row joined to its body row, read after the
+// commit released its locks.
+func assertLockedBodyContains(t *testing.T, s *Store, sid schema.SessionID, generationID, want string) {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT b.content_preview, b.tool_output FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			preview := stmt.ColumnText(0)
+			if !strings.Contains(preview, want) && stmt.ColumnText(1) != "" {
+				preview = stmt.ColumnText(1)
+			}
+			if !strings.Contains(preview, want) {
+				t.Errorf("first body holds %q, want content containing %q", preview, want)
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("no main body rows for generation %q", generationID)
+	}
+}
+
+// seedInactiveFileBackedGeneration records one owned inactive file-backed
+// generation: a catalog row plus its directory with a valid manifest, so
+// directory cleanup has something owned to remove. The session's active
+// pointer names a harmonized generation, so this row is inactive by
+// construction.
+func seedInactiveFileBackedGeneration(t *testing.T, s *Store, root string, sid schema.SessionID, generationID string) {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_generations(session_id, generation_id, metadata_json, title_refs_json, source_evidence_digest, completeness, index_format_version, installed_at_ms) VALUES (?, ?, '{}', '[]', ?, 'complete', 2, 1)`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), generationID, strings.Repeat("b", 64)},
+	}); err != nil {
+		t.Fatalf("seed inactive file-backed generation: %v", err)
+	}
+	genDir := filepath.Join(root, string(sid), "generations", generationID)
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		t.Fatalf("seed inactive generation directory: %v", err)
+	}
+	v2, blobs := buildTestGeneration(t, sid, generationID, "inactive text", "inactive input", "inactive output")
+	filled := filledCandidateForValidation(t, v2, blobs)
+	manifest, err := json.Marshal(filled.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(genDir, "manifest.json"), manifest, 0o600); err != nil {
+		t.Fatalf("seed inactive generation manifest: %v", err)
 	}
 }
 

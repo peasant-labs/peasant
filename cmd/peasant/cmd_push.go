@@ -302,7 +302,7 @@ func BuildPushCommand() *cobra.Command {
 				}
 				cfg.Output.BasePath = string(resolvedOutput)
 
-				db, err := openRunStore(cmd, dryRun, string(resolvedOutput))
+				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write)
 				if err != nil {
 					return fmt.Errorf("open analytics store: %w", err)
 				}
@@ -2243,7 +2243,7 @@ func storedSessionEntries(ctx context.Context, reader availableContentReader) pu
 		if err != nil {
 			return push.StoredContent{}, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
-		snapshot, err := reader.ReadSessionAvailable(ctx, id)
+		snapshot, err := readPublicationSnapshot(ctx, reader, id)
 		if err != nil {
 			return push.StoredContent{}, err
 		}

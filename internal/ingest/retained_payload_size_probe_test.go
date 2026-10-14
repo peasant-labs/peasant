@@ -4,10 +4,12 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -22,7 +24,15 @@ type retainedPayloadSizeProbeFixtures struct {
 	// ProbeHarness is the export harness the probe cases are asked for unless a
 	// case overrides it.
 	ProbeHarness string `yaml:"probeHarness"`
-	MeasureCases []struct {
+	// TransferLimitMiB is the published retained-evidence transfer limit the
+	// refusal label must state. It is an independent literal contract pin for
+	// the production constant, not derived from it.
+	TransferLimitMiB int `yaml:"transferLimitMiB"`
+	// NoMaterializationPayloadBytes sizes the allocation proof's over-limit
+	// payload. It is read here only so the strict fixture decoder accepts the
+	// field; the proof's own loader reads it directly.
+	NoMaterializationPayloadBytes int `yaml:"noMaterializationPayloadBytes"`
+	MeasureCases                  []struct {
 		Name string `yaml:"name"`
 		Raw  string `yaml:"raw"`
 		Want int    `yaml:"want"`
@@ -381,13 +391,33 @@ func TestProbeRequiredMemberMaskResolves(t *testing.T) {
 	}
 }
 
-// TestRetainedUnknownTransferLimitMatchesPublishedLabel pins the probe limit
-// to the 8 MiB the refusal text publishes. The message is built from a literal
-// while the enforced limit comes from defaults.SessionDetailDocumentCapBytes,
-// so a defaults change that moves the limit without the label would otherwise
-// stay green while the refusal overstates what it enforces.
+// TestRetainedUnknownTransferLimitMatchesPublishedLabel pins the enforced probe
+// limit, its defaults source, and the published refusal label. The production
+// constant aliases the retained-unknown per-payload cap
+// (defaults.RetainedUnknownPayloadCapBytes), which mirrors the schema
+// validator's inner 8 MiB/depth-64 per-payload bound, and the refusal renders
+// that same constant through the one human-byte-size formatter. Two independent
+// guards protect the alias: it must equal defaults.RetainedUnknownPayloadCapBytes
+// (the source), and it must equal the fixture's literal transferLimitMiB
+// contract value, which is not derived from the production constant. A source
+// revert to a decoupled literal fails both even though the message and the
+// enforcement would still agree with each other. The full expected wording is
+// asserted, including the larger-transfers clause, so a formatting-source or
+// wording drift is caught too.
 func TestRetainedUnknownTransferLimitMatchesPublishedLabel(t *testing.T) {
-	if retainedUnknownTransferLimitBytes != 8<<20 {
-		t.Fatalf("probe limit is %d bytes, want 8 MiB (8388608) to match the published refusal label", retainedUnknownTransferLimitBytes)
+	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
+	if fixtures.TransferLimitMiB <= 0 {
+		t.Fatalf("committed fixture %s needs a positive transferLimitMiB", retainedPayloadSizeProbeFixturePath)
+	}
+	if retainedUnknownTransferLimitBytes != defaults.RetainedUnknownPayloadCapBytes {
+		t.Fatalf("probe limit is %d bytes, not the retained-unknown per-payload cap %d", retainedUnknownTransferLimitBytes, defaults.RetainedUnknownPayloadCapBytes)
+	}
+	wantBytes := fixtures.TransferLimitMiB << 20
+	if retainedUnknownTransferLimitBytes != wantBytes {
+		t.Fatalf("probe limit is %d bytes, want the fixture's %d MiB (%d)", retainedUnknownTransferLimitBytes, fixtures.TransferLimitMiB, wantBytes)
+	}
+	wantLabel := fmt.Sprintf("export retained evidence: payload exceeds the published %s transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available", defaults.HumanByteSize(int64(wantBytes)))
+	if got := retainedUnknownTransferLimitError(retainedUnknownTransferLimitBytes).Error(); got != wantLabel {
+		t.Fatalf("published transfer refusal does not state the enforced limit:\n got: %s\nwant: %s", got, wantLabel)
 	}
 }

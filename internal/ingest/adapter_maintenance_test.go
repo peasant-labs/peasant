@@ -112,14 +112,14 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 		t.Run(row.Name, func(t *testing.T) {
 			root := t.TempDir()
 			output := filepath.Join(root, "managed")
-			native := filepath.Join(root, "native.jsonl")
-			filesystem := &adapterMaintenanceFS{OSFileSystem: &ingest.OSFileSystem{}, nativePath: native}
 			database := storetest.OpenWith(t)
 			t.Cleanup(func() { _ = database.Close() })
 			var metadata ingest.UnifiedMetadata
 			if err := json.Unmarshal([]byte(fixture.Metadata), &metadata); err != nil {
 				t.Fatal(err)
 			}
+			native := filepath.Join(root, metadata.SessionID.String()+".jsonl")
+			filesystem := &adapterMaintenanceFS{OSFileSystem: &ingest.OSFileSystem{}, nativePath: native}
 			metadata.Source.FilePath = native
 			if row.UnknownClock {
 				unknown := int64(0)

@@ -1,0 +1,10 @@
+# Required-name manifest for content_concurrency: deletion protection by NAME, never by count.
+requiredNames:
+  - reader-during-stage
+  - reader-during-commit
+  - two-harvests-same-session
+  - concurrent-staging-same-session
+  - harvest-vs-reclaim
+  - harvest-vs-migrate
+  - sweep-vs-stage
+  - harvest-during-search-consolidation

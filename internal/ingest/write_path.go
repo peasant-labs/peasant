@@ -252,7 +252,7 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 			failure := fmt.Errorf("record saved session %s: %w; the saved files were kept and the next harvest reads the session again", wr.result.SessionID, cause)
 			failed[wr.result.SessionID] = true
 			wr.result.mirrorPending = true
-			p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_mirror_pending", Location: string(wr.result.SessionID), Message: failure.Error(), Remediation: "Restore database access and rerun harvest to record the saved session."})
+			p.reportSessionDiagnostic(wr.result.SessionID, DiagnosticEntry{ErrorType: "artifact_mirror_pending", Location: string(wr.result.SessionID), Message: failure.Error(), Remediation: "Restore database access and rerun harvest to record the saved session."})
 			// The pair is on disk; only the row is missing. Preserve the run's
 			// file counts, but push the failure so the run reports it and does
 			// not authorize indexing on a session with no row.

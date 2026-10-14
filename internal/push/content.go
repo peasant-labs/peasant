@@ -411,6 +411,11 @@ func restoreObservedModelExtra(extra *string, value string) (*string, error) {
 	return &result, nil
 }
 
+// transcriptInputRedactionCapBytes is the materialization seam shared by the
+// transcript content and entry redaction inputs. The metadata part carries its
+// own larger input cap (defaults.PushMetadataDocumentCapBytes).
+const transcriptInputRedactionCapBytes = 64 << 20
+
 // redactJSONDocument redacts a marshalled document and PROVES it did.
 //
 // redact.RedactJSONDocBytes fails OPEN: if the decode or the re-marshal fails it
@@ -420,13 +425,22 @@ func restoreObservedModelExtra(extra *string, value string) (*string, error) {
 // because the caller receives well-formed bytes either way. So the round trip is
 // repeated here with the errors kept.
 //
-// ALL THREE outward seams go through this: the entries at the point they are
-// read, the assembled metadata document, and the transcript content part. One
-// implementation, so a fail-open cannot be closed on one path and left open on
-// another - which is what had happened, with this comment claiming two seams
-// while the third and largest one called the fail-open primitive directly.
+// ALL THREE outward seams go through the same fail-closed round trip: the
+// entries at the point they are read, the assembled metadata document, and the
+// transcript content part. One implementation, so a fail-open cannot be closed
+// on one path and left open on another - which is what had happened, with an
+// earlier comment claiming two seams while the third and largest one called the
+// fail-open primitive directly. The entries and transcript seams use the shared
+// input cap; the metadata seam passes its own larger cap through
+// redactJSONDocumentWithInputCap.
 func redactJSONDocument(redactor redact.JSONRedactor, document []byte, what string) ([]byte, error) {
-	if err := schema.ScanRawJSONDocument(document, schema.RawJSONPathPolicy{MaxDocumentBytes: 64 << 20, MaxDocumentDepth: 64}); err != nil {
+	return redactJSONDocumentWithInputCap(redactor, document, what, transcriptInputRedactionCapBytes)
+}
+
+// Metadata uses its own input cap; transcript and entry materialization retain
+// their smaller input boundary. All paths share the same fail-closed redaction.
+func redactJSONDocumentWithInputCap(redactor redact.JSONRedactor, document []byte, what string, maxDocumentBytes int) ([]byte, error) {
+	if err := schema.ScanRawJSONDocument(document, schema.RawJSONPathPolicy{MaxDocumentBytes: maxDocumentBytes, MaxDocumentDepth: 64}); err != nil {
 		return nil, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(document))
@@ -489,7 +503,28 @@ func marshalTranscriptContent(
 	return marshalBuiltTranscriptContent(content, redactor)
 }
 
-func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) (_ []byte, err error) {
+// transcriptDocumentPolicy is the raw-document policy the publication output
+// scan applies to a redacted transcript envelope. Production passes
+// defaults.PushTranscriptDocumentCapBytes; the depth and the opaque native
+// metadata pointers mirror schema's transcript raw policy.
+func transcriptDocumentPolicy(limitBytes int) schema.RawJSONPathPolicy {
+	return schema.RawJSONPathPolicy{
+		MaxDocumentBytes:       limitBytes,
+		MaxDocumentDepth:       64,
+		OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"},
+	}
+}
+
+func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) ([]byte, error) {
+	return marshalBuiltTranscriptContentWithPolicy(content, redactor, transcriptInputRedactionCapBytes, defaults.PushTranscriptDocumentCapBytes)
+}
+
+// marshalBuiltTranscriptContentWithPolicy is the shared transcript publication
+// path with its two caller-owned limits injected: the redaction input
+// materialization cap and the output raw-document cap. The production wrapper
+// passes the transcript/entry input cap and defaults.PushTranscriptDocumentCapBytes,
+// so this seam changes no production boundary.
+func marshalBuiltTranscriptContentWithPolicy(content schema.TranscriptContent, redactor redact.JSONRedactor, inputLimitBytes, outputLimitBytes int) (_ []byte, err error) {
 	// Embedded JSON is text on the public wire. Redact its decoded string
 	// tokens separately, preserving number literals and the capture's coordinates.
 	var retained []schema.RetainedUnknownRecord
@@ -527,7 +562,7 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	// on the seam that carries the published transcript. Two comments here
 	// asserted there were two outward seams and that one implementation prevented
 	// exactly this; there are three, and this was the one outside it.
-	redacted, err := redactJSONDocument(redactor, b, "transcript content")
+	redacted, err := redactJSONDocumentWithInputCap(redactor, b, "transcript content", inputLimitBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -542,7 +577,7 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	// Nothing leaks in that case, which is why it is a shape check and not a
 	// second redaction; a body the village stores as a transcript should still be
 	// one.
-	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.SessionDetailDocumentCapBytes, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
+	if err := schema.ScanRawJSONDocument(redacted, transcriptDocumentPolicy(outputLimitBytes)); err != nil {
 		return nil, err
 	}
 	var check schema.TranscriptContent

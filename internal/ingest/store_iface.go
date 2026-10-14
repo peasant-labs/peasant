@@ -100,8 +100,11 @@ type ParentCacheReconcile struct {
 
 // OrphanParentReconciler is the optional store capability that heals the FK
 // availability cache of an independently admitted child after a later harvest
-// makes its logical parent available. The production store implements it; a
-// store that does not keeps the cache unchanged.
+// makes its logical parent available, and re-queues the settled parent-linked
+// rows whose origin verdict predates that repair so the next origin resolve
+// pass re-judges them. Every parent-link repair resets the row's origin
+// watermark. The production store implements it; a store that does not keeps
+// the cache and the origin watermarks unchanged.
 type OrphanParentReconciler interface {
 	// ListUncachedChildrenOfParents returns the stored, still-uncached
 	// independently admitted children whose durable logical-parent evidence
@@ -114,6 +117,12 @@ type OrphanParentReconciler interface {
 	// self-parent, or that would close a parent-cache cycle is skipped; every
 	// other update commits or the whole reconciliation rolls back.
 	ReconcileParentCache(ctx context.Context, updates []ParentCacheReconcile) error
+	// InvalidateStaleParentOrigins resets origin_version to 0 for every stored
+	// codex or opencode row that carries a parent link but an unknown origin
+	// verdict at the current rule version, and returns how many rows it
+	// re-queued. It is whole-population and idempotent: a second application
+	// returns zero. Claude Code rows and parentless roots are never touched.
+	InvalidateStaleParentOrigins(ctx context.Context) (int64, error)
 }
 
 // SessionStore abstracts SQLite persistence for the pipeline.

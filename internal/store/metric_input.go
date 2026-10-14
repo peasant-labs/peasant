@@ -8,6 +8,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 var _ ingest.MetricInputStore = (*Store)(nil)
@@ -37,10 +38,12 @@ func (s *Store) readMetricInputOnConn(conn *sqlite.Conn, sid ingest.SessionID, i
 	if err != nil {
 		return nil, err
 	}
-	if len(input.Entries) == 0 && (input.IndexState.IndexedAt == nil || input.IndexState.IndexerVersion <= 0 || input.IndexState.IndexVersion == nil || input.IndexState.SessionEntriesHash == nil) {
+	missingIndexStamp := input.IndexState.IndexedAt == nil || input.IndexState.IndexerVersion <= 0
+	missingIndexIdentity := input.IndexState.IndexVersion == nil || input.IndexState.SessionEntriesHash == nil
+	if len(input.Entries) == 0 && (missingIndexStamp || missingIndexIdentity) {
 		return nil, fmt.Errorf("read metric input for session %s: empty entries have no completed index; prior metrics were preserved; index the session before retrying", sid)
 	}
-	input.Seed, err = getMetricSeedOnConn(conn, sid)
+	input.Seed, err = readMetricSeedOnConn(conn, schema.SessionID(sid))
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +55,7 @@ func (s *Store) readMetricInputOnConn(conn *sqlite.Conn, sid ingest.SessionID, i
 	// captured. It is read in the same snapshot as the entries, so a save after
 	// an activation that replaced the generation is refused instead of folding
 	// one generation's metrics into another generation's title and counts.
-	err = sqlitex.ExecuteTransient(conn, "SELECT start_ms, end_ms, active_generation_id FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
+	err = sqlitex.Execute(conn, "SELECT start_ms, end_ms, active_generation_id FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
 		Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			input.StartMS, input.EndMS = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
 			if stmt.ColumnType(2) != sqlite.TypeNull {
@@ -83,7 +86,7 @@ func metricModelOnConn(conn *sqlite.Conn, modelID string) (*ingest.MetricModel, 
 		return nil, nil
 	}
 	var model *ingest.MetricModel
-	err := sqlitex.ExecuteTransient(conn, `SELECT model_id, provider_key, context_window,
+	err := sqlitex.Execute(conn, `SELECT model_id, provider_key, context_window,
 cost_input_per_mtok, cost_output_per_mtok, cost_reasoning_per_mtok,
 cost_cache_read_per_mtok, cost_cache_write_per_mtok FROM models WHERE model_id = ?
 ORDER BY CASE provider_key WHEN '' THEN 0 WHEN 'anthropic' THEN 1 WHEN 'openai' THEN 2 WHEN 'google' THEN 3 ELSE 4 END, provider_key
@@ -107,7 +110,12 @@ LIMIT 1`, &sqlitex.ExecOptions{Args: []any{modelID}, ResultFunc: func(stmt *sqli
 // SaveMetricsForInput validates captured database inputs and prior output inside
 // the same write transaction as the new values, algorithm and hashes.
 func (s *Store) SaveMetricsForInput(ctx context.Context, expected *ingest.MetricInput, metrics *ingest.SessionMetrics) (retErr error) {
-	if expected == nil || metrics == nil || expected.SessionID != metrics.SessionID || metrics.ComputeVersion == nil || *metrics.ComputeVersion < 1 || metrics.ComputedAt == nil || metrics.InputHash == nil || metrics.OutputHash == nil {
+	if expected == nil || metrics == nil {
+		return fmt.Errorf("save computed metrics: missing captured input or completion evidence; no values changed; capture and compute the session again")
+	}
+	invalidComputeVersion := metrics.ComputeVersion == nil || *metrics.ComputeVersion < 1
+	missingCompletion := metrics.ComputedAt == nil || metrics.InputHash == nil || metrics.OutputHash == nil
+	if expected.SessionID != metrics.SessionID || invalidComputeVersion || missingCompletion {
 		return fmt.Errorf("save computed metrics: missing captured input or completion evidence; no values changed; capture and compute the session again")
 	}
 	inputHash, err := expected.Hash()

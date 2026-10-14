@@ -1,0 +1,19 @@
+# Required-name manifest for content_corruption: deletion protection by NAME, never by count.
+requiredNames:
+  - entry-column-altered
+  - chunk-byte-flipped
+  - chunk-missing
+  - header-length-wrong
+  - descriptor-digest-wrong
+  - capture-hash-wrong
+  - body-row-missing-fk-blocked
+  - preview-read-not-verified
+  - routing-read-not-verified
+  - carrier-column-altered-full-read-refuses
+  - preview-only-damaged-api-serves
+  - carrier-row-missing-full-read-refuses
+  - repair-mode-rewrites-object
+  - repair-mode-rewrites-blob
+  - repair-mode-rederives-descriptor
+  - repair-identical-candidate-rewrites-corrupt-body
+  - swept-corrupt-body-rebuilds-index

@@ -333,9 +333,9 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 }
 
 // TestGenerationActivationRecoveryRecordsPublicationCapture proves a crash
-// between staging and the commit replays the certified capture: the durable
-// intent carries it, and recovery records it with the same guarded
-// transaction, so a repaired session is publishable after recovery too.
+// between staging and the commit leaves the certified capture unstamped,
+// and the retry records it with the same guarded transaction, so a
+// retried session is publishable too.
 func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 	fixture := loadGenerationProvenanceFixture(t)
 	sid := schema.SessionID(fixture.Session.ID)
@@ -361,13 +361,13 @@ func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 		Capture: &ingest.PublicationCaptureWrite{Metadata: provenanceCaptureMetadata(fixture, sid, kind), CWDProvenance: kind},
 	}
 
-	installRecoveryFault(t, s, "after-rename-before-db")
+	installHarmonizedFault(t, harmonizedSeamBeforeCommit)
 	if _, err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
 		t.Fatal("activation across the staging seam succeeded; the crash must interrupt it")
 	}
-	clearRecoveryFault(t, s, "after-rename-before-db")
-	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
-		t.Fatalf("recover interrupted activation: %v", err)
+	clearHarmonizedFault()
+	if _, err := s.ActivateNativeGeneration(context.Background(), activation); err != nil {
+		t.Fatalf("retry interrupted activation: %v", err)
 	}
 
 	state, err := s.ReadIndexState(context.Background(), sid)

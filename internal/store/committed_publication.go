@@ -17,14 +17,14 @@ var _ ingest.PublicationInputReader = (*Store)(nil)
 // graph facts; capture metadata supplies source identity and capture evidence.
 // No stored capture, digest or revision is rewritten by this read.
 //
-// Like WithSessionSnapshot, it holds the shared session lock through the callback
-// so activation/cleanup cannot retire blobs during hydration, but returns the
-// database connection before invoking it. The callback must finish hydration
-// before returning and must not activate a generation or perform network I/O.
+// Harmonized content is verified inside that transaction and needs no session
+// lock during the callback. File-backed content keeps the shared session lock
+// so cleanup cannot retire blobs during hydration. Both paths return the pool
+// connection before invoking the callback.
 // Sessions without a managed generation use the verified legacy capture. A
 // broken or unsupported managed generation fails, never falls back to legacy.
 func (s *Store) WithCommittedPublicationInput(ctx context.Context, id ingest.SessionID, fn func(ingest.PublicationInputBundle) error) (retErr error) {
-	if s.GenerationSnapshotsSupported() {
+	if s.GenerationSnapshotsSupported() && !isHarmonizedSession(ctx, s, id) {
 		release, err := s.sessionLocker.LockShared(ctx, id)
 		if err != nil {
 			return err

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -21,21 +22,50 @@ type mirrorsFixture struct {
 	Parent struct {
 		ID string `yaml:"id"`
 	} `yaml:"parent"`
+	StoredParent struct {
+		ID string `yaml:"id"`
+	} `yaml:"stored_parent"`
 	Generation struct {
 		FirstID  string `yaml:"first_id"`
 		SecondID string `yaml:"second_id"`
 	} `yaml:"generation"`
 	Cases []struct {
-		Name             string `yaml:"name"`
-		FirstTitle       string `yaml:"first_title"`
-		SecondTitle      string `yaml:"second_title"`
-		FirstInputCount  *int64 `yaml:"first_input_count"`
-		SecondInputCount *int64 `yaml:"second_input_count"`
-		FirstAdapter     *int   `yaml:"first_adapter"`
-		SecondAdapter    *int   `yaml:"second_adapter"`
-		Relationship     string `yaml:"relationship"`
-		InputCount       string `yaml:"input_count"`
+		Name             string                `yaml:"name"`
+		FirstTitle       string                `yaml:"first_title"`
+		SecondTitle      string                `yaml:"second_title"`
+		FirstInputCount  *int64                `yaml:"first_input_count"`
+		SecondInputCount *int64                `yaml:"second_input_count"`
+		FirstAdapter     *int                  `yaml:"first_adapter"`
+		SecondAdapter    *int                  `yaml:"second_adapter"`
+		Relationship     string                `yaml:"relationship"`
+		InputCount       string                `yaml:"input_count"`
+		Activation       *mirrorActivationCase `yaml:"activation"`
 	} `yaml:"cases"`
+}
+
+// mirrorActivationCase drives one three-way parent cache activation: the
+// seeded child row, the activated generation's parent evidence, and the row
+// state the single pointing UPDATE must leave behind. Target tokens are
+// "stored" (the fixture's stored_parent, seeded before activation), "missing"
+// (the fixture's parent, never stored) and "none".
+type mirrorActivationCase struct {
+	Harness       string `yaml:"harness"`
+	ParentUUID    string `yaml:"parent_uuid"`
+	Relationships []struct {
+		Kind        string `yaml:"kind"`
+		TargetState string `yaml:"target_state"`
+		Target      string `yaml:"target"`
+		Evidence    string `yaml:"evidence"`
+	} `yaml:"relationships"`
+	Seed   mirrorActivationRow `yaml:"seed"`
+	Expect mirrorActivationRow `yaml:"expect"`
+}
+
+type mirrorActivationRow struct {
+	ParentCache    string `yaml:"parent_cache"`
+	Origin         string `yaml:"origin"`
+	OriginVersion  int    `yaml:"origin_version"`
+	EvidenceTarget string `yaml:"evidence_target"`
 }
 
 func loadMirrorsFixture(t *testing.T) mirrorsFixture {
@@ -78,7 +108,10 @@ func buildMirrorGeneration(t *testing.T, sid schema.SessionID, genID, text strin
 // TestGenerationMirrors proves activation installs title, input-count, adapter,
 // timestamp, logical-parent and tool-count mirrors atomically, derives the
 // snapshot parent from relationship evidence, and changes fields between
-// generations without a prior metadata upsert. Every case is driven from the
+// generations without a prior metadata upsert. Activation cases pin the
+// three-way parent cache write: any relationship evidence is authoritative and
+// re-queues the origin verdict in the same write, and no relationships at all
+// preserve both the cache and the verdict. Every case is driven from the
 // typed fixture, and an unknown case fails rather than doing nothing, so
 // deleting a runner branch cannot leave the manifest guard green.
 func TestGenerationMirrors(t *testing.T) {
@@ -95,6 +128,11 @@ func TestGenerationMirrors(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			s, _ := openGenerationStore(t)
 			seedGenerationSession(t, s, fixture.Session.ID)
+
+			if tc.Activation != nil {
+				runMirrorActivationCase(t, s, fixture, id, *tc.Activation)
+				return
+			}
 
 			switch tc.Name {
 			case "mirrors-change-between-generations":
@@ -136,8 +174,8 @@ func TestGenerationMirrors(t *testing.T) {
 					t.Fatalf("activate child with missing parent: %v", err)
 				}
 				// The availability cache stays NULL so the admitted child
-				// survives, while the snapshot still names the durable logical
-				// parent.
+				// survives, while the durable evidence still names the
+				// missing logical parent.
 				conn, err := s.pool.Take(context.Background())
 				if err != nil {
 					t.Fatal(err)
@@ -150,18 +188,27 @@ func TestGenerationMirrors(t *testing.T) {
 						return nil
 					},
 				})
-				s.pool.Put(conn)
 				if !parentNull {
+					s.pool.Put(conn)
 					t.Fatal("sessions.parent_id names a missing target; it must stay NULL")
 				}
-				err = s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
-					if snapshot.Session.ParentSessionID == nil || *snapshot.Session.ParentSessionID != missing {
-						return stringsErrorf("snapshot parent = %v, want missing target %s", snapshot.Session.ParentSessionID, missing)
-					}
-					return nil
+				var evidenceTarget *string
+				_ = sqlitex.ExecuteTransient(conn, `SELECT target_local_id FROM session_relationship_evidence WHERE session_id = ? AND kind = 'started_by'`, &sqlitex.ExecOptions{
+					Args: []any{string(id)},
+					ResultFunc: func(stmt *sqlite.Stmt) error {
+						if stmt.ColumnType(0) != sqlite.TypeNull {
+							v := stmt.ColumnText(0)
+							evidenceTarget = &v
+						}
+						return nil
+					},
 				})
+				s.pool.Put(conn)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if evidenceTarget == nil || *evidenceTarget != string(missing) {
+					t.Fatalf("durable parent target = %v, want missing target %s", evidenceTarget, missing)
 				}
 
 			case "absent-input-count-preserved":
@@ -191,6 +238,123 @@ func TestGenerationMirrors(t *testing.T) {
 				t.Fatalf("unknown generation mirror scenario %q; add it to the fixture, the required-names manifest and this runner", tc.Name)
 			}
 		})
+	}
+}
+
+// runMirrorActivationCase seeds the child row's parent cache and settled
+// origin verdict, activates one generation carrying the case's parent
+// evidence through the production ActivateGeneration path, and asserts the
+// parent cache, the origin verdict and its version on the row afterwards.
+func runMirrorActivationCase(t *testing.T, s *Store, fixture mirrorsFixture, id schema.SessionID, tc mirrorActivationCase) {
+	t.Helper()
+	seedGenerationSession(t, s, fixture.StoredParent.ID)
+	resolveTarget := func(token string) *schema.SessionID {
+		t.Helper()
+		var raw string
+		switch token {
+		case "stored":
+			raw = fixture.StoredParent.ID
+		case "missing":
+			raw = fixture.Parent.ID
+		case "", "none":
+			return nil
+		default:
+			t.Fatalf("unknown activation target token %q; use stored, missing or none", token)
+		}
+		target, err := schema.NewSessionID(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &target
+	}
+
+	seedParent := "NULL"
+	if target := resolveTarget(tc.Seed.ParentCache); target != nil {
+		seedParent = "'" + string(*target) + "'"
+	}
+	execGenerationSQL(t, s, `UPDATE sessions SET model_harness = '`+tc.Harness+`', parent_id = `+seedParent+`, session_origin = '`+tc.Seed.Origin+`', origin_version = `+intString(tc.Seed.OriginVersion)+` WHERE session_id = '`+string(id)+`';`)
+	assertMirrorActivationRow(t, s, id, resolveTarget(tc.Seed.ParentCache), tc.Seed.Origin, tc.Seed.OriginVersion)
+
+	relationships := make([]schema.SessionRelationship, 0, len(tc.Relationships))
+	for _, r := range tc.Relationships {
+		relationships = append(relationships, schema.SessionRelationship{
+			Kind:          schema.SessionRelationshipKind(r.Kind),
+			TargetState:   schema.RelationshipTargetState(r.TargetState),
+			TargetLocalID: resolveTarget(r.Target),
+			Evidence:      schema.EvidenceKind(r.Evidence),
+		})
+	}
+	if len(relationships) == 0 {
+		relationships = nil
+	}
+	measured := int64(1)
+	g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "activation text", &measured, nil, 1000, 2000, 0, relationships, schema.SourceEntryRef(generationRefs[0]))
+	g1.Generation.Metadata.ModelHarness = ingest.Harness(tc.Harness)
+	for i := range g1.Generation.Main.Entries {
+		g1.Generation.Main.Entries[i].Harness = ingest.Harness(tc.Harness)
+	}
+	g1.Generation.Metadata.ParentUUID = resolveTarget(tc.ParentUUID)
+	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
+		t.Fatalf("activate generation: %v", err)
+	}
+	assertMirrorActivationRow(t, s, id, resolveTarget(tc.Expect.ParentCache), tc.Expect.Origin, tc.Expect.OriginVersion)
+
+	if tc.Expect.EvidenceTarget != "" {
+		want := resolveTarget(tc.Expect.EvidenceTarget)
+		conn, err := s.pool.Take(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got *string
+		err = sqlitex.ExecuteTransient(conn, `SELECT target_local_id FROM session_relationship_evidence WHERE session_id = ? AND kind = 'started_by'`, &sqlitex.ExecOptions{
+			Args: []any{string(id)},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				if stmt.ColumnType(0) != sqlite.TypeNull {
+					v := stmt.ColumnText(0)
+					got = &v
+				}
+				return nil
+			},
+		})
+		s.pool.Put(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !equalOptionalSessionIDPtr(want, got) {
+			t.Fatalf("durable started_by target = %v, want %v; the evidence a later reconcile heals from must survive the cleared cache", got, want)
+		}
+	}
+}
+
+func assertMirrorActivationRow(t *testing.T, s *Store, id schema.SessionID, wantParent *schema.SessionID, wantOrigin string, wantVersion int) {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	var parent *string
+	var origin string
+	version := -1
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id, session_origin, origin_version FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(id)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				v := stmt.ColumnText(0)
+				parent = &v
+			}
+			origin = stmt.ColumnText(1)
+			version = stmt.ColumnInt(2)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read parent cache and origin state: %v", err)
+	}
+	if !equalOptionalSessionIDPtr(wantParent, parent) {
+		t.Fatalf("parent cache = %v, want %v", parent, wantParent)
+	}
+	if origin != wantOrigin || version != wantVersion {
+		t.Fatalf("origin state = %s@%d, want %s@%d", origin, version, wantOrigin, wantVersion)
 	}
 }
 
@@ -269,26 +433,69 @@ func assertMirrorRow(t *testing.T, s *Store, sid schema.SessionID, wantStart, wa
 
 func assertSnapshotMirrors(t *testing.T, s *Store, sid schema.SessionID, wantGen string, wantStart, wantEnd int64, wantParent *string, wantInput *int64, wantTurns, wantTools int) {
 	t.Helper()
-	err := s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		if snapshot.GenerationID != wantGen {
-			return stringsErrorf("generation = %q, want %q", snapshot.GenerationID, wantGen)
-		}
-		if snapshot.Session.StartTime.UnixMilli() != wantStart || snapshot.Session.EndTime.UnixMilli() != wantEnd {
-			return stringsErrorf("snapshot timestamps = (%d,%d), want (%d,%d)", snapshot.Session.StartTime.UnixMilli(), snapshot.Session.EndTime.UnixMilli(), wantStart, wantEnd)
-		}
-		if !equalOptionalSessionIDPtr(snapshot.Session.ParentSessionID, wantParent) {
-			return stringsErrorf("snapshot parent = %v, want %v", snapshot.Session.ParentSessionID, wantParent)
-		}
-		if !equalOptionalInt64Ptr(snapshot.Session.InputSubmissionCount, wantInput) {
-			return stringsErrorf("snapshot input count = %v, want %v", snapshot.Session.InputSubmissionCount, wantInput)
-		}
-		if snapshot.Session.TurnCount != wantTurns || snapshot.Session.ToolCallCount != wantTools {
-			return stringsErrorf("snapshot counts = (%d,%d), want (%d,%d)", snapshot.Session.TurnCount, snapshot.Session.ToolCallCount, wantTurns, wantTools)
-		}
-		return nil
-	})
+	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	active, err := readActiveGenerationOnConn(conn, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active == nil || *active != wantGen {
+		t.Fatalf("active generation = %v, want %q", active, wantGen)
+	}
+	var start, end int64
+	var turns, tools int
+	var input *int64
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT g.ts_start, g.ts_end, c.turn_count, c.tool_call_count, c.input_submission_count FROM session_generations g LEFT JOIN session_captured_stats c ON c.session_id = g.session_id WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), wantGen},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			start, end = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			if stmt.ColumnType(2) != sqlite.TypeNull {
+				turns = stmt.ColumnInt(2)
+			}
+			if stmt.ColumnType(3) != sqlite.TypeNull {
+				tools = stmt.ColumnInt(3)
+			}
+			if stmt.ColumnType(4) != sqlite.TypeNull {
+				v := stmt.ColumnInt64(4)
+				input = &v
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("no harmonized generation row %q", wantGen)
+	}
+	if start != wantStart || end != wantEnd {
+		t.Fatalf("timestamps = (%d,%d), want (%d,%d)", start, end, wantStart, wantEnd)
+	}
+	if !equalOptionalInt64Ptr(input, wantInput) {
+		t.Fatalf("input count = %v, want %v", input, wantInput)
+	}
+	if turns != wantTurns || tools != wantTools {
+		t.Fatalf("counts = (%d,%d), want (%d,%d)", turns, tools, wantTurns, wantTools)
+	}
+	var parent *string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				v := stmt.ColumnText(0)
+				parent = &v
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !equalOptionalStringPtr(parent, wantParent) {
+		t.Fatalf("parent = %v, want %v", parent, wantParent)
 	}
 }
 
@@ -310,7 +517,7 @@ func assertInputCountMirror(t *testing.T, s *Store, sid schema.SessionID, want *
 			return nil
 		},
 	})
-	_ = sqlitex.ExecuteTransient(conn, `SELECT input_submission_count FROM session_projection_generations WHERE session_id = ?`, &sqlitex.ExecOptions{
+	_ = sqlitex.ExecuteTransient(conn, `SELECT input_submission_count FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			var row *int64
@@ -319,25 +526,13 @@ func assertInputCountMirror(t *testing.T, s *Store, sid schema.SessionID, want *
 				row = &v
 			}
 			if !equalOptionalInt64Ptr(row, want) {
-				t.Fatalf("generation input count = %v, want %v", row, want)
+				t.Fatalf("captured stats input count = %v, want %v", row, want)
 			}
 			return nil
 		},
 	})
 	if !equalOptionalInt64Ptr(got, want) {
 		t.Fatalf("sessions input count = %v, want %v (absent versus measured zero must be preserved)", got, want)
-	}
-	err = s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		if !equalOptionalInt64Ptr(snapshot.Session.InputSubmissionCount, want) {
-			return stringsErrorf("snapshot input count = %v, want %v", snapshot.Session.InputSubmissionCount, want)
-		}
-		if !equalOptionalInt64Ptr(snapshot.Metadata.Stats.InputSubmissionCount, want) {
-			return stringsErrorf("metadata input count = %v, want %v", snapshot.Metadata.Stats.InputSubmissionCount, want)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 

@@ -100,6 +100,9 @@ func OpenReadOnlyWithOptions(path string, opts ...OpenOption) (*Store, error) {
 	}}); err != nil {
 		return fail(fmt.Errorf("store: read schema version from %s for dry-run: %w; no files were changed", path, err))
 	}
+	if current := CurrentSchemaVersion(); version > current {
+		return fail(fmt.Errorf("store: dry-run inspection of %s: database schema is version %d, but this build understands only up to version %d (the database was upgraded by a newer Peasant); no files were changed; install that version or newer to inspect it", path, version, current))
+	}
 	if version != CurrentSchemaVersion() {
 		return fail(fmt.Errorf("store: dry-run inspection of %s: database schema is %d, this build needs schema %d; no files were changed; run a normal harvest to migrate this database, or use the matching Peasant version", path, version, CurrentSchemaVersion()))
 	}
@@ -199,6 +202,10 @@ func (a readOnlyGenerationArtifacts) ReadBlob(ctx context.Context, id schema.Ses
 	return a.inner.ReadBlob(ctx, id, generationID, record)
 }
 
+func (a readOnlyGenerationArtifacts) BlobExists(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) (bool, error) {
+	return a.inner.BlobExists(ctx, id, generationID, record)
+}
+
 func (a readOnlyGenerationArtifacts) WritePriorEvidence(context.Context, schema.SessionID, string, []byte) error {
 	return errReadOnlyGenerationWrite
 }
@@ -213,6 +220,22 @@ func (a readOnlyGenerationArtifacts) GenerationSize(ctx context.Context, id sche
 
 func (a readOnlyGenerationArtifacts) ListGenerationDirectories(ctx context.Context, id schema.SessionID) ([]string, error) {
 	return a.inner.ListGenerationDirectories(ctx, id)
+}
+
+func (a readOnlyGenerationArtifacts) ListOwnedSessionIDs(ctx context.Context) ([]schema.SessionID, error) {
+	return a.inner.ListOwnedSessionIDs(ctx)
+}
+
+func (a readOnlyGenerationArtifacts) OrphanGenerationFootprint(ctx context.Context, id schema.SessionID, keep string) (int64, GenerationFootprint, error) {
+	return a.inner.OrphanGenerationFootprint(ctx, id, keep)
+}
+
+func (a readOnlyGenerationArtifacts) RemoveReservedStagingDirs(context.Context, schema.SessionID) (int, error) {
+	return 0, errReadOnlyGenerationWrite
+}
+
+func (a readOnlyGenerationArtifacts) RemoveConvertedSessionFiles(context.Context, schema.SessionID) (GenerationFootprint, error) {
+	return GenerationFootprint{}, errReadOnlyGenerationWrite
 }
 
 // prepareReadOnlyConn pins the read-only guarantees on every pooled connection.

@@ -32,11 +32,8 @@ type nativeRecoveryCase struct {
 	CarrierPayload    string `yaml:"carrier_payload"`
 	WantDisposition   string `yaml:"want_disposition"`
 	WantOccurrences   int    `yaml:"want_occurrences"`
-	WantRepairPending bool   `yaml:"want_repair_pending"`
 	WantActive        string `yaml:"want_active"`
-	WantFullRead      string `yaml:"want_full_read"`
-	WantAvailable     string `yaml:"want_available"`
-	WantIntentCleared bool   `yaml:"want_intent_cleared"`
+	WantRows          string `yaml:"want_rows"`
 	WantErrorContains string `yaml:"want_error_contains"`
 }
 
@@ -92,18 +89,36 @@ func buildRecoveryCarrier(t *testing.T, sid schema.SessionID, index int, c nativ
 
 func buildRecoveryV2(t *testing.T, sid schema.SessionID, genID, completeness string, withCarrier bool, c nativeRecoveryCase) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
 	t.Helper()
+	// The text varies per identifier so a prior and its refresh never
+	// compare equal by accident: identical bytes must skip, so the matrix
+	// needs distinct bytes wherever it expects a commit.
+	text := "recovery text " + genID
 	var v2 indexformat.V2
 	var blobs map[schema.SourceEntryRef][]byte
 	if completeness == "complete" {
-		v2, blobs = buildTestGeneration(t, sid, genID, "recovery text", "recovery input", "recovery output")
+		v2, blobs = buildTestGeneration(t, sid, genID, text, "recovery input "+genID, "recovery output "+genID)
 	} else {
-		v2, blobs = buildIncompleteGeneration(t, sid, genID, "recovery preview text", "recovery preview input", "recovery preview output")
+		v2, blobs = buildIncompleteGeneration(t, sid, genID, text, "recovery preview input "+genID, "recovery preview output "+genID)
 	}
 	if withCarrier {
 		carrier := buildRecoveryCarrier(t, sid, len(v2.Generation.Main.Entries), c)
 		v2.Generation.Main.Entries = append(v2.Generation.Main.Entries, carrier)
 		v2.Generation.Metadata.Stats.TurnCount = len(v2.Generation.Main.Entries)
 	}
+	// Every matrix candidate carries one retained (non-emitted) content
+	// record with its bytes, so the missing-bytes faults have a binding to
+	// break: the record is retained through a captured context segment, and
+	// its descriptor reaches the blob store while emitted refs stay inline.
+	retained := schema.SourceEntryRef("e_retained_recovery")
+	v2.Generation.Content = append(v2.Generation.Content, indexformat.ContentRecord{Ref: retained})
+	v2.Generation.Segments = append(v2.Generation.Segments, indexformat.ContextSegment{
+		Ordinal:          len(v2.Generation.Segments),
+		PhysicalSourceID: "recovery-source",
+		Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
+		Inclusion:        indexformat.SegmentInclusionInherited,
+		CapturedRefs:     []schema.SourceEntryRef{retained},
+	})
+	blobs[retained] = []byte("retained recovery bytes")
 	return v2, blobs
 }
 
@@ -162,8 +177,9 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 			var outcome ingest.ActivationOutcome
 			var actErr error
 			execActivate := func(captureOverride ingest.SessionContentCaptureWrite, blobsOverride map[schema.SourceEntryRef][]byte, expected *ingest.SessionIndexState) (ingest.ActivationOutcome, error) {
+				filled := filledCandidateForValidation(t, v2, blobs)
 				return s.ActivateGeneration(context.Background(), GenerationActivation{
-					Generation: v2, Blobs: blobsOverride,
+					Generation: filled, Blobs: blobsOverride,
 					IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: captureOverride, ExpectedState: expected,
 				})
 			}
@@ -175,14 +191,12 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 				for ref, data := range blobs {
 					broken[ref] = data
 				}
-				for _, record := range v2.Generation.Content {
-					delete(broken, record.Ref)
-					break
-				}
+				delete(broken, schema.SourceEntryRef("e_retained_recovery"))
 				outcome, actErr = execActivate(capture, broken, nil)
-			case "fail_repair":
-				s.generationArtifacts = faultArtifacts{GenerationArtifactStore: s.generationArtifacts, failRepair: true}
+			case "commit_fault":
+				installHarmonizedFault(t, harmonizedSeamAtCommit)
 				outcome, actErr = execActivate(capture, blobs, nil)
+				clearHarmonizedFault()
 			case "stale":
 				staleState, err := s.ReadIndexState(context.Background(), ingest.SessionID(sid))
 				if err != nil {
@@ -198,120 +212,91 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 					t.Fatalf("mid advance: %v", err)
 				}
 				outcome, actErr = execActivate(capture, blobs, staleState)
-			case "unrelated_prior":
+			case "unrelated_staged":
+				// Objects staged for another candidate are inert: they
+				// install no generation row, so the requested activation
+				// commits over them.
 				unrelatedID := "gen-unrelated-" + c.Name
 				unrelatedV2, unrelatedBlobs := buildRecoveryV2(t, sid, unrelatedID, "complete", false, c)
-				staged, err := s.generationArtifacts.Stage(context.Background(), unrelatedV2.Generation, unrelatedBlobs)
-				if err != nil {
+				if _, err := s.StageGeneration(context.Background(), GenerationActivation{
+					Generation: unrelatedV2, Blobs: unrelatedBlobs,
+					IndexerVersion: 1, IndexedAtMs: 2,
+				}); err != nil {
 					t.Fatalf("stage unrelated: %v", err)
 				}
-				_ = staged
-				if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
-					SessionID: sid, GenerationID: unrelatedID,
-					ManifestPath: "generations/" + unrelatedID + "/manifest.json",
-					Completeness: "complete", StagedAtMs: 1,
-					CandidateDigest: "mismatch-digest-for-unrelated-prior",
-				}); err != nil {
-					t.Fatalf("write unrelated intent: %v", err)
-				}
 				outcome, actErr = execActivate(capture, blobs, nil)
-			case "preamble_pending", "intent_replay":
-				// Stage requested candidate and record a matching intent, then
-				// let preamble recovery commit it. No DB commit yet.
-				digest, err := computeActivationBinding(v2.Generation, bindingFromBlobs(blobs))
-				if err != nil {
-					t.Fatalf("binding: %v", err)
-				}
-				if _, err := s.generationArtifacts.Stage(context.Background(), v2.Generation, blobs); err != nil {
-					t.Fatalf("stage pending: %v", err)
-				}
-				if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
-					SessionID: sid, GenerationID: genID,
-					ManifestPath: "generations/" + genID + "/manifest.json",
-					Completeness: string(v2.Generation.Completeness), StagedAtMs: 1,
+			case "prestaged":
+				// The requested candidate's own objects are staged first;
+				// the activation commits them through the prepared handle.
+				filled := filledCandidateForValidation(t, v2, blobs)
+				prepared, err := s.StageGeneration(context.Background(), GenerationActivation{
+					Generation: filled, Blobs: blobs,
 					IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: capture,
-					CandidateDigest: digest,
-				}); err != nil {
-					t.Fatalf("write pending intent: %v", err)
+				})
+				if err != nil {
+					t.Fatalf("prestage requested: %v", err)
 				}
-				if c.Fault == "intent_replay" {
-					outcome, actErr = s.RecoverGenerationActivation(context.Background(), sid)
-				} else {
-					outcome, actErr = execActivate(capture, blobs, nil)
-				}
-			case "retry", "retry_fail_repair":
-				// First commit, then retry same candidate.
+				outcome, actErr = s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation: filled, Blobs: blobs,
+					IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: capture, ExpectedState: nil,
+					Prepared: prepared,
+				})
+			case "retry", "retry_commit_fault":
+				// First commit, then retry the same candidate. A fault on
+				// the retry's commit needs a write path, so the faulted
+				// retry carries altered content under a fresh identifier
+				// while the first commit stands.
 				firstOutcome, err := execActivate(capture, blobs, nil)
 				if err != nil || firstOutcome.Disposition != ingest.ActivationCommittedNow {
 					t.Fatalf("first commit: %+v err=%v", firstOutcome, err)
 				}
-				if c.Fault == "retry_fail_repair" {
-					s.generationArtifacts = faultArtifacts{GenerationArtifactStore: s.generationArtifacts, failRepair: true}
+				if c.Fault == "retry_commit_fault" {
+					altered, alteredBlobs := buildRecoveryV2(t, sid, genID+"-bis", "complete", false, c)
+					alteredCapture := recoveryCapture(t, altered)
+					installHarmonizedFault(t, harmonizedSeamAtCommit)
+					filled := filledCandidateForValidation(t, altered, alteredBlobs)
+					outcome, actErr = s.ActivateGeneration(context.Background(), GenerationActivation{
+						Generation: filled, Blobs: alteredBlobs,
+						IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: alteredCapture,
+					})
+					clearHarmonizedFault()
+				} else {
+					outcome, actErr = execActivate(capture, blobs, nil)
 				}
-				outcome, actErr = execActivate(capture, blobs, nil)
-			case "forged_intent_replay":
-				// Forged recovery: an incomplete_new candidate staged under an
-				// intent that claims a full/complete capture. Recovery replays
-				// the persisted envelope through the same guarded write, which
-				// refuses the forged claim and preserves last-good authority.
-				digest, err := computeActivationBinding(v2.Generation, bindingFromBlobs(blobs))
-				if err != nil {
-					t.Fatalf("binding: %v", err)
-				}
+			case "forged_capture":
+				// Forged capture: an incomplete_new candidate that claims a
+				// full/complete capture. The guarded write refuses the
+				// forged claim and preserves last-good authority.
 				forged := ingest.SessionContentCaptureWrite{
 					Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
 					TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 2,
 				}
-				if _, err := s.generationArtifacts.Stage(context.Background(), v2.Generation, blobs); err != nil {
-					t.Fatalf("stage forged: %v", err)
+				outcome, actErr = execActivate(forged, blobs, nil)
+			case "same_id_mismatched":
+				// The requested identifier commits first; a second
+				// candidate under the same identifier with different entry
+				// bytes is refused against the immutable installed
+				// identifier.
+				if _, err := execActivate(capture, blobs, nil); err != nil {
+					t.Fatalf("first commit: %v", err)
 				}
-				if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
-					SessionID: sid, GenerationID: genID,
-					ManifestPath: "generations/" + genID + "/manifest.json",
-					Completeness: string(v2.Generation.Completeness), StagedAtMs: 1,
-					IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: forged,
-					CandidateDigest: digest,
-				}); err != nil {
-					t.Fatalf("write forged intent: %v", err)
-				}
-				outcome, actErr = s.RecoverGenerationActivation(context.Background(), sid)
-			case "same_id_mismatched_intent", "same_id_unbindable_request":
-				// A replayable pending intent for the requested identifier.
-				// The mismatched row installs different bytes under that
-				// identifier, so a replay would commit bytes the request
-				// never asked for; the unbindable row installs the requested
-				// bytes but the request itself is missing a captured blob.
-				pendingBlobs := blobs
-				if c.Fault == "same_id_mismatched_intent" {
-					pendingBlobs = map[schema.SourceEntryRef][]byte{}
-					for ref, data := range blobs {
-						pendingBlobs[ref] = append([]byte("different "), data...)
-					}
-				}
-				digest, err := computeActivationBinding(v2.Generation, bindingFromBlobs(pendingBlobs))
-				if err != nil {
-					t.Fatalf("binding: %v", err)
-				}
-				if _, err := s.generationArtifacts.Stage(context.Background(), v2.Generation, pendingBlobs); err != nil {
-					t.Fatalf("stage same-id candidate: %v", err)
-				}
-				if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
-					SessionID: sid, GenerationID: genID,
-					ManifestPath: "generations/" + genID + "/manifest.json",
-					Completeness: string(v2.Generation.Completeness), StagedAtMs: 1,
+				alteredV2, _ := buildRecoveryV2(t, sid, genID, "complete", false, c)
+				altered := "altered recovery text"
+				alteredV2.Generation.Main.Entries[0].ContentPreview = &altered
+				filledAlter := filledCandidateForValidation(t, alteredV2, blobs)
+				outcome, actErr = s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation: filledAlter, Blobs: blobs,
 					IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: capture,
-					CandidateDigest: digest,
-				}); err != nil {
-					t.Fatalf("write same-id intent: %v", err)
+				})
+			case "same_id_unbindable":
+				// The requested envelope itself cannot be bound (the
+				// retained blob is missing): refused with the binding
+				// category, last-good authority unchanged.
+				requestBlobs := map[schema.SourceEntryRef][]byte{}
+				for ref, data := range blobs {
+					requestBlobs[ref] = data
 				}
-				requestBlobs := blobs
-				if c.Fault == "same_id_unbindable_request" {
-					requestBlobs = map[schema.SourceEntryRef][]byte{}
-					for ref, data := range blobs {
-						requestBlobs[ref] = data
-					}
-					delete(requestBlobs, v2.Generation.Content[0].Ref)
-				}
+				delete(requestBlobs, schema.SourceEntryRef("e_retained_recovery"))
 				outcome, actErr = execActivate(capture, requestBlobs, nil)
 			default:
 				t.Fatalf("unknown fault %q", c.Fault)
@@ -319,13 +304,7 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 			if c.WantErrorContains != "" && (actErr == nil || !strings.Contains(actErr.Error(), c.WantErrorContains)) {
 				t.Fatalf("error = %v, want it to contain %q", actErr, c.WantErrorContains)
 			}
-			if c.WantIntentCleared {
-				pending, err := s.generationArtifacts.ReadIntent(context.Background(), sid)
-				if err != nil || pending != nil {
-					t.Fatalf("pending intent after activation = %+v (err=%v), want cleared", pending, err)
-				}
-			}
-			// Disposition and repair-pending.
+			// Disposition.
 			wantDisposition := map[string]ingest.ActivationDisposition{
 				"committed_now":     ingest.ActivationCommittedNow,
 				"already_committed": ingest.ActivationAlreadyCommitted,
@@ -334,23 +313,8 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 			if outcome.Disposition != wantDisposition {
 				t.Fatalf("disposition = %v, want %v (err=%v)", outcome.Disposition, wantDisposition, actErr)
 			}
-			if outcome.RepairPending != c.WantRepairPending {
-				t.Fatalf("repairPending = %v, want %v (err=%v)", outcome.RepairPending, c.WantRepairPending, actErr)
-			}
-			var repairPendingErr *ingest.GenerationRepairPendingError
-			isRepairPending := errors.As(actErr, &repairPendingErr)
-			if c.WantRepairPending && !isRepairPending {
-				t.Fatalf("want GenerationRepairPendingError, got %v", actErr)
-			}
-			if !c.WantRepairPending && isRepairPending {
-				t.Fatalf("unexpected repair-pending error: %v", actErr)
-			}
 			if c.WantDisposition == "not_committed" && actErr == nil {
 				t.Fatal("want pre-commit refusal, got nil error")
-			}
-			if c.WantDisposition != "not_committed" && c.Fault != "retry" && c.Fault != "retry_fail_repair" {
-				// New commits and preamble commits succeed or carry
-				// repair-pending; retries assert separately below.
 			}
 			// Per-invocation counts: CommittedNow counts candidates once,
 			// AlreadyCommitted/NotCommitted zero. Preview CommittedNow carries
@@ -386,39 +350,22 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 			if active != wantActiveID {
 				t.Fatalf("active = %q, want %q", active, wantActiveID)
 			}
-			// Actual read verdicts, never readiness alone. success_empty pins
-			// the refused-no-prior half the review flagged: a store bug that
-			// served stale or foreign entries on available after a refused
-			// activation still fails here. Unknown expectations fail closed
-			// instead of passing vacuously.
-			_, _, fullErr := s.LoadFullSessionEntries(context.Background(), sid, 0)
-			switch c.WantFullRead {
-			case "success":
-				if fullErr != nil {
-					t.Fatalf("full read refused committed authority: %v", fullErr)
+			// Committed rows: the generation row, its mapping and its bodies
+			// are present exactly when a commit happened, never on authority
+			// alone.
+			present := rowPresent(t, s, sid, genID)
+			switch c.WantRows {
+			case "present":
+				if !present {
+					t.Fatalf("candidate %q has no generation row; want committed rows", genID)
 				}
-			case "refused":
-				if fullErr == nil {
-					t.Fatal("full read certified refused authority")
-				}
-			default:
-				t.Fatalf("unknown want_full_read %q", c.WantFullRead)
-			}
-			page, err := s.ReadSessionEntries(context.Background(), ingest.SessionID(sid), ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadAvailable, Limit: 100})
-			if err != nil {
-				t.Fatalf("available read failed: %v", err)
-			}
-			switch c.WantAvailable {
-			case "success":
-				if len(page.Entries) == 0 {
-					t.Fatal("available read returned no entries for valid authority")
-				}
-			case "success_empty":
-				if len(page.Entries) != 0 {
-					t.Fatalf("available read served %d entries with no authority; want empty", len(page.Entries))
+				assertHarmonizedContent(t, s, sid, genID, v2, blobs)
+			case "absent":
+				if present {
+					t.Fatalf("candidate %q has a generation row; want no committed rows", genID)
 				}
 			default:
-				t.Fatalf("unknown want_available %q", c.WantAvailable)
+				t.Fatalf("unknown want_rows %q", c.WantRows)
 			}
 			// Raw-never-in-errors: refused and repair-pending errors must not
 			// echo payload bytes, source labels, or coordinate namespaces. The

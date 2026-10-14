@@ -83,6 +83,43 @@ func (p *Pipeline) priorReader() NativeGenerationPriorReader {
 	return reader
 }
 
+// storedCaptureAuthorityReader returns the store-backed stored-capture
+// authority reader, or nil when the configured store cannot answer it. A store
+// without it bridges nothing and keeps the existing empty-prior behavior.
+func (p *Pipeline) storedCaptureAuthorityReader() NativePriorCaptureAuthorityReader {
+	if p.metricsStore == nil {
+		return nil
+	}
+	reader, _ := p.metricsStore.(NativePriorCaptureAuthorityReader)
+	return reader
+}
+
+// bridgeOpenCodeCaptureAuthority consults the stored content-capture
+// certificate when a session has no active managed generation, so an
+// incomplete native candidate is refused early against the same authority the
+// content writer guards instead of being built and refused later. The bridge
+// preserves the certificate's own origin and format and fabricates no alias or
+// captured-prefix proof. An operator-initiated rebuild (force/reindex)
+// deliberately replaces full read authority with a preview, so the bridge is
+// suppressed for it exactly as the writer's guard is.
+func (p *Pipeline) bridgeOpenCodeCaptureAuthority(ctx context.Context, session DiscoveredSession) (OpenCodeProvenancePrior, error) {
+	if p.config.Force || p.config.Reindex {
+		return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+	}
+	reader := p.storedCaptureAuthorityReader()
+	if reader == nil {
+		return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+	}
+	authority, err := reader.ReadStoredCaptureAuthority(ctx, session.SessionID)
+	if err != nil {
+		return OpenCodeProvenancePrior{}, fmt.Errorf("load stored capture authority for session %s: %w; no candidate was produced and the last good generation stays active", session.SessionID, err)
+	}
+	if authority == nil {
+		return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+	}
+	return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState(), CaptureAuthority: authority}, nil
+}
+
 // codexPriorLoader supplies the last-good graph metadata and reusable alias
 // state a Codex refresh must retain. A session with no active generation yields
 // an empty prior, so a first discovery allocates fresh identities.
@@ -122,7 +159,11 @@ func (p *Pipeline) openCodePriorLoader() func(context.Context, DiscoveredSession
 			return OpenCodeProvenancePrior{}, fmt.Errorf("load OpenCode prior evidence for session %s: %w; no candidate was produced and the last good generation stays active", session.SessionID, err)
 		}
 		if prior == nil {
-			return OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}, nil
+			// No active generation. The stored capture certificate may still
+			// hold last-good full authority; bridge it so an incomplete native
+			// candidate is refused early with an actionable last-good-held
+			// result instead of being built and refused by the store later.
+			return p.bridgeOpenCodeCaptureAuthority(ctx, session)
 		}
 		loaded := OpenCodeProvenancePrior{Aliases: prior.Aliases, HasCompleteGeneration: prior.HasCompleteGeneration}
 		if len(prior.PriorEvidence) > 0 {
@@ -372,6 +413,7 @@ func (p *Pipeline) nativeGenerationStager() NativeGenerationStager {
 // because the serial activation then stages inline and owns the authoritative
 // refusal or repair outcome.
 func (p *Pipeline) prepareAndStageNativeGeneration(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string, stager NativeGenerationStager) nativeGenerationCommit {
+	ctx = WithWriteAdvisoryReporter(ctx, p.reportWriteDiagnostic)
 	commit := p.prepareNativeGenerationResult(result, outcome, logPrefix)
 	if !commit.ready || stager == nil {
 		return commit
@@ -407,6 +449,12 @@ func (p *Pipeline) stageAndCommitNativeGenerations(
 ) {
 	if len(positions) == 0 {
 		return
+	}
+	if stager, ok := p.metricsStore.(NativeGenerationBatchStager); ok {
+		if activator, ok := p.metricsStore.(NativeGenerationBatchActivator); ok {
+			p.stageAndCommitNativeBatches(ctx, results, positions, outcome, logPrefix, writeLane, onCommit, stager, activator)
+			return
+		}
 	}
 	stager := p.nativeGenerationStager()
 	workers := 1
@@ -464,10 +512,10 @@ func (p *Pipeline) stageAndCommitNativeGenerations(
 // files, the activation installs them, so the writer lane pays only for the
 // intent, rename and database transaction.
 func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared preparedNativeGeneration, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+	ctx = WithWriteAdvisoryReporter(ctx, p.reportWriteDiagnostic)
 	result := prepared.result
 	im := result.im
 	entriesCount := prepared.entriesCount
-	candidates := prepared.candidates
 	fail := func(err error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
 		return p.refuseNativeGeneration(result, entriesCount, logPrefix, err)
 	}
@@ -482,14 +530,29 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 			var err error
 			if staged := prepared.staged; staged != nil {
 				if preparedActivator, ok := p.metricsStore.(NativeGenerationPreparedActivator); ok {
+					p.config.IndexProfiler.RecordActivationSize(1)
 					activationOutcome, err = preparedActivator.ActivateStagedNativeGeneration(ctx, prepared.activation, staged)
 					return err
 				}
 			}
+			p.config.IndexProfiler.RecordActivationSize(1)
 			activationOutcome, err = activator.ActivateNativeGeneration(ctx, prepared.activation)
 			return err
 		})
 	})
+	return p.finishNativeGenerationResult(ctx, prepared, outcome, logPrefix, activationOutcome, activationErr)
+}
+
+// finishNativeGenerationResult is shared by single and batched activation so
+// refusal, retained accounting, skip, and post-commit sweep have one owner.
+func (p *Pipeline) finishNativeGenerationResult(ctx context.Context, prepared preparedNativeGeneration, outcome IndexOutcome, logPrefix string, activationOutcome ActivationOutcome, activationErr error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+	result := prepared.result
+	im := result.im
+	entriesCount := prepared.entriesCount
+	candidates := prepared.candidates
+	fail := func(err error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+		return p.refuseNativeGeneration(result, entriesCount, logPrefix, err)
+	}
 	if activationErr != nil {
 		var repairPending *GenerationRepairPendingError
 		if errors.As(activationErr, &repairPending) {
@@ -516,9 +579,28 @@ func (p *Pipeline) commitNativeGenerationResult(ctx context.Context, prepared pr
 	// CommittedNow counts once. AlreadyCommitted is an idempotent repair with
 	// zero new counts, not a failed capture. NotCommitted carries no counts
 	// by construction (activationErr would be non-nil above).
+	//
+	// The commit is durable in both committing dispositions (or was already
+	// durable for the idempotent retry), so the per-session sweep runs for
+	// either: the superseded rows and orphans the staging flagged are
+	// deleted and the flag is cleared. A sweep failure never fails the
+	// session; the next harvest recovers it.
+	if activationOutcome.Disposition == ActivationCommittedNow ||
+		activationOutcome.Disposition == ActivationAlreadyCommitted {
+		p.sweepCommittedSession(ctx, im.session.SessionID, logPrefix)
+	}
 	var committed []RetainedUnknownKindCount
 	if activationOutcome.Disposition == ActivationCommittedNow {
 		committed = candidates
+	}
+	if activationOutcome.Disposition == ActivationSkipped {
+		// An identical refresh: the projection is unchanged, so the
+		// bookkeeping advanced and nothing else did. The outcome reports
+		// skipped with the fixed reason; per-invocation counts stay zero.
+		reason := "projection unchanged"
+		logEntry := p.makeIndexLogEntry(im, IndexOutcomeSkipped, entriesCount, result.startedAt, &reason, nil)
+		profile := p.makeIndexProfileSession(result, logEntry, 0)
+		return indexedMeta{session: im.session, startMs: im.startMs, indexed: true}, logEntry, profile
 	}
 	logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
 	profile := p.makeIndexProfileSession(result, logEntry, 0)

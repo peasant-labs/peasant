@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -55,6 +56,7 @@ var settingChoices = map[string]func() []string{
 // narrower entry comes before a wider one.
 var settingReadOnly = []struct{ key, reason string }{
 	{"version", "the configuration format version; peasant sets it"},
+	{"write.", "write budgets are read when harvest starts; edit config.yaml before the next harvest"},
 	{"village.connected", "changes when you sign in to village or sign out"},
 	{"sources.claude.", "retired: renamed to sources.claude-code; a configuration that turns it on is refused"},
 	{"push.fields.projectHash", "retired: the project hash is always sent, so this key changes nothing"},
@@ -240,6 +242,10 @@ func peasantConfigKeys(catalog []settingSpec) map[string]bool {
 func filledConfig() config.Config {
 	var cfg config.Config
 	fill(reflect.ValueOf(&cfg).Elem())
+	// The registry probe must use durations representable in config.yaml;
+	// nanoseconds would round to zero during a field's config copy.
+	cfg.Write.HoldTarget = time.Millisecond
+	cfg.Write.HarvestTarget = time.Minute
 	return cfg
 }
 
@@ -308,6 +314,13 @@ func (s settingSpec) fileValue(document *yaml.Node) (schema.LocalSettingValue, e
 	if node == nil {
 		return schema.LocalSettingNull(), nil
 	}
+	if strings.HasPrefix(s.key, "write.") {
+		var cfg config.Config
+		if err := document.Decode(&cfg); err != nil {
+			return nil, fmt.Errorf("read %s from the configuration file: %w", s.key, err)
+		}
+		return s.writeValue(&cfg)
+	}
 	typed := reflect.New(s.typ)
 	if err := node.Decode(typed.Interface()); err != nil {
 		return nil, fmt.Errorf("read %s from the configuration file: %w", s.key, err)
@@ -333,6 +346,12 @@ func (e *settingNotAppliedError) Error() string {
 // effectiveValue is the value that applies under cfg. When no value applies,
 // refused says where the stored value is refused.
 func (s settingSpec) effectiveValue(cfg *config.Config) (effective schema.LocalSettingValue, refused string, err error) {
+	if strings.HasPrefix(s.key, "write.") {
+		resolved := *cfg
+		resolved.Write = cfg.Write.WithDefaults(runtime.NumCPU())
+		value, err := s.writeValue(&resolved)
+		return value, "", err
+	}
 	var value any
 	if resolve, ok := settingEffective[s.key]; ok {
 		value, refused = resolve(cfg)
@@ -359,6 +378,20 @@ func (s settingSpec) effectiveValue(cfg *config.Config) (effective schema.LocalS
 	}
 	effective, err = settingJSON(value)
 	return effective, refused, err
+}
+
+// writeValue uses WriteConfig's on-disk units for both duration keys instead
+// of decoding or rendering individual time.Duration fields independently.
+func (s settingSpec) writeValue(cfg *config.Config) (schema.LocalSettingValue, error) {
+	var node yaml.Node
+	if err := node.Encode(cfg.Write); err != nil {
+		return nil, fmt.Errorf("render %s: %w", s.key, err)
+	}
+	var value any
+	if err := mappingValue(&node, strings.TrimPrefix(s.key, "write.")).Decode(&value); err != nil {
+		return nil, fmt.Errorf("render %s: %w", s.key, err)
+	}
+	return settingJSON(value)
 }
 
 // settingJSON renders a configuration value as JSON with the yaml key names

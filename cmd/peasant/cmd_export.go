@@ -474,14 +474,44 @@ func exportSessionSummary(cmd *cobra.Command, rows []frictionExportRow, asJSON b
 			return fmt.Errorf("export friction summary: read metadata for %s: %w", sid, err)
 		}
 
-		// Get turn counts.
-		if err := sqlitex.ExecuteTransient(conn, `
+		// Get turn counts from the session's current representation: mapped
+		// body rows for harmonized sessions, the mirror otherwise (file-backed
+		// sessions still own their mirror).
+		countQuery := `
 			SELECT
 				COUNT(*) FILTER (WHERE role = 'user' AND depth = 0),
 				COUNT(*)
 			FROM session_entries WHERE session_id = ?
-		`, &sqlitex.ExecOptions{
+		`
+		countArgs := []any{sid}
+		var generationID any
+		if err := sqlitex.ExecuteTransient(conn, `SELECT s.active_generation_id FROM sessions s
+WHERE s.session_id = ?
+AND EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id)`, &sqlitex.ExecOptions{
 			Args: []any{sid},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				if stmt.ColumnType(0) != sqlite.TypeNull {
+					generationID = stmt.ColumnText(0)
+				}
+				return nil
+			},
+		}); err != nil {
+			return fmt.Errorf("export friction summary: resolve representation for %s: %w", sid, err)
+		}
+		if generationID, ok := generationID.(string); ok {
+			countQuery = `
+				SELECT
+					COUNT(*) FILTER (WHERE b.role = 'user' AND b.depth = 0),
+					COUNT(*)
+				FROM session_generation_entries m
+				JOIN session_entry_bodies b
+				  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+				WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0
+			`
+			countArgs = []any{sid, generationID}
+		}
+		if err := sqlitex.ExecuteTransient(conn, countQuery, &sqlitex.ExecOptions{
+			Args: countArgs,
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				s.UserMessages = stmt.ColumnInt(0)
 				s.TotalTurns = stmt.ColumnInt(1)
@@ -630,7 +660,7 @@ Requires either --session for a single session or --session-from-file for a batc
 
 			var succeeded, failed int
 			for _, sid := range sessionIDs {
-				exported, exportErr := export.ExportSession(ctx, db, fs, sid, cfg.Output.BasePath)
+				exported, exportErr := exportSessionTranscript(ctx, db, fs, sid, cfg.Output.BasePath)
 				if exportErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
 					failed++

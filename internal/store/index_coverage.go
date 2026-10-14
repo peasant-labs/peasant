@@ -83,7 +83,15 @@ func (s *Store) readSessionsWithoutEntriesChunk(conn *sqlite.Conn, chunk []inges
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	query := `SELECT DISTINCT session_id FROM session_entries WHERE session_id IN (` + strings.Join(placeholders, ",") + `)`
+	// Membership spans both representations: mirror rows for legacy and
+	// file-backed sessions, active-generation mapping rows for harmonized
+	// ones (whose mirror rows are gone).
+	query := `SELECT DISTINCT session_id FROM session_entries WHERE session_id IN (` + strings.Join(placeholders, ",") + `)
+UNION SELECT DISTINCT m.session_id FROM session_generation_entries m
+JOIN sessions s ON s.session_id = m.session_id
+WHERE m.session_id IN (` + strings.Join(placeholders, ",") + `)
+AND m.generation_id = s.active_generation_id AND m.partition_id = 0`
+	args = append(args, args...)
 	return sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {

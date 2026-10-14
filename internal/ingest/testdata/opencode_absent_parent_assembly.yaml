@@ -1,0 +1,12 @@
+# The parent is deliberately absent from the synthetic source. Discovery's
+# root view must not erase the authoritative parent at capture/assembly.
+cases:
+  - name: captured-unstored-parent-emits-started-by
+    source: native-current-rows
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    parentId: ses_unstoredAssemblyParent
+    relationship:
+      kind: started_by
+      targetState: target_known
+      targetLocalId: ses_unstoredAssemblyParent
+      evidence: existing_adapter

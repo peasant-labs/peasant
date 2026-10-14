@@ -173,7 +173,11 @@ func MaterializeOpenCodeHistory(snapshot OpenCodeHistorySnapshot) (OpenCodeMater
 	for _, row := range own {
 		if !row.Settled {
 			out.Completeness = indexformat.GenerationCompletenessIncompleteNew
-			out.Diagnostics = append(out.Diagnostics, fmt.Sprintf("unfinished own row %q is omitted from the capture; retry after it settles", row.MessageID))
+			position := "an unrecorded sequence"
+			if row.HasSeq {
+				position = fmt.Sprintf("sequence %d", row.Seq)
+			}
+			out.Diagnostics = append(out.Diagnostics, fmt.Sprintf("unfinished own row %q at %s is omitted from the capture; retry after it settles", row.MessageID, position))
 			continue
 		}
 		if snapshot.Revert != nil && snapshot.Revert.Committed && !row.HasSeq {

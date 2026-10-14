@@ -1,4 +1,16 @@
 requiredNames:
+  - delivery-scalar-redacts-retained-evidence
+  - delivery-scalar-agent-message
+  - delivery-unknown-scalar-agent-message
+  - delivery-unsupported-retained-shape
+  - delivery-absent-agent-message
+  - delivery-null-agent-message
+  - delivery-object-correlation
+  - delivery-malformed-correlation-object
+  - delivery-wrong-required-item-field
+  - delivery-repeated-item-completion
+  - delivery-scalar-does-not-open-admission
+  - delivery-correlation-opens-admission
   - copied-prefix-S-boundary
   - empty-child-then-append
   - incomplete-prefix-safe

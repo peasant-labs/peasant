@@ -1,0 +1,15 @@
+requiredNames: [worker, diagnostic, unknown, empty, whitespace, padded, path, message]
+reasons:
+  - {name: worker, reason: error, valid: true}
+  - {name: diagnostic, reason: record_too_large, valid: true}
+  - {name: unknown, reason: unrecognized, valid: false}
+  - {name: empty, reason: '', valid: false}
+  - {name: whitespace, reason: '   ', valid: false}
+  - {name: padded, reason: ' error ', valid: false}
+  - {name: path, reason: /synthetic/private/source, valid: false}
+  - {name: message, reason: 'synthetic source payload must stay private', valid: false}
+batchFailure:
+  name: second-batch-storage-failure
+  rows: 257
+  failAt: 130
+  committedRows: 128

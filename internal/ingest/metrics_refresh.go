@@ -92,10 +92,14 @@ func (p *Pipeline) refreshStoredMetrics(ctx context.Context) (computed, checked,
 }
 
 func (p *Pipeline) reportMetricFailure(location string, err error) {
-	p.reportDiagnostic(DiagnosticEntry{
+	diagnostic := DiagnosticEntry{
 		ErrorType: "metrics_incomplete", Location: location, Message: err.Error(),
 		Remediation: "Resolve the reported cause, then run peasant harvest again to retry this session's metrics and annotations.",
-	})
+	}
+	p.reportDiagnostic(diagnostic)
+	if sid, err := NewSessionID(location); err == nil {
+		p.retainSessionDiagnostic(sid, diagnostic)
+	}
 	slog.Warn("harvest: stored metrics remain retryable", "location", location, "error", err)
 }
 

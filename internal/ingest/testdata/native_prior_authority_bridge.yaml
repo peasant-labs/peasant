@@ -1,0 +1,68 @@
+# OpenCode prior-loader authority-bridge oracle. Each case configures the
+# active-generation prior, the stored certificate, the run mode, and the store's
+# reader surface, then states what the production prior loader must return. The
+# loader is a pure composition over the two reader seams, so the cases are
+# combinatorial rather than mounted: the mounted path is covered by the native
+# maintenance integration case. The required names are the deletion guard.
+requiredNames:
+  - active-generation-prior-wins
+  - no-generation-bridges-authority
+  - no-generation-no-authority-keeps-empty-prior
+  - force-suppresses-bridge
+  - reindex-suppresses-bridge
+  - store-without-authority-reader-bridges-nothing
+  - authority-reader-error-is-actionable
+sessionId: ses_bridge_authority_test
+# The certificate every authority-present case serves. The bridge must preserve
+# it verbatim, including an accounted incomplete status and its failure code.
+authority:
+  status: incomplete
+  sourceAuthority: provider_source
+  transcriptOrigin: opencode-current-sqlite
+  captureFormat: full
+  failureCode: source_records_omitted
+cases:
+  - name: active-generation-prior-wins
+    prior: active-complete
+    authority: present
+    wantPrior: active
+    wantCaptureAuthority: false
+    wantAuthorityReads: 0
+  - name: no-generation-bridges-authority
+    prior: none
+    authority: present
+    wantPrior: bridge
+    wantCaptureAuthority: true
+    wantAuthorityReads: 1
+  - name: no-generation-no-authority-keeps-empty-prior
+    prior: none
+    authority: absent
+    wantPrior: empty
+    wantCaptureAuthority: false
+    wantAuthorityReads: 1
+  - name: force-suppresses-bridge
+    prior: none
+    authority: present
+    force: true
+    wantPrior: empty
+    wantCaptureAuthority: false
+    wantAuthorityReads: 0
+  - name: reindex-suppresses-bridge
+    prior: none
+    authority: present
+    reindex: true
+    wantPrior: empty
+    wantCaptureAuthority: false
+    wantAuthorityReads: 0
+  - name: store-without-authority-reader-bridges-nothing
+    prior: none
+    authority: present
+    storeKind: prior-only
+    wantPrior: empty
+    wantCaptureAuthority: false
+    wantAuthorityReads: 0
+  - name: authority-reader-error-is-actionable
+    prior: none
+    authority: absent
+    authorityError: true
+    wantError: true

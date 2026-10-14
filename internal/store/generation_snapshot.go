@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 // Compile-time guards: the production Store is the concrete SnapshotReader and
 // ContentResolver consumed by the transcript hydration and export layers.
 var (
-	_ indexformat.SnapshotReader  = (*Store)(nil)
-	_ indexformat.ContentResolver = (*Store)(nil)
+	_ indexformat.SnapshotReader        = (*Store)(nil)
+	_ indexformat.ContentResolver       = (*Store)(nil)
+	_ indexformat.PreviewSnapshotReader = (*Store)(nil)
 )
 
 // GenerationSnapshotsSupported reports whether this store was opened with the
@@ -27,32 +29,50 @@ func (s *Store) GenerationSnapshotsSupported() bool {
 	return s != nil && s.generationArtifacts != nil && s.sessionLocker != nil
 }
 
-// WithSessionSnapshot loads ONE immutable read snapshot for a session. It takes
-// the shared per-session OS lock BEFORE the SQLite read transaction, loads the
-// metadata, active generation, main and earlier partitions, contexts and
-// content map in one snapshot, commits the read transaction, returns the pool
-// connection, and then keeps the shared lock for the ENTIRE callback through
-// hydration and serialization. Returning the connection before the callback
-// lets a callback that needs another store lookup proceed without deadlocking
-// at pool size one. A concurrent activation or cleanup takes the exclusive
-// lock and therefore waits until the callback returns.
+// WithSessionSnapshot loads ONE immutable read snapshot for a session.
+//
+// A harmonized session reads from one SQLite read transaction with no
+// session lock: every body is loaded and verified inside that transaction,
+// including ref-less evidence, so later activation and sweep cannot disturb
+// hydration. A file-backed or legacy session keeps the shared
+// per-session OS lock from before the SQLite read transaction through the
+// callback, because its blobs live on disk and cleanup could retire them.
+//
+// Either way the metadata, active generation, main and earlier partitions,
+// contexts and content map load in one snapshot, the pool connection returns
+// before the callback, and a concurrent activation or cleanup of a
+// file-backed session waits on the exclusive lock until the callback
+// returns. A callback that needs another store lookup proceeds without
+// deadlocking at pool size one.
 //
 // A session with no active generation yields a legacy V1 snapshot whose
 // LegacySource names the retained transcript; the caller uses the unchanged
 // legacy callback and never falls back to mutable native data for a V2 read.
 func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) (retErr error) {
+	return s.withSessionSnapshot(ctx, sessionID, true, fn)
+}
+
+// WithSessionPreviewSnapshot reads display fields without digest verification.
+// Only preview consumers opt in; authoritative reads use WithSessionSnapshot.
+func (s *Store) WithSessionPreviewSnapshot(ctx context.Context, sessionID schema.SessionID, fn func(indexformat.ReadSnapshot) error) error {
+	return s.withSessionSnapshot(ctx, sessionID, false, fn)
+}
+
+func (s *Store) withSessionSnapshot(ctx context.Context, sessionID schema.SessionID, authoritative bool, fn func(indexformat.ReadSnapshot) error) (retErr error) {
 	if s.sessionLocker == nil {
 		return fmt.Errorf("store: managed generation support is not configured; a coherent session snapshot cannot be taken; open the store with WithGenerationArtifacts")
 	}
-	release, err := s.sessionLocker.LockShared(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if releaseErr := release(); releaseErr != nil && retErr == nil {
-			retErr = releaseErr
+	if !isHarmonizedSession(ctx, s, sessionID) {
+		release, err := s.sessionLocker.LockShared(ctx, sessionID)
+		if err != nil {
+			return err
 		}
-	}()
+		defer func() {
+			if releaseErr := release(); releaseErr != nil && retErr == nil {
+				retErr = releaseErr
+			}
+		}()
+	}
 
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -60,7 +80,7 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	}
 
 	endSnapshot := sqlitex.Save(conn)
-	snapshot, readErr := buildReadSnapshotOnConn(conn, sessionID)
+	snapshot, readErr := buildReadSnapshotModeOnConn(conn, sessionID, authoritative)
 	endSnapshot(&readErr)
 	// The snapshot is fully materialized in memory; return the pool connection
 	// before invoking the callback while retaining the shared OS lock.
@@ -74,10 +94,11 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	return fn(snapshot)
 }
 
-// ReadFullContent resolves one immutable V2 content blob addressed by the
-// captured snapshot identity. It takes the shared session lock so cleanup
-// cannot remove the generation while the blob is read, and it NEVER reparses a
-// mutable native source.
+// ReadFullContent resolves one immutable content address for the captured
+// snapshot identity. It takes the shared session lock so cleanup cannot
+// retire the generation while the bytes are read, and it NEVER reparses a
+// mutable native source. A harmonized generation resolves from its entry
+// rows (digest-verified); a file-backed one reads its immutable blobs.
 func (s *Store) ReadFullContent(ctx context.Context, sessionID schema.SessionID, generationID string, record indexformat.ContentRecord) ([]byte, error) {
 	if s.generationArtifacts == nil || s.sessionLocker == nil {
 		return nil, fmt.Errorf("store: managed generation support is not configured; captured content cannot be resolved; open the store with WithGenerationArtifacts")
@@ -86,11 +107,48 @@ func (s *Store) ReadFullContent(ctx context.Context, sessionID schema.SessionID,
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = release() }()
+	defer func() {
+		_ = release()
+	}()
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection for managed content %s: %w", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+	_, harmonized, err := harmonizedActiveOnConn(conn, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if harmonized {
+		return readHarmonizedContentOnConn(conn, sessionID, generationID, record)
+	}
 	return s.generationArtifacts.ReadBlob(ctx, sessionID, generationID, record)
 }
 
+// isHarmonizedSession peeks at the active generation row's location without
+// holding the session lock. It answers the lock question only: the snapshot
+// builder re-dispatches inside its own read transaction, so a conversion
+// between the peek and the read cannot straddle representations (conversion
+// moves file-backed to harmonized, never back). A peek failure takes the
+// locked path, today's behavior, and surfaces there if it is real.
+func isHarmonizedSession(ctx context.Context, s *Store, sessionID schema.SessionID) bool {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return false
+	}
+	defer s.pool.Put(conn)
+	_, harmonized, err := harmonizedActiveOnConn(conn, sessionID)
+	if err != nil {
+		return false
+	}
+	return harmonized
+}
+
 func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (indexformat.ReadSnapshot, error) {
+	return buildReadSnapshotModeOnConn(conn, sessionID, true)
+}
+
+func buildReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, authoritative bool) (indexformat.ReadSnapshot, error) {
 	row, err := readSnapshotSessionRowOnConn(conn, sessionID)
 	if err != nil {
 		return indexformat.ReadSnapshot{}, err
@@ -101,6 +159,24 @@ func buildReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (ind
 	}
 	if active == nil {
 		return legacyReadSnapshot(row), nil
+	}
+	// The dispatch key is the active generation row's location: a row in the
+	// harmonized catalog reads its bodies, a row elsewhere reads the
+	// file-backed tables and blobs. The check runs inside the same read
+	// transaction as every row below, so the snapshot cannot straddle a
+	// conversion.
+	harmonized := false
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), *active},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			harmonized = true
+			return nil
+		},
+	}); err != nil {
+		return indexformat.ReadSnapshot{}, fmt.Errorf("store: locate active generation %s for session %s: %w; no snapshot was built", *active, sessionID, err)
+	}
+	if harmonized {
+		return harmonizedReadSnapshotModeOnConn(conn, sessionID, *active, authoritative)
 	}
 	return generationReadSnapshotOnConn(conn, sessionID, *active, row)
 }
@@ -121,10 +197,12 @@ type snapshotSessionRow struct {
 func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (snapshotSessionRow, error) {
 	row := snapshotSessionRow{sessionID: sessionID}
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT s.model_harness, s.parent_id, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
- COALESCE(m.turn_count, 0), COALESCE(m.tool_calls, 0)
- FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
- WHERE s.session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT s.model_harness, s.parent_id, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
+ COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
+ COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
+  FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
+  LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
+  WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -205,7 +283,7 @@ func generationReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	var completeness string
 	var titleRefsJSON string
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT metadata_json, title_refs_json, completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT metadata_json, title_refs_json, completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
@@ -225,6 +303,15 @@ func generationReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	completenessValue, err := indexformat.NewGenerationCompleteness(completeness)
 	if err != nil {
 		return indexformat.ReadSnapshot{}, err
+	}
+	// Native sessions read their wire stats from the captured stats row, not
+	// the capture-time document: resume and derived updates land there. A
+	// session without a stats row keeps its document stats; that row should
+	// always exist past the backfill.
+	if captured, statsErr := readCapturedStatsOnConn(conn, sessionID); statsErr == nil {
+		metadata.Stats = capturedStatsToWire(captured)
+	} else if !errors.Is(statsErr, ErrNoCapturedStats) {
+		return indexformat.ReadSnapshot{}, statsErr
 	}
 	var titleRefs []schema.SourceEntryRef
 	if err := json.Unmarshal([]byte(titleRefsJSON), &titleRefs); err != nil {
@@ -286,16 +373,14 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	sections := []struct {
 		partitionID int
 		state       string
-		native      string
 	}{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, COALESCE(earlier_state, ''), native_metadata FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sections = append(sections, struct {
 				partitionID int
 				state       string
-				native      string
-			}{stmt.ColumnInt(0), stmt.ColumnText(1), stmt.ColumnText(2)})
+			}{stmt.ColumnInt(0), stmt.ColumnText(1)})
 			return nil
 		},
 	}); err != nil {
@@ -307,10 +392,14 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	}
 	partitions := generationPartitions{}
 	for _, section := range sections {
-		partition, err := partitionFromRows(section.native, entries[section.partitionID], section.partitionID)
+		// Native metadata lives in the structured child rows for both
+		// representations: the reshape backfilled every file-backed
+		// generation, and new rows are written structured.
+		native, err := harmonizedNativeMetadataOnConn(conn, sessionID, generationID, section.partitionID)
 		if err != nil {
-			return generationPartitions{}, err
+			return generationPartitions{}, fmt.Errorf("store: read native metadata for partition %d: %w", section.partitionID, err)
 		}
+		partition := indexformat.Partition{Entries: entries[section.partitionID], NativeMetadata: native}
 		if section.partitionID == 0 {
 			partitions.main = partition
 			continue
@@ -324,19 +413,9 @@ func readGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	return partitions, nil
 }
 
-func partitionFromRows(nativeJSON string, entries []schema.SessionEntry, partitionID int) (indexformat.Partition, error) {
-	partition := indexformat.Partition{Entries: entries}
-	if nativeJSON != "" && nativeJSON != "null" {
-		if err := json.Unmarshal([]byte(nativeJSON), &partition.NativeMetadata); err != nil {
-			return indexformat.Partition{}, fmt.Errorf("store: decode native metadata for partition %d: %w", partitionID, err)
-		}
-	}
-	return partition, nil
-}
-
 func readGenerationEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (map[int][]schema.SessionEntry, error) {
 	entries := map[int][]schema.SessionEntry{}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT partition_id, entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT partition_id, entry_json FROM session_projection_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			partitionID := stmt.ColumnInt(0)
@@ -355,7 +434,7 @@ func readGenerationEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 
 func readGenerationContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]indexformat.ContentRecord, error) {
 	var records []indexformat.ContentRecord
-	if err := sqlitex.ExecuteTransient(conn, `SELECT source_entry_ref, relative_blob, byte_length, integrity_digest FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT source_entry_ref, relative_blob, byte_length, integrity_digest FROM session_projection_content WHERE session_id = ? AND generation_id = ? ORDER BY source_entry_ref`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ref, err := schema.NewSourceEntryRef(stmt.ColumnText(0))

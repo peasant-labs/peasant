@@ -20,11 +20,15 @@ JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 WHERE s.session_id = ? LIMIT 1`
 
 	sqlGetMetrics = `SELECT
-    session_id, turn_count, subagent_count,
+    m.session_id,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.subagent_count ELSE m.subagent_count END,
     title, outcome,
-    total_tokens, input_tokens, output_tokens,
-    tool_calls, files_touched, lines_changed,
-    duration_minutes,
+    total_tokens, input_tokens,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
+    files_touched, lines_changed,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END,
     retry_loops, retry_tokens_wasted, within_session_reverts,
     signal_density, spec_quality_score, exploration_ratio,
     scope_breadth, discovery_turns,
@@ -38,7 +42,10 @@ WHERE s.session_id = ? LIMIT 1`
     cost_input_usd, cost_output_usd, cost_reasoning_usd,
     cost_cache_read_usd, cost_cache_write_usd, cost_total_usd, cost_model_id,
     scope, input_hash, output_hash
-FROM session_metrics WHERE session_id = ?`
+FROM session_metrics m
+JOIN sessions s ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = m.session_id
+WHERE m.session_id = ?`
 
 	sqlMetricsExist = `SELECT compute_version FROM session_metrics WHERE session_id = ?`
 
@@ -192,8 +199,27 @@ func (s *Store) listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID)
 }
 
 func listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if shimmed {
+		records, err := shimBodyRecordsOnConn(conn, string(sessionID), nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		bounded, err := shimBoundedOnConn(conn, string(sessionID))
+		if err != nil {
+			return nil, err
+		}
+		entries, err := shimListEntries(records, bounded)
+		if err != nil {
+			return nil, fmt.Errorf("store: list shim entries for %s: %w", sessionID, err)
+		}
+		return entries, nil
+	}
 	var entries []schema.SessionEntry
-	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
+	err = sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := scanSessionEntry(stmt)
@@ -263,6 +289,26 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 		return nil, err
 	}
 
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if shimmed {
+		records, err := shimBodyRecordsOnConn(conn, string(sessionID), &fromIndex, &toIndex)
+		if err != nil {
+			return nil, err
+		}
+		bounded, err := shimBoundedOnConn(conn, string(sessionID))
+		if err != nil {
+			return nil, err
+		}
+		entries, err := shimListEntries(records, bounded)
+		if err != nil {
+			return nil, fmt.Errorf("store: list shim entries range [%d,%d] for %s: %w", fromIndex, toIndex, sessionID, err)
+		}
+		return entries, nil
+	}
+
 	var entries []schema.SessionEntry
 	err = sqlitex.ExecuteTransient(conn, sqlListEntriesRange, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), fromIndex, toIndex},
@@ -330,6 +376,14 @@ func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (
 		return -1, err
 	}
 
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return -1, err
+	}
+	if shimmed {
+		return shimMaxEntryIndex(conn, string(sessionID))
+	}
+
 	maxIdx := -1
 	err = sqlitex.ExecuteTransient(conn, sqlMaxEntryIndex, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
@@ -367,6 +421,14 @@ func (s *Store) FirstEntry(ctx context.Context, sessionID schema.SessionID) (_ *
 	defer endSnapshot(&retErr)
 	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
 		return nil, err
+	}
+
+	shimmed, err := shimmedOnConn(conn, string(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if shimmed {
+		return shimFirstEntry(conn, string(sessionID))
 	}
 
 	var head *EntryHead

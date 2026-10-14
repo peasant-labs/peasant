@@ -637,7 +637,7 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT
 		COALESCE(ats.session_id, ate.session_id) as sid,
-		COALESCE(m.turn_count, 0),
+		COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
 		COALESCE(p.canonical_cwd, p.project_hash, ''),
 		SUM(CASE WHEN ak.name = 'agent' THEN 1 ELSE 0 END) as agent_count,
 		SUM(CASE WHEN ak.name = 'human' THEN 1 ELSE 0 END) as human_count
@@ -649,6 +649,7 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 	LEFT JOIN annotation_target_entries ate ON ate.annotation_id = a.id
 	LEFT JOIN sessions s ON s.session_id = COALESCE(ats.session_id, ate.session_id)
 	LEFT JOIN session_metrics m ON m.session_id = s.session_id
+	LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 	LEFT JOIN projects p ON s.project_hash = p.project_hash
 	WHERE t.type_id = 'research.friction_episode'
 	AND a.superseded_by IS NULL

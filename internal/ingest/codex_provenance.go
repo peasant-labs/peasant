@@ -393,7 +393,7 @@ type codexItemPayload struct {
 	Arguments    json.RawMessage
 	Input        json.RawMessage
 	Output       json.RawMessage
-	Delivery     codexDeliveryCorrelation
+	Delivery     codexDelivery
 	KindsUsable  bool
 	KindsPresent bool
 }
@@ -425,10 +425,10 @@ func decodeCodexItemPayload(raw json.RawMessage) codexItemPayload {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"summary"`
-		Arguments   json.RawMessage           `json:"arguments"`
-		Input       json.RawMessage           `json:"input"`
-		Output      json.RawMessage           `json:"output"`
-		Delivery    *codexDeliveryCorrelation `json:"delivery"`
+		Arguments   json.RawMessage `json:"arguments"`
+		Input       json.RawMessage `json:"input"`
+		Output      json.RawMessage `json:"output"`
+		Delivery    codexDelivery   `json:"delivery"`
 		Passthrough *struct {
 			Kinds json.RawMessage `json:"content_item_kinds"`
 		} `json:"internal_chat_message_metadata_passthrough"`
@@ -446,9 +446,7 @@ func decodeCodexItemPayload(raw json.RawMessage) codexItemPayload {
 	payload.Arguments = wire.Arguments
 	payload.Input = wire.Input
 	payload.Output = wire.Output
-	if wire.Delivery != nil {
-		payload.Delivery = *wire.Delivery
-	}
+	payload.Delivery = wire.Delivery
 	for _, element := range wire.Content {
 		payload.Content = append(payload.Content, codexMessageBlock{ContentType: element.Type, Text: element.Text})
 	}
@@ -710,7 +708,7 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		if event.Type == "item_completed" && len(event.Item) > 0 {
 			payload = decodeCodexItemPayload(event.Item)
 			if !payload.Delivery.isCorrelated() && event.Delivery.isCorrelated() {
-				payload.Delivery = *event.Delivery
+				payload.Delivery = event.Delivery
 			}
 		}
 	}
@@ -1347,10 +1345,13 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 		delivery = schema.DeliveryOriginInheritedContext
 	}
 	partType := payload.Type
-	if c.callCarriers == nil {
-		c.callCarriers = map[string]string{}
+	// Retained inherited calls are evidence, not emitted parents.
+	if !c.retaining {
+		if c.callCarriers == nil {
+			c.callCarriers = map[string]string{}
+		}
+		c.callCarriers[callKey] = carrierKey
 	}
-	c.callCarriers[callKey] = carrierKey
 	toolInput := codexToolBytes(payload.Arguments, payload.Input)
 	c.emit(ClassifiedBlock{
 		NativeKey:        node.NativeKey + "/call",
@@ -1373,10 +1374,12 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 			InputModality: schema.InputModalityNone,
 		},
 	})
-	if c.useKeys == nil {
-		c.useKeys = map[string]bool{}
+	if !c.retaining {
+		if c.useKeys == nil {
+			c.useKeys = map[string]bool{}
+		}
+		c.useKeys[callKey] = true
 	}
-	c.useKeys[callKey] = true
 }
 
 // classifyToolResult emits the depth-1 tool_result block under the carrier its

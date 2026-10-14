@@ -25,7 +25,8 @@ import (
 // transiently on the harvest that first made the parent available is retried on
 // the next harvest that discovers the same parent, without waiting for another
 // new session. The store refuses any update that would close a parent-cache
-// cycle. A store without the reconciliation capability keeps the cache
+// cycle, and every heal resets the child's origin watermark in the same
+// statement. A store without the reconciliation capability keeps the cache
 // unchanged.
 func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, written []DiffEntry) {
 	if p.store == nil || p.config.DryRun {
@@ -34,6 +35,14 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, 
 	reconciler, ok := p.store.(OrphanParentReconciler)
 	if !ok {
 		return
+	}
+	// Re-queue settled parent-linked rows whose unknown origin verdict was
+	// judged before their parent link existed. This runs on every pass, before
+	// either early return below, so a stuck row heals even on a harvest that
+	// names no target or finds no cache to heal. A failure is reported and the
+	// cache heal still runs; the next harvest retries the requeue.
+	if _, err := reconciler.InvalidateStaleParentOrigins(ctx); err != nil {
+		p.warnParentOriginRequeue(storeLookupReasonCode(err))
 	}
 	targets := make([]SessionID, 0, len(discovered))
 	seen := make(map[SessionID]struct{}, len(discovered))
@@ -83,6 +92,17 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, 
 	if err := reconciler.ReconcileParentCache(ctx, updates); err != nil {
 		p.warnParentReconcile("reconcile stored child parent cache", storeLookupReasonCode(err))
 	}
+}
+
+// warnParentOriginRequeue reports only a bounded cause, never a raw store error.
+func (p *Pipeline) warnParentOriginRequeue(reason string) {
+	slog.Warn("pipeline: re-queue stale parent-linked origin verdicts",
+		"step", "reconcile orphan parent caches",
+		"reason", reason,
+		"what", "stale unknown origin verdicts were not requeued",
+		"why", "the store origin requeue operation failed",
+		"user_impact", "existing parent links stay unchanged; cache healing continues; the next harvest retries even without parent discovery",
+		"how_to_fix", "restore database access and rerun harvest")
 }
 
 // warnParentReconcile reports a cache-reconciliation failure with a bounded

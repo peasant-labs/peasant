@@ -49,7 +49,6 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 	metadata.SchemaVersion = CurrentSchemaVersion
 	metadata.Timestamp.Ingested = original.Metadata.Timestamp.Ingested
 	metadata.DerivedAt = nil
-	metadata.ContentHash = schema.ComputeTranscriptHash(original.Transcript)
 	metadata.MetadataHash = schema.ComputeMetadataHash(metadata)
 	before, err := json.Marshal(&original.Metadata)
 	if err != nil {

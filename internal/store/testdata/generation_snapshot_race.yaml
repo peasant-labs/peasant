@@ -1,0 +1,14 @@
+requiredNames:
+  - activation-and-sweep-preserve-captured-detail
+  - publication-and-sweep-preserve-captured-detail
+cases:
+  - name: activation-and-sweep-preserve-captured-detail
+    firstText: captured original text
+    nextText: replacement text
+    sweep: true
+    surface: detail
+  - name: publication-and-sweep-preserve-captured-detail
+    firstText: original full read bytes
+    nextText: replacement publication text
+    sweep: true
+    surface: publication

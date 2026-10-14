@@ -90,10 +90,9 @@ VALUES('`+string(sid)+`','claude-code','model-gen','host-gen','proj-gen',1,2,3,'
 }
 
 // BenchmarkV2GenerationActivate measures the real managed-generation install
-// entry point, ActivateGeneration, for a fresh session. It includes the session
-// lock, intent and manifest file work, and the one activation transaction that
-// installs the generation rows, so it shows the change on the production path
-// end to end.
+// entry point, ActivateGeneration, for a fresh session. It includes the
+// lock-free staging and the one activation transaction that installs the
+// generation rows, so it shows the change on the production path end to end.
 func BenchmarkV2GenerationActivate(b *testing.B) {
 	for _, entries := range []int{2000, 20000} {
 		b.Run(fmt.Sprintf("entries=%d", entries), func(b *testing.B) {
@@ -129,10 +128,10 @@ func BenchmarkV2GenerationActivate(b *testing.B) {
 
 // BenchmarkV2GenerationInstall measures one serialized managed-generation
 // database install for a fresh session: the production DB install path that
-// ActivateGeneration reaches through IndexSessionEntryBatch, writing one
-// session_projection_entries row per entry plus the section, alias, segment,
-// content and relationship-evidence rows. A fresh session is written every
-// iteration so the install actually runs instead of taking a skip path.
+// ActivateGeneration reaches through IndexSessionEntryBatch, writing one body
+// row per entry plus the mapping, section, alias, segment, content and
+// relationship-evidence rows. A fresh session is written every iteration so
+// the install actually runs instead of taking a skip path.
 func BenchmarkV2GenerationInstall(b *testing.B) {
 	for _, entries := range []int{2000, 20000} {
 		b.Run(fmt.Sprintf("entries=%d", entries), func(b *testing.B) {

@@ -2304,6 +2304,9 @@ entries:
   - { name: "internal/push.TestPublicationOmissions", destination: retained-in-place }
   - { name: "internal/push.TestPublicationOmissionsCarryPartialDiagnostics", destination: retained-in-place }
   - { name: "internal/push.TestPublicationOmissionsFixtureGuards", destination: retained-in-place }
+  # Adapted to the harmonized shape: the tool-block seed carries the full
+  # tool body in the field instead of a bounded preview plus a full blob,
+  # which §3.4 reserves for refs no entry emits.
   - { name: "internal/push.TestPublishedProvenanceEnvelopeCarriage", destination: retained-in-place }
   - { name: "internal/push.TestPushAction_String", destination: retained-in-place }
   - { name: "internal/push.TestPushAnnotationsSelected_AssociationTarget", destination: retained-in-place }

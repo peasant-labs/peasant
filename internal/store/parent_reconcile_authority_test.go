@@ -29,6 +29,32 @@ type parentReconcileAuthorityCase struct {
 	HarvestTarget     string `yaml:"harvestTarget"`
 	ExpectParentCache string `yaml:"expectParentCache"`
 	ExpectUpdates     int    `yaml:"expectUpdates"`
+	// Arm selects the driver: empty or "reconcile" runs the authority
+	// reconcile driver, "heal" runs the heal-reset branch, and "invalidate"
+	// runs the bounded origin invalidation branch, which needs no harvest
+	// target.
+	Arm string `yaml:"arm"`
+	// Harness is the stuck child's harness on the heal and invalidate arms
+	// (codex or opencode); it is empty on reconcile-arm cases.
+	Harness string `yaml:"harness"`
+	// ExpectInvalidated is the invalidate arm's expected re-queued row count on
+	// the first application.
+	ExpectInvalidated int64 `yaml:"expectInvalidated"`
+}
+
+const (
+	authorityArmReconcile  = "reconcile"
+	authorityArmHeal       = "heal"
+	authorityArmInvalidate = "invalidate"
+)
+
+// authorityArm normalizes the case's arm token; the empty token is the
+// reconcile driver.
+func authorityArm(tc parentReconcileAuthorityCase) string {
+	if tc.Arm == "" {
+		return authorityArmReconcile
+	}
+	return tc.Arm
 }
 
 type parentReconcileAuthorityFixture struct {
@@ -65,7 +91,14 @@ func TestParentReconcileAuthority(t *testing.T) {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
-			runParentReconcileAuthorityCase(t, fixture, tc)
+			switch authorityArm(tc) {
+			case authorityArmReconcile:
+				runParentReconcileAuthorityCase(t, fixture, tc)
+			case authorityArmHeal:
+				runParentReconcileHealResetCase(t, fixture, tc)
+			case authorityArmInvalidate:
+				runParentReconcileInvalidateCase(t, fixture, tc)
+			}
 		})
 	}
 }
@@ -103,8 +136,23 @@ func loadParentReconcileAuthorityFixture(t *testing.T) parentReconcileAuthorityF
 			t.Fatalf("duplicate authority fixture case %q", tc.Name)
 		}
 		seen[tc.Name] = struct{}{}
-		if tc.HarvestTarget == "" {
-			t.Fatalf("authority case %q names no harvest target", tc.Name)
+		switch authorityArm(tc) {
+		case authorityArmReconcile:
+			if tc.HarvestTarget == "" {
+				t.Fatalf("authority case %q names no harvest target", tc.Name)
+			}
+			if tc.Harness != "" || tc.ExpectInvalidated != 0 {
+				t.Fatalf("authority reconcile case %q must not declare harness or expectInvalidated", tc.Name)
+			}
+		case authorityArmHeal:
+			if tc.HarvestTarget == "" {
+				t.Fatalf("authority heal case %q names no harvest target", tc.Name)
+			}
+			authorityIndependentHarness(t, tc)
+		case authorityArmInvalidate:
+			authorityIndependentHarness(t, tc)
+		default:
+			t.Fatalf("authority case %q names unknown arm %q (want empty, %q, %q, or %q)", tc.Name, tc.Arm, authorityArmReconcile, authorityArmHeal, authorityArmInvalidate)
 		}
 	}
 	return fixture
@@ -149,6 +197,150 @@ func runParentReconcileAuthorityCase(t *testing.T, fixture parentReconcileAuthor
 	reopened := reopenAuthorityStore(t, dir)
 	t.Cleanup(func() { _ = reopened.Close() })
 	assertAuthorityParentCache(t, ctx, reopened, child, want)
+}
+
+// authorityIndependentHarness resolves the case's stuck-row harness, which must
+// be one of the independently admitted harnesses the invalidation scopes.
+func authorityIndependentHarness(t *testing.T, tc parentReconcileAuthorityCase) ingest.Harness {
+	t.Helper()
+	switch harness := ingest.Harness(tc.Harness); harness {
+	case ingest.HarnessCodex, ingest.HarnessOpenCode:
+		return harness
+	default:
+		t.Fatalf("authority case %q harness %q must be %q or %q", tc.Name, tc.Harness, ingest.HarnessCodex, ingest.HarnessOpenCode)
+		return ""
+	}
+}
+
+// runParentReconcileHealResetCase proves the reconcile heal re-queues the
+// healed child's origin verdict: the child settles unknown at the current rule
+// version while its parent is absent, the parent is stored and settled, and the
+// real reverse lookup and reconciliation heal the cache. The healed child must
+// come back at origin version 0 with its verdict unchanged, while the parent,
+// which the heal does not touch, keeps its settled watermark. The result must
+// survive a SQLite reopen.
+func runParentReconcileHealResetCase(t *testing.T, fixture parentReconcileAuthorityFixture, tc parentReconcileAuthorityCase) {
+	t.Helper()
+	ctx := t.Context()
+	db, dir := openAuthorityStore(t)
+	harness := authorityIndependentHarness(t, tc)
+	child := authorityRequiredID(t, "child", fixture.Child)
+	legacyParent := authorityOptionalID(t, fixture, tc.LegacyParent)
+	harvest := authorityOptionalID(t, fixture, tc.HarvestTarget)
+	if harvest == nil {
+		t.Fatalf("authority heal case %q harvest target %q is unknown", tc.Name, tc.HarvestTarget)
+	}
+
+	insertAuthoritySession(t, ctx, db, child, harness, legacyParent)
+	settleAuthorityOrigin(t, ctx, db, child)
+	assertAuthorityParentCache(t, ctx, db, child, nil)
+	insertAuthoritySession(t, ctx, db, *harvest, harness, nil)
+	settleAuthorityOrigin(t, ctx, db, *harvest)
+
+	updates, err := db.ListUncachedChildrenOfParents(ctx, []ingest.SessionID{*harvest}, []ingest.Harness{harness})
+	if err != nil {
+		t.Fatalf("ListUncachedChildrenOfParents: %v", err)
+	}
+	if len(updates) != tc.ExpectUpdates {
+		t.Fatalf("authority heal case %q reverse lookup returned %d updates (%+v), want %d", tc.Name, len(updates), updates, tc.ExpectUpdates)
+	}
+	if err := db.ReconcileParentCache(ctx, updates); err != nil {
+		t.Fatalf("ReconcileParentCache: %v", err)
+	}
+	want := authorityOptionalID(t, fixture, tc.ExpectParentCache)
+	expectedOrigins := map[ingest.SessionID]int{child: 0, *harvest: ingest.OriginRuleVersion}
+	assertAuthorityParentCache(t, ctx, db, child, want)
+	assertAuthorityOrigins(t, ctx, db, expectedOrigins)
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close before reopen: %v", err)
+	}
+	reopened := reopenAuthorityStore(t, dir)
+	t.Cleanup(func() { _ = reopened.Close() })
+	assertAuthorityParentCache(t, ctx, reopened, child, want)
+	assertAuthorityOrigins(t, ctx, reopened, expectedOrigins)
+}
+
+// runParentReconcileInvalidateCase proves the bounded origin invalidation's
+// scope directly on the store. The shared parent is stored first so each
+// child's parent link lands; the stuck child (the case's harness), a Claude
+// Code control under the same parent, and the parent root itself all settle
+// unknown at the current rule version. Only the parent-linked independently
+// admitted child is re-queued: the Claude Code control keeps its watermark, and
+// the parent root keeps its settled verdict because it carries no parent link.
+// A second application re-queues nothing.
+func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAuthorityFixture, tc parentReconcileAuthorityCase) {
+	t.Helper()
+	ctx := t.Context()
+	db, _ := openAuthorityStore(t)
+	harness := authorityIndependentHarness(t, tc)
+	child := authorityRequiredID(t, "child", fixture.Child)
+	parent := authorityRequiredID(t, "legacy", fixture.Legacy)
+	control := authorityRequiredID(t, "alternate", fixture.Alternate)
+
+	insertAuthoritySession(t, ctx, db, parent, harness, nil)
+	insertAuthoritySession(t, ctx, db, child, harness, &parent)
+	insertAuthoritySession(t, ctx, db, control, ingest.HarnessClaudeCode, &parent)
+	for _, id := range []ingest.SessionID{parent, child, control} {
+		settleAuthorityOrigin(t, ctx, db, id)
+	}
+	assertAuthorityParentCache(t, ctx, db, child, &parent)
+	assertAuthorityParentCache(t, ctx, db, control, &parent)
+	assertAuthorityParentCache(t, ctx, db, parent, nil)
+
+	requeued, err := db.InvalidateStaleParentOrigins(ctx)
+	if err != nil {
+		t.Fatalf("InvalidateStaleParentOrigins: %v", err)
+	}
+	if requeued != tc.ExpectInvalidated {
+		t.Fatalf("authority invalidate case %q re-queued %d rows, want %d", tc.Name, requeued, tc.ExpectInvalidated)
+	}
+	assertAuthorityOrigins(t, ctx, db, map[ingest.SessionID]int{
+		child:   0,
+		control: ingest.OriginRuleVersion,
+		parent:  ingest.OriginRuleVersion,
+	})
+
+	again, err := db.InvalidateStaleParentOrigins(ctx)
+	if err != nil {
+		t.Fatalf("InvalidateStaleParentOrigins second application: %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("authority invalidate case %q second application re-queued %d rows, want 0 (the invalidation must be idempotent)", tc.Name, again)
+	}
+}
+
+// settleAuthorityOrigin records the unknown verdict at the current rule
+// version, the state a resolve pass leaves a row it judged without evidence.
+func settleAuthorityOrigin(t *testing.T, ctx context.Context, db *Store, id ingest.SessionID) {
+	t.Helper()
+	if err := db.UpdateOriginState(ctx, id, "unknown", ingest.OriginRuleVersion); err != nil {
+		t.Fatalf("settle origin of %s: %v", id, err)
+	}
+}
+
+// assertAuthorityOrigins re-reads origin state through the resolve pass's own
+// stale-row listing and requires each named row at the given version with its
+// verdict still unknown.
+func assertAuthorityOrigins(t *testing.T, ctx context.Context, db *Store, want map[ingest.SessionID]int) {
+	t.Helper()
+	rows, err := db.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1)
+	if err != nil {
+		t.Fatalf("ListStaleOriginSessions: %v", err)
+	}
+	got := make(map[ingest.SessionID]ingest.StoredOriginRow, len(rows))
+	for _, row := range rows {
+		got[row.SessionID] = row
+	}
+	for id, version := range want {
+		row, ok := got[id]
+		if !ok {
+			t.Fatalf("origin state of %s missing from the stale-origin listing", id)
+		}
+		if row.OriginVersion != version || row.StoredOrigin != "unknown" {
+			t.Fatalf("origin state of %s = %q@%d, want \"unknown\"@%d", id, row.StoredOrigin, row.OriginVersion, version)
+		}
+	}
 }
 
 // authorityOptionalID resolves a fixture token to a session id, or nil for the

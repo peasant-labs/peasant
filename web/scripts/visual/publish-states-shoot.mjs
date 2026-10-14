@@ -1,6 +1,6 @@
 /* MOUNTED PUBLISH BAR AND POPUP STATES — real-binary evidence capture.
  *
- * Boots this worktree's `bin/peasant` (assets embedded from this branch's
+ * Boots this worktree's `peasant` (assets embedded from this branch's
  * `web/out`) with the mock data store, opens a stored session's transcript
  * through the real route (project resolution -> SessionDetailV2 -> the
  * WebSocket session_detail -> fairtrade's TranscriptViewer and publish parts),
@@ -41,7 +41,7 @@ import { createAutomaticConsentWorld, loadAutomaticConsent } from '../../src/app
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const OUT = process.env.PEASANT_PUBLISH_STATES_CAPTURE_DIR || '/tmp/peasant-publish-states'
 const PORT = process.env.PEASANT_PUBLISH_STATES_PORT || '8847'
 const ORIGIN = `http://localhost:${PORT}`
@@ -88,7 +88,7 @@ function assertBuildProvenance() {
   if (!existsSync(BIN) || !existsSync(chunks)) throw fail('verifying build provenance', `missing ${relative(REPO, BIN)} or exported chunks; run make build in this worktree first`)
   const binary = readFileSync(BIN)
   const missing = FEATURE_BYTES.filter((signature) => !binary.includes(Buffer.from(signature)))
-  if (missing.length) throw fail('verifying build provenance', `the embedded binary carries no ${missing.join(', ')}; rebuild this exact worktree so bin/peasant matches web/out`)
+  if (missing.length) throw fail('verifying build provenance', `the embedded binary carries no ${missing.join(', ')}; rebuild this exact worktree so peasant matches web/out`)
   const chunk = filesBelow(chunks).filter((path) => path.endsWith('.js')).find((path) => FEATURE_BYTES.every((signature) => readFileSync(path, 'utf8').includes(signature)))
   if (!chunk) throw fail('verifying build provenance', `no exported chunk carries ${FEATURE_BYTES.join(', ')}; rebuild this exact worktree`)
   return chunk

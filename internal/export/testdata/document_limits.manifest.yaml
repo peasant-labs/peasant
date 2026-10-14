@@ -1,0 +1,5 @@
+requiredNames:
+  - formerly_refused_live_detail_size
+  - one_byte_below_document_limit
+  - at_document_limit
+  - one_byte_above_document_limit

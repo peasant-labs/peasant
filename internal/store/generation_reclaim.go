@@ -18,17 +18,36 @@ import (
 const reclaimSeamAfterRows = "after-rows-before-directories"
 
 // reclaimTableNames are the generation-scoped tables one reclaim pass clears.
-// Every table is addressed by (session_id, generation_id); none carries a
-// foreign key to another in this set, so deletion order does not matter. The
-// catalog table is included: its non-active rows are exactly the superseded
-// generations whose directories are then removed.
+// Every table is addressed by (session_id, generation_id). The list is the
+// single generation-scoped inventory both the reclaim and the representation
+// replacement consume: the reclaim deletes every non-active row per table,
+// and generationIndexFormat.Delete (index_format_v2.go) deletes every row of
+// a replaced session through this same list, so the two hand-maintained
+// lists cannot drift apart. The exact membership is pinned by
+// TestReclaimTableInventoryMatchesFormatDelete: reclaim never leaves rows
+// for a new table.
+//
+// Children come before the parents their foreign keys cascade from, so the
+// per-table counts are exact: an explicit child delete counts its rows
+// instead of vanishing into a parent cascade. The catalog tables close the
+// list; their cascades find no remaining children.
 var reclaimTableNames = []string{
+	"session_context_segment_refs",
+	"session_section_native_metadata",
+	"session_generation_entries",
+	"session_generation_content",
+	"session_generation_subagents",
+	"session_generation_commits",
+	"session_generation_associations",
+	"session_generation_diagnostics",
+	"session_generation_title_refs",
 	"session_projection_entries",
 	"session_projection_content",
 	"session_projection_aliases",
 	"session_projection_sections",
 	"session_context_segments",
 	"session_relationship_evidence",
+	"session_generations",
 	"session_projection_generations",
 }
 
@@ -51,28 +70,63 @@ func reclaimCountField(counts *ReclaimTableCounts, table string) *int64 {
 		return &counts.RelationshipEvidence
 	case "session_projection_generations":
 		return &counts.Generations
+	case "session_context_segment_refs":
+		return &counts.SegmentRefs
+	case "session_section_native_metadata":
+		return &counts.NativeMetadata
+	case "session_generation_entries":
+		return &counts.GenerationEntries
+	case "session_generation_content":
+		return &counts.GenerationContent
+	case "session_generation_subagents":
+		return &counts.GenerationSubagents
+	case "session_generation_commits":
+		return &counts.GenerationCommits
+	case "session_generation_associations":
+		return &counts.GenerationAssociations
+	case "session_generation_diagnostics":
+		return &counts.GenerationDiagnostics
+	case "session_generation_title_refs":
+		return &counts.GenerationTitleRefs
+	case "session_generations":
+		return &counts.SessionGenerations
 	default:
 		return nil
 	}
 }
 
 // ReclaimTableCounts is the per-table row count one reclaim removes. The
-// closed set is every generation-scoped table: the five projection tables, the
-// context segments, the relationship evidence and the generation catalog.
+// closed set is every generation-scoped table: the harmonized catalog and
+// its children, the shared generation-keyed tables, and the file-backed
+// catalog. A table outside this set has no count field, so a caller cannot
+// silently accumulate a row count it never reports.
 type ReclaimTableCounts struct {
-	ProjectionEntries    int64
-	ProjectionContent    int64
-	ProjectionAliases    int64
-	ProjectionSections   int64
-	ContextSegments      int64
-	RelationshipEvidence int64
-	Generations          int64
+	ProjectionEntries      int64
+	ProjectionContent      int64
+	ProjectionAliases      int64
+	ProjectionSections     int64
+	ContextSegments        int64
+	RelationshipEvidence   int64
+	Generations            int64
+	SegmentRefs            int64
+	NativeMetadata         int64
+	GenerationEntries      int64
+	GenerationContent      int64
+	GenerationSubagents    int64
+	GenerationCommits      int64
+	GenerationAssociations int64
+	GenerationDiagnostics  int64
+	GenerationTitleRefs    int64
+	SessionGenerations     int64
 }
 
 // Total is the sum of every table count.
 func (c ReclaimTableCounts) Total() int64 {
 	return c.ProjectionEntries + c.ProjectionContent + c.ProjectionAliases +
-		c.ProjectionSections + c.ContextSegments + c.RelationshipEvidence + c.Generations
+		c.ProjectionSections + c.ContextSegments + c.RelationshipEvidence + c.Generations +
+		c.SegmentRefs + c.NativeMetadata + c.GenerationEntries + c.GenerationContent +
+		c.GenerationSubagents + c.GenerationCommits + c.GenerationAssociations +
+		c.GenerationDiagnostics + c.GenerationTitleRefs + c.SessionGenerations
 }
 
 // Add accumulates another count into this one.
@@ -84,6 +138,16 @@ func (c *ReclaimTableCounts) Add(other ReclaimTableCounts) {
 	c.ContextSegments += other.ContextSegments
 	c.RelationshipEvidence += other.RelationshipEvidence
 	c.Generations += other.Generations
+	c.SegmentRefs += other.SegmentRefs
+	c.NativeMetadata += other.NativeMetadata
+	c.GenerationEntries += other.GenerationEntries
+	c.GenerationContent += other.GenerationContent
+	c.GenerationSubagents += other.GenerationSubagents
+	c.GenerationCommits += other.GenerationCommits
+	c.GenerationAssociations += other.GenerationAssociations
+	c.GenerationDiagnostics += other.GenerationDiagnostics
+	c.GenerationTitleRefs += other.GenerationTitleRefs
+	c.SessionGenerations += other.SessionGenerations
 }
 
 // ReclaimGeneration is one superseded generation selected for reclaim: its
@@ -165,6 +229,12 @@ type ReclaimResult struct {
 	Generations int
 	// Rows is the per-table row count removed by this pass.
 	Rows ReclaimTableCounts
+	// BodiesDeleted counts the orphan entry bodies the pass swept: entry
+	// rows no generation references after the superseded rows went away.
+	BodiesDeleted int64
+	// BlobsDeleted counts the orphan content blobs the pass swept, whole
+	// objects whose chunks cascade.
+	BlobsDeleted int64
 	// Footprint is the on-disk size of the directories removed by this pass.
 	Footprint GenerationFootprint
 	// DirectoriesRemoved counts the generation directories successfully
@@ -179,7 +249,7 @@ type ReclaimResult struct {
 	Warnings []error
 }
 
-// reclaimCandidate is one session with an active generation. Every such
+// reclaimCandidate is one session the sweep flag marks. Every flagged
 // session is inspected, so a crash that removed the rows but left an orphan
 // generation directory is retried on the next pass even though the session no
 // longer has more than one committed generation.
@@ -189,9 +259,9 @@ type reclaimCandidate struct {
 }
 
 // PlanSupersededGenerationReclaim builds the reclaim forecast. For every
-// session with an active generation, every committed generation other than the
-// active one is a candidate, and so is any owned generation directory that is
-// not active (an orphan left by an interrupted earlier pass). Each candidate's
+// flagged session, every committed generation other than the active one is
+// a candidate, and so is any owned generation directory that is not active
+// (an orphan left by an interrupted earlier pass). Each candidate's
 // per-table row count and on-disk footprint are measured. A session with a
 // pending activation intent is reported as skipped and contributes no
 // candidates. limit, when positive, bounds how many sessions with work are
@@ -233,20 +303,24 @@ func (s *Store) PlanSupersededGenerationReclaim(ctx context.Context, limit int) 
 
 // ReclaimSupersededGenerations reclaims every superseded generation. For each
 // candidate session it takes the exclusive per-session lock, re-reads the
-// active generation and the pending intent, and then, in ONE transaction,
-// deletes every non-active row across the generation-scoped tables. It then
-// releases the lock and removes each superseded generation's directory through
-// the ownership-verified cleanup path.
+// active generation and the pending intent, and deletes every non-active row
+// across the generation-scoped tables in bounded batches. It then releases
+// the lock and removes each superseded generation's directory through the
+// ownership-verified cleanup path, and finally sweeps the orphan objects
+// the row deletes uncovered and clears the sweep flag.
 //
 // A session with a pending intent is never touched. The active generation is
 // never deleted: the row predicate excludes it and the cleanup path refuses
-// it. A missing directory is success, so a crash between the row transaction
-// and directory removal leaves a readable store and a retryable orphan that
-// the next pass removes. limit, when positive, bounds how many sessions with
+// it. A missing directory is success, so a crash between the row deletes and
+// directory removal leaves a readable store and a retryable orphan that the
+// next pass removes. limit, when positive, bounds how many sessions with
 // work this pass reclaims.
 func (s *Store) ReclaimSupersededGenerations(ctx context.Context, limit int) (ReclaimResult, error) {
 	var result ReclaimResult
 	if err := s.requireGenerationSupport(); err != nil {
+		return result, err
+	}
+	if _, err := s.EnsureSearchIndexHealthy(ctx); err != nil {
 		return result, err
 	}
 	candidates, err := s.reclaimCandidateSessions(ctx)
@@ -276,6 +350,8 @@ func (s *Store) ReclaimSupersededGenerations(ctx context.Context, limit int) (Re
 		result.Sessions++
 		result.Generations += outcome.generations
 		result.Rows.Add(outcome.rows)
+		result.BodiesDeleted += outcome.bodiesDeleted
+		result.BlobsDeleted += outcome.blobsDeleted
 		result.Footprint.Add(outcome.footprint)
 		result.DirectoriesRemoved += outcome.directoriesRemoved
 		result.Warnings = append(result.Warnings, outcome.warnings...)
@@ -344,12 +420,28 @@ type reclaimSessionOutcome struct {
 	didWork            bool
 	generations        int
 	rows               ReclaimTableCounts
+	bodiesDeleted      int64
+	blobsDeleted       int64
 	footprint          GenerationFootprint
 	directoriesRemoved int
 	warnings           []error
 }
 
-// reclaimOneSession reclaims one candidate session under its exclusive lock.
+// reclaimOneSession reclaims one candidate session. It takes the exclusive
+// per-session lock, re-reads the active generation and the pending intent,
+// and deletes every non-active row across the generation-scoped tables. It
+// then releases the lock and removes each superseded generation's directory
+// through the ownership-verified cleanup path. Finally it re-acquires the
+// lock, sweeps the orphan objects the row deletes uncovered, and clears the
+// sweep flag when the session is fully clean.
+//
+// A session with a pending intent is never touched. A session with no
+// active generation keeps nothing: every catalog row counts as superseded.
+// The active generation is never deleted: the row predicate excludes it and
+// the cleanup path refuses it. A missing directory is success, so a crash
+// between the row transaction and directory removal leaves a readable store
+// and a retryable orphan that the next pass removes. limit, when positive,
+// bounds how many sessions with work this pass reclaims.
 func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidate) (reclaimSessionOutcome, error) {
 	var outcome reclaimSessionOutcome
 	release, err := s.sessionLocker.LockExclusive(ctx, candidate.sessionID)
@@ -366,11 +458,6 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 	active, err := s.activeGenerationID(ctx, candidate.sessionID)
 	if err != nil {
 		return outcome, err
-	}
-	if active == "" {
-		// The active pointer was cleared between enumeration and the lock; the
-		// session no longer names a read authority to protect, so leave it.
-		return outcome, nil
 	}
 	intent, err := s.generationArtifacts.ReadIntent(ctx, candidate.sessionID)
 	if err != nil {
@@ -394,22 +481,19 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 		return outcome, fmt.Errorf("store: reclaim superseded generations for session %s: %w; no row was deleted", candidate.sessionID, err)
 	}
 	ids := reclaimGenerationUnion(rowCounts, committed, dirs, active)
-	if len(ids) == 0 {
-		return outcome, nil
-	}
 
 	deleted, err := s.deleteSupersededGenerationRows(ctx, candidate.sessionID, active)
 	if err != nil {
 		return outcome, err
 	}
 
-	// The row transaction has committed. Release the lock before the directory
+	// The row deletes have committed. Release the lock before the directory
 	// pass so a long cleanup cannot block a reader that shares the lock; the
 	// cleanup path re-acquires it and re-verifies ownership.
 	release()
 	locked = false
 
-	if s.reclaimSeam != nil {
+	if len(ids) > 0 && s.reclaimSeam != nil {
 		if err := s.reclaimSeam(reclaimSeamAfterRows); err != nil {
 			outcome.rows = deleted
 			outcome.generations = len(ids)
@@ -417,8 +501,18 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 		}
 	}
 
+	// Only generations with an owned directory attempt removal: a
+	// harmonized generation without one has nothing to remove, and
+	// attempting it would refuse ownership no manifest can prove.
+	present := make(map[string]struct{}, len(dirs))
+	for _, generationID := range dirs {
+		present[generationID] = struct{}{}
+	}
 	sort.Strings(ids)
 	for _, generationID := range ids {
+		if _, ok := present[generationID]; !ok {
+			continue
+		}
 		footprint, sizeErr := s.generationArtifacts.GenerationSize(ctx, candidate.sessionID, generationID)
 		if sizeErr != nil {
 			outcome.warnings = append(outcome.warnings, fmt.Errorf("store: measure superseded generation %s for session %s: %w; the directory was left in place", generationID, candidate.sessionID, sizeErr))
@@ -433,41 +527,98 @@ func (s *Store) reclaimOneSession(ctx context.Context, candidate reclaimCandidat
 	}
 	outcome.generations = len(ids)
 	outcome.rows = deleted
-	outcome.didWork = deleted.Total() > 0 || outcome.directoriesRemoved > 0
+
+	// The row deletes uncovered orphan objects: bodies and blobs no live
+	// generation references. Sweep them under a fresh lock span, then clear
+	// the sweep flag when the session is fully clean. A directory warning
+	// keeps the flag set, so the next pass retries the refused removal.
+	orphanRelease, err := s.sessionLocker.LockExclusive(ctx, candidate.sessionID)
+	if err != nil {
+		return outcome, err
+	}
+	limit := s.writeConfigForLane().SweepRows
+	if limit < 1 {
+		limit = 1
+	}
+	bodies, blobs, _, orphanErr := s.sweepUnreferencedObjects(ctx, candidate.sessionID, limit)
+	if orphanErr != nil {
+		_ = orphanRelease()
+		return outcome, orphanErr
+	}
+	outcome.bodiesDeleted = bodies
+	outcome.blobsDeleted = blobs
+	if len(outcome.warnings) == 0 {
+		if flagErr := s.clearSweepFlag(ctx, candidate.sessionID); flagErr != nil {
+			_ = orphanRelease()
+			return outcome, flagErr
+		}
+	}
+	_ = orphanRelease()
+
+	deletedContent := bodies > 0 || blobs > 0
+	outcome.didWork = deleted.Total() > 0 || outcome.directoriesRemoved > 0 || deletedContent
 	return outcome, nil
 }
 
 // deleteSupersededGenerationRows deletes every non-active generation row for
-// one session in ONE transaction across the generation-scoped tables. The
-// active generation is excluded by the row predicate, so it is never deleted
-// and the completeness guard keeps its complete last-good row.
+// one session across the generation-scoped tables, in bounded batches (the
+// configured write.sweep_rows). The active generation is excluded by a
+// NULL-safe row predicate, so it is never deleted; a session with no active
+// generation keeps nothing. Children go before the parents their foreign
+// keys cascade from, so the per-table counts are exact. Each batch commits
+// on its own, so a crash between batches leaves a partial, safe deletion
+// the next pass completes; the seam fires between batches. The completeness
+// guard keeps the active generation's complete last-good row.
 func (s *Store) deleteSupersededGenerationRows(ctx context.Context, sessionID schema.SessionID, active string) (ReclaimTableCounts, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return ReclaimTableCounts{}, fmt.Errorf("store: reclaim superseded generation rows for session %s: take connection: %w; no row was deleted", sessionID, err)
 	}
 	defer s.pool.Put(conn)
+	limit := s.writeConfigForLane().SweepRows
+	if limit < 1 {
+		limit = 1
+	}
 	var counts ReclaimTableCounts
-	var txErr error
-	end := sqlitex.Transaction(conn)
 	for _, table := range reclaimTableNames {
-		if txErr != nil {
-			break
-		}
-		txErr = sqlitex.ExecuteTransient(conn, `DELETE FROM `+table+` WHERE session_id = ? AND generation_id != ?`, &sqlitex.ExecOptions{
-			Args: []any{string(sessionID), active},
-		})
-		if txErr == nil {
+		for {
+			if err := ctx.Err(); err != nil {
+				return ReclaimTableCounts{}, err
+			}
+			changed, err := deleteSupersededBatch(conn, table, sessionID, active, limit)
+			if err != nil {
+				return ReclaimTableCounts{}, err
+			}
 			if field := reclaimCountField(&counts, table); field != nil {
-				*field = int64(conn.Changes())
+				*field += int64(changed)
+			}
+			if changed == 0 {
+				break
+			}
+			if err := s.reportSweepBatch(ctx, sessionID); err != nil {
+				return ReclaimTableCounts{}, err
 			}
 		}
 	}
-	end(&txErr)
-	if txErr != nil {
-		return ReclaimTableCounts{}, fmt.Errorf("store: reclaim superseded generation rows for session %s: %w; the transaction rolled back and every generation row is unchanged", sessionID, txErr)
-	}
 	return counts, nil
+}
+
+// deleteSupersededBatch deletes one bounded batch of non-active generation
+// rows from one table and reports how many rows went away. The engine has no
+// UPDATE/DELETE LIMIT, so the batch addresses its rows by key: the rowid for
+// rowid tables, the full primary key for the WITHOUT ROWID descriptor
+// table. A batch that deletes nothing ends its table's loop.
+func deleteSupersededBatch(conn *sqlite.Conn, table string, sessionID schema.SessionID, active string, limit int) (int64, error) {
+	statement := `DELETE FROM ` + table + ` WHERE rowid IN (SELECT rowid FROM ` + table + ` WHERE session_id = ? AND generation_id IS NOT ? LIMIT ?)`
+	if table == "session_generation_content" {
+		statement = `DELETE FROM session_generation_content WHERE (session_id, generation_id, source_entry_ref) IN (SELECT session_id, generation_id, source_entry_ref FROM session_generation_content WHERE session_id = ? AND generation_id IS NOT ? LIMIT ?)`
+	}
+	if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), active, int64(limit)},
+	}); err != nil {
+		return 0, fmt.Errorf("store: reclaim superseded generation rows for session %s in %s: %w; the committed batches stay deleted and the next pass completes the sweep", sessionID, table, err)
+	}
+	return int64(conn.Changes()), nil
 }
 
 // reclaimRowCounts returns the per-generation, per-table row counts for one
@@ -482,7 +633,7 @@ func (s *Store) reclaimRowCounts(ctx context.Context, sessionID schema.SessionID
 	defer s.pool.Put(conn)
 	counts := make(map[string]ReclaimTableCounts)
 	for _, table := range reclaimTableNames {
-		err := sqlitex.ExecuteTransient(conn, `SELECT generation_id, COUNT(*) FROM `+table+` WHERE session_id = ? GROUP BY generation_id`, &sqlitex.ExecOptions{
+		err := sqlitex.Execute(conn, `SELECT generation_id, COUNT(*) FROM `+table+` WHERE session_id = ? GROUP BY generation_id`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID)},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				generationID := stmt.ColumnText(0)
@@ -505,7 +656,10 @@ func (s *Store) reclaimRowCounts(ctx context.Context, sessionID schema.SessionID
 }
 
 // reclaimCommittedGenerationIDs returns the session's committed generation
-// catalog identifiers, sorted.
+// catalog identifiers from both catalog tables, sorted: the file-backed
+// catalog Release N still reads and the harmonized catalog the new writers
+// install. A generation with a catalog row in either table is committed,
+// even when its mapping rows are already gone.
 func (s *Store) reclaimCommittedGenerationIDs(ctx context.Context, sessionID schema.SessionID) ([]string, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -513,8 +667,8 @@ func (s *Store) reclaimCommittedGenerationIDs(ctx context.Context, sessionID sch
 	}
 	defer s.pool.Put(conn)
 	var ids []string
-	err = sqlitex.ExecuteTransient(conn, `SELECT generation_id FROM session_projection_generations WHERE session_id = ? ORDER BY generation_id`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
+	err = sqlitex.Execute(conn, `SELECT generation_id FROM session_projection_generations WHERE session_id = ? UNION SELECT generation_id FROM session_generations WHERE session_id = ? ORDER BY generation_id`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ids = append(ids, stmt.ColumnText(0))
 			return nil
@@ -526,26 +680,36 @@ func (s *Store) reclaimCommittedGenerationIDs(ctx context.Context, sessionID sch
 	return ids, nil
 }
 
-// reclaimCandidateSessions lists every session with an active generation,
-// ordered by session identifier so a batched pass is deterministic.
+// reclaimCandidateSessions lists every session the sweep flag marks,
+// ordered by session identifier so a batched pass is deterministic. The
+// flag is complete for catalog rows and objects: a session holds superseded
+// rows or orphans only while its flag is set (the v62 backfill flags every
+// session with a non-active projection row; staging, migration, and
+// representation replacement set it before any object write or row removal;
+// the sweep clears it after). Selecting through the partial index removes
+// the scan of every session.
 func (s *Store) reclaimCandidateSessions(ctx context.Context) ([]reclaimCandidate, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("store: list sessions with an active generation: take connection: %w", err)
+		return nil, fmt.Errorf("store: list sessions with a set sweep flag: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
 	var candidates []reclaimCandidate
-	err = sqlitex.ExecuteTransient(conn, `SELECT session_id, active_generation_id FROM sessions WHERE active_generation_id IS NOT NULL ORDER BY session_id`, &sqlitex.ExecOptions{
+	err = sqlitex.ExecuteTransient(conn, `SELECT session_id, active_generation_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
+			active := ""
+			if stmt.ColumnType(1) != sqlite.TypeNull {
+				active = stmt.ColumnText(1)
+			}
 			candidates = append(candidates, reclaimCandidate{
 				sessionID: schema.SessionID(stmt.ColumnText(0)),
-				active:    stmt.ColumnText(1),
+				active:    active,
 			})
 			return nil
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store: list sessions with an active generation: %w", err)
+		return nil, fmt.Errorf("store: list sessions with a set sweep flag: %w", err)
 	}
 	return candidates, nil
 }

@@ -1,0 +1,38 @@
+requiredNames:
+  - content_model_parity
+  - content_promotion
+  - content_one_copy
+  - generation_skip
+  - content_crash_seams
+  - content_enospc
+  - content_write_budget
+  - session_captured_stats
+  - content_corruption
+  - content_concurrency
+  - content_hostile_input
+  - content_gc
+  - content_migration
+  - content_release_guard
+  - search_recall
+  - annotation_targets_no_fk
+  - schema_fresh_vs_migrated
+  - stats_overflow
+families:
+  - {name: content_model_parity, owner: TestContentModelParity}
+  - {name: content_promotion, owner: TestContentPromotion}
+  - {name: content_one_copy, owner: TestContentOneCopy}
+  - {name: generation_skip, owner: TestHarmonizedSkip}
+  - {name: content_crash_seams, owner: TestContentCrashSeams}
+  - {name: content_enospc, owner: 'TestContentHarvestENOSPC + TestContentMigrationENOSPC'}
+  - {name: content_write_budget, owner: TestContentWriteBudgetFamily}
+  - {name: session_captured_stats, owner: TestSessionCapturedStatsFamily}
+  - {name: content_corruption, owner: 'TestContentCorruptionFullRead + TestContentCorruptionRetainedObjects + TestContentCorruptionRepair + TestSearchCorruptionFamily'}
+  - {name: content_concurrency, owner: 'TestContentConcurrency + TestContentConcurrencyReaders'}
+  - {name: content_hostile_input, owner: TestHarmonizedHostileInput}
+  - {name: content_gc, owner: TestContentGCFamily}
+  - {name: content_migration, owner: 'TestContentMigrationBackfills + TestContentMigrationConversion'}
+  - {name: content_release_guard, owner: TestContentReleaseGuard}
+  - {name: search_recall, owner: TestSearchRecallFamily}
+  - {name: annotation_targets_no_fk, owner: TestAnnotationTargetsNoFK}
+  - {name: schema_fresh_vs_migrated, owner: 'TestSchemaFreshVsMigrated + TestGoldenTemplateBodyInsert'}
+  - {name: stats_overflow, owner: TestStatsOverflowFamily}

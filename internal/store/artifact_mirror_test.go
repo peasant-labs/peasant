@@ -200,6 +200,9 @@ func TestArtifactMirrorCommitsEvidenceTogether(t *testing.T) {
 				if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 					t.Fatal(err)
 				}
+				if changed, err := db.RecordSourceUnavailable(t.Context(), entry.Metadata.SessionID, ingest.SourceUnavailableNoSavedCopy); err != nil || !changed {
+					t.Fatalf("seed unavailable source: changed=%t err=%v", changed, err)
+				}
 				if err := db.UpsertOpenCodeSeqCursor(t.Context(), entry.Metadata.SessionID, fixture.OriginalCursor); err != nil {
 					t.Fatal(err)
 				}
@@ -255,6 +258,12 @@ func TestArtifactMirrorCommitsEvidenceTogether(t *testing.T) {
 				t.Fatalf("incorrect per-session outcome: %+v", results)
 			}
 			after := mirrorDatabaseState(t, db.Pool(), fixture.SessionID)
+			if seeded {
+				reason, err := db.ReadSourceUnavailability(t.Context(), entry.Metadata.SessionID)
+				if err != nil || (reason != nil) != row.WantError {
+					t.Fatalf("mirror availability state: %v %v, want retained=%t", reason, err, row.WantError)
+				}
+			}
 			if row.WantError {
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("failed mirror changed prior data: before=%v after=%v", before, after)

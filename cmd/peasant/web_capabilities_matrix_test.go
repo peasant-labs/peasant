@@ -203,6 +203,7 @@ func TestWebCapabilitiesMatrix(t *testing.T) {
 var (
 	peasantCLIOnce sync.Once
 	peasantCLIPath string
+	peasantCLIDir  string
 	peasantCLIErr  error
 )
 
@@ -247,11 +248,22 @@ func buildPeasantMatrixBinary(t *testing.T) string {
 			return
 		}
 		peasantCLIPath = out
+		peasantCLIDir = dir
 	})
 	if peasantCLIErr != nil {
 		t.Fatalf("%v", peasantCLIErr)
 	}
 	return peasantCLIPath
+}
+
+// removePeasantMatrixBuildDir deletes the memoized CLI build dir the Once
+// created, if any. TestMain calls it after the run: without this the
+// peasant-matrix-bin-* directory leaks into /tmp on every matrix run.
+func removePeasantMatrixBuildDir() {
+	if peasantCLIDir != "" {
+		_ = os.RemoveAll(peasantCLIDir)
+		peasantCLIDir = ""
+	}
 }
 
 // isolatedXDGEnv returns the parent process environment with HOME and the XDG

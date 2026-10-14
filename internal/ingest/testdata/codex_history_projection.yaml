@@ -1,4 +1,95 @@
 cases:
+  - name: delivery-scalar-redacts-retained-evidence
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"ghp_abcdefghijklmnopqrstuvwxyz0123456789","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"ghp_abcdefghijklmnopqrstuvwxyz0123456789"']
+      redacted: ['"\u003cGITHUB_PAT\u003e"']
+      turns: 1
+      submissions: 0
+  - name: delivery-scalar-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"final"']
+      turns: 1
+      submissions: 0
+  - name: delivery-unknown-scalar-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"user wrote this","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"user wrote this"']
+      turns: 1
+      submissions: 0
+  - name: delivery-unsupported-retained-shape
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":[true, 7],"content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['[true, 7]']
+      turns: 1
+      submissions: 0
+  - name: delivery-absent-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      turns: 1
+      submissions: 0
+  - name: delivery-null-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":null,"content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      turns: 1
+      submissions: 0
+  - name: delivery-object-correlation
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":{"target":"agent-b","call_id":"c1"},"content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      turns: 1
+      submissions: 0
+  - name: delivery-malformed-correlation-object
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":{"target":7},"content":[{"type":"output_text","text":"answer"}]}}}
+      refusal: delivery correlation_object field target requires a string
+  - name: delivery-wrong-required-item-field
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":7,"delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+      refusal: codexItemBody.id
+  - name: delivery-repeated-item-completion
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"first"}]}}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"final"', '"final"']
+      turns: 1
+      submissions: 0
+  - name: delivery-scalar-does-not-open-admission
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"request"}]}}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+        {"type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+      content: []
+      turns: 0
+      submissions: 0
+  - name: delivery-correlation-opens-admission
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"request"}]}}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":{"target":"agent-b"},"content":[{"type":"output_text","text":"answer"}]}}}
+        {"type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+      content: [request]
+      turns: 1
+      submissions: 0
   - name: copied-prefix-S-boundary
     phases:
       - authority:

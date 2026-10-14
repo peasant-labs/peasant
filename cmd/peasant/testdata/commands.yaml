@@ -61,6 +61,8 @@ commands:
       - use: verify
         flags:
           - { name: verbose, type: bool, default: "false" }
+          - { name: content, type: bool, default: "false" }
+          - { name: repair, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
@@ -257,3 +259,15 @@ commands:
           - { name: session, type: string, default: "" }
           - { name: paired, type: bool, default: "false" }
           - { name: summary, type: bool, default: "false" }
+
+  - name: Migrate
+    use: migrate
+    flags:
+      - { name: dry-run, type: bool, default: "false" }
+      - { name: limit, type: int, default: "0" }
+      - { name: confirm, type: bool, default: "false" }
+      - { name: json, type: bool, default: "false" }
+    exit_cases:
+      - args: ["--help"]
+        expect_error: false
+        output_contains: ["migrate"]

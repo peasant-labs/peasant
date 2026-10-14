@@ -123,6 +123,15 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 					t.Fatalf("reactivate G1: %v", err)
 				}
 			}
+			// Activation writes no files; the cases below manipulate the
+			// owned generation directories, so seed the committed
+			// generations' directories the way a file-backed install leaves
+			// them.
+			for _, genID := range []string{fixture.Generation.CompleteID, fixture.Generation.InactiveID} {
+				if err := os.MkdirAll(filepath.Join(root, fixture.Session.ID, "generations", genID), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			outsideDir := t.TempDir()
 			sentinelOutside := filepath.Join(outsideDir, fixture.Sentinel.OutsideFile)
@@ -184,7 +193,10 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 					t.Fatalf("external sentinel missing after refused generations-symlink cleanup: %v", statErr)
 				}
 			case "unrelated":
-				if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.InactiveID); err != nil {
+				// Cleanup of an owned inactive file-backed generation
+				// removes its directory while unrelated files survive.
+				seedInactiveFileBackedGeneration(t, s, root, id, "gen_fs_cleanup_ok")
+				if err := s.CleanupInactiveGeneration(context.Background(), id, "gen_fs_cleanup_ok"); err != nil {
 					t.Fatalf("cleanup inactive: %v", err)
 				}
 				if _, statErr := os.Stat(unrelatedPath); statErr != nil {
@@ -283,7 +295,7 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 			case "mismatched-manifest":
 				// A decodable manifest that names another session or generation
 				// is not this owner's candidate and must be left in place.
-				foreign := stageForeignGeneration(t, s, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
+				foreign := stageForeignGeneration(t, s, root, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
 				mismatchedID := "gen_fs_mismatch"
 				candidateDir := filepath.Join(root, fixture.Session.ID, "generations", mismatchedID)
 				if err := os.MkdirAll(candidateDir, 0o700); err != nil {
@@ -313,7 +325,7 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 				// points at another session's generation. os.Root confinement
 				// allows that resolution, so ownership must be proven from the
 				// manifest identity before any recursive removal.
-				foreign := stageForeignGeneration(t, s, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
+				foreign := stageForeignGeneration(t, s, root, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
 				foreignSentinel := filepath.Join(root, fixture.ForeignSession.ID, "generations", fixture.Generation.ForeignID, fixture.Sentinel.CandidateFile)
 				if err := os.WriteFile(foreignSentinel, []byte("foreign generation must survive"), 0o600); err != nil {
 					t.Fatal(err)
@@ -364,7 +376,7 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 				if err := os.MkdirAll(foreignDir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				foreign := stageForeignGeneration(t, s, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
+				foreign := stageForeignGeneration(t, s, root, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
 				foreignManifest, err := jsonMarshalForTest(foreign)
 				if err != nil {
 					t.Fatal(err)
@@ -409,13 +421,10 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 				// validation detail must also be refused without echoing the
 				// path-bearing validator text.
 				candidateID := "gen_fs_private_content"
-				installed, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.CompleteID)
-				if err != nil {
-					t.Fatalf("read installed manifest: %v", err)
-				}
-				installed.ID = candidateID
-				installed.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(fixture.Sentinel.PrivateIdentity)}
-				manifest, err := jsonMarshalForTest(installed)
+				installed, installedBlobs := buildTestGeneration(t, id, candidateID, "installed text", "installed input", "installed output")
+				installed = filledCandidateForValidation(t, installed, installedBlobs)
+				installed.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(fixture.Sentinel.PrivateIdentity)}
+				manifest, err := jsonMarshalForTest(installed.Generation)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -483,28 +492,39 @@ func assertRefusalDiagnostic(t *testing.T, err error, sentinelPath, privateIdent
 	}
 }
 
-// stageForeignGeneration stages one generation owned by another session so an
-// ownership test can point a candidate at, or copy bytes from, a real
-// foreign-owned generation.
-func stageForeignGeneration(t *testing.T, s *Store, foreignSessionID, generationID string) indexformat.Generation {
+// stageForeignGeneration builds one generation owned by another session and
+// writes its manifest file directly, so an ownership test can point a
+// candidate at, or copy bytes from, a real foreign-owned generation. The
+// directories remain the file-backed read path; only the database writer
+// side is harmonized.
+func stageForeignGeneration(t *testing.T, s *Store, root, foreignSessionID, generationID string) indexformat.Generation {
 	t.Helper()
 	foreign, err := schema.NewSessionID(foreignSessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	v2, blobs := buildTestGeneration(t, foreign, generationID, "foreign text", "foreign input", "foreign output")
-	staged, err := s.generationArtifacts.Stage(context.Background(), v2.Generation, blobs)
+	filled := filledCandidateForValidation(t, v2, blobs)
+	manifest, err := jsonMarshalForTest(filled.Generation)
 	if err != nil {
-		t.Fatalf("stage foreign generation: %v", err)
+		t.Fatal(err)
 	}
-	return staged
+	candidateDir := filepath.Join(root, foreignSessionID, "generations", generationID)
+	if err := os.MkdirAll(candidateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(candidateDir, "manifest.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = s
+	return filled.Generation
 }
 
 func jsonMarshalForTest(g indexformat.Generation) ([]byte, error) {
 	return json.Marshal(g)
 }
 
-// TestGenerationDiagnosticsSanitized proves lock, stage, read, repair and
+// TestGenerationDiagnosticsSanitized proves lock, stage, read and
 // cleanup failures omit the private root path across failure seams.
 func TestGenerationDiagnosticsSanitized(t *testing.T) {
 	dir := t.TempDir()
@@ -540,7 +560,7 @@ func TestGenerationDiagnosticsSanitized(t *testing.T) {
 	sid, _ := schema.NewSessionID("99999999-9999-4999-8999-999999999999")
 	v2, blobs := buildTestGeneration(t, sid, "gen_ok", "text", "input", "output")
 	v2.Generation.ID = "."
-	if _, err := artifacts.Stage(context.Background(), v2.Generation, blobs); err == nil {
+	if _, err := s.StageGeneration(context.Background(), GenerationActivation{Generation: v2, Blobs: blobs}); err == nil {
 		t.Fatal("dot staging succeeded; it must be refused")
 	} else {
 		assertSentinelAbsent(t, err, sentinelSegment)
@@ -568,22 +588,6 @@ func TestGenerationDiagnosticsSanitized(t *testing.T) {
 		assertSentinelAbsent(t, err, sentinelSegment)
 		if !strings.Contains(err.Error(), "read staged manifest") || !strings.Contains(err.Error(), "cannot be recovered") {
 			t.Fatalf("read failure diagnostic is not actionable: %v", err)
-		}
-	}
-
-	// Real path-bearing OS repair failure: a directory where metadata.json is
-	// expected makes the atomic rename fail; the diagnostic must stay sanitized
-	// and name the caller effect and recovery.
-	metadataDir := filepath.Join(root, string(validSID), "metadata.json")
-	if err := os.MkdirAll(metadataDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := artifacts.RepairMetadata(context.Background(), validSID, []byte("{}")); err == nil {
-		t.Fatal("repairing metadata onto a directory succeeded; it must fail")
-	} else {
-		assertSentinelAbsent(t, err, sentinelSegment)
-		if !strings.Contains(err.Error(), "repair the exported metadata") || !strings.Contains(err.Error(), "retry") {
-			t.Fatalf("repair failure diagnostic is not actionable: %v", err)
 		}
 	}
 }

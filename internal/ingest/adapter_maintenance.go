@@ -306,8 +306,20 @@ func (p *Pipeline) pairSourceAvailable(session DiscoveredSession) bool {
 // damaged and whose native source could not be reached to repair it. The
 // stored copy keeps serving meanwhile; the repair runs automatically once the
 // source is available again.
-func (p *Pipeline) reportPairRepairUnavailable(sid SessionID, source string) {
-	p.reportDiagnostic(DiagnosticEntry{
+func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionID, source string, lane *storeWriteLane) {
+	if recorder, ok := p.metricsStore.(SourceAvailabilityStore); ok && !p.config.DryRun {
+		var changed bool
+		var err error
+		p.runStoreWrite(lane, func() {
+			changed, err = recorder.RecordSourceUnavailable(ctx, sid, SourceUnavailableNoSavedCopy)
+		})
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
+		} else if !changed {
+			return
+		}
+	}
+	p.reportSessionDiagnostic(sid, DiagnosticEntry{
 		ErrorType:   "pair_repair_unavailable",
 		Location:    fmt.Sprintf("session %s pair repair", sid),
 		Message:     missingPairText(sid, source),
@@ -426,6 +438,9 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	})
 	var repaired []SessionID
 	for i, outcome := range outcomes {
+		if outcome.unavailableSource != nil {
+			p.reportPairRepairUnavailable(ctx, ids[i], *outcome.unavailableSource, nil)
+		}
 		if outcome.damaged {
 			// The pair is not a readable index input. Record it so the index
 			// inventory does not re-read it and repeat the acquisition failure.
@@ -459,10 +474,11 @@ const (
 // pairRepairOutcome carries one candidate's decision from a parallel worker
 // back to the serial pass that applies it in candidate order.
 type pairRepairOutcome struct {
-	kind         pairRepairOutcomeKind
-	queuedIndex  int
-	metadataPath string
-	entry        DiffEntry
+	unavailableSource *string
+	kind              pairRepairOutcomeKind
+	queuedIndex       int
+	metadataPath      string
+	entry             DiffEntry
 	// damaged reports that the candidate's saved pair is missing or damaged,
 	// whether or not this pass found a native source to repair it from. The
 	// index inventory must not re-attempt such a candidate: its pair is not a
@@ -501,10 +517,14 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 	metadataPath, _ := p.storedMetadataPath(ctx, sid, snap)
 	session, found := native[sid]
 	if !found {
-		reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
-		if reconstructed == nil {
-			p.reportPairRepairUnavailable(sid, "")
+		reconstructed, startMs, _, err := p.reconstructFromSourceInfo(ctx, sid)
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
 			return pairRepairOutcome{damaged: true}
+		}
+		if reconstructed == nil {
+			source := ""
+			return pairRepairOutcome{damaged: true, unavailableSource: &source}
 		}
 		session = *reconstructed
 		if !p.pairRepairInScope(session, startMs) {
@@ -514,8 +534,8 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		return pairRepairOutcome{damaged: true}
 	}
 	if !p.pairSourceAvailable(session) {
-		p.reportPairRepairUnavailable(sid, session.SourcePath.String())
-		return pairRepairOutcome{damaged: true}
+		source := session.SourcePath.String()
+		return pairRepairOutcome{damaged: true, unavailableSource: &source}
 	}
 	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
 		Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
@@ -544,9 +564,13 @@ func (p *Pipeline) pairRepairTargets(ctx context.Context, scanned []reindexTarge
 		if seen[sid] || !p.pairNeedsRepair(ctx, sid) {
 			continue
 		}
-		session, startMs, transcriptPath := p.reconstructFromSourceInfo(ctx, sid)
+		session, startMs, transcriptPath, err := p.reconstructFromSourceInfo(ctx, sid)
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
+			continue
+		}
 		if session == nil {
-			p.reportPairRepairUnavailable(sid, "")
+			p.reportPairRepairUnavailable(ctx, sid, "", nil)
 			continue
 		}
 		if !p.pairRepairInScope(*session, startMs) {
@@ -617,7 +641,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		// A repair has no usable retained pair by definition: when the native
 		// source cannot be acquired, the failure is the outcome. Falling back
 		// would try to read the missing or damaged pair and hide the error.
-		p.reportPairRepairUnavailable(entry.Session.SessionID, string(entry.Session.SourcePath))
+		p.reportPairRepairUnavailable(ctx, entry.Session.SessionID, string(entry.Session.SourcePath), writeLane)
 		return result
 	}
 	// The manual index refresh (harvest index --force) names its own
@@ -627,7 +651,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	if p.config.Reindex && p.config.Force {
 		errorType, location = "native_refresh_unavailable", fmt.Sprintf("%s session %s forced refresh", entry.Session.Harness, entry.Session.SessionID)
 	}
-	p.reportDiagnostic(DiagnosticEntry{
+	p.reportSessionDiagnostic(entry.Session.SessionID, DiagnosticEntry{
 		ErrorType: errorType, Location: location,
 		Message:     acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported retained indexing may continue",
 		Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",
@@ -701,7 +725,11 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 		return false
 	}
 	for _, sid := range staleIDs {
-		session, _, transcriptPath := p.reconstructFromSourceInfo(ctx, sid)
+		session, _, transcriptPath, err := p.reconstructFromSourceInfo(ctx, sid)
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
+			continue
+		}
 		if session == nil {
 			continue
 		}

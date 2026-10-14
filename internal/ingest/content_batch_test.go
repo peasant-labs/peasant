@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 
 	"github.com/peasant-labs/schema"
@@ -276,8 +275,11 @@ func (s *budgetStore) IndexSessionEntryBatch(_ context.Context, writes []Session
 // cosmetic regression. It is asserted at the boundary that applies it: the batch
 // grouping that decides how many parsed sessions travel to one flush.
 //
-// Sizes are declared as a FRACTION of the shipped budget rather than in bytes, so
-// the corpus still describes the same situations if the budget ever moves.
+// Sizes are declared as a FRACTION of the configured budget rather than in bytes, so
+// the corpus still describes the same situations whatever the configured budget
+// is. Every case runs under each budget in budgetsUnderTest: the fractions
+// scale with the budget under test, so the grouping is identical and a case
+// that stopped tracking the knob fails under the custom budget.
 func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
 	t.Parallel()
 	var fixtures struct {
@@ -292,7 +294,7 @@ func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
 	if err := yaml.Unmarshal(contentBatchBudgetFixtureData, &fixtures); err != nil {
 		t.Fatal(err)
 	}
-	if fixtures.Budget != "defaults.FullContentWriteBatchBytes" {
+	if fixtures.Budget != "write.batchBytes" {
 		t.Fatalf("the corpus must name the budget under test, got %q", fixtures.Budget)
 	}
 	names := make(map[string]bool)
@@ -301,47 +303,14 @@ func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
 			t.Fatalf("duplicate fixture %s", fixture.Name)
 		}
 		names[fixture.Name] = true
-		t.Run(fixture.Name, func(t *testing.T) {
-			ctx := context.Background()
-			output := t.TempDir()
-			indexer := &budgetIndexer{bytes: make(map[SessionID]int)}
-			store := &budgetStore{states: make(map[SessionID]*SessionIndexState)}
-			// Built by literal to reach the unexported grouping. This path reads
-			// fs and config.OutputDir for the artifact publisher, metricsStore for
-			// both the index-state read and the atomic write, and indexers for the
-			// parse. store stays nil and metricsStore is not a SessionStore, so the
-			// metadata-compatibility check has no backing store and returns nil in
-			// file-only mode: nothing here is asked for a schema version. The
-			// harvester version map stays nil so the shipped registry applies, and
-			// the profiler stays nil and records nothing.
-			assertFileOnlyCompatibility(t, store)
-			pipeline := &Pipeline{
-				fs:           &OSFileSystem{},
-				metricsStore: store,
-				indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer},
-				// One parser worker keeps the waves and therefore the observed
-				// grouping deterministic; Force makes every session need work, so
-				// no case is skipped for being current.
-				config: PipelineConfig{OutputDir: ResolvedPath(output), Parallelism: 1, Force: true},
-			}
-			var metas []indexedMeta
-			for index, fraction := range fixture.Fractions {
-				written := int(float64(defaults.FullContentWriteBatchBytes) * fraction)
-				meta, artifactHash := publishSyntheticArtifact(t, output, index)
-				indexer.bytes[meta.session.SessionID] = written
-				store.states[meta.session.SessionID] = &SessionIndexState{
-					SessionID: meta.session.SessionID, Harness: HarnessClaudeCode, ArtifactHash: &artifactHash,
-				}
-				metas = append(metas, meta)
-			}
-			indexed, logs, _ := pipeline.indexBatch(ctx, metas, IndexOutcomeIndexed, "budget test")
-			if len(indexed) != len(metas) || len(logs) != len(metas) {
-				t.Fatalf("the grouping lost a session: indexed=%d logs=%d for %d sessions", len(indexed), len(logs), len(metas))
-			}
-			want := expectedCommitOrder(t, fixture.Groups, metas)
-			if !reflect.DeepEqual(store.committed, want) {
-				t.Fatalf("commit order %v does not match the flush groups %v (that grouping commits in order %v); the budget is %d bytes and this case wrote fractions %v",
-					store.committed, fixture.Groups, want, defaults.FullContentWriteBatchBytes, fixture.Fractions)
+	}
+	for _, budget := range budgetsUnderTest() {
+		t.Run(fmt.Sprintf("budget-%d", budget), func(t *testing.T) {
+			for _, fixture := range fixtures.Cases {
+				t.Run(fixture.Name, func(t *testing.T) {
+					t.Parallel()
+					runIndexBatchBudgetCase(t, budget, fixture.Fractions, fixture.Groups)
+				})
 			}
 		})
 	}
@@ -349,6 +318,54 @@ func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
 		if !names[name] {
 			t.Fatalf("missing required fixture %s", name)
 		}
+	}
+}
+
+// runIndexBatchBudgetCase drives one budget-corpus case through the
+// stale-session wave grouping with the batch byte cap set to budget.
+func runIndexBatchBudgetCase(t *testing.T, budget int64, fractions []float64, groups [][]int) {
+	t.Helper()
+	ctx := context.Background()
+	output := t.TempDir()
+	indexer := &budgetIndexer{bytes: make(map[SessionID]int)}
+	store := &budgetStore{states: make(map[SessionID]*SessionIndexState)}
+	// Built by literal to reach the unexported grouping. This path reads
+	// fs and config.OutputDir for the artifact publisher, metricsStore for
+	// both the index-state read and the atomic write, and indexers for the
+	// parse. store stays nil and metricsStore is not a SessionStore, so the
+	// metadata-compatibility check has no backing store and returns nil in
+	// file-only mode: nothing here is asked for a schema version. The
+	// harvester version map stays nil so the shipped registry applies, and
+	// the profiler stays nil and records nothing.
+	assertFileOnlyCompatibility(t, store)
+	pipeline := &Pipeline{
+		fs:           &OSFileSystem{},
+		metricsStore: store,
+		indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer},
+		// One parser worker keeps the waves and therefore the observed
+		// grouping deterministic; Force makes every session need work, so
+		// no case is skipped for being current. The byte cap is the budget
+		// under test; every other knob takes its default.
+		config: PipelineConfig{OutputDir: ResolvedPath(output), Parallelism: 1, Force: true, Write: WriteConfig{BatchBytes: budget}},
+	}
+	var metas []indexedMeta
+	for index, fraction := range fractions {
+		written := int(float64(budget) * fraction)
+		meta, artifactHash := publishSyntheticArtifact(t, output, index)
+		indexer.bytes[meta.session.SessionID] = written
+		store.states[meta.session.SessionID] = &SessionIndexState{
+			SessionID: meta.session.SessionID, Harness: HarnessClaudeCode, ArtifactHash: &artifactHash,
+		}
+		metas = append(metas, meta)
+	}
+	indexed, logs, _ := pipeline.indexBatch(ctx, metas, IndexOutcomeIndexed, "budget test")
+	if len(indexed) != len(metas) || len(logs) != len(metas) {
+		t.Fatalf("the grouping lost a session: indexed=%d logs=%d for %d sessions", len(indexed), len(logs), len(metas))
+	}
+	want := expectedCommitOrder(t, groups, metas)
+	if !reflect.DeepEqual(store.committed, want) {
+		t.Fatalf("commit order %v does not match the flush groups %v (that grouping commits in order %v); the budget is %d bytes and this case wrote fractions %v",
+			store.committed, groups, want, budget, fractions)
 	}
 }
 
@@ -456,7 +473,12 @@ type streamingBudgetFixtures struct {
 		PendingCount    int     `yaml:"pending_count"`
 		PendingFraction float64 `yaml:"pending_budget_fraction"`
 		NextFraction    float64 `yaml:"next_budget_fraction"`
-		WantFlush       bool    `yaml:"want_flush"`
+		// BatchSessions overrides the configured session cap for this case
+		// only; nil means the shipped default. ByteCapFraction scales the
+		// shipped byte budget into this case's cap; nil means unscaled.
+		BatchSessions   *int     `yaml:"batch_sessions"`
+		ByteCapFraction *float64 `yaml:"byte_cap_fraction"`
+		WantFlush       bool     `yaml:"want_flush"`
 	} `yaml:"predicate_cases"`
 	DrainRequired []string `yaml:"drain_required_names"`
 	DrainCases    []struct {
@@ -472,10 +494,18 @@ func loadStreamingBudgetFixtures(t *testing.T) streamingBudgetFixtures {
 	if err := yaml.Unmarshal(contentBatchBudgetFixtureData, &fixtures); err != nil {
 		t.Fatal(err)
 	}
-	if fixtures.Budget != "defaults.FullContentWriteBatchBytes" {
+	if fixtures.Budget != "write.batchBytes" {
 		t.Fatalf("the corpus must name the budget under test, got %q", fixtures.Budget)
 	}
 	return fixtures
+}
+
+// budgetsUnderTest runs the budget corpus against the shipped budget and a
+// smaller custom one. Fractions are relative to the budget under test, so the
+// corpus describes the same situations under both — and a boundary that
+// stopped tracking the configured knob fails under the custom budget.
+func budgetsUnderTest() []int64 {
+	return []int64{DefaultWriteConfig(8).BatchBytes, 8 << 20}
 }
 
 // requireFixtureNames refuses a corpus that lost a case. The manifest names the
@@ -496,10 +526,11 @@ func requireFixtureNames(t *testing.T, corpus string, required []string, present
 	}
 }
 
-// budgetFractionBytes turns a fraction of the shipped budget into bytes, so a
-// case keeps describing the same situation if the budget moves.
-func budgetFractionBytes(fraction float64) int64 {
-	return int64(float64(defaults.FullContentWriteBatchBytes) * fraction)
+// budgetFractionBytes turns a fraction of the budget under test into bytes,
+// so a case keeps describing the same situation whatever the configured
+// budget is.
+func budgetFractionBytes(budget int64, fraction float64) int64 {
+	return int64(float64(budget) * fraction)
 }
 
 // TestIndexWriteBudgetPredicate holds the rule both grouping sites apply,
@@ -520,17 +551,33 @@ func TestIndexWriteBudgetPredicate(t *testing.T) {
 		present[fixture.Name] = true
 	}
 	requireFixtureNames(t, "index write budget predicate", fixtures.PredicateRequired, present)
-	for _, fixture := range fixtures.PredicateCases {
-		t.Run(fixture.Name, func(t *testing.T) {
-			t.Parallel()
-			got := exceedsIndexWriteBudget(
-				fixture.PendingCount,
-				budgetFractionBytes(fixture.PendingFraction),
-				budgetFractionBytes(fixture.NextFraction),
-			)
-			if got != fixture.WantFlush {
-				t.Fatalf("a pending batch of %d sessions holding %.6f of the budget, offered %.6f more, flushes=%v want %v",
-					fixture.PendingCount, fixture.PendingFraction, fixture.NextFraction, got, fixture.WantFlush)
+	// The predicate answers from the caps under test: the count cap stays at
+	// its default while the byte cap runs the corpus under each budget, so a
+	// predicate that stopped reading the knob fails off-default.
+	for _, budget := range budgetsUnderTest() {
+		t.Run(fmt.Sprintf("budget-%d", budget), func(t *testing.T) {
+			for _, fixture := range fixtures.PredicateCases {
+				t.Run(fixture.Name, func(t *testing.T) {
+					t.Parallel()
+					cfg := DefaultWriteConfig(8)
+					cfg.BatchBytes = budget
+					if fixture.BatchSessions != nil {
+						cfg.BatchSessions = *fixture.BatchSessions
+					}
+					if fixture.ByteCapFraction != nil {
+						cfg.BatchBytes = int64(float64(cfg.BatchBytes) * *fixture.ByteCapFraction)
+					}
+					got := ExceedsWriteBudget(
+						cfg,
+						fixture.PendingCount,
+						budgetFractionBytes(budget, fixture.PendingFraction),
+						budgetFractionBytes(budget, fixture.NextFraction),
+					)
+					if got != fixture.WantFlush {
+						t.Fatalf("a pending batch of %d sessions holding %.6f of the budget, offered %.6f more, flushes=%v want %v",
+							fixture.PendingCount, fixture.PendingFraction, fixture.NextFraction, got, fixture.WantFlush)
+					}
+				})
 			}
 		})
 	}
@@ -556,35 +603,44 @@ func TestStreamingIndexDrainGroupsByBytes(t *testing.T) {
 		present[fixture.Name] = true
 	}
 	requireFixtureNames(t, "streaming index drain", fixtures.DrainRequired, present)
-	for _, fixture := range fixtures.DrainCases {
-		t.Run(fixture.Name, func(t *testing.T) {
-			t.Parallel()
-			parsedCh := make(chan indexParseResult, len(fixture.Fractions))
-			for index, fraction := range fixture.Fractions {
-				content := strings.Repeat("a", int(budgetFractionBytes(fraction)))
-				id := SessionID(fmt.Sprintf("session-%02d", index))
-				parsedCh <- indexParseResult{output: indexformat.V1{Entries: []schema.SessionEntry{{
-					SessionID: schema.SessionID(id), EntryIndex: 0, Harness: HarnessClaudeCode,
-					Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &content,
-				}}}}
-			}
-			close(parsedCh)
-			var groups [][]int
-			drainIndexParseResults(parsedCh, make([]indexParseResult, 0, indexWriteBatchLimit), func(results []indexParseResult) {
-				group := make([]int, 0, len(results))
-				for _, result := range results {
-					entries := result.output.(indexformat.V1).Entries
-					var index int
-					if _, err := fmt.Sscanf(string(entries[0].SessionID), "session-%d", &index); err != nil {
-						t.Errorf("a flushed result lost its identity: %v", err)
-						return
+	// The drain groups by the same configured caps the predicate answers
+	// from, under each budget in turn, so a call site that stopped asking is
+	// visible as well as a predicate that stopped answering.
+	for _, budget := range budgetsUnderTest() {
+		t.Run(fmt.Sprintf("budget-%d", budget), func(t *testing.T) {
+			drainCfg := DefaultWriteConfig(8)
+			drainCfg.BatchBytes = budget
+			for _, fixture := range fixtures.DrainCases {
+				t.Run(fixture.Name, func(t *testing.T) {
+					t.Parallel()
+					parsedCh := make(chan indexParseResult, len(fixture.Fractions))
+					for index, fraction := range fixture.Fractions {
+						content := strings.Repeat("a", int(budgetFractionBytes(budget, fraction)))
+						id := SessionID(fmt.Sprintf("session-%02d", index))
+						parsedCh <- indexParseResult{output: indexformat.V1{Entries: []schema.SessionEntry{{
+							SessionID: schema.SessionID(id), EntryIndex: 0, Harness: HarnessClaudeCode,
+							Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &content,
+						}}}}
 					}
-					group = append(group, index)
-				}
-				groups = append(groups, group)
-			})
-			if !reflect.DeepEqual(groups, fixture.Groups) {
-				t.Fatalf("the drain flushed %v, want %v: the budget decides where a wave is split", groups, fixture.Groups)
+					close(parsedCh)
+					var groups [][]int
+					drainIndexParseResults(parsedCh, make([]indexParseResult, 0, drainCfg.BatchSessions), drainCfg, func(results []indexParseResult) {
+						group := make([]int, 0, len(results))
+						for _, result := range results {
+							entries := result.output.(indexformat.V1).Entries
+							var index int
+							if _, err := fmt.Sscanf(string(entries[0].SessionID), "session-%d", &index); err != nil {
+								t.Errorf("a flushed result lost its identity: %v", err)
+								return
+							}
+							group = append(group, index)
+						}
+						groups = append(groups, group)
+					})
+					if !reflect.DeepEqual(groups, fixture.Groups) {
+						t.Fatalf("the drain flushed %v, want %v: the budget decides where a wave is split", groups, fixture.Groups)
+					}
+				})
 			}
 		})
 	}

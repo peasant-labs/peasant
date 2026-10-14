@@ -7,6 +7,41 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-07
+
+### Added
+- Native **Windows amd64** support: Peasant builds, passes CI, discovers and ingests
+  Claude Code desktop sessions, serves the dashboard, and self-upgrades on Windows.
+  Each release publishes a `peasant_<version>_windows_amd64.zip` (carrying
+  `peasant.exe`, `LICENSE`, `README.md`, and `THIRD_PARTY_NOTICES`) and the bare
+  `peasant_<version>_windows_amd64.exe` that `peasant upgrade` replaces in place;
+  Windows arm64 is not published. Linux and macOS behavior is unchanged. The install
+  guide is `docs/install/windows.md`; the maintainer guide is `docs/cross-platform.md`
+  (#480, #563).
+- `peasant reclaim`: a maintenance command that deletes superseded managed
+  generations. It offers a dry-run that lists the sessions, generations, rows, and
+  bytes it would reclaim and a resumable `--limit` batch mode; the destructive path
+  requires consent or `--confirm` and prints the offline `VACUUM` step (#559).
+
+### Performance
+- The durable full-content writer prepares its manifest and chunk inserts once per
+  transaction and re-binds them per row instead of preparing a statement for every
+  row. A large full-content write dropped 24–28% in time and about half its
+  allocations (#556).
+- The managed-generation install prepares its per-row inserts once per install and
+  re-binds them per row. A fresh-session install dropped 12–14% in time and about 38%
+  of its allocations (#558).
+
+### Fixed
+- Publication repair selects only recoverable captures, and the pair-repair pass now
+  owns pair-damaged maintenance candidates, settling missing-pair churn (#557).
+- The IPv6-loopback refusal test verifies its bind-exclusivity premise and retries the
+  rebind, so a parallel test that grabs the same port number no longer fails it
+  spuriously while a genuinely leaked listener still does (#561).
+
+### CI
+- The local↔CI podman parity floor moved to 5.8.x, tracking the runner image.
+
 ## [0.8.2] - 2026-10-04
 
 ### Changed
@@ -628,6 +663,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.9.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.9.0
 [0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
 [0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1
 [0.8.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.0

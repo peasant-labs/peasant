@@ -1,0 +1,64 @@
+{
+  "detail": {
+    "error": {
+      "identity": "error",
+      "message": "transcript.SnapshotToDetailValidated: hydrate captured generation \"g_opencode_tools\" for session \"ses_3cd91f52effeXd3QAJ54jFmt01\" before detail/export/publication: session detail validation failed at schema.ValidateSessionDetailPayload: duplicate block reference \"e_call\" at turns[1].callEntryRef crosses a main, earlier, turn, call, or result owner; content identity is ambiguous; emit one unique source reference per block; no transcript was emitted; run managed recovery to repair the generation, then retry"
+    }
+  },
+  "export": {
+    "error": {
+      "identity": "error",
+      "message": "export session ses_3cd91f52effeXd3QAJ54jFmt01: transcript.SnapshotToDetailValidated: hydrate captured generation \"g_opencode_tools\" for session \"ses_3cd91f52effeXd3QAJ54jFmt01\" before detail/export/publication: session detail validation failed at schema.ValidateSessionDetailPayload: duplicate block reference \"e_call\" at turns[1].callEntryRef crosses a main, earlier, turn, call, or result owner; content identity is ambiguous; emit one unique source reference per block; no transcript was emitted; run managed recovery to repair the generation, then retry"
+    }
+  },
+  "publish": {
+    "error": {
+      "identity": "error",
+      "message": "load publication input from peasant.db before publication: transcript.SnapshotToDetailValidated: hydrate captured generation \"g_opencode_tools\" for session \"ses_3cd91f52effeXd3QAJ54jFmt01\" before detail/export/publication: session detail validation failed at schema.ValidateSessionDetailPayload: duplicate block reference \"e_call\" at turns[1].callEntryRef crosses a main, earlier, turn, call, or result owner; content identity is ambiguous; emit one unique source reference per block; no transcript was emitted; run managed recovery to repair the generation, then retry; nothing uploaded; run peasant ingest and retry"
+    }
+  },
+  "publishEntries": {
+    "error": {
+      "identity": "error",
+      "message": "load publication input from peasant.db before publication: transcript.SnapshotToDetailValidated: hydrate captured generation \"g_opencode_tools\" for session \"ses_3cd91f52effeXd3QAJ54jFmt01\" before detail/export/publication: session detail validation failed at schema.ValidateSessionDetailPayload: duplicate block reference \"e_call\" at turns[1].callEntryRef crosses a main, earlier, turn, call, or result owner; content identity is ambiguous; emit one unique source reference per block; no transcript was emitted; run managed recovery to repair the generation, then retry; nothing uploaded; run peasant ingest and retry"
+    }
+  },
+  "preview": {
+    "error": {
+      "identity": "error",
+      "message": "transcript.SnapshotToPreviewValidated: bounded preview for generation \"g_opencode_tools\" of session \"ses_3cd91f52effeXd3QAJ54jFmt01\": session detail validation failed at schema.ValidateSessionDetailPayload: duplicate block reference \"e_call\" at turns[1].callEntryRef crosses a main, earlier, turn, call, or result owner; content identity is ambiguous; emit one unique source reference per block; no preview was emitted"
+    }
+  },
+  "listEntries": {
+    "bytes": "W3sic2Vzc2lvbklkIjoic2VzXzNjZDkxZjUyZWZmZVhkM1FBSjU0akZtdDAxIiwiZW50cnlJbmRleCI6MCwiaGFybmVzcyI6Im9wZW5jb2RlIiwiZW50cnlUeXBlIjoidGV4dCIsInJvbGUiOiJ1c2VyIiwiY29udGVudFByZXZpZXciOiJzeW50aGV0aWMgcmVxdWVzdCIsImhhc1Rvb2xVc2UiOmZhbHNlLCJoYXNUaGlua2luZyI6ZmFsc2UsImlzRXJyb3IiOmZhbHNlLCJkZXB0aCI6MH0seyJzZXNzaW9uSWQiOiJzZXNfM2NkOTFmNTJlZmZlWGQzUUFKNTRqRm10MDEiLCJlbnRyeUluZGV4IjoxLCJoYXJuZXNzIjoib3BlbmNvZGUiLCJlbnRyeVR5cGUiOiJ0b29sX3VzZSIsInJvbGUiOiJhc3Npc3RhbnQiLCJoYXNUb29sVXNlIjp0cnVlLCJoYXNUaGlua2luZyI6ZmFsc2UsImlzRXJyb3IiOmZhbHNlLCJ0b29sQ2FsbElkIjoiY2FsbF9zZW1hbnRpYyIsImRlcHRoIjowLCJ0b29sSW5wdXQiOiJ7XCJwYXRoXCI6XCIvc3ludGhldGljL2ZpbGVcIn0ifSx7InNlc3Npb25JZCI6InNlc18zY2Q5MWY1MmVmZmVYZDNRQUo1NGpGbXQwMSIsImVudHJ5SW5kZXgiOjIsImhhcm5lc3MiOiJvcGVuY29kZSIsImVudHJ5VHlwZSI6InRvb2xfcmVzdWx0Iiwicm9sZSI6InRvb2wiLCJoYXNUb29sVXNlIjpmYWxzZSwiaGFzVGhpbmtpbmciOmZhbHNlLCJpc0Vycm9yIjpmYWxzZSwidG9vbENhbGxJZCI6ImNhbGxfc2VtYW50aWMiLCJkZXB0aCI6MCwidG9vbE91dHB1dCI6InN5bnRoZXRpYyBvdXRwdXQifV0="
+  },
+  "listEntriesRange": {
+    "bytes": "W3sic2Vzc2lvbklkIjoic2VzXzNjZDkxZjUyZWZmZVhkM1FBSjU0akZtdDAxIiwiZW50cnlJbmRleCI6MCwiaGFybmVzcyI6Im9wZW5jb2RlIiwiZW50cnlUeXBlIjoidGV4dCIsInJvbGUiOiJ1c2VyIiwiY29udGVudFByZXZpZXciOiJzeW50aGV0aWMgcmVxdWVzdCIsImhhc1Rvb2xVc2UiOmZhbHNlLCJoYXNUaGlua2luZyI6ZmFsc2UsImlzRXJyb3IiOmZhbHNlLCJkZXB0aCI6MH0seyJzZXNzaW9uSWQiOiJzZXNfM2NkOTFmNTJlZmZlWGQzUUFKNTRqRm10MDEiLCJlbnRyeUluZGV4IjoxLCJoYXJuZXNzIjoib3BlbmNvZGUiLCJlbnRyeVR5cGUiOiJ0b29sX3VzZSIsInJvbGUiOiJhc3Npc3RhbnQiLCJoYXNUb29sVXNlIjp0cnVlLCJoYXNUaGlua2luZyI6ZmFsc2UsImlzRXJyb3IiOmZhbHNlLCJ0b29sQ2FsbElkIjoiY2FsbF9zZW1hbnRpYyIsImRlcHRoIjowLCJ0b29sSW5wdXQiOiJ7XCJwYXRoXCI6XCIvc3ludGhldGljL2ZpbGVcIn0ifSx7InNlc3Npb25JZCI6InNlc18zY2Q5MWY1MmVmZmVYZDNRQUo1NGpGbXQwMSIsImVudHJ5SW5kZXgiOjIsImhhcm5lc3MiOiJvcGVuY29kZSIsImVudHJ5VHlwZSI6InRvb2xfcmVzdWx0Iiwicm9sZSI6InRvb2wiLCJoYXNUb29sVXNlIjpmYWxzZSwiaGFzVGhpbmtpbmciOmZhbHNlLCJpc0Vycm9yIjpmYWxzZSwidG9vbENhbGxJZCI6ImNhbGxfc2VtYW50aWMiLCJkZXB0aCI6MCwidG9vbE91dHB1dCI6InN5bnRoZXRpYyBvdXRwdXQifV0="
+  },
+  "maxEntryIndex": {
+    "bytes": "Mg=="
+  },
+  "firstEntry": {
+    "bytes": "eyJFbnRyeUluZGV4IjowLCJSb2xlIjoidXNlciJ9"
+  },
+  "firstUserMessage": {
+    "bytes": "InN5bnRoZXRpYyByZXF1ZXN0Ig=="
+  },
+  "firstUserMessageBulk": {
+    "bytes": "eyJzZXNfM2NkOTFmNTJlZmZlWGQzUUFKNTRqRm10MDEiOiJzeW50aGV0aWMgcmVxdWVzdCJ9"
+  },
+  "leadingUserMessagesBulk": {
+    "bytes": "eyJzZXNfM2NkOTFmNTJlZmZlWGQzUUFKNTRqRm10MDEiOlsic3ludGhldGljIHJlcXVlc3QiXX0="
+  },
+  "metricInputHash": {
+    "bytes": "ImZhMDk0N2IxZDJmYTgxN2I3ODJjMjgyZDYwZmQ2MzE0NGViNWE3NzhlNmM1NTY4YTg3ZjhiMmViZTA5Yjc0MDIi"
+  },
+  "metricInput": {
+    "bytes": "eyJTZXNzaW9uSUQiOiJzZXNfM2NkOTFmNTJlZmZlWGQzUUFKNTRqRm10MDEiLCJFbnRyaWVzIjpbeyJzZXNzaW9uSWQiOiJzZXNfM2NkOTFmNTJlZmZlWGQzUUFKNTRqRm10MDEiLCJlbnRyeUluZGV4IjowLCJoYXJuZXNzIjoib3BlbmNvZGUiLCJlbnRyeVR5cGUiOiJ0ZXh0Iiwicm9sZSI6InVzZXIiLCJjb250ZW50UHJldmlldyI6InN5bnRoZXRpYyByZXF1ZXN0IiwiaGFzVG9vbFVzZSI6ZmFsc2UsImhhc1RoaW5raW5nIjpmYWxzZSwiaXNFcnJvciI6ZmFsc2UsImRlcHRoIjowfSx7InNlc3Npb25JZCI6InNlc18zY2Q5MWY1MmVmZmVYZDNRQUo1NGpGbXQwMSIsImVudHJ5SW5kZXgiOjEsImhhcm5lc3MiOiJvcGVuY29kZSIsImVudHJ5VHlwZSI6InRvb2xfdXNlIiwicm9sZSI6ImFzc2lzdGFudCIsImhhc1Rvb2xVc2UiOnRydWUsImhhc1RoaW5raW5nIjpmYWxzZSwiaXNFcnJvciI6ZmFsc2UsInRvb2xDYWxsSWQiOiJjYWxsX3NlbWFudGljIiwiZGVwdGgiOjAsInRvb2xJbnB1dCI6IntcInBhdGhcIjpcIi9zeW50aGV0aWMvZmlsZVwifSJ9LHsic2Vzc2lvbklkIjoic2VzXzNjZDkxZjUyZWZmZVhkM1FBSjU0akZtdDAxIiwiZW50cnlJbmRleCI6MiwiaGFybmVzcyI6Im9wZW5jb2RlIiwiZW50cnlUeXBlIjoidG9vbF9yZXN1bHQiLCJyb2xlIjoidG9vbCIsImhhc1Rvb2xVc2UiOmZhbHNlLCJoYXNUaGlua2luZyI6ZmFsc2UsImlzRXJyb3IiOmZhbHNlLCJ0b29sQ2FsbElkIjoiY2FsbF9zZW1hbnRpYyIsImRlcHRoIjowLCJ0b29sT3V0cHV0Ijoic3ludGhldGljIG91dHB1dCJ9XSwiU2VlZCI6eyJ0dXJuQ291bnQiOjMsImlucHV0U3VibWlzc2lvbkNvdW50IjoxLCJ0b29sQ2FsbENvdW50IjowLCJzdWJhZ2VudENvdW50IjowLCJkdXJhdGlvbk1zIjowLCJ0b2tlbnNJbiI6MCwidG9rZW5zT3V0IjowfSwiSGFybmVzcyI6Im9wZW5jb2RlIiwiUHJvamVjdFBhdGgiOiIvc3ludGhldGljL3Bhcml0eSIsIlN0YXJ0TVMiOjE3MDAwMDAwMDAwMDAsIkVuZE1TIjoxNzAwMDAwMDA1MDAwLCJTdG9yZWRNb2RlbHMiOmZhbHNlLCJNb2RlbCI6bnVsbCwiZ2VuZXJhdGlvbklEIjoiZ19vcGVuY29kZV90b29scyJ9"
+  },
+  "generationEntries": {
+    "bytes": "W3siRW50cmllcyI6W3sic2Vzc2lvbklkIjoic2VzXzNjZDkxZjUyZWZmZVhkM1FBSjU0akZtdDAxIiwiZW50cnlJbmRleCI6MCwiaGFybmVzcyI6Im9wZW5jb2RlIiwiZW50cnlUeXBlIjoidGV4dCIsInJvbGUiOiJ1c2VyIiwiY29udGVudFByZXZpZXciOiJzeW50aGV0aWMgcmVxdWVzdCIsImhhc1Rvb2xVc2UiOmZhbHNlLCJoYXNUaGlua2luZyI6ZmFsc2UsImlzRXJyb3IiOmZhbHNlLCJkZXB0aCI6MCwic291cmNlRW50cnlSZWYiOiJlX3VzZXIifSx7InNlc3Npb25JZCI6InNlc18zY2Q5MWY1MmVmZmVYZDNRQUo1NGpGbXQwMSIsImVudHJ5SW5kZXgiOjEsImhhcm5lc3MiOiJvcGVuY29kZSIsImVudHJ5VHlwZSI6InRvb2xfdXNlIiwicm9sZSI6ImFzc2lzdGFudCIsImhhc1Rvb2xVc2UiOnRydWUsImhhc1RoaW5raW5nIjpmYWxzZSwiaXNFcnJvciI6ZmFsc2UsInRvb2xDYWxsSWQiOiJjYWxsX3NlbWFudGljIiwiZGVwdGgiOjAsInRvb2xJbnB1dCI6IntcInBhdGhcIjpcIi9zeW50aGV0aWMvZmlsZVwifSIsInNvdXJjZUVudHJ5UmVmIjoiZV9jYWxsIn0seyJzZXNzaW9uSWQiOiJzZXNfM2NkOTFmNTJlZmZlWGQzUUFKNTRqRm10MDEiLCJlbnRyeUluZGV4IjoyLCJoYXJuZXNzIjoib3BlbmNvZGUiLCJlbnRyeVR5cGUiOiJ0b29sX3Jlc3VsdCIsInJvbGUiOiJ0b29sIiwiaGFzVG9vbFVzZSI6ZmFsc2UsImhhc1RoaW5raW5nIjpmYWxzZSwiaXNFcnJvciI6ZmFsc2UsInRvb2xDYWxsSWQiOiJjYWxsX3NlbWFudGljIiwiZGVwdGgiOjAsInRvb2xPdXRwdXQiOiJzeW50aGV0aWMgb3V0cHV0Iiwic291cmNlRW50cnlSZWYiOiJlX3Jlc3VsdCJ9XSwiTmF0aXZlTWV0YWRhdGEiOm51bGx9XQ=="
+  },
+  "sessionEntriesHash": "62eb1574781180ca509cea3920d3d62b0a04e7dcb8a0ef8e9f592bca527b52a0",
+  "fullCaptureHash": "55ea40f2465d5790b00239dbea2eb14f5e82bc38d62e5e15a1a5685390636d83"
+}

@@ -60,7 +60,11 @@ requiredNames:
   - v59-content-captures-rebuild
   - v60-active-generation
   - v61-publication-parent-index
-  - v62-session-thinking-level
+  - v62-harmonized-content
+  - v63-source-unavailability
+  - v64-ingest-run-outcomes
+  - v65-claude-identity-proof
+  - v66-session-thinking-level
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

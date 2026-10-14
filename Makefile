@@ -10,7 +10,7 @@ set -e; \
 	if [ -z "$$version" ]; then \
 		version="$$(sh ./scripts/dev-version.sh)"; \
 	fi; \
-	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
+	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o peasant ./cmd/peasant
 endef
 
 # The race detector for `make check`. Off by default, everywhere (CI and
@@ -58,7 +58,7 @@ web:
 	@# surface. A stale/stub export (failed web build or placeholder out/) would otherwise silently ship a binary
 	@# WITHOUT the surface — the user's "changes/change-detail unavailable" failure. Fail loud.
 	@if ! grep -rqE 'gmp-changes-root' web/out 2>/dev/null; then \
-		echo 'ERROR [make web] web/out does NOT contain the lifted /review Changes surface (marker "gmp-changes-root" absent) — refusing to embed a stale/stub export into bin/peasant.'; \
+		echo 'ERROR [make web] web/out does NOT contain the lifted /review Changes surface (marker "gmp-changes-root" absent) — refusing to embed a stale/stub export into peasant.'; \
 		echo '  Cause: a failed pnpm build, an unavailable published package, or a stale/stub web/out.'; \
 		echo '  Fix: ensure pnpm can install the locked dependency graph, then rebuild.'; \
 		exit 1; \
@@ -256,18 +256,18 @@ dev:
 		wait
 
 restart: build
-	-./bin/peasant web stop
-	./bin/peasant web start
+	-./peasant web stop
+	./peasant web start
 
 docs: docs-cli
 	@echo "Docs generated (CLI reference; API specs now live in the schema module)"
 
 docs-cli: go
-	./bin/peasant docgen docs/cli
+	./peasant docgen docs/cli
 	@echo "CLI docs generated in docs/cli/"
 
 docs-open: docs
 	xdg-open docs/api/index.html
 
 clean:
-	rm -rf bin/ web/out/ web/.next/
+	rm -rf bin/ peasant peasant.exe web/out/* web/.next/

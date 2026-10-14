@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/schema"
 )
 
 // TranscriptMetadataExtractor extracts the adapter-owned fields represented in
 // transcript bytes, preserving the original metadata's native-only context.
-// Implementations refuse input that cannot support their current behavior.
+// Implementations refuse input that cannot support their current behavior and
+// record the supplied bytes' ContentHash for identity checks and publication.
 type TranscriptMetadataExtractor interface {
 	ExtractMetadataFromTranscript(context.Context, []byte, *UnifiedMetadata) (*UnifiedMetadata, error)
 }
@@ -90,6 +92,9 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 	if err := json.Unmarshal(encoded, &metadata); err != nil {
 		return nil, insufficient("original metadata could not be decoded: " + err.Error())
 	}
+	// Hash once at the retained extraction boundary. Identity verification and
+	// the publisher reuse this digest of the supplied bytes, not the prior claim.
+	metadata.ContentHash = schema.ComputeTranscriptHash(data)
 	return &metadata, nil
 }
 
@@ -120,7 +125,11 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
 	parsed.ParentUUID = original.ParentUUID
-	first, parseErr := parseClaudeTranscriptMetadata(data, &parsed)
+	allowed, relationships, identityErr := a.verifyRetainedClaudeIdentity(data, original, metadata.ContentHash)
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	first, parseErr := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed)
 	if parseErr != nil {
 		return nil, parseErr
 	}
@@ -131,6 +140,7 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.Relationships = relationships
 	metadata.ThinkingLevel, metadata.ThinkingLevelRaw = parsed.ThinkingLevel, parsed.ThinkingLevelRaw
 	metadata.ThinkingLevelHistory = parsed.ThinkingLevelHistory
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End

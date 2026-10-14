@@ -1,0 +1,12 @@
+# Required-name manifest for content_cli_surface: deletion protection by NAME, never by count.
+requiredNames:
+  - migrate
+  - migrate-dry-run
+  - migrate-limit
+  - migrate-confirm
+  - migrate-json
+  - harvest-verify-content
+  - harvest-verify-content-repair
+  - fts-size-ratio-reported
+  - reclaim-sweeps-orphans
+  - reclaim-selects-by-flag

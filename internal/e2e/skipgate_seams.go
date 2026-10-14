@@ -107,6 +107,7 @@ func buildPeasant(t *testing.T) string {
 			buildPeasantErr = fmt.Errorf("e2e: build peasant: %v\n%s", err, output)
 			return
 		}
+		buildPeasantDir = dir
 		buildPeasantPath = out
 	})
 	if buildPeasantErr != nil {
@@ -115,14 +116,25 @@ func buildPeasant(t *testing.T) string {
 	return buildPeasantPath
 }
 
+// removePeasantBuildDir deletes the memoized CLI build dir the Once created,
+// if any. TestMain calls it after the run: without this the peasant-e2e-bin-*
+// directory leaks into /tmp on every e2e run.
+func removePeasantBuildDir() {
+	if buildPeasantDir != "" {
+		_ = os.RemoveAll(buildPeasantDir)
+		buildPeasantDir = ""
+	}
+}
+
 // buildPeasantOnce memoizes the default (PEASANT_BIN-unset) build so one test
 // binary performs exactly one `go build` even when several e2e tests ask for
-// the CLI. The output lives for the process; the OS temp reaper removes it after
-// exit. An injected PEASANT_BIN is resolved per call and never memoized, so the
-// seam tests keep observing their own command.
+// the CLI. The dir lives until TestMain removes it after the run; the OS temp
+// reaper covers a killed run. An injected PEASANT_BIN is resolved per call and
+// never memoized, so the seam tests keep observing their own command.
 var (
 	buildPeasantOnce sync.Once
 	buildPeasantPath string
+	buildPeasantDir  string
 	buildPeasantErr  error
 )
 

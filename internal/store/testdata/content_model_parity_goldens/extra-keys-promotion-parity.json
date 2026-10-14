@@ -1,0 +1,64 @@
+{
+  "detail": {
+    "error": {
+      "identity": "error",
+      "message": "transcript.SnapshotToDetailValidated: hydrate captured generation \"g_extra_keys_promotion_parity\" for session \"11111111-1111-4111-8111-111111111111\" before detail/export/publication: observed-model entry validation failed\n  what: indexed entry 0 carries invalid model_id evidence \"m\"\n  why: the identifier does not satisfy the released observedModel contract: observed-model evidence validation failed at schema.ValidateObservedModelEvidence during enriched publish: role \"user\" is not assistant, so observedModel cannot describe assistant or subagent output and the server must reject the publish; omit observedModel from user, system, and tool turns\n  where: transcript.ValidateObservedModelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently normalizing or dropping evidence\n  fix: repair or re-index the source entry with exact valid model evidence, then retry; no transcript was emitted; run managed recovery to repair the generation, then retry"
+    }
+  },
+  "export": {
+    "error": {
+      "identity": "error",
+      "message": "export session 11111111-1111-4111-8111-111111111111: transcript.SnapshotToDetailValidated: hydrate captured generation \"g_extra_keys_promotion_parity\" for session \"11111111-1111-4111-8111-111111111111\" before detail/export/publication: observed-model entry validation failed\n  what: indexed entry 0 carries invalid model_id evidence \"m\"\n  why: the identifier does not satisfy the released observedModel contract: observed-model evidence validation failed at schema.ValidateObservedModelEvidence during enriched publish: role \"user\" is not assistant, so observedModel cannot describe assistant or subagent output and the server must reject the publish; omit observedModel from user, system, and tool turns\n  where: transcript.ValidateObservedModelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently normalizing or dropping evidence\n  fix: repair or re-index the source entry with exact valid model evidence, then retry; no transcript was emitted; run managed recovery to repair the generation, then retry"
+    }
+  },
+  "publish": {
+    "error": {
+      "identity": "error",
+      "message": "load publication input from peasant.db before publication: transcript.SnapshotToDetailValidated: hydrate captured generation \"g_extra_keys_promotion_parity\" for session \"11111111-1111-4111-8111-111111111111\" before detail/export/publication: observed-model entry validation failed\n  what: indexed entry 0 carries invalid model_id evidence \"m\"\n  why: the identifier does not satisfy the released observedModel contract: observed-model evidence validation failed at schema.ValidateObservedModelEvidence during enriched publish: role \"user\" is not assistant, so observedModel cannot describe assistant or subagent output and the server must reject the publish; omit observedModel from user, system, and tool turns\n  where: transcript.ValidateObservedModelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently normalizing or dropping evidence\n  fix: repair or re-index the source entry with exact valid model evidence, then retry; no transcript was emitted; run managed recovery to repair the generation, then retry; nothing uploaded; run peasant ingest and retry"
+    }
+  },
+  "publishEntries": {
+    "error": {
+      "identity": "error",
+      "message": "load publication input from peasant.db before publication: transcript.SnapshotToDetailValidated: hydrate captured generation \"g_extra_keys_promotion_parity\" for session \"11111111-1111-4111-8111-111111111111\" before detail/export/publication: observed-model entry validation failed\n  what: indexed entry 0 carries invalid model_id evidence \"m\"\n  why: the identifier does not satisfy the released observedModel contract: observed-model evidence validation failed at schema.ValidateObservedModelEvidence during enriched publish: role \"user\" is not assistant, so observedModel cannot describe assistant or subagent output and the server must reject the publish; omit observedModel from user, system, and tool turns\n  where: transcript.ValidateObservedModelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently normalizing or dropping evidence\n  fix: repair or re-index the source entry with exact valid model evidence, then retry; no transcript was emitted; run managed recovery to repair the generation, then retry; nothing uploaded; run peasant ingest and retry"
+    }
+  },
+  "preview": {
+    "error": {
+      "identity": "error",
+      "message": "transcript.SnapshotToPreviewValidated: bounded preview for generation \"g_extra_keys_promotion_parity\" of session \"11111111-1111-4111-8111-111111111111\": observed-model entry validation failed\n  what: indexed entry 0 carries invalid model_id evidence \"m\"\n  why: the identifier does not satisfy the released observedModel contract: observed-model evidence validation failed at schema.ValidateObservedModelEvidence during enriched publish: role \"user\" is not assistant, so observedModel cannot describe assistant or subagent output and the server must reject the publish; omit observedModel from user, system, and tool turns\n  where: transcript.ValidateObservedModelEntries\n  when: after storage read and before entry folding or payload emission\n  meaning: no local, exported, or remote payload can be emitted without silently normalizing or dropping evidence\n  fix: repair or re-index the source entry with exact valid model evidence, then retry; no preview was emitted"
+    }
+  },
+  "listEntries": {
+    "bytes": "W3sic2Vzc2lvbklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwiZW50cnlJbmRleCI6MCwiaGFybmVzcyI6Im9wZW5jb2RlIiwiZW50cnlUeXBlIjoidGV4dCIsInJvbGUiOiJ1c2VyIiwiY29udGVudFByZXZpZXciOiJ2aXNpYmxlIiwiaGFzVG9vbFVzZSI6ZmFsc2UsImhhc1RoaW5raW5nIjpmYWxzZSwiaXNFcnJvciI6ZmFsc2UsImRlcHRoIjowLCJleHRyYSI6IntcImNhY2hlX3JlYWRcIjo3LFwiY2FjaGVfd3JpdGVcIjo4LFwibW9kZWxfaWRcIjpcIm1cIixcInRva2Vuc19yZWFzb25pbmdcIjo5LFwidW5rbm93blwiOlwia2VwdFwifSJ9XQ=="
+  },
+  "listEntriesRange": {
+    "bytes": "W3sic2Vzc2lvbklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwiZW50cnlJbmRleCI6MCwiaGFybmVzcyI6Im9wZW5jb2RlIiwiZW50cnlUeXBlIjoidGV4dCIsInJvbGUiOiJ1c2VyIiwiY29udGVudFByZXZpZXciOiJ2aXNpYmxlIiwiaGFzVG9vbFVzZSI6ZmFsc2UsImhhc1RoaW5raW5nIjpmYWxzZSwiaXNFcnJvciI6ZmFsc2UsImRlcHRoIjowLCJleHRyYSI6IntcImNhY2hlX3JlYWRcIjo3LFwiY2FjaGVfd3JpdGVcIjo4LFwibW9kZWxfaWRcIjpcIm1cIixcInRva2Vuc19yZWFzb25pbmdcIjo5LFwidW5rbm93blwiOlwia2VwdFwifSJ9XQ=="
+  },
+  "maxEntryIndex": {
+    "bytes": "MA=="
+  },
+  "firstEntry": {
+    "bytes": "eyJFbnRyeUluZGV4IjowLCJSb2xlIjoidXNlciJ9"
+  },
+  "firstUserMessage": {
+    "bytes": "InZpc2libGUi"
+  },
+  "firstUserMessageBulk": {
+    "bytes": "eyIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiOiJ2aXNpYmxlIn0="
+  },
+  "leadingUserMessagesBulk": {
+    "bytes": "eyIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiOlsidmlzaWJsZSJdfQ=="
+  },
+  "metricInputHash": {
+    "bytes": "IjYzYzA1ZjliYzNjMTZmZjg4MDUxYWUxMjI4ZThmMGM5YjQxNjdiNWY0NTI2YmRhNGY1ZDI4ZWMwMjU1NDQ4Zjgi"
+  },
+  "metricInput": {
+    "bytes": "eyJTZXNzaW9uSUQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJFbnRyaWVzIjpbeyJzZXNzaW9uSWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJlbnRyeUluZGV4IjowLCJoYXJuZXNzIjoib3BlbmNvZGUiLCJlbnRyeVR5cGUiOiJ0ZXh0Iiwicm9sZSI6InVzZXIiLCJjb250ZW50UHJldmlldyI6InZpc2libGUiLCJoYXNUb29sVXNlIjpmYWxzZSwiaGFzVGhpbmtpbmciOmZhbHNlLCJpc0Vycm9yIjpmYWxzZSwiZGVwdGgiOjAsImV4dHJhIjoie1wiY2FjaGVfcmVhZFwiOjcsXCJjYWNoZV93cml0ZVwiOjgsXCJtb2RlbF9pZFwiOlwibVwiLFwidG9rZW5zX3JlYXNvbmluZ1wiOjksXCJ1bmtub3duXCI6XCJrZXB0XCJ9In1dLCJTZWVkIjp7InR1cm5Db3VudCI6MSwiaW5wdXRTdWJtaXNzaW9uQ291bnQiOjEsInRvb2xDYWxsQ291bnQiOjAsInN1YmFnZW50Q291bnQiOjAsImR1cmF0aW9uTXMiOjAsInRva2Vuc0luIjowLCJ0b2tlbnNPdXQiOjB9LCJIYXJuZXNzIjoib3BlbmNvZGUiLCJQcm9qZWN0UGF0aCI6Ii9zeW50aGV0aWMvcGFyaXR5IiwiU3RhcnRNUyI6MTcwMDAwMDAwMDAwMCwiRW5kTVMiOjE3MDAwMDAwMDUwMDAsIlN0b3JlZE1vZGVscyI6ZmFsc2UsIk1vZGVsIjpudWxsLCJnZW5lcmF0aW9uSUQiOiJnX2V4dHJhX2tleXNfcHJvbW90aW9uX3Bhcml0eSJ9"
+  },
+  "generationEntries": {
+    "bytes": "W3siRW50cmllcyI6W3sic2Vzc2lvbklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwiZW50cnlJbmRleCI6MCwiaGFybmVzcyI6Im9wZW5jb2RlIiwiZW50cnlUeXBlIjoidGV4dCIsInJvbGUiOiJ1c2VyIiwiY29udGVudFByZXZpZXciOiJ2aXNpYmxlIiwiaGFzVG9vbFVzZSI6ZmFsc2UsImhhc1RoaW5raW5nIjpmYWxzZSwiaXNFcnJvciI6ZmFsc2UsImRlcHRoIjowLCJleHRyYSI6IntcImNhY2hlX3JlYWRcIjo3LFwiY2FjaGVfd3JpdGVcIjo4LFwibW9kZWxfaWRcIjpcIm1cIixcInRva2Vuc19yZWFzb25pbmdcIjo5LFwidW5rbm93blwiOlwia2VwdFwifSIsInNvdXJjZUVudHJ5UmVmIjoiZV8wIn1dLCJOYXRpdmVNZXRhZGF0YSI6bnVsbH1d"
+  },
+  "sessionEntriesHash": "a4ca68c87bdeb1456a51193a8fb6a2d84e8b6a16caddf037ffec9078f949cb05",
+  "fullCaptureHash": "0cb1beda4a3b83c578194cbb535b419d2ba93ed1c7c8afadd59edacfbf62b202"
+}

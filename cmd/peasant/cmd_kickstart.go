@@ -657,6 +657,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			OutputDir:          resolvedOutput,
 			StalenessThreshold: staleness,
 			Parallelism:        0,
+			Write:              cfg.Write,
 			Progress:           progState,
 			AllowedSessionIDs:  allowedIDs,
 		}

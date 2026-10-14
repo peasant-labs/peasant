@@ -9,6 +9,19 @@
 # pointed at another target. A session with active relationship authority must
 # never be healed from its legacy snapshot.
 #
+# The arm field selects the driver. Empty (the cases above the arm-tagged ones)
+# runs the authority reconcile driver described above. arm: heal stores the
+# child and then its parent, settles both unknown at the current origin rule
+# version, and runs the real reverse lookup and heal: the healed child must be
+# re-queued (origin version 0) by the same statement that set its cache, while
+# the parent keeps its settled watermark. arm: invalidate needs no harvest
+# target: it stores the shared parent (legacy) first, then the stuck child
+# (harness from the case) and a Claude Code control (alternate) under it,
+# settles all three unknown at the current rule version, and calls the bounded
+# invalidation directly. Only the parent-linked child is re-queued
+# (expectInvalidated); the Claude Code control and the parentless parent root
+# keep their settled watermark, and a second application re-queues nothing.
+#
 # Tokens: legacyParent/authorityTarget/expectParentCache name one of the ids
 # below or are empty for none; authorityState is empty (no active generation) or
 # one relationship target state; harvestTarget names the id made available.
@@ -52,3 +65,25 @@ cases:
     harvestTarget: legacy
     expectParentCache: legacy
     expectUpdates: 1
+  - name: heal-resets-codex-child-origin-version
+    arm: heal
+    harness: codex
+    legacyParent: legacy
+    harvestTarget: legacy
+    expectParentCache: legacy
+    expectUpdates: 1
+  - name: heal-resets-opencode-child-origin-version
+    arm: heal
+    harness: opencode
+    legacyParent: legacy
+    harvestTarget: legacy
+    expectParentCache: legacy
+    expectUpdates: 1
+  - name: invalidate-requeues-codex-parented-child-claude-code-control-untouched
+    arm: invalidate
+    harness: codex
+    expectInvalidated: 1
+  - name: invalidate-requeues-opencode-parented-child-claude-code-control-untouched
+    arm: invalidate
+    harness: opencode
+    expectInvalidated: 1

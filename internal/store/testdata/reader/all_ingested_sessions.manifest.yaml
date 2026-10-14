@@ -1,0 +1,3 @@
+requiredNames:
+  - populated_identity_columns
+  - empty_identity_columns

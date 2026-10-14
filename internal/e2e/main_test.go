@@ -21,7 +21,9 @@ func TestMain(m *testing.M) {
 		// Runtime startup precedes TestMain; setting the env alone only affects children.
 		debug.SetMemoryLimit(2 * 1024 * 1024 * 1024)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	removePeasantBuildDir()
+	os.Exit(code)
 }
 
 func TestMemoryBudgetInheritedByChild(t *testing.T) {

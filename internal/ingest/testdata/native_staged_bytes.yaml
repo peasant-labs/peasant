@@ -1,0 +1,16 @@
+required_names: [peak-under-cap, oversized-admitted-alone, refusal-releases, cancel-releases]
+cases:
+  - name: peak-under-cap
+    entries: [2, 2, 2, 2, 2]
+    cap_units: 2
+  - name: oversized-admitted-alone
+    entries: [2, 20, 2]
+    cap_units: 2
+  - name: refusal-releases
+    entries: [2, 2, 2]
+    cap_units: 2
+    refuse: 1
+  - name: cancel-releases
+    entries: [2, 20, 2]
+    cap_units: 1
+    cancel: true

@@ -33,6 +33,14 @@ type GroupingEvidenceRow struct {
 	OwnerTargetLocalID *string
 }
 
+const groupingEvidenceQuery = `SELECT s.session_id, s.session_purpose, s.input_submission_count, r.target_state, r.target_local_id
+FROM sessions s
+LEFT JOIN session_relationship_evidence r
+  ON r.session_id = s.session_id
+ AND r.kind = 'started_by'
+ AND r.generation_id = s.active_generation_id
+WHERE s.session_id IN (`
+
 // GroupingEvidenceForSessions reads the active-generation grouping evidence for
 // exactly the named sessions, in bounded IN(...) batches. Sessions that name no
 // stored row are omitted; the caller already holds the identifiers and decides
@@ -59,13 +67,7 @@ func (s *Store) GroupingEvidenceForSessions(ctx context.Context, sessionIDs []st
 			placeholders[i] = "?"
 			args[i] = id
 		}
-		query := `SELECT s.session_id, s.session_purpose, s.input_submission_count, r.target_state, r.target_local_id
-FROM sessions s
-LEFT JOIN session_relationship_evidence r
-  ON r.session_id = s.session_id
- AND r.kind = 'started_by'
- AND r.generation_id = s.active_generation_id
-WHERE s.session_id IN (` + strings.Join(placeholders, ", ") + `)`
+		query := groupingEvidenceQuery + strings.Join(placeholders, ", ") + `)`
 		if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 			Args: args,
 			ResultFunc: func(stmt *sqlite.Stmt) error {

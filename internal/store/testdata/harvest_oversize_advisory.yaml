@@ -1,0 +1,10 @@
+requiredNames:
+  - oversize staging advises an exclusive writer
+  - ordinary staging emits no oversize advisory
+cases:
+  - name: oversize staging advises an exclusive writer
+    batchBytes: 64
+    wantAdvisory: true
+  - name: ordinary staging emits no oversize advisory
+    batchBytes: 33554432
+    wantAdvisory: false

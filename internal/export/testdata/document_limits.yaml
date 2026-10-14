@@ -1,0 +1,14 @@
+cases:
+  - name: formerly_refused_live_detail_size
+    documentBytes: 8698891
+    accepted: true
+  - name: one_byte_below_document_limit
+    documentBytes: 134217727
+    accepted: true
+  - name: at_document_limit
+    documentBytes: 134217728
+    accepted: true
+  - name: one_byte_above_document_limit
+    documentBytes: 134217729
+    accepted: false
+    errorContains: "document exceeds 134217728 bytes; decoding would exceed the caller boundary; reduce the document"

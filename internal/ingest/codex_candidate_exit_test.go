@@ -44,6 +44,7 @@ type codexCandidateExitCase struct {
 		Harness        string `yaml:"harness"`
 		SessionID      string `yaml:"sessionID"`
 		EffectContains string `yaml:"effectContains"`
+		ReasonContains string `yaml:"reasonContains"`
 	} `yaml:"expected"`
 }
 
@@ -121,6 +122,9 @@ func TestCodexCandidateExitRefusalsAreSafe(t *testing.T) {
 			}
 			if !strings.Contains(message, testCase.Expected.EffectContains) {
 				t.Errorf("refusal does not name the fixed effect category %q: %s", testCase.Expected.EffectContains, message)
+			}
+			if !strings.Contains(message, testCase.Expected.ReasonContains) {
+				t.Errorf("refusal lacks structural field diagnosis %q: %s", testCase.Expected.ReasonContains, message)
 			}
 			if !strings.Contains(message, "retry harvest") {
 				t.Errorf("refusal does not name its safe recovery: %s", message)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -22,6 +23,45 @@ func sampleCursorJSONL() []byte {
 		`{"role":"user","timestamp":"2026-06-04T10:01:00Z","message":{"content":[{"type":"text","text":"Thanks"}]}}`,
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+// The same native record fixtures exercise ordinary index completion as well
+// as strict full capture; controls must never become conversational turns.
+func TestCursorTurnEndingCompletion(t *testing.T) {
+	for _, fixture := range loadCaptureFixtures(t) {
+		turnEnding := strings.HasPrefix(fixture.Name, "cursor-success") || strings.HasPrefix(fixture.Name, "cursor-aborted") || fixture.Name == "cursor-unknown-turn-status"
+		invalidConversation := fixture.Name == "cursor-conversation-without-role" || fixture.Name == "cursor-truncated-final-control"
+		if fixture.Harness != ingest.HarnessCursor || (!turnEnding && !invalidConversation) {
+			continue
+		}
+		t.Run(fixture.Name, func(t *testing.T) {
+			fs := testutil.NewMemFS()
+			session, _ := captureFixtureSource(t, fixture, fs, "synthetic control evidence")
+			idx := ingest.NewCursorIndexer(fs)
+			result, err := idx.IndexTranscriptResult(t.Context(), session)
+			if fixture.Reject {
+				if err == nil {
+					t.Fatal("invalid control certified by ordinary index completion")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			v1, ok := result.(indexformat.V1)
+			if !ok || len(v1.Entries) != 1 || v1.Entries[0].Role != ingest.RoleSystem {
+				t.Fatalf("control lost its non-conversation projection: %+v", result)
+			}
+			adapter := ingest.NewCursorAdapter(fs, testutil.NoGitResolver(), salt.Salt{})
+			meta, err := adapter.ExtractMetadata(t.Context(), session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.Stats.TurnCount != 0 || meta.Stats.InputSubmissionCount != nil && *meta.Stats.InputSubmissionCount != 0 {
+				t.Fatalf("control invented conversation counts: %+v", meta.Stats)
+			}
+		})
+	}
 }
 
 func setupCursorRootFS(t *testing.T, mfs *testutil.MemFS, basePath, workspace, sessionID string, data []byte) string {
