@@ -900,7 +900,7 @@ Prerequisites: `pnpm dlx playwright install` (or equivalent). No `web/e2e/` dire
 
 ```bash
 # Start server
-./bin/peasant web start --port 9999 --foreground --no-browser &
+./peasant web start --port 9999 --foreground --no-browser &
 sleep 2
 
 # Run Playwright tests (assumes web/e2e/ test directory)
@@ -911,7 +911,7 @@ pnpm dlx playwright screenshot http://localhost:9999/ screenshots/dashboard.png
 pnpm dlx playwright screenshot http://localhost:9999/sessions screenshots/sessions.png
 pnpm dlx playwright screenshot "http://localhost:9999/sessions/detail?id=SOME_ID" screenshots/detail.png
 
-./bin/peasant web stop --port 9999
+./peasant web stop --port 9999
 ```
 
 ### Example test patterns

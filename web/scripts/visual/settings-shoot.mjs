@@ -3,7 +3,7 @@
    It builds a throwaway peasant world under the OS temp directory: a HOME with three git
    repositories and a Claude Code session recorded in each, a config.yaml, the auto-publish rules in
    hooks.yaml, and a stored Village sign-in whose Village is a small local double that lists two
-   collectives. It starts bin/peasant on that world, ingests the sessions through the real route, and
+   collectives. It starts peasant on that world, ingests the sessions through the real route, and
    shoots the mounted page in both themes:
 
      default         the whole page as it opens (desktop, and 390px wide)
@@ -21,13 +21,13 @@
    so no personal path reaches a capture; it is removed at the end (KEEP=1 keeps it).
 
    Build provenance is checked before the browser starts: the settings copy marker must be in a
-   web/out chunk no older than the page's sources, in bin/peasant (no older than that chunk), and in
+   web/out chunk no older than the page's sources, in peasant (no older than that chunk), and in
    the chunk the running server serves.
 
    Run (after `make build` in this worktree):
      CHROME_PATH=/path/to/chrome node scripts/visual/settings-shoot.mjs [out-dir]
 
-   Env: CHROME_PATH (required), PEASANT_BIN (default ../bin/peasant), PEASANT_SETTINGS_PORT
+   Env: CHROME_PATH (required), PEASANT_BIN (default ../peasant), PEASANT_SETTINGS_PORT
    (default 8795), PUPPETEER_CORE, KEEP. */
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -43,7 +43,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const WEB = join(HERE, '../..')
 const REPO = join(WEB, '..')
 const CHROME = process.env.CHROME_PATH
-const BIN = process.env.PEASANT_BIN || join(REPO, 'bin/peasant')
+const BIN = process.env.PEASANT_BIN || join(REPO, 'peasant')
 const PORT = process.env.PEASANT_SETTINGS_PORT || '8795'
 const ORIGIN = `http://localhost:${PORT}`
 const OUT = process.argv[2] || join(tmpdir(), 'peasant-settings-shots')
@@ -183,7 +183,7 @@ try {
     healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200
     if (!healthy) await pause(250)
   }
-  if (!healthy) await abort(`bin/peasant did not answer on ${ORIGIN}: ${serverLog.trim().slice(-400)}`, `free port ${PORT} or set PEASANT_SETTINGS_PORT.`)
+  if (!healthy) await abort(`peasant did not answer on ${ORIGIN}: ${serverLog.trim().slice(-400)}`, `free port ${PORT} or set PEASANT_SETTINGS_PORT.`)
 
   const servedChunk = `/${relative(join(WEB, 'out'), markerChunk).split('\\').join('/')}`
   const served = await fetch(`${ORIGIN}${servedChunk}`).catch(() => null)

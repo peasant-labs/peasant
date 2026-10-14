@@ -1,7 +1,7 @@
 /* Real-binary mounted evidence for the root page: the stats strip, the search
  * box, and the session list with its publish-state filters.
  *
- * It boots bin/peasant twice, each on its own throwaway XDG directories so no
+ * It boots peasant twice, each on its own throwaway XDG directories so no
  * real session store is read:
  *   - with the mock store (`web,dashboard,sessions,trends,qualitySessions,search`), which serves the WebSocket topics
  *     (sessions, titles, dashboard, trends), the project summary and search;
@@ -42,7 +42,7 @@ import { loadContextNavigationFixture } from './context-navigation-fixture.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const OUT = process.env.CAPTURES || join(tmpdir(), 'peasant-root-page')
 const PORT = Number(process.env.PEASANT_ROOT_PORT || '8731')
 const MOCK_ORIGIN = `http://localhost:${PORT}`

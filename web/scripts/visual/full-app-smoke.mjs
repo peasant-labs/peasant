@@ -1,7 +1,7 @@
 /* FULL-APP SMOKE — the standing, repeatable gate on the user's canonical path.
  *
  * It builds the real binary the way the user does (`make build` → pnpm primary), boots
- * `bin/peasant web start` with the full mock store, then drives EVERY first-class surface
+ * `peasant web start` with the full mock store, then drives EVERY first-class surface
  * through the REAL Go binary (static-export SPA served from //go:embed web/out, NOT the dev
  * harness) and ASSERTS each is:
  *   1. SERVED        — HTTP 200 on its route,
@@ -14,7 +14,7 @@
  * regression fails CI loudly.
  *
  * Run:  CHROME_PATH=$(command -v google-chrome) node web/scripts/visual/full-app-smoke.mjs
- * Env:  SMOKE_SKIP_BUILD=1  reuse the existing bin/peasant (skip `make build`)
+ * Env:  SMOKE_SKIP_BUILD=1  reuse the existing peasant (skip `make build`)
  *       PEASANT_SMOKE_PORT  server port (default 8699)
  *       SMOKE_PROJECT / SMOKE_SESSION / SMOKE_BRANCH  mock fixture coordinates
  *       PUPPETEER_CORE      explicit puppeteer-core module path
@@ -298,9 +298,9 @@ if (!process.env.SMOKE_SKIP_BUILD) {
   execSync('make build', { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   console.log('[smoke] build path: pnpm (required)')
 } else {
-  console.log('[smoke] SMOKE_SKIP_BUILD=1 — reusing existing bin/peasant')
+  console.log('[smoke] SMOKE_SKIP_BUILD=1 — reusing existing ./peasant')
 }
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 if (!existsSync(BIN)) { console.error(`ERROR [full-app-smoke] ${BIN} not found — run \`make build\` first or unset SMOKE_SKIP_BUILD.`); process.exit(1) }
 
 // ── 2. boot the real binary ───────────────────────────────────────────────────
@@ -396,7 +396,7 @@ try {
 }
 
 // ── 4. verdict ────────────────────────────────────────────────────────────────
-console.log('\n=== FULL-APP SMOKE (real bin/peasant) ===')
+console.log('\n=== FULL-APP SMOKE (real peasant) ===')
 console.log('theme  surface                served  mount  theme  atkinson  nonbg     verdict')
 for (const r of rows) {
   console.log(`${r.theme.padEnd(6)} ${r.id.padEnd(22)} ${String(r.served).padEnd(7)} ${String(r.mounted).padEnd(6)} ${String(r.themeAttrs).padEnd(6)} ${String(r.atkinson).padEnd(9)} ${(r.nonbg * 100).toFixed(1).padStart(5)}%   ${r.ok ? 'OK' : 'FAIL: ' + r.note}`)

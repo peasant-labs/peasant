@@ -4,7 +4,6 @@
 ralph-plans/
 finesse-plans/
 .claude.local/*
-bin/
 # Ignore built web assets, but keep a committed `.gitkeep` placeholder so the
 # `//go:embed all:web/out` directive (embed.go) is satisfied for `go install`
 # / `go build` of a fresh checkout that never ran `make web` (and for the

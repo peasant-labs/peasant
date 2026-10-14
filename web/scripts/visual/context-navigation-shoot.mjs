@@ -1,6 +1,6 @@
 /* MOUNTED CURRENT-PARENT / CONTEXT NAVIGATION — real-binary evidence capture.
  *
- * Boots the exact worktree's `bin/peasant` (assets embedded from this branch's
+ * Boots the exact worktree's `peasant` (assets embedded from this branch's
  * `web/out`) with the mock data store, so the child transcript, its stored
  * context_from source and started_by parent, and its retained earlier-history
  * partition all arrive over the REAL WebSocket `session_detail` payload through
@@ -36,7 +36,7 @@
  * invalidate the evidence.
  *
  * Run:  CHROME_PATH=$(command -v google-chrome) node web/scripts/visual/context-navigation-shoot.mjs
- * Env:  PEASANT_CONTEXT_NAV_SKIP_BUILD=1   reuse the existing bin/peasant
+ * Env:  PEASANT_CONTEXT_NAV_SKIP_BUILD=1   reuse the existing peasant
  *       PEASANT_CONTEXT_NAV_PORT            server port (default 8793)
  *       PEASANT_CONTEXT_NAV_CAPTURE_DIR     output root (default /tmp/opencode/context-navigation-captures)
  *       PUPPETEER_CORE                      explicit puppeteer-core module path
@@ -53,7 +53,7 @@ import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const OUT = process.env.PEASANT_CONTEXT_NAV_CAPTURE_DIR || '/tmp/opencode/context-navigation-captures'
 const PORT = process.env.PEASANT_CONTEXT_NAV_PORT || '8793'
 const ORIGIN = `http://localhost:${PORT}`
@@ -100,7 +100,7 @@ function assertBuildProvenance() {
   const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
   const binary = readFileSync(BIN)
   const missingBinaryBytes = FEATURE_BYTES.filter((signature) => !binary.includes(Buffer.from(signature)))
-  if (missingBinaryBytes.length) throw fail('verifying build provenance', `the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so bin/peasant matches web/out`)
+  if (missingBinaryBytes.length) throw fail('verifying build provenance', `the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so peasant matches web/out`)
   const match = javascript.find(({ content }) => FEATURE_BYTES.every((signature) => content.includes(signature)))
   if (!match) throw fail('verifying build provenance', `the built export contains no chunk with the feature bytes ${FEATURE_BYTES.join(', ')}; rebuild this exact worktree`)
   return match.path
@@ -536,7 +536,7 @@ if (!process.env.PEASANT_CONTEXT_NAV_SKIP_BUILD) {
   console.log('[context-navigation-shoot] make build (user canonical path) …')
   execSync('make build', { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 } else {
-  console.log('[context-navigation-shoot] PEASANT_CONTEXT_NAV_SKIP_BUILD=1 — reusing existing bin/peasant')
+  console.log('[context-navigation-shoot] PEASANT_CONTEXT_NAV_SKIP_BUILD=1 — reusing existing ./peasant')
 }
 if (!existsSync(BIN)) { console.error(`ERROR [context-navigation-shoot] ${BIN} not found — run \`make build\` first.`); process.exit(1) }
 

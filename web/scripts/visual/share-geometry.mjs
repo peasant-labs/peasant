@@ -9,7 +9,7 @@ import { SurfaceGate } from './surface-gate.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const OUT = process.env.CAPTURES || join(HERE, 'review-capture', 'share-geometry')
 const PORT = process.env.PEASANT_SHARE_GEOMETRY_PORT || '8721'
 const ORIGIN = `http://localhost:${PORT}`
