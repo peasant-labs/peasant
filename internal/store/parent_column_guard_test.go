@@ -186,7 +186,11 @@ func parentColumnRepoRoot(t *testing.T) string {
 
 // parseParentColumnSites walks production Go files under internal/ and cmd/ and
 // returns one entry per declaration that carries the token in a string literal.
-// Test files and testdata are outside the closure.
+// Test files and testdata are outside the closure, and so are directories the Go
+// tool itself ignores: a name beginning with "." or "_", and testdata. That rule
+// matters because other tests materialize scratch trees beside the sources they
+// exercise (for example the OpenCode build-topology cases), and a scratch copy
+// of a scanned file must never be classified as a production site.
 func parseParentColumnSites(t *testing.T, root string) []parsedParentColumnSite {
 	t.Helper()
 	var sites []parsedParentColumnSite
@@ -197,7 +201,8 @@ func parseParentColumnSites(t *testing.T, root string) []parsedParentColumnSite 
 				return walkErr
 			}
 			if info.IsDir() {
-				if info.Name() == "testdata" || info.Name() == "node_modules" {
+				name := info.Name()
+				if path != base && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "testdata" || name == "node_modules") {
 					return filepath.SkipDir
 				}
 				return nil
