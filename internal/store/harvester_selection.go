@@ -93,9 +93,10 @@ func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[inges
 		// The settle fragment itself requires a retained pointer, so the
 		// surrounding NOT stays false — and the session stays listed — for a
 		// session that retains nothing.
-		if target := targets[harness]; target.IndexerVersion >= 1 && target.AdapterVersion >= 1 {
-			settleTerms = append(settleTerms, "(s.model_harness = ? AND "+retainedAttemptSettledSQL("s")+")")
-			settleArgs = append(settleArgs, string(harness), target.IndexerVersion, target.AdapterVersion)
+		if fragment, fragmentArgs, ok := retainedAttemptSettleFragment("s", targets[harness]); ok {
+			settleTerms = append(settleTerms, "(s.model_harness = ? AND "+fragment+")")
+			settleArgs = append(settleArgs, string(harness))
+			settleArgs = append(settleArgs, fragmentArgs...)
 		}
 	}
 	args = append(args, int(ingest.CurrentSchemaVersion))

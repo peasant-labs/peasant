@@ -487,6 +487,31 @@ func TestRetainedAttemptSettleGatesSelection(t *testing.T) {
 	}
 	assertSelected("repair artifact arm (settled)", ids, false)
 
+	// A target that cannot express a settle decision must never hide work: the
+	// settle clause is omitted, so the session stays listed exactly as it did
+	// before retention existed.
+	zeroAdapter := map[ingest.Harness]ingest.HarvesterVersions{
+		ingest.Harness("claude-code"): {IndexerVersion: 18, AdapterVersion: 0},
+	}
+	zeroIndexer := map[ingest.Harness]ingest.HarvesterVersions{
+		ingest.Harness("claude-code"): {IndexerVersion: 0, AdapterVersion: 2},
+	}
+	ids, err = s.ListStaleIndexSessions(ctx, zeroAdapter)
+	if err != nil {
+		t.Fatalf("ListStaleIndexSessions with a zero adapter target: %v", err)
+	}
+	assertSelected("stale index (zero adapter target)", ids, true)
+	ids, err = s.ListStaleAdapterSessions(ctx, zeroIndexer, nil)
+	if err != nil {
+		t.Fatalf("ListStaleAdapterSessions with a zero producer target: %v", err)
+	}
+	assertSelected("stale adapter (zero producer target)", ids, true)
+	ids, err = s.ListSessionsNeedingRepair(ctx, zeroAdapter)
+	if err != nil {
+		t.Fatalf("ListSessionsNeedingRepair with a zero adapter target: %v", err)
+	}
+	assertSelected("repair artifact arm (zero adapter target)", ids, true)
+
 	// The publication arm keeps LISTING the pending binding even though the
 	// retained attempt is settled: the pending fact is real, and only the PARSE
 	// decision short-circuits.
