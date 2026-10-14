@@ -363,7 +363,9 @@ func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, hasToolResu
 	block.ObservedModel = observedModel
 	block.Extra = extra
 	claudeAssignContent(&block, entry)
-	claudeAssignSubmission(&block, entry, !hasToolResultContent)
+	if err := claudeAssignSubmission(&block, entry, !hasToolResultContent); err != nil {
+		return ClassifiedBlock{}, err
+	}
 	return block, nil
 }
 
@@ -414,7 +416,9 @@ func claudeChildBlock(childKey, recordKey string, entry schema.SessionEntry, see
 		block.ToolCallKey = callKey
 	}
 	if entry.EntryType == EntryTypeToolResult {
-		claudeAssignSubmission(&block, entry, false)
+		if err := claudeAssignSubmission(&block, entry, false); err != nil {
+			return ClassifiedBlock{}, err
+		}
 	}
 	return block, nil
 }
@@ -438,25 +442,27 @@ func claudeAssignContent(block *ClassifiedBlock, entry schema.SessionEntry) {
 // by the discriminating record identity. An AskUserQuestion answer -- a
 // depth-1 user tool_result with a validated tool_use id -- is its own
 // submission, keyed per record and answer. Mixed wrappers, harness content and
-// tool activity carry no provenance.
-func claudeAssignSubmission(block *ClassifiedBlock, entry schema.SessionEntry, plainPrompt bool) {
+// tool activity carry no provenance. An over-bound answer key is refused, never
+// dropped: every key this classifier assembles respects the persisted bound.
+func claudeAssignSubmission(block *ClassifiedBlock, entry schema.SessionEntry, plainPrompt bool) error {
 	if plainPrompt && entry.Role == RoleUser && entry.EntryType == EntryTypeText {
 		block.Provenance = claudeSubmissionProvenance()
 		block.SubmissionKey = block.NativeKey
-		return
+		return nil
 	}
 	if entry.Role == RoleUser && entry.EntryType == EntryTypeToolResult {
 		callKey := derefString(entry.ToolCallID)
 		if callKey == "" {
-			return
+			return nil
 		}
 		key, err := claudeAnswerKey(block.CarrierNativeKey, callKey)
 		if err != nil {
-			return
+			return err
 		}
 		block.Provenance = claudeSubmissionProvenance()
 		block.SubmissionKey = key
 	}
+	return nil
 }
 
 // claudeSubmissionProvenance is the full six-dimension tuple every admitted

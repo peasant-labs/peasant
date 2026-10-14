@@ -464,3 +464,13 @@ cases:
       - {depth: 1, role: user, entryType: text, partType: text, parentIndex: 0, toolCallIDFromIndex: -1, preview: "look at this"}
       - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "image reply"}
       - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 2, toolCallIDFromIndex: -1, preview: "image reply"}
+
+  - name: over-bound-answer-key-refusal
+    # An AskUserQuestion answer whose tool id pushes the assembled answer key
+    # over the persisted alias bound refuses through the one fixed-shape
+    # refusal instead of silently dropping the answer's submission.
+    transcript: |
+      {"type":"user","uuid":"ob0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"pick one"}}
+      {"type":"assistant","uuid":"ob1","parentUuid":"ob0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"tool_use","id":"toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"AskUserQuestion","input":{"questions":[]}}]}}
+      {"type":"user","uuid":"ob2","parentUuid":"ob1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","content":"answer one"}]}}
+    wantRefusal: true

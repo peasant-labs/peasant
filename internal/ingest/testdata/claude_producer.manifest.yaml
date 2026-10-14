@@ -22,3 +22,4 @@ requiredNames:
   - control-record-over-cap
   - plain-prompt-text-array
   - plain-prompt-text-and-image-array
+  - over-bound-answer-key-refusal
