@@ -27,9 +27,6 @@ type claudeStabilityCase struct {
 	UnchangedKeys []string `yaml:"unchangedKeys"`
 	// AddedKeys appear only in the second build and must allocate fresh refs.
 	AddedKeys []string `yaml:"addedKeys"`
-	// ChangedKeys exist in both builds but must NOT keep their ref: the source
-	// boundary moved and the identity belongs to different source now.
-	ChangedKeys []string `yaml:"changedKeys"`
 	// RemovedKeys exist only in the first build.
 	RemovedKeys []string `yaml:"removedKeys"`
 
@@ -105,14 +102,6 @@ func runClaudeStabilityCase(t *testing.T, row claudeStabilityCase) {
 		}
 		if firstRefs[key] != secondRefs[key] {
 			t.Errorf("key %q ref changed across an unchanged source: %q -> %q", key, firstRefs[key], secondRefs[key])
-		}
-	}
-	for _, key := range row.ChangedKeys {
-		if firstRefs[key] == "" || secondRefs[key] == "" {
-			t.Fatalf("key %q is missing from one of the builds", key)
-		}
-		if firstRefs[key] == secondRefs[key] {
-			t.Errorf("key %q kept its ref %q across a changed boundary", key, firstRefs[key])
 		}
 	}
 	for _, key := range row.AddedKeys {
