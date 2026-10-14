@@ -268,4 +268,4 @@ docs-open: docs
 	xdg-open docs/api/index.html
 
 clean:
-	rm -rf bin/ peasant peasant.exe web/out/ web/.next/
+	rm -rf bin/ peasant peasant.exe web/out/* web/.next/
