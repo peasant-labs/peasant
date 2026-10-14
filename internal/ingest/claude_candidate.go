@@ -41,10 +41,10 @@ func (e *claudeCandidateRefusal) Error() string {
 }
 
 // claudeCandidateCompletionFailure translates any candidate-build failure into
-// the one fixed-shape Claude refusal. The underlying failure is classified here
-// and then dropped, so nothing it carries -- a recorded source locator, a raw
-// kernel message, or a wrapped filesystem error -- can reach the diagnostic.
-func claudeCandidateCompletionFailure(session DiscoveredSession, failure error) error {
+// the one fixed-shape Claude refusal. The underlying failure is not carried, so
+// nothing it holds -- a recorded source locator, a raw kernel message, or a
+// wrapped filesystem error -- can reach the diagnostic.
+func claudeCandidateCompletionFailure(session DiscoveredSession) error {
 	return &claudeCandidateRefusal{
 		Operation: "ClaudeIndexer.BuildGeneration",
 		Harness:   string(HarnessClaudeCode),
@@ -68,11 +68,11 @@ func claudeCandidateCompletionFailure(session DiscoveredSession, failure error) 
 // sanitized refusal above, never a raw kernel value or the recorded locator.
 func (idx *ClaudeIndexer) BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
 	if err := ctx.Err(); err != nil {
-		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session, err)
+		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session)
 	}
 	candidate, err := idx.buildClaudeGeneration(ctx, in)
 	if err != nil {
-		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session, err)
+		return GenerationCandidate{}, claudeCandidateCompletionFailure(in.Session)
 	}
 	return candidate, nil
 }
