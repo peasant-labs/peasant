@@ -125,6 +125,28 @@ func AttachSessionLocationLookup(adapter SourceAdapter, lookup SessionLocationLo
 	}
 }
 
+// ClaudeLogicalParentLookupCapable is implemented by an adapter that can use a
+// store's evidence-first logical-parent accessor to keep walking an ancestor
+// chain past this discovery's own write batch. The adapter factory signature
+// carries only the filesystem, the git resolver, and the salt, so a caller
+// attaches this capability after it builds the adapter — the same optional,
+// type-asserted attach shape ClaudeSessionLocationLookupCapable uses.
+type ClaudeLogicalParentLookupCapable interface {
+	SetLogicalParentLookup(lookup LogicalParentReader)
+}
+
+// AttachLogicalParentLookup gives adapter the evidence-first logical-parent
+// accessor when the adapter can use one. Adapters that need no such lookup
+// ignore it.
+func AttachLogicalParentLookup(adapter SourceAdapter, lookup LogicalParentReader) {
+	if adapter == nil || lookup == nil {
+		return
+	}
+	if capable, ok := adapter.(ClaudeLogicalParentLookupCapable); ok {
+		capable.SetLogicalParentLookup(lookup)
+	}
+}
+
 // claudeSessionAlreadyStored reports whether sessionID is already recorded in
 // the store from a prior discovery. It fails closed: no lookup attached, or
 // any error, answers false, because a parent identifier must never point at a
@@ -139,19 +161,21 @@ func (a *ClaudeAdapter) claudeSessionAlreadyStored(ctx context.Context, sessionI
 	return err == nil && hostSlug != ""
 }
 
-// claudeStoredParent returns the parent id the store already recorded for
+// claudeStoredParent returns the logical parent the store already recorded for
 // sessionID, if any, so cycle detection can keep walking an ancestor chain
-// past this discovery's own write batch. It fails closed: no lookup attached,
-// any error, or an absent parent answers no parent found.
+// past this discovery's own write batch. It answers through the evidence-first
+// accessor, so an ancestor whose relationship evidence names a parent is walked
+// even while its availability cache is NULL. It fails closed: no lookup
+// attached, any error, or an absent parent answers no parent found.
 func (a *ClaudeAdapter) claudeStoredParent(ctx context.Context, sessionID SessionID) (SessionID, bool) {
-	if a.locationLookup == nil {
+	if a.logicalParentLookup == nil {
 		return SessionID(""), false
 	}
-	_, parentID, err := a.locationLookup.LookupSessionLocation(ctx, sessionID)
-	if err != nil || parentID == "" {
+	parent, err := a.logicalParentLookup.LogicalParentForSession(ctx, sessionID)
+	if err != nil || parent == nil || *parent == "" {
 		return SessionID(""), false
 	}
-	return SessionID(parentID), true
+	return SessionID(*parent), true
 }
 
 // claudeCyclicChildren returns which candidate assignments would place a

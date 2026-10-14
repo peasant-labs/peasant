@@ -77,6 +77,21 @@ type SessionLocationLookup interface {
 	LookupSessionLocation(ctx context.Context, sessionID SessionID) (hostSlug string, parentID string, err error)
 }
 
+// LogicalParentReader is the optional store capability that answers the ONE
+// logical-parent question: the started_by evidence target of the session's
+// active generation (or its latest attempt when none is active), falling back
+// to the availability cache. A nil answer means no known logical parent; it
+// never proves a root.
+//
+// It is deliberately narrower than SessionLocationLookup. The location lookup
+// answers which cached row exists, which is what on-disk path construction
+// needs; a consumer that must know WHO the parent is — for example, keeping an
+// ancestor-cycle walk honest — depends on this accessor instead, so it follows
+// the durable evidence even while the availability cache is NULL.
+type LogicalParentReader interface {
+	LogicalParentForSession(ctx context.Context, sessionID SessionID) (*string, error)
+}
+
 // OpenCodeSeqCursorStore is the optional store capability that records the
 // OpenCode change cursor: the last ingested newest-event sequence per session.
 // A store that implements it lets the pipeline re-ingest a session whose current

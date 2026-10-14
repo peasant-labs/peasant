@@ -2618,6 +2618,13 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		// persisted before trusting it.
 		if p.store != nil {
 			AttachSessionLocationLookup(adapter, p.store)
+			// The ancestor-cycle walk asks who the parent is, not which
+			// cached row exists, so it takes the evidence-first accessor when
+			// the store carries one; a store that does not leaves the walk
+			// reading only this run's own candidate edges.
+			if parentReader, ok := p.store.(LogicalParentReader); ok {
+				AttachLogicalParentLookup(adapter, parentReader)
+			}
 		}
 		sessions, err := adapter.Discover(ctx, cfg)
 		// Per-location discovery failures are collected whether or not the whole
