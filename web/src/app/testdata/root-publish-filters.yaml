@@ -159,20 +159,22 @@ cases:
       child-two: 'not published'
 
   - name: recursive-family-and-refresh
-    # Anonymized grandparent -> delegated parent -> delegated child.
+    # Anonymized grandparent -> delegated parent -> two delegated children, so
+    # one level of the family lists more than one subagent.
     sessions:
       - { id: ancestor, project: alpha, syncStatus: synced, state: published }
       - { id: delegate, project: beta, syncStatus: new, state: unpublished, parentSessionId: ancestor, preview: Inspect the Parser }
       - { id: nested-agent, project: beta, syncStatus: synced, state: published, parentSessionId: delegate }
+      - { id: second-agent, project: beta, syncStatus: new, state: unpublished, parentSessionId: delegate }
     filter: all
     expectedCounts: { all: 1, notPublished: 0, published: 1, auto: 0 }
     expectedRows: [ancestor]
     expectedGroups: [ancestor]
     steps:
       - { expand: ancestor, children: [delegate] }
-      - { expand: delegate, children: [delegate, nested-agent] }
-      - { refresh: true, children: [delegate, nested-agent] }
-    childLabels: { delegate: '“Inspect the Parser”', nested-agent: nested-a }
+      - { expand: delegate, children: [delegate, nested-agent, second-agent] }
+      - { refresh: true, children: [delegate, nested-agent, second-agent] }
+    childLabels: { delegate: '“Inspect the Parser”', nested-agent: nested-a, second-agent: second-a }
 
   - name: snapshot-and-evidence-children-with-absent-parents-hidden
     sessions:
