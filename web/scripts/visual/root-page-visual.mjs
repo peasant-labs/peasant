@@ -63,7 +63,7 @@ const FILTERS = [
 // name live in the app chunk, the strip and publish-state classes in fairtrade's.
 const FEATURE_GROUPS = [
   { label: 'root page', signatures: ['data-root-session-list', 'your sessions in numbers', 'rootSessions'] },
-  { label: 'recursive session family', signatures: ['data-session-group-child', 'session-group-rows:', 'flex flex-col gap-3 py-3 pl-4'] },
+  { label: 'recursive session family', signatures: ['data-session-group-child', 'session-group-rows:', 'var(--sp-5) + var(--sp-4)'] },
   { label: 'parent-attached session disclosure', signatures: ['data-session-family'] },
   { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', 'tick the auto-publish box the next time you publish'] },
   { label: 'fairtrade stats strip and publish state', signatures: ['sst-pair', 'pub-state-text'] },
@@ -413,7 +413,7 @@ async function probeGroupAttachment(page, where) {
       sameCell: group.closest('td') === cell && cell.parentElement.firstElementChild === cell,
       order: parent.nextElementSibling === group && group.parentElement === family && !parent.contains(group),
       rootLeak: !!group.querySelector('[data-session-id]'),
-      extraRows: [...document.querySelectorAll('[data-root-session-list] tbody tr')].some((row) => row.querySelectorAll('[data-session-id]').length !== 1),
+      extraRows: [...document.querySelectorAll('[data-root-session-list] tbody tr')].some((row) => row.querySelectorAll('[data-session-id]').length > 1),
       bare: disclosure.classList.contains('sgd-bare'), indented: disclosure.classList.contains('sgd-indent'),
       bareBorder: px(style.borderTopWidth) + px(style.borderRightWidth) + px(style.borderBottomWidth) + px(style.borderLeftWidth),
       indent, padY, padX, target, rules,
@@ -456,26 +456,44 @@ async function waitForStats(page, where) {
   }, undefined, { timeout: 10000 }).catch(() => fail(`${where}: the complete stats strip never mounted`))
 }
 
-/** Compare immediate child glyphs to their own disclosure, never an ancestor. */
+/** Compare each expanded child row's glyph to its owning disclosure, never an ancestor. */
 async function probeChildAlignment(page, id, where) {
   const probe = await page.evaluate((id) => {
     const control = document.querySelector(`[data-session-group="${id}"] > .sgd > button`)
-    const icon = control?.querySelector(':scope > svg')
-    const list = document.getElementById(control?.getAttribute('aria-controls'))
-    if (!icon || !list || control.getAttribute('aria-expanded') !== 'true') return null
-    const chevron = icon.getBoundingClientRect()
-    const children = [...list.querySelectorAll(':scope > li')].map((child) => {
-      const glyph = child.querySelector(':scope > [data-session-group-child] svg[data-brand]')
+    const chevron = control?.querySelector(':scope > svg')
+    const parentRow = document.querySelector(`[data-session-id="${id}"], [data-session-group-child="${id}"]`)?.closest('tr')
+    if (!control || !chevron || !parentRow || control.getAttribute('aria-expanded') !== 'true') return null
+    const chevronBox = chevron.getBoundingClientRect()
+    const table = parentRow.closest('table')
+    const ids = (control.getAttribute('aria-controls') ?? '').split(/\s+/).filter(Boolean)
+    // Each declared IDREF is a rendered child row, consecutive after the parent.
+    let previous = parentRow
+    const children = ids.map((childId) => {
+      const node = document.getElementById(childId)
+      const row = node?.closest('tr')
+      const glyph = node?.querySelector('svg[data-brand]')
       const box = glyph?.getBoundingClientRect()
-      return { left: box?.left, width: box?.width, height: box?.height, delta: box ? box.left - chevron.left : null }
+      const entry = {
+        id: childId,
+        child: !!node?.hasAttribute('data-session-group-child'),
+        topLevel: !!node?.hasAttribute('data-session-id'),
+        sameTable: !!row && row.closest('table') === table,
+        adjacency: !!row && row.previousElementSibling === previous,
+        left: box?.left,
+        width: box?.width,
+        height: box?.height,
+        delta: box ? box.left - chevronBox.left : null,
+      }
+      previous = row
+      return entry
     })
     // Allow at most one physical pixel of browser layout rounding.
-    return { chevron: chevron.left, width: chevron.width, height: chevron.height, children, epsilon: 1 / devicePixelRatio }
+    return { chevron: chevronBox.left, width: chevronBox.width, height: chevronBox.height, children, epsilon: 1 / devicePixelRatio }
   }, id)
   if (!probe || !Number.isFinite(probe.chevron) || !(probe.width > 0 && probe.height > 0)
-    || !probe.children.length || !probe.children.every((child) => Number.isFinite(child.left)
-      && child.width > 0 && child.height > 0 && Number.isFinite(child.delta) && Math.abs(child.delta) <= probe.epsilon)) {
-    fail(`root-page-visual.mjs ${where}/${id}: immediate child BrandMark/own chevron alignment ${JSON.stringify(probe)}; glyphs are missing or misaligned; reuse the child list's token padding, rebuild this worktree, then rerun visual:root-page`)
+    || !probe.children.length || !probe.children.every((child) => child.child && !child.topLevel && child.sameTable && child.adjacency
+      && Number.isFinite(child.left) && child.width > 0 && child.height > 0 && Number.isFinite(child.delta) && Math.abs(child.delta) <= probe.epsilon)) {
+    fail(`root-page-visual.mjs ${where}/${id}: immediate child rows/BrandMark to owning chevron alignment ${JSON.stringify(probe)}; the child rows are missing, detached from the table, out of order, or misaligned; reuse the child list's token padding, rebuild this worktree, then rerun visual:root-page`)
   }
   console.log(`child alignment ${where}/${id} ${JSON.stringify(probe)}`)
 }
@@ -558,7 +576,7 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     })
     await assertSessionsStat()
     await control.click()
-    const child = group.locator(`[data-session-group-child="${CONTEXT.childSessionId}"]`)
+    const child = page.locator(`[data-session-group-child="${CONTEXT.childSessionId}"]`)
     await child.waitFor({ state: 'visible' })
     const familyProbe = await child.evaluate((node) => ({
       topLevel: node.hasAttribute('data-session-id'),
@@ -570,6 +588,21 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     const childSync = answers.sync.find((row) => row.id === CONTEXT.childSessionId)
     if (familyProbe.topLevel || familyProbe.publishChrome || !familyProbe.title || familyProbe.fontSize !== '16px'
       || familyProbe.href?.replace(/\/$/, '') !== `/projects/${childSync.projectHash}/${childSync.id}`) fail(`${where}: expanded family probe ${JSON.stringify(familyProbe)}`)
+    const childCells = await child.evaluate((node) => {
+      const cells = [...node.closest('tr').querySelectorAll('td')]
+      return {
+        count: cells.length,
+        project: cells[1]?.textContent ?? '',
+        turns: cells[2]?.textContent?.trim() ?? '',
+        duration: cells[3]?.textContent?.trim() ?? '',
+        when: cells[4]?.textContent?.trim() ?? '',
+        state: cells[5]?.querySelector('.pub-state-text')?.textContent?.trim() ?? '',
+      }
+    })
+    if (childCells.count !== 6 || !childCells.project.includes(childSync.projectName)
+      || !childCells.turns || !childCells.duration || !childCells.when || !childCells.state) {
+      fail(`${where}: the expanded child row does not carry its own column values ${JSON.stringify(childCells)}`)
+    }
     if (await listedRows(page) !== expectedCounts.all) fail(`${where}: expanding a family changed the top-level count`)
     await assertSessionsStat()
     await assertMissingParentOmitted(page, `${where}/expanded-group`)
