@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   DataTable,
@@ -65,7 +65,7 @@ const EMPTY_FILTER_COPY: Readonly<Record<PublishFilter, string>> = {
   auto: 'no session here publishes automatically.',
 };
 
-type ListRow = RootSessionRow & { id: string };
+type ListRow = RootSessionRow & { id: string; kind: 'session' | 'child'; depth: number };
 
 const NO_CHILDREN: ReadonlyMap<string, readonly RootSessionRow[]> = new Map();
 
@@ -78,59 +78,31 @@ export interface RootSessionListProps {
   previews: ReadonlyMap<string, string>;
 }
 
-interface SessionChildrenGroupProps extends Pick<RootSessionListProps, 'titles' | 'previews'> {
+interface SessionChildrenGroupProps {
   parentId: string;
-  children: readonly RootSessionRow[];
-  childGroups: ReadonlyMap<string, readonly RootSessionRow[]>;
-  expandedGroups: ReadonlySet<string>;
-  setExpandedGroups: Dispatch<SetStateAction<ReadonlySet<string>>>;
+  childIds: readonly string[];
+  expanded: boolean;
+  onToggle: () => void;
   indent?: boolean;
 }
 
-/** Each disclosure constructs only its opened level; folded descendants do no render work. */
-function SessionChildrenGroup({ parentId, children, childGroups, titles, previews, expandedGroups, setExpandedGroups, indent = false }: SessionChildrenGroupProps) {
-  const expanded = expandedGroups.has(parentId);
-  const label = <>subagents <span className="tabular-nums">{children.length.toLocaleString('en-US')}</span></>;
-  const rowsID = `session-group-rows:${parentId}`;
+/** The family disclosure. Its rows are the flattened child rows that follow the parent row. */
+function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent = false }: SessionChildrenGroupProps) {
+  const label = <>subagents <span className="tabular-nums">{childIds.length.toLocaleString('en-US')}</span></>;
+  // rowsID is an IDREF list: the rendered child rows are the revealed content.
+  const rowsID = childIds.map((id) => `session-group-rows:${id}`).join(' ');
   return (
     <div data-session-group={parentId}>
       <SessionGroupDisclosure
         label={label}
         collapsedLabel={label}
         expanded={expanded}
-        onToggle={() => setExpandedGroups((previous) => {
-          const next = new Set(previous);
-          if (next.has(parentId)) next.delete(parentId);
-          else next.add(parentId);
-          return next;
-        })}
+        onToggle={onToggle}
         rowsID={rowsID}
         showActionHint={false}
         bare
         indent={indent}
-      >
-        {expanded && <ul id={rowsID} className="flex flex-col gap-3 py-3 pl-4">
-          {children.map((child) => {
-            const id = child.sync.id;
-            const hash = parseProjectHash(child.sync.projectHash);
-            const title = rowTitle(id, titles, previews);
-            const nested = childGroups.get(id);
-            return (
-              <li key={id}>
-                <span data-session-group-child={id} className="inline-flex min-w-0 items-start gap-2">
-                  <ProviderIcon harness={child.sync.harness} accent className="mt-1 shrink-0" />
-                  {hash ? (
-                    <Link href={transcriptHref(hash, id)} className="font-[family-name:var(--font-body)] text-base text-ink underline decoration-dotted decoration-[color:var(--ink-4)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--amber)] focus-mono">
-                      {title.text}
-                    </Link>
-                  ) : <span className="font-[family-name:var(--font-body)] text-base text-ink [overflow-wrap:anywhere]">{title.text}</span>}
-                </span>
-                {nested?.length ? <SessionChildrenGroup parentId={id} children={nested} childGroups={childGroups} titles={titles} previews={previews} expandedGroups={expandedGroups} setExpandedGroups={setExpandedGroups} indent /> : null}
-              </li>
-            );
-          })}
-        </ul>}
-      </SessionGroupDisclosure>
+      />
     </div>
   );
 }
@@ -168,9 +140,22 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
   );
   const visible = listed.slice(0, shown);
 
+  // Depth-first: each expanded child becomes its own row immediately after its
+  // parent. Folded groups materialize nothing, so a deep chain stays bounded.
+  const renderRows = useMemo(() => {
+    const out: ListRow[] = [];
+    const walk = (row: RootSessionRow, kind: 'session' | 'child', depth: number) => {
+      out.push({ ...row, id: row.sync.id, kind, depth });
+      if (!expandedGroups.has(row.sync.id)) return;
+      for (const child of childGroups.get(row.sync.id) ?? []) walk(child, 'child', depth + 1);
+    };
+    for (const row of visible) walk(row, 'session', 0);
+    return out;
+  }, [visible, childGroups, expandedGroups]);
+
   const publishedOnScreen = useMemo(
-    () => visible.filter((row) => row.publication.state === 'published').map((row) => row.id),
-    [visible],
+    () => renderRows.filter((row) => row.publication.state === 'published').map((row) => row.id),
+    [renderRows],
   );
   const audience = usePublicationAudience(publishedOnScreen, rows);
 
@@ -184,6 +169,38 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
           const hash = parseProjectHash(row.sync.projectHash);
           const title = rowTitle(row.id, titles, previews);
           const harness = row.sync.harness.replace(/-/g, ' ');
+          const group = children?.length ? (
+            <SessionChildrenGroup
+              parentId={row.id}
+              childIds={children.map((child) => child.sync.id)}
+              expanded={expandedGroups.has(row.id)}
+              onToggle={() => setExpandedGroups((previous) => {
+                const next = new Set(previous);
+                if (next.has(row.id)) next.delete(row.id);
+                else next.add(row.id);
+                return next;
+              })}
+              indent
+            />
+          ) : null;
+          if (row.kind === 'child') {
+            return (
+              <div className="flex min-w-0 flex-col" style={{ paddingLeft: `calc(${row.depth} * (var(--sp-5) + var(--sp-4)))` }}>
+                <span id={`session-group-rows:${row.id}`} data-session-group-child={row.id} className="inline-flex min-w-0 items-start gap-2">
+                  <ProviderIcon harness={row.sync.harness} accent className="mt-1 shrink-0" />
+                  {hash ? (
+                    <Link
+                      href={transcriptHref(hash, row.id)}
+                      className="font-[family-name:var(--font-body)] text-base text-ink underline decoration-dotted decoration-[color:var(--ink-4)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--amber)] focus-mono"
+                    >
+                      {title.text}
+                    </Link>
+                  ) : <span className="font-[family-name:var(--font-body)] text-base text-ink [overflow-wrap:anywhere]">{title.text}</span>}
+                </span>
+                {group}
+              </div>
+            );
+          }
           return (
             <div className="flex min-w-0 flex-col" data-session-family={row.id}>
               <span className="inline-flex min-w-0 items-start gap-2" data-session-id={row.id}>
@@ -205,7 +222,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
                   </span>
                 </span>
               </span>
-              {children?.length ? <SessionChildrenGroup parentId={row.id} children={children} childGroups={childGroups} titles={titles} previews={previews} expandedGroups={expandedGroups} setExpandedGroups={setExpandedGroups} indent /> : null}
+              {group}
             </div>
           );
         },
@@ -319,7 +336,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
           // instead of crushing every column into a sliver.
           className="[&_.tbl]:min-w-[68rem]"
           columns={columns}
-          rows={visible}
+          rows={renderRows}
           rowKey={(row) => row.id}
         />
       )}
