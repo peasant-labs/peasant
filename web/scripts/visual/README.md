@@ -247,7 +247,7 @@ lockfile is regenerated. Run the Fairtrade demo from the checkout matching that 
 - **cmd:** `cd PEASANT/web && node scripts/visual/full-app-smoke.mjs`
 - **what:** runs `make build`, boots the REAL `peasant`, drives EVERY surface over its HTTP
   routes (NOT the dev harness), asserting SERVED 200 + MOUNTED + Atkinson + NON-BLANK.
-- **env:** `SMOKE_SKIP_BUILD=1` reuse the existing bin (skip `make build`); `PEASANT_SMOKE_PORT`
+- **env:** `SMOKE_SKIP_BUILD=1` reuse the existing `./peasant` (skip `make build`); `PEASANT_SMOKE_PORT`
   (default 8699); `SMOKE_PROJECT`/`SMOKE_SESSION`/`SMOKE_BRANCH` fixture coordinates.
 - **when:** before closing ANY surface + before launching a new graph surface — the collateral-regression catcher.
 - **expect:** a per-row table `served=200 mounted=true atkinson=true` for all surfaces (dark+light)

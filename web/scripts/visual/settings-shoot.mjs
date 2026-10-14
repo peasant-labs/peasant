@@ -31,7 +31,7 @@
    (default 8795), PUPPETEER_CORE, KEEP. */
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -75,6 +75,7 @@ const markerChunk = chunks.find((path) => readFileSync(path, 'utf8').includes(MA
 if (!markerChunk) fail(`no web/out chunk carries the settings marker "${MARKER}".`, 'run make build in this worktree.')
 const newestSource = Math.max(...SOURCES.flatMap(files).map((path) => statSync(path).mtimeMs))
 if (statSync(markerChunk).mtimeMs < newestSource) fail(`${relative(REPO, markerChunk)} is older than the settings sources.`, 'run make build again.')
+if (!existsSync(BIN)) fail(`missing ${relative(REPO, BIN)}.`, 'run make build in this worktree first.')
 const binary = readFileSync(BIN)
 if (!binary.includes(Buffer.from(MARKER))) fail(`${relative(REPO, BIN)} does not embed the settings marker.`, 'run make build in this worktree.')
 if (statSync(BIN).mtimeMs < statSync(markerChunk).mtimeMs) fail(`${relative(REPO, BIN)} is older than web/out.`, 'run make build again.')

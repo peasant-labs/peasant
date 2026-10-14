@@ -18,7 +18,7 @@
  */
 import { spawn } from 'node:child_process'
 import YAML from 'yaml'
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -96,6 +96,11 @@ const RECOVER_WITHIN_MS = 10000
 
 if (!CHROME) {
   console.error('ERROR [shell-nav-default-gate.mjs] CHROME_PATH is unset. Set it to your Chrome/Chromium binary before running the offline gate.')
+  process.exit(1)
+}
+
+if (!existsSync(BIN)) {
+  console.error(`ERROR [shell-nav-default-gate.mjs] ${BIN} is missing. Run make build in this worktree, or set PEASANT_BIN.`)
   process.exit(1)
 }
 
