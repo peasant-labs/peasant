@@ -175,6 +175,58 @@ func TestRetainedAttemptRefusalIsUniformForCertificateAuthority(t *testing.T) {
 	}
 }
 
+// TestRetainedAttemptLastGoodRefusesActivePreview proves the explicit last-good
+// selection refuses an active authority that is only a preview, in both shapes:
+// with the retained pointer set and the certificate flipped to a preview, and in
+// the explicit-rebuild shape where the pointer is cleared and the preview is the
+// active authority.
+func TestRetainedAttemptLastGoodRefusesActivePreview(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("aaaabbbb-cccc-4ddd-8eee-ffff00001111")
+	seedRetainedCoexistence(t, s, sid)
+	ctx := context.Background()
+
+	// Shape 1: the retained pointer stays set; only the certificate becomes an
+	// incomplete preview, so no full generation remains to serve as last-good.
+	execGenerationSQL(t, s, `UPDATE session_content_captures SET status='incomplete', capture_format='preview_only', failure_code='source_records_omitted' WHERE session_id = '`+string(sid)+`';`)
+
+	callbackRan := false
+	err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(indexformat.ReadSnapshot) error {
+		callbackRan = true
+		return nil
+	})
+	if !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
+		t.Fatalf("last-good snapshot error = %v, want the retained-attempt sentinel", err)
+	}
+	if callbackRan {
+		t.Fatal("last-good served a snapshot for an active preview")
+	}
+	if _, err := s.ReadSessionContentSelected(ctx, string(sid), ingest.SessionReadSelection{LastGood: true}); !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
+		t.Fatalf("last-good content error = %v, want the retained-attempt sentinel", err)
+	}
+
+	// Shape 2: an explicit rebuild cleared the retained pointer and installed
+	// the preview as the active authority. The snapshot lane still refuses; the
+	// content lane refuses through its own capture authority, so the two lanes
+	// are independently guarded.
+	execGenerationSQL(t, s, `UPDATE sessions SET active_generation_id = 'gen_preview_b', latest_attempt_generation_id = NULL, latest_attempt_artifact_hash = NULL, latest_attempt_indexer_version = NULL, latest_attempt_failure_code = NULL, latest_attempt_failure_message = NULL, latest_attempt_captured_at_ms = NULL, latest_attempt_stats_json = NULL WHERE session_id = '`+string(sid)+`';`)
+
+	callbackRan = false
+	err = s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(indexformat.ReadSnapshot) error {
+		callbackRan = true
+		return nil
+	})
+	if !errors.Is(err, indexformat.ErrRetainedAttemptIncomplete) {
+		t.Fatalf("state-9 last-good snapshot error = %v, want the retained-attempt sentinel", err)
+	}
+	if callbackRan {
+		t.Fatal("state-9 last-good served a snapshot for an active preview")
+	}
+	if _, err := s.ReadSessionContentSelected(ctx, string(sid), ingest.SessionReadSelection{LastGood: true}); !errors.Is(err, ErrContentCaptureIncomplete) {
+		t.Fatalf("state-9 last-good content error = %v, want the incomplete-capture refusal", err)
+	}
+}
+
 // TestRetainedAttemptAvailableReadBindsRetainedAttempt proves the available
 // read serves the retained attempt: its generation-scoped entries, its
 // synthesized capture with the partial state, and its own counts.
