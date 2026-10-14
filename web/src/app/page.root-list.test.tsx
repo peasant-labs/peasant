@@ -371,8 +371,9 @@ describe('root page publish filters', () => {
        topics.quality = { sessions: specs.filter((spec) => spec.title).map((spec) => ({ id: spec.id, title: spec.title })) };
        if (specs.some((spec) => spec.preview)) topics.sessions = { sessions: specs.filter((spec) => spec.preview).map((spec) => makeSession({ id: spec.id, preview: spec.preview })) };
        const view = render(<HomePage />);
-      // The first mount compiles the page's chunk graph; under full-suite
-      // parallel load it can exceed the 1s default findBy timeout.
+      // Under full-suite parallel load the mounted region can take longer than the
+      // 1s default findBy timeout (observed on a cold Vite dep cache); wait up to
+      // five seconds. The assertions below are unchanged.
       let list = await screen.findByRole('region', { name: 'sessions' }, { timeout: 5000 });
       const assertSessionsStat = () => {
         const strip = screen.getByRole('list', { name: 'your sessions in numbers' });
