@@ -619,7 +619,12 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     const childTurns = childSync.turnCount.toLocaleString('en-US')
     const childMinutes = Math.max(0, Math.round(childSync.durationMs / 60_000))
     const childDuration = childMinutes < 60 ? `${childMinutes}m` : `${Math.floor(childMinutes / 60)}h ${String(childMinutes % 60).padStart(2, '0')}m`
-    const childElapsed = Math.floor(Math.max(0, Date.now() - Date.parse(childSync.startTime)) / 60_000)
+    // The page renders `when` from its own clock, which applyDeterminism freezes
+    // per document at open time. Read that same instant here; node's live clock
+    // is tens of seconds later, so a capture spanning a day boundary would fail
+    // spuriously with a message that mimics the regression this checks for.
+    const pageNow = await page.evaluate(() => Date.now())
+    const childElapsed = Math.floor(Math.max(0, pageNow - Date.parse(childSync.startTime)) / 60_000)
     const childWhen = childElapsed < 1 ? 'just now' : childElapsed < 60 ? `${childElapsed}m ago` : childElapsed < 1440 ? `${Math.floor(childElapsed / 60)}h ago` : `${Math.floor(childElapsed / 1440)}d ago`
     if (childCells.count !== 6 || !childCells.project.includes(childSync.projectName)
       || childCells.turns !== childTurns || childCells.duration !== childDuration
