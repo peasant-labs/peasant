@@ -137,6 +137,36 @@ When adding or changing a kind, update the adapter declaration beside its dispat
 production-owned census when the dispatch shape changes, regenerate the artifacts, and bump the
 relevant indexer version when settled sessions must be re-indexed.
 
+## Managed generations and the retained latest attempt
+
+A store that can persist and read a managed generation replaces the relational
+format-1 projection with one immutable format-2 generation per session. The
+generation owns its metadata, content records and completeness; the session row
+records the generation identity, the producer revision and the verified pair
+identity that produced it.
+
+A managed write is RETAINED as the session's latest attempt instead of installed
+only when all of these hold: the result is a managed V2 generation; its
+completeness is complete (`incomplete_new` is excluded); the assessed capture is
+the unaccounted source omission (`preview_only` with failure code
+`source_records_omitted`, derived from `SourceOmitted && Unaccounted &&
+!hasOmissions`); the write is an ordinary replace, never an explicit rebuild, a
+format conversion or a content backfill; the stored certificate still holds full
+authority; and a verified pair identity is available — the stored artifact hash
+or the identity the write carries. When neither is present the store refuses
+before any mutation.
+
+Retention leaves the active authority byte-identical and reports through the
+existing durable vocabulary: the `skipped` outcome with the held reason and a
+literal zero entry count, so the pipeline counts no indexed session. The mounted
+reads and the preview-snapshot detail serve the retained attempt with partial
+diagnostics; the full read and export refuse with the retained-attempt sentinel;
+the explicit last-good selection serves the active full authority. The retained
+pointer clears with the active authority's own finalization — the active move, a
+representation replacement, or the shared bookkeeping a skip or repair runs —
+and never with an identical-candidate retry. Retention consumes the capture the
+run already made; it does not reacquire the source.
+
 ## Constraints
 
 | ID | Name | Rule |
