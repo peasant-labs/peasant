@@ -150,8 +150,26 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	// and final bars. It stays silent when stderr is not a terminal and under
 	// --json; the per-transcript lines and the closing summary keep printing
 	// either way because they travel on stdout.
+	//
+	// Nothing here wipes the panel. The bar and its final footer are the ending
+	// state: a user who looks back after a cancelled run must still find them on
+	// the terminal, so every write appends and the last one to land stays.
 	progress := newCollectivePullProgress(cmd.ErrOrStderr(), flags.JSON, pullProgressTheme(cmd))
 	progress.SetTotal(len(listed))
+
+	// Paint the canceling state the moment the interrupt arrives, while the
+	// transcript in flight finishes. Without it the bar sits on its last refresh
+	// for the whole unwind, which reads as an unresponsive command. The watcher
+	// yields to the final state; Cancel is the last panel to land.
+	cancelWatch := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			progress.MarkCanceling()
+		case <-cancelWatch:
+		}
+	}()
+	defer close(cancelWatch)
 
 	outcomes := make([]collectivePullOutcome, 0, len(listed))
 	for _, row := range listed {

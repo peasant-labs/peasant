@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/pull"
@@ -77,13 +78,24 @@ const collectivePullProgressFloor = 5 * time.Second
 // silent when stderr is not a terminal and under --json; the per-transcript
 // lines and the closing summary keep printing either way because they travel
 // on stdout.
+//
+// Every write APPENDS. Nothing clears, erases, or repositions the panel, so the
+// bar and its final footer are still on the terminal after the command exits:
+// they are the ending state, and a user looking back after a cancelled run must
+// be able to read what was reached.
 type collectivePullProgress struct {
+	// mu guards the surface against the interrupt watcher, which paints the
+	// canceling state from its own goroutine while the loop is blocked in a pull.
+	mu         sync.Mutex
 	w          io.Writer
 	enabled    bool
 	model      pullprogress.Model
 	started    time.Time
 	lastRender time.Time
-	now        func() time.Time
+	// final is set once the cancellation is reported, so a watcher that wakes
+	// late cannot repaint the intermediate state over the final one.
+	final bool
+	now   func() time.Time
 }
 
 func newCollectivePullProgress(w io.Writer, jsonOutput bool, th theme.Theme) *collectivePullProgress {
@@ -117,10 +129,12 @@ func (p *collectivePullProgress) Enabled() bool { return p.enabled }
 
 // SetTotal publishes the listed cohort size and renders the initial bar.
 func (p *collectivePullProgress) SetTotal(total int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.model.SetTotal(total)
 	p.model.SetElapsed(p.sinceStart())
 	if p.enabled {
-		p.render()
+		p.renderLocked()
 	}
 }
 
@@ -128,17 +142,37 @@ func (p *collectivePullProgress) SetTotal(total int) {
 // the floor interval has passed. The final advance always renders, so a
 // fast run still leaves its completed bar on stderr.
 func (p *collectivePullProgress) Advance(done int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.model.SetDone(done)
 	p.model.SetElapsed(p.sinceStart())
 	if !p.enabled {
 		return
 	}
 	if total := p.model.Total(); total > 0 && done >= total {
-		p.render()
+		p.renderLocked()
 		return
 	}
 	if p.now().Sub(p.lastRender) >= collectivePullProgressFloor {
-		p.render()
+		p.renderLocked()
+	}
+}
+
+// MarkCanceling paints the intermediate state as soon as an interrupt arrives,
+// so the user learns the signal was received while the transcript in flight
+// finishes. Without it the bar would sit on its last refresh for the whole
+// unwind, which reads as an unresponsive command. It is safe to call from the
+// watcher goroutine, and it yields to the final state once that is reported.
+func (p *collectivePullProgress) MarkCanceling() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.final {
+		return
+	}
+	p.model.SetElapsed(p.sinceStart())
+	p.model.MarkCanceling()
+	if p.enabled {
+		p.renderLocked()
 	}
 }
 
@@ -146,10 +180,16 @@ func (p *collectivePullProgress) Advance(done int) {
 // terminal keeps the reached counts beside the cancellation report. A
 // cancellation is a final state, never a throttled refresh.
 func (p *collectivePullProgress) Cancel() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.final {
+		return
+	}
+	p.final = true
 	p.model.SetElapsed(p.sinceStart())
 	p.model.MarkCanceled()
 	if p.enabled {
-		p.render()
+		p.renderLocked()
 	}
 }
 
@@ -163,7 +203,8 @@ func (p *collectivePullProgress) sinceStart() time.Duration {
 	return elapsed
 }
 
-func (p *collectivePullProgress) render() {
+// renderLocked writes one panel. The caller holds p.mu.
+func (p *collectivePullProgress) renderLocked() {
 	fmt.Fprintln(p.w, p.model.View())
 	p.lastRender = p.now()
 }
