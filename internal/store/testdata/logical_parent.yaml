@@ -57,6 +57,7 @@
 # `documentParent` is the parent the V1 metadata document carries.
 
 child: 9a1e0000-0000-4000-8000-000000000001
+managedChild: 9a1e0000-0000-4000-8000-000000000004
 target: 9a1e0000-0000-4000-8000-000000000002
 alternate: 9a1e0000-0000-4000-8000-000000000003
 activeGeneration: gen_logical_parent_active
@@ -104,6 +105,7 @@ cases:
   - name: publication-bundle-parent-from-evidence-lastgood
     state: publication-bundle
     latestAttemptEvidence: target
+    activeEvidence: alternate
   - name: availability-readers-keep-raw
     state: availability-raw
     latestAttemptEvidence: target

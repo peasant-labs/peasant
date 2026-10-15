@@ -40,6 +40,7 @@ type logicalParentCase struct {
 
 type logicalParentFixture struct {
 	Child                   string              `yaml:"child"`
+	ManagedChild            string              `yaml:"managedChild"`
 	Target                  string              `yaml:"target"`
 	Alternate               string              `yaml:"alternate"`
 	ActiveGeneration        string              `yaml:"activeGeneration"`
@@ -725,6 +726,10 @@ func runLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *St
 	if evidenceTarget == nil {
 		t.Fatalf("case %q names no evidence target", tc.Name)
 	}
+	managedTarget := logicalParentTokenID(t, fixture, tc.ActiveEvidence)
+	if managedTarget == nil {
+		t.Fatalf("case %q names no managed generation target", tc.Name)
+	}
 	insertLogicalParentSession(t, ctx, db, *evidenceTarget)
 	seedLogicalParentPublicationSession(t, ctx, db, child)
 
@@ -732,7 +737,27 @@ func runLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *St
 	// stays NULL, so the no-active publication read must take its parent from
 	// the evidence rather than from the stored capture document.
 	seedLogicalParentPublicationEvidence(t, ctx, db, child, evidenceTarget)
+	assertLogicalParentPublicationBundle(t, ctx, db, child, evidenceTarget, "the evidence target")
 
+	// The managed half: a real activation over a publication-ready capture. The
+	// served generation names a target no stored session matches, so the cache
+	// stays NULL and the capture document names no parent at all; the bundle must
+	// therefore carry the served generation's OWN answer, which a read that left
+	// the scanned capture document in place would report as nil.
+	managedChild, err := schema.NewSessionID(fixture.ManagedChild)
+	if err != nil {
+		t.Fatalf("logical parent fixture managed child identifier: %v", err)
+	}
+	seedLogicalParentManagedPublicationSession(t, ctx, db, managedChild, managedTarget)
+	assertLogicalParentCache(t, ctx, db, managedChild, nil)
+	assertLogicalParentPublicationBundle(t, ctx, db, managedChild, managedTarget, "the served generation's own answer")
+}
+
+// assertLogicalParentPublicationBundle reads the publication bundle under the
+// explicit last-good selection both halves of the case name, and asserts the
+// parent it carries.
+func assertLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *Store, child schema.SessionID, want *schema.SessionID, source string) {
+	t.Helper()
 	bundleParent := (*schema.SessionID)(nil)
 	if err := db.WithCommittedPublicationInputSelected(ctx, ingest.SessionID(child), ingest.SessionReadSelection{LastGood: true}, func(input ingest.PublicationInputBundle) error {
 		if input.Readiness != ingest.PublicationReady {
@@ -743,9 +768,79 @@ func runLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *St
 	}); err != nil {
 		t.Fatalf("WithCommittedPublicationInputSelected(LastGood, %s): %v", child, err)
 	}
-	if !logicalParentEqual(bundleParent, evidenceTarget) {
-		t.Fatalf("publication bundle parent of %s = %s, want the evidence target %s", child, logicalParentString(bundleParent), logicalParentString(evidenceTarget))
+	if !logicalParentEqual(bundleParent, want) {
+		t.Fatalf("publication bundle parent of %s = %s, want %s from %s", child, logicalParentString(bundleParent), logicalParentString(want), source)
 	}
+}
+
+// seedLogicalParentManagedPublicationSession stores a publication-ready legacy
+// capture and then activates a managed generation over it through the real
+// activation path, carrying the capture's revision and a certified capture so
+// the recorded publication agreement survives the activation.
+func seedLogicalParentManagedPublicationSession(t *testing.T, ctx context.Context, db *Store, child schema.SessionID, target *schema.SessionID) {
+	t.Helper()
+	revision := seedLogicalParentPublicationSession(t, ctx, db, child)
+	generation, blobs := logicalParentManagedGeneration(t, child, target, "gen_logical_parent_managed_publication")
+	versions, registered := ingest.HarvesterVersionRegistry[ingest.HarnessCodex]
+	if !registered {
+		t.Fatal("the logical parent publication fixture needs a registered codex harness")
+	}
+	if _, err := db.ActivateGeneration(ctx, GenerationActivation{
+		Generation:      generation,
+		Blobs:           blobs,
+		IndexerVersion:  versions.IndexerVersion,
+		IndexedAtMs:     2,
+		CaptureRevision: revision,
+		ContentCapture:  recoveryCapture(t, generation),
+	}); err != nil {
+		t.Fatalf("activate the managed publication generation for %s: %v", child, err)
+	}
+}
+
+// logicalParentManagedGeneration builds a complete managed generation from the
+// capture's own entries, carrying one started_by relationship that names the
+// given target. The target is deliberately unstored in the managed case, so the
+// availability cache stays NULL while the generation answers.
+func logicalParentManagedGeneration(t *testing.T, child schema.SessionID, target *schema.SessionID, generationID string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+	t.Helper()
+	entries := logicalParentPublicationEntries(child)
+	blobs := make(map[schema.SourceEntryRef][]byte, len(entries))
+	content := make([]indexformat.ContentRecord, 0, len(entries))
+	refs := make([]schema.SourceEntryRef, 0, len(entries))
+	for i := range entries {
+		ref := entries[i].SourceEntryRef
+		payload := []byte("synthetic logical parent publication content " + string(ref))
+		if entries[i].ContentPreview != nil {
+			payload = []byte(*entries[i].ContentPreview)
+		}
+		blobs[ref] = payload
+		refs = append(refs, ref)
+		content = append(content, indexformat.ContentRecord{Ref: ref})
+	}
+	value := schema.SessionID(*target)
+	relationship := schema.SessionRelationship{
+		Kind:          schema.SessionRelationshipStartedBy,
+		TargetState:   schema.RelationshipTargetState(logicalParentEvidenceTargetKnown),
+		Evidence:      schema.EvidenceNativeTyped,
+		TargetLocalID: &value,
+	}
+	inputCount := int64(1)
+	generation := indexformat.V2{Generation: indexformat.Generation{
+		ID:           generationID,
+		Completeness: indexformat.GenerationCompletenessComplete,
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: ingest.CurrentSchemaVersion,
+			SessionID:     child,
+			ModelHarness:  schema.HarnessCodex,
+			Stats:         schema.SessionStats{TurnCount: len(entries), InputSubmissionCount: &inputCount},
+			Relationships: []schema.SessionRelationship{relationship},
+		},
+		Main:                 indexformat.Partition{Entries: entries},
+		Content:              content,
+		SourceEvidenceDigest: strings.Repeat("a", 64),
+		TitleRefs:            []schema.SourceEntryRef{refs[0]},
+	}}
+	return filledCandidateForValidation(t, generation, blobs), blobs
 }
 
 func runLogicalParentAvailabilityRaw(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {
@@ -815,8 +910,9 @@ func runLogicalParentOriginListing(t *testing.T, ctx context.Context, db *Store,
 
 // seedLogicalParentPublicationSession stores one publication-ready legacy
 // capture through the production writers, so the publication read reaches its
-// composition instead of refusing an unready session.
-func seedLogicalParentPublicationSession(t *testing.T, ctx context.Context, db *Store, child schema.SessionID) {
+// composition instead of refusing an unready session. It returns the capture
+// revision the session was indexed at.
+func seedLogicalParentPublicationSession(t *testing.T, ctx context.Context, db *Store, child schema.SessionID) int64 {
 	t.Helper()
 	meta := planLibraryMeta(ingest.SessionID(child), ingest.HarnessCodex, nil)
 	entries := logicalParentPublicationEntries(child)
@@ -850,6 +946,7 @@ func seedLogicalParentPublicationSession(t *testing.T, ctx context.Context, db *
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("index logical parent publication capture: %+v", results)
 	}
+	return revisions[ingest.SessionID(child)]
 }
 
 func logicalParentPublicationEntries(child schema.SessionID) []schema.SessionEntry {
