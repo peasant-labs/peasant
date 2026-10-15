@@ -40,3 +40,8 @@ cases:
     snapshot: sess_snapshotparent
     cache: sess_cacheparent
     expectParent: sess_snapshotparent
+  - name: latest-attempt-evidence-child-answers-parent
+    state: target_known
+    target: sess_latestattemptparent
+    latestAttempt: true
+    expectParent: sess_latestattemptparent

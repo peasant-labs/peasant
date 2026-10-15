@@ -26,6 +26,11 @@ type pushIdentityCase struct {
 	Snapshot         string `yaml:"snapshot"`
 	Cache            string `yaml:"cache"`
 	InactiveEvidence bool   `yaml:"inactiveEvidence"`
+	// LatestAttempt puts the case's evidence generation in the session's latest
+	// attempt instead of its active generation, so the identity lane must
+	// consult the shared generation scope rather than the active generation
+	// alone.
+	LatestAttempt    bool   `yaml:"latestAttempt"`
 	ExpectParent     string `yaml:"expectParent"`
 	ExpectUnresolved bool   `yaml:"expectUnresolved"`
 }
@@ -73,6 +78,11 @@ func TestSyncParentIdentities(t *testing.T) {
 			exec(`INSERT OR IGNORE INTO session_metrics(session_id) VALUES ('sess_child')`)
 			exec(`DELETE FROM session_metrics WHERE session_id='sess_cacheparent'`)
 			exec(`UPDATE sessions SET active_generation_id='active', parent_id=NULLIF(?, '') WHERE session_id='sess_child'`, tc.Cache)
+			if tc.LatestAttempt {
+				// The evidence generation is the session's only generation: no
+				// active generation exists, so only the shared scope reaches it.
+				exec(`UPDATE sessions SET active_generation_id=NULL, latest_attempt_generation_id='active' WHERE session_id='sess_child'`)
+			}
 			if tc.State != "" {
 				kind := tc.Kind
 				if kind == "" {
