@@ -357,6 +357,15 @@ type SessionReadSelection struct {
 	LastGood bool
 }
 
+// SelectedSnapshotReader is the explicit-selection form of the store's
+// authoritative snapshot read. The selector names only the last-good intent:
+// the store resolves the generation internally, so no caller-supplied
+// generation identifier can select a full read. It is the read contract the
+// transcript and export selected builders consume.
+type SelectedSnapshotReader interface {
+	WithSessionSnapshotSelected(context.Context, schema.SessionID, SessionReadSelection, func(indexformat.ReadSnapshot) error) error
+}
+
 // SessionIndexStateReader captures SQL evidence only. The indexing caller must
 // separately bind this snapshot to the captured files before claiming coherence.
 type SessionIndexStateReader interface {

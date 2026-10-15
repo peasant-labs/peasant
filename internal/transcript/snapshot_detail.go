@@ -236,6 +236,9 @@ func unixMilliToTime(ms int64) time.Time {
 // already hold full verified fields; file-backed snapshots keep their shared
 // lock through hydration, folding, validation and serialization. Callers send
 // or write the owned bytes only after the callback returns.
+//
+// It performs no latest-attempt check of its own: the reader's authority read
+// carries the uniform refusal, so nothing is emitted before it.
 func BuildSnapshotDetailBytes(ctx context.Context, reader indexformat.SnapshotReader, resolver indexformat.ContentResolver, sessionID schema.SessionID) ([]byte, *schema.SessionDetailPayload, error) {
 	if reader == nil {
 		return nil, nil, fmt.Errorf("transcript.BuildSnapshotDetailBytes: no snapshot reader for session %q; a durable payload cannot be built; open the store with generation support", sessionID)
@@ -250,6 +253,39 @@ func BuildSnapshotDetailBytes(ctx context.Context, reader indexformat.SnapshotRe
 		encoded, err := json.Marshal(detail)
 		if err != nil {
 			return fmt.Errorf("transcript.BuildSnapshotDetailBytes: serialize validated detail for session %q: %w; nothing was emitted", sessionID, err)
+		}
+		owned = encoded
+		payload = detail
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return owned, payload, nil
+}
+
+// BuildSnapshotDetailBytesSelected is the explicit-selection form of
+// BuildSnapshotDetailBytes: the caller names which generation the read answers
+// for. A LastGood selection serves the last-good full authority while a newer
+// incomplete attempt is kept beside it; the store still refuses when the active
+// authority is itself only a preview, and it resolves the generation internally
+// so no caller-supplied identifier can select a full read. The zero selection is
+// authority mode and behaves exactly like BuildSnapshotDetailBytes. Hydration,
+// folding, validation and serialization run inside the same shared lock.
+func BuildSnapshotDetailBytesSelected(ctx context.Context, reader ingest.SelectedSnapshotReader, resolver indexformat.ContentResolver, selection ingest.SessionReadSelection, sessionID schema.SessionID) ([]byte, *schema.SessionDetailPayload, error) {
+	if reader == nil {
+		return nil, nil, fmt.Errorf("transcript.BuildSnapshotDetailBytesSelected: no snapshot reader for session %q; a durable payload cannot be built; open the store with generation support", sessionID)
+	}
+	var owned []byte
+	var payload *schema.SessionDetailPayload
+	err := reader.WithSessionSnapshotSelected(ctx, sessionID, selection, func(snapshot indexformat.ReadSnapshot) error {
+		detail, err := SnapshotToDetailValidated(ctx, snapshot, resolver)
+		if err != nil {
+			return err
+		}
+		encoded, err := json.Marshal(detail)
+		if err != nil {
+			return fmt.Errorf("transcript.BuildSnapshotDetailBytesSelected: serialize validated detail for session %q: %w; nothing was emitted", sessionID, err)
 		}
 		owned = encoded
 		payload = detail
