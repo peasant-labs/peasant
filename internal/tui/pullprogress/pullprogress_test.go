@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -16,11 +17,12 @@ import (
 var pullProgressYAML []byte
 
 type pullProgressCase struct {
-	Name      string `yaml:"name"`
-	Done      int    `yaml:"done"`
-	Total     int    `yaml:"total"`
-	Canceling bool   `yaml:"canceling"`
-	Canceled  bool   `yaml:"canceled"`
+	Name       string `yaml:"name"`
+	Done       int    `yaml:"done"`
+	Total      int    `yaml:"total"`
+	ElapsedSec int    `yaml:"elapsedSec"`
+	Canceling  bool   `yaml:"canceling"`
+	Canceled   bool   `yaml:"canceled"`
 }
 
 type pullProgressDocument struct {
@@ -57,6 +59,7 @@ func mount(t *testing.T, c pullProgressCase, mode theme.Mode, width int) string 
 	model := pullprogress.New(theme.New(mode))
 	model.SetTotal(c.Total)
 	model.SetDone(c.Done)
+	model.SetElapsed(time.Duration(c.ElapsedSec) * time.Second)
 	if c.Canceling {
 		model.MarkCanceling()
 	}
@@ -67,11 +70,12 @@ func mount(t *testing.T, c pullProgressCase, mode theme.Mode, width int) string 
 	return model.View()
 }
 
-// TestPullProgressMounted proves the mounted surface keeps its counts,
-// copy, and bar in both themes at both terminal sizes. It is the mounted
-// screenshot test for the bulk-pull bar: header, done/total, bar cells,
-// and the interrupt footer must all be present, every row must fit the
-// terminal width, and the surface must never pad to a full screen.
+// TestPullProgressMounted proves the mounted surface keeps its counts, its
+// elapsed readout, its copy, and its bar in both themes at both terminal
+// sizes. It is the mounted screenshot test for the bulk-pull bar: header,
+// done/total, elapsed, bar cells, and the interrupt footer must all be
+// present, every row must fit the terminal width, and the surface must
+// never pad to a full screen.
 func TestPullProgressMounted(t *testing.T) {
 	t.Parallel()
 	for _, c := range loadPullProgressCases(t) {
@@ -93,9 +97,13 @@ func TestPullProgressMounted(t *testing.T) {
 					if !strings.Contains(plain, "█") && !strings.Contains(plain, "░") {
 						t.Errorf("theme %s width %d: bar lost its cells in\n%s", mode, width, plain)
 					}
+					wantElapsed := fmt.Sprintf("elapsed: %ds", c.ElapsedSec)
+					if !strings.Contains(plain, wantElapsed) {
+						t.Errorf("theme %s width %d: missing elapsed readout %q in\n%s", mode, width, wantElapsed, plain)
+					}
 					wantFooter := "ctrl+c to cancel"
 					if c.Canceling {
-						wantFooter = "canceling pull"
+						wantFooter = "canceling pull..."
 					}
 					if c.Canceled {
 						wantFooter = "pull canceled"
@@ -105,6 +113,9 @@ func TestPullProgressMounted(t *testing.T) {
 					}
 					if c.Canceling && strings.Contains(plain, "ctrl+c to cancel") {
 						t.Errorf("theme %s width %d: canceling state kept the steady hint in\n%s", mode, width, plain)
+					}
+					if c.Canceling && strings.Contains(plain, "waiting for current work") {
+						t.Errorf("theme %s width %d: canceling footer kept the long sentence in\n%s", mode, width, plain)
 					}
 					if c.Canceled && (strings.Contains(plain, "ctrl+c to cancel") || strings.Contains(plain, "canceling pull")) {
 						t.Errorf("theme %s width %d: canceled state kept a live hint in\n%s", mode, width, plain)
