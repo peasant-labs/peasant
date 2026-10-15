@@ -876,6 +876,24 @@ func runLogicalParentAvailabilityRaw(t *testing.T, ctx context.Context, db *Stor
 	if location.ParentID != "" {
 		t.Fatalf("bulk location parent of %s = %q, want the raw cache (empty)", child, location.ParentID)
 	}
+	// The push row carries the same availability cache: it is how a consumer
+	// builds the on-disk path, never a parent answer.
+	pushRows, err := db.UnpushedSessions(ctx)
+	if err != nil {
+		t.Fatalf("UnpushedSessions: %v", err)
+	}
+	var pushRow *ingest.PushSessionRow
+	for i := range pushRows {
+		if string(pushRows[i].SessionID) == string(child) {
+			pushRow = &pushRows[i]
+		}
+	}
+	if pushRow == nil {
+		t.Fatalf("UnpushedSessions did not list session %s", child)
+	}
+	if pushRow.ParentID != "" {
+		t.Fatalf("push row parent of %s = %q, want the raw cache (empty)", child, pushRow.ParentID)
+	}
 }
 
 func runLogicalParentOriginListing(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {
