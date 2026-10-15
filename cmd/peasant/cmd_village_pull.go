@@ -138,7 +138,7 @@ anything.`,
 			defer cleanup()
 
 			if len(collectiveRefs) > 0 {
-				return runVillageTranscriptsPullCollectives(cmd, newVillageClientFromCreds(creds),
+				return runVillageTranscriptsPullCollectives(cmd, db, newVillageClientFromCreds(creds),
 					villagePullPipeline(cmd, creds, db),
 					collectiveRefs,
 					collectivePullFlags{Force: force, DryRun: dryRun, JSON: jsonOutput, Level: level})
