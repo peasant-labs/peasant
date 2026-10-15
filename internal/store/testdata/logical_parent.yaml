@@ -63,18 +63,6 @@ alternate: 9a1e0000-0000-4000-8000-000000000003
 activeGeneration: gen_logical_parent_active
 latestAttemptGeneration: gen_logical_parent_latest_attempt
 
-requiredNames:
-  - latest-attempt-only-evidence-answers
-  - active-wins-over-latest-attempt
-  - active-without-evidence-ignores-latest-attempt
-  - no-evidence-falls-back-to-cache
-  - managed-target-unstored-prior-answers-target
-  - written-cache-agrees-with-accessor
-  - converted-pair-answers-document-parent
-  - publication-bundle-parent-from-evidence-lastgood
-  - availability-readers-keep-raw
-  - origin-listing-answers-latest-attempt-evidence
-
 cases:
   - name: latest-attempt-only-evidence-answers
     state: latest-attempt-only
