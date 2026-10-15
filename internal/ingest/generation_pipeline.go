@@ -466,9 +466,9 @@ func (p *Pipeline) commitGenerationResult(ctx context.Context, prepared prepared
 
 // latestAttemptHeldReason is the durable free-text reason a kept latest attempt
 // records. The index_log outcome stays the existing skipped value: the write
-// held the latest preview instead of advancing the active authority, and the
-// cause line names why and what the user can do about it.
-const latestAttemptHeldReason = "latest capture retained as an incomplete preview; the last-good generation stays the read authority; re-index the complete source to publish"
+// held the latest attempt beside the active authority instead of advancing it,
+// and the cause line names why and what the user can do about it.
+const latestAttemptHeldReason = "latest attempt kept as an incomplete preview; the last-good generation stays the read authority; re-index the complete source to publish"
 
 // finishGenerationResult is shared by single and batched activation so
 // refusal, retained accounting, skip, and post-commit sweep have one owner.

@@ -32,7 +32,7 @@ const (
 // latestAttemptHeldReason is the substring every retention case asserts in the
 // durable held reason. It is the production reason's own opening clause, so a
 // reason that stops naming the latest attempt fails instead of drifting.
-const latestAttemptHeldReason = "latest capture retained"
+const latestAttemptHeldReason = "latest attempt kept as an incomplete preview"
 
 // latestAttemptFlagWarning is the stored metadata warning that makes a refresh's
 // capture the assessed unaccounted-SourceOmitted preview: the stored pair

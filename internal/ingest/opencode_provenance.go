@@ -133,7 +133,7 @@ type OpenCodeMessageAttribution struct {
 	// Inherited marks a settled copied row: delivery becomes inherited_context
 	// while origin and actor stay as the native rule established.
 	Inherited bool
-	// UncertainCopy marks a retained copy whose proof did not survive (the
+	// UncertainCopy marks a copy whose proof did not survive (the
 	// parent payload is gone). The caller must place such blocks in a declared
 	// earlier section; the classifier flags them so the builder can enforce it.
 	UncertainCopy bool
@@ -833,7 +833,7 @@ func singleOpenCodeBlock(msg OpenCodeProvenanceMessage, attr OpenCodeMessageAttr
 	return blocks, nil
 }
 
-// markOpenCodeUncertain flags retained copies whose proof did not survive. The
+// markOpenCodeUncertain flags uncertain copies whose proof did not survive. The
 // shared builder only accepts uncertain blocks in a declared earlier section,
 // so the capture builder must route them there.
 func markOpenCodeUncertain(blocks []ClassifiedBlock) {

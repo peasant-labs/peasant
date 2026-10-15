@@ -28,12 +28,12 @@ cases:
           depth: 0
           toolCallAbsent: true
           provenance: {origin: tool_activity, ownership: local, delivery: tool_delivery}
-      retained:
-        - &retained_carrier
+      inherited:
+        - &inherited_carrier
           ref: e_carrier
           content: ""
           segmentInclusion: same_thread_surviving_own
-        - &retained_call
+        - &inherited_call
           ref: e_call
           content: "{}"
           segmentInclusion: same_thread_surviving_own
@@ -70,9 +70,9 @@ cases:
       purpose: interaction
       turnCount: 0
       inputSubmissionCount: 0
-      retained:
-        - *retained_carrier
-        - *retained_call
+      inherited:
+        - *inherited_carrier
+        - *inherited_call
         - {ref: e_result, content: synthetic result, segmentInclusion: same_thread_surviving_own}
   - <<: *boundary_pair
     name: inherited-custom-pair
@@ -297,7 +297,7 @@ cases:
           entryType: "system"
           content: "dev config malformed"
           provenance: {origin: harness_context, actor: unknown, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
-      retained:
+      inherited:
         - ref: e_inh1
           content: "inherited"
           segmentInclusion: same_thread_surviving_own
@@ -341,7 +341,7 @@ cases:
           entryType: "text"
           content: "unequal two"
           provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
-      retained:
+      inherited:
         - ref: e_ck4
           content: "aligned inherited"
           segmentInclusion: same_thread_surviving_own
@@ -870,11 +870,11 @@ cases:
           entryType: "system"
           content: "ctx-user_verification.notice"
           provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
-  - name: inherited-copied-prefix-retained
+  - name: inherited-copied-prefix
     stableThreadID: "11111111-1111-4111-8111-111111111111"
     pointer: /synthetic/current.jsonl
     physicalSourceID: phys-current
-    generationID: gen-inherited-copied-prefix-retained
+    generationID: gen-inherited-copied-prefix
     completeness: complete
     historyMode: paginated
     copyBoundary: 4
@@ -906,7 +906,7 @@ cases:
           content: "child surviving input"
           submissionRef: "s_u1"
           provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
-      retained:
+      inherited:
         - ref: e_inh1
           content: "copied parent question"
           segmentInclusion: same_thread_surviving_own
@@ -916,11 +916,11 @@ cases:
         - ref: e_inh3
           content: "run the copied command"
           segmentInclusion: same_thread_surviving_own
-  - name: inherited-multi-segment-retained
+  - name: inherited-multi-segment
     stableThreadID: "11111111-1111-4111-8111-111111111111"
     pointer: /synthetic/current.jsonl
     physicalSourceID: phys-current
-    generationID: gen-inherited-multi-segment-retained
+    generationID: gen-inherited-multi-segment
     completeness: complete
     historyMode: paginated
     references:
@@ -958,7 +958,7 @@ cases:
           content: "current surviving input"
           submissionRef: "s_u1"
           provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
-      retained:
+      inherited:
         - ref: e_inh1
           content: "ancestor copied input"
           segmentInclusion: inherited
