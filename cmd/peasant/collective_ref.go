@@ -4,20 +4,23 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
-// collectiveRefURLSegment is the web path segment a collective's page lives
-// under: https://<village-host>/groups/<uuid>.
-const collectiveRefURLSegment = "groups"
+// collectiveRefURLSegments are the collective page path segments a pasted URL may
+// use: the live route today, and the canonical one once the API family is renamed
+// (peasant-labs/schema#155). Accepting both costs nothing here, because the CLI
+// parses the URL itself, and it keeps a copied page URL working across the rename.
+var collectiveRefURLSegments = []string{"groups", "collectives"}
 
 // resolveCollectiveRefs turns the repeatable --collective values into the
 // collectives they name, in the order given, with duplicates collapsed. One
 // value may be a collective UUID, a collective name (case-insensitive), or a
-// pasted collective web URL (https://<host>/groups/<uuid>).
+// pasted collective page URL (…/groups/<uuid> or …/collectives/<uuid>).
 //
 // Resolution runs ONCE against the caller's own collective list, before any
 // pull-list request. An unknown or ambiguous name therefore fails early, naming
@@ -122,12 +125,12 @@ func collectiveRefCandidate(raw string) (string, error) {
 			segments = append(segments, segment)
 		}
 	}
-	if len(segments) != 2 || segments[0] != collectiveRefURLSegment {
+	if len(segments) != 2 || !slices.Contains(collectiveRefURLSegments, segments[0]) {
 		return "", fmt.Errorf(
 			"invalid --collective value %q: the URL is not a collective page\n"+
-				"  what: the URL path is not the canonical /groups/<uuid> shape (got %q)\n"+
+				"  what: the URL path is neither the /groups/<uuid> nor the /collectives/<uuid> shape (got %q)\n"+
 				"  why:  only a collective's own page URL names a collective\n"+
-				"  fix:  copy the collective's page URL (…/groups/<uuid>), or pass its name or UUID",
+				"  fix:  copy the collective's page URL (…/groups/<uuid> or …/collectives/<uuid>), or pass its name or UUID",
 			trimmed, parsed.Path)
 	}
 	return segments[1], nil
