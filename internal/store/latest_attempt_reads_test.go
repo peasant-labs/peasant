@@ -15,8 +15,12 @@ import (
 // This file proves the store-side read contract of latest-attempt
 // coexistence: which generation each read answers for, which counts it
 // reports, and which selection surfaces treat the latest attempt as settled.
-// The mounted and end-to-end evidence over the same seams belongs to the
-// integration family, not here.
+// The same seams have other homes, and this file is not a second copy of them:
+// the mounted detail payload (BuildSnapshotPreviewBytes, with the attempt's own
+// counts) is proven in internal/api/snapshot_detail_test.go; the mounted
+// kickstart pane and the share-wizard source read in cmd/peasant; the harvest's
+// literal summary and durable-log observables in internal/ingest. A store row
+// read here is not mounted or end-to-end proof.
 
 // authorityStats and latestAttemptStats are the two DISTINCT literal producer-stat
 // documents the counts-scope assertions use, so a read that reports the wrong
