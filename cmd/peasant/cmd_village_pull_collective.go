@@ -145,10 +145,11 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 		fmt.Fprintf(cmd.ErrOrStderr(), "Dry run — no transcript will be written\n\n")
 	}
 
-	// The stderr bar shows done/total while the run proceeds. It stays
-	// silent when stderr is not a terminal and under --json; the
-	// per-transcript lines and the closing summary keep printing either way
-	// because they travel on stdout.
+	// The stderr bar shows done/total with the elapsed run time while the run
+	// proceeds, throttled to one refresh per floor interval plus the initial
+	// and final bars. It stays silent when stderr is not a terminal and under
+	// --json; the per-transcript lines and the closing summary keep printing
+	// either way because they travel on stdout.
 	progress := newCollectivePullProgress(cmd.ErrOrStderr(), flags.JSON, pullProgressTheme(cmd))
 	progress.SetTotal(len(listed))
 

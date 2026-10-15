@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -288,14 +289,30 @@ func testVillagePullCollectiveSkipGateFallback(t *testing.T) {
 	}
 }
 
+// progressTestClock is a stepped clock steering the progress throttle
+// deterministically: the reported run time only moves when the test moves
+// it, so rapid advances and floor refreshes never depend on wall timing.
+type progressTestClock struct {
+	now time.Time
+}
+
+// Now reports the clock's current time for the progress reporter.
+func (c *progressTestClock) Now() time.Time { return c.now }
+
+// Advance moves the clock forward by d.
+func (c *progressTestClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
+
 // testVillagePullCollectiveProgressTTY proves the stderr bar renders
 // done/total on a terminal: the reporter is enabled on a PTY writer and
-// the bytes it writes carry the count and the bar cells.
+// the bytes it writes carry the count, the bar cells, and the elapsed run
+// time. The clock steps past the refresh floor so the advance is a
+// periodic refresh, not a throttled-away write.
 func testVillagePullCollectiveProgressTTY(t *testing.T) {
 	t.Helper()
 	master, terminal := openTestTerminal(t)
 	setTestTerminalSize(t, terminal, 24, 80)
-	progress := newCollectivePullProgress(terminal, false, theme.New(theme.ModeDark))
+	clock := &progressTestClock{now: time.Now()}
+	progress := newCollectivePullProgressAt(terminal, false, theme.New(theme.ModeDark), clock.Now)
 	if !progress.Enabled() {
 		t.Fatal("progress must be enabled on a terminal stderr without --json")
 	}
@@ -304,14 +321,106 @@ func testVillagePullCollectiveProgressTTY(t *testing.T) {
 	go func() { _, _ = io.Copy(out, master); close(copied) }()
 	t.Cleanup(func() { _ = terminal.Close(); _ = master.Close(); <-copied })
 	progress.SetTotal(4)
+	clock.Advance(collectivePullProgressFloor)
 	progress.Advance(1)
 	testwait.Receive(t, out.seen, "the progress bar rendered done/total on a terminal")
 	rendered := out.String()
 	if !strings.Contains(rendered, "1/4") {
 		t.Errorf("terminal bar must show done/total 1/4; got %q", rendered)
 	}
+	if !strings.Contains(rendered, "elapsed:") {
+		t.Errorf("terminal bar must carry the elapsed run time; got %q", rendered)
+	}
 	if !strings.Contains(rendered, "█") && !strings.Contains(rendered, "░") {
 		t.Errorf("terminal bar must carry bar cells; got %q", rendered)
+	}
+}
+
+// TestCollectivePullProgressThrottlesRapidAdvances proves a burst of
+// completions writes one periodic refresh instead of one panel per
+// transcript: with the clock frozen past the initial bar, intermediate
+// advances move only the counts, and the floor passing renders once with
+// the reached count and the elapsed run time.
+func TestCollectivePullProgressThrottlesRapidAdvances(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	clock := &progressTestClock{now: time.Now()}
+	progress := newCollectivePullProgressAt(&stderr, false, theme.New(theme.ModeDark), clock.Now)
+	progress.enabled = true
+	progress.SetTotal(100)
+	initial := stderr.String()
+	if !strings.Contains(initial, "0/100") {
+		t.Fatalf("initial bar must show 0/100; got %q", initial)
+	}
+	progress.Advance(1)
+	progress.Advance(2)
+	progress.Advance(50)
+	if got := stderr.String(); got != initial {
+		t.Errorf("rapid advances must not write between floor refreshes; initial %d bytes grew to %d", len(initial), len(got))
+	}
+	clock.Advance(collectivePullProgressFloor)
+	progress.Advance(51)
+	refreshed := stderr.String()
+	if !strings.Contains(refreshed, "51/100") {
+		t.Errorf("floor refresh must show the reached 51/100; got %q", refreshed)
+	}
+	if !strings.Contains(refreshed, "elapsed: 5s") {
+		t.Errorf("floor refresh must carry the elapsed run time; got %q", refreshed)
+	}
+	if n := strings.Count(refreshed, "collective pull progress"); n != 2 {
+		t.Errorf("one initial plus one refresh must render exactly 2 panels, got %d", n)
+	}
+}
+
+// TestCollectivePullProgressFinalAdvanceAlwaysRenders proves a fast run
+// still leaves its completed bar on stderr: the final advance renders even
+// though the floor interval never passed.
+func TestCollectivePullProgressFinalAdvanceAlwaysRenders(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	clock := &progressTestClock{now: time.Now()}
+	progress := newCollectivePullProgressAt(&stderr, false, theme.New(theme.ModeDark), clock.Now)
+	progress.enabled = true
+	progress.SetTotal(4)
+	progress.Advance(1)
+	progress.Advance(2)
+	progress.Advance(3)
+	before := stderr.String()
+	if n := strings.Count(before, "collective pull progress"); n != 1 {
+		t.Fatalf("throttled advances must leave only the initial panel, got %d", n)
+	}
+	progress.Advance(4)
+	final := stderr.String()
+	if !strings.Contains(final, "4/4") {
+		t.Errorf("final advance must show the completed 4/4; got %q", final)
+	}
+	if n := strings.Count(final, "collective pull progress"); n != 2 {
+		t.Errorf("initial plus final must render exactly 2 panels, got %d", n)
+	}
+}
+
+// TestCollectivePullProgressCancelAlwaysRenders proves an interrupt renders
+// its final state even though the floor interval never passed: the
+// terminal keeps the reached counts beside the cancellation report.
+func TestCollectivePullProgressCancelAlwaysRenders(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	clock := &progressTestClock{now: time.Now()}
+	progress := newCollectivePullProgressAt(&stderr, false, theme.New(theme.ModeDark), clock.Now)
+	progress.enabled = true
+	progress.SetTotal(4)
+	progress.Advance(1)
+	clock.Advance(2 * time.Second)
+	progress.Cancel()
+	rendered := stderr.String()
+	if !strings.Contains(rendered, "pull canceled") {
+		t.Errorf("cancel must render the canceled footer; got %q", rendered)
+	}
+	if !strings.Contains(rendered, "1/4") {
+		t.Errorf("cancel must retain the reached 1/4; got %q", rendered)
+	}
+	if !strings.Contains(rendered, "elapsed: 2s") {
+		t.Errorf("cancel must retain the elapsed run time; got %q", rendered)
 	}
 }
 

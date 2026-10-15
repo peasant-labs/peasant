@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/pull"
 	"github.com/peasant-labs/peasant/internal/tui/pullprogress"
@@ -58,26 +59,55 @@ func pullProgressTheme(cmd *cobra.Command) theme.Theme {
 	return theme.New(theme.ModeDark)
 }
 
+// collectivePullProgressFloor is the minimum gap between two stderr bar
+// writes while transcripts keep landing. It follows the migrate progress
+// tracker's floor: a bulk pull of hundreds of transcripts must not fill
+// stderr with near-identical panels.
+const collectivePullProgressFloor = 5 * time.Second
+
 // collectivePullProgress is the stderr bar for a bulk pull. It renders the
-// pullprogress surface after each completed transcript while the run
-// proceeds. It is silent when stderr is not a terminal and under --json;
-// the per-transcript lines and the closing summary keep printing either
-// way because they travel on stdout.
+// pullprogress surface while the run proceeds, throttled to
+// collectivePullProgressFloor: the initial bar, a periodic refresh carrying
+// the elapsed run time, and the final bar always render, while the advances
+// between two refreshes only move the counts. Throttling instead of an
+// in-place redraw is deliberate. The per-transcript lines travel on stdout,
+// so both streams share the terminal: a cursor-up erase of the stderr panel
+// would clobber stdout lines printed since the last render, and a Bubble Tea
+// renderer (the ingest approach) would fight the same interleaving. It is
+// silent when stderr is not a terminal and under --json; the per-transcript
+// lines and the closing summary keep printing either way because they travel
+// on stdout.
 type collectivePullProgress struct {
-	w       io.Writer
-	enabled bool
-	model   pullprogress.Model
+	w          io.Writer
+	enabled    bool
+	model      pullprogress.Model
+	started    time.Time
+	lastRender time.Time
+	now        func() time.Time
 }
 
 func newCollectivePullProgress(w io.Writer, jsonOutput bool, th theme.Theme) *collectivePullProgress {
+	return newCollectivePullProgressAt(w, jsonOutput, th, time.Now)
+}
+
+// newCollectivePullProgressAt is the clock-injectable constructor. Tests
+// steer the throttle deterministically through now; production passes
+// time.Now.
+func newCollectivePullProgressAt(w io.Writer, jsonOutput bool, th theme.Theme, now func() time.Time) *collectivePullProgress {
+	if now == nil {
+		now = time.Now
+	}
 	model := pullprogress.New(th)
 	if width := collectivePullTerminalWidth(w); width > 0 {
 		model.SetSize(width, 0)
 	}
+	started := now()
 	return &collectivePullProgress{
 		w:       w,
 		enabled: !jsonOutput && isCollectivePullTTY(w),
 		model:   model,
+		started: started,
+		now:     now,
 	}
 }
 
@@ -88,30 +118,54 @@ func (p *collectivePullProgress) Enabled() bool { return p.enabled }
 // SetTotal publishes the listed cohort size and renders the initial bar.
 func (p *collectivePullProgress) SetTotal(total int) {
 	p.model.SetTotal(total)
+	p.model.SetElapsed(p.sinceStart())
 	if p.enabled {
 		p.render()
 	}
 }
 
-// Advance records one more completed transcript and re-renders the bar.
+// Advance records one more completed transcript and refreshes the bar when
+// the floor interval has passed. The final advance always renders, so a
+// fast run still leaves its completed bar on stderr.
 func (p *collectivePullProgress) Advance(done int) {
 	p.model.SetDone(done)
-	if p.enabled {
+	p.model.SetElapsed(p.sinceStart())
+	if !p.enabled {
+		return
+	}
+	if total := p.model.Total(); total > 0 && done >= total {
+		p.render()
+		return
+	}
+	if p.now().Sub(p.lastRender) >= collectivePullProgressFloor {
 		p.render()
 	}
 }
 
 // Cancel retains the interrupted final state and renders it once, so a
-// terminal keeps the reached counts beside the cancellation report.
+// terminal keeps the reached counts beside the cancellation report. A
+// cancellation is a final state, never a throttled refresh.
 func (p *collectivePullProgress) Cancel() {
+	p.model.SetElapsed(p.sinceStart())
 	p.model.MarkCanceled()
 	if p.enabled {
 		p.render()
 	}
 }
 
+// sinceStart reports how long the run has been going. A clock stepped
+// backwards still renders a zero elapsed, never a negative one.
+func (p *collectivePullProgress) sinceStart() time.Duration {
+	elapsed := p.now().Sub(p.started)
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
+}
+
 func (p *collectivePullProgress) render() {
 	fmt.Fprintln(p.w, p.model.View())
+	p.lastRender = p.now()
 }
 
 // collectivePullCancellationError reports an interrupted bulk pull. Done
