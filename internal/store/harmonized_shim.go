@@ -98,7 +98,7 @@ func shimBodyRecordsOnConn(conn *sqlite.Conn, sessionID string, minIndex, maxInd
 // shimBodyRecordsForGenerationOnConn reads one generation's partition-0 body
 // rows in entry order with their stored digests. An empty generationID selects
 // the session's active generation, which is the ordinary read; a named one
-// binds the read to that exact generation, so a retained latest attempt's rows
+// binds the read to that exact generation, so a latest attempt's rows
 // serve without the active pointer ever being consulted. A your-range variant
 // filters by entry index; a nil bound leaves that side open.
 func shimBodyRecordsForGenerationOnConn(conn *sqlite.Conn, sessionID, generationID string, minIndex, maxIndex *int) ([]EntryRecord, error) {
