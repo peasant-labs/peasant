@@ -301,10 +301,10 @@ func TestLatestAttemptAvailableReadBindsLatestAttempt(t *testing.T) {
 	}
 }
 
-// TestLatestAttemptPreviewSnapshotReportsItsStats proves the
+// TestLatestAttemptPreviewSnapshotReportsLatestAttemptStats proves the
 // preview-snapshot read resolves the latest attempt's generation and its
 // counts from the latest attempt's own producer stats document.
-func TestLatestAttemptPreviewSnapshotReportsItsStats(t *testing.T) {
+func TestLatestAttemptPreviewSnapshotReportsLatestAttemptStats(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("44445555-6666-4777-8888-999900001111")
 	seedLatestAttemptCoexistence(t, s, sid)

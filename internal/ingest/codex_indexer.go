@@ -153,7 +153,7 @@ func validatedCompletionSessionReference(session DiscoveredSession) string {
 
 // readCurrentSource returns the transcript bytes for the completion-gated
 // path. Without the history capture it reads the file exactly as the
-// retained file indexer always has: one read, no authority selection, no
+// stored-file indexer always has: one read, no authority selection, no
 // refusal. With the capture it verifies authority, bounds and stability
 // first, then re-points the session at the stable native identity and
 // authoritative current source the capture selected, so entry parsing

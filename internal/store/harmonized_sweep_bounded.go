@@ -15,7 +15,7 @@ var errSweepNeedsBatches = errors.New("sweep requires resumable bounded batches"
 // sweepBoundedSession consolidates an ordinary sweep in one bounded commit.
 // The total catalog + body + blob work must fit SweepRows. Larger sessions,
 // filesystem cleanup, and corrupt deletes retain the resumable batch path.
-func (s *Store) sweepBoundedSession(ctx context.Context, sid schema.SessionID, active, retained string, limit int) (result SweepResult, applied bool, err error) {
+func (s *Store) sweepBoundedSession(ctx context.Context, sid schema.SessionID, active, latestAttempt string, limit int) (result SweepResult, applied bool, err error) {
 	dirs, err := s.generationArtifacts.ListGenerationDirectories(ctx, sid)
 	if err != nil {
 		return result, false, err
@@ -28,7 +28,7 @@ func (s *Store) sweepBoundedSession(ctx context.Context, sid schema.SessionID, a
 		return result, false, fmt.Errorf("store: take connection for bounded sweep of session %s: %w; the sweep flag remains set; retry harvest", sid, err)
 	}
 	defer s.pool.Put(conn)
-	err = sweepBoundedOnConn(ctx, conn, sid, active, retained, limit, &result)
+	err = sweepBoundedOnConn(ctx, conn, sid, active, latestAttempt, limit, &result)
 	if errors.Is(err, errSweepNeedsBatches) {
 		return SweepResult{}, false, nil
 	}
@@ -38,14 +38,14 @@ func (s *Store) sweepBoundedSession(ctx context.Context, sid schema.SessionID, a
 	return result, true, nil
 }
 
-func sweepBoundedOnConn(ctx context.Context, conn *sqlite.Conn, sid schema.SessionID, active, retained string, limit int, result *SweepResult) (err error) {
+func sweepBoundedOnConn(ctx context.Context, conn *sqlite.Conn, sid schema.SessionID, active, latestAttempt string, limit int, result *SweepResult) (err error) {
 	end := sqlitex.Transaction(conn)
 	defer end(&err)
 	var work int64
 	for _, table := range reclaimTableNames {
 		statement := `SELECT COUNT(*) FROM (SELECT 1 FROM ` + table + ` WHERE session_id = ? AND ` + supersededGenerationPredicate + ` LIMIT ?)`
 		if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{
-			Args: []any{string(sid), active, retained, int64(limit) + 1 - work},
+			Args: []any{string(sid), active, latestAttempt, int64(limit) + 1 - work},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				work += stmt.ColumnInt64(0)
 				return nil
@@ -59,14 +59,14 @@ func sweepBoundedOnConn(ctx context.Context, conn *sqlite.Conn, sid schema.Sessi
 	}
 	// These predicates include objects referenced only by the superseded
 	// catalog rows that this transaction will remove, not content the active
-	// authority or the retained latest attempt still references.
+	// authority or the latest attempt still references.
 	statements := []string{
 		`SELECT COUNT(*) FROM (SELECT 1 FROM session_entry_bodies b WHERE b.session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_entries m WHERE m.session_id = b.session_id AND m.body_digest = b.body_digest AND (m.generation_id = ? OR m.generation_id = ?)) LIMIT ?)`,
 		`SELECT COUNT(*) FROM (SELECT 1 FROM session_content c WHERE c.session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_content d WHERE d.session_id = c.session_id AND d.digest = c.digest AND (d.generation_id = ? OR d.generation_id = ?)) LIMIT ?)`,
 	}
 	for _, statement := range statements {
 		if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{
-			Args: []any{string(sid), active, retained, int64(limit) + 1 - work},
+			Args: []any{string(sid), active, latestAttempt, int64(limit) + 1 - work},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				work += stmt.ColumnInt64(0)
 				return nil
@@ -98,7 +98,7 @@ func sweepBoundedOnConn(ctx context.Context, conn *sqlite.Conn, sid schema.Sessi
 			return err
 		}
 		statement := `DELETE FROM ` + table + ` WHERE session_id = ? AND ` + supersededGenerationPredicate
-		if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{Args: []any{string(sid), active, retained}}); err != nil {
+		if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{Args: []any{string(sid), active, latestAttempt}}); err != nil {
 			return err
 		}
 		result.RowsDeleted += int64(conn.Changes())

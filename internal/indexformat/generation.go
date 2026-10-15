@@ -31,7 +31,7 @@ var ErrSnapshotNotFound = errors.New("indexformat: session has no stored metadat
 // explicitly; it never means the session is missing, and it never means the
 // stored content is damaged. transcript.ErrLegacySnapshot stays reserved for an
 // actual legacy V1 snapshot.
-var ErrLatestAttemptIncomplete = errors.New("indexformat: session holds a retained incomplete latest attempt beside its last-good generation; read the bounded preview or select the last-good explicitly")
+var ErrLatestAttemptIncomplete = errors.New("indexformat: session holds an incomplete latest attempt beside its last-good generation; read the bounded preview or select the last-good explicitly")
 
 // MaxNativeAliasKeyBytes bounds one opaque native alias key. Native identity
 // is encoded into this key before it is persisted; the raw private path stays

@@ -106,9 +106,9 @@ func TestLatestAttemptPointerClearsOnRepresentationReplacement(t *testing.T) {
 	}
 }
 
-// TestLatestAttemptSweepKeepsIt proves the shared {active, latest attempt}
+// TestLatestAttemptSweepKeepsTheLatestAttempt proves the shared {active, latest attempt}
 // reference: the ordinary sweep keeps the latest attempt's rows and objects.
-func TestLatestAttemptSweepKeepsIt(t *testing.T) {
+func TestLatestAttemptSweepKeepsTheLatestAttempt(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("e3e3e3e3-e3e3-43e3-83e3-e3e3e3e3e3e3")
 	latestAttemptPreviewForTest(t, s, sid, hexIdentity('4'))
@@ -127,9 +127,9 @@ func TestLatestAttemptSweepKeepsIt(t *testing.T) {
 	}
 }
 
-// TestLatestAttemptCleanupInactiveGenerationRefusesIt proves the latest-attempt
+// TestLatestAttemptCleanupInactiveGenerationRefusesTheLatestAttempt proves the latest-attempt
 // pointer is protected from the inactive-generation cleanup.
-func TestLatestAttemptCleanupInactiveGenerationRefusesIt(t *testing.T) {
+func TestLatestAttemptCleanupInactiveGenerationRefusesTheLatestAttempt(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("f4f4f4f4-f4f4-44f4-84f4-f4f4f4f4f4f4")
 	latestAttemptPreviewForTest(t, s, sid, hexIdentity('5'))
