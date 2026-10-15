@@ -133,7 +133,7 @@ func previewCandidate(t *testing.T, sid schema.SessionID, genID string) Generati
 	return GenerationActivation{
 		Generation:     preview,
 		Blobs:          blobs,
-		IndexerVersion: 18,
+		IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion,
 		IndexedAtMs:    2,
 		ContentCapture: sourceOmittedPreviewWrite(),
 	}
@@ -172,8 +172,8 @@ func TestLatestAttemptPreviewOverFullAuthority(t *testing.T) {
 	if pointer.artifactHash != identity {
 		t.Fatalf("latest-attempt pair identity = %q, want the verified identity", pointer.artifactHash)
 	}
-	if pointer.indexerVersion != 18 {
-		t.Fatalf("latest-attempt producer revision = %d, want 18", pointer.indexerVersion)
+	if want := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion; pointer.indexerVersion != want {
+		t.Fatalf("latest-attempt producer revision = %d, want %d", pointer.indexerVersion, want)
 	}
 	if pointer.failureCode != string(ingest.ContentCaptureSourceRecordsOmitted) {
 		t.Fatalf("latest-attempt failure code = %q, want source_records_omitted", pointer.failureCode)
@@ -216,7 +216,7 @@ func TestLatestAttemptFreshIDUnchangedIsTrueNoOp(t *testing.T) {
 	// excludes the generation identifier, so this is the true no-op.
 	repeat, repeatBlobs := buildTestGeneration(t, sid, "gen_preview_b2", "preview text", "preview input", "preview output")
 	outcome, err := s.ActivateGeneration(context.Background(), GenerationActivation{
-		Generation: repeat, Blobs: repeatBlobs, IndexerVersion: 18, IndexedAtMs: 3,
+		Generation: repeat, Blobs: repeatBlobs, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 3,
 		ContentCapture: sourceOmittedPreviewWrite(),
 	})
 	if err != nil {
@@ -248,7 +248,7 @@ func TestLatestAttemptChangedFacetReplacesAttempt(t *testing.T) {
 	}
 	replacement, blobs := buildTestGeneration(t, sid, "gen_preview_b2", "preview text", "preview input", "preview output")
 	outcome, err := s.ActivateGeneration(context.Background(), GenerationActivation{
-		Generation: replacement, Blobs: blobs, IndexerVersion: 19, IndexedAtMs: 4,
+		Generation: replacement, Blobs: blobs, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion + 1, IndexedAtMs: 4,
 		ContentCapture: sourceOmittedPreviewWrite(),
 	})
 	if err != nil {
@@ -261,8 +261,8 @@ func TestLatestAttemptChangedFacetReplacesAttempt(t *testing.T) {
 	if pointer.generationID != "gen_preview_b2" {
 		t.Fatalf("latest-attempt generation = %q, want the replaced gen_preview_b2", pointer.generationID)
 	}
-	if pointer.indexerVersion != 19 {
-		t.Fatalf("latest-attempt producer revision = %d, want 19", pointer.indexerVersion)
+	if want := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion + 1; pointer.indexerVersion != want {
+		t.Fatalf("latest-attempt producer revision = %d, want %d", pointer.indexerVersion, want)
 	}
 	if rows := generationRowCount(t, s, sid); rows != 2 {
 		t.Fatalf("generation rows = %d, want 2 (the full authority and one latest attempt)", rows)

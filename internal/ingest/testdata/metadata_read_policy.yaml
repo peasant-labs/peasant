@@ -1,3 +1,5 @@
+# adapterVersion and storedAdapterVersion track
+# HarvesterVersionRegistry[claude-code].AdapterVersion; this fixture is YAML and cannot derive it.
 requiredNames:
   - future-stored-adapter-failed-prefetch
   - future-stored-adapter-missing-sidecar
@@ -365,8 +367,8 @@ cases:
   # before publication captures existed; a captured row is not re-read.
   - name: db v9 without a capture rereads native input once
     schemaVersion: 9
-    adapterVersion: 2
-    storedAdapterVersion: 2
+    adapterVersion: 3
+    storedAdapterVersion: 3
     database: true
     reconciled: true
     wantExtract: 1
@@ -393,24 +395,24 @@ cases:
     wantExtract: 1
   - name: v10 known producer without a capture rereads native input once
     schemaVersion: 10
-    adapterVersion: 2
-    storedAdapterVersion: 2
+    adapterVersion: 3
+    storedAdapterVersion: 3
     database: true
     reconciled: true
     wantExtract: 1
     wantIndexed: 1
   - name: retained v9 index does not reread native input
     schemaVersion: 9
-    adapterVersion: 2
-    storedAdapterVersion: 2
+    adapterVersion: 3
+    storedAdapterVersion: 3
     database: true
     reindex: true
     stale: true
     wantIndexed: 1
   - name: forced retained v9 index does not reread native input
     schemaVersion: 9
-    adapterVersion: 2
-    storedAdapterVersion: 2
+    adapterVersion: 3
+    storedAdapterVersion: 3
     database: true
     reindex: true
     force: true
