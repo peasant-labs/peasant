@@ -312,3 +312,68 @@ func runCrashSavepointIsolation(t *testing.T) {
 		t.Fatalf("hostile session visible = %q, want nothing committed", got)
 	}
 }
+
+// TestLatestAttemptLegacyBatchRetainsThroughTheRealWriter drives the REAL batch
+// activation over a row that predates the artifact-hash column, with the write
+// supplying the verified pair identity. The batch seam returns only the
+// activation outcome and its error, so the case asserts exactly those facts:
+// the held disposition, the authority staying active and byte-identical, the
+// retained pointer recording the attempt, and the bootstrapped artifact hash.
+// Written, entry counts and producer stats are NOT asserted here; the batch
+// seam does not return them, and the harvest-side family owns those literals.
+func TestLatestAttemptLegacyBatchRetainsThroughTheRealWriter(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	ctx := context.Background()
+	sid, err := schema.NewSessionID("c8c8c8c8-c8c8-48c8-88c8-c8c8c8c8c8c8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedGenerationSession(t, s, string(sid))
+
+	authority, authorityBlobs := buildTestGeneration(t, sid, "gen_authority_a", "authority text", "authority input", "authority output")
+	if _, err := s.ActivateGeneration(ctx, GenerationActivation{
+		Generation: authority, Blobs: authorityBlobs, IndexerVersion: 1, IndexedAtMs: 1,
+		ContentCapture: recoveryCapture(t, authority),
+	}); err != nil {
+		t.Fatalf("install the read authority: %v", err)
+	}
+	// The row predates the artifact-hash column, so the retention must establish
+	// the pair identity from the write rather than claim NULL equality.
+	execGenerationSQL(t, s, `UPDATE sessions SET artifact_hash = NULL WHERE session_id = '`+string(sid)+`';`)
+
+	attempt, attemptBlobs := buildTestGeneration(t, sid, "gen_attempt_b", "preview text", "preview input", "preview output")
+	identity := hexIdentity('e')
+	// The pair identity claim is only admitted against the captured SQL state,
+	// so the write carries the snapshot it describes.
+	expected := readIndexStateFor(t, s, sid)
+	results := s.ActivateGenerationBatch(ctx, []GenerationActivation{{
+		Generation: attempt, Blobs: attemptBlobs, IndexerVersion: 18, IndexedAtMs: 2,
+		ContentCapture: sourceOmittedPreviewWrite(), ArtifactIdentity: &identity,
+		ExpectedState: expected,
+	}})
+	if len(results) != 1 {
+		t.Fatalf("batch results = %d, want 1", len(results))
+	}
+	if results[0].Err != nil {
+		t.Fatalf("legacy retention batch write returned %v, want a held attempt", results[0].Err)
+	}
+	if results[0].Outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("batch disposition = %v, want ActivationLatestAttemptPreview", results[0].Outcome.Disposition)
+	}
+	if got := visibleGeneration(t, s, sid); got != "gen_authority_a" {
+		t.Fatalf("active generation = %q, want the untouched authority", got)
+	}
+	assertHarmonizedContent(t, s, sid, "gen_authority_a", authority, authorityBlobs)
+
+	pointer := latestAttemptPointerFor(t, s, sid)
+	if pointer.generationID != "gen_attempt_b" {
+		t.Fatalf("retained generation = %q, want gen_attempt_b", pointer.generationID)
+	}
+	if pointer.artifactHash != identity {
+		t.Fatalf("retained pair identity = %q, want the supplied %q", pointer.artifactHash, identity)
+	}
+	state := readIndexStateFor(t, s, sid)
+	if state.ArtifactHash == nil || *state.ArtifactHash != identity {
+		t.Fatalf("bootstrapped artifact hash = %v, want the supplied identity", state.ArtifactHash)
+	}
+}

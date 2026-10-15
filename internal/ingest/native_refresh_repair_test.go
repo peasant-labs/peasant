@@ -44,6 +44,16 @@ type nativeRefreshRepairCase struct {
 	// carries a running/streaming tool, for the authority-bridge scenario.
 	UnsettledNativeSource  string   `yaml:"unsettledNativeSource"`
 	HeldDiagnosticContains []string `yaml:"heldDiagnosticContains"`
+	// Authority names the read authority a latest-attempt retention case starts
+	// from: a managed generation, the stored certificate, or a managed
+	// generation whose row predates the artifact-hash column.
+	Authority string `yaml:"authority"`
+	// RetentionRepeat runs the harvest a second time to prove the settled
+	// retained attempt is a true no-op.
+	RetentionRepeat bool `yaml:"retentionRepeat"`
+	// ExplicitRebuild runs a forced harvest after retention to prove the
+	// operator override replaces the authority and clears the retained pointer.
+	ExplicitRebuild bool `yaml:"explicitRebuild"`
 }
 
 type nativeRefreshRepairFixture struct {
@@ -109,9 +119,9 @@ func nativeRepairMeta(t *testing.T, sessionID string, harness ingest.Harness, na
 // runNativeRepairPipeline runs the real Pipeline with the managed-generation
 // targets injected explicitly, exactly as production composes them once a
 // capable store is configured.
-func runNativeRepairPipeline(t *testing.T, db *store.Store, fs ingest.FileSystem, outputDir string) *ingest.PipelineResult {
+func runNativeRepairPipeline(t *testing.T, db *store.Store, fs ingest.FileSystem, outputDir string, cfgOpts ...func(*ingest.PipelineConfig)) *ingest.PipelineResult {
 	t.Helper()
-	cfg := makePipelineConfig(outputDir)
+	cfg := makePipelineConfig(outputDir, cfgOpts...)
 	versions := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)
 	pipeline, err := newTestPipeline(
 		fs,
@@ -406,7 +416,7 @@ func readMetricsTitle(t *testing.T, db *store.Store, sid ingest.SessionID) strin
 func knownNativeRepairScenario(scenario string) bool {
 	switch scenario {
 	case "maintenance_repair", "failed_capture", "future_state", "unrelated_harness",
-		"opencode_native_activation", "opencode_authority_bridge":
+		"opencode_native_activation", "opencode_authority_bridge", "latest_attempt_retention":
 		return true
 	default:
 		return false
@@ -443,6 +453,10 @@ func TestNativeRefreshRepair(t *testing.T) {
 			}
 			if tc.Scenario == "opencode_authority_bridge" {
 				runOpenCodeAuthorityBridgePipeline(t, tc)
+				return
+			}
+			if tc.Scenario == "latest_attempt_retention" {
+				runLatestAttemptRetention(t, tc)
 				return
 			}
 			sid, err := ingest.NewSessionID(tc.SessionID)

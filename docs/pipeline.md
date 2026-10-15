@@ -196,6 +196,44 @@ carried annotation targets. If remapping would detach existing entry annotations
 the rewrite is refused and logged as a warning instead of corrupting annotation
 targets.
 
+### Managed generations and the retained latest attempt
+
+A store that can persist and read a managed generation replaces the relational
+format-1 projection with one immutable format-2 generation per session. The
+generation owns its metadata, content records and completeness; the session row
+records the generation identity, the producer revision and the verified pair
+identity that produced it.
+
+One case is deliberately not a replacement. A managed write whose assessed
+capture is an unaccounted source omission — the stored metadata records that a
+source record was left out, and the stored transcript carries no stand-in for it
+— over a session that already holds a full read authority is **retained** as the
+session's latest attempt instead of installed:
+
+- The active authority is untouched: its generation, content, certificate and
+  stamps stay byte-identical, and the write never enters repair.
+- The attempt is recorded on the session row (`latest_attempt_*`) with its own
+  generation, producer revision, adapter revision and producer stats. An attempt
+  that changes the pair, the producer target or the adapter target replaces the
+  previous attempt; an identical repeat is a true no-op.
+- The durable report is the existing `skipped` outcome with the held reason and
+  a literal zero entry count, so the harvest counts no indexed session.
+- The mounted reads (`ReadSessionAvailable`, the kickstart pane, the share-wizard
+  preview) and the preview-snapshot detail serve the retained attempt's own
+  entries, capture and counts, with partial diagnostics. The full read and the
+  export refuse with the retained-attempt sentinel instead of serving either
+  generation blended.
+- The explicit last-good selection (`--last-good`,
+  `SessionReadSelection{LastGood}`) serves the active full authority. It is
+  refused when the active authority is itself only a preview.
+- Publication readiness refuses while the attempt is retained, naming the
+  coexistence in the actionable reason.
+
+The attempt settles once the pair, the producer target and the adapter target
+all match the recorded facets. A newer complete generation, an explicit rebuild,
+or a skip/repair finalization clears the retained pointer in the same
+transaction; the ordinary sweep keeps the retained attempt's rows until then.
+
 ### ANNOTATE fast paths
 
 ANNOTATE records an `annotation_run_state` row after a successful classifier pass.

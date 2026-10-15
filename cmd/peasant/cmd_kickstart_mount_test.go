@@ -48,8 +48,12 @@ const (
 	mountOmittedRecordsSessionID = "1b6d4f82-2a57-4c03-8d91-4e7f3a0b6c25"
 	mountFreshSessionID          = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
 	mountEmptySessionID          = "c60b9f74-9e36-4a22-a75e-7c4b5d9f1e80"
-	mountProjectRowID            = "git@github.com:acme/tool.git"
-	expectedMountSeedRows        = 1
+	// A session whose last-good authority is a complete generation with a newer
+	// incomplete preview retained beside it. The pane must report the partial
+	// state, because the capture read it uses resolves the retained attempt.
+	mountRetainedSessionID = "d71c2e58-6f49-4b31-9c8d-3e5a7b2f4d96"
+	mountProjectRowID      = "git@github.com:acme/tool.git"
+	expectedMountSeedRows  = 1
 )
 
 type mountRetentionSeedFixture struct {
@@ -643,6 +647,58 @@ func TestKickstartPreview_HighlightsCodeFromTheStore(t *testing.T) {
 	idx := strings.Index(got, "func")
 	if idx <= 0 || !strings.HasSuffix(got[:idx], "m") {
 		t.Errorf("the keyword %q from the stored reply is not syntax-highlighted; got:\n%q", "func", got)
+	}
+}
+
+// TestKickstartPreview_RetainedAttemptReportsPartial proves the mounted partial
+// notice over a REAL generation-capable store: the session's last-good authority
+// is a complete generation and a newer incomplete preview is retained beside it.
+// The pane's capture read resolves the retained attempt, so the pane reports the
+// partial state and shows the retained attempt's own prose. Reading the store
+// row alone would not prove the mounted path.
+func TestKickstartPreview_RetainedAttemptReportsPartial(t *testing.T) {
+	t.Parallel()
+	doc := loadPreviewDoc(t)
+	dataHome := t.TempDir()
+	dbPath := defaults.ResolveDBFilePathWith(dataHome).String()
+	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
+		t.Fatalf("create data directory: %v", err)
+	}
+	now := time.Now().UnixMilli()
+	entry := storeEntryFor(mountRetainedSessionID, now)
+	entry.Metadata.SchemaVersion = ingest.CurrentSchemaVersion
+
+	db, err := openPreparedStore(t, dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	retainedID := ingest.SessionID(mountRetainedSessionID)
+	testutil.SeedReadyPublication(t, db, entry.Metadata, sessionEntries(t, retainedID, doc.Recorded, now))
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seed store: %v", err)
+	}
+	seedRetainedPreview(t, dataHome, mountRetainedSessionID, "the retained attempt carries newer prose")
+
+	readDB, err := openPreparedStore(t, dbPath, mustGenerationStoreOptions(t, filepath.Join(dataHome, "peasant-sync"))...)
+	if err != nil {
+		t.Fatalf("open the generation store the mount reads: %v", err)
+	}
+	defer readDB.Close()
+
+	sessions := []ftue.SessionListing{{Harness: string(defaults.HarnessClaudeCode), SessionID: mountRetainedSessionID, ProjectName: "acme/tool"}}
+	body, err := kickstartPreview(mountTestCmd(t, dataHome), readDB, theme.New(theme.ModeDark), sessions).Body(mountRetainedSessionID)
+	if err != nil {
+		t.Fatalf("preview the retained session: %v", err)
+	}
+	got := flattenPane(body.Render(100))
+	if !strings.Contains(got, needle("showing a partial preview of the session")) {
+		t.Fatalf("the pane must report the retained attempt as partial; got:\n%s", got)
+	}
+	if !strings.Contains(got, needle("the retained attempt carries newer prose")) {
+		t.Fatalf("the pane must show the retained attempt's own prose; got:\n%s", got)
+	}
+	if strings.Contains(got, "not imported yet") {
+		t.Fatalf("a retained session is imported; the pane must not describe it as unimported; got:\n%s", got)
 	}
 }
 

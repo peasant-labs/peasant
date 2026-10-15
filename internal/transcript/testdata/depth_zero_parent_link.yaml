@@ -35,3 +35,13 @@ cases:
     expectedOverlay:
       0: "moved content"
       1: "moved content"
+  - name: unpaired_tool_result_is_not_a_served_turn
+    entries:
+      - {index: 0, role: user, depth: 0, content: "run the probe"}
+      - {index: 1, role: assistant, depth: 0, entryType: tool_use, toolCallId: call-observed, content: "bash"}
+      - {index: 2, role: tool, depth: 0, entryType: tool_result, toolCallId: call-lost, toolOutput: "the call was never observed"}
+    expectedTurns:
+      - {index: 0, role: user, toolCalls: 0}
+      - {index: 1, role: assistant, toolCalls: 1}
+    expectedToolOutput:
+      call-observed: ""

@@ -8,3 +8,7 @@ requiredNames:
   - codex_unrelated_harness_unchanged
   - opencode_stale_v1_native_activation
   - opencode_v1_full_authority_holds_unfinished_native
+  - claude_flag_without_stand_in_retains_latest_attempt
+  - claude_legacy_null_artifact_retains_with_provided_identity
+  - claude_certificate_authority_retains_latest_attempt
+  - claude_explicit_rebuild_over_retained_clears_pointer
