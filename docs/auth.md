@@ -62,7 +62,9 @@ require login; purely-local reads are **offline**.
 | Command | Contacts village? | Gate | Source |
 |---------|-------------------|------|--------|
 | `village transcripts pull <ref>` | yes | **login required** — `requireVillageCredentials` (mirrors `cmd_push.go`) | `cmd_village_pull.go` |
+| `village transcripts pull --collective <ref>...` (bulk) | yes | **login required** (same gate; exactly one selection: a ref or `--collective`, not both) | `cmd_village_pull.go` + `cmd_village_pull_collective.go` |
 | `village transcripts list` (remote, default) | yes | **login required** | `cmd_village_list.go` |
+| `village transcripts list --collective <ref>... [--limit N]` (remote) | yes | **login required** (same gate; pages to the end, `--limit` sets the page size) | `cmd_village_list.go` |
 | `village annotations sync` | yes | **login required** | `cmd_village_annotations.go` |
 | `village transcripts list --local` | **no** | **OFFLINE** — no credentials loaded | `cmd_village_list.go` (`runVillageTranscriptsListLocal`) |
 | `village transcripts context <ref>` | **no** | **OFFLINE** — reads only the V34 index + on-disk blob | `cmd_village_transcripts.go` |
@@ -142,6 +144,25 @@ flowchart TD
     E -- no --> DENY
     DENY -. public / collective-preview / pending-share all land here .-> DENY
 ```
+
+### 4.5 Collective filter (`collectives` + repeatable `--collective`)
+
+`pull --collective` and `list --collective` narrow the pullable listing to
+transcripts with an `approved` share into any listed collective the caller is a
+member of. A `--collective` value is a collective name, its UUID, or its page
+URL under `/groups/<uuid>` or `/collectives/<uuid>`; it is repeatable, and
+several values list the union, each transcript once. An omitted `collectives`
+filter lists everything pullable (own + approved-shared). A collective listing
+pages to the end so the listing matches what a pull would take, while the plain
+listing keeps its single-page behaviour; `--limit` sets the remote page size
+(`--local` refuses `--collective`/`--limit`).
+
+A village which predates the filter is refused rather than over-pulled: the
+bulk pull negotiates the pull window once before any download, and a village
+that predates the `collectives` filter advertises an older window there, so the
+CLI aborts with a `contract-error` instead of pulling everything. See
+[pull.md §8](pull.md#8-collective-bulk-pull---collective) for the paging,
+reference-form, and test citations.
 
 ---
 
