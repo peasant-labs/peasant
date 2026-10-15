@@ -147,6 +147,13 @@ func testVillagePullCollectiveCancelPaintsWhileInFlight(t *testing.T) {
 		t.Fatal("a cancelled bulk pull must exit non-zero")
 	}
 
+	// The copy from the pseudo-terminal drains asynchronously, so the final panel
+	// can arrive after the command returns. Wait for it instead of reading the
+	// buffer the instant the run finishes, which races the copy.
+	testwait.Until(t, "the terminal kept the canceled panel", func() bool {
+		return strings.Contains(out.String(), "pull canceled")
+	})
+
 	rendered := out.String()
 	if !strings.Contains(rendered, "canceling pull...") {
 		t.Errorf("the terminal must keep the canceling panel; got %q", rendered)
