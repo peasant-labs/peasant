@@ -207,19 +207,19 @@ func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ing
 	return updates, nil
 }
 
-// sqlHealParentCache sets one child's FK availability cache and resets its
-// origin watermark in the same statement, so the repaired row is re-judged by
-// the next origin resolve pass.
-const sqlHealParentCache = `UPDATE sessions SET parent_id = ?, origin_version = 0 WHERE session_id = ?`
-
 // sqlInvalidateStaleParentOrigins re-queues every settled, parent-linked,
 // independently admitted row whose verdict is still unknown at the current
-// origin rule version. The predicate is whole-population and idempotent: once a
-// row is reset to version 0 it no longer matches, and the resolve pass moves it
-// back to the rule version with its parent-link verdict.
-const sqlInvalidateStaleParentOrigins = `UPDATE sessions SET origin_version = 0
+// origin rule version. Its parent test is the session-level logical-parent
+// answer, rendered through LogicalParentSQL, not the raw availability cache: a
+// child whose generation carries started_by evidence is parent-linked even
+// while its cache is NULL, so the re-queue set is exactly the set the resolve
+// pass's own work list (sqlListStaleOriginSessions) treats as parent-linked.
+// The predicate is whole-population and idempotent: once a row is reset to
+// version 0 it no longer matches, and the resolve pass moves it back to the
+// rule version with its parent-link verdict.
+var sqlInvalidateStaleParentOrigins = `UPDATE sessions SET origin_version = 0
 WHERE session_origin = 'unknown'
-  AND parent_id IS NOT NULL
+  AND COALESCE(` + LogicalParentSQL("sessions") + `, '') <> ''
   AND origin_version = ?
   AND model_harness IN (?, ?)`
 
