@@ -434,9 +434,15 @@ func BuildPushCommand() *cobra.Command {
 				}
 
 				// Run the push wizard for interactive confirmation.
-				// Skipped for --dry-run, --json, non-TTY, or --non-interactive/--yes.
+				// Skipped for --dry-run, --json, non-TTY, --non-interactive/--yes,
+				// or --last-good. The last-good flag skips it because the wizard
+				// previews the newer attempt while the push sends the last-good
+				// authority, and a session with a retained attempt is not even
+				// selectable in the wizard; the flag does NOT imply
+				// --non-interactive, so the public-consent prompt below still
+				// applies.
 				isTTY := term.IsTerminal(int(os.Stdin.Fd()))
-				if !dryRun && !jsonOutput && isTTY && !nonInteractive {
+				if pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood) {
 					wizQuery := push.PushCandidateQuery{
 						Force:          force,
 						SourceProvider: sourceHarness,
@@ -887,7 +893,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")
 	cmd.Flags().StringVar(&autoPublishEvent, "auto-publish-event", "", "Require consent for this hook event (post-commit or pre-push)")
 	cmd.Flags().BoolVar(&requireAutoPublishRule, "require-auto-publish-rule", false, "Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)")
-	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Publish the last-good full transcript when a newer incomplete attempt is kept beside it. A hand-run, non-interactive choice: it is refused together with --auto-publish-event/--require-auto-publish-rule and is never written into a hook file, so an automatic publication never sends stale last-good content. The store resolves the last-good authority server-side, so no session or generation identifier is accepted")
+	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Publish the last-good full transcript when a newer incomplete attempt is kept beside it. A hand-run choice: it skips the push wizard (the wizard previews the newer attempt, while this flag publishes the last-good authority) and does not imply --non-interactive, so the public-consent prompt still applies. It is refused together with --auto-publish-event/--require-auto-publish-rule and is never written into a hook file, so an automatic publication never sends stale last-good content. The store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 	cmd.Flags().BoolVar(&nonInteractiveFlag, "non-interactive", false, "Run without the interactive wizard or public-consent prompt (for CI/scripts)")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "(alias for --non-interactive)")
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")
@@ -2211,6 +2217,16 @@ func buildPushWizardSessions(
 		wizSessions[i].Meta = &input.Metadata
 	}
 	return wizSessions, nil
+}
+
+// pushWizardEnabled reports whether this run opens the interactive push wizard.
+// --last-good skips it: the wizard's preview reads the session's available
+// (latest attempt) content while the flag publishes the last-good authority,
+// and a session with a retained attempt is not even selectable in the wizard
+// (it reads as NeedsIngest). The flag does not imply --non-interactive: the
+// public-consent prompt still applies.
+func pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood bool) bool {
+	return !dryRun && !jsonOutput && isTTY && !nonInteractive && !lastGood
 }
 
 // runPushWizard is a thin TTY wrapper over buildPushWizardSessions: it builds the

@@ -15,11 +15,14 @@ import (
 )
 
 // Compile-time guards: the production Store is the concrete SnapshotReader and
-// ContentResolver consumed by the transcript hydration and export layers.
+// ContentResolver consumed by the transcript hydration and export layers, and
+// the SelectedSnapshotReader consumed by the explicit-selection detail and
+// export builders.
 var (
 	_ indexformat.SnapshotReader        = (*Store)(nil)
 	_ indexformat.ContentResolver       = (*Store)(nil)
 	_ indexformat.PreviewSnapshotReader = (*Store)(nil)
+	_ ingest.SelectedSnapshotReader     = (*Store)(nil)
 )
 
 // GenerationSnapshotsSupported reports whether this store was opened with the
