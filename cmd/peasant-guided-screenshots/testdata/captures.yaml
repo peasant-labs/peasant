@@ -180,13 +180,13 @@ ingestProgressStates:
 
 pullProgressStates:
   - key: running
-    wantContains: [collective pull progress, 1/4, "█", ctrl+c to cancel]
+    wantContains: [collective pull progress, 1/4, "█", "elapsed: 2s", ctrl+c to cancel]
     wantAbsent: [canceling pull, pull canceled]
   - key: canceling
-    wantContains: [collective pull progress, 2/4, "█", canceling pull]
-    wantAbsent: [ctrl+c to cancel, pull canceled]
+    wantContains: [collective pull progress, 2/4, "█", "elapsed: 9s", canceling pull...]
+    wantAbsent: [ctrl+c to cancel, pull canceled, waiting for current work]
   - key: canceled
-    wantContains: [collective pull progress, 2/4, "█", pull canceled]
+    wantContains: [collective pull progress, 2/4, "█", "elapsed: 12s", pull canceled]
     wantAbsent: [ctrl+c to cancel, canceling pull]
 
 selection:

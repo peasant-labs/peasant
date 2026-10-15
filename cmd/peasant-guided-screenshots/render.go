@@ -242,22 +242,26 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 
 // renderPullProgressCapture mounts the REAL bulk-pull progress surface —
 // the same pullprogress.Model the collective-pull stderr reporter renders
-// after each completed transcript — over scrubbed synthetic counts. The
-// running bar advances 1/4; the canceling and canceled states retain the
-// reached 2/4 beside their footers, exactly as the interrupted run does.
+// on its throttled refreshes — over scrubbed synthetic counts and a fixed
+// elapsed run time per state. The running bar advances 1/4; the canceling
+// and canceled states retain the reached 2/4 beside their footers, exactly
+// as the interrupted run does.
 func renderPullProgressCapture(capture pullProgressCaptureFixture) (string, error) {
 	model := pullprogress.New(captureThemeValue(capture.Theme))
 	switch capture.State {
 	case pullProgressStateRunning:
 		model.SetTotal(4)
 		model.SetDone(1)
+		model.SetElapsed(2 * time.Second)
 	case pullProgressStateCanceling:
 		model.SetTotal(4)
 		model.SetDone(2)
+		model.SetElapsed(9 * time.Second)
 		model.MarkCanceling()
 	case pullProgressStateCanceled:
 		model.SetTotal(4)
 		model.SetDone(2)
+		model.SetElapsed(12 * time.Second)
 		model.MarkCanceled()
 	default:
 		return "", fmt.Errorf("render pull progress capture %q: unknown pull progress state %q", capture.Name, capture.State)
