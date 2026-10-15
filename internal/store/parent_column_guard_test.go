@@ -63,7 +63,12 @@ var parentColumnResidualClasses = map[string]bool{
 	"write-guard":       true,
 	"writers":           true,
 	"ddl":               true,
-	"cross-package":     true,
+	// cross-package is the class of a parent answer whose rendering belongs to
+	// the cross-package reader slice: it is used only while that slice has not
+	// yet routed the declaration, and it disappears from the fixture when those
+	// entries move to the routed section. It stays in the closed set so the
+	// guard can classify such a site instead of rejecting it.
+	"cross-package": true,
 }
 
 var parentColumnForeignClasses = map[string]bool{
@@ -187,10 +192,12 @@ func parentColumnRepoRoot(t *testing.T) string {
 // parseParentColumnSites walks production Go files under internal/ and cmd/ and
 // returns one entry per declaration that carries the token in a string literal.
 // Test files and testdata are outside the closure, and so are directories the Go
-// tool itself ignores: a name beginning with "." or "_", and testdata. That rule
-// matters because other tests materialize scratch trees beside the sources they
-// exercise (for example the OpenCode build-topology cases), and a scratch copy
-// of a scanned file must never be classified as a production site.
+// tool itself ignores: a name beginning with "." or "_", and testdata. The walk
+// also skips a directory named node_modules, which is not part of the package
+// tree either. The Go-ignored rule matters because other tests materialize
+// scratch trees beside the sources they exercise (for example the OpenCode
+// build-topology cases), and a scratch copy of a scanned file must never be
+// classified as a production site.
 func parseParentColumnSites(t *testing.T, root string) []parsedParentColumnSite {
 	t.Helper()
 	var sites []parsedParentColumnSite
