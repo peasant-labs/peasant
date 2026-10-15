@@ -746,6 +746,7 @@ func (v *CollectiveVillage) matchesPullFilterLocked(transcript schema.Transcript
 func (v *CollectiveVillage) listPullable(w http.ResponseWriter, r *http.Request) {
 	v.mu.Lock()
 	status := v.pullListStatus
+	v.pullListCalls++
 	v.mu.Unlock()
 	if status != 0 {
 		w.WriteHeader(status)
@@ -777,7 +778,6 @@ func (v *CollectiveVillage) listPullable(w http.ResponseWriter, r *http.Request)
 			matched = append(matched, info)
 		}
 	}
-	v.pullListCalls++
 	v.mu.Unlock()
 	sort.Slice(matched, func(i, j int) bool { return matched[i].TranscriptID < matched[j].TranscriptID })
 	total := len(matched)
@@ -823,6 +823,7 @@ func (v *CollectiveVillage) pullAnnotationHashesLocked(transcript schema.Transcr
 func (v *CollectiveVillage) skipGate(w http.ResponseWriter, r *http.Request) {
 	v.mu.Lock()
 	status := v.skipGateStatus
+	v.skipGateCalls++
 	v.mu.Unlock()
 	if status != 0 {
 		w.WriteHeader(status)
@@ -837,7 +838,6 @@ func (v *CollectiveVillage) skipGate(w http.ResponseWriter, r *http.Request) {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.skipGateCalls++
 	results := make([]schema.PullSkipGateResult, 0, len(request.Items))
 	for _, item := range request.Items {
 		info, ok := v.pullInfos[item.TranscriptID]
