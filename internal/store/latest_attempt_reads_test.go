@@ -525,3 +525,43 @@ VALUES (7, `+strconv.Itoa(int(ingest.CurrentSchemaVersion))+`, '{"seed":true}', 
 	}
 	assertSelected("repair publication arm (settled)", ids, true)
 }
+
+// TestUnknownSessionReadsKeepNotFoundClassification proves an id with no
+// metadata row is answered as not found by every snapshot selection: the
+// zero-selection read and the explicit last-good read both return the
+// indexformat not-found sentinel, run no callback, and name the session. The
+// last-good authority check runs ahead of the representation for every
+// selection, so it must carry the same classification the row read produces;
+// losing it would turn an honest not-found into a server error at the API
+// mapping that recognizes the sentinel.
+func TestUnknownSessionReadsKeepNotFoundClassification(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("99990000-1111-4222-8333-444455556666")
+	ctx := context.Background()
+
+	callbackRan := false
+	if err := s.WithSessionSnapshot(ctx, sid, func(indexformat.ReadSnapshot) error {
+		callbackRan = true
+		return nil
+	}); !errors.Is(err, indexformat.ErrSnapshotNotFound) {
+		t.Fatalf("zero-selection read error = %v, want the not-found sentinel", err)
+	}
+	if callbackRan {
+		t.Fatal("the zero-selection read ran the callback for an unknown session")
+	}
+
+	callbackRan = false
+	err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(indexformat.ReadSnapshot) error {
+		callbackRan = true
+		return nil
+	})
+	if !errors.Is(err, indexformat.ErrSnapshotNotFound) {
+		t.Fatalf("last-good read error = %v, want the not-found sentinel the zero-selection read keeps", err)
+	}
+	if callbackRan {
+		t.Fatal("the last-good read ran the callback for an unknown session")
+	}
+	if !strings.Contains(err.Error(), string(sid)) {
+		t.Fatalf("last-good read error = %v, want it to still name the unknown session", err)
+	}
+}

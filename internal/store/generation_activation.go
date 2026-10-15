@@ -504,7 +504,12 @@ func readActiveGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (
 		return nil, fmt.Errorf("store: read active generation for session %s: %w; no generation read was authorized", sessionID, err)
 	}
 	if !found {
-		return nil, fmt.Errorf("store: session %s has no metadata row; import the session before reading its generation", sessionID)
+		// A validated identifier that names no sessions row is a not-found
+		// answer, not a server error: the sentinel is what the snapshot row
+		// read returns for the same state, so every caller that recognizes it
+		// (the API detail mapping among them) keeps the honest classification
+		// whichever selection reaches the authority first.
+		return nil, fmt.Errorf("%w: session %s has no metadata row; import the session before reading its generation", indexformat.ErrSnapshotNotFound, sessionID)
 	}
 	return active, nil
 }
