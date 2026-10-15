@@ -15,6 +15,7 @@ requiredNames:
   - progress stays silent when stderr is not a terminal
   - progress stays silent under json and the aggregate is unchanged
   - cancel reports after N of M and exits non-zero
+  - cancel paints the canceling footer while a transcript is in flight
   - cancel leaves no partial copy and earlier transcripts stay landed
   - resume after cancel downloads only what was missing
   - progress composes through the kit primitives only
@@ -27,6 +28,7 @@ cases:
   - name: progress stays silent when stderr is not a terminal
   - name: progress stays silent under json and the aggregate is unchanged
   - name: cancel reports after N of M and exits non-zero
+  - name: cancel paints the canceling footer while a transcript is in flight
   - name: cancel leaves no partial copy and earlier transcripts stay landed
   - name: resume after cancel downloads only what was missing
   - name: progress composes through the kit primitives only

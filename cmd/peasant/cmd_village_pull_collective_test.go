@@ -67,6 +67,8 @@ func TestVillagePullCollectivesFixtures(t *testing.T) {
 				testVillagePullCollectiveProgressSuppressedUnderJSON(t)
 			case "cancel reports after N of M and exits non-zero":
 				testVillagePullCollectiveCancelReports(t)
+			case "cancel paints the canceling footer while a transcript is in flight":
+				testVillagePullCollectiveCancelPaintsWhileInFlight(t)
 			case "cancel leaves no partial copy and earlier transcripts stay landed":
 				testVillagePullCollectiveCancelNoPartial(t)
 			case "resume after cancel downloads only what was missing":
