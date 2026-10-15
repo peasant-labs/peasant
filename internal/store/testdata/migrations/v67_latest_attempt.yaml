@@ -1,0 +1,145 @@
+# V67 adds seven nullable latest-attempt pointer columns to sessions. Each
+# acceptance record is inserted directly through the real migrated store and
+# read back byte for byte; NULL columns are written with null and must read back
+# as NULL. Each rejection is the full NOT NULL column list with the offending
+# latest-attempt column appended, and the CHECK must refuse it. Deletion
+# protection is by required NAME, never a declared count.
+
+required_record_names:
+  - all seven columns null round-trip as null
+  - a 64-character lowercase hex artifact hash round-trips
+  - the minimum indexer revision one round-trips
+  - captured-at zero round-trips
+  - a JSON object stats document round-trips exact bytes
+  - the JSON literal null is valid stats
+  - the three unconstrained text columns round-trip arbitrary bytes
+
+required_rejection_names:
+  - a 63-character artifact hash is refused
+  - a 65-character artifact hash is refused
+  - an uppercase hex artifact hash is refused
+  - a non-hex artifact hash character is refused
+  - an empty artifact hash is refused
+  - indexer revision zero is refused
+  - a negative indexer revision is refused
+  - a negative captured-at is refused
+  - invalid stats JSON is refused
+  - a bare JSON fragment is refused
+
+records:
+  - name: all seven columns null round-trip as null
+    session_id: v67-nulls
+    generation_id: null
+    artifact_hash: null
+    indexer_version: null
+    failure_code: null
+    failure_message: null
+    captured_at_ms: null
+    stats_json: null
+  - name: a 64-character lowercase hex artifact hash round-trips
+    session_id: v67-hex64
+    generation_id: null
+    artifact_hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    indexer_version: null
+    failure_code: null
+    failure_message: null
+    captured_at_ms: null
+    stats_json: null
+  - name: the minimum indexer revision one round-trips
+    session_id: v67-idx1
+    generation_id: null
+    artifact_hash: null
+    indexer_version: "1"
+    failure_code: null
+    failure_message: null
+    captured_at_ms: null
+    stats_json: null
+  - name: captured-at zero round-trips
+    session_id: v67-at0
+    generation_id: null
+    artifact_hash: null
+    indexer_version: null
+    failure_code: null
+    failure_message: null
+    captured_at_ms: "0"
+    stats_json: null
+  - name: a JSON object stats document round-trips exact bytes
+    session_id: v67-json
+    generation_id: null
+    artifact_hash: null
+    indexer_version: null
+    failure_code: null
+    failure_message: null
+    captured_at_ms: null
+    stats_json: '{"turnCount":1}'
+  - name: the JSON literal null is valid stats
+    session_id: v67-jsonnull
+    generation_id: null
+    artifact_hash: null
+    indexer_version: null
+    failure_code: null
+    failure_message: null
+    captured_at_ms: null
+    stats_json: "null"
+  - name: the three unconstrained text columns round-trip arbitrary bytes
+    session_id: v67-text
+    generation_id: gen-x
+    artifact_hash: null
+    indexer_version: null
+    failure_code: source_records_omitted
+    failure_message: arbitrary bytes
+    captured_at_ms: null
+    stats_json: null
+
+# Rows the CHECK constraints must refuse outright.
+rejections:
+  - name: a 63-character artifact hash is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_artifact_hash)
+      VALUES ('bad-63', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde')
+  - name: a 65-character artifact hash is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_artifact_hash)
+      VALUES ('bad-65', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0')
+  - name: an uppercase hex artifact hash is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_artifact_hash)
+      VALUES ('bad-upper', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF')
+  - name: a non-hex artifact hash character is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_artifact_hash)
+      VALUES ('bad-nonhex', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg')
+  - name: an empty artifact hash is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_artifact_hash)
+      VALUES ('bad-empty', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '')
+  - name: indexer revision zero is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_indexer_version)
+      VALUES ('bad-idx0', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', 0)
+  - name: a negative indexer revision is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_indexer_version)
+      VALUES ('bad-idxneg', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', -1)
+  - name: a negative captured-at is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_captured_at_ms)
+      VALUES ('bad-at', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', -1)
+  - name: invalid stats JSON is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_stats_json)
+      VALUES ('bad-json', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '{')
+  - name: a bare JSON fragment is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_stats_json)
+      VALUES ('bad-fragment', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', 'not json')
