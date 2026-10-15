@@ -29,6 +29,7 @@ type nativeLaneCase struct {
 	CapUnits      int64  `yaml:"cap_units"`
 	Refuse        *int   `yaml:"refuse"`
 	Skip          *int   `yaml:"skip"`
+	Retained      *int   `yaml:"retained"`
 	Cancel        bool   `yaml:"cancel"`
 	Mode          string `yaml:"mode"`
 	Batches       []int  `yaml:"batches"`
@@ -57,7 +58,7 @@ func loadNativeLaneFixtures(t *testing.T, data []byte) []nativeLaneCase {
 type nativeBatchRecordingStore struct {
 	*sweepRecordingStore
 	stageBatches, activationBatches []int
-	refuse, skip                    *int
+	refuse, skip, retained          *int
 	gate                            *stagedBytesGate
 	maxObserved                     int64
 }
@@ -94,6 +95,9 @@ func (s *nativeBatchRecordingStore) ActivateStagedGenerationCandidates(_ context
 		if s.skip != nil && id == fmt.Sprintf("g_bench_%d", *s.skip) {
 			r[i].Outcome.Disposition = ActivationSkipped
 		}
+		if s.retained != nil && id == fmt.Sprintf("g_bench_%d", *s.retained) {
+			r[i].Outcome.Disposition = ActivationLatestAttemptPreview
+		}
 	}
 	return r
 }
@@ -101,7 +105,7 @@ func (s *nativeBatchRecordingStore) ActivateStagedGenerationCandidates(_ context
 func TestGenerationBatchActivation(t *testing.T) {
 	for _, c := range loadNativeLaneFixtures(t, nativeBatchActivationYAML) {
 		t.Run(c.Name, func(t *testing.T) {
-			store := &nativeBatchRecordingStore{sweepRecordingStore: &sweepRecordingStore{}, refuse: c.Refuse, skip: c.Skip}
+			store := &nativeBatchRecordingStore{sweepRecordingStore: &sweepRecordingStore{}, refuse: c.Refuse, skip: c.Skip, retained: c.Retained}
 			var results []indexParseResult
 			for i, n := range c.Entries {
 				results = append(results, benchNativeResult(t, i, n))
@@ -114,11 +118,26 @@ func TestGenerationBatchActivation(t *testing.T) {
 			}
 			for i, im := range flush.indexed {
 				want := c.Refuse == nil || i != *c.Refuse
+				if c.Retained != nil && i == *c.Retained {
+					want = false
+				}
 				if im.indexed != want {
 					t.Fatalf("session %d indexed=%v, want %v", i, im.indexed, want)
 				}
 				if c.Skip != nil && i == *c.Skip && flush.logEntries[i].Outcome != IndexOutcomeSkipped {
 					t.Fatalf("skip outcome=%v", flush.logEntries[i])
+				}
+				if c.Retained != nil && i == *c.Retained {
+					entry := flush.logEntries[i]
+					if entry.Outcome != IndexOutcomeSkipped {
+						t.Fatalf("latest attempt outcome=%v, want %v", entry.Outcome, IndexOutcomeSkipped)
+					}
+					if entry.EntriesCount != 0 {
+						t.Fatalf("latest attempt logged %d entries, want the literal zero count (never the parsed count)", entry.EntriesCount)
+					}
+					if entry.Reason == nil || *entry.Reason != latestAttemptHeldReason {
+						t.Fatalf("latest attempt reason=%v, want the held reason", entry.Reason)
+					}
 				}
 			}
 		})
