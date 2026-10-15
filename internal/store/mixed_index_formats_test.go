@@ -551,6 +551,10 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 			fs := testutil.NewMemFS()
 			files := make(map[string][]byte)
 			writeManaged := func(meta *schema.UnifiedMetadata, transcript string) {
+				// Format adoption is independent of adapter back-fill. Both
+				// peers start with current metadata extraction evidence.
+				adapterVersion := ingest.HarvesterVersionRegistry[meta.ModelHarness].AdapterVersion
+				meta.AdapterVersion = &adapterVersion
 				basePath := filepath.Join("/managed", string(meta.HostSlug), string(meta.SessionID), string(meta.SessionID))
 				data, err := json.Marshal(meta)
 				if err != nil {

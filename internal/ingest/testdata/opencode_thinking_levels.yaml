@@ -1,0 +1,131 @@
+# OpenCode thinking-level corpus.
+#
+# retainedIndexerCases: the shared retained indexer stamps each assistant
+# message's model.variant as per-turn evidence through the same mapping the
+# managed provenance path uses. layout selects the source the shared parser
+# reads: "current" and "legacy" are managed SQLite projections, "file" is the
+# legacy message-file layout. turns lists every message entry in order; an
+# empty turn means "absent" (unknown), never off, and non-assistant entries
+# never carry evidence.
+retainedIndexerCases:
+  - name: ultra_is_canonical_identity
+    layout: current
+    messages:
+      - {id: msg_001, role: assistant, variant: ultra}
+    turns:
+      - {level: ultra}
+  - name: current_layout_projection_variant_identity
+    layout: current
+    messages:
+      - {id: msg_001, role: user}
+      - {id: msg_002, role: assistant, variant: medium}
+    turns:
+      - {}
+      - {level: medium}
+  - name: legacy_projection_variant_identity
+    layout: legacy
+    messages:
+      - {id: msg_001, role: user}
+      - {id: msg_002, role: assistant, variant: high}
+    turns:
+      - {}
+      - {level: high}
+  - name: legacy_message_file_variant_identity
+    layout: file
+    messages:
+      - {id: msg_001, role: user}
+      - {id: msg_002, role: assistant, variant: low}
+    turns:
+      - {}
+      - {level: low}
+  - name: no_variant_sibling_stays_absent
+    layout: current
+    messages:
+      - {id: msg_001, role: user}
+      - {id: msg_002, role: assistant}
+    turns:
+      - {}
+      - {}
+  - name: arbitrary_label_is_absent_with_raw
+    layout: current
+    messages:
+      - {id: msg_001, role: assistant, variant: thinking}
+    turns:
+      - {raw: thinking}
+  - name: default_is_absent_with_raw
+    layout: legacy
+    messages:
+      - {id: msg_001, role: assistant, variant: default}
+    turns:
+      - {raw: default}
+  - name: none_maps_off_with_raw
+    layout: file
+    messages:
+      - {id: msg_001, role: assistant, variant: none}
+    turns:
+      - {level: "off", raw: none}
+  - name: user_variant_is_never_evidence
+    layout: current
+    messages:
+      - {id: msg_001, role: user, variant: high}
+    turns:
+      - {}
+
+# Session-row materialization cases. Retained-indexer cases have their own section.
+sessionRows:
+  - name: session-message-invalid-raw-diagnostic
+    messageVariant: medium
+    laterVariant: " high"
+    wantLevel: medium
+    wantDiagnostic: true
+  - name: session-column-present-fallback
+    modelColumn: true
+    modelJSON: '{"variant":"high"}'
+    changedModelJSON: '{"variant":"low"}'
+    wantVariant: high
+    wantLevel: high
+  - name: session-message-wins
+    modelColumn: true
+    modelJSON: '{"variant":"high"}'
+    wantVariant: high
+    messageVariant: medium
+    laterVariant: max
+    wantLevel: medium
+    wantHistory:
+      - {level: max}
+  - name: session-message-change-records-history
+    messageVariant: medium
+    laterVariant: max
+    wantLevel: medium
+    wantHistory:
+      - {level: max}
+  - name: session-message-unknown-wins
+    modelColumn: true
+    modelJSON: '{"variant":"high"}'
+    wantVariant: high
+    messageVariant: default
+    laterVariant: max
+    wantRaw: default
+    wantHistory:
+      - {level: max}
+  - name: session-column-absent
+  - name: session-model-invalid-json
+    modelColumn: true
+    modelJSON: '{not json'
+  - name: session-model-invalid-variant
+    modelColumn: true
+    modelJSON: '{"variant":42}'
+  - name: session-model-null
+    modelColumn: true
+    modelJSON: 'null'
+  - name: session-model-ultra-identity
+    modelColumn: true
+    modelJSON: '{"variant":"ultra"}'
+    wantVariant: ultra
+    wantLevel: ultra
+  - name: session-model-none-alias
+    modelColumn: true
+    modelJSON: '{"variant":"none"}'
+    wantVariant: none
+    wantLevel: "off"
+    wantRaw: none

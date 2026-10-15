@@ -242,6 +242,8 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			meta := makeReindexMeta(t, string(sid), nativePath)
+			// This corpus also injects invalid producer claims into raw JSON.
+			meta.AdapterVersion = nil
 			meta.SchemaVersion = fixture.SchemaVersion
 			// The transcript the pair carries is the fixture transcript, so
 			// the metadata records its checksum exactly as every production

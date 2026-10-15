@@ -1,0 +1,11 @@
+requiredNames:
+  - raw_first_observation_seeds_unknown
+  - identical_text_with_changed_level_is_retained
+  - per_turn_levels_fold_from_assistant_extra
+  - earliest_root_observation_beats_stored_seed
+  - stored_seed_without_observations
+  - turn_observations_win_over_stored_history
+  - stored_history_is_the_fallback_without_turn_evidence
+  - latest_observation_is_not_seed
+  - most_common_observation_is_not_seed
+  - nested_observation_does_not_replace_root_seed

@@ -1,0 +1,53 @@
+# Entry-boundary thinking-level handling cases. Each case builds one indexed
+# entry from its role and raw Extra JSON and drives both the warning collector
+# and the shared entries-to-projection boundary. A malformed stored value is
+# DROPPED with an actionable warning, never refused at the fold; the served
+# result keeps any well-formed surviving half. An explicit stored JSON null for
+# either half is treated as omission: it is warned like the other malformed
+# shapes and the nulled half is served absent while a well-formed surviving half
+# is still served. The warning carries the what/why/where/when/meaning/fix shape
+# and a repair hint. Accepted cases carry no warning and are served as recorded.
+#
+# A case with pi: true builds a real typed Pi row (valid pi.state envelope,
+# sourceRef and usage) and merges its `overlay` JSON onto the encoded evidence,
+# modeling a stored Pi row whose private thinking-level evidence was corrupted
+# after indexing. A generic case supplies its whole Extra through `extra`.
+errorFragments:
+  - "thinking-level stored evidence dropped"
+  - "  what:"
+  - "  why:"
+  - "  where: transcript.ThinkingLevelEntryWarnings"
+  - "  when:"
+  - "  meaning:"
+  - "  fix:"
+cases:
+  - {name: assistant_canonical_served, role: assistant, extra: '{"thinking_level":"off"}', dropped: false, servedLevel: "off"}
+  - {name: assistant_canonical_with_raw_served, role: assistant, extra: '{"thinking_level":"high","thinking_level_raw":"High"}', dropped: false, servedLevel: "high", servedRaw: "High"}
+  - {name: assistant_raw_only_served, role: assistant, extra: '{"thinking_level_raw":"deep"}', dropped: false, servedRaw: "deep"}
+  - {name: absent_no_extra_served, role: user, dropped: false}
+  - {name: absent_empty_extra_served, role: user, extra: '{}', dropped: false}
+  - {name: user_level_dropped, role: user, extra: '{"thinking_level":"high"}', dropped: true}
+  - {name: system_raw_dropped, role: system, extra: '{"thinking_level_raw":"deep"}', dropped: true}
+  - {name: tool_level_dropped, role: tool, extra: '{"thinking_level":"high"}', dropped: true}
+  - {name: non_string_level_dropped, role: assistant, extra: '{"thinking_level":7}', dropped: true}
+  - {name: non_string_raw_dropped, role: assistant, extra: '{"thinking_level_raw":false}', dropped: true}
+  - {name: unknown_canonical_dropped, role: assistant, extra: '{"thinking_level":"deep"}', dropped: true}
+  - {name: edge_whitespace_raw_dropped, role: assistant, extra: '{"thinking_level_raw":" deep"}', dropped: true}
+  - {name: unknown_canonical_valid_raw_serves_raw, role: assistant, extra: '{"thinking_level":"custom","thinking_level_raw":"Custom"}', dropped: true, servedRaw: "Custom"}
+  - {name: valid_level_invalid_raw_serves_level, role: assistant, extra: '{"thinking_level":"high","thinking_level_raw":" deep"}', dropped: true, servedLevel: "high"}
+  - {name: non_string_level_valid_raw_serves_absent, role: assistant, extra: '{"thinking_level":7,"thinking_level_raw":"Deep"}', dropped: true}
+  - {name: non_string_raw_valid_level_serves_absent, role: assistant, extra: '{"thinking_level":"high","thinking_level_raw":false}', dropped: true}
+  - {name: null_level_dropped_served_absent, role: assistant, extra: '{"thinking_level":null}', dropped: true}
+  - {name: null_raw_dropped_served_absent, role: assistant, extra: '{"thinking_level_raw":null}', dropped: true}
+  - {name: null_pair_dropped_served_absent, role: assistant, extra: '{"thinking_level":null,"thinking_level_raw":null}', dropped: true}
+  - {name: null_level_valid_raw_serves_raw, role: assistant, extra: '{"thinking_level":null,"thinking_level_raw":"Custom"}', dropped: true, servedRaw: "Custom"}
+  - {name: valid_level_null_raw_serves_level, role: assistant, extra: '{"thinking_level":"high","thinking_level_raw":null}', dropped: true, servedLevel: "high"}
+  - {name: pi_valid_evidence_served, role: assistant, pi: true, overlay: '{"thinking_level":"high","thinking_level_raw":"High"}', dropped: false, servedLevel: "high", servedRaw: "High"}
+  - {name: pi_unknown_canonical_dropped_served_absent, role: assistant, pi: true, overlay: '{"thinking_level":"custom"}', dropped: true}
+  - {name: pi_valid_level_invalid_raw_serves_level, role: assistant, pi: true, overlay: '{"thinking_level":"high","thinking_level_raw":" deep"}', dropped: true, servedLevel: "high"}
+  - {name: pi_non_string_level_dropped_served_absent, role: assistant, pi: true, overlay: '{"thinking_level":7}', dropped: true}
+  - {name: pi_null_level_dropped_served_absent, role: assistant, pi: true, overlay: '{"thinking_level":null}', dropped: true}
+  - {name: pi_null_raw_dropped_served_absent, role: assistant, pi: true, overlay: '{"thinking_level_raw":null}', dropped: true}
+  - {name: pi_null_pair_dropped_served_absent, role: assistant, pi: true, overlay: '{"thinking_level":null,"thinking_level_raw":null}', dropped: true}
+  - {name: pi_null_level_valid_raw_serves_raw, role: assistant, pi: true, overlay: '{"thinking_level":null,"thinking_level_raw":"Custom"}', dropped: true, servedRaw: "Custom"}
+  - {name: pi_valid_level_null_raw_serves_level, role: assistant, pi: true, overlay: '{"thinking_level":"high","thinking_level_raw":null}', dropped: true, servedLevel: "high"}

@@ -104,8 +104,8 @@ export interface RootStatsItem {
  * as zero.
  */
 export interface RootStatsSources {
-  /** `totalSessions` of the dashboard topic. */
-  dashboardSessions: number | null;
+  /** All selection-visible top-level roots, before local filters or paging. */
+  rootSessions: number | null;
   /** How many projects GET /api/v1/projects/summary lists. */
   projects: number | null;
   /** How many sessions the publications read reports as published. */
@@ -120,7 +120,7 @@ export interface RootStatsSources {
 /** The stats strip's pairs, in reading order. */
 export function rootStatsItems(sources: RootStatsSources): RootStatsItem[] {
   const items: RootStatsItem[] = [];
-  if (sources.dashboardSessions !== null) items.push({ value: sources.dashboardSessions, label: 'sessions' });
+  if (sources.rootSessions !== null) items.push({ value: sources.rootSessions, label: 'sessions' });
   if (sources.projects !== null) items.push({ value: sources.projects, label: 'projects' });
   if (sources.published !== null) items.push({ value: sources.published, label: 'published' });
   if (sources.trendDays !== null) {

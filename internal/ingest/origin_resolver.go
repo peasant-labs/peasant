@@ -36,7 +36,11 @@ type StoredOriginRow struct {
 	// first, the availability cache as the fallback — so a cache heal or a
 	// generation activation is visible here on the next pass. A stored NULL
 	// cache is therefore not proof of rootness: a row whose evidence names a
-	// parent is judged as a child even while its cache is empty.
+	// parent is judged as a child even while its cache is empty. Every
+	// parent-link repair — an authoritative activation write, the reconcile
+	// heal, the bounded invalidation — resets origin_version to 0 in the same
+	// write, so a row whose parent changes after a verdict is listed again and
+	// re-judged.
 	ParentID string
 	// Harness names which producer recorded the transcript, and therefore which
 	// miner - if any - can read origin evidence back out of it.
@@ -160,9 +164,11 @@ func NewOriginResolver(store OriginResolverStore, cache ClaudeEvidenceCache, min
 // run writes its own sessions, so that it sees only rows an EARLIER run
 // persisted. That is what keeps the pass from judging a row mid-write: the
 // parent answer is resolved through the session-level rule at read time, so a
-// row this pass finalises is judged on the answer as of this pass, and a later
-// cache heal or generation activation reaches it through the next rule-version
-// pass rather than mid-write.
+// row this pass finalises is judged on the answer as of this pass. A parent
+// link repaired after insert — an authoritative activation write, the
+// reconcile heal, the bounded invalidation — resets origin_version to 0 in the
+// same write, so a later repair re-queues the row and the next pass re-judges
+// it.
 func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion int) (ResolveReport, error) {
 	var report ResolveReport
 	if ruleVersion < 1 {

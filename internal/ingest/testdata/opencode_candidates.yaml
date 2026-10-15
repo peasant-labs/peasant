@@ -94,7 +94,8 @@ forbidden_query_tokens:
 # the record read carries without folding entries: agent labels a subagent
 # session, the token columns and cost fill the session statistics, version fills
 # the harness version, slug is the display-name fallback, and revert exposes the
-# revert marker directly. Every other session column, including share_url,
+# revert marker directly. Model supplies the optional recorded thinking variant.
+# Every other session column, including share_url,
 # summary, metadata, permission, model, path, workspace_id, time_archived, and
 # time_compacting, stays unreadable: a statement that reads FROM the session
 # table and names a column outside this set is rejected.
@@ -115,6 +116,7 @@ readable_session_columns:
   - version
   - slug
   - revert
+  - model
 required_session_column_mutations:
   - reject-forbidden-v2-session-projection
   - reject-forbidden-session-projection
@@ -164,6 +166,22 @@ table_column_mutations:
     statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
     forbidden_column: data
 allowed_query_statements:
+  - name: captured-session-v2-model
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session_v2 where id = ?1'
+  - name: captured-session-model
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session where id = ?1'
+  - name: session-v2-model-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session_v2 order by id limit ?1'
+  - name: session-v2-model-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session_v2 where id > ?1 order by id limit ?2'
+  - name: session-model-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session order by id limit ?1'
+  - name: session-model-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model from session where id > ?1 order by id limit ?2'
+  - name: partial-session-v2-model-range
+    statement: 'select id, model from session_v2 where id >= ?1 and id <= ?2 order by id limit ?3'
+  - name: partial-session-model-range
+    statement: 'select id, model from session where id >= ?1 and id <= ?2 order by id limit ?3'
   - name: captured-session-v2-extended
     statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session_v2 where id = ?1'
   - name: captured-session-v2-attribution

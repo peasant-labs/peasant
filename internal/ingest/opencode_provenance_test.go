@@ -49,23 +49,25 @@ type ocProvAllocator struct {
 }
 
 type ocProvEntryExpect struct {
-	Ref         string `yaml:"ref"`
-	Index       int    `yaml:"index"`
-	Role        string `yaml:"role"`
-	EntryType   string `yaml:"entryType"`
-	Depth       int    `yaml:"depth"`
-	ParentIndex *int   `yaml:"parentIndex"`
-	Content     string `yaml:"content"`
-	ToolInput   string `yaml:"toolInput"`
-	ToolOutput  string `yaml:"toolOutput"`
-	ToolCallID  string `yaml:"toolCallId"`
-	Submission  string `yaml:"submission"`
-	Origin      string `yaml:"origin"`
-	Actor       string `yaml:"actor"`
-	Delivery    string `yaml:"delivery"`
-	Ownership   string `yaml:"ownership"`
-	Evidence    string `yaml:"evidence"`
-	Modality    string `yaml:"modality"`
+	ThinkingLevel    string `yaml:"thinkingLevel"`
+	ThinkingLevelRaw string `yaml:"thinkingLevelRaw"`
+	Ref              string `yaml:"ref"`
+	Index            int    `yaml:"index"`
+	Role             string `yaml:"role"`
+	EntryType        string `yaml:"entryType"`
+	Depth            int    `yaml:"depth"`
+	ParentIndex      *int   `yaml:"parentIndex"`
+	Content          string `yaml:"content"`
+	ToolInput        string `yaml:"toolInput"`
+	ToolOutput       string `yaml:"toolOutput"`
+	ToolCallID       string `yaml:"toolCallId"`
+	Submission       string `yaml:"submission"`
+	Origin           string `yaml:"origin"`
+	Actor            string `yaml:"actor"`
+	Delivery         string `yaml:"delivery"`
+	Ownership        string `yaml:"ownership"`
+	Evidence         string `yaml:"evidence"`
+	Modality         string `yaml:"modality"`
 }
 
 type ocProvWant struct {
@@ -244,6 +246,7 @@ func assertOpenCodeEntries(t *testing.T, entries []schema.SessionEntry, want []o
 	}
 	for i, expected := range want {
 		entry := entries[i]
+		assertManagedThinkingLevel(t, entry, expected.ThinkingLevel, expected.ThinkingLevelRaw)
 		label := "main[" + itoa(i) + "]"
 		if string(entry.SourceEntryRef) != expected.Ref {
 			t.Fatalf("%s ref = %q, want %q", label, entry.SourceEntryRef, expected.Ref)
@@ -364,6 +367,15 @@ type ocFlowParent struct {
 	Rows []ocFlowRow `yaml:"rows"`
 }
 
+// ocFlowRelationship is one expected generation relationship, spelled with
+// the wire vocabulary so the fixture reads as the durable evidence it pins.
+type ocFlowRelationship struct {
+	Kind          string `yaml:"kind"`
+	TargetState   string `yaml:"targetState"`
+	TargetLocalID string `yaml:"targetLocalId"`
+	Evidence      string `yaml:"evidence"`
+}
+
 type ocFlowCase struct {
 	Name               string        `yaml:"name"`
 	Kind               string        `yaml:"kind"`
@@ -391,6 +403,11 @@ type ocFlowCase struct {
 	AuthorityCode      string        `yaml:"authorityFailureCode"`
 	ExpectMessage      string        `yaml:"expectMessage"`
 	ExpectSequence     int64         `yaml:"expectSequence"`
+	// AssemblyParentID names the parent written beside the child in the JSON
+	// storage the real metadata assembly reads; empty writes a parentless child.
+	AssemblyParentID      string               `yaml:"assemblyParentId"`
+	ExpectRelationships   []ocFlowRelationship `yaml:"expectRelationships"`
+	ExpectNoRelationships bool                 `yaml:"expectNoRelationships"`
 }
 
 type ocFlowDocument struct {
@@ -477,6 +494,16 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 		if row.Source == "" {
 			return errors.New("the first-discovery-preview kind requires the native source fixture that carries an unfinished own row")
 		}
+	case "started-by-assembly":
+		if row.ExpectNoRelationships == (len(row.ExpectRelationships) > 0) {
+			return errors.New("the started-by-assembly kind requires exactly one of expectRelationships or expectNoRelationships")
+		}
+		if row.ExpectNoRelationships && row.AssemblyParentID != "" {
+			return errors.New("the started-by-assembly kind cannot expect no relationship for a child written with a parent")
+		}
+		if len(row.ExpectRelationships) > 0 && row.AssemblyParentID == "" {
+			return errors.New("the started-by-assembly kind requires assemblyParentId when it expects a relationship")
+		}
 	default:
 		return errors.New("kind is outside the closed set")
 	}
@@ -524,6 +551,8 @@ func TestOpenCodeProvenanceFlow(t *testing.T) {
 				runOpenCodeFlowAuthorityBridge(t, source, row)
 			case "first-discovery-preview":
 				runOpenCodeFlowFirstDiscoveryPreview(t, source, row)
+			case "started-by-assembly":
+				runOpenCodeFlowStartedByAssembly(t, source, row)
 			default:
 				t.Fatalf("unsupported flow kind %q", row.Kind)
 			}
@@ -868,6 +897,93 @@ func assertOpenCodeSanitizedRefusal(t *testing.T, err error, row ocFlowCase) {
 	}
 	if row.ExpectStep != "" && !strings.Contains(err.Error(), row.ExpectStep) {
 		t.Fatalf("refusal step = %v, want it to name %q", err, row.ExpectStep)
+	}
+}
+
+// runOpenCodeFlowStartedByAssembly drives the adapter's real metadata
+// assembly: the parent (when named) and the child are written as OpenCode JSON
+// storage, discovered together, and the child's metadata comes from the real
+// ExtractMetadata. That metadata is the provenance indexer's metadata
+// dependency, so the assertion observes the relationships the built generation
+// keeps, not a synthetic stand-in.
+func runOpenCodeFlowStartedByAssembly(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	const (
+		root      = "/opencode"
+		projHash  = "projflow"
+		directory = "/synthetic/flow-project"
+	)
+	messages := []struct{ id, role, model string }{
+		{"msg_flow_assembly_user", "user", ""},
+		{"msg_flow_assembly_assistant", "assistant", "synthetic-model"},
+	}
+	fs := testutil.NewMemFS()
+	if row.AssemblyParentID != "" {
+		populateOpenCodeStorage(t, fs, root, projHash, directory, row.AssemblyParentID, directory, "", 1770000000000, 1770000050000, messages)
+	}
+	populateOpenCodeStorage(t, fs, root, projHash, directory, row.SessionID, directory, row.AssemblyParentID, 1770000050000, 1770000100000, messages)
+	adapter := newTestOpenCodeAdapter(fs, testutil.DefaultGitResolver(), salt.Salt{})
+	discovered, err := adapter.Discover(context.Background(), ingest.SourceConfig{Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}, Enabled: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	var child *ingest.DiscoveredSession
+	for i := range discovered {
+		if discovered[i].SessionID == ingest.SessionID(row.SessionID) {
+			child = &discovered[i]
+		}
+	}
+	if child == nil {
+		t.Fatalf("discovery = %+v, want the child %q", discovered, row.SessionID)
+	}
+	if row.AssemblyParentID != "" && (child.ParentUUID == nil || child.ParentUUID.String() != row.AssemblyParentID) {
+		t.Fatalf("discovered child parent = %v, want the discovered parent %q", child.ParentUUID, row.AssemblyParentID)
+	}
+	metadata, err := adapter.ExtractMetadata(context.Background(), *child)
+	if err != nil {
+		t.Fatalf("ExtractMetadata: %v", err)
+	}
+	want := openCodeFlowRelationships(row.ExpectRelationships)
+	assertOpenCodeFlowRelationships(t, "assembled metadata", metadata.Relationships, want)
+
+	buildInput := openCodeFlowBuildInput(t, source, openCodeFlowSession(row), ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
+	buildInput.RecordedMetadata = metadata
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), buildInput)
+	if err != nil {
+		t.Fatalf("BuildGeneration: %v", err)
+	}
+	assertOpenCodeFlowRelationships(t, "built generation", candidate.Result.Generation.Metadata.Relationships, want)
+}
+
+func openCodeFlowRelationships(specs []ocFlowRelationship) []schema.SessionRelationship {
+	relationships := make([]schema.SessionRelationship, 0, len(specs))
+	for _, spec := range specs {
+		relationship := schema.SessionRelationship{Kind: schema.SessionRelationshipKind(spec.Kind), TargetState: schema.RelationshipTargetState(spec.TargetState), Evidence: schema.EvidenceKind(spec.Evidence)}
+		if spec.TargetLocalID != "" {
+			target := schema.SessionID(spec.TargetLocalID)
+			relationship.TargetLocalID = &target
+		}
+		relationships = append(relationships, relationship)
+	}
+	return relationships
+}
+
+func assertOpenCodeFlowRelationships(t *testing.T, label string, got, want []schema.SessionRelationship) {
+	t.Helper()
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("%s: marshal relationships: %v", label, err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("%s: marshal expected relationships: %v", label, err)
+	}
+	if len(got) == 0 && len(want) == 0 {
+		return
+	}
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("%s relationships = %s, want %s", label, gotJSON, wantJSON)
 	}
 }
 

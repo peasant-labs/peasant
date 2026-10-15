@@ -6,11 +6,33 @@
 # required_cases names the cases that must stay present. Removing one goes red
 # by name; adding a case need not appear here. The list, not a count, guards.
 required_cases:
+  - extended-model-variant
+  - v2-extended-model-variant
+  - extended-invalid-model
   - populated-extended-layout
   - older-layout-empty
+  - partial-layout-model-variant
+  - v2-partial-layout-model-variant
   - v2-populated-extended-layout
   - v2-base-attribution
 cases:
+  - &model
+    name: extended-model-variant
+    extended: true
+    model_column: true
+    rows:
+      - id: ses_thinkingExtended
+        model_json: '{"variant":"high"}'
+        want_variant: high
+  - <<: *model
+    name: v2-extended-model-variant
+    table: session_v2
+  - name: extended-invalid-model
+    extended: true
+    model_column: true
+    rows:
+      - id: ses_thinkingInvalid
+        model_json: '{bad'
   - &populated
     name: populated-extended-layout
     extended: true
@@ -51,6 +73,37 @@ cases:
         version: 1.1.53
         slug: glowing-wizard
         revert: '{"messageID":"msg_x"}'
+  # A base attribution layout that also carries the optional model column: the
+  # record read resolves the base attribution from one bounded statement and
+  # then fills every kept record's model variant from the batched identifier-span
+  # read, with no extended attribution columns present. Two rows with distinct
+  # variants prove the fill maps each record to its own model, not only the
+  # first. The v2 sibling reaches the same batched read through the session_v2
+  # statement arm.
+  - &partial
+    name: partial-layout-model-variant
+    extended: false
+    model_column: true
+    rows:
+      - id: ses_thinkingPartialFirst
+        parent_id: ""
+        time_created: 4000
+        time_updated: 5000
+        directory: /home/dev/peasant-labs/partial
+        title: base attribution with model column
+        model_json: '{"variant":"high"}'
+        want_variant: high
+      - id: ses_thinkingPartialSecond
+        parent_id: ""
+        time_created: 4010
+        time_updated: 5010
+        directory: /home/dev/peasant-labs/partial
+        title: base attribution with a second model variant
+        model_json: '{"variant":"low"}'
+        want_variant: low
+  - <<: *partial
+    name: v2-partial-layout-model-variant
+    table: session_v2
   - <<: *populated
     name: v2-populated-extended-layout
     table: session_v2

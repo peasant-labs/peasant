@@ -1,0 +1,12 @@
+requiredNames:
+  - session-message-invalid-raw-diagnostic
+  - session-column-present-fallback
+  - session-message-wins
+  - session-message-change-records-history
+  - session-message-unknown-wins
+  - session-column-absent
+  - session-model-invalid-json
+  - session-model-invalid-variant
+  - session-model-null
+  - session-model-ultra-identity
+  - session-model-none-alias

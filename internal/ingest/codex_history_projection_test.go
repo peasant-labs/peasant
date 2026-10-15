@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -115,6 +116,18 @@ type codexHistoryExpected struct {
 	// FingerprintStableWithPrevious proves a parent append past the captured
 	// cutoff does not change the child fingerprint.
 	FingerprintStableWithPrevious bool `yaml:"fingerprintStableWithPrevious"`
+	// Controls asserts the exact turn_context control evidence in source
+	// order. A nil section is not asserted; an explicit empty list asserts
+	// that no control was surfaced.
+	Controls []codexHistoryControlExpected `yaml:"controls"`
+}
+
+type codexHistoryControlExpected struct {
+	NodeIndex        int    `yaml:"nodeIndex"`
+	Segment          int    `yaml:"segment"`
+	Ordinal          int64  `yaml:"ordinal"`
+	ThinkingLevel    string `yaml:"thinkingLevel"`
+	ThinkingLevelRaw string `yaml:"thinkingLevelRaw"`
 }
 
 type codexHistoryPhase struct {
@@ -124,10 +137,11 @@ type codexHistoryPhase struct {
 }
 
 type codexHistoryCase struct {
-	Name     string                    `yaml:"name"`
-	Delivery *codexDeliveryFixtureCase `yaml:"delivery"`
-	Unstable bool                      `yaml:"unstable"`
-	Phases   []codexHistoryPhase       `yaml:"phases"`
+	SameProjectionAs string                    `yaml:"sameProjectionAs"`
+	Name             string                    `yaml:"name"`
+	Delivery         *codexDeliveryFixtureCase `yaml:"delivery"`
+	Unstable         bool                      `yaml:"unstable"`
+	Phases           []codexHistoryPhase       `yaml:"phases"`
 }
 
 type codexHistoryProjectionFixture struct {
@@ -355,6 +369,25 @@ func codexAssertExpected(t *testing.T, want codexHistoryExpected, history ingest
 	if want.Nodes != nil || want.Segments != nil {
 		codexAssertCapturedSegments(t, history)
 	}
+	if want.Controls != nil {
+		codexAssertControls(t, want.Controls, history.Controls)
+	}
+}
+
+func codexAssertControls(t *testing.T, want []codexHistoryControlExpected, got []ingest.CodexCapturedControl) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("controls = %d, want %d (%+v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		g := got[i]
+		if g.NodeIndex != w.NodeIndex || g.SegmentOrdinal != w.Segment || g.Ordinal != w.Ordinal {
+			t.Errorf("controls[%d] position = node %d segment %d ordinal %d, want node %d segment %d ordinal %d", i, g.NodeIndex, g.SegmentOrdinal, g.Ordinal, w.NodeIndex, w.Segment, w.Ordinal)
+		}
+		if string(g.ThinkingLevel.Level) != w.ThinkingLevel || string(g.ThinkingLevel.Raw) != w.ThinkingLevelRaw {
+			t.Errorf("controls[%d] thinking level = %q/%q, want %q/%q", i, g.ThinkingLevel.Level, g.ThinkingLevel.Raw, w.ThinkingLevel, w.ThinkingLevelRaw)
+		}
+	}
 }
 
 func codexAssertNodes(t *testing.T, want []codexHistoryNodeExpected, got []ingest.CodexCapturedNode) {
@@ -508,6 +541,7 @@ func normalizeRefs(values []string) []string {
 
 func TestCodexHistoryProjectionFixtures(t *testing.T) {
 	fixture := loadCodexHistoryProjectionFixture(t)
+	histories := map[string]ingest.CodexCapturedHistory{}
 	for _, testCase := range fixture.Cases {
 		if testCase.Delivery != nil {
 			continue
@@ -551,6 +585,16 @@ func TestCodexHistoryProjectionFixtures(t *testing.T) {
 					}
 				})
 				previousFingerprint = history.Fingerprint
+				if testCase.SameProjectionAs != "" {
+					other, ok := histories[testCase.SameProjectionAs]
+					if !ok {
+						t.Fatalf("missing previous sibling %q", testCase.SameProjectionAs)
+					}
+					if !reflect.DeepEqual(history.Nodes, other.Nodes) || !reflect.DeepEqual(history.Segments, other.Segments) || !reflect.DeepEqual(history.MainRefs, other.MainRefs) {
+						t.Fatal("control evidence changed Nodes, Segments, or MainRefs compared with the effort-stripped sibling")
+					}
+				}
+				histories[testCase.Name] = history
 			}
 		})
 	}

@@ -49,3 +49,5 @@ requiredNames:
   - event-only-tool-item-arguments
   - legacy-canonical-item-rollback-boundary
   - cross-segment-item-body-replaced
+  - turn-context-effort-control-evidence
+  - turn-context-effort-stripped-sibling

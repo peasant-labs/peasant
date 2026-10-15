@@ -4,7 +4,10 @@
 ralph-plans/
 finesse-plans/
 .claude.local/*
-bin/
+# `/bin/` is no longer produced: the CLI builds to the repository root (see the
+# `/peasant` entry below). It stays ignored so a checkout that built before the
+# move does not report its stale binary as untracked.
+/bin/
 # Ignore built web assets, but keep a committed `.gitkeep` placeholder so the
 # `//go:embed all:web/out` directive (embed.go) is satisfied for `go install`
 # / `go build` of a fresh checkout that never ran `make web` (and for the

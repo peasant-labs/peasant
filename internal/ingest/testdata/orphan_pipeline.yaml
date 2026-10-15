@@ -35,6 +35,14 @@ sessions:
     harness: codex
     parent: 88888888-8888-4838-8838-888888888888
     transcript: '{"type":"user","message":{"role":"user","content":"synthetic cycle b transcript"}}'
+  - id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    harness: opencode
+    parent: null
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic opencode parent transcript"}}'
+  - id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    harness: opencode
+    parent: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic opencode spawned child transcript"}}'
 cases:
   - name: child-missing-parent-retained
     discovered:
@@ -336,6 +344,17 @@ cases:
           - 22222222-2222-4222-8222-222222222222
       - discovered:
           - 11111111-1111-4111-8111-111111111111
+        expectWarning:
+          contains:
+            - 'pipeline: reconcile independent child parent cache'
+            - '"step":"reconcile stored child parent cache"'
+            - '"reason":"unavailable"'
+            - 'the child keeps a nil FK cache'
+            - 'next harvest that discovers the same parent'
+            - 'restore database access and rerun harvest'
+          excludes:
+            - 'synthetic transient parent-cache reconciliation failure'
+            - 'stale unknown origin verdicts were not requeued'
       - discovered:
           - 11111111-1111-4111-8111-111111111111
     allowed: null
@@ -375,3 +394,181 @@ cases:
       22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
     expectRootOwned:
       - 22222222-2222-4222-8222-222222222222
+# Origin requeue arms. The stored parent root is seeded first so the stuck
+# child's FK cache lands; the child is then settled unknown at the current
+# origin rule version, the verdict judged before its parent link existed. The
+# parent root seeds unjudged, and the harvest's own resolve pass settles it
+# unknown at the rule version before the reconcile pass runs. The reconcile pass
+# must re-queue the child even when the harvest names no reconciliation target
+# or finds no cache to heal, and must leave the parentless root settled.
+  - name: no-target-requeues-stuck-child-keeps-parent-root
+    runs:
+      - discovered:
+          - 66666666-6666-4636-8636-666666666666
+        expectParentCache:
+          22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+        expectOrigin:
+          22222222-2222-4222-8222-222222222222:
+            verdict: unknown
+            version: 0
+          11111111-1111-4111-8111-111111111111:
+            verdict: unknown
+            version: 2
+    seedStored:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    seedOrigin:
+      22222222-2222-4222-8222-222222222222:
+        verdict: unknown
+        version: 2
+    expectParentCacheAfterSeed:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+      11111111-1111-4111-8111-111111111111: null
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 66666666-6666-4636-8636-666666666666
+    expectNotStored: []
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectLogicalParent: {}
+  - name: no-heal-updates-requeues-stuck-child-keeps-parent-root
+    runs:
+      - discovered:
+          - 33333333-3333-4333-8333-333333333333
+        expectParentCache:
+          44444444-4444-4434-8434-444444444444: 11111111-1111-4111-8111-111111111111
+        expectOrigin:
+          44444444-4444-4434-8434-444444444444:
+            verdict: unknown
+            version: 0
+          11111111-1111-4111-8111-111111111111:
+            verdict: unknown
+            version: 2
+    seedStored:
+      - 11111111-1111-4111-8111-111111111111
+      - 44444444-4444-4434-8434-444444444444
+    seedOrigin:
+      44444444-4444-4434-8434-444444444444:
+        verdict: unknown
+        version: 2
+    expectParentCacheAfterSeed:
+      44444444-4444-4434-8434-444444444444: 11111111-1111-4111-8111-111111111111
+      11111111-1111-4111-8111-111111111111: null
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 33333333-3333-4333-8333-333333333333
+    expectNotStored: []
+    expectParentCache:
+      44444444-4444-4434-8434-444444444444: 11111111-1111-4111-8111-111111111111
+    expectLogicalParent: {}
+# Two-pass repair of a stored spawned child. The settled OpenCode child is
+# stored first, while its parent is absent: its FK cache stays NULL, and only
+# its durable publication snapshot names the parent. It already carries the
+# unknown verdict at the current rule version. The first harvest discovers the
+# parent only; the reverse heal sets the child's cache and re-queues its origin
+# in the same statement, so after that harvest the child is linked and still
+# unknown at version 0. The second harvest's resolve pass judges the linked
+# child and settles it agent at the rule version. The parent itself is first
+# written by the first harvest, so the resolve pass, which judges only rows an
+# earlier run stored, settles it on the second.
+  - name: stored-child-heals-then-reclassifies-agent-over-two-harvests
+    runs:
+      - discovered:
+          - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expectParentCache:
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expectOrigin:
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:
+            verdict: unknown
+            version: 0
+          aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:
+            verdict: unknown
+            version: 0
+      - discovered:
+          - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expectParentCache:
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expectOrigin:
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:
+            verdict: agent
+            version: 2
+          aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:
+            verdict: unknown
+            version: 2
+    seedCapture:
+      - bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    seedOrigin:
+      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:
+        verdict: unknown
+        version: 2
+    expectParentCacheAfterSeed:
+      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: null
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    expectNotStored: []
+    expectParentCache:
+      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    expectLogicalParent: {}
+  - name: origin-requeue-failure-warns-heals-and-retries-without-discovery
+    invalidateFault: "synthetic database failure at /private/synthetic-store/private-value"
+    seedStored:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    seedCapture:
+      - bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    seedOrigin:
+      22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 2}
+      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: unknown, version: 2}
+    expectParentCacheAfterSeed:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: null
+    runs:
+      - discovered:
+          - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expectWarning:
+          contains:
+            - 'pipeline: re-queue stale parent-linked origin verdicts'
+            - '"step":"reconcile orphan parent caches"'
+            - '"reason":"unavailable"'
+            - 'stale unknown origin verdicts were not requeued'
+            - 'the store origin requeue operation failed'
+            - 'existing parent links stay unchanged; cache healing continues'
+            - 'the next harvest retries even without parent discovery'
+            - 'restore database access and rerun harvest'
+          excludes:
+            - '/private/synthetic-store'
+            - 'private-value'
+            - 'synthetic database failure'
+            - 'child keeps a nil FK cache'
+            - 'next harvest that discovers the same parent'
+        expectParentCache:
+          22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expectOrigin:
+          22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 2}
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: unknown, version: 0}
+      - discovered: []
+        expectWarning:
+          excludes:
+            - 'pipeline: re-queue stale parent-linked origin verdicts'
+        expectParentCache:
+          22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expectOrigin:
+          22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 0}
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: agent, version: 2}
+    expectStored:
+      - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa

@@ -58,7 +58,7 @@ func main() {
 	parallelFlag := fs.Int("parallel", 1, "profile: per-batch -parallel; 0 leaves it unpinned (isolated run)")
 	priorFlag := fs.String("prior", "", "profile: prior go test -json stream used for LPT batch weights")
 	cpuTopFlag := fs.Int("cpuprofile-top", 10, "profile: re-profile the N slowest tests with -cpuprofile (0 disables)")
-	pretestFlag := fs.Bool("pretest", false, "profile: measure the five pre-test steps instead of a package")
+	pretestFlag := fs.Bool("pretest", false, "profile: measure the pre-test steps instead of a package")
 	profilesFlag := fs.Bool("profiles", false, "profile: write Class B block/mutex/cpu profiles per batch")
 	traceFlag := fs.Bool("trace", false, "profile: also write a runtime trace per batch (perturbs block.out)")
 	timingTop := fs.Int("top", 25, "timing: rows to print per section")
@@ -162,7 +162,7 @@ flags:
                    (default 10; 0 disables)
   -profiles        profile: write Class B block/mutex/cpu profiles
   -trace           profile: also write a runtime trace (perturbs block.out)
-  -pretest         profile: measure the five pre-test steps
+  -pretest         profile: measure the pre-test steps
   -top N           timing: rows to print per section (default 25)
   -family-re RE    timing: regexp with one capture group; overrides default family grouping
   -no-families     timing: skip the per-family section

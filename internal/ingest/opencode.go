@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/schema"
 )
 
 // OpenCodeAdapter discovers every supported materialized representation and
@@ -1336,6 +1337,16 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 	return cloned
 }
 
+// openCodeStartedBy is the durable started_by evidence for a session whose
+// authoritative OpenCode row names a parent. Both metadata-assembly paths emit
+// it whenever the session carries a parent, whether or not this run discovered
+// or stored that parent: the target may name an unstored session, and the
+// listing groups or hides the child by this evidence rather than by discovery.
+func openCodeStartedBy(parent SessionID) schema.SessionRelationship {
+	target := parent
+	return schema.SessionRelationship{Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnown, TargetLocalID: &target, Evidence: schema.EvidenceExistingAdapter}
+}
+
 // ExtractMetadata builds UnifiedMetadata from session + message files.
 //
 // It reads:
@@ -1462,10 +1473,12 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	md.ModelHarness = HarnessOpenCode
 	md.Model = modelID
 	md.Version = ses.Version
+	applyOpenCodeThinkingSeed(&md, semanticMessages, decodeOpenCodeModelVariant(ses.Model))
 
 	if session.ParentUUID != nil {
 		parent := *session.ParentUUID
 		md.ParentUUID = &parent
+		md.Relationships = append(md.Relationships, openCodeStartedBy(parent))
 	}
 
 	ingested := time.Now().UnixMilli()
@@ -1537,14 +1550,15 @@ type openCodeProject struct {
 
 // openCodeSession represents the JSON structure of session/{hash}/ses_{id}.json.
 type openCodeSession struct {
-	ID        string `json:"id"`
-	Slug      string `json:"slug"`
-	Version   string `json:"version"`
-	Agent     string `json:"agent"`
-	ProjectID string `json:"projectID"`
-	Directory string `json:"directory"`
-	ParentID  string `json:"parentID"`
-	Title     string `json:"title"`
+	ID        string          `json:"id"`
+	Slug      string          `json:"slug"`
+	Version   string          `json:"version"`
+	Agent     string          `json:"agent"`
+	ProjectID string          `json:"projectID"`
+	Directory string          `json:"directory"`
+	ParentID  string          `json:"parentID"`
+	Title     string          `json:"title"`
+	Model     json.RawMessage `json:"model"`
 	Time      struct {
 		Created int64 `json:"created"`
 		Updated int64 `json:"updated"`

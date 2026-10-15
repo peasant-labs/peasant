@@ -6,7 +6,7 @@ import { visibleRootRows, type RootSessionRow } from '@/lib/home/publishState';
 
 export type RootSessionsState =
   | { status: 'loading'; rows: null; error: null }
-  | { status: 'ready'; rows: RootSessionRow[]; error: null }
+  | { status: 'ready'; rows: RootSessionRow[]; childGroups: ReadonlyMap<string, readonly RootSessionRow[]>; error: null }
   | { status: 'error'; rows: null; error: unknown };
 
 const LOADING: RootSessionsState = { status: 'loading', rows: null, error: null };
@@ -43,7 +43,19 @@ export function useRootSessions({
       try {
         const sync = await fetchSyncSessions();
         const publications = await fetchPublications(sync.map((session) => session.id));
-        if (!cancelled) setState({ status: 'ready', rows: visibleRootRows(sync, publications), error: null });
+        const rows: RootSessionRow[] = [];
+        const childGroups = new Map<string, RootSessionRow[]>();
+        for (const row of visibleRootRows(sync, publications)) {
+          if (row.sync.parentUnresolved) continue;
+          const parent = row.sync.parentSessionId;
+          if (!parent) rows.push(row);
+          else {
+            const children = childGroups.get(parent) ?? [];
+            children.push(row);
+            childGroups.set(parent, children);
+          }
+        }
+        if (!cancelled) setState({ status: 'ready', rows, childGroups, error: null });
       } catch (error: unknown) {
         if (!cancelled) setState({ status: 'error', rows: null, error });
       }

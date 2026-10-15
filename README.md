@@ -39,7 +39,7 @@ Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against
 nix develop
 
 # Build the binary
-make build          # outputs bin/peasant
+make build          # outputs peasant
 
 # Run the first-time setup wizard
 peasant kickstart
@@ -712,7 +712,7 @@ Start the server in one process and probe it from another:
 
 ```bash
 # Terminal 1: start server in foreground on a test port
-./bin/peasant web start --port 9999 --foreground --no-browser
+./peasant web start --port 9999 --foreground --no-browser
 
 # Terminal 2: verify endpoints
 # Health check
@@ -734,18 +734,18 @@ Compare mock vs real data by running two servers:
 
 ```bash
 # Server A: real data
-./bin/peasant web start --port 9990 --foreground --no-browser &
+./peasant web start --port 9990 --foreground --no-browser &
 
 # Server B: mock data for quality
-./bin/peasant web start --port 9991 --foreground --no-browser --mock-data-store=web,qualitySessions &
+./peasant web start --port 9991 --foreground --no-browser --mock-data-store=web,qualitySessions &
 
 # Compare session counts
 REAL=$(curl -s http://localhost:9990/api/v1/sessions | jq '.sessions | length')
 MOCK=$(curl -s http://localhost:9991/api/v1/sessions | jq '.sessions | length')
 echo "Real: $REAL, Mock: $MOCK"
 
-./bin/peasant web stop --port 9990
-./bin/peasant web stop --port 9991
+./peasant web stop --port 9990
+./peasant web stop --port 9991
 ```
 
 #### Pattern 2: Playwright/Puppeteer browser automation
@@ -935,7 +935,7 @@ var migrations = []Migration{
 Run verification after migrations:
 
 ```bash
-./bin/peasant ingest verify
+./peasant ingest verify
 ```
 
 ### Database verification

@@ -79,6 +79,7 @@ export function loadContextNavigationFixture() {
     // honest-reference arm can never accidentally become a link.
     const unresolvedRelationships = unresolved.relationships
     if (!Array.isArray(unresolvedRelationships) || unresolvedRelationships.length !== 1) throw new Error('context navigation fixture.unresolved.relationships must carry the one started_by relationship')
+    if (unresolvedRelationships[0]?.kind !== 'started_by' || unresolvedRelationships[0]?.targetState !== 'target_known' || unresolvedRelationships[0]?.evidence !== 'native_typed') throw new Error('context navigation fixture.unresolved.relationships[0] must carry a nameable started_by / target_known / native_typed target, not an unknown parent')
     const absentTargetId = requiredSessionId(record(unresolvedRelationships[0], 'context navigation fixture.unresolved.relationships[0]'), 'targetLocalId', 'context navigation fixture.unresolved.relationships[0]')
     if ([childSessionId, sourceId, parentId, unresolvedChildId].includes(absentTargetId)) throw new Error(`context navigation fixture.unresolved relationship target ${absentTargetId} names a stored session; the unavailable reference case requires an absent target`)
 

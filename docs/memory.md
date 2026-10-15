@@ -14,7 +14,7 @@
 > To use it, rebuild with the tag:
 >
 > ```bash
-> go build -tags=experimental -o bin/peasant ./cmd/peasant
+> go build -tags=experimental -o peasant ./cmd/peasant
 > ```
 >
 > See [Build-tag gating](#build-tag-gating) below for why and how this works.

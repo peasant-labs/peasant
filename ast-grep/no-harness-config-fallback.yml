@@ -1,0 +1,17 @@
+id: no-harness-config-fallback
+language: Go
+severity: error
+message: >
+  Ingest must derive thinking levels from recorded session evidence, never current
+  harness settings or environment defaults. Remove this configuration fallback.
+note: >
+  Reading today's harness configuration cannot prove yesterday's session level.
+  Missing recorded evidence must remain absent, not off or a configured default.
+rule:
+  all:
+    - kind: interpreted_string_literal
+    - regex: '(config\.toml|settings(?:\.local)?\.json|opencode\.jsonc?|CLAUDE_CODE_EFFORT_LEVEL|MAX_THINKING_TOKENS)'
+files:
+  - internal/ingest/**/*.go
+ignores:
+  - '**/*_test.go'

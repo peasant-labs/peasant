@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -337,10 +338,21 @@ func TestHarvestIndexCoverage_RealStoreThroughSummaryAndJSON(t *testing.T) {
 					gotRetainedPositions = append(gotRetainedPositions, position)
 				}
 			}
-			if fmt.Sprintf("%v", gotEmptyPositions) != fmt.Sprintf("%v", spec.WantEmptyPositions) {
+			// First-seen index-log order reflects scheduling, not fixture seed
+			// order. Compare exact memberships without mutating either oracle
+			// or observed order, and without discarding duplicate positions.
+			emptyPositions := slices.Clone(gotEmptyPositions)
+			wantEmptyPositions := slices.Clone(spec.WantEmptyPositions)
+			retainedPositions := slices.Clone(gotRetainedPositions)
+			wantRetainedPositions := slices.Clone(spec.WantRetainedPositions)
+			slices.Sort(emptyPositions)
+			slices.Sort(wantEmptyPositions)
+			slices.Sort(retainedPositions)
+			slices.Sort(wantRetainedPositions)
+			if !slices.Equal(emptyPositions, wantEmptyPositions) {
 				t.Errorf("empty membership = %v, want %v", gotEmptyPositions, spec.WantEmptyPositions)
 			}
-			if fmt.Sprintf("%v", gotRetainedPositions) != fmt.Sprintf("%v", spec.WantRetainedPositions) {
+			if !slices.Equal(retainedPositions, wantRetainedPositions) {
 				t.Errorf("retained membership = %v, want %v", gotRetainedPositions, spec.WantRetainedPositions)
 			}
 

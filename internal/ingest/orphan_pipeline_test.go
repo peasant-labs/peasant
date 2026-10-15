@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,9 +45,30 @@ type orphanSessionFixture struct {
 	Transcript string         `yaml:"transcript"`
 }
 
+// orphanOriginSpec is a stored origin verdict and the rule version it was
+// written at, as the origin resolve pass persists them.
+type orphanOriginSpec struct {
+	Verdict string `yaml:"verdict"`
+	Version int    `yaml:"version"`
+}
+
 type orphanRunFixture struct {
-	Discovered []string           `yaml:"discovered"`
-	Reparent   map[string]*string `yaml:"reparent"`
+	ExpectWarning *orphanWarningFixture `yaml:"expectWarning"`
+	Discovered    []string              `yaml:"discovered"`
+	Reparent      map[string]*string    `yaml:"reparent"`
+	// ExpectParentCache is the FK availability cache each named session must
+	// carry right after this run, read inside the run loop so a heal is
+	// attributed to the harvest that performed it.
+	ExpectParentCache map[string]*string `yaml:"expectParentCache"`
+	// ExpectOrigin is the stored origin verdict and version each named session
+	// must carry right after this run, read through the resolve pass's own
+	// stale-origin listing.
+	ExpectOrigin map[string]orphanOriginSpec `yaml:"expectOrigin"`
+}
+
+type orphanWarningFixture struct {
+	Contains []string `yaml:"contains"`
+	Excludes []string `yaml:"excludes"`
 }
 
 type orphanCaseFixture struct {
@@ -84,11 +106,30 @@ type orphanCaseFixture struct {
 	// failure through a store decorator that otherwise delegates to the real
 	// SQLite store. The case proves the next harvest retries the failed
 	// reconciliation and heals the cache without another new session.
-	FailReconcileOnce bool `yaml:"failReconcileOnce"`
+	FailReconcileOnce bool   `yaml:"failReconcileOnce"`
+	InvalidateFault   string `yaml:"invalidateFault"`
 	// UnrelatedRoots names sessions an earlier run stored but the final run no
 	// longer discovers. The final run must not open their managed metadata
 	// files: only the persistence-backed target-scoped reconciliation runs.
 	UnrelatedRoots []string `yaml:"unrelatedRoots"`
+	// SeedStored names sessions stored directly before the first run, in order,
+	// with their logical parent retained and no publication capture, so a
+	// parent listed ahead of its child lands the child's FK cache. They are
+	// settled for adapter and index maintenance.
+	SeedStored []string `yaml:"seedStored"`
+	// SeedCapture names sessions stored directly before the first run, after
+	// SeedStored, with a validated publication capture whose snapshot retains
+	// the logical parent and no relationship evidence. A child whose parent is
+	// not stored keeps a NULL FK cache while that durable snapshot names the
+	// parent, which is the evidence the reverse cache heal reads. Its recorded
+	// source is absent, so maintenance cannot rewrite it.
+	SeedCapture []string `yaml:"seedCapture"`
+	// SeedOrigin records an origin verdict and version on seeded sessions
+	// before the first run, as an earlier resolve pass would have left them.
+	SeedOrigin map[string]orphanOriginSpec `yaml:"seedOrigin"`
+	// ExpectParentCacheAfterSeed is the FK availability cache each named
+	// session must carry after seeding and before the first run.
+	ExpectParentCacheAfterSeed map[string]*string `yaml:"expectParentCacheAfterSeed"`
 }
 
 type orphanCorpusFixture struct {
@@ -104,16 +145,28 @@ var errOrphanParentFailure = errors.New("synthetic parent extraction failure")
 var errOrphanTransientReconcile = errors.New("synthetic transient parent-cache reconciliation failure")
 
 // orphanTransientReconcileStore delegates every store method to the real
-// SQLite store and fails only the first reverse parent-cache reconciliation
-// when a case asks for it. It changes no stored row; it exists to prove the
-// pipeline retries a transiently failed reconciliation on a later harvest.
+// SQLite store and fails only the first cache reconciliation or origin requeue
+// when a case asks for it. The injected fault changes no stored row; the next
+// harvest must retry the failed operation.
 type orphanTransientReconcileStore struct {
 	*store.Store
-	failNext   bool
-	injections int
+	failNext             bool
+	injections           int
+	invalidateFault      string
+	invalidateInjections int
 }
 
 var _ ingest.OrphanParentReconciler = (*orphanTransientReconcileStore)(nil)
+
+func (s *orphanTransientReconcileStore) InvalidateStaleParentOrigins(ctx context.Context) (int64, error) {
+	if s.invalidateFault != "" {
+		fault := s.invalidateFault
+		s.invalidateFault = ""
+		s.invalidateInjections++
+		return 0, errors.New(fault)
+	}
+	return s.Store.InvalidateStaleParentOrigins(ctx)
+}
 
 func (s *orphanTransientReconcileStore) ReconcileParentCache(ctx context.Context, updates []ingest.ParentCacheReconcile) error {
 	if s.failNext {
@@ -271,12 +324,15 @@ func orphanHarness(t *testing.T, raw ingest.Harness) ingest.Harness {
 }
 
 func TestOrphanPipelineIndependentAdmission(t *testing.T) {
-	t.Parallel()
+	// Warning cases replace the process-wide logger. Run them serially before
+	// the parallel cases resume, and keep this parent test nonparallel.
 	corpus := loadOrphanCorpus(t)
 	byID := orphanSessionsByID(t, corpus)
 	for _, tc := range corpus.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			t.Parallel()
+			if tc.InvalidateFault == "" && !tc.FailReconcileOnce {
+				t.Parallel()
+			}
 			runOrphanCase(t, byID, tc)
 		})
 	}
@@ -357,7 +413,14 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if err != nil {
 		t.Fatal(err)
 	}
-	reconcileStore := &orphanTransientReconcileStore{Store: db, failNext: tc.FailReconcileOnce}
+	t.Cleanup(func() { _ = db.Close() })
+	reconcileStore := &orphanTransientReconcileStore{Store: db, failNext: tc.FailReconcileOnce, invalidateFault: tc.InvalidateFault}
+	var warningLog bytes.Buffer
+	if tc.InvalidateFault != "" || tc.FailReconcileOnce {
+		previous := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&warningLog, &slog.HandlerOptions{Level: slog.LevelWarn})))
+		t.Cleanup(func() { slog.SetDefault(previous) })
+	}
 
 	selfParents := make(map[string]bool, len(tc.SelfParent))
 	for _, id := range tc.SelfParent {
@@ -381,9 +444,14 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if len(tc.UnrelatedRoots) > 0 {
 		seedOrphanUnrelatedRoots(t, ctx, db, byID, tc.UnrelatedRoots)
 	}
+	seedOrphanStoredRows(t, ctx, db, env, byID, tc.SeedStored, false)
+	seedOrphanStoredRows(t, ctx, db, env, byID, tc.SeedCapture, true)
+	seedOrphanOrigins(t, ctx, db, tc.SeedOrigin)
+	assertOrphanParentCache(t, ctx, db, tc.Name+" after seeding", tc.ExpectParentCacheAfterSeed)
 
 	var finalResult *ingest.PipelineResult
 	for runIndex, run := range runs {
+		warningLog.Reset()
 		if len(tc.UnrelatedRoots) > 0 && runIndex == len(runs)-1 {
 			// The final run is the incremental harvest: only its metadata
 			// reads are observed, so a stored unrelated root opened by the
@@ -430,6 +498,22 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 			t.Fatalf("run %d Run: %v", runIndex, err)
 		}
 		finalResult = result
+		if run.ExpectWarning != nil {
+			logged := warningLog.String()
+			for _, text := range run.ExpectWarning.Contains {
+				if !strings.Contains(logged, text) {
+					t.Fatalf("run %d warning lacks %q: %s", runIndex, text, logged)
+				}
+			}
+			for _, text := range run.ExpectWarning.Excludes {
+				if strings.Contains(logged, text) {
+					t.Fatalf("run %d warning contains forbidden %q: %s", runIndex, text, logged)
+				}
+			}
+		}
+		label := fmt.Sprintf("%s after run %d", tc.Name, runIndex)
+		assertOrphanParentCache(t, ctx, db, label, run.ExpectParentCache)
+		assertOrphanOrigins(t, ctx, db, label, run.ExpectOrigin)
 		for _, id := range tc.UnchangedBytes {
 			pair := orphanManagedPairBytes(t, env, id)
 			if runIndex == 0 {
@@ -446,6 +530,9 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 		}
 	}
 
+	if tc.InvalidateFault != "" && reconcileStore.invalidateInjections != 1 {
+		t.Fatalf("origin invalidation fault must fire exactly once, got %d", reconcileStore.invalidateInjections)
+	}
 	if tc.FailReconcileOnce {
 		if reconcileStore.injections != 1 {
 			t.Fatalf("case %q: injected reconciliation failures = %d, want exactly 1: the transient failure must fire before the retry proves itself", tc.Name, reconcileStore.injections)
@@ -686,22 +773,7 @@ func assertOrphanExpectations(
 			t.Fatalf("case %q: expected session %q to stay unstored, found row %+v", tc.Name, id, row)
 		}
 	}
-	for id, wantCache := range tc.ExpectParentCache {
-		row, err := db.SessionByID(ctx, id)
-		if err != nil {
-			t.Fatalf("case %q: SessionByID(%q): %v", tc.Name, id, err)
-		}
-		if row == nil {
-			t.Fatalf("case %q: cannot check parent cache of missing session %q", tc.Name, id)
-		}
-		var gotCache *string
-		if row.ParentID != nil && *row.ParentID != "" {
-			gotCache = row.ParentID
-		}
-		if !orphanOptionalEqual(gotCache, wantCache) {
-			t.Fatalf("case %q: parent cache of %q = %v, want %v", tc.Name, id, orphanDisplay(gotCache), orphanDisplay(wantCache))
-		}
-	}
+	assertOrphanParentCache(t, ctx, db, tc.Name, tc.ExpectParentCache)
 	for _, id := range tc.ExpectRootOwned {
 		rootPath := filepath.Join(env.outputDir, testutil.TestHostSlug, id, id+defaults.MetadataSuffix)
 		if _, err := env.fs.ReadFile(rootPath); err != nil {
@@ -750,6 +822,124 @@ func assertOrphanExpectations(
 		}
 		if wantLogical == nil && gotLogical != nil {
 			t.Fatalf("case %q: DB logical parent of %q = %v, want nil", tc.Name, id, orphanDisplay(gotLogical))
+		}
+	}
+}
+
+// assertOrphanParentCache requires each named session's stored FK
+// availability cache to equal the expected parent, or to be NULL for a null
+// expectation.
+func assertOrphanParentCache(t *testing.T, ctx context.Context, db *store.Store, label string, want map[string]*string) {
+	t.Helper()
+	for id, wantCache := range want {
+		row, err := db.SessionByID(ctx, id)
+		if err != nil {
+			t.Fatalf("case %q: SessionByID(%q): %v", label, id, err)
+		}
+		if row == nil {
+			t.Fatalf("case %q: cannot check parent cache of missing session %q", label, id)
+		}
+		var gotCache *string
+		if row.ParentID != nil && *row.ParentID != "" {
+			gotCache = row.ParentID
+		}
+		if !orphanOptionalEqual(gotCache, wantCache) {
+			t.Fatalf("case %q: parent cache of %q = %v, want %v", label, id, orphanDisplay(gotCache), orphanDisplay(wantCache))
+		}
+	}
+}
+
+// assertOrphanOrigins requires each named session's stored origin verdict and
+// version to match, read through the same stale-origin listing the resolve
+// pass uses. The listing bound sits above the current rule version so every
+// stored row is returned.
+func assertOrphanOrigins(t *testing.T, ctx context.Context, db *store.Store, label string, want map[string]orphanOriginSpec) {
+	t.Helper()
+	if len(want) == 0 {
+		return
+	}
+	rows, err := db.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1)
+	if err != nil {
+		t.Fatalf("case %q: ListStaleOriginSessions: %v", label, err)
+	}
+	got := make(map[string]ingest.StoredOriginRow, len(rows))
+	for _, row := range rows {
+		got[string(row.SessionID)] = row
+	}
+	for id, spec := range want {
+		row, ok := got[id]
+		if !ok {
+			t.Fatalf("case %q: origin state of %q missing from the stale-origin listing", label, id)
+		}
+		if row.StoredOrigin != spec.Verdict || row.OriginVersion != spec.Version {
+			t.Fatalf("case %q: origin state of %q = %q@%d, want %q@%d", label, id, row.StoredOrigin, row.OriginVersion, spec.Verdict, spec.Version)
+		}
+	}
+}
+
+// seedOrphanStoredRows stores corpus sessions directly, in the listed order,
+// with their logical parent retained. Rows are settled for adapter and index
+// maintenance. With capture, the row also persists a validated publication
+// capture whose snapshot retains the logical parent and carries no
+// relationship evidence; its recorded source is absent, so neither the
+// maintenance pass nor the write path can rewrite it.
+func seedOrphanStoredRows(t *testing.T, ctx context.Context, db *store.Store, env orphanEnv, byID map[string]orphanSessionFixture, ids []string, capture bool) {
+	t.Helper()
+	for _, raw := range ids {
+		fixture, ok := byID[raw]
+		if !ok {
+			t.Fatalf("unknown seeded session %q", raw)
+		}
+		meta := makeMinimalMeta(t, raw)
+		meta.ModelHarness = orphanHarness(t, fixture.Harness)
+		versions := ingest.HarvesterVersionRegistry[meta.ModelHarness]
+		meta.AdapterVersion = &versions.AdapterVersion
+		if fixture.Parent != nil {
+			parent, err := ingest.NewSessionID(*fixture.Parent)
+			if err != nil {
+				t.Fatalf("seeded session %q parent %q: %v", raw, *fixture.Parent, err)
+			}
+			meta.ParentUUID = &parent
+		}
+		entry := ingest.StoreEntry{Metadata: meta, CWDProvenance: ingest.CWDNotRecovered}
+		if capture {
+			meta.SchemaVersion = ingest.CurrentSchemaVersion
+			meta.Model = ingest.ModelID("synthetic-orphan-model")
+			meta.Source = ingest.SourceInfo{
+				Format:   ingest.SourceFormatJSONL,
+				FilePath: filepath.Join(env.sourceDir, "absent", raw+".jsonl"),
+			}
+			meta.ContentHash = schema.ComputeTranscriptHash([]byte(fixture.Transcript))
+			meta.MetadataHash = schema.ComputeMetadataHash(meta)
+			entry.PublicationCapture = true
+			entry.CWDProvenance = ingest.CWDSourceAbsent
+		}
+		if err := db.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
+			t.Fatalf("seed stored session %q: %v", raw, err)
+		}
+		sid, err := ingest.NewSessionID(raw)
+		if err != nil {
+			t.Fatalf("seeded session %q: %v", raw, err)
+		}
+		if err := db.UpdateIndexState(ctx, sid, versions.IndexerVersion, time.Now().UnixMilli()); err != nil {
+			t.Fatalf("settle seeded session %q: %v", raw, err)
+		}
+	}
+}
+
+// seedOrphanOrigins records the given origin verdicts and versions.
+func seedOrphanOrigins(t *testing.T, ctx context.Context, db *store.Store, origins map[string]orphanOriginSpec) {
+	t.Helper()
+	for raw, spec := range origins {
+		if spec.Verdict == "" {
+			t.Fatalf("seeded origin for %q names no verdict", raw)
+		}
+		sid, err := ingest.NewSessionID(raw)
+		if err != nil {
+			t.Fatalf("seeded origin session %q: %v", raw, err)
+		}
+		if err := db.UpdateOriginState(ctx, sid, spec.Verdict, spec.Version); err != nil {
+			t.Fatalf("seed origin of %q: %v", raw, err)
 		}
 	}
 }

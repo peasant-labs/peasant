@@ -3,7 +3,7 @@
    It builds a throwaway peasant world under the OS temp directory: a HOME with three git
    repositories and a Claude Code session recorded in each, a config.yaml, the auto-publish rules in
    hooks.yaml, and a stored Village sign-in whose Village is a small local double that lists two
-   collectives. It starts bin/peasant on that world, ingests the sessions through the real route, and
+   collectives. It starts peasant on that world, ingests the sessions through the real route, and
    shoots the mounted page in both themes:
 
      default         the whole page as it opens (desktop, and 390px wide)
@@ -21,17 +21,17 @@
    so no personal path reaches a capture; it is removed at the end (KEEP=1 keeps it).
 
    Build provenance is checked before the browser starts: the settings copy marker must be in a
-   web/out chunk no older than the page's sources, in bin/peasant (no older than that chunk), and in
+   web/out chunk no older than the page's sources, in peasant (no older than that chunk), and in
    the chunk the running server serves.
 
    Run (after `make build` in this worktree):
      CHROME_PATH=/path/to/chrome node scripts/visual/settings-shoot.mjs [out-dir]
 
-   Env: CHROME_PATH (required), PEASANT_BIN (default ../bin/peasant), PEASANT_SETTINGS_PORT
+   Env: CHROME_PATH (required), PEASANT_BIN (default ../peasant), PEASANT_SETTINGS_PORT
    (default 8795), PUPPETEER_CORE, KEEP. */
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -43,7 +43,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const WEB = join(HERE, '../..')
 const REPO = join(WEB, '..')
 const CHROME = process.env.CHROME_PATH
-const BIN = process.env.PEASANT_BIN || join(REPO, 'bin/peasant')
+const BIN = process.env.PEASANT_BIN || join(REPO, 'peasant')
 const PORT = process.env.PEASANT_SETTINGS_PORT || '8795'
 const ORIGIN = `http://localhost:${PORT}`
 const OUT = process.argv[2] || join(tmpdir(), 'peasant-settings-shots')
@@ -70,6 +70,7 @@ function files(path) {
 }
 
 /* ---- build provenance, before anything starts ---- */
+if (!existsSync(BIN) || !existsSync(join(WEB, 'out/_next/static/chunks'))) fail(`missing ${relative(REPO, BIN)} or exported chunks.`, 'run make build in this worktree first.')
 const chunks = files(join(WEB, 'out/_next/static/chunks')).filter((path) => path.endsWith('.js'))
 const markerChunk = chunks.find((path) => readFileSync(path, 'utf8').includes(MARKER))
 if (!markerChunk) fail(`no web/out chunk carries the settings marker "${MARKER}".`, 'run make build in this worktree.')
@@ -183,7 +184,7 @@ try {
     healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200
     if (!healthy) await pause(250)
   }
-  if (!healthy) await abort(`bin/peasant did not answer on ${ORIGIN}: ${serverLog.trim().slice(-400)}`, `free port ${PORT} or set PEASANT_SETTINGS_PORT.`)
+  if (!healthy) await abort(`peasant did not answer on ${ORIGIN}: ${serverLog.trim().slice(-400)}`, `free port ${PORT} or set PEASANT_SETTINGS_PORT.`)
 
   const servedChunk = `/${relative(join(WEB, 'out'), markerChunk).split('\\').join('/')}`
   const served = await fetch(`${ORIGIN}${servedChunk}`).catch(() => null)

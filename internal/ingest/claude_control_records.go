@@ -375,3 +375,74 @@ func claudeScalarText(raw json.RawMessage) string {
 	}
 	return ""
 }
+
+// Claude Code records its ultracode session mode as persisted attachment
+// records: {"type":"attachment","attachment":{"type":"ultra_effort_enter",
+// "reminderType":...}} turns the mode on and {"type":"attachment",
+// "attachment":{"type":"ultra_effort_exit"}} turns it off. The per-message
+// effort field carries the resolved effort and never names the mode.
+const (
+	claudeAttachmentUltraEffortEnter = "ultra_effort_enter"
+	claudeAttachmentUltraEffortExit  = "ultra_effort_exit"
+	// claudeUltracodeModeName maps identically to the canonical level without
+	// raw evidence while the mode governs a turn.
+	claudeUltracodeModeName = "ultracode"
+)
+
+// claudeThinkingLevelState tracks, in source order, the session mode that
+// governs the thinking level of each Claude Code assistant line.
+type claudeThinkingLevelState struct {
+	ultracode bool
+}
+
+// observe updates the mode from one record. Only attachment records carrying
+// the enter or exit attachment type change it.
+func (s *claudeThinkingLevelState) observe(recordType string, attachment json.RawMessage) {
+	if recordType != "attachment" || len(attachment) == 0 {
+		return
+	}
+	switch claudeAttachmentType(map[string]json.RawMessage{"attachment": attachment}) {
+	case claudeAttachmentUltraEffortEnter:
+		s.ultracode = true
+	case claudeAttachmentUltraEffortExit:
+		s.ultracode = false
+	}
+}
+
+// governing maps the level that governs an assistant line: the ultracode mode
+// while it is on (superseding the recorded effort), otherwise the line's own
+// effort. An empty effort outside the mode yields the zero mapping.
+func (s claudeThinkingLevelState) governing(effort string) (thinkingLevelMapping, *DiagnosticEntry) {
+	if s.ultracode {
+		return mapClaudeEffort(claudeUltracodeModeName)
+	}
+	return mapClaudeEffort(effort)
+}
+
+// claudeEffortValue decodes a top-level effort value. A missing or
+// non-string value is not effort evidence and never fails the line.
+func claudeEffortValue(raw json.RawMessage) string {
+	var value string
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return ""
+	}
+	return value
+}
+
+// claudeThinkingMetadata preserves the legacy shape without interpreting
+// the disabled flag or numeric budget as a level.
+type claudeThinkingMetadata struct {
+	Level             json.RawMessage `json:"level"`
+	Disabled          json.RawMessage `json:"disabled"`
+	MaxThinkingTokens json.RawMessage `json:"maxThinkingTokens"`
+}
+
+// claudeLegacyThinkingLevel decodes weak seed-only level evidence. A missing
+// or malformed value yields ""; budgets and disabled flags are never mapped.
+func claudeLegacyThinkingLevel(raw json.RawMessage) string {
+	var metadata claudeThinkingMetadata
+	if len(raw) == 0 || json.Unmarshal(raw, &metadata) != nil {
+		return ""
+	}
+	return claudeEffortValue(metadata.Level)
+}

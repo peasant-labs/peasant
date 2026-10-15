@@ -48,6 +48,7 @@ import {
   PublishStateLabel as FtPublishStateLabel,
   Segmented as FtSegmented,
   Select as FtSelect,
+  SessionGroupDisclosure as FtSessionGroupDisclosure,
   Sparkline as FtSparkline,
   StatsStrip as FtStatsStrip,
   Popover as FtPopover,
@@ -809,6 +810,20 @@ export interface DataTableProps<Row> {
   className?: string;
 }
 export const DataTable = FtDataTable as unknown as <Row>(props: DataTableProps<Row>) => ReactElement;
+
+/** Canonical controlled disclosure for a collapsed session family. */
+export interface SessionGroupDisclosureProps {
+  label: ReactNode;
+  collapsedLabel: ReactNode;
+  expanded: boolean;
+  onToggle: () => void;
+  rowsID: string;
+  bare?: boolean;
+  indent?: boolean;
+  showActionHint?: boolean;
+  children?: ReactNode;
+}
+export const SessionGroupDisclosure = FtSessionGroupDisclosure as unknown as ComponentType<SessionGroupDisclosureProps>;
 
 /** The fairtrade publish states a label can show. */
 export type PublishState =

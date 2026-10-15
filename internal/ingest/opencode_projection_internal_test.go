@@ -18,9 +18,107 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/opencode_absent_parent_assembly.yaml
+var openCodeAbsentParentAssemblyYAML []byte
+
+//go:embed testdata/opencode_absent_parent_assembly.manifest.yaml
+var openCodeAbsentParentAssemblyManifestYAML []byte
+
+func TestOpenCodeCapturedAbsentParentMetadataAssembly(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Name         string                     `yaml:"name"`
+			Source       string                     `yaml:"source"`
+			SessionID    string                     `yaml:"sessionId"`
+			ParentID     string                     `yaml:"parentId"`
+			Relationship schema.SessionRelationship `yaml:"relationship"`
+		} `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(openCodeAbsentParentAssemblyYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(openCodeAbsentParentAssemblyManifestYAML, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(fixture.Cases))
+	for _, row := range fixture.Cases {
+		names = append(names, row.Name)
+	}
+	if !reflect.DeepEqual(names, manifest.RequiredNames) {
+		t.Fatalf("assembly fixture names = %v, want %v", names, manifest.RequiredNames)
+	}
+	for _, row := range fixture.Cases {
+		t.Run(row.Name, func(t *testing.T) {
+			materialized := testfixture.MaterializeByName(t, row.Source)
+			conn, err := sqlite.OpenConn(materialized.Path, sqlite.OpenReadWrite)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = sqlitex.Execute(conn, "UPDATE session SET parent_id = ? WHERE id = ?", &sqlitex.ExecOptions{Args: []any{row.ParentID, row.SessionID}})
+			closeErr := conn.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			source := openSemanticSource(t, materialized.Path)
+			defer func() {
+				if err := source.Close(t.Context()); err != nil {
+					t.Error(err)
+				}
+			}()
+			id, err := NewSessionID(row.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Begin with the discovery root view. Capture must restore the parent.
+			session, _, err := capturedOpenCodeSession(t.Context(), source, DiscoveredSession{SessionID: id, Harness: HarnessOpenCode, TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite})
+			if err != nil {
+				t.Fatalf("capture %q: %v", row.SessionID, err)
+			}
+			if session.ParentUUID == nil || session.ParentUUID.String() != row.ParentID {
+				t.Fatalf("captured parent = %v, want %s", session.ParentUUID, row.ParentID)
+			}
+			parentLink, err := NewOpenCodeSessionLinkID(row.ParentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pageSize, _ := NewOpenCodeCurrentPageSize(MaxOpenCodeCurrentPageSize)
+			parentPage, err := source.SessionRecords(t.Context(), OpenCodeSessionRecordPageRequest{PageSize: pageSize, SessionID: &parentLink})
+			if err != nil || len(parentPage.Records) != 0 {
+				t.Fatalf("parent must be unstored: records=%v error=%v", parentPage.Records, err)
+			}
+			currentID, _ := NewOpenCodeCurrentSessionID(row.SessionID)
+			projection, _, err := readOpenCodeCurrentProjection(t.Context(), source, currentID, pageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapter := NewOpenCodeAdapter(&OSFileSystem{}, semanticNoGit{}, salt.Salt{}, WithOpenCodeEnvironment(fixedOpenCodeAdapterEnvironment{}))
+			metadata, err := adapter.metadataFromManagedProjection(t.Context(), session, openCodeLegacyProjection{Format: projection.Format, Version: projection.Version, SessionID: projection.SessionID, Messages: projection.Messages})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.ParentUUID == nil || metadata.ParentUUID.String() != row.ParentID {
+				t.Fatalf("snapshot parent = %v, want %s", metadata.ParentUUID, row.ParentID)
+			}
+			if !reflect.DeepEqual(metadata.Relationships, []schema.SessionRelationship{row.Relationship}) {
+				t.Fatalf("assembled relationships = %+v, want %+v", metadata.Relationships, row.Relationship)
+			}
+		})
+	}
+}
 
 const (
 	expectedOpenCodeSemanticCases     = 1

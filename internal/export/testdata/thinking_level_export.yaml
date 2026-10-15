@@ -1,0 +1,13 @@
+requiredNames: [stored_seed_without_turn_evidence, stored_unknown_native_seed, absent_is_not_off, explicit_off, stored_history_without_turn_evidence]
+cases:
+  - name: stored_seed_without_turn_evidence
+    level: ultracode
+  - name: stored_unknown_native_seed
+    raw: custom
+  - name: absent_is_not_off
+  - name: explicit_off
+    level: off
+  - name: stored_history_without_turn_evidence
+    history:
+      - {level: high}
+      - {level: "off", raw: none}

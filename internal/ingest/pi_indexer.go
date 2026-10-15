@@ -68,7 +68,7 @@ func (i *PiIndexer) IndexTranscriptBytesForCapture(ctx context.Context, session 
 	// physical EOF record. Preserve that diagnostic while retaining full text.
 	full := *i
 	full.fullContent = true
-	entries, err := full.project(doc, session.SessionID)
+	entries, _, err := full.project(doc, session.SessionID)
 	if err != nil {
 		return TranscriptCaptureResult{}, err
 	}
@@ -95,7 +95,8 @@ func (i *PiIndexer) IndexTranscriptBytes(ctx context.Context, session Discovered
 	if doc.header.ID != session.SessionID.String() {
 		return nil, piSourceError("index", 0, fmt.Errorf("header id changed since discovery"))
 	}
-	return i.project(doc, session.SessionID)
+	entries, _, err := i.project(doc, session.SessionID)
+	return entries, err
 }
 
 type piMessageRole string
@@ -166,6 +167,9 @@ type piMessagePayload struct {
 	Output        string          `json:"output"`
 	ExitCode      *int            `json:"exitCode"`
 	Cancelled     bool            `json:"cancelled"`
+	// ThinkingLevel is an assistant record's own level; when present it wins
+	// over the level set by the latest thinking_level_change.
+	ThinkingLevel string `json:"thinkingLevel"`
 }
 type piContentBlock struct {
 	Type      piBlockType     `json:"type"`
@@ -254,10 +258,19 @@ func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, e
 	return content, tools, nil
 }
 
-func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.SessionEntry, error) {
+// project returns the projected entries plus the thinking-level diagnostics
+// produced by mapping each native observation exactly once, in source order.
+// The metadata path consumes the diagnostics instead of re-deriving the native
+// values, so the assistant-record and thinking_level_change extraction rules
+// live only here.
+func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.SessionEntry, []*DiagnosticEntry, error) {
 	var rows []schema.SessionEntry
+	var diagnostics []*DiagnosticEntry
 	metadataCount, metadataBytes := 0, 0
 	calls := make(map[string]*piToolOwner)
+	// currentLevel is the level set by the latest thinking_level_change; it
+	// governs the assistant rows that follow it.
+	var currentLevel thinkingLevelMapping
 	appendRow := func(row schema.SessionEntry, extra PiExtra) error {
 		row.SessionID, row.EntryIndex, row.Harness = sessionID, len(rows), schema.HarnessPi
 		if !i.fullContent {
@@ -281,14 +294,14 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 	for _, entry := range doc.active {
 		entry, unknown, carrierOnly, err := preparePiUnknown(entry, sessionID)
 		if err != nil {
-			return nil, piSourceError("unknown evidence", entry.line, err)
+			return nil, nil, piSourceError("unknown evidence", entry.line, err)
 		}
 		extra := PiExtra{Kind: PiExtraState, Harness: schema.HarnessPi, SourceRef: PiPublicRef(sessionID.String(), "entry", entry.ID)}
 		extra.RetainedUnknown = unknown
 		if carrierOnly {
 			carrier, err := NewPiCarrier(sessionID, len(rows), extra)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			rows = append(rows, carrier)
 			continue
@@ -305,7 +318,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		case piMessage:
 			var message piMessagePayload
 			if err := json.Unmarshal(entry.Message, &message); err != nil {
-				return nil, piSourceError("message", entry.line, err)
+				return nil, nil, piSourceError("message", entry.line, err)
 			}
 			if message.Role == piRoleBash {
 				// A user shell execution has a real execute-style result, but is not
@@ -315,7 +328,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				row.ContentPreview = &content
 				parent := len(rows)
 				if err := appendRow(row, extra); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				extra.RetainedUnknown = nil // evidence belongs to the source owner only
 				toolID := PiPublicRef(sessionID.String(), "tool", entry.ID)
@@ -325,24 +338,24 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				input := string(args)
 				call := schema.SessionEntry{Role: RoleAssistant, EntryType: EntryTypeToolUse, Depth: 1, ParentIndex: &parent, HasToolUse: true, ToolCallID: &toolID, ToolKind: &kind, ToolNamesCSV: &name, ToolInput: &input}
 				if err := appendRow(call, extra); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				result := schema.SessionEntry{Role: RoleTool, EntryType: EntryTypeToolResult, Depth: 1, ParentIndex: &parent, ToolCallID: &toolID, ToolOutput: &message.Output, ContentPreview: &message.Output, IsError: message.Cancelled || message.ExitCode != nil && *message.ExitCode != 0}
 				extra.SourceRef = PiPublicRef(sessionID.String(), "entry", entry.ID+":result")
 				usage, err := PiUsageFromRaw(sessionID.String(), entry.ID+":result", schema.UsageScopeTool, message.Usage)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				extra.Usage = &usage
 				if err := appendRow(result, extra); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				continue
 			}
 			var err error
 			content, tools, err = piContent(message.Content, message.Role == piRoleAssistant)
 			if err != nil {
-				return nil, piSourceError("message content", entry.line, err)
+				return nil, nil, piSourceError("message content", entry.line, err)
 			}
 			switch message.Role {
 			case piRoleUser:
@@ -361,23 +374,32 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				model := message.Model
 				if len(message.ResponseModel) > 0 {
 					if bytes.Equal(bytes.TrimSpace(message.ResponseModel), []byte("null")) {
-						return nil, piSourceError("response model", 0, fmt.Errorf("responseModel must be a valid observed model string when present, not null"))
+						return nil, nil, piSourceError("response model", 0, fmt.Errorf("responseModel must be a valid observed model string when present, not null"))
 					}
 					if err := json.Unmarshal(message.ResponseModel, &model); err != nil {
-						return nil, piSourceError("response model", 0, err)
+						return nil, nil, piSourceError("response model", 0, err)
 					}
 				}
 				if model != "" || len(message.ResponseModel) > 0 {
 					observed, modelErr := schema.NewObservedModelID(model)
 					if modelErr != nil {
-						return nil, piSourceError("response model", 0, modelErr)
+						return nil, nil, piSourceError("response model", 0, modelErr)
 					}
 					extra.ModelID = observed
 				}
+				level := currentLevel
+				if message.ThinkingLevel != "" {
+					mapping, diagnostic := mapPiThinkingLevel(message.ThinkingLevel)
+					level = mapping
+					if diagnostic != nil {
+						diagnostics = append(diagnostics, diagnostic)
+					}
+				}
+				extra.ThinkingLevel, extra.ThinkingLevelRaw = level.Level, level.Raw
 			case piRoleToolResult:
 				owner := calls[message.ToolCallID]
 				if owner == nil || owner.finished || owner.name != message.ToolName {
-					return nil, piSourceError("tool pairing", 0, fmt.Errorf("result has no unique preceding matching call"))
+					return nil, nil, piSourceError("tool pairing", 0, fmt.Errorf("result has no unique preceding matching call"))
 				}
 				owner.finished = true
 				id := PiPublicRef(sessionID.String(), "tool", message.ToolCallID)
@@ -386,16 +408,16 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				scope, rawUsage = schema.UsageScopeTool, message.Usage
 				metadataKind, sourceType, data = schema.NativeMetadataPiToolResultDetails, schema.NativeSourcePiMessage, message.Details
 			default:
-				return nil, piSourceError("message role", 0, fmt.Errorf("unsupported message role"))
+				return nil, nil, piSourceError("message role", 0, fmt.Errorf("unsupported message role"))
 			}
 			if message.Role != piRoleAssistant && len(tools) > 0 {
-				return nil, piSourceError("tool pairing", 0, fmt.Errorf("only assistant messages may declare tool calls"))
+				return nil, nil, piSourceError("tool pairing", 0, fmt.Errorf("only assistant messages may declare tool calls"))
 			}
 		case piCustomMessage:
 			var err error
 			content, tools, err = piContent(entry.Content, false)
 			if err != nil || len(tools) > 0 {
-				return nil, piSourceError("custom message", 0, fmt.Errorf("expected text/image context content"))
+				return nil, nil, piSourceError("custom message", 0, fmt.Errorf("expected text/image context content"))
 			}
 			metadataKind, sourceType, data = schema.NativeMetadataPiCustomMessageDetails, schema.NativeSourcePiCustomMessage, entry.Details
 		case piCompaction, piBranchSummary:
@@ -407,11 +429,19 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			}
 		case piCustom:
 			metadataKind, sourceType, data = schema.NativeMetadataPiCustomData, schema.NativeSourcePiCustom, entry.Data
+		case piThinkingChange:
+			// The change stays a carrier row (no new display turn); it only
+			// sets the level governing the assistant rows that follow.
+			mapping, diagnostic := mapPiThinkingLevel(entry.ThinkingLevel)
+			currentLevel = mapping
+			if diagnostic != nil {
+				diagnostics = append(diagnostics, diagnostic)
+			}
 		}
 		if scope != "" {
 			usage, err := PiUsageFromRaw(sessionID.String(), entry.ID, scope, rawUsage)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			extra.Usage, extra.Kind = &usage, PiExtraUsage
 			if scope == schema.UsageScopeAssistant && usage.Tokens != nil {
@@ -427,16 +457,16 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		}
 		if len(data) > 0 {
 			if (entry.Type == piCustom || entry.Type == piCustomMessage) && strings.TrimSpace(entry.CustomType) == "" {
-				return nil, piSourceError("metadata", 0, fmt.Errorf("customType is required for custom metadata"))
+				return nil, nil, piSourceError("metadata", 0, fmt.Errorf("customType is required for custom metadata"))
 			}
 			metadataCount++
 			metadataBytes += len(data)
 			if metadataCount > 256 || metadataBytes > 1<<20 {
-				return nil, piSourceError("metadata", 0, fmt.Errorf("metadata exceeds session record or byte budget"))
+				return nil, nil, piSourceError("metadata", 0, fmt.Errorf("metadata exceeds session record or byte budget"))
 			}
 			safe, err := SanitizePiMetadataData(data, func(s string) (string, error) { return s, nil })
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			record := schema.NativeMetadataRecord{ID: PiPublicRef(sessionID.String(), "metadata", entry.ID), Kind: metadataKind, Source: schema.NativeSourceRef{EntryRef: schema.SourceEntryRef(extra.SourceRef), SourceType: sourceType}, Data: safe}
 			if entry.Type == piCustom || entry.Type == piCustomMessage {
@@ -450,7 +480,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		if entry.Type != piMessage && entry.Type != piCustomMessage && entry.Type != piCompaction && entry.Type != piBranchSummary {
 			carrier, err := NewPiCarrier(sessionID, len(rows), extra)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			rows = append(rows, carrier)
 			continue
@@ -458,11 +488,11 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		row.ContentPreview, row.HasToolUse = &content, len(tools) > 0
 		parent := len(rows)
 		if err := appendRow(row, extra); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, tool := range tools {
 			if _, exists := calls[tool.ID]; exists {
-				return nil, piSourceError("tool pairing", 0, fmt.Errorf("duplicate tool call id"))
+				return nil, nil, piSourceError("tool pairing", 0, fmt.Errorf("duplicate tool call id"))
 			}
 			calls[tool.ID] = &piToolOwner{parent: parent, name: tool.Name}
 			id := PiPublicRef(sessionID.String(), "tool", tool.ID)
@@ -470,29 +500,30 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			call := schema.SessionEntry{Role: RoleAssistant, EntryType: EntryTypeToolUse, TimestampMs: row.TimestampMs, Depth: 1, ParentIndex: &parent, HasToolUse: true, ToolNamesCSV: &tool.Name, ToolKind: &kind, ToolCallID: &id, ToolInput: &input}
 			callExtra := PiExtra{Kind: PiExtraState, Harness: schema.HarnessPi, SourceRef: extra.SourceRef, Namespace: tool.Namespace}
 			if err := appendRow(call, callExtra); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
 	if len(rows) == 0 {
 		carrier, err := NewPiCarrier(sessionID, 0, PiExtra{Kind: PiExtraCarrier, Harness: schema.HarnessPi})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		rows = append(rows, carrier)
 	}
 	if doc.hasTitle {
 		extra, _, err := DecodePiExtra(rows[0].Extra)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		extra.SessionName = &doc.title
 		rows[0].Extra, err = EncodePiExtra(extra)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return insertPiOmissionPlaceholders(rows, doc, sessionID)
+	entries, err := insertPiOmissionPlaceholders(rows, doc, sessionID)
+	return entries, diagnostics, err
 }
 
 // insertPiOmissionPlaceholders puts a placeholder entry where each record

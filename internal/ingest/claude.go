@@ -81,7 +81,15 @@ type claudeJSONLLine struct {
 	AgentID   string           `json:"agentId"`
 	UUID      string           `json:"uuid"`
 	Timestamp string           `json:"timestamp"`
-	Message   struct {
+	// Effort is the assistant line's top-level resolved effort. Attachment
+	// carries the nested attachment of an attachment record (the ultracode
+	// mode enter/exit evidence). ThinkingMetadata is the legacy per-line
+	// thinking configuration. All three are decoded tolerantly so a
+	// malformed value never drops the line.
+	Effort           json.RawMessage `json:"effort"`
+	Attachment       json.RawMessage `json:"attachment"`
+	ThinkingMetadata json.RawMessage `json:"thinkingMetadata"`
+	Message          struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"` // string or []contentBlock
@@ -1085,6 +1093,12 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 		toolCount      int
 		tokensIn       int
 		tokensOut      int
+		// levelState tracks the ultracode session mode in source order.
+		levelState claudeThinkingLevelState
+		// modernEffortSeen records any non-empty top-level effort anywhere;
+		// the legacy level is consulted only when none exists.
+		modernEffortSeen bool
+		legacyLevel      string
 	)
 
 	// The shared record reader handles a record of any size: a record up to
@@ -1134,6 +1148,23 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 				firstTimestamp = line.Timestamp
 			}
 			lastTimestamp = line.Timestamp
+		}
+
+		levelState.observe(string(line.Type), line.Attachment)
+		effort := claudeEffortValue(line.Effort)
+		if effort != "" {
+			modernEffortSeen = true
+		}
+		if legacyLevel == "" {
+			legacyLevel = claudeLegacyThinkingLevel(line.ThinkingMetadata)
+		}
+		if line.Type == claudeRecordTypeAssistant {
+			// The governing level of the earliest assistant line that has one
+			// seeds the session: the ultracode mode while on, otherwise the
+			// line's own effort.
+			mapping, diagnostic := levelState.governing(effort)
+			appendThinkingLevelDiagnostic(meta, diagnostic, lineNum)
+			applyThinkingLevelObservation(meta, mapping)
 		}
 
 		// Count turns.
@@ -1204,6 +1235,14 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 			meta.Stats.DurationMs = endMs - startMs
 		}
 
+	}
+
+	if !modernEffortSeen && meta.ThinkingLevel == "" && meta.ThinkingLevelRaw == "" {
+		// Weak fallback: the legacy level only when no modern effort exists
+		// anywhere in the transcript. Budgets are never consulted.
+		mapping, diagnostic := mapClaudeLegacyLevel(legacyLevel)
+		appendThinkingLevelDiagnostic(meta, diagnostic, 0)
+		applyThinkingLevelSeed(meta, mapping)
 	}
 
 	meta.CWD = literalCWD

@@ -8,6 +8,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 func TestStoredMetadataRecoveryPreservesSparseEvidence(t *testing.T) {
@@ -84,5 +85,49 @@ func TestStoredMetadataRecoveryPreservesSparseEvidence(t *testing.T) {
 	metrics, err := db.GetMetrics(t.Context(), entry.Metadata.SessionID)
 	if err != nil || !reflect.DeepEqual(computed, metrics) {
 		t.Fatalf("recovery replaced existing computed metrics: %v", err)
+	}
+}
+
+// TestStoredMetadataRecoveryCarriesThinkingLevel is the thinking-level round
+// trip through the retained-recovery contract: a seed written at ingest is
+// read back by ReadStoredMetadata and survives managed-artifact validation as
+// the same canonical level and exact raw spelling.
+func TestStoredMetadataRecoveryCarriesThinkingLevel(t *testing.T) {
+	fixture := loadArtifactMirrorFixtures(t)
+	levels := loadThinkingLevelStoreFixture(t)
+	const caseName = "a canonical level with its native raw spelling round-trips"
+	var pair *thinkingLevelPair
+	for _, c := range levels.RoundTrips {
+		if c.Name == caseName {
+			pair = &c.First
+		}
+	}
+	if pair == nil {
+		t.Fatalf("thinking-level store fixture is missing %q", caseName)
+	}
+	db := openTestStore(t)
+	entry := makeStoreEntry(t, fixture.SessionID, fixture.ProjectHash, fixture.HostSlug, defaults.HarnessOpenCode, fixture.StartedAt, 100, 50)
+	entry.Metadata.ThinkingLevel = schema.ThinkingLevel(pair.Level)
+	entry.Metadata.ThinkingLevelRaw = schema.ThinkingLevelRaw(pair.Raw)
+	entry.Metadata.ThinkingLevelHistory = []schema.ThinkingLevelChange{
+		{Level: schema.ThinkingLevelHigh},
+		{Level: schema.ThinkingLevelOff, Raw: "none"},
+	}
+	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := db.ReadStoredMetadata(t.Context(), entry.Metadata.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := ingest.NewManagedArtifact(metadata, []byte(fixture.Transcript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(artifact.Metadata.ThinkingLevel) != pair.Level || string(artifact.Metadata.ThinkingLevelRaw) != pair.Raw {
+		t.Fatalf("recovered thinking level = (%q, %q), want (%q, %q)", artifact.Metadata.ThinkingLevel, artifact.Metadata.ThinkingLevelRaw, pair.Level, pair.Raw)
+	}
+	if !reflect.DeepEqual(artifact.Metadata.ThinkingLevelHistory, entry.Metadata.ThinkingLevelHistory) {
+		t.Fatalf("recovered thinking level history = %+v, want %+v", artifact.Metadata.ThinkingLevelHistory, entry.Metadata.ThinkingLevelHistory)
 	}
 }

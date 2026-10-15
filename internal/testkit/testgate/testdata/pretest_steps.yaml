@@ -22,6 +22,8 @@ required_names:
   - lint
   - ast-grep-scan
   - ast-grep-gate-test
+  - projection-negative-seed
+  - projection-negative-scope
   - release-guard
 
 steps:
@@ -45,6 +47,16 @@ steps:
     args: ["test", "-race", "-tags=astgrep", "./internal/tui/gates/..."]
     target: check
     fragment: "go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/..."
+  - step: projection-negative-seed
+    program: go
+    args: ["test", "-tags=projection_negative_seed", "-run", "^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$", "./internal/transcript/"]
+    target: check
+    fragment: "go test -tags=projection_negative_seed -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/"
+  - step: projection-negative-scope
+    program: go
+    args: ["test", "-tags=projection_negative_scope", "-run", "^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$", "./internal/transcript/"]
+    target: check
+    fragment: "go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/"
   - step: release-guard
     program: go
     args: ["run", "github.com/peasant-labs/schema/cmd/release-guard", "check-workflow", "--policy", ".github/release-guard.policy.yml", "--release", ".github/workflows/release.yml"]

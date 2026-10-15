@@ -1,0 +1,40 @@
+requiredNames: [stored_seed, first_turn_not_final, raw_only, absent_not_off, stored_history_rides_the_socket]
+cases:
+  - name: stored_seed
+    storedLevel: ultracode
+    expectedLevel: ultracode
+    turns:
+      - role: assistant
+  - name: first_turn_not_final
+    storedLevel: high
+    expectedLevel: off
+    expectedRaw: none
+    expectedHistory:
+      - {level: ultra}
+    turns:
+      - role: user
+      - role: assistant
+        level: off
+        raw: none
+      - role: user
+      - role: assistant
+        level: ultra
+  - name: stored_history_rides_the_socket
+    storedLevel: medium
+    storedHistory:
+      - {level: high}
+      - {level: "off", raw: none}
+    expectedLevel: medium
+    expectedHistory:
+      - {level: high}
+      - {level: "off", raw: none}
+    turns:
+      - role: assistant
+  - name: raw_only
+    expectedRaw: custom
+    turns:
+      - role: assistant
+        raw: custom
+  - name: absent_not_off
+    turns:
+      - role: assistant

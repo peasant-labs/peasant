@@ -127,6 +127,12 @@ type ClassifiedBlock struct {
 	// producing this block. Nil means no observation. When present it must
 	// name an assistant block and survive layout on the owning entry.
 	ObservedModel *string
+	// ThinkingLevel / ThinkingLevelRaw are the mapped thinking-level evidence
+	// governing this block. Both empty means no observation. They are legal on
+	// assistant blocks only and are encoded under the entry Extra keys
+	// thinking_level / thinking_level_raw.
+	ThinkingLevel    schema.ThinkingLevel
+	ThinkingLevelRaw schema.ThinkingLevelRaw
 	// NativeAttachments carries optional typed native-metadata enrichment
 	// owned by this block. Each record is remapped to the allocated block ref
 	// in the owner's final partition; a tool attachment is remapped from its
@@ -978,9 +984,10 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 		}
 	}
 	// Merge order is Extra, then the projection-owned model observation, then
-	// the projection-owned retained-unknown evidence: each later step keeps
-	// every unrelated key the earlier one carried. The reserved keys were
-	// refused at capture validation, so nothing here overwrites adapter data.
+	// the projection-owned thinking-level evidence, then the projection-owned
+	// retained-unknown evidence: each later step keeps every unrelated key the
+	// earlier one carried. The reserved keys were refused at capture
+	// validation, so nothing here overwrites adapter data.
 	if block.Extra != "" {
 		value := block.Extra
 		entry.Extra = &value
@@ -990,6 +997,37 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 		// projection-owned model_id; the identifier is already validated, so a
 		// valid observation always lands.
 		entry.Extra = addModelObservation(entry.Extra, *block.ObservedModel)
+	}
+	if block.ThinkingLevel != "" || block.ThinkingLevelRaw != "" {
+		if err := schema.ValidateThinkingLevelEvidence(block.Role, block.ThinkingLevel, block.ThinkingLevelRaw); err != nil {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q carries thinking-level evidence the contract refuses; the entry cannot be emitted; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+		}
+		extra := map[string]json.RawMessage{}
+		if entry.Extra != nil {
+			if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
+				return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q extension evidence cannot be decoded to attach thinking-level evidence; the entry cannot be emitted; fix the adapter's Extra encoding: %w", block.NativeKey, err)
+			}
+		}
+		if block.ThinkingLevel != "" {
+			value, err := json.Marshal(string(block.ThinkingLevel))
+			if err != nil {
+				return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q thinking-level evidence cannot be encoded; the observation cannot be preserved; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+			}
+			extra[ThinkingLevelExtraKey] = value
+		}
+		if block.ThinkingLevelRaw != "" {
+			value, err := json.Marshal(string(block.ThinkingLevelRaw))
+			if err != nil {
+				return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q thinking-level raw evidence cannot be encoded; the observation cannot be preserved; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+			}
+			extra[ThinkingLevelRawExtraKey] = value
+		}
+		encoded, err := json.Marshal(extra)
+		if err != nil {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q thinking-level evidence cannot be merged into the entry's extension fields; the observation cannot be preserved; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+		}
+		value := string(encoded)
+		entry.Extra = &value
 	}
 	if block.RawByteLength != nil {
 		if *block.RawByteLength < 0 {

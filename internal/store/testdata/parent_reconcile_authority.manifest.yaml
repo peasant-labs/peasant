@@ -7,3 +7,7 @@ requiredNames:
   - active-target-known-reconciles
   - latest-attempt-evidence-child-reconciles
   - latest-attempt-authority-not-resurrected-from-legacy
+  - heal-resets-codex-child-origin-version
+  - heal-resets-opencode-child-origin-version
+  - invalidate-requeues-codex-parented-child-claude-code-control-untouched
+  - invalidate-requeues-opencode-parented-child-claude-code-control-untouched

@@ -55,7 +55,8 @@ func newSQLiteMaterializedTranscript(metadata *UnifiedMetadata, data []byte, ses
 	// Only source-owned attributes participate, never discovery file/WAL clocks
 	// or decision-time Git configuration. The latter has its own identity trigger.
 	attrs := DiscoveredSession{ParentUUID: session.ParentUUID, CWD: session.CWD,
-		Title: session.Title, Agent: session.Agent, Version: session.Version,
+		OpenCodeModelVariant: session.OpenCodeModelVariant,
+		Title:                session.Title, Agent: session.Agent, Version: session.Version,
 		Slug: session.Slug, Cost: session.Cost, TokensIn: session.TokensIn,
 		TokensOut: session.TokensOut, CreatedAt: session.CreatedAt, ModTime: session.ModTime,
 		ProjectWorktree: session.ProjectWorktree, ProjectName: session.ProjectName, EventSeq: session.EventSeq}
@@ -278,6 +279,9 @@ type DiscoveredSession struct {
 	TokensIn  int
 	TokensOut int
 	Cost      float64
+	// OpenCodeModelVariant is the optional native session fallback; message
+	// observations take precedence when deriving metadata.
+	OpenCodeModelVariant string
 	// EventSeq is the session's newest event sequence, a monotonic per-session
 	// counter that advances on every mutation, including an in-place rewrite that
 	// moves no time column. Change detection re-ingests a session whose EventSeq

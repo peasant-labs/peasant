@@ -1,0 +1,109 @@
+# V66 adds sessions.thinking_level (nullable, CHECK over the canonical set),
+# sessions.thinking_level_raw (nullable, no CHECK), and
+# sessions.thinking_level_history (nullable JSON array, no CHECK). Each record is
+# inserted directly through the real migrated store and read back byte for byte;
+# NULL columns are written with null and must read back as NULL. Deletion
+# protection is by required NAME, never a declared count.
+
+required_record_names:
+  - canonical level off round-trips
+  - canonical level minimal round-trips
+  - canonical level low round-trips
+  - canonical level medium round-trips
+  - canonical level high round-trips
+  - canonical level xhigh round-trips
+  - canonical level max round-trips
+  - canonical level ultra round-trips
+  - canonical level ultracode round-trips
+  - a canonical level with its native raw spelling round-trips as a pair
+  - a raw-only row with an unmapped native spelling keeps the canonical absent
+  - a multibyte raw spelling round-trips exact bytes
+  - a row with neither column set reads back as NULL
+  - a raw value longer than 128 bytes stored directly round-trips as stored
+  - a session thinking-level history JSON array round-trips exact bytes
+  - a row with a null history reads back as NULL
+
+required_rejection_names:
+  - a canonical level outside the closed set is refused
+  - the empty string is not a legal sessions.thinking_level
+
+records:
+  - name: canonical level off round-trips
+    session_id: v62-level-off
+    thinking_level: "off"
+    thinking_level_raw: null
+  - name: canonical level minimal round-trips
+    session_id: v62-level-minimal
+    thinking_level: "minimal"
+    thinking_level_raw: null
+  - name: canonical level low round-trips
+    session_id: v62-level-low
+    thinking_level: "low"
+    thinking_level_raw: null
+  - name: canonical level medium round-trips
+    session_id: v62-level-medium
+    thinking_level: "medium"
+    thinking_level_raw: null
+  - name: canonical level high round-trips
+    session_id: v62-level-high
+    thinking_level: "high"
+    thinking_level_raw: null
+  - name: canonical level xhigh round-trips
+    session_id: v62-level-xhigh
+    thinking_level: "xhigh"
+    thinking_level_raw: null
+  - name: canonical level max round-trips
+    session_id: v62-level-max
+    thinking_level: "max"
+    thinking_level_raw: null
+  - name: canonical level ultra round-trips
+    session_id: v62-level-ultra
+    thinking_level: "ultra"
+    thinking_level_raw: null
+  - name: canonical level ultracode round-trips
+    session_id: v62-level-ultracode
+    thinking_level: "ultracode"
+    thinking_level_raw: null
+  - name: a canonical level with its native raw spelling round-trips as a pair
+    session_id: v62-pair
+    thinking_level: "xhigh"
+    thinking_level_raw: "xhigh"
+  - name: a raw-only row with an unmapped native spelling keeps the canonical absent
+    session_id: v62-raw-only
+    thinking_level: null
+    thinking_level_raw: "custom"
+  - name: a multibyte raw spelling round-trips exact bytes
+    session_id: v62-multibyte
+    thinking_level: "high"
+    thinking_level_raw: "思考-高-é🧠"
+  - name: a row with neither column set reads back as NULL
+    session_id: v62-null
+    thinking_level: null
+    thinking_level_raw: null
+  - name: a raw value longer than 128 bytes stored directly round-trips as stored
+    session_id: v62-long-raw
+    thinking_level: null
+    thinking_level_raw: "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+  - name: a session thinking-level history JSON array round-trips exact bytes
+    session_id: v62-history
+    thinking_level: "medium"
+    thinking_level_raw: null
+    thinking_level_history: '[{"level":"high"},{"level":"off","raw":"none"}]'
+  - name: a row with a null history reads back as NULL
+    session_id: v62-history-null
+    thinking_level: "low"
+    thinking_level_raw: null
+    thinking_level_history: null
+
+# Rows the CHECK must refuse outright.
+rejections:
+  - name: a canonical level outside the closed set is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, thinking_level)
+      VALUES ('bad-1', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', 'extreme')
+  - name: the empty string is not a legal sessions.thinking_level
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, thinking_level)
+      VALUES ('bad-2', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '')

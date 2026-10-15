@@ -20,6 +20,16 @@ func NewSessionID(raw string) (SessionID, error) {
 	return schema.NewSessionID(raw)
 }
 
+// --- ThinkingLevel ---
+
+// ThinkingLevel is the canonical thinking/reasoning effort level; empty means
+// unknown (absent), which is distinct from off.
+type ThinkingLevel = schema.ThinkingLevel
+
+// ThinkingLevelRaw is the exact native thinking-level spelling kept as source
+// evidence when it differs from the canonical level.
+type ThinkingLevelRaw = schema.ThinkingLevelRaw
+
 // --- ModelID ---
 
 // ModelID identifies a specific model version (e.g. "claude-opus-4-6").

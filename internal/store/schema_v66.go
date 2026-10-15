@@ -1,33 +1,28 @@
 package store
 
-// migrationV66 adds the latest-attempt pointer to sessions. A managed
-// V2 write whose assessed capture is an unaccounted source-records omission
-// preview does not replace the active authority; the preview is retained as a
-// separate attempt and this pointer records it while the last-good full
-// generation stays the read authority.
+// migrationV66 adds the session thinking-level columns.
 //
-// The seven columns stay nullable with no backfill: a session that never
-// retained an attempt keeps every column NULL, which is also the settled state
-// the latest-attempt commit compares against. latest_attempt_stats_json carries
-// the latest attempt's own producer stats so count-carrying reads can resolve
-// them without touching the session's active-authority stats. Plain
-// ALTER TABLE ADD COLUMN, no table rebuild, STRICT-compatible.
+// thinking_level is the canonical level the producer resolved for the session
+// (the earliest valid root-assistant observation). NULL means unknown, which is
+// distinct from the canonical 'off'. Its CHECK mirrors schema.AllThinkingLevels
+// exactly; SQLite cannot ALTER a CHECK, so any future change to that set needs a
+// table-rebuild migration, and migration_v66_check_test.go fails until one lands.
+//
+// thinking_level_raw is the exact native spelling kept as source evidence. It
+// carries no CHECK: its byte bound is enforced at ingest and by the wire
+// contract, not by the store, so an over-long stored value reads back as stored.
+//
+// thinking_level_history is the JSON array of later in-session changes, in
+// source order with consecutive duplicates collapsed. NULL means no change was
+// observed (absent, never an empty array), which keeps a session with no
+// history distinct from one whose history was recorded as empty.
 const migrationV66 = `
-ALTER TABLE sessions ADD COLUMN latest_attempt_generation_id TEXT;
-ALTER TABLE sessions ADD COLUMN latest_attempt_artifact_hash TEXT CHECK (
-    latest_attempt_artifact_hash IS NULL OR (
-        length(latest_attempt_artifact_hash) = 64 AND latest_attempt_artifact_hash NOT GLOB '*[^0-9a-f]*'
-    )
-);
-ALTER TABLE sessions ADD COLUMN latest_attempt_indexer_version INTEGER CHECK (
-    latest_attempt_indexer_version IS NULL OR latest_attempt_indexer_version > 0
-);
-ALTER TABLE sessions ADD COLUMN latest_attempt_failure_code TEXT;
-ALTER TABLE sessions ADD COLUMN latest_attempt_failure_message TEXT;
-ALTER TABLE sessions ADD COLUMN latest_attempt_captured_at_ms INTEGER CHECK (
-    latest_attempt_captured_at_ms IS NULL OR latest_attempt_captured_at_ms >= 0
-);
-ALTER TABLE sessions ADD COLUMN latest_attempt_stats_json TEXT CHECK (
-    latest_attempt_stats_json IS NULL OR json_valid(latest_attempt_stats_json)
-);
+ALTER TABLE sessions
+  ADD COLUMN thinking_level TEXT
+  CHECK (thinking_level IS NULL OR thinking_level IN
+    ('off','minimal','low','medium','high','xhigh','max','ultra','ultracode'));
+ALTER TABLE sessions
+  ADD COLUMN thinking_level_raw TEXT;
+ALTER TABLE sessions
+  ADD COLUMN thinking_level_history TEXT;
 `

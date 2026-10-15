@@ -64,7 +64,8 @@ slots:
   - {name: v63-source-unavailability, slot: 63, needle: "CREATE TABLE session_source_unavailability ("}
   - {name: v64-ingest-run-outcomes, slot: 64, needle: "CREATE TABLE ingest_run_outcomes ("}
   - {name: v65-claude-identity-proof, slot: 65, needle: "ADD COLUMN identity_records_json TEXT"}
-  - {name: v66-latest-attempt-pointer, slot: 66, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
+  - {name: v66-session-thinking-level, slot: 66, needle: "ADD COLUMN thinking_level_raw TEXT"}
+  - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

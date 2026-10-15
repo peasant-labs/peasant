@@ -18,7 +18,7 @@ import { applyDeterminism } from './determinism.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const OUT = process.env.CAPTURES || join(HERE, 'review-capture', 'grouped-local')
 const PORT = process.env.PEASANT_GROUPED_PORT || '8723'
 const ORIGIN = `http://localhost:${PORT}`
@@ -106,7 +106,7 @@ function assertProvenance() {
   const binary = readFileSync(BIN)
   const missingBinaryBytes = FEATURE_BYTES.filter((signature) => !binary.includes(Buffer.from(signature)))
   if (missingBinaryBytes.length) {
-    fail(`the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so bin/peasant matches web/out`)
+    fail(`the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so peasant matches web/out`)
   }
   return FEATURE_GROUPS.map(({ label, signatures }) => {
     const match = javascript.find(({ content }) => signatures.every((signature) => content.includes(signature)))

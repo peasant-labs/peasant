@@ -656,12 +656,15 @@ func metadataToSession(meta *ingest.UnifiedMetadata, fields config.PushFieldVisi
 		project = label
 	}
 	session := &ingest.Session{
-		ID:        sid,
-		Harness:   meta.ModelHarness,
-		Model:     string(meta.Model),
-		Project:   project,
-		StartTime: time.UnixMilli(meta.Timestamp.Start),
-		EndTime:   time.UnixMilli(meta.Timestamp.End),
+		ID:                   sid,
+		Harness:              meta.ModelHarness,
+		Model:                string(meta.Model),
+		ThinkingLevel:        meta.ThinkingLevel,
+		ThinkingLevelRaw:     meta.ThinkingLevelRaw,
+		ThinkingLevelHistory: append([]schema.ThinkingLevelChange(nil), meta.ThinkingLevelHistory...),
+		Project:              project,
+		StartTime:            time.UnixMilli(meta.Timestamp.Start),
+		EndTime:              time.UnixMilli(meta.Timestamp.End),
 	}
 	// The local path is withheld whenever the label went out instead (D10):
 	// a label already identifies the project, so pairing it with the
