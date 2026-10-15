@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -23,6 +24,20 @@ type staleIndexSettlingDocument struct {
 	RequiredNames []string                    `yaml:"required_names"`
 	Transcripts   map[string]string           `yaml:"transcripts"`
 	Cases         []staleIndexSettlingFixture `yaml:"cases"`
+	// LatestAttemptRequiredNames and LatestAttemptCases are the coexistence
+	// section of the same family: a full read authority with a fully settled
+	// latest attempt beside it, driven through the ordinary harvest.
+	LatestAttemptRequiredNames []string                                 `yaml:"latest_attempt_required_names"`
+	LatestAttemptCases         []staleIndexSettlingLatestAttemptFixture `yaml:"latest_attempt_cases"`
+}
+
+// staleIndexSettlingLatestAttemptFixture names one settled-latest-attempt
+// harvest case. The transcript is the saved pair the harvest would read if the
+// attempt had not settled.
+type staleIndexSettlingLatestAttemptFixture struct {
+	Name       string `yaml:"name"`
+	Harness    string `yaml:"harness"`
+	Transcript string `yaml:"transcript"`
 }
 
 type staleIndexSettlingFixture struct {
@@ -72,6 +87,19 @@ func loadStaleIndexSettlingFixtures(t *testing.T) staleIndexSettlingDocument {
 		names[fixture.Name] = true
 	}
 	if err := testutil.RequireFixtureNames("stale index settling", "case", document.RequiredNames, names); err != nil {
+		t.Fatal(err)
+	}
+	latestNames := make(map[string]bool)
+	for _, fixture := range document.LatestAttemptCases {
+		if fixture.Name == "" || latestNames[fixture.Name] {
+			t.Fatalf("invalid settled latest-attempt fixture %q", fixture.Name)
+		}
+		if _, ok := document.Transcripts[fixture.Transcript]; !ok {
+			t.Fatalf("settled latest-attempt fixture %s names unknown transcript %q", fixture.Name, fixture.Transcript)
+		}
+		latestNames[fixture.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("settled latest attempt", "case", document.LatestAttemptRequiredNames, latestNames); err != nil {
 		t.Fatal(err)
 	}
 	return document
@@ -442,4 +470,216 @@ func seedStalePreviewCapture(t *testing.T, ctx context.Context, database *store.
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("seed stale preview capture: %+v", results)
 	}
+}
+
+// TestOrdinaryHarvestSettlesLatestAttempt drives the ORDINARY harvest over a
+// real generation-capable store holding a full read authority with a fully
+// settled latest attempt beside it. The attempt already consumed the current
+// pair under this build's producer and adapter targets, so the harvest selects
+// no work for the session: it reads no transcript, indexes nothing, and leaves
+// both the active authority's producer stamp and the latest-attempt pointer
+// exactly as they were. The per-facet selection surfaces and the replace/true
+// no-op lifecycle are covered by the store family; this case proves the
+// production harvest path obeys them.
+func TestOrdinaryHarvestSettlesLatestAttempt(t *testing.T) {
+	t.Parallel()
+	document := loadStaleIndexSettlingFixtures(t)
+	for _, fixture := range document.LatestAttemptCases {
+		t.Run(fixture.Name, func(t *testing.T) {
+			harness := ingest.Harness(fixture.Harness)
+			if !harness.IsKnown() {
+				t.Fatalf("fixture names unknown harness %q", fixture.Harness)
+			}
+			ctx := t.Context()
+			fs := testutil.NewCountingFS(testutil.NewMemFS())
+			root := filepath.Join(t.TempDir(), "artifacts")
+			artifacts, err := store.NewOSGenerationArtifactStore(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			locker, err := store.NewFileSessionLocker(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			database := storetest.OpenWith(t, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+
+			id, err := ingest.NewSessionID(testutil.TestSessionUUID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transcript := []byte(document.Transcripts[fixture.Transcript])
+			meta := makeMinimalMeta(t, id.String())
+			meta.ModelHarness = harness
+			meta.ContentHash = schema.ComputeTranscriptHash(transcript)
+			sessionDir := filepath.Join(testOutputDir, testutil.TestHostSlug, id.String())
+			path := filepath.Join(sessionDir, id.String()+"--transcript.jsonl")
+			if err := fs.WriteFile(path, transcript, 0600); err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(meta)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fs.WriteFile(filepath.Join(sessionDir, id.String()+"--metadata.json"), encoded, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+				t.Fatal(err)
+			}
+
+			target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[harness]
+			sid := schema.SessionID(id.String())
+			identity := strings.Repeat("7", 64)
+			seedSettledLatestAttempt(t, ctx, database, sid, target, identity)
+
+			cfg := makePipelineConfig(testOutputDir)
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+				ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database),
+				ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+				ingest.WithHarvesterVersions(ingest.GenerationTargets(ingest.HarvesterVersionRegistry)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			fs.ResetCounts()
+			result, err := pipeline.Run(ctx)
+			if err != nil {
+				t.Fatalf("harvest: %v", err)
+			}
+			if result.Summary.Indexed != 0 {
+				t.Fatalf("a settled latest attempt was re-indexed (%d session(s)); diagnostics: %+v", result.Summary.Indexed, result.Diagnostics)
+			}
+			if reads := fs.ReadCount(path); reads != 0 {
+				t.Fatalf("the harvest read the settled attempt's transcript %d time(s), want 0", reads)
+			}
+			state, err := database.ReadIndexState(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state == nil {
+				t.Fatal("no stored index state after the harvest")
+			}
+			if state.IndexerVersion != 1 {
+				t.Fatalf("the authority's producer stamp moved to %d, want the authority's own 1; the harvest must not stamp A as current", state.IndexerVersion)
+			}
+			if state.ArtifactHash == nil || *state.ArtifactHash != identity {
+				t.Fatalf("stored pair identity = %v, want the recorded %s", state.ArtifactHash, identity)
+			}
+			if state.LatestAttemptArtifactHash == nil || *state.LatestAttemptArtifactHash != identity {
+				t.Fatalf("latest-attempt pair facet = %v, want the recorded %s", state.LatestAttemptArtifactHash, identity)
+			}
+			if state.LatestAttemptIndexerVersion == nil || *state.LatestAttemptIndexerVersion != target.IndexerVersion {
+				t.Fatalf("latest-attempt producer facet = %v, want %d", state.LatestAttemptIndexerVersion, target.IndexerVersion)
+			}
+			if state.LatestAttemptAdapterVersion == nil || *state.LatestAttemptAdapterVersion != target.AdapterVersion {
+				t.Fatalf("latest-attempt adapter facet = %v, want %d", state.LatestAttemptAdapterVersion, target.AdapterVersion)
+			}
+		})
+	}
+}
+
+// seedSettledLatestAttempt seeds the coexistence state the settled harvest case
+// starts from: a complete full generation installed as the read authority, then
+// a complete preview attempt over it recorded as the latest attempt with the
+// authority's pair identity. Both writes go through the real activation route,
+// so the seeded state is exactly what production leaves.
+func seedSettledLatestAttempt(t *testing.T, ctx context.Context, database *store.Store, sid schema.SessionID, target ingest.HarvesterVersions, identity string) {
+	t.Helper()
+	authority, authorityBlobs := buildSettlingGeneration(t, sid, "gen_settle_authority", "authority text", "authority input", "authority output")
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: ingest.HarnessClaudeCode, Result: authority,
+		Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+	})
+	if err != nil {
+		t.Fatalf("assess the read authority: %v", err)
+	}
+	capture, err := assessment.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1)
+	if err != nil {
+		t.Fatalf("build the read authority's capture: %v", err)
+	}
+	outcome, err := database.ActivateGeneration(ctx, store.GenerationActivation{
+		Generation: authority, Blobs: authorityBlobs, IndexerVersion: 1, IndexedAtMs: 1, ContentCapture: capture,
+	})
+	if err != nil {
+		t.Fatalf("activate the read authority: %v", err)
+	}
+	if outcome.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("read authority disposition = %v, want ActivationCommittedNow", outcome.Disposition)
+	}
+
+	// The pair-identity claim is only admitted against the captured SQL state,
+	// so the activation carries the snapshot it describes.
+	expected, err := database.ReadIndexState(ctx, ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("read the index state before the attempt: %v", err)
+	}
+	if expected == nil {
+		t.Fatal("the read authority left no stored index state")
+	}
+	attempt, attemptBlobs := buildSettlingGeneration(t, sid, "gen_settle_attempt", "attempt text", "attempt input", "attempt output")
+	adapter := target.AdapterVersion
+	attempt.Generation.Metadata.AdapterVersion = &adapter
+	preview, err := database.ActivateGeneration(ctx, store.GenerationActivation{
+		Generation: attempt, Blobs: attemptBlobs, ExpectedState: expected,
+		IndexerVersion: target.IndexerVersion, IndexedAtMs: 2,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			Status:           ingest.ContentCaptureIncomplete,
+			SourceAuthority:  ingest.ContentSourceNewIngest,
+			TranscriptOrigin: ingest.TranscriptOriginFile,
+			CaptureFormat:    ingest.ContentCaptureFormatPreviewOnly,
+			FailureCode:      ingest.ContentCaptureSourceRecordsOmitted,
+			FailureMessage:   "oversized source records were omitted",
+			CapturedAtMs:     1,
+		},
+		ArtifactIdentity: &identity,
+	})
+	if err != nil {
+		t.Fatalf("activate the latest attempt: %v", err)
+	}
+	if preview.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("latest-attempt disposition = %v, want ActivationLatestAttemptPreview", preview.Disposition)
+	}
+}
+
+// buildSettlingGeneration builds a valid, self-contained complete V2 candidate
+// whose content records carry only their refs; activation staging fills the
+// managed relative path, byte length and integrity digest.
+func buildSettlingGeneration(t *testing.T, sid schema.SessionID, genID, text, toolInput, toolOutput string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+	t.Helper()
+	refs := []schema.SourceEntryRef{"e_u1", "e_call1", "e_result1"}
+	entries := []schema.SessionEntry{
+		{
+			SessionID: sid, EntryIndex: 0, Harness: defaults.HarnessClaudeCode, EntryType: ingest.EntryTypeText,
+			Role: ingest.RoleUser, ContentPreview: &text, SourceEntryRef: refs[0],
+		},
+		{
+			SessionID: sid, EntryIndex: 1, Harness: defaults.HarnessClaudeCode, EntryType: ingest.EntryTypeToolUse,
+			Role: ingest.RoleAssistant, ToolInput: &toolInput, SourceEntryRef: refs[1],
+		},
+		{
+			SessionID: sid, EntryIndex: 2, Harness: defaults.HarnessClaudeCode, EntryType: ingest.EntryTypeToolResult,
+			Role: ingest.RoleTool, ToolOutput: &toolOutput, SourceEntryRef: refs[2],
+		},
+	}
+	inputCount := int64(1)
+	generation := indexformat.Generation{
+		ID:           genID,
+		Completeness: indexformat.GenerationCompletenessComplete,
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: ingest.CurrentSchemaVersion,
+			SessionID:     sid,
+			ModelHarness:  defaults.HarnessClaudeCode,
+			Stats:         schema.SessionStats{TurnCount: len(entries), InputSubmissionCount: &inputCount},
+		},
+		Main:                 indexformat.Partition{Entries: entries},
+		Content:              []indexformat.ContentRecord{{Ref: refs[0]}, {Ref: refs[1]}, {Ref: refs[2]}},
+		Aliases:              []indexformat.NativeAlias{{NativeKey: "native-0", Ref: refs[0]}},
+		SourceEvidenceDigest: strings.Repeat("a", 64),
+		TitleRefs:            []schema.SourceEntryRef{refs[0]},
+	}
+	blobs := map[schema.SourceEntryRef][]byte{
+		refs[0]: []byte(text),
+		refs[1]: []byte(toolInput),
+		refs[2]: []byte(toolOutput),
+	}
+	return indexformat.V2{Generation: generation}, blobs
 }

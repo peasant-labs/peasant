@@ -17,6 +17,7 @@ type indexSelectionFixtures struct {
 	Required []string `yaml:"required_names"`
 	Cases    []struct {
 		Name               string `yaml:"name"`
+		Surface            string `yaml:"surface"`
 		Force              bool   `yaml:"force"`
 		ProducerDelta      int    `yaml:"producer_delta"`
 		MissingInputHash   bool   `yaml:"missing_input_hash"`
@@ -26,6 +27,8 @@ type indexSelectionFixtures struct {
 		Incomplete         bool   `yaml:"incomplete"`
 		DeclaredFormat     int    `yaml:"declared_format"`
 		LenientIndexer     bool   `yaml:"lenient_indexer"`
+		LatestAttempt      string `yaml:"latest_attempt"`
+		ReadPairMismatch   bool   `yaml:"read_pair_mismatch"`
 		NeedsWork          bool   `yaml:"needs_work"`
 	} `yaml:"cases"`
 }
@@ -112,10 +115,50 @@ func TestCapturedInputNeedsWork(t *testing.T) {
 			if fixture.Incomplete {
 				state.ContentStatus = ContentCaptureIncomplete
 			}
-			input := &CapturedIndexInput{session: DiscoveredSession{SessionID: sid, Harness: harness}, inputHash: inputHash, expected: state}
-			if got := pipeline.capturedInputNeedsWork(input); got != fixture.NeedsWork {
+			applyLatestAttemptFacet(t, fixture.LatestAttempt, state, target, artifactHash)
+			inputArtifact := artifactHash
+			if fixture.ReadPairMismatch {
+				inputArtifact = "other-pair"
+			}
+			input := &CapturedIndexInput{session: DiscoveredSession{SessionID: sid, Harness: harness}, inputHash: inputHash, expected: state, artifactHash: inputArtifact}
+			got := pipeline.capturedInputNeedsWork(input)
+			if fixture.Surface == "stored_state" {
+				got = pipeline.stateNeedsIndexWork(state, target)
+			}
+			if got != fixture.NeedsWork {
 				t.Fatalf("needs work = %t, want %t for state %+v", got, fixture.NeedsWork, *state)
 			}
 		})
 	}
+}
+
+// applyLatestAttemptFacet seeds the stored latest-attempt pointer a settle case
+// describes. A case with no facet leaves the three fields nil, exactly like a
+// session with no latest attempt.
+func applyLatestAttemptFacet(t *testing.T, facet string, state *SessionIndexState, target HarvesterVersions, artifactHash string) {
+	t.Helper()
+	if facet == "" {
+		return
+	}
+	producer := target.IndexerVersion
+	adapter := target.AdapterVersion
+	pair := artifactHash
+	switch facet {
+	case "settled":
+	case "pair_moved":
+		pair = "other-pair"
+	case "pair_null":
+		pair = ""
+	case "producer_behind":
+		producer = target.IndexerVersion - 1
+	case "adapter_behind":
+		adapter = target.AdapterVersion - 1
+	default:
+		t.Fatalf("unknown latest-attempt facet %q", facet)
+	}
+	if pair != "" {
+		state.LatestAttemptArtifactHash = &pair
+	}
+	state.LatestAttemptIndexerVersion = &producer
+	state.LatestAttemptAdapterVersion = &adapter
 }
