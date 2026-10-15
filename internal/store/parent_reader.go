@@ -9,6 +9,8 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
+var _ ingest.LogicalParentReader = (*Store)(nil)
+
 // The logical-parent answer for independently admitted children.
 //
 // sessions.parent_id is a nullable FK availability cache. A nil cache never
