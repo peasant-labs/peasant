@@ -58,6 +58,7 @@ const (
 	authorityArmReconcile  = "reconcile"
 	authorityArmHeal       = "heal"
 	authorityArmInvalidate = "invalidate"
+	authorityArmWriteGuard = "write-guard"
 )
 
 // authorityArm normalizes the case's arm token; the empty token is the
@@ -73,6 +74,8 @@ type parentReconcileAuthorityFixture struct {
 	Child     string                         `yaml:"child"`
 	Legacy    string                         `yaml:"legacy"`
 	Alternate string                         `yaml:"alternate"`
+	Unstored  string                         `yaml:"unstored"`
+	Uncached  string                         `yaml:"uncached"`
 	Cases     []parentReconcileAuthorityCase `yaml:"cases"`
 }
 
@@ -110,6 +113,8 @@ func TestParentReconcileAuthority(t *testing.T) {
 				runParentReconcileHealResetCase(t, fixture, tc)
 			case authorityArmInvalidate:
 				runParentReconcileInvalidateCase(t, fixture, tc)
+			case authorityArmWriteGuard:
+				runParentReconcileWriteGuardCase(t, fixture, tc)
 			}
 		})
 	}
@@ -163,8 +168,22 @@ func loadParentReconcileAuthorityFixture(t *testing.T) parentReconcileAuthorityF
 			authorityIndependentHarness(t, tc)
 		case authorityArmInvalidate:
 			authorityIndependentHarness(t, tc)
+		case authorityArmWriteGuard:
+			if tc.HarvestTarget != "" || tc.ExpectUpdates != 0 || tc.ExpectInvalidated != 0 || tc.AuthorityState != "" || tc.Scope != "" {
+				t.Fatalf("authority write-guard case %q declares a field only another arm uses", tc.Name)
+			}
+			authorityIndependentHarness(t, tc)
+			stored := authorityOptionalID(t, fixture, tc.LegacyParent)
+			logical := authorityOptionalID(t, fixture, tc.AuthorityTarget)
+			want := authorityOptionalID(t, fixture, tc.ExpectParentCache)
+			if stored == nil || logical == nil || want == nil {
+				t.Fatalf("authority write-guard case %q must name legacyParent, authorityTarget and expectParentCache", tc.Name)
+			}
+			if *stored == *logical || *want != *stored {
+				t.Fatalf("authority write-guard case %q must hand the writer a logical parent that differs from the populated cache it expects to survive", tc.Name)
+			}
 		default:
-			t.Fatalf("authority case %q names unknown arm %q (want empty, %q, %q, or %q)", tc.Name, tc.Arm, authorityArmReconcile, authorityArmHeal, authorityArmInvalidate)
+			t.Fatalf("authority case %q names unknown arm %q (want empty, %q, %q, %q, or %q)", tc.Name, tc.Arm, authorityArmReconcile, authorityArmHeal, authorityArmInvalidate, authorityArmWriteGuard)
 		}
 		switch tc.Scope {
 		case "", authorityScopeActive, authorityScopeLatestAttempt:
@@ -291,7 +310,10 @@ func runParentReconcileHealResetCase(t *testing.T, fixture parentReconcileAuthor
 // unknown at the current rule version. Only the parent-linked independently
 // admitted child is re-queued: the Claude Code control keeps its watermark, and
 // the parent root keeps its settled verdict because it carries no parent link.
-// A second application re-queues nothing.
+// A second application re-queues nothing. A case that declares authorityState
+// activates that relationship for the child first, so the child is parent-linked
+// by evidence while its cache follows expectParentCache: the re-queue set is the
+// logical-parent answer, never the raw cache.
 func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAuthorityFixture, tc parentReconcileAuthorityCase) {
 	t.Helper()
 	ctx := t.Context()
@@ -304,10 +326,18 @@ func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAutho
 	insertAuthoritySession(t, ctx, db, parent, harness, nil)
 	insertAuthoritySession(t, ctx, db, child, harness, &parent)
 	insertAuthoritySession(t, ctx, db, control, ingest.HarnessClaudeCode, &parent)
+	wantCache := &parent
+	if tc.AuthorityState != "" {
+		// An authoritative activation rewrites the child's cache from its
+		// relationship evidence, so the fixture names what it expects (nil when
+		// the evidence target is not stored).
+		activateAuthorityRelationship(t, db, child, tc.AuthorityState, authorityOptionalID(t, fixture, tc.AuthorityTarget))
+		wantCache = authorityOptionalID(t, fixture, tc.ExpectParentCache)
+	}
 	for _, id := range []ingest.SessionID{parent, child, control} {
 		settleAuthorityOrigin(t, ctx, db, id)
 	}
-	assertAuthorityParentCache(t, ctx, db, child, &parent)
+	assertAuthorityParentCache(t, ctx, db, child, wantCache)
 	assertAuthorityParentCache(t, ctx, db, control, &parent)
 	assertAuthorityParentCache(t, ctx, db, parent, nil)
 
@@ -331,6 +361,58 @@ func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAutho
 	if again != 0 {
 		t.Fatalf("authority invalidate case %q second application re-queued %d rows, want 0 (the invalidation must be idempotent)", tc.Name, again)
 	}
+}
+
+// runParentReconcileWriteGuardCase drives the shared cache writer's own
+// contract directly: the NULL-only statement the reverse heal and the migration
+// conversion both call. Both production callers already decide NULL-only in Go
+// before they call it, so this is the one arm that observes the declaration's
+// additional invariant; it hands the writer a logical parent that DIFFERS from
+// the child's populated cache, so a clause-free statement overwrites the cache
+// and moves the watermark. The NULL-cached session in the same arm is the
+// positive control that the writer is live: a disabled writer heals nothing.
+// The requeue that rides the same statement is pinned by the heal arm, on the
+// production path.
+func runParentReconcileWriteGuardCase(t *testing.T, fixture parentReconcileAuthorityFixture, tc parentReconcileAuthorityCase) {
+	t.Helper()
+	ctx := t.Context()
+	db, _ := openAuthorityStore(t)
+	harness := authorityIndependentHarness(t, tc)
+	child := authorityRequiredID(t, "child", fixture.Child)
+	uncached := authorityRequiredID(t, "uncached", fixture.Uncached)
+	stored := authorityOptionalID(t, fixture, tc.LegacyParent)
+	logical := authorityOptionalID(t, fixture, tc.AuthorityTarget)
+	if stored == nil || logical == nil {
+		t.Fatalf("authority write-guard case %q names no stored parent or logical parent", tc.Name)
+	}
+
+	insertAuthoritySession(t, ctx, db, *stored, harness, nil)
+	insertAuthoritySession(t, ctx, db, *logical, harness, nil)
+	insertAuthoritySession(t, ctx, db, child, harness, stored)
+	insertAuthoritySession(t, ctx, db, uncached, harness, nil)
+	settleAuthorityOrigin(t, ctx, db, child)
+	settleAuthorityOrigin(t, ctx, db, uncached)
+
+	conn, err := db.pool.Take(ctx)
+	if err != nil {
+		t.Fatalf("authority write-guard case %q: take connection: %v", tc.Name, err)
+	}
+	populatedErr := writeParentCacheOnConn(conn, child, logical)
+	uncachedErr := writeParentCacheOnConn(conn, uncached, logical)
+	db.pool.Put(conn)
+	if populatedErr != nil {
+		t.Fatalf("authority write-guard case %q: write past a populated cache: %v", tc.Name, populatedErr)
+	}
+	if uncachedErr != nil {
+		t.Fatalf("authority write-guard case %q: heal a nil cache: %v", tc.Name, uncachedErr)
+	}
+
+	// The populated cache is authoritative: neither it nor its settled
+	// watermark may move.
+	assertAuthorityParentCache(t, ctx, db, child, authorityOptionalID(t, fixture, tc.ExpectParentCache))
+	assertAuthorityOrigins(t, ctx, db, map[ingest.SessionID]int{child: ingest.OriginRuleVersion})
+	// The writer is live: the NULL-cached session must be healed.
+	assertAuthorityParentCache(t, ctx, db, uncached, logical)
 }
 
 // settleAuthorityOrigin records the unknown verdict at the current rule
@@ -381,6 +463,12 @@ func authorityOptionalID(t *testing.T, fixture parentReconcileAuthorityFixture, 
 		return &id
 	case "alternate":
 		id := authorityRequiredID(t, "alternate", fixture.Alternate)
+		return &id
+	case "unstored":
+		id := authorityRequiredID(t, "unstored", fixture.Unstored)
+		return &id
+	case "uncached":
+		id := authorityRequiredID(t, "uncached", fixture.Uncached)
 		return &id
 	default:
 		t.Fatalf("authority fixture names unknown id token %q", token)

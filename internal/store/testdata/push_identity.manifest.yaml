@@ -10,3 +10,4 @@ requiredNames:
   - plain-root
   - inactive-generation-evidence-snapshot-decides
   - snapshot-beats-cache-both-present
+  - latest-attempt-evidence-child-answers-parent

@@ -38,7 +38,10 @@ import (
 //     startedByTarget + DesiredParentCacheID, with the FK-existence check as
 //     the availability input.
 //  4. writeParentCacheOnConn (this file) — the one standalone NULL-only writer,
-//     used by the migration conversion and the reverse reconciliation heal.
+//     used by the migration conversion and the reverse reconciliation heal. It
+//     moves the heal and the origin requeue in ONE statement: the same UPDATE
+//     that sets the cache resets the row's origin watermark, so a repaired link
+//     is always re-judged by the next origin resolve pass.
 //
 // No fifth statement computes the column. Statements 1 and 2 are listed so the
 // set is exact; they are deliberately not re-expressed.
@@ -95,6 +98,11 @@ func startedByTarget(relationships []schema.SessionRelationship) *schema.Session
 // check is the availability input) and applies it NULL-ONLY, so a populated
 // cache is never overwritten from this path.
 //
+// The heal and the origin requeue move in ONE statement: the same UPDATE resets
+// origin_version to 0, so no child is ever observable with a repaired parent
+// link still carrying the origin verdict judged before the link existed, and
+// the next resolve pass re-judges it against its current parent.
+//
 // The NULL-only predicate is an ADDITIONAL invariant, not a replacement for a
 // caller's own guards: the reverse reconciliation decides NULL-only in Go and
 // keeps its parent-existence and cycle refusals, and the migration conversion
@@ -114,7 +122,7 @@ func writeParentCacheOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, logic
 	if cache == nil {
 		return nil
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET parent_id = ? WHERE session_id = ? AND parent_id IS NULL`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET parent_id = ?, origin_version = 0 WHERE session_id = ? AND parent_id IS NULL`, &sqlitex.ExecOptions{
 		Args: []any{string(*cache), string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: write the parent cache of session %s from its logical parent %s: %w; the availability cache was left unchanged; restore database access and retry", sessionID, *logicalParent, err)

@@ -413,14 +413,14 @@ cases:
             version: 0
           11111111-1111-4111-8111-111111111111:
             verdict: unknown
-            version: 2
+            version: 3
     seedStored:
       - 11111111-1111-4111-8111-111111111111
       - 22222222-2222-4222-8222-222222222222
     seedOrigin:
       22222222-2222-4222-8222-222222222222:
         verdict: unknown
-        version: 2
+        version: 3
     expectParentCacheAfterSeed:
       22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
       11111111-1111-4111-8111-111111111111: null
@@ -446,14 +446,14 @@ cases:
             version: 0
           11111111-1111-4111-8111-111111111111:
             verdict: unknown
-            version: 2
+            version: 3
     seedStored:
       - 11111111-1111-4111-8111-111111111111
       - 44444444-4444-4434-8434-444444444444
     seedOrigin:
       44444444-4444-4434-8434-444444444444:
         verdict: unknown
-        version: 2
+        version: 3
     expectParentCacheAfterSeed:
       44444444-4444-4434-8434-444444444444: 11111111-1111-4111-8111-111111111111
       11111111-1111-4111-8111-111111111111: null
@@ -497,16 +497,16 @@ cases:
         expectOrigin:
           bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:
             verdict: agent
-            version: 2
+            version: 3
           aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:
             verdict: unknown
-            version: 2
+            version: 3
     seedCapture:
       - bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
     seedOrigin:
       bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:
         verdict: unknown
-        version: 2
+        version: 3
     expectParentCacheAfterSeed:
       bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: null
     allowed: null
@@ -527,8 +527,8 @@ cases:
     seedCapture:
       - bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
     seedOrigin:
-      22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 2}
-      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: unknown, version: 2}
+      22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 3}
+      bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: unknown, version: 3}
     expectParentCacheAfterSeed:
       22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
       bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: null
@@ -555,7 +555,7 @@ cases:
           22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
           bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
         expectOrigin:
-          22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 2}
+          22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 3}
           bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: unknown, version: 0}
       - discovered: []
         expectWarning:
@@ -566,7 +566,7 @@ cases:
           bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
         expectOrigin:
           22222222-2222-4222-8222-222222222222: {verdict: unknown, version: 0}
-          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: agent, version: 2}
+          bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb: {verdict: agent, version: 3}
     expectStored:
       - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
     expectParentCache:

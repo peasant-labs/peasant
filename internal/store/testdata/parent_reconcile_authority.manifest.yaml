@@ -11,3 +11,5 @@ requiredNames:
   - heal-resets-opencode-child-origin-version
   - invalidate-requeues-codex-parented-child-claude-code-control-untouched
   - invalidate-requeues-opencode-parented-child-claude-code-control-untouched
+  - invalidate-requeues-evidenced-child-with-null-cache
+  - write-guard-keeps-a-populated-cache-and-heals-a-nil-one
