@@ -526,6 +526,66 @@ VALUES (7, `+strconv.Itoa(int(ingest.CurrentSchemaVersion))+`, '{"seed":true}', 
 	assertSelected("repair publication arm (settled)", ids, true)
 }
 
+// TestLatestAttemptStaleAttemptStillServesItsOwnContent proves the stale-attempt
+// read: with the retained pointer's pair identity differing from the session's
+// current artifact hash, the attempt is still the actual last attempted
+// snapshot, so the mounted reads and the preview-snapshot read serve ITS own
+// entries, counts and partial flag — never the authority and never the
+// unindexed current source — while the full read keeps refusing.
+func TestLatestAttemptStaleAttemptStillServesItsOwnContent(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("aaaabbbb-2222-4333-8444-555566667777")
+	seedLatestAttemptCoexistence(t, s, sid)
+	// The pair moved on after the attempt: the row now carries a different
+	// identity than the one the retained pointer recorded.
+	execGenerationSQL(t, s, `UPDATE sessions SET artifact_hash = '`+hexIdentity('9')+`' WHERE session_id = '`+string(sid)+`';`)
+	ctx := context.Background()
+
+	available, err := s.ReadSessionAvailable(ctx, ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("ReadSessionAvailable on a stale attempt: %v", err)
+	}
+	if !PartialPreviewNeeded(available.Capture) || available.Capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted {
+		t.Fatalf("stale available capture = %+v, want the attempt's partial preview state", available.Capture)
+	}
+	if len(available.Entries) != 3 {
+		t.Fatalf("stale available entries = %d, want the attempt's 3", len(available.Entries))
+	}
+	if first := available.Entries[0]; first.ContentPreview == nil || !strings.Contains(*first.ContentPreview, "preview text") {
+		t.Fatalf("stale available entry 0 = %+v, want the attempt's own content", first.ContentPreview)
+	}
+	if available.Detail.TurnCount != latestAttemptStats.TurnCount || available.Detail.ToolCalls != latestAttemptStats.ToolCallCount {
+		t.Fatalf("stale available counts = %d/%d, want the attempt's %d/%d",
+			available.Detail.TurnCount, available.Detail.ToolCalls,
+			latestAttemptStats.TurnCount, latestAttemptStats.ToolCallCount)
+	}
+
+	var preview indexformat.ReadSnapshot
+	if err := s.WithSessionPreviewSnapshot(ctx, sid, func(snapshot indexformat.ReadSnapshot) error {
+		preview = snapshot
+		return nil
+	}); err != nil {
+		t.Fatalf("WithSessionPreviewSnapshot on a stale attempt: %v", err)
+	}
+	if preview.GenerationID != "gen_preview_b" {
+		t.Fatalf("stale preview snapshot generation = %q, want the attempt", preview.GenerationID)
+	}
+	if preview.Metadata.Stats.TurnCount != latestAttemptStats.TurnCount {
+		t.Fatalf("stale preview stats = %d, want the attempt's %d", preview.Metadata.Stats.TurnCount, latestAttemptStats.TurnCount)
+	}
+
+	callbackRan := false
+	if err := s.WithSessionSnapshot(ctx, sid, func(indexformat.ReadSnapshot) error {
+		callbackRan = true
+		return nil
+	}); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+		t.Fatalf("stale full read = %v, want the retained-attempt sentinel", err)
+	}
+	if callbackRan {
+		t.Fatal("the stale full read ran the callback for a retained session")
+	}
+}
+
 // TestUnknownSessionReadsKeepNotFoundClassification proves an id with no
 // metadata row is answered as not found by every snapshot selection: the
 // zero-selection read and the explicit last-good read both return the
