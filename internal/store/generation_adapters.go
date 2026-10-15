@@ -333,23 +333,9 @@ func readHarmonizedPriorOnConn(conn *sqlite.Conn, sessionID schema.SessionID, ge
 	prior.Metadata = &metadata
 	prior.HasCompleteGeneration = view.record.Completeness == indexformat.GenerationCompletenessComplete
 	prior.PriorEvidence = view.record.PriorEvidence
-	aliases, err := readGenerationAliasesOnConn(conn, sessionID, generationID)
+	state, err := readGenerationAliasStateOnConn(conn, sessionID, generationID)
 	if err != nil {
 		return nil, err
-	}
-	entries, err := readHarmonizedMainEntriesOnConn(conn, sessionID, generationID)
-	if err != nil {
-		return nil, err
-	}
-	stub := indexformat.Generation{
-		ID:       generationID,
-		Aliases:  aliases,
-		Metadata: metadata,
-		Main:     indexformat.Partition{Entries: entries},
-	}
-	state, err := ingest.PriorStateFromGeneration(stub)
-	if err != nil {
-		return nil, fmt.Errorf("store: rebuild reusable identities for session %s generation %s: %w; no candidate was produced; the committed generation stays active", sessionID, generationID, err)
 	}
 	prior.Aliases = state
 	return prior, nil

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -101,7 +102,7 @@ func loadBridgePriorDocument(t *testing.T) bridgePriorDocument {
 		}
 		seen[c.Name] = true
 		switch c.Prior {
-		case "active-complete", "none":
+		case "active-complete", "none", "aliases-only":
 		default:
 			t.Fatalf("case %q names an unknown prior %q", c.Name, c.Prior)
 		}
@@ -181,10 +182,11 @@ func (s *priorOnlyStore) ReadGenerationPrior(context.Context, SessionID) (*Gener
 // TestOpenCodeGenerationPriorBridgesStoredCaptureAuthority drives every named prior
 // loader scenario through the production loader: with no active generation it
 // consults the stored certificate and preserves its state without fabricating
-// aliases, captured-prefix proof, or a complete-generation claim. An active
-// generation wins outright, an operator-initiated rebuild suppresses the
-// bridge, and a store without the authority reader keeps the existing empty
-// prior.
+// captured-prefix proof or a complete-generation claim. The certificate-only
+// lane deliberately carries the kept latest attempt's own aliases; every other
+// lane carries none. An active generation wins outright, an operator-initiated
+// rebuild suppresses the bridge, and a store without the authority reader keeps
+// the existing empty prior.
 func TestOpenCodeGenerationPriorBridgesStoredCaptureAuthority(t *testing.T) {
 	document := loadBridgePriorDocument(t)
 	session := DiscoveredSession{SessionID: SessionID(document.SessionID), Harness: HarnessOpenCode}
@@ -231,11 +233,23 @@ func TestOpenCodeGenerationPriorBridgesStoredCaptureAuthority(t *testing.T) {
 	}
 }
 
+// bridgeAttemptAliasKey and bridgeAttemptAliasRef are the one alias the
+// certificate-only lane carries: the kept latest attempt's own identity.
+const bridgeAttemptAliasKey = "attempt-only-block"
+
+var bridgeAttemptAliasRef = schema.SourceEntryRef("attempt-only-ref")
+
 func activePriorFor(tc bridgePriorCase) *GenerationPrior {
-	if tc.Prior != "active-complete" {
+	switch tc.Prior {
+	case "active-complete":
+		return &GenerationPrior{HasCompleteGeneration: true, Aliases: NewProjectionPriorState()}
+	case "aliases-only":
+		state := NewProjectionPriorState()
+		state.Entries[bridgeAttemptAliasKey] = bridgeAttemptAliasRef
+		return &GenerationPrior{Aliases: state}
+	default:
 		return nil
 	}
-	return &GenerationPrior{HasCompleteGeneration: true, Aliases: NewProjectionPriorState()}
 }
 
 func assertBridgePrior(t *testing.T, tc bridgePriorCase, prior OpenCodeProvenancePrior, authority *StoredCaptureAuthority) {
@@ -263,7 +277,16 @@ func assertBridgePrior(t *testing.T, tc bridgePriorCase, prior OpenCodeProvenanc
 	if got := prior.CaptureAuthority != nil; got != tc.WantCaptureAuthority {
 		t.Fatalf("capture authority present = %v, want %v", got, tc.WantCaptureAuthority)
 	}
-	if len(prior.Aliases.Entries) != 0 || len(prior.Aliases.Submissions) != 0 {
+	// The certificate-only lane reuses exactly the kept attempt's own aliases;
+	// every other lane must carry none.
+	if tc.Prior == "aliases-only" {
+		if got := prior.Aliases.Entries[bridgeAttemptAliasKey]; got != bridgeAttemptAliasRef {
+			t.Fatalf("the certificate-only lane did not carry the attempt's aliases: %+v", prior.Aliases)
+		}
+		if len(prior.Aliases.Entries) != 1 || len(prior.Aliases.Submissions) != 0 {
+			t.Fatalf("the certificate-only lane carried aliases beyond the attempt's own: %+v", prior.Aliases)
+		}
+	} else if len(prior.Aliases.Entries) != 0 || len(prior.Aliases.Submissions) != 0 {
 		t.Fatalf("the loader fabricated aliases: %+v", prior.Aliases)
 	}
 	if prior.HasCapturedPrefix || len(prior.CapturedPrefix) != 0 {

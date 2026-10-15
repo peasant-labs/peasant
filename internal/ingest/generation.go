@@ -73,14 +73,19 @@ type GenerationBuildInput struct {
 // the mode and capability gates applied by the implementation, so a builder
 // consumes evidence without knowing the store or the run's mode.
 type GenerationPriorSource interface {
-	// ReadGenerationPrior returns the active generation's reusable evidence, or
-	// nil when the session has no active generation.
+	// ReadGenerationPrior returns the active generation's reusable evidence. It
+	// returns nil only when the session has no active generation AND no latest
+	// attempt. The certificate-only state (no active generation, a kept latest
+	// attempt) returns the attempt's aliases with no metadata, no evidence
+	// document and no complete-generation claim: the attempt contributes
+	// identity, never proof.
 	ReadGenerationPrior(ctx context.Context) (*GenerationPrior, error)
 	// ReadStoredCaptureAuthority returns the stored capture certificate that
-	// holds last-good full authority, or nil. It is consulted only when
-	// ReadGenerationPrior returned nil; the implementation returns (nil, nil)
-	// under an operator-initiated rebuild and when no authority reader is
-	// configured.
+	// holds last-good full authority, or nil. It is consulted for a nil prior
+	// AND for the certificate-only prior (the attempt's aliases with no
+	// evidence document), so a candidate is still judged against the stored
+	// certificate. The implementation returns (nil, nil) under an
+	// operator-initiated rebuild and when no authority reader is configured.
 	ReadStoredCaptureAuthority(ctx context.Context) (*StoredCaptureAuthority, error)
 }
 

@@ -36,6 +36,12 @@ required_names:
   - stored-state-settled-attempt-producer-behind-reruns
   - stored-state-settled-attempt-adapter-behind-reruns
   - stored-state-settled-attempt-accounted-omission-authority-is-settled
+  - settled-attempt-reindexed-reruns
+  - settled-attempt-reindex-with-no-pending-work-is-settled
+  - stored-state-settled-attempt-reindexed-reruns
+  - stored-state-settled-attempt-reindex-with-no-pending-work-is-settled
+  - zero-target-settled-attempt-reruns
+  - stored-state-zero-target-settled-attempt-reruns
 cases:
   - name: current-bound-complete-is-settled
     needs_work: false
@@ -166,3 +172,43 @@ cases:
     capture_revision: 3
     unbound: true
     needs_work: false
+  # A deliberate reindex disables the settle short-circuit: a pending term
+  # re-attempts once. A reindex with no pending term still settles, so Reindex
+  # is not a full bypass (that is --force).
+  - name: settled-attempt-reindexed-reruns
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    reindex: true
+    needs_work: true
+  - name: settled-attempt-reindex-with-no-pending-work-is-settled
+    latest_attempt: settled
+    reindex: true
+    needs_work: false
+  - name: stored-state-settled-attempt-reindexed-reruns
+    surface: stored_state
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    reindex: true
+    needs_work: true
+  - name: stored-state-settled-attempt-reindex-with-no-pending-work-is-settled
+    surface: stored_state
+    latest_attempt: settled
+    reindex: true
+    needs_work: false
+  # A target that cannot express a settle decision never settles, so the
+  # predicate cannot diverge from the store surfaces' own guard.
+  - name: zero-target-settled-attempt-reruns
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    zero_target: true
+    needs_work: true
+  - name: stored-state-zero-target-settled-attempt-reruns
+    surface: stored_state
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    zero_target: true
+    needs_work: true

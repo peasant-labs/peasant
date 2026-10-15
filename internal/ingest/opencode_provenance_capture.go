@@ -477,8 +477,9 @@ type OpenCodeProvenancePrior struct {
 	// managed generation exists. It is the writer's own publishable-capture
 	// predicate applied to the stored certificate, never a publication
 	// revision, and it is preserved with the certificate's own origin and
-	// format. A bridged prior carries no aliases and no captured-prefix proof:
-	// the bridge never fabricates a V2 generation.
+	// format. The certificate-only lane reuses the latest attempt's aliases and
+	// carries no captured-prefix proof: the bridge never fabricates a V2
+	// generation.
 	CaptureAuthority *StoredCaptureAuthority
 }
 
@@ -574,7 +575,9 @@ func (idx *OpenCodeIndexer) BuildGeneration(ctx context.Context, in GenerationBu
 // a first discovery. With no active generation it consults the stored capture
 // certificate, so an incomplete candidate is refused early against the same
 // authority the content writer guards. The certificate's own origin and format
-// are preserved; no alias and no captured-prefix proof is fabricated.
+// are preserved; the certificate-only lane still reuses the latest attempt's
+// aliases, and no alias beyond the attempt's own and no captured-prefix proof
+// is fabricated.
 func openCodeGenerationPrior(ctx context.Context, session DiscoveredSession, source GenerationPriorSource) (OpenCodeProvenancePrior, error) {
 	prior := OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}
 	if source == nil {
