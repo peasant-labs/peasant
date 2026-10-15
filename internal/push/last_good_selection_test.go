@@ -1,11 +1,13 @@
 package push_test
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -13,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
@@ -186,5 +189,75 @@ func TestPublicationReadRefusesWithCoexistenceReasonAndLastGoodServesAuthority(t
 	}
 	if !served {
 		t.Fatalf("the explicit last-good read did not serve the last-good authority: %+v", selectedDetail.Turns)
+	}
+}
+
+// TestPipelineLastGoodPublishesAuthorityOverRetainedAttempt pins the hop the
+// CLI cannot: PipelineConfig.LastGood is what makes readPublicationInput read
+// the last-good authority. Without it the pipeline refuses the session (the
+// negative control), and with it the uploaded transcript carries the authority
+// content and never the newer incomplete attempt.
+func TestPipelineLastGoodPublishesAuthorityOverRetainedAttempt(t *testing.T) {
+	db := lastGoodPushStore(t)
+	sid := schema.SessionID("b2b2b2b2-2222-4222-8222-222222222222")
+	const authorityText = "authority publication transcript"
+	const previewText = "latest attempt preview transcript"
+	lastGoodPushSeed(t, db, sid, authorityText, previewText)
+
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher := &testutil.StubPublisher{
+		StatusCode: 201,
+		// The last-good authority detail carries graph evidence (a measured
+		// input-submission count), so the receiver must advertise it or the
+		// upload is refused before the read is ever exercised.
+		SchemaVersionResp: &schema.SchemaVersionResponse{
+			MinPushContractVersion: schema.PushContractVersion("0.0.1"),
+			PushContractVersion:    defaults.PublishSchemaVersion,
+			ContentCapabilities:    append([]schema.ContentCapability(nil), schema.AllContentCapabilities...),
+		},
+	}
+	var output bytes.Buffer
+	run := func(cfg push.PipelineConfig) (*push.PushResult, error) {
+		cfg.FilterSessionIDs = []string{string(sid)}
+		pipeline, err := push.NewPipeline(db, publisher, baseCreds(), baseTestConfig(), forbiddenPublicationFS{}, cfg, redactor, &output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pipeline.Run(context.Background())
+	}
+
+	// Negative control: without LastGood the session is refused and nothing is
+	// uploaded.
+	result, runErr := run(push.PipelineConfig{Force: true})
+	if runErr != nil {
+		t.Fatalf("default run: %v", runErr)
+	}
+	if result.Errors == 0 || result.New != 0 {
+		t.Fatalf("the default run did not refuse the session: %+v", result)
+	}
+	if len(publisher.Calls) != 0 {
+		t.Fatalf("the default run uploaded a session it must refuse: %+v", publisher.Calls)
+	}
+
+	// With LastGood the last-good authority is uploaded.
+	result, runErr = run(push.PipelineConfig{Force: true, LastGood: true})
+	if runErr != nil {
+		t.Fatalf("last-good run: %v", runErr)
+	}
+	if result.Errors != 0 || result.New != 1 {
+		t.Fatalf("the last-good run did not upload the session: %+v (output: %s)", result, output.String())
+	}
+	if len(publisher.Calls) != 1 {
+		t.Fatalf("last-good uploads = %d, want 1", len(publisher.Calls))
+	}
+	body := string(publisher.Calls[0].TranscriptBody)
+	if !strings.Contains(body, authorityText) {
+		t.Fatalf("the uploaded transcript does not carry the last-good authority content: %s", body)
+	}
+	if strings.Contains(body, previewText) {
+		t.Fatalf("the uploaded transcript carries the newer incomplete attempt: %s", body)
 	}
 }
