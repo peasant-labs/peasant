@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/api"
@@ -316,6 +317,7 @@ func TestDetailPayloadWithReaderRealStore(t *testing.T) {
 	ctx := context.Background()
 	completeID := "45454545-4545-4545-4545-454545454550"
 	previewID := "45454545-4545-4545-4545-454545454551"
+	retainedID := "45454545-4545-4545-4545-454545454552"
 
 	openMountedStore := func(t *testing.T, sid string) *store.Store {
 		t.Helper()
@@ -387,6 +389,72 @@ func TestDetailPayloadWithReaderRealStore(t *testing.T) {
 			t.Fatalf("mounted preview turns = %+v, want bounded preview prose", payload.Turns)
 		}
 	})
+
+	t.Run("retained", func(t *testing.T) {
+		// A complete authority with a newer incomplete preview attempt retained
+		// beside it: the full read refuses with the latest-attempt sentinel, so
+		// the detail path must serve the bounded preview from the retained
+		// attempt with partial diagnostics, never the legacy callback.
+		db := openMountedStore(t, retainedID)
+		sid := schema.SessionID(retainedID)
+		activateMountedCandidate(t, db, sid, "gen-mnt-authority", "complete",
+			[]string{"mounted authority prose one", "mounted authority prose two"})
+		conn, err := db.Pool().Take(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{strings.Repeat("a", 64), retainedID}}); err != nil {
+			db.Pool().Put(conn)
+			t.Fatal(err)
+		}
+		db.Pool().Put(conn)
+		retainMountedCandidate(t, db, sid, "gen-mnt-attempt", []string{"mounted retained prose"})
+
+		legacyCalls := 0
+		legacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+			legacyCalls++
+			return &schema.SessionDetailPayload{ID: "legacy"}, nil
+		}
+		payload, err := api.DetailPayloadWithReader(ctx, db, db, retainedID, legacy)
+		if err != nil {
+			t.Fatalf("mounted retained detail: %v", err)
+		}
+		if legacyCalls != 0 {
+			t.Fatal("mounted retained detail must not fall back to legacy content")
+		}
+		if payload.Diagnostics == nil || !payload.Diagnostics.Partial {
+			t.Fatalf("mounted retained detail must carry partial diagnostics: %+v", payload.Diagnostics)
+		}
+		if len(payload.Turns) != 1 || payload.Turns[0].Content != "mounted retained prose" {
+			t.Fatalf("mounted retained turns = %+v, want the retained attempt's bounded prose", payload.Turns)
+		}
+	})
+}
+
+// retainMountedCandidate activates one assessed unaccounted-omission preview as
+// the retained latest attempt over the session's installed authority.
+func retainMountedCandidate(t *testing.T, db *store.Store, sid schema.SessionID, genID string, texts []string) {
+	t.Helper()
+	v2, blobs := mountedV2(t, sid, genID, "complete", texts)
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: ingest.Harness("claude-code"), Result: v2,
+		Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+		SourceOmitted: true, Unaccounted: true,
+	})
+	if err != nil {
+		t.Fatalf("retained assessment: %v", err)
+	}
+	capture, err := assessment.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1)
+	if err != nil {
+		t.Fatalf("retained capture: %v", err)
+	}
+	outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
+		Generation: v2, Blobs: blobs,
+		IndexerVersion: 18, IndexedAtMs: 2, ContentCapture: capture,
+	})
+	if err != nil || outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("retained activation: outcome=%+v err=%v", outcome, err)
+	}
 }
 
 // stubLinkProvider exercises the non-store subscription path: it offers exactly
