@@ -16,9 +16,20 @@ import (
 var _ ingest.PublicationInputReader = (*StubPushStore)(nil)
 
 func (s *StubPushStore) WithCommittedPublicationInput(ctx context.Context, id ingest.SessionID, fn func(ingest.PublicationInputBundle) error) error {
+	return s.WithCommittedPublicationInputSelected(ctx, id, ingest.SessionReadSelection{}, fn)
+}
+
+// WithCommittedPublicationInputSelected mirrors the store's selected read for
+// the double: an explicit last-good selection drops only the latest-attempt
+// refusal and serves the authority bundle. The double has no generations, so
+// every other check is the plain read.
+func (s *StubPushStore) WithCommittedPublicationInputSelected(ctx context.Context, id ingest.SessionID, selection ingest.SessionReadSelection, fn func(ingest.PublicationInputBundle) error) error {
 	input, err := s.LoadPublicationInput(ctx, id)
 	if err != nil {
 		return err
+	}
+	if selection.LastGood {
+		input.LatestAttemptPending = false
 	}
 	return fn(input)
 }

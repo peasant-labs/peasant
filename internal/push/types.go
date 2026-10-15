@@ -86,6 +86,13 @@ type PipelineConfig struct {
 	// callers. The CLI supplies its shared recorder through the run context.
 	// Nil resolves through perf.RecorderFromContext (Nop when disabled).
 	Recorder perf.Recorder
+	// LastGood selects the last-good full authority for publication
+	// (--last-good). It bypasses ONLY the latest-attempt refusal and reads the
+	// authority through the unchanged active read, so an explicitly consented
+	// publication can still send the last-good full transcript while a newer
+	// incomplete attempt is kept beside it. It is never set by a hook: the
+	// flag is refused together with the hook's auto-publish flags.
+	LastGood bool
 }
 
 // SessionSelection is the immutable branch-aware decision set prepared at the

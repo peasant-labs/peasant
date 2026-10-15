@@ -11,8 +11,16 @@ import (
 // readPublicationInput captures database-authoritative content and verifies
 // that selection still refers to this captured session. Eligibility remains an
 // explicit ValidatePublicationInput call at the publication boundary.
+//
+// With LastGood set, the read is the explicit last-good form: it bypasses only
+// the latest-attempt refusal and reads the last-good authority through the
+// unchanged active read. Every other check below is unchanged.
 func (p *Pipeline) readPublicationInput(ctx context.Context, candidate ingest.PushSessionRow) (ingest.PublicationInputBundle, *schema.SessionDetailPayload, error) {
-	input, detail, err := LoadPublicationInput(ctx, p.store, candidate.SessionID)
+	var selection ingest.SessionReadSelection
+	if p.runCfg.LastGood {
+		selection = ingest.SessionReadSelection{LastGood: true}
+	}
+	input, detail, err := LoadPublicationInputSelected(ctx, p.store, candidate.SessionID, selection)
 	if err != nil || input.Readiness != ingest.PublicationReady {
 		return input, nil, err
 	}

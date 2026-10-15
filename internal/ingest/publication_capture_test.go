@@ -531,10 +531,14 @@ var _ ingest.SessionEntryBatchStore = (*publicationReindexStore)(nil)
 var _ ingest.PublicationInputReader = (*publicationReindexStore)(nil)
 
 func (s *publicationReindexStore) WithCommittedPublicationInput(ctx context.Context, id ingest.SessionID, fn func(ingest.PublicationInputBundle) error) error {
+	return s.WithCommittedPublicationInputSelected(ctx, id, ingest.SessionReadSelection{}, fn)
+}
+
+func (s *publicationReindexStore) WithCommittedPublicationInputSelected(ctx context.Context, id ingest.SessionID, selection ingest.SessionReadSelection, fn func(ingest.PublicationInputBundle) error) error {
 	if s.unreadableEntries {
 		return errors.New("old transcript entries are unavailable during rebuild; recover from the verified captured input")
 	}
-	return s.Store.WithCommittedPublicationInput(ctx, id, fn)
+	return s.Store.WithCommittedPublicationInputSelected(ctx, id, selection, fn)
 }
 
 func (s *publicationReindexStore) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (ingest.PublicationInputBundle, error) {
