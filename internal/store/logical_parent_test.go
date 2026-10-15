@@ -29,21 +29,22 @@ var logicalParentManifestYAML []byte
 // generation (the eligibility predicate always keeps the active authority).
 // The evidence rows themselves are always production-written.
 type logicalParentCase struct {
-	Name                  string `yaml:"name"`
-	State                 string `yaml:"state"`
-	ActiveEvidence        string `yaml:"activeEvidence"`
-	LatestAttemptEvidence string `yaml:"latestAttemptEvidence"`
-	CacheParent           string `yaml:"cacheParent"`
-	DocumentParent        string `yaml:"documentParent"`
+	Name                   string `yaml:"name"`
+	State                  string `yaml:"state"`
+	ActiveEvidence         string `yaml:"activeEvidence"`
+	LatestAttemptEvidence  string `yaml:"latestAttemptEvidence"`
+	CacheParent            string `yaml:"cacheParent"`
+	DocumentParent         string `yaml:"documentParent"`
+	UnstoredDocumentParent bool   `yaml:"unstoredDocumentParent"`
 }
 
 type logicalParentFixture struct {
 	Child                   string              `yaml:"child"`
+	ManagedChild            string              `yaml:"managedChild"`
 	Target                  string              `yaml:"target"`
 	Alternate               string              `yaml:"alternate"`
 	ActiveGeneration        string              `yaml:"activeGeneration"`
 	LatestAttemptGeneration string              `yaml:"latestAttemptGeneration"`
-	RequiredNames           []string            `yaml:"requiredNames"`
 	Cases                   []logicalParentCase `yaml:"cases"`
 }
 
@@ -119,6 +120,9 @@ func loadLogicalParentFixture(t *testing.T) logicalParentFixture {
 			default:
 				t.Fatalf("logical parent case %q names the unknown id token %q", tc.Name, token)
 			}
+		}
+		if tc.UnstoredDocumentParent && tc.State != logicalParentStateConvertedPair {
+			t.Fatalf("logical parent case %q marks an unstored document parent outside the converted-pair state", tc.Name)
 		}
 		actual = append(actual, tc.Name)
 	}
@@ -500,8 +504,8 @@ func runLogicalParentLatestAttemptOnly(t *testing.T, ctx context.Context, db *St
 	assertLogicalParentGrouping(t, ctx, db, child, logicalParentEvidenceTargetKnown, target)
 	assertLogicalParentLegacySnapshot(t, ctx, db, child, target)
 	assertLogicalParentStoredMetadata(t, ctx, db, child, target)
-	// The documented exception: the retained-only state never writes the cache,
-	// so the answer comes from evidence while the cache stays NULL.
+	// The documented exception: the latest-attempt-only state never writes the
+	// cache, so the answer comes from evidence while the cache stays NULL.
 	assertLogicalParentCache(t, ctx, db, child, nil)
 }
 
@@ -636,7 +640,9 @@ func runLogicalParentConvertedPair(t *testing.T, ctx context.Context, db *Store,
 	if documentParent == nil {
 		t.Fatalf("case %q names no document parent", tc.Name)
 	}
-	insertLogicalParentSession(t, ctx, db, *documentParent)
+	if !tc.UnstoredDocumentParent {
+		insertLogicalParentSession(t, ctx, db, *documentParent)
+	}
 	seedGenerationSession(t, db, string(child))
 
 	// A V1 pair: the document carries the logical parent and the generation
@@ -652,6 +658,20 @@ func runLogicalParentConvertedPair(t *testing.T, ctx context.Context, db *Store,
 	execGenerationSQL(t, db, `UPDATE sessions SET parent_id = NULL WHERE session_id = '`+string(child)+`';`)
 
 	outcome, err := db.MigrateSession(ctx, child)
+	if tc.UnstoredDocumentParent {
+		// The availability cache cannot hold an unstored parent, so the
+		// conversion must refuse explicitly instead of dropping the linkage.
+		if err == nil {
+			t.Fatalf("MigrateSession(%s) converted a document parent that names no stored session; want the actionable unstored-parent refusal", child)
+		}
+		if !strings.Contains(err.Error(), "carry the parent linkage") {
+			t.Fatalf("MigrateSession(%s) refusal = %v, want the actionable unstored-parent refusal", child, err)
+		}
+		assertLogicalParentCache(t, ctx, db, child, nil)
+		assertLogicalParentAnswer(t, ctx, db, child, nil)
+		assertLogicalParentStoredDocumentParent(t, ctx, db, child, documentParent)
+		return
+	}
 	if err != nil {
 		t.Fatalf("MigrateSession(%s): %v", child, err)
 	}
@@ -662,11 +682,52 @@ func runLogicalParentConvertedPair(t *testing.T, ctx context.Context, db *Store,
 	assertLogicalParentCache(t, ctx, db, child, documentParent)
 }
 
+// assertLogicalParentStoredDocumentParent proves the old representation is
+// intact after a refused conversion: the projection generation row is still
+// there and its stored document still names the parent the conversion could not
+// carry.
+func assertLogicalParentStoredDocumentParent(t *testing.T, ctx context.Context, db *Store, child schema.SessionID, want *schema.SessionID) {
+	t.Helper()
+	conn, err := db.pool.Take(ctx)
+	if err != nil {
+		t.Fatalf("take connection to read the stored document of %s: %v", child, err)
+	}
+	defer db.pool.Put(conn)
+	var document struct {
+		ParentUUID *string `json:"parentUuid"`
+	}
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT metadata_json FROM session_projection_generations WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(child)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			return json.Unmarshal([]byte(stmt.ColumnText(0)), &document)
+		},
+	}); err != nil {
+		t.Fatalf("read the stored document of %s: %v", child, err)
+	}
+	if !found {
+		t.Fatalf("the refused conversion removed the stored document of %s; the old representation must stay intact", child)
+	}
+	got := (*schema.SessionID)(nil)
+	if document.ParentUUID != nil {
+		value := schema.SessionID(*document.ParentUUID)
+		got = &value
+	}
+	if !logicalParentEqual(got, want) {
+		t.Fatalf("stored document parent of %s = %s, want %s (the old representation must stay intact)", child, logicalParentString(got), logicalParentString(want))
+	}
+}
+
 func runLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {
 	t.Helper()
 	evidenceTarget := logicalParentTokenID(t, fixture, tc.LatestAttemptEvidence)
 	if evidenceTarget == nil {
 		t.Fatalf("case %q names no evidence target", tc.Name)
+	}
+	managedTarget := logicalParentTokenID(t, fixture, tc.ActiveEvidence)
+	if managedTarget == nil {
+		t.Fatalf("case %q names no managed generation target", tc.Name)
 	}
 	insertLogicalParentSession(t, ctx, db, *evidenceTarget)
 	seedLogicalParentPublicationSession(t, ctx, db, child)
@@ -675,7 +736,27 @@ func runLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *St
 	// stays NULL, so the no-active publication read must take its parent from
 	// the evidence rather than from the stored capture document.
 	seedLogicalParentPublicationEvidence(t, ctx, db, child, evidenceTarget)
+	assertLogicalParentPublicationBundle(t, ctx, db, child, evidenceTarget, "the evidence target")
 
+	// The managed half: a real activation over a publication-ready capture. The
+	// served generation names a target no stored session matches, so the cache
+	// stays NULL and the capture document names no parent at all; the bundle must
+	// therefore carry the served generation's OWN answer, which a read that left
+	// the scanned capture document in place would report as nil.
+	managedChild, err := schema.NewSessionID(fixture.ManagedChild)
+	if err != nil {
+		t.Fatalf("logical parent fixture managed child identifier: %v", err)
+	}
+	seedLogicalParentManagedPublicationSession(t, ctx, db, managedChild, managedTarget)
+	assertLogicalParentCache(t, ctx, db, managedChild, nil)
+	assertLogicalParentPublicationBundle(t, ctx, db, managedChild, managedTarget, "the served generation's own answer")
+}
+
+// assertLogicalParentPublicationBundle reads the publication bundle under the
+// explicit last-good selection both halves of the case name, and asserts the
+// parent it carries.
+func assertLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *Store, child schema.SessionID, want *schema.SessionID, source string) {
+	t.Helper()
 	bundleParent := (*schema.SessionID)(nil)
 	if err := db.WithCommittedPublicationInputSelected(ctx, ingest.SessionID(child), ingest.SessionReadSelection{LastGood: true}, func(input ingest.PublicationInputBundle) error {
 		if input.Readiness != ingest.PublicationReady {
@@ -686,9 +767,79 @@ func runLogicalParentPublicationBundle(t *testing.T, ctx context.Context, db *St
 	}); err != nil {
 		t.Fatalf("WithCommittedPublicationInputSelected(LastGood, %s): %v", child, err)
 	}
-	if !logicalParentEqual(bundleParent, evidenceTarget) {
-		t.Fatalf("publication bundle parent of %s = %s, want the evidence target %s", child, logicalParentString(bundleParent), logicalParentString(evidenceTarget))
+	if !logicalParentEqual(bundleParent, want) {
+		t.Fatalf("publication bundle parent of %s = %s, want %s from %s", child, logicalParentString(bundleParent), logicalParentString(want), source)
 	}
+}
+
+// seedLogicalParentManagedPublicationSession stores a publication-ready legacy
+// capture and then activates a managed generation over it through the real
+// activation path, carrying the capture's revision and a certified capture so
+// the recorded publication agreement survives the activation.
+func seedLogicalParentManagedPublicationSession(t *testing.T, ctx context.Context, db *Store, child schema.SessionID, target *schema.SessionID) {
+	t.Helper()
+	revision := seedLogicalParentPublicationSession(t, ctx, db, child)
+	generation, blobs := logicalParentManagedGeneration(t, child, target, "gen_logical_parent_managed_publication")
+	versions, registered := ingest.HarvesterVersionRegistry[ingest.HarnessCodex]
+	if !registered {
+		t.Fatal("the logical parent publication fixture needs a registered codex harness")
+	}
+	if _, err := db.ActivateGeneration(ctx, GenerationActivation{
+		Generation:      generation,
+		Blobs:           blobs,
+		IndexerVersion:  versions.IndexerVersion,
+		IndexedAtMs:     2,
+		CaptureRevision: revision,
+		ContentCapture:  recoveryCapture(t, generation),
+	}); err != nil {
+		t.Fatalf("activate the managed publication generation for %s: %v", child, err)
+	}
+}
+
+// logicalParentManagedGeneration builds a complete managed generation from the
+// capture's own entries, carrying one started_by relationship that names the
+// given target. The target is deliberately unstored in the managed case, so the
+// availability cache stays NULL while the generation answers.
+func logicalParentManagedGeneration(t *testing.T, child schema.SessionID, target *schema.SessionID, generationID string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+	t.Helper()
+	entries := logicalParentPublicationEntries(child)
+	blobs := make(map[schema.SourceEntryRef][]byte, len(entries))
+	content := make([]indexformat.ContentRecord, 0, len(entries))
+	refs := make([]schema.SourceEntryRef, 0, len(entries))
+	for i := range entries {
+		ref := entries[i].SourceEntryRef
+		payload := []byte("synthetic logical parent publication content " + string(ref))
+		if entries[i].ContentPreview != nil {
+			payload = []byte(*entries[i].ContentPreview)
+		}
+		blobs[ref] = payload
+		refs = append(refs, ref)
+		content = append(content, indexformat.ContentRecord{Ref: ref})
+	}
+	value := schema.SessionID(*target)
+	relationship := schema.SessionRelationship{
+		Kind:          schema.SessionRelationshipStartedBy,
+		TargetState:   schema.RelationshipTargetState(logicalParentEvidenceTargetKnown),
+		Evidence:      schema.EvidenceNativeTyped,
+		TargetLocalID: &value,
+	}
+	inputCount := int64(1)
+	generation := indexformat.V2{Generation: indexformat.Generation{
+		ID:           generationID,
+		Completeness: indexformat.GenerationCompletenessComplete,
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: ingest.CurrentSchemaVersion,
+			SessionID:     child,
+			ModelHarness:  schema.HarnessCodex,
+			Stats:         schema.SessionStats{TurnCount: len(entries), InputSubmissionCount: &inputCount},
+			Relationships: []schema.SessionRelationship{relationship},
+		},
+		Main:                 indexformat.Partition{Entries: entries},
+		Content:              content,
+		SourceEvidenceDigest: strings.Repeat("a", 64),
+		TitleRefs:            []schema.SourceEntryRef{refs[0]},
+	}}
+	return filledCandidateForValidation(t, generation, blobs), blobs
 }
 
 func runLogicalParentAvailabilityRaw(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {
@@ -724,6 +875,24 @@ func runLogicalParentAvailabilityRaw(t *testing.T, ctx context.Context, db *Stor
 	if location.ParentID != "" {
 		t.Fatalf("bulk location parent of %s = %q, want the raw cache (empty)", child, location.ParentID)
 	}
+	// The push row carries the same availability cache: it is how a consumer
+	// builds the on-disk path, never a parent answer.
+	pushRows, err := db.UnpushedSessions(ctx)
+	if err != nil {
+		t.Fatalf("UnpushedSessions: %v", err)
+	}
+	var pushRow *ingest.PushSessionRow
+	for i := range pushRows {
+		if string(pushRows[i].SessionID) == string(child) {
+			pushRow = &pushRows[i]
+		}
+	}
+	if pushRow == nil {
+		t.Fatalf("UnpushedSessions did not list session %s", child)
+	}
+	if pushRow.ParentID != "" {
+		t.Fatalf("push row parent of %s = %q, want the raw cache (empty)", child, pushRow.ParentID)
+	}
 }
 
 func runLogicalParentOriginListing(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {
@@ -758,8 +927,9 @@ func runLogicalParentOriginListing(t *testing.T, ctx context.Context, db *Store,
 
 // seedLogicalParentPublicationSession stores one publication-ready legacy
 // capture through the production writers, so the publication read reaches its
-// composition instead of refusing an unready session.
-func seedLogicalParentPublicationSession(t *testing.T, ctx context.Context, db *Store, child schema.SessionID) {
+// composition instead of refusing an unready session. It returns the capture
+// revision the session was indexed at.
+func seedLogicalParentPublicationSession(t *testing.T, ctx context.Context, db *Store, child schema.SessionID) int64 {
 	t.Helper()
 	meta := planLibraryMeta(ingest.SessionID(child), ingest.HarnessCodex, nil)
 	entries := logicalParentPublicationEntries(child)
@@ -793,6 +963,7 @@ func seedLogicalParentPublicationSession(t *testing.T, ctx context.Context, db *
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("index logical parent publication capture: %+v", results)
 	}
+	return revisions[ingest.SessionID(child)]
 }
 
 func logicalParentPublicationEntries(child schema.SessionID) []schema.SessionEntry {

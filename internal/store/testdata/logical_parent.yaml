@@ -36,7 +36,12 @@
 #                         latest-attempt-only state is the documented
 #                         exception (the cache stays NULL by design).
 #   converted-pair        a V1 pair converted through the real migration: the
-#                         document parent becomes the answer.
+#                         document parent becomes the answer. A document parent
+#                         that names no stored session is REFUSED: the
+#                         availability cache cannot hold an unstored parent, so
+#                         the conversion stops explicitly and the old
+#                         representation is left intact.
+#                         `unstoredDocumentParent` marks that refusing shape.
 #   publication-bundle    the publication bundle's parent, for both the
 #                         no-active and the managed halves, under an explicit
 #                         last-good selection.
@@ -52,22 +57,11 @@
 # `documentParent` is the parent the V1 metadata document carries.
 
 child: 9a1e0000-0000-4000-8000-000000000001
+managedChild: 9a1e0000-0000-4000-8000-000000000004
 target: 9a1e0000-0000-4000-8000-000000000002
 alternate: 9a1e0000-0000-4000-8000-000000000003
 activeGeneration: gen_logical_parent_active
 latestAttemptGeneration: gen_logical_parent_latest_attempt
-
-requiredNames:
-  - latest-attempt-only-evidence-answers
-  - active-wins-over-latest-attempt
-  - active-without-evidence-ignores-latest-attempt
-  - no-evidence-falls-back-to-cache
-  - managed-target-unstored-prior-answers-target
-  - written-cache-agrees-with-accessor
-  - converted-pair-answers-document-parent
-  - publication-bundle-parent-from-evidence-lastgood
-  - availability-readers-keep-raw
-  - origin-listing-answers-latest-attempt-evidence
 
 cases:
   - name: latest-attempt-only-evidence-answers
@@ -92,9 +86,14 @@ cases:
   - name: converted-pair-answers-document-parent
     state: converted-pair
     documentParent: target
+  - name: converted-pair-unstored-document-parent-refused
+    state: converted-pair
+    documentParent: alternate
+    unstoredDocumentParent: true
   - name: publication-bundle-parent-from-evidence-lastgood
     state: publication-bundle
     latestAttemptEvidence: target
+    activeEvidence: alternate
   - name: availability-readers-keep-raw
     state: availability-raw
     latestAttemptEvidence: target

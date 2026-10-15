@@ -22,9 +22,12 @@
 #             pair), migration-oracle (the V1 lane's durable logical record),
 #             write-guard (the reverse lookup's own NULL-only and cycle guards),
 #             writers (the four statements that SET the column), ddl (immutable
-#             historical schema and migration text), and cross-package (a
-#             parent answer owned by a reader outside internal/store, which
-#             moves to the routed section when it renders the rule).
+#             historical schema and migration text), and cross-package (a parent
+#             answer whose rendering belongs to the cross-package reader slice;
+#             it appears here only while that slice has not yet routed the
+#             declaration, and it disappears from this section — and from the
+#             class set's reason to be exercised — when those entries move to
+#             routed).
 #   routed    declarations that render the rule: asserted to carry ZERO
 #             token-bearing literals AND to contain a LogicalParentSQL( or
 #             parentGenerationScopeSQL( call.

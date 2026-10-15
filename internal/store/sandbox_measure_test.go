@@ -132,6 +132,11 @@ func TestSandboxListGroupingMirrors(t *testing.T) {
 	}
 	query := strings.Replace(groupingEvidenceQuery, "s.input_submission_count", "c.input_submission_count", 1)
 	query = strings.Replace(query, "FROM sessions s", "FROM sessions s LEFT JOIN session_captured_stats c ON c.session_id=s.session_id", 1)
+	// Both replacements must have applied, or this guard would compare the
+	// production statement against itself and pass without measuring anything.
+	if !strings.Contains(query, "c.input_submission_count") || !strings.Contains(query, "session_captured_stats") {
+		t.Fatal("the grouping mirror did not apply; the production statement changed and this guard would compare it to itself")
+	}
 	query += strings.Join(placeholders, ", ") + ")"
 	conn, err := s.pool.Take(t.Context())
 	if err != nil {
