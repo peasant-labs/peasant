@@ -25,19 +25,19 @@ const collectiveRefURLSegment = "groups"
 // to is reported as such instead of arriving as a puzzling empty result. The
 // returned names are parallel to the identifiers.
 func resolveCollectiveRefs(ctx context.Context, client *village.VillageClient, values []string) ([]schema.VillageUUID, []string, error) {
-	groups, err := client.ListCollectives(ctx)
+	collectives, err := client.ListCollectives(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list the collectives you belong to: %w", err)
 	}
 
-	byID := make(map[schema.VillageUUID]string, len(groups))
-	byName := make(map[string][]schema.VillageUserGroup, len(groups))
-	visible := make([]string, 0, len(groups))
-	for _, group := range groups {
-		byID[group.ID] = group.Name
-		key := strings.ToLower(strings.TrimSpace(group.Name))
-		byName[key] = append(byName[key], group)
-		visible = append(visible, group.Name)
+	byID := make(map[schema.VillageUUID]string, len(collectives))
+	byName := make(map[string][]schema.VillageUserGroup, len(collectives))
+	visible := make([]string, 0, len(collectives))
+	for _, collective := range collectives {
+		byID[collective.ID] = collective.Name
+		key := strings.ToLower(strings.TrimSpace(collective.Name))
+		byName[key] = append(byName[key], collective)
+		visible = append(visible, collective.Name)
 	}
 
 	ids := make([]schema.VillageUUID, 0, len(values))
