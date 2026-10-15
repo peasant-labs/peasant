@@ -845,7 +845,7 @@ Freeze invocation, or PNG dimension check fails.
 
 ### Contact sheets and evidence review
 
-The harness publishes six contact sheets under the commit-derived directory
+The harness publishes seven contact sheets under the commit-derived directory
 `out/test/screenshots/peasant-guided-final-<commit>/`:
 
 | File | PNG dimensions | Contents |
@@ -856,6 +856,7 @@ The harness publishes six contact sheets under the commit-derived directory
 | `push.png` | `1800x6000` | The mounted publication wizard: start, selection, transcript preview, consent, and receipt. |
 | `ingest-progress.png` | `1800x1200` | Local import progress after the guided configuration is saved. |
 | `ingest-completion.png` | `1800x3420` | Local import completion with multiple actionable warnings at the top and bottom of the scrollable result, plus a no-warning control. Every state includes both themes and both terminal sizes. |
+| `pull-progress.png` | `1800x3600` | The bulk collective-pull progress bar: running, canceling, and canceled. Every state includes both themes and both terminal sizes. |
 
 The selection fixture contains six synthetic sessions across two harnesses. One session is marked as
 already ingested. One carries scrubbed transcript turns in the store. One carries a scrubbed harness
@@ -863,7 +864,9 @@ transcript that the harness wrote and the store does not hold. Its states exerci
 hierarchy, global search, grouped repository and branch context, the stored session transcript
 preview, and the preview of a session that Peasant has not imported yet, without depending on a
 developer's repository or session history. The guided matrix contains 24 captures: six sections x
-two themes x two terminal sizes.
+two themes x two terminal sizes. The pull-progress matrix contains 12 captures: three states
+(running, canceling, canceled) x two themes x two terminal sizes, mounted from the real
+`pullprogress.Model` over scrubbed synthetic counts.
 
 The generated directory is local evidence and is ignored by git at `/out/test/screenshots/`; do not
 commit the PNGs. Manually inspect every sheet after generation. Review both themes, both

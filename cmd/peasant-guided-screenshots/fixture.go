@@ -25,16 +25,21 @@ const (
 	sheetPush        sheetName = "push"
 	sheetIngest      sheetName = "ingest-progress"
 	sheetCompletion  sheetName = "ingest-completion"
+	// sheetPullProgress is the bulk collective-pull progress bar: the
+	// running bar, the canceling acknowledgment, and the canceled final,
+	// in both themes at both terminal sizes.
+	sheetPullProgress sheetName = "pull-progress"
 )
 
 type sheetKind string
 
 const (
-	sheetKindGuided     sheetKind = "guided"
-	sheetKindSelection  sheetKind = "selection"
-	sheetKindPush       sheetKind = "push"
-	sheetKindIngest     sheetKind = "ingest-progress"
-	sheetKindCompletion sheetKind = "ingest-completion"
+	sheetKindGuided       sheetKind = "guided"
+	sheetKindSelection    sheetKind = "selection"
+	sheetKindPush         sheetKind = "push"
+	sheetKindIngest       sheetKind = "ingest-progress"
+	sheetKindCompletion   sheetKind = "ingest-completion"
+	sheetKindPullProgress sheetKind = "pull-progress"
 )
 
 type captureTheme string
@@ -204,6 +209,51 @@ type ingestProgressCaptureFixture struct {
 	Height int                 `yaml:"height"`
 }
 
+// pullProgressState is the closed set of bulk collective-pull progress
+// screens the harness captures: the steady running bar, the interrupt
+// acknowledgment while the current transcript unwinds, and the retained
+// canceled final state.
+type pullProgressState string
+
+const (
+	pullProgressStateRunning   pullProgressState = "running"
+	pullProgressStateCanceling pullProgressState = "canceling"
+	pullProgressStateCanceled  pullProgressState = "canceled"
+)
+
+func (s pullProgressState) valid() bool {
+	switch s {
+	case pullProgressStateRunning, pullProgressStateCanceling, pullProgressStateCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+// requiresBothThemes reports whether a pull-progress state is reviewed in
+// both palettes. Every bulk-pull state is user-visible, so all of them are.
+func (s pullProgressState) requiresBothThemes() bool {
+	return s == pullProgressStateRunning || s == pullProgressStateCanceling || s == pullProgressStateCanceled
+}
+
+// pullProgressStateFixture names what one captured bulk-pull screen must
+// show. WantAbsent is optional; the canceling and canceled states use it to
+// prove the footer actually switched instead of merely containing the new
+// copy beside the stale hint.
+type pullProgressStateFixture struct {
+	Key          pullProgressState `yaml:"key"`
+	WantContains []string          `yaml:"wantContains"`
+	WantAbsent   []string          `yaml:"wantAbsent"`
+}
+
+type pullProgressCaptureFixture struct {
+	Name   string            `yaml:"name"`
+	State  pullProgressState `yaml:"state"`
+	Theme  captureTheme      `yaml:"theme"`
+	Width  int               `yaml:"width"`
+	Height int               `yaml:"height"`
+}
+
 // pushCaptureFixture is one push screen at one palette and one region.
 type pushCaptureFixture struct {
 	Name   string       `yaml:"name"`
@@ -345,6 +395,8 @@ type captureDocument struct {
 	PushCaptures             []pushCaptureFixture           `yaml:"pushCaptures"`
 	IngestProgressStates     []ingestProgressStateFixture   `yaml:"ingestProgressStates"`
 	IngestProgressCaptures   []ingestProgressCaptureFixture `yaml:"ingestProgressCaptures"`
+	PullProgressStates       []pullProgressStateFixture     `yaml:"pullProgressStates"`
+	PullProgressCaptures     []pullProgressCaptureFixture   `yaml:"pullProgressCaptures"`
 	Push                     pushFixture                    `yaml:"push"`
 	Sheets                   []sheetFixture                 `yaml:"sheets"`
 	GuidedSections           []guidedSectionFixture         `yaml:"guidedSections"`
@@ -392,6 +444,9 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 	if err := validateIngestProgressMatrix(document.IngestProgressStates, document.IngestProgressCaptures); err != nil {
 		return document, err
 	}
+	if err := validatePullProgressMatrix(document.PullProgressStates, document.PullProgressCaptures); err != nil {
+		return document, err
+	}
 	if err := validateCompletionMatrix(document.Completion); err != nil {
 		return document, err
 	}
@@ -428,6 +483,53 @@ func validateIngestProgressMatrix(states []ingestProgressStateFixture, captures 
 				pair := fmt.Sprintf("%s/%s/%dx%d", state, name, viewport.Width, viewport.Height)
 				if pairs[pair] != 1 {
 					return fmt.Errorf("screenshot fixture ingest progress pair %q has %d captures, want exactly one", pair, pairs[pair])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validatePullProgressMatrix requires one capture per bulk-pull progress
+// screen, per palette, per region: the collective-pull bar is reviewed in
+// both themes at both sizes.
+func validatePullProgressMatrix(states []pullProgressStateFixture, captures []pullProgressCaptureFixture) error {
+	stateRows := make(map[pullProgressState]pullProgressStateFixture, len(states))
+	for _, state := range states {
+		if !state.Key.valid() || stateRows[state.Key].Key != "" || !nonEmptyStrings(state.WantContains) ||
+			(len(state.WantAbsent) > 0 && !nonEmptyStrings(state.WantAbsent)) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate pull progress state: %#v", state)
+		}
+		stateRows[state.Key] = state
+	}
+	for _, required := range []pullProgressState{pullProgressStateRunning, pullProgressStateCanceling, pullProgressStateCanceled} {
+		if stateRows[required].Key == "" {
+			return fmt.Errorf("screenshot fixture omits pull progress state %q", required)
+		}
+	}
+	seenNames := make(map[string]bool, len(captures))
+	pairs := make(map[string]int, len(captures))
+	for _, capture := range captures {
+		wantName := fmt.Sprintf("pull-progress-%s-%s-%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)
+		if capture.Name != wantName || seenNames[capture.Name] || stateRows[capture.State].Key == "" ||
+			!capture.Theme.valid() || (!capture.State.requiresBothThemes() && capture.Theme != captureThemeDark) ||
+			!validCaptureSize(capture.Width, capture.Height) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate pull progress capture: %#v", capture)
+		}
+		seenNames[capture.Name] = true
+		pairs[fmt.Sprintf("%s/%s/%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)]++
+	}
+	for state := range stateRows {
+		themes := []captureTheme{captureThemeDark}
+		if state.requiresBothThemes() {
+			themes = append(themes, captureThemeLight)
+		}
+		for _, name := range themes {
+			for _, viewport := range []viewportFixture{{Width: 80, Height: 24}, {Width: 120, Height: 40}} {
+				pair := fmt.Sprintf("%s/%s/%dx%d", state, name, viewport.Width, viewport.Height)
+				captureName := fmt.Sprintf("pull-progress-%s-%s-%dx%d", state, name, viewport.Width, viewport.Height)
+				if pairs[pair] != 1 {
+					return fmt.Errorf("screenshot fixture pull progress pair %q has %d captures, want exactly one (missing capture %q)", pair, pairs[pair], captureName)
 				}
 			}
 		}
@@ -550,12 +652,13 @@ func validateSheets(sheets []sheetFixture) error {
 		theme         captureTheme
 		width, height int
 	}{
-		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3980},
-		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
-		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
-		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
-		sheetCompletion:  {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
+		sheetGuidedDark:   {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3980},
+		sheetGuidedLight:  {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
+		sheetSelection:    {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
+		sheetPush:         {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
+		sheetIngest:       {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
+		sheetCompletion:   {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
+		sheetPullProgress: {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {
