@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -53,52 +52,17 @@ func lastGoodPushStore(t *testing.T) *store.Store {
 	return db
 }
 
-// lastGoodPushGeneration builds a complete generation whose single user entry
-// carries the supplied text, so the hydrated detail names which generation the
-// publication read served.
-func lastGoodPushGeneration(t *testing.T, sid schema.SessionID, genID, text string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
-	t.Helper()
-	meta := ingest.NewUnifiedMetadata()
-	meta.SessionID = sid
-	meta.ModelHarness = schema.HarnessClaudeCode
-	meta.HostSlug = testutil.TestHostSlug
-	meta.Model = testutil.TestModel
-	meta.CWD = "/home/test/myapp"
-	meta.Project = ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "myapp", FilePath: "/home/test/myapp"}
-	ingested := int64(1700000060000)
-	meta.Timestamp = ingest.TimestampInfo{Start: 1700000000000, End: 1700000060000, Ingested: &ingested}
-	meta.Source = ingest.SourceInfo{FilePath: "/source/file.jsonl", Format: ingest.SourceFormatJSONL}
-	meta.Stats = ingest.StatsInfo{TurnCount: 1, DurationMs: 60000, TokensIn: 1, TokensOut: 1}
-	submissions := int64(1)
-	meta.Stats.InputSubmissionCount = &submissions
-
-	ref := schema.SourceEntryRef(genID + "_user")
-	entry := schema.SessionEntry{
-		SessionID: sid, EntryIndex: 0, Harness: schema.HarnessClaudeCode,
-		EntryType: schema.EntryTypeText, Role: schema.RoleUser, SourceEntryRef: ref, ContentPreview: &text,
-	}
-	generation := indexformat.Generation{
-		ID:                   genID,
-		Completeness:         indexformat.GenerationCompletenessComplete,
-		Metadata:             meta,
-		Main:                 indexformat.Partition{Entries: []schema.SessionEntry{entry}},
-		Content:              []indexformat.ContentRecord{{Ref: ref}},
-		SourceEvidenceDigest: strings.Repeat("a", 64),
-	}
-	return indexformat.V2{Generation: generation}, map[schema.SourceEntryRef][]byte{ref: []byte(text)}
-}
-
 // lastGoodPushSeed seeds a complete full authority (A) plus one retained
 // incomplete preview attempt (B) over it.
 func lastGoodPushSeed(t *testing.T, db *store.Store, sid schema.SessionID, authorityText, previewText string) {
 	t.Helper()
-	authority, blobs := lastGoodPushGeneration(t, sid, "gen_push_a", authorityText)
+	authority, blobs := testutil.CompleteGeneration(t, sid, "gen_push_a", authorityText)
 	meta := authority.Generation.Metadata
 	storetest.SeedGenerationPublication(t, db, &meta, authority, blobs)
 
 	identity := strings.Repeat("d", 64)
 	lastGoodPushExec(t, db, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ?`, identity, string(sid))
-	preview, previewBlobs := lastGoodPushGeneration(t, sid, "gen_push_b", previewText)
+	preview, previewBlobs := testutil.CompleteGeneration(t, sid, "gen_push_b", previewText)
 	outcome, err := db.ActivateGeneration(context.Background(), store.GenerationActivation{
 		Generation:     preview,
 		Blobs:          previewBlobs,

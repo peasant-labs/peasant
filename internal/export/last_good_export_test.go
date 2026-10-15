@@ -66,46 +66,11 @@ func lastGoodOpenStore(t *testing.T) *store.Store {
 	return db
 }
 
-// lastGoodGeneration builds a complete generation whose single user entry
-// carries the supplied text, so an export that served the wrong generation is
-// observable in the turn content.
-func lastGoodGeneration(t *testing.T, sid schema.SessionID, genID, text string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
-	t.Helper()
-	meta := ingest.NewUnifiedMetadata()
-	meta.SessionID = sid
-	meta.ModelHarness = schema.HarnessClaudeCode
-	meta.HostSlug = testutil.TestHostSlug
-	meta.Model = testutil.TestModel
-	meta.CWD = "/home/test/myapp"
-	meta.Project = ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "myapp", FilePath: "/home/test/myapp"}
-	ingested := int64(1700000060000)
-	meta.Timestamp = ingest.TimestampInfo{Start: 1700000000000, End: 1700000060000, Ingested: &ingested}
-	meta.Source = ingest.SourceInfo{FilePath: "/source/file.jsonl", Format: ingest.SourceFormatJSONL}
-	meta.Stats = ingest.StatsInfo{TurnCount: 1, DurationMs: 60000, TokensIn: 1, TokensOut: 1}
-	submissions := int64(1)
-	meta.Stats.InputSubmissionCount = &submissions
-
-	ref := schema.SourceEntryRef(genID + "_user")
-	entry := schema.SessionEntry{
-		SessionID: sid, EntryIndex: 0, Harness: schema.HarnessClaudeCode,
-		EntryType: schema.EntryTypeText, Role: schema.RoleUser, SourceEntryRef: ref, ContentPreview: &text,
-	}
-	generation := indexformat.Generation{
-		ID:                   genID,
-		Completeness:         indexformat.GenerationCompletenessComplete,
-		Metadata:             meta,
-		Main:                 indexformat.Partition{Entries: []schema.SessionEntry{entry}},
-		Content:              []indexformat.ContentRecord{{Ref: ref}},
-		SourceEvidenceDigest: strings.Repeat("a", 64),
-	}
-	return indexformat.V2{Generation: generation}, map[schema.SourceEntryRef][]byte{ref: []byte(text)}
-}
-
 // lastGoodSeedAuthority seeds the session with a complete full generation (A)
 // carrying the supplied authority text.
 func lastGoodSeedAuthority(t *testing.T, db *store.Store, sid schema.SessionID, authorityText string) {
 	t.Helper()
-	generation, blobs := lastGoodGeneration(t, sid, "gen_last_good_a", authorityText)
+	generation, blobs := testutil.CompleteGeneration(t, sid, "gen_last_good_a", authorityText)
 	meta := generation.Generation.Metadata
 	storetest.SeedGenerationPublication(t, db, &meta, generation, blobs)
 }
@@ -114,7 +79,7 @@ func lastGoodSeedAuthority(t *testing.T, db *store.Store, sid schema.SessionID, 
 // seeded authority, carrying its own distinguishable preview text.
 func lastGoodRetainPreview(t *testing.T, db *store.Store, sid schema.SessionID, previewText string) {
 	t.Helper()
-	generation, blobs := lastGoodGeneration(t, sid, "gen_latest_attempt_b", previewText)
+	generation, blobs := testutil.CompleteGeneration(t, sid, "gen_latest_attempt_b", previewText)
 	identity := strings.Repeat("b", 64)
 	lastGoodExec(t, db, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ?`, identity, string(sid))
 	outcome, err := db.ActivateGeneration(context.Background(), store.GenerationActivation{
