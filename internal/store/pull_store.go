@@ -126,6 +126,14 @@ ON CONFLICT(village_host, content_hash) DO UPDATE SET
 	sqlAnnotationCurrent = `SELECT transcript_id, local_session_id, author_user_id, author_username, payload
 FROM pulled_annotations WHERE village_host = ? AND content_hash = ?`
 
+	// sqlListPulledAnnotationHashesByTranscript returns every annotation content
+	// hash this database holds for one village host, ordered by its transcript so
+	// the scan appends each transcript's set together. It reads only the two keys
+	// a skip-gate question needs; the payloads stay on disk.
+	sqlListPulledAnnotationHashesByTranscript = `SELECT transcript_id, content_hash
+FROM pulled_annotations WHERE village_host = ?
+ORDER BY transcript_id, content_hash`
+
 	// sqlListPulledTranscripts returns all pulled transcripts, newest pull first.
 	sqlListPulledTranscripts = `SELECT
     village_host, transcript_id, owner_user_id, owner_username,
@@ -315,6 +323,34 @@ func (s *Store) ListPulledTranscripts(ctx context.Context) ([]PulledTranscriptRo
 		return nil, fmt.Errorf("store.ListPulledTranscripts: query: %w", err)
 	}
 	return rows, nil
+}
+
+// ListPulledAnnotationHashesByTranscript returns, for one village host, each
+// pulled transcript id mapped to the content hashes of the annotations this
+// database holds for it. It is the LOCAL half of a pull skip-gate question: the
+// caller sends the sets back to the village to learn whether its annotations are
+// still current. The host is required, because hashes held for another village
+// would answer a different question.
+func (s *Store) ListPulledAnnotationHashesByTranscript(ctx context.Context, villageHost string) (map[schema.TranscriptID][]string, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store.ListPulledAnnotationHashesByTranscript: take connection for %s: %w", villageHost, err)
+	}
+	defer s.pool.Put(conn)
+
+	hashes := make(map[schema.TranscriptID][]string)
+	err = sqlitex.Execute(conn, sqlListPulledAnnotationHashesByTranscript, &sqlitex.ExecOptions{
+		Args: []any{villageHost},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			id := schema.TranscriptID(stmt.ColumnText(0))
+			hashes[id] = append(hashes[id], stmt.ColumnText(1))
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store.ListPulledAnnotationHashesByTranscript: query for %s: %w", villageHost, err)
+	}
+	return hashes, nil
 }
 
 // GetPulledTranscript returns a single pulled transcript by its composite PK,

@@ -1,6 +1,7 @@
 package village
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -159,6 +160,54 @@ type PullListOptions struct {
 	// identifiers travel as one comma-separated parameter, the shape the village
 	// declares. An empty slice lists every pullable transcript.
 	Collectives []schema.VillageUUID
+}
+
+// pullSkipGatePath is the batch currency endpoint: a client POSTs the ids it
+// already holds together with the hashes it holds for them, and the village
+// answers, per id, whether the stored transcript and its annotations are still
+// current.
+const pullSkipGatePath = pullTranscriptsEndpoint + "/skip-gate"
+
+// PullSkipGate asks the village which of the held transcripts are still current,
+// in ONE request, so a bulk pull can skip what has not diverged instead of
+// re-reading each transcript. Only the caller's held hashes travel, never
+// content.
+//
+// A non-pullable id is ABSENT from the answer rather than answered (the
+// village's leak-free withheld semantics), so a caller must read an absent id as
+// "unanswered" and never as "current". A non-2xx status is returned as an
+// actionable error; a caller that can proceed without the gate should treat any
+// error here as "ask about nothing and pull everything".
+//
+// The caller runs NegotiatePull once before this call — it does not preflight the
+// pull window.
+func (c *VillageClient) PullSkipGate(ctx context.Context, request schema.PullSkipGateRequest) (*schema.PullSkipGateResponse, error) {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode pull skip-gate request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+pullSkipGatePath, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create pull skip-gate request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute pull skip-gate request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, pullStatusError("ask the pull skip-gate", pullSkipGatePath, resp)
+	}
+
+	var result schema.PullSkipGateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode pull skip-gate response: %w", err)
+	}
+	return &result, nil
 }
 
 // ListPullableTranscripts fetches one page of the village's pullable-transcript
