@@ -85,7 +85,7 @@ func lastGoodRetainPreview(t *testing.T, db *store.Store, sid schema.SessionID, 
 	outcome, err := db.ActivateGeneration(context.Background(), store.GenerationActivation{
 		Generation:     generation,
 		Blobs:          blobs,
-		IndexerVersion: 18,
+		IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion,
 		IndexedAtMs:    2,
 		ContentCapture: lastGoodPreviewCapture(),
 	})
