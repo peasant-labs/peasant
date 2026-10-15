@@ -1,17 +1,8 @@
 # Native repair maintenance oracle. Each case drives the REAL Pipeline with
 # injected harvester targets over real temporary managed files and a real
 # SQLite store. Native sources are sanitized synthetic rollouts, never private
-# user data.
-requiredNames:
-  - codex_stale_v1_maintenance_repair
-  - codex_failed_capture_retains_last_good
-  - codex_future_state_refused
-  - codex_unrelated_harness_unchanged
-  - opencode_stale_v1_native_activation
-  - claude_flag_without_stand_in_retains_latest_attempt
-  - claude_legacy_null_artifact_retains_with_provided_identity
-  - claude_certificate_authority_retains_latest_attempt
-  - claude_explicit_rebuild_over_retained_clears_pointer
+# user data. The required-name manifest beside this file is the single case
+# inventory; the fixture declares no second copy.
 cases:
   - name: codex_stale_v1_maintenance_repair
     harness: codex

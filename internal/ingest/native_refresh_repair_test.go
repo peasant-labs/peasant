@@ -57,8 +57,7 @@ type nativeRefreshRepairCase struct {
 }
 
 type nativeRefreshRepairFixture struct {
-	RequiredNames []string                  `yaml:"requiredNames"`
-	Cases         []nativeRefreshRepairCase `yaml:"cases"`
+	Cases []nativeRefreshRepairCase `yaml:"cases"`
 }
 
 func loadNativeRefreshRepairFixture(t *testing.T) nativeRefreshRepairFixture {

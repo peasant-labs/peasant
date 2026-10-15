@@ -125,8 +125,13 @@ func runLatestAttemptRetention(t *testing.T, tc nativeRefreshRepairCase) {
 	meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, retentionFlagWarning())
 	storetest.SeedManagedInput(t, db, fs, outputDir, *meta, []byte(tc.Source))
 
-	if tc.Authority != retentionAuthorityCertificate {
+	switch tc.Authority {
+	case retentionAuthorityManaged, retentionAuthorityManagedLegacyNull:
 		installRetentionAuthority(t, db, sid, tc.Harness)
+	case retentionAuthorityCertificate:
+		// No active managed generation: the stored V1 projection is the authority.
+	default:
+		t.Fatalf("latest-attempt retention case %q declares unknown authority %q", tc.Name, tc.Authority)
 	}
 	if tc.Authority == retentionAuthorityManagedLegacyNull {
 		execBridgeSQL(t, db, `UPDATE sessions SET artifact_hash = NULL WHERE session_id = ?`, string(sid))
@@ -262,16 +267,8 @@ func assertRetainedPreview(t *testing.T, result *ingest.PipelineResult, db *stor
 	}
 
 	after := readRetentionAuthority(t, db, sid)
-	if authorityKind == retentionAuthorityManagedLegacyNull {
-		// The row predates the artifact-hash column, so the bootstrap establishes
-		// it; every other part of the authority is unchanged.
-		before.entries, after.entries = nil, nil
-		if before.format != after.format || before.generationID != after.generationID ||
-			before.indexVersion != after.indexVersion || before.certificate != after.certificate || before.stamps != after.stamps {
-			t.Fatalf("retention changed the legacy authority:\nbefore=%+v\nafter=%+v", before, after)
-		}
-	} else if !reflect.DeepEqual(before, after) {
-		t.Fatalf("retention changed the read authority:\nbefore=%+v\nafter=%+v", before, after)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("the write changed the read authority:\nbefore=%+v\nafter=%+v", before, after)
 	}
 
 	available, err := db.ReadSessionAvailable(t.Context(), sid)
