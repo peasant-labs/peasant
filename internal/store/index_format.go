@@ -145,11 +145,11 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*inges
 	var state *ingest.SessionIndexState
 	// One snapshot, one statement: the publication binding and the content
 	// capture status describe the same instant as the index columns.
-	// The retained latest-attempt fields are read in the same snapshot as the
-	// rest of the index state: the settle comparison must not mix facts from
-	// two states. The adapter revision comes from the retained generation row
-	// through one correlated subquery keyed by the recorded generation id, so
-	// no Go mirror of that id is needed.
+	// The latest-attempt fields are read in the same snapshot as the rest of
+	// the index state: the settle comparison must not mix facts from two
+	// states. The adapter revision comes from the latest-attempt generation
+	// row through one correlated subquery keyed by the recorded generation id,
+	// so no Go mirror of that id is needed.
 	err := sqlitex.Execute(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
 s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
 `+publicationCaptureRevisionSQL+`,

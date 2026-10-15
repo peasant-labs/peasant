@@ -28,8 +28,8 @@ func (s *Store) WithCommittedPublicationInput(ctx context.Context, id ingest.Ses
 }
 
 // WithCommittedPublicationInputSelected is the explicit-selection form of
-// WithCommittedPublicationInput. A zero selection refuses while a retained
-// latest attempt is pending, exactly like the default read. A LastGood
+// WithCommittedPublicationInput. A zero selection refuses while a latest attempt
+// is pending, exactly like the default read. A LastGood
 // selection bypasses only that refusal and uploads the last-good authority
 // through the unchanged active read; every other publication check still
 // applies, so an active preview remains refused.

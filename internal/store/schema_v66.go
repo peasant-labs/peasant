@@ -1,6 +1,6 @@
 package store
 
-// migrationV66 adds the retained-latest-attempt pointer to sessions. A managed
+// migrationV66 adds the latest-attempt pointer to sessions. A managed
 // V2 write whose assessed capture is an unaccounted source-records omission
 // preview does not replace the active authority; the preview is retained as a
 // separate attempt and this pointer records it while the last-good full
@@ -8,8 +8,8 @@ package store
 //
 // The seven columns stay nullable with no backfill: a session that never
 // retained an attempt keeps every column NULL, which is also the settled state
-// the retention commit compares against. latest_attempt_stats_json carries the
-// retained attempt's own producer stats so count-carrying reads can resolve
+// the latest-attempt commit compares against. latest_attempt_stats_json carries
+// the latest attempt's own producer stats so count-carrying reads can resolve
 // them without touching the session's active-authority stats. Plain
 // ALTER TABLE ADD COLUMN, no table rebuild, STRICT-compatible.
 const migrationV66 = `

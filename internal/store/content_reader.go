@@ -813,10 +813,10 @@ func loadLatestAttemptAvailableEntriesOnConn(ctx context.Context, conn *sqlite.C
 	return entries, capture, nil
 }
 
-// latestAttemptGenerationRowExistsOnConn refuses an available read whose retained
-// pointer names no stored generation row. Serving the empty projection instead
-// would draw a partial-flagged transcript with nothing in it, which reads as an
-// empty session rather than as a broken latest attempt.
+// latestAttemptGenerationRowExistsOnConn refuses an available read whose
+// latest-attempt pointer names no stored generation row. Serving the empty
+// projection instead would draw a partial-flagged transcript with nothing in it,
+// which reads as an empty session rather than as a broken latest attempt.
 func latestAttemptGenerationRowExistsOnConn(conn *sqlite.Conn, id ingest.SessionID, generationID string) error {
 	found := false
 	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
