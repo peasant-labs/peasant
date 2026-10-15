@@ -3,6 +3,7 @@ package ingest
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -121,6 +122,39 @@ func PriorStateFromGeneration(generation indexformat.Generation) (ProjectionPrio
 		}
 	}
 	return state, nil
+}
+
+// ErrPriorAliasConflict is the fixed category the coexistence prior merge
+// reports when the latest attempt and the active authority disagree about the
+// ref one shared native key owns. Callers classify with errors.Is.
+var ErrPriorAliasConflict = errors.New("prior-alias-conflict")
+
+// MergeLatestAttemptAliases merges the latest attempt's reusable alias state
+// into the active authority's: every key only the attempt introduced is added
+// under the authority's identity, and a key the two share keeps the ref they
+// agree on.
+//
+// A shared key whose refs DISAGREE is refused. Keeping the authority's ref for a
+// native key the attempt mapped to another ref would silently bind the
+// attempt's content to an identity it never had, which is exactly the
+// mis-binding the coexistence rule forbids; reusing the attempt's ref instead
+// would rebind the authority. Neither silent choice is safe, so the merge
+// reports the conflict with both refs and produces no prior state.
+func MergeLatestAttemptAliases(authority, attempt ProjectionPriorState) (ProjectionPriorState, error) {
+	merged := authority.clone()
+	for key, ref := range attempt.Entries {
+		if existing, ok := merged.Entries[key]; ok && existing != ref {
+			return ProjectionPriorState{}, fmt.Errorf("ingest.MergeLatestAttemptAliases: the latest attempt maps block native key %q to entry ref %q while the active authority maps it to %q; merging them would rebind one generation's content to the other's identity; re-index the session from its recorded source so the attempt is rebuilt against one identity, then retry: %w", key, ref, existing, ErrPriorAliasConflict)
+		}
+		merged.Entries[key] = ref
+	}
+	for key, ref := range attempt.Submissions {
+		if existing, ok := merged.Submissions[key]; ok && existing != ref {
+			return ProjectionPriorState{}, fmt.Errorf("ingest.MergeLatestAttemptAliases: the latest attempt maps submission native key %q to submission ref %q while the active authority maps it to %q; merging them would rebind one generation's content to the other's identity; re-index the session from its recorded source so the attempt is rebuilt against one identity, then retry: %w", key, ref, existing, ErrPriorAliasConflict)
+		}
+		merged.Submissions[key] = ref
+	}
+	return merged, nil
 }
 
 // encodeBlockAliasKey encodes a classified block's native key into the bounded

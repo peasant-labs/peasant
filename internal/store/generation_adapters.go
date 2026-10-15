@@ -152,11 +152,22 @@ func (s *Store) SweepFlaggedSessionsForHarvest(ctx context.Context) (int, []erro
 // one session: its committed metadata, the native-key aliases the projection
 // must reuse, whether a complete generation is already the last-good authority,
 // and the harness-owned prior document when one was persisted. A session with
-// no active generation returns (nil, nil), so a first discovery builds an empty
-// prior state instead of guessing. A harmonized active generation reads its
-// structured rows (the metadata rebuilds from the catalog row, the children,
-// and the stats row, with the durable parent from the session row); a
-// file-backed one reads the projection tables and the prior document file.
+// no active generation and no latest attempt returns (nil, nil), so a first
+// discovery builds an empty prior state instead of guessing. A harmonized active
+// generation reads its structured rows (the metadata rebuilds from the catalog
+// row, the children, and the stats row, with the durable parent from the session
+// row); a file-backed one reads the projection tables and the prior document
+// file.
+//
+// When a latest attempt is kept beside the authority, its reusable aliases merge
+// into the authority's under the authority's identity: a key only the attempt
+// introduced is added, and a shared key whose refs disagree refuses rather than
+// silently rebinding either generation. The evidence authority stays the
+// authority's alone (its completeness and its prior document); the attempt
+// contributes identity, never proof. With no active generation (the
+// certificate-only state) the prior is the attempt's aliases and no evidence
+// document, so the caller still judges the candidate against the stored capture
+// certificate.
 func (s *Store) ReadGenerationPrior(ctx context.Context, sessionID schema.SessionID) (*ingest.GenerationPrior, error) {
 	if s.generationArtifacts == nil {
 		return nil, fmt.Errorf("store: managed generation support is not configured; the active generation's prior evidence cannot be loaded for session %s; open the store with WithGenerationArtifacts before refreshing", sessionID)
@@ -166,26 +177,81 @@ func (s *Store) ReadGenerationPrior(ctx context.Context, sessionID schema.Sessio
 		return nil, fmt.Errorf("store: take connection to read the managed-generation prior for session %s: %w; no candidate was produced; restore database access and retry", sessionID, err)
 	}
 	defer s.pool.Put(conn)
+	pointer, err := readLatestAttemptPointerOnConn(conn, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	active, err := readActiveGenerationOnConn(conn, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	if active == nil || *active == "" {
-		return nil, nil
+		if !pointer.found() {
+			return nil, nil
+		}
+		state, err := readGenerationAliasStateOnConn(conn, sessionID, pointer.generationID)
+		if err != nil {
+			return nil, err
+		}
+		return &ingest.GenerationPrior{Aliases: state}, nil
 	}
+	var prior *ingest.GenerationPrior
 	if generationIsHarmonized(conn, sessionID, *active) {
-		return readHarmonizedPriorOnConn(conn, sessionID, *active)
+		prior, err = readHarmonizedPriorOnConn(conn, sessionID, *active)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		prior, err = readGenerationPriorOnConn(conn, sessionID, *active)
+		if err != nil {
+			return nil, err
+		}
+		evidence, err := s.generationArtifacts.ReadPriorEvidence(ctx, sessionID, *active)
+		if err != nil {
+			return nil, err
+		}
+		prior.PriorEvidence = evidence
 	}
-	prior, err := readGenerationPriorOnConn(conn, sessionID, *active)
+	if !pointer.found() {
+		return prior, nil
+	}
+	attemptState, err := readGenerationAliasStateOnConn(conn, sessionID, pointer.generationID)
 	if err != nil {
 		return nil, err
 	}
-	evidence, err := s.generationArtifacts.ReadPriorEvidence(ctx, sessionID, *active)
+	merged, err := ingest.MergeLatestAttemptAliases(prior.Aliases, attemptState)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store: merge the latest attempt's reusable identities for session %s: %w; no candidate was produced and the committed generation stays active", sessionID, err)
 	}
-	prior.PriorEvidence = evidence
+	prior.Aliases = merged
 	return prior, nil
+}
+
+// readGenerationAliasStateOnConn rebuilds one generation's reusable alias state
+// from its persisted alias rows and its harmonized main entries: an acceptance
+// alias recovers its submission ref from the first submitted block's
+// provenance, which only the entries carry. A latest attempt is always written
+// as a harmonized generation, so the harmonized entry reader is the one that
+// applies.
+func readGenerationAliasStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (ingest.ProjectionPriorState, error) {
+	aliases, err := readGenerationAliasesOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return ingest.NewProjectionPriorState(), err
+	}
+	entries, err := readHarmonizedMainEntriesOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return ingest.NewProjectionPriorState(), err
+	}
+	stub := indexformat.Generation{
+		ID:      generationID,
+		Aliases: aliases,
+		Main:    indexformat.Partition{Entries: entries},
+	}
+	state, err := ingest.PriorStateFromGeneration(stub)
+	if err != nil {
+		return ingest.NewProjectionPriorState(), fmt.Errorf("store: rebuild reusable identities for session %s generation %s: %w; no candidate was produced; the committed generation stays active", sessionID, generationID, err)
+	}
+	return state, nil
 }
 
 // ReadStoredCaptureAuthority reports the stored content-capture certificate
