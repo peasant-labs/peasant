@@ -1,0 +1,68 @@
+# Collective reference resolution: every accepted form of `--collective`, and
+# every refusal, exercised against the village double's collective list.
+#
+# `collectives` is the double's membership list. A collective with `member: false`
+# exists but is not one the caller belongs to, so the double omits it from
+# `GET /api/v1/groups` exactly as the village does.
+#
+# A case either resolves (`id`) or refuses (`errorContains`, plus `errorMentions`
+# when the message must also name something specific, such as a sibling collective
+# or the list of names).
+requiredNames:
+  - a collective UUID resolves when the caller belongs to it
+  - a differently cased name resolves
+  - a collective page URL resolves
+  - a canonical collective page URL resolves
+  - a collective page URL with a trailing slash resolves
+  - a collective page URL with a query string resolves
+  - an unknown name names the collectives the caller can see
+  - a name two collectives share is refused with both identifiers
+  - a UUID the caller does not belong to is refused
+  - a URL that is not a collective page is refused
+  - a URL whose last segment is not a collective identifier is refused
+  - an empty value is refused
+collectives:
+  - {id: 11111111-1111-4111-8111-111111111111, name: platform-team, member: true}
+  - {id: 22222222-2222-4222-8222-222222222222, name: oss-mirror, member: true}
+  - {id: 33333333-3333-4333-8333-333333333333, name: core, member: true}
+  - {id: 44444444-4444-4444-8444-444444444444, name: Core, member: true}
+  - {id: 55555555-5555-4555-8555-555555555555, name: not-joined, member: false}
+cases:
+  - name: a collective UUID resolves when the caller belongs to it
+    raw: 11111111-1111-4111-8111-111111111111
+    id: 11111111-1111-4111-8111-111111111111
+  - name: a differently cased name resolves
+    raw: Platform-Team
+    id: 11111111-1111-4111-8111-111111111111
+  - name: a collective page URL resolves
+    raw: https://village.example.com/groups/22222222-2222-4222-8222-222222222222
+    id: 22222222-2222-4222-8222-222222222222
+  - name: a canonical collective page URL resolves
+    raw: https://village.example.com/collectives/22222222-2222-4222-8222-222222222222
+    id: 22222222-2222-4222-8222-222222222222
+  - name: a collective page URL with a trailing slash resolves
+    raw: https://village.example.com/groups/22222222-2222-4222-8222-222222222222/
+    id: 22222222-2222-4222-8222-222222222222
+  - name: a collective page URL with a query string resolves
+    raw: https://village.example.com/groups/22222222-2222-4222-8222-222222222222?tab=review
+    id: 22222222-2222-4222-8222-222222222222
+  - name: an unknown name names the collectives the caller can see
+    raw: platfrom-team
+    errorContains: no collective you belong to is named
+    errorMentions: platform-team
+  - name: a name two collectives share is refused with both identifiers
+    raw: core
+    errorContains: is ambiguous
+    errorMentions: 44444444-4444-4444-8444-444444444444
+  - name: a UUID the caller does not belong to is refused
+    raw: 55555555-5555-4555-8555-555555555555
+    errorContains: is not one you belong to
+  - name: a URL that is not a collective page is refused
+    raw: https://village.example.com/users/11111111-1111-4111-8111-111111111111
+    errorContains: is not a collective page
+  - name: a URL whose last segment is not a collective identifier is refused
+    raw: https://village.example.com/groups/not-a-uuid
+    errorContains: is not a collective page
+  - name: an empty value is refused
+    raw: " "
+    errorContains: empty

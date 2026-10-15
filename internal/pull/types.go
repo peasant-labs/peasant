@@ -174,6 +174,19 @@ type PullOptions struct {
 	// matches the server hash, else PullStatusPulled for "would pull"). Mirrors the
 	// push pipeline's dry-run reporting spirit (no side effects, reports intent).
 	DryRun bool
+	// Meta, when non-nil, is the metadata a caller already read for this transcript
+	// from the pullable listing. Supplying it skips the per-transcript FETCH-META
+	// GET. The listing row is the SAME schema.PullTranscriptInfo projection the
+	// single read returns, including ContentHash, so the DIFF is fed identically.
+	// The DOWNLOAD stage stays authoritative: a transcript that diverged between
+	// the listing and the pull is still settled by the conditional GET and the
+	// post-download hash compare.
+	Meta *schema.PullTranscriptInfo
+	// SkipNegotiate suppresses the NEGOTIATE stage. A caller that has already run
+	// NegotiatePull once for the command sets it, so a bulk run does not repeat the
+	// schema-version preflight per transcript. The pull window cannot change
+	// mid-command, and the caller owns the single check.
+	SkipNegotiate bool
 }
 
 // PullResult is the observable outcome of a PullTranscript run.

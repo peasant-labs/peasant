@@ -374,6 +374,53 @@ round-trip shape-pin test.
 
 ---
 
+## 8. Collective bulk pull (`--collective`)
+
+`peasant village transcripts pull --collective <ref>...` pulls every
+transcript an accessible collective holds, and
+`peasant village transcripts list --collective <ref>... [--limit N]` lists
+what such a pull would take. Both contact the village and require login; both
+narrow the pullable listing with the village's `collectives` filter (a
+comma-separated identifier list, the shape the village declares).
+
+A `--collective` value is a collective name (case-insensitive), a collective
+UUID, or a pasted collective page URL under `/groups/<uuid>` or
+`/collectives/<uuid>` (a trailing slash and a query string are allowed; the
+last segment must be a collective identifier, so `/users/<uuid>` and
+`/groups/<slug>` are refused as "not a collective page" rather than resolved
+as a name — mirroring `ParseTranscriptRef`'s separation of a bare identifier
+from a URL whose last segment is wrong). The flag is repeatable; several
+values pull the union, each transcript once (client-side de-duplication, so a
+transcript approved in two listed collectives is pulled once).
+
+A collective holds the transcripts offered to it and approved, so a transcript
+the caller owns but never shared with a listed collective is not part of the
+selection. Only `approved` shares into a listed collective the caller is a
+member of count; `pending`/rejected, public, and preview shares never do (the
+[auth matrices](auth.md#4-authorization-matrices--web-vs-pull) apply unchanged).
+
+Listing paging differs by selection: a collective listing pages to the end
+(follows the pages, merges, and de-duplicates) so the listing matches what a
+pull would take, while the plain listing keeps its single-page behaviour.
+`--limit` sets the page size for the remote listing only (`--local` reads the
+local inventory and refuses `--collective`/`--limit`).
+
+A village which predates the filter is refused rather than over-pulled. The
+bulk pull negotiates the pull window once, before any download; a village that
+predates the `collectives` filter advertises an older window there, so the CLI
+aborts with a `contract-error` instead of listing — and pulling — everything.
+A mistyped collective likewise fails before any download.
+
+Tested by `TestCollectiveRefsFixtures` (`cmd/peasant/collective_ref_test.go`,
+driven by `testdata/collective_refs.yaml`) for every accepted and refused
+`--collective` form, and by `TestVillagePullCollectivesFixtures`
+(`cmd/peasant/cmd_village_pull_collective_test.go`, driven by
+`testdata/village_pull_collectives.yaml`) for multi-page paging with
+de-duplication, continue-on-error with a non-zero result, skip-gate pruning of
+current transcripts, and skip-gate fallback to per-transcript checks.
+
+---
+
 ## See also
 
 - [Peasant ↔ Village Auth Model](auth.md) — login, wire auth, command gates, the

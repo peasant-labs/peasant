@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"text/tabwriter"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
@@ -25,8 +27,10 @@ const villageListDefaultLimit = 50
 // Output conventions mirror push: the table goes to stdout, --json is parseable.
 func buildVillageTranscriptsListCommand() *cobra.Command {
 	var (
-		local      bool
-		jsonOutput bool
+		local          bool
+		jsonOutput     bool
+		limit          int
+		collectiveRefs []string
 	)
 
 	cmd := &cobra.Command{
@@ -34,24 +38,31 @@ func buildVillageTranscriptsListCommand() *cobra.Command {
 		Short: "List pullable (remote, login required) or already-pulled (--local, offline) transcripts",
 		Long: `List transcripts you can pull from the village (the default — own and
 group-shared transcripts; requires login), or the transcripts you have ALREADY
-pulled locally (--local; reads only local data and works offline).`,
+pulled locally (--local; reads only local data and works offline).
+
+--collective narrows the remote listing to one or more collectives you belong
+to, named by a collective name, its UUID, or its /groups/<uuid> page URL, and
+pages to the end so the listing matches what a pull would take. --limit sets the
+page size. Both apply to the remote listing only.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Runtime errors (the remote auth gate, an unreachable village, a local
-			// DB read) are not usage errors — suppress cobra's Usage/Flags dump so
-			// the actionable one-liner stands alone. Genuine flag misuse is still
-			// reported with usage by cobra before RunE runs.
 			cmd.SilenceUsage = true
 
 			if local {
+				if len(collectiveRefs) > 0 || cmd.Flags().Changed("limit") {
+					return fmt.Errorf("--collective and --limit apply to the remote listing; --local reads only the local inventory")
+				}
 				return runVillageTranscriptsListLocal(cmd, jsonOutput)
 			}
-			return runVillageTranscriptsListRemote(cmd, jsonOutput)
+			return runVillageTranscriptsListRemote(cmd, jsonOutput, collectiveRefs, limit)
 		},
 	}
 
 	cmd.Flags().BoolVar(&local, "local", false, "List already-pulled transcripts from the local inventory (offline; no login)")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of a table")
+	cmd.Flags().IntVar(&limit, "limit", villageListDefaultLimit, "Page size for the remote listing")
+	cmd.Flags().StringArrayVar(&collectiveRefs, "collective", nil,
+		"List the transcripts a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values list the union")
 
 	return cmd
 }
@@ -79,19 +90,32 @@ func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool) error {
 
 // runVillageTranscriptsListRemote fetches and renders the village's pullable
 // listing. Login is REQUIRED. NegotiatePull is called EXACTLY ONCE before the
-// listing GET used by the transcript list command.
-func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool) error {
+// listing GET used by the transcript list command. A collective listing follows
+// the pages to the end, so the listing matches what a pull would take; the plain
+// listing keeps its single-page behavior.
+func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collectiveRefs []string, limit int) error {
 	creds, err := requireVillageCredentials(cmd)
 	if err != nil {
 		return err
 	}
 
 	client := newVillageClientFromCreds(creds)
+
+	var collectives []schema.VillageUUID
+	if len(collectiveRefs) > 0 {
+		// Resolve against the caller's own collectives before the listing call, so
+		// a mistyped name fails with the names the caller can see.
+		collectives, _, err = resolveCollectiveRefs(cmd.Context(), client, collectiveRefs)
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := client.NegotiatePull(cmd.Context()); err != nil {
 		return err
 	}
 
-	resp, err := client.ListPullableTranscripts(cmd.Context(), 1, villageListDefaultLimit)
+	response, err := listPullableTranscripts(cmd.Context(), client, collectives, limit, len(collectiveRefs) > 0)
 	if err != nil {
 		return fmt.Errorf("list pullable transcripts: %w", err)
 	}
@@ -99,10 +123,61 @@ func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool) error 
 	if jsonOutput {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		return enc.Encode(resp)
+		return enc.Encode(response)
 	}
-	printRemoteListTable(cmd, resp)
+	printRemoteListTable(cmd, response)
 	return nil
+}
+
+// listPullableTranscripts reads the pullable listing. With allPages false it
+// returns the single page it read. With allPages true it follows the pages to
+// the end and returns one merged response, with duplicates collapsed, so a
+// multi-page collective listing is complete rather than silently truncated.
+func listPullableTranscripts(ctx context.Context, client *village.VillageClient, collectives []schema.VillageUUID, limit int, allPages bool) (*schema.PullListResponse, error) {
+	if limit <= 0 {
+		limit = villageListDefaultLimit
+	}
+
+	first, err := client.ListPullableTranscripts(ctx, village.PullListOptions{Page: 1, Limit: limit, Collectives: collectives})
+	if err != nil {
+		return nil, err
+	}
+	if !allPages || first == nil {
+		return first, nil
+	}
+
+	merged := &schema.PullListResponse{
+		Transcripts: append([]schema.PullTranscriptInfo(nil), first.Transcripts...),
+		Page:        1,
+		Limit:       first.Limit,
+		Total:       first.Total,
+	}
+	seen := make(map[schema.TranscriptID]struct{}, len(merged.Transcripts))
+	for i := range merged.Transcripts {
+		seen[merged.Transcripts[i].TranscriptID] = struct{}{}
+	}
+	for page := 2; len(merged.Transcripts) < merged.Total; page++ {
+		next, err := client.ListPullableTranscripts(ctx, village.PullListOptions{Page: page, Limit: limit, Collectives: collectives})
+		if err != nil {
+			return nil, err
+		}
+		if next == nil || len(next.Transcripts) == 0 {
+			break
+		}
+		for i := range next.Transcripts {
+			row := next.Transcripts[i]
+			if _, duplicate := seen[row.TranscriptID]; duplicate {
+				continue
+			}
+			seen[row.TranscriptID] = struct{}{}
+			merged.Transcripts = append(merged.Transcripts, row)
+		}
+		// A short page means the end of the listing.
+		if len(next.Transcripts) < limit {
+			break
+		}
+	}
+	return merged, nil
 }
 
 // jsonLocalListRow is the JSON-safe local inventory row.

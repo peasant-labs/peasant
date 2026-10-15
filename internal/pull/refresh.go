@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -91,7 +92,7 @@ func (p *Pipeline) RefreshOwnAnnotations(ctx context.Context, opts RefreshOption
 func (p *Pipeline) listOwnTranscripts(ctx context.Context, sessionID string) ([]schema.PullTranscriptInfo, error) {
 	var own []schema.PullTranscriptInfo
 	for page := 1; ; page++ {
-		resp, err := p.reader.ListPullableTranscripts(ctx, page, refreshPageLimit)
+		resp, err := p.reader.ListPullableTranscripts(ctx, village.PullListOptions{Page: page, Limit: refreshPageLimit})
 		if err != nil {
 			return nil, err
 		}

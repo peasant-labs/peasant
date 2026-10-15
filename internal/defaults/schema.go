@@ -34,7 +34,7 @@ const MinPushContractVersion schema.PushContractVersion = "0.1.0"
 // contract because pull is where the village's migrate-on-read floor becomes
 // wire-visible. Typed as schema.PushContractVersion (the shared semver newtype)
 // so the version flows typed; the PullContractVersion NAME disambiguates the axis.
-const PullContractVersion schema.PushContractVersion = "0.1.0"
+const PullContractVersion schema.PushContractVersion = "0.2.0"
 
 // MinPullContractVersion is the OLDEST pull envelope version the village still
 // supports on the pull surface (the pull-negotiation floor, advertised in

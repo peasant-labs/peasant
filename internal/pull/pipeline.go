@@ -28,7 +28,7 @@ import (
 // data calls that do NOT re-preflight the pull window.
 type VillageReader interface {
 	NegotiatePull(ctx context.Context) error
-	ListPullableTranscripts(ctx context.Context, page, limit int) (*schema.PullListResponse, error)
+	ListPullableTranscripts(ctx context.Context, opts village.PullListOptions) (*schema.PullListResponse, error)
 	GetPullTranscript(ctx context.Context, id schema.TranscriptID) (*schema.PullTranscriptInfo, error)
 	GetPullTranscriptContent(ctx context.Context, id schema.TranscriptID, ifNoneMatch string) (io.ReadCloser, string, error)
 	GetPullTranscriptAnnotations(ctx context.Context, id schema.TranscriptID) ([]schema.PullAnnotation, error)
@@ -185,15 +185,22 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	}
 	host := p.villageHost()
 
-	// --- NEGOTIATE (exactly once, before the FETCH stages) ---
-	if err := p.reader.NegotiatePull(ctx); err != nil {
-		return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+	// --- NEGOTIATE (once per command; a bulk caller sets SkipNegotiate after its
+	// own single NegotiatePull) ---
+	if !opts.SkipNegotiate {
+		if err := p.reader.NegotiatePull(ctx); err != nil {
+			return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+		}
 	}
 
-	// --- FETCH-META ---
-	meta, err := p.reader.GetPullTranscript(ctx, ref.ID)
-	if err != nil {
-		return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+	// --- FETCH-META (skipped when the caller passed the listing's own row) ---
+	meta := opts.Meta
+	if meta == nil {
+		fetched, err := p.reader.GetPullTranscript(ctx, ref.ID)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+		}
+		meta = fetched
 	}
 
 	pullDir := p.pullDir(host, ref.ID)

@@ -1,0 +1,18 @@
+# Bulk collective pull driver: the behaviours a multi-transcript run must keep.
+#
+# Each case names one driver behaviour. The test sets up the village double's
+# pullable transcripts and shares per case, runs
+# `peasant village transcripts pull --collective ...` against it, and asserts
+# the observable outcome (pulled rows, exit code, and which village reads
+# happened). No case carries inline expectations beyond its name; the test
+# proves each behaviour against the double and the local pulled index.
+requiredNames:
+  - paging follows a multi-page listing to the end and pulls a transcript held by two collectives once
+  - continue-on-error pulls the others when one transcript fails and reports non-zero
+  - skip-gate pruning does not pull a transcript the gate answers as current
+  - skip-gate fallback pulls every transcript individually when the gate does not answer
+cases:
+  - name: paging follows a multi-page listing to the end and pulls a transcript held by two collectives once
+  - name: continue-on-error pulls the others when one transcript fails and reports non-zero
+  - name: skip-gate pruning does not pull a transcript the gate answers as current
+  - name: skip-gate fallback pulls every transcript individually when the gate does not answer

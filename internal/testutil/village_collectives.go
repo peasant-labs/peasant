@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -75,6 +76,28 @@ type CollectiveVillage struct {
 	collectivesStatus    int
 	repositoriesStatus   int
 	promptRequests       []schema.VillagePromptRequest
+	// pullBlobs holds each pullable transcript's served blob bytes, keyed by
+	// transcript. pullAnnotations holds its authored annotations, and pullInfos
+	// holds the metadata view the listing and the single-transcript GET serve.
+	// A transcript with pull data is treated as owned and therefore pullable
+	// (unless public, which the pull surface excludes); a filtered listing
+	// further requires an APPROVED share into a listed member collective.
+	pullBlobs       map[schema.TranscriptID][]byte
+	pullAnnotations map[schema.TranscriptID][]schema.PullAnnotation
+	pullInfos       map[schema.TranscriptID]schema.PullTranscriptInfo
+	// pullListStatus, when non-zero, makes the pull listing answer with that
+	// status instead of the list. skipGateStatus does the same for the
+	// skip-gate. failPullContent makes the content GET of each listed
+	// transcript answer 500. 0 / empty restores the happy answers.
+	pullListStatus  int
+	skipGateStatus  int
+	failPullContent map[schema.TranscriptID]bool
+	// pullListCalls counts pull-listing reads. skipGateCalls counts skip-gate
+	// questions. contentCalls counts content GETs per transcript, so a test can
+	// prove a pruned transcript was never downloaded.
+	pullListCalls int
+	skipGateCalls int
+	contentCalls  map[schema.TranscriptID]int
 }
 
 // NewCollectiveVillage starts a CollectiveVillage that knows the collectives,
@@ -82,13 +105,18 @@ type CollectiveVillage struct {
 func NewCollectiveVillage(t testing.TB, collectives ...VillageCollective) *CollectiveVillage {
 	t.Helper()
 	v := &CollectiveVillage{
-		t:             t,
-		collectives:   map[schema.VillageUUID]VillageCollective{},
-		transcripts:   map[schema.TranscriptID]map[schema.VillageUUID]schema.VillageShareStatus{},
-		events:        map[schema.TranscriptID]map[schema.VillageUUID][]schema.VillageShareEvent{},
-		public:        map[schema.TranscriptID]bool{},
-		failShare:     map[schema.VillageUUID]bool{},
-		conflictShare: map[schema.VillageUUID]bool{},
+		t:               t,
+		collectives:     map[schema.VillageUUID]VillageCollective{},
+		transcripts:     map[schema.TranscriptID]map[schema.VillageUUID]schema.VillageShareStatus{},
+		events:          map[schema.TranscriptID]map[schema.VillageUUID][]schema.VillageShareEvent{},
+		public:          map[schema.TranscriptID]bool{},
+		failShare:       map[schema.VillageUUID]bool{},
+		conflictShare:   map[schema.VillageUUID]bool{},
+		pullBlobs:       map[schema.TranscriptID][]byte{},
+		pullAnnotations: map[schema.TranscriptID][]schema.PullAnnotation{},
+		pullInfos:       map[schema.TranscriptID]schema.PullTranscriptInfo{},
+		failPullContent: map[schema.TranscriptID]bool{},
+		contentCalls:    map[schema.TranscriptID]int{},
 	}
 	for _, collective := range collectives {
 		v.collectives[collective.ID] = collective
@@ -165,6 +193,9 @@ func (v *CollectiveVillage) DeleteTranscript(transcript schema.TranscriptID) {
 	defer v.mu.Unlock()
 	delete(v.transcripts, transcript)
 	delete(v.events, transcript)
+	delete(v.pullBlobs, transcript)
+	delete(v.pullAnnotations, transcript)
+	delete(v.pullInfos, transcript)
 }
 
 // AnswerRepositories makes every collective's linked repositories read
@@ -188,6 +219,88 @@ func (v *CollectiveVillage) SetPromptRequests(requests ...schema.VillagePromptRe
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.promptRequests = requests
+}
+
+// SetPullTranscript stores a pullable transcript's served blob and its authored
+// annotations, deriving the metadata view the pull surface serves (the content
+// hash over the blob bytes, the annotation count, and the group visibility a
+// shared transcript carries). A transcript with pull data is treated as owned
+// and therefore pullable unless public; a filtered pull listing further
+// requires an APPROVED share into a listed member collective (see Share).
+func (v *CollectiveVillage) SetPullTranscript(transcript schema.TranscriptID, blob []byte, annotations []schema.PullAnnotation) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	cp := append([]byte(nil), blob...)
+	anns := append([]schema.PullAnnotation(nil), annotations...)
+	v.pullBlobs[transcript] = cp
+	v.pullAnnotations[transcript] = anns
+	hash := schema.ComputeTranscriptHash(cp)
+	v.pullInfos[transcript] = schema.PullTranscriptInfo{
+		TranscriptID:    transcript,
+		OwnerUserID:     TestOwnerUserID,
+		OwnerUsername:   TestOwnerUsername,
+		Title:           "pull title for " + transcript.String(),
+		Harness:         schema.HarnessClaudeCode,
+		Visibility:      schema.VisibilityGroup,
+		ContentHash:     hash,
+		ContractVersion: defaults.PublishSchemaVersion,
+		PublishedAt:     villageDoubleTime.UnixMilli(),
+		UpdatedAt:       villageDoubleTime.UnixMilli(),
+		AnnotationCount: len(anns),
+	}
+}
+
+// AnswerPullList makes the pull listing answer with the status instead of the
+// list; 0 restores the list.
+func (v *CollectiveVillage) AnswerPullList(status int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.pullListStatus = status
+}
+
+// AnswerSkipGate makes the pull skip-gate answer with the status instead of the
+// currency answers; 0 restores the answers. A non-2xx status exercises the
+// bulk driver's skip-gate fallback: every transcript is then pulled
+// individually.
+func (v *CollectiveVillage) AnswerSkipGate(status int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.skipGateStatus = status
+}
+
+// FailPullContent makes the content GET of the transcript answer 500, so a bulk
+// pull records one failure and continues with the others. False restores the
+// blob.
+func (v *CollectiveVillage) FailPullContent(transcript schema.TranscriptID, fail bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if fail {
+		v.failPullContent[transcript] = true
+		return
+	}
+	delete(v.failPullContent, transcript)
+}
+
+// PullListCalls is the number of pull-listing reads received.
+func (v *CollectiveVillage) PullListCalls() int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.pullListCalls
+}
+
+// SkipGateCalls is the number of skip-gate questions received.
+func (v *CollectiveVillage) SkipGateCalls() int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.skipGateCalls
+}
+
+// ContentCalls is the number of content GETs received for the transcript, so a
+// test can prove a skip-gate-pruned transcript was never downloaded.
+func (v *CollectiveVillage) ContentCalls(transcript schema.TranscriptID) int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.contentCalls[transcript]
 }
 
 // Share records a share event of the transcript in the collective, as its
@@ -283,10 +396,17 @@ func (v *CollectiveVillage) serve(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
 	case r.Method == http.MethodGet && path == "/api/v1/schema/version":
-		window := schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities}
+		window := schema.SchemaVersionResponse{
+			MinPushContractVersion: "0.1.0",
+			PushContractVersion:    defaults.PublishSchemaVersion,
+			MinPullContractVersion: defaults.MinPullContractVersion,
+			PullContractVersion:    defaults.PullContractVersion,
+			ContentCapabilities:    schema.AllContentCapabilities,
+		}
 		v.mu.Lock()
 		if v.requiresNewerPeasant {
 			window.MinPushContractVersion, window.PushContractVersion = "99.0.0", "99.0.0"
+			window.MinPullContractVersion, window.PullContractVersion = "99.0.0", "99.0.0"
 		}
 		v.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(window)
@@ -307,6 +427,12 @@ func (v *CollectiveVillage) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(schema.AnnotationManifestResponse{})
 	case r.Method == http.MethodPost && path == "/api/v1/annotations":
 		_ = json.NewEncoder(w).Encode(schema.AnnotationPushResponse{})
+	case r.Method == http.MethodGet && path == "/api/v1/pull/transcripts":
+		v.listPullable(w, r)
+	case r.Method == http.MethodPost && path == "/api/v1/pull/transcripts/skip-gate":
+		v.skipGate(w, r)
+	case strings.HasPrefix(path, "/api/v1/pull/transcripts/"):
+		v.pullTranscript(w, r, strings.TrimPrefix(path, "/api/v1/pull/transcripts/"))
 	case strings.HasPrefix(path, "/api/v1/transcripts/"):
 		v.transcript(w, r, strings.TrimPrefix(path, "/api/v1/transcripts/"))
 	default:
@@ -570,6 +696,227 @@ func (v *CollectiveVillage) listRepositories(w http.ResponseWriter, id schema.Vi
 		repositories = append(repositories, schema.VillageLinkedRepository{ID: "00000000-0000-4000-8000-000000000002", GroupID: id, Owner: owner, Name: name, InstallationID: 1, LinkedBy: "00000000-0000-4000-8000-000000000001"})
 	}
 	_ = json.NewEncoder(w).Encode(schema.VillageLinkedRepositoriesResponse{Repositories: repositories})
+}
+
+// pullableLocked reports whether the double holds pull data for the transcript
+// and may serve it: public transcripts are excluded, exactly as the pull
+// surface excludes them. A held, private transcript is treated as owned and
+// therefore pullable; a filtered listing further requires an APPROVED share
+// into a listed member collective. The caller must hold v.mu.
+func (v *CollectiveVillage) pullableLocked(transcript schema.TranscriptID) bool {
+	if _, ok := v.pullInfos[transcript]; !ok {
+		return false
+	}
+	if v.public[transcript] {
+		return false
+	}
+	return true
+}
+
+// matchesPullFilterLocked reports whether the transcript counts for a pull
+// listing narrowed to filter. An empty filter lists everything pullable; a
+// listed collective counts only when the caller is a member of it and the
+// transcript holds an APPROVED share there. The caller must hold v.mu.
+func (v *CollectiveVillage) matchesPullFilterLocked(transcript schema.TranscriptID, filter []schema.VillageUUID) bool {
+	if !v.pullableLocked(transcript) {
+		return false
+	}
+	if len(filter) == 0 {
+		return true
+	}
+	shares := v.transcripts[transcript]
+	for _, id := range filter {
+		collective, known := v.collectives[id]
+		if !known || !collective.Member {
+			continue
+		}
+		if shares[id] == schema.VillageShareStatusApproved {
+			return true
+		}
+	}
+	return false
+}
+
+// listPullable answers GET /api/v1/pull/transcripts with the page, limit, and
+// comma-separated collectives filter the village declares. The rows are the
+// transcripts the double holds that the filter admits, in transcript-ID order,
+// paged by (page-1)*limit. Total is the admitted count, so a caller pages to
+// the end and de-duplicates client-side when a transcript matches several
+// listed collectives.
+func (v *CollectiveVillage) listPullable(w http.ResponseWriter, r *http.Request) {
+	v.mu.Lock()
+	status := v.pullListStatus
+	v.pullListCalls++
+	v.mu.Unlock()
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(schema.VillageErrorResponse{Error: http.StatusText(status)})
+		return
+	}
+	query := r.URL.Query()
+	page, err := strconv.Atoi(query.Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(query.Get("limit"))
+	if err != nil || limit < 1 {
+		limit = 50
+	}
+	var filter []schema.VillageUUID
+	if raw := strings.TrimSpace(query.Get("collectives")); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				filter = append(filter, schema.VillageUUID(part))
+			}
+		}
+	}
+	v.mu.Lock()
+	matched := make([]schema.PullTranscriptInfo, 0)
+	for id, info := range v.pullInfos {
+		if v.matchesPullFilterLocked(id, filter) {
+			matched = append(matched, info)
+		}
+	}
+	v.mu.Unlock()
+	sort.Slice(matched, func(i, j int) bool { return matched[i].TranscriptID < matched[j].TranscriptID })
+	total := len(matched)
+	start := (page - 1) * limit
+	var pageRows []schema.PullTranscriptInfo
+	if start < total {
+		end := start + limit
+		if end > total {
+			end = total
+		}
+		pageRows = matched[start:end]
+	}
+	if pageRows == nil {
+		pageRows = []schema.PullTranscriptInfo{}
+	}
+	_ = json.NewEncoder(w).Encode(schema.PullListResponse{Transcripts: pageRows, Page: page, Limit: limit, Total: total})
+}
+
+// pullAnnotationHashesLocked returns the content-hash set the double holds for
+// the transcript's annotations, using the pipeline's dedup-key rule: the
+// annotation's own content hash when present, else a hash of its stable ID.
+// The caller must hold v.mu.
+func (v *CollectiveVillage) pullAnnotationHashesLocked(transcript schema.TranscriptID) []string {
+	anns := v.pullAnnotations[transcript]
+	out := make([]string, 0, len(anns))
+	for i := range anns {
+		a := &anns[i]
+		if a.ContentHash != nil && *a.ContentHash != "" {
+			out = append(out, *a.ContentHash)
+			continue
+		}
+		out = append(out, schema.ComputeTranscriptHash([]byte(a.ID)))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// skipGate answers POST /api/v1/pull/transcripts/skip-gate. An id is current
+// exactly when the caller's sent content hash equals the held served-blob hash
+// and the sent annotation-hash set equals the held set. An id the caller may
+// not pull — unknown to the double or public — is ABSENT from Results, withheld
+// by omission rather than answered.
+func (v *CollectiveVillage) skipGate(w http.ResponseWriter, r *http.Request) {
+	v.mu.Lock()
+	status := v.skipGateStatus
+	v.skipGateCalls++
+	v.mu.Unlock()
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(schema.VillageErrorResponse{Error: http.StatusText(status)})
+		return
+	}
+	var request schema.PullSkipGateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		v.t.Errorf("decode skip-gate request: %v", err)
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	results := make([]schema.PullSkipGateResult, 0, len(request.Items))
+	for _, item := range request.Items {
+		info, ok := v.pullInfos[item.TranscriptID]
+		if !ok || v.public[item.TranscriptID] {
+			continue
+		}
+		contentCurrent := item.ContentHash == info.ContentHash
+		held := v.pullAnnotationHashesLocked(item.TranscriptID)
+		sent := append([]string(nil), item.AnnotationHashes...)
+		sort.Strings(sent)
+		annotationsCurrent := len(sent) == len(held)
+		if annotationsCurrent {
+			for i := range sent {
+				if sent[i] != held[i] {
+					annotationsCurrent = false
+					break
+				}
+			}
+		}
+		results = append(results, schema.PullSkipGateResult{
+			TranscriptID:       item.TranscriptID,
+			ContentCurrent:     contentCurrent,
+			AnnotationsCurrent: annotationsCurrent,
+		})
+	}
+	_ = json.NewEncoder(w).Encode(schema.NewPullSkipGateResponse(results))
+}
+
+// pullTranscript answers the single-transcript pull GETs the pipeline drives:
+// GET /api/v1/pull/transcripts/{id}, /{id}/content, and /{id}/annotations. A
+// transcript the caller may not pull answers 404, never 403, so existence never
+// leaks.
+func (v *CollectiveVillage) pullTranscript(w http.ResponseWriter, r *http.Request, rest string) {
+	id, tail, _ := strings.Cut(rest, "/")
+	transcript := schema.TranscriptID(id)
+	v.mu.Lock()
+	info, ok := v.pullInfos[transcript]
+	blob := v.pullBlobs[transcript]
+	anns := append([]schema.PullAnnotation(nil), v.pullAnnotations[transcript]...)
+	failContent := v.failPullContent[transcript]
+	pullable := ok && !v.public[transcript]
+	if r.Method == http.MethodGet && tail == "content" {
+		v.contentCalls[transcript]++
+	}
+	v.mu.Unlock()
+	if r.Method != http.MethodGet {
+		v.t.Errorf("unexpected Village pull request %s %s", r.Method, r.URL.Path)
+		http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+		return
+	}
+	if !pullable {
+		http.Error(w, `{"error":"Transcript not found"}`, http.StatusNotFound)
+		return
+	}
+	switch tail {
+	case "":
+		_ = json.NewEncoder(w).Encode(info)
+	case "content":
+		if failContent {
+			http.Error(w, `{"error":"content unavailable"}`, http.StatusInternalServerError)
+			return
+		}
+		etag := `"` + info.ContentHash + `"`
+		if match := r.Header.Get("If-None-Match"); match != "" && (match == etag || match == info.ContentHash || match == "W/"+etag) {
+			w.Header().Set("ETag", etag)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		_, _ = w.Write(blob)
+	case "annotations":
+		if anns == nil {
+			anns = []schema.PullAnnotation{}
+		}
+		_ = json.NewEncoder(w).Encode(anns)
+	default:
+		v.t.Errorf("unexpected Village pull request %s %s", r.Method, r.URL.Path)
+		http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+	}
 }
 
 // villageDoubleTime is the one time the double reports for its rows.

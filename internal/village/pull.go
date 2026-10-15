@@ -1,12 +1,16 @@
 package village
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
@@ -145,14 +149,86 @@ func (c *VillageClient) NegotiatePull(ctx context.Context) error {
 // ListPullableTranscripts. This keeps transport (client) separate from
 // policy/stage orchestration (pipeline), matching the push split.
 
+// PullListOptions controls one page read of the village's pullable listing.
+type PullListOptions struct {
+	// Page and Limit are the offset pagination pair. Limit is capped by the
+	// village.
+	Page  int
+	Limit int
+	// Collectives, when non-empty, narrows the listing to transcripts with an
+	// approved share into any listed collective the requester is a member of. The
+	// identifiers travel as one comma-separated parameter, the shape the village
+	// declares. An empty slice lists every pullable transcript.
+	Collectives []schema.VillageUUID
+}
+
+// pullSkipGatePath is the batch currency endpoint: a client POSTs the ids it
+// already holds together with the hashes it holds for them, and the village
+// answers, per id, whether the stored transcript and its annotations are still
+// current.
+const pullSkipGatePath = pullTranscriptsEndpoint + "/skip-gate"
+
+// PullSkipGate asks the village which of the held transcripts are still current,
+// in ONE request, so a bulk pull can skip what has not diverged instead of
+// re-reading each transcript. Only the caller's held hashes travel, never
+// content.
+//
+// A non-pullable id is ABSENT from the answer rather than answered (the
+// village's leak-free withheld semantics), so a caller must read an absent id as
+// "unanswered" and never as "current". A non-2xx status is returned as an
+// actionable error; a caller that can proceed without the gate should treat any
+// error here as "ask about nothing and pull everything".
+//
+// The caller runs NegotiatePull once before this call — it does not preflight the
+// pull window.
+func (c *VillageClient) PullSkipGate(ctx context.Context, request schema.PullSkipGateRequest) (*schema.PullSkipGateResponse, error) {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode pull skip-gate request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+pullSkipGatePath, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create pull skip-gate request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute pull skip-gate request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, pullStatusError("ask the pull skip-gate", pullSkipGatePath, resp)
+	}
+
+	var result schema.PullSkipGateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode pull skip-gate response: %w", err)
+	}
+	return &result, nil
+}
+
 // ListPullableTranscripts fetches one page of the village's pullable-transcript
 // listing (own + group-shared; public excluded by the village's canPullTranscript
 // policy). It issues an authed GET to /api/v1/pull/transcripts with offset
-// pagination (page/limit query params). A non-2xx status is returned as an
-// actionable error. The caller is responsible for running NegotiatePull once
-// before the FETCH stages — this method does NOT preflight the pull window.
-func (c *VillageClient) ListPullableTranscripts(ctx context.Context, page, limit int) (*schema.PullListResponse, error) {
-	endpoint := fmt.Sprintf("%s%s?page=%d&limit=%d", c.baseURL, pullTranscriptsEndpoint, page, limit)
+// pagination (page/limit query params), plus the optional collectives filter. A
+// non-2xx status is returned as an actionable error. The caller is responsible
+// for running NegotiatePull once before the FETCH stages — this method does NOT
+// preflight the pull window.
+func (c *VillageClient) ListPullableTranscripts(ctx context.Context, opts PullListOptions) (*schema.PullListResponse, error) {
+	query := url.Values{}
+	query.Set("page", strconv.Itoa(opts.Page))
+	query.Set("limit", strconv.Itoa(opts.Limit))
+	if len(opts.Collectives) > 0 {
+		identifiers := make([]string, 0, len(opts.Collectives))
+		for _, collective := range opts.Collectives {
+			identifiers = append(identifiers, collective.String())
+		}
+		query.Set("collectives", strings.Join(identifiers, ","))
+	}
+	endpoint := c.baseURL + pullTranscriptsEndpoint + "?" + query.Encode()
 	req, err := c.newAuthedGet(ctx, endpoint)
 	if err != nil {
 		return nil, err

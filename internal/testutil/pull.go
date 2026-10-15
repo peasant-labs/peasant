@@ -9,6 +9,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -196,6 +197,10 @@ type StubVillageReader struct {
 	AnnotationsByID  map[schema.TranscriptID][]schema.PullAnnotation
 	AnnotationsErr   error
 	AnnotationsCalls int
+
+	// ListOptions records the options of every ListPullableTranscripts call, so a
+	// test can assert the page window and the collectives filter a caller sent.
+	ListOptions []village.PullListOptions
 }
 
 func (s *StubVillageReader) NegotiatePull(_ context.Context) error {
@@ -203,8 +208,9 @@ func (s *StubVillageReader) NegotiatePull(_ context.Context) error {
 	return s.NegotiateErr
 }
 
-func (s *StubVillageReader) ListPullableTranscripts(_ context.Context, _, _ int) (*schema.PullListResponse, error) {
+func (s *StubVillageReader) ListPullableTranscripts(_ context.Context, opts village.PullListOptions) (*schema.PullListResponse, error) {
 	s.ListCalls++
+	s.ListOptions = append(s.ListOptions, opts)
 	if s.ListErr != nil {
 		return nil, s.ListErr
 	}

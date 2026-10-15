@@ -100,7 +100,7 @@ func TestListPullableTranscripts_OK(t *testing.T) {
 	})
 
 	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
-	resp, err := client.ListPullableTranscripts(context.Background(), 2, 10)
+	resp, err := client.ListPullableTranscripts(context.Background(), village.PullListOptions{Page: 2, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListPullableTranscripts: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestListPullableTranscripts_401(t *testing.T) {
 		http.Error(w, "no creds", http.StatusUnauthorized)
 	})
 	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
-	_, err := client.ListPullableTranscripts(context.Background(), 1, 50)
+	_, err := client.ListPullableTranscripts(context.Background(), village.PullListOptions{Page: 1, Limit: 50})
 	if err == nil {
 		t.Fatal("expected 401 error")
 	}
@@ -364,7 +364,7 @@ func TestNegotiatePull_IncompatibleWindow_ContractError(t *testing.T) {
 // so a signature drift breaks the build here.
 type pullReader interface {
 	NegotiatePull(ctx context.Context) error
-	ListPullableTranscripts(ctx context.Context, page, limit int) (*schema.PullListResponse, error)
+	ListPullableTranscripts(ctx context.Context, opts village.PullListOptions) (*schema.PullListResponse, error)
 	GetPullTranscript(ctx context.Context, id schema.TranscriptID) (*schema.PullTranscriptInfo, error)
 	GetPullTranscriptContent(ctx context.Context, id schema.TranscriptID, ifNoneMatch string) (io.ReadCloser, string, error)
 	GetPullTranscriptAnnotations(ctx context.Context, id schema.TranscriptID) ([]schema.PullAnnotation, error)

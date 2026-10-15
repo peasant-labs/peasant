@@ -67,24 +67,33 @@ func villagePullPipeline(cmd *cobra.Command, creds *auth.Credentials, db *store.
 // PullStatus (0 for pulled/up-to-date; non-zero otherwise) — never a string.
 func buildVillageTranscriptsPullCommand() *cobra.Command {
 	var (
-		force      bool
-		dryRun     bool
-		jsonOutput bool
-		verbose    bool
-		quiet      bool
+		force          bool
+		dryRun         bool
+		jsonOutput     bool
+		verbose        bool
+		quiet          bool
+		collectiveRefs []string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "pull <uuid|url>",
-		Short: "Pull a transcript and its annotations from the village (login required)",
-		Long: `Pull one transcript (and the annotations authored on it) from the Peasant
-village into the local village-pulls/ namespace and the pulled-transcripts
-index. Pulled data is foreign and one-way: it never enters ingest, analytics, or
-your annotate-push candidate set.
+		Use:   "pull [<uuid|url>] [--collective <ref>]...",
+		Short: "Pull one transcript, or a collective's transcripts, from the village (login required)",
+		Long: `Pull one transcript (and the annotations authored on it), or every transcript an
+accessible collective holds, from the Peasant village into the local
+village-pulls/ namespace and the pulled-transcripts index. Pulled data is foreign
+and one-way: it never enters ingest, analytics, or your annotate-push candidate
+set.
 
-The reference is the transcript UUID or a pasted village web URL. --dry-run
-reports what WOULD be pulled (and why / why-not) without writing anything.`,
-		Args: cobra.ExactArgs(1),
+Choose exactly one selection. A transcript reference is its UUID or a pasted
+village web URL. --collective names a collective the caller belongs to, by its
+name, its UUID, or its /groups/<uuid> page URL. It is repeatable, and several
+values pull the union, each transcript once. A collective holds the transcripts
+offered to it and approved, so a transcript the caller owns but never shared with
+a listed collective is not part of the selection.
+
+--dry-run reports what WOULD be pulled (and why / why-not) without writing
+anything.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past argument validation, every failure here is a RUNTIME error
 			// (auth gate, unreachable village, pipeline) — not a usage error. Cobra
@@ -99,9 +108,22 @@ reports what WOULD be pulled (and why / why-not) without writing anything.`,
 				return levelErr
 			}
 
-			ref, err := pull.ParseTranscriptRef(args[0])
-			if err != nil {
-				return err
+			// Exactly one selection. Checked before any credential or database work
+			// so a misuse cannot half-run.
+			if len(args) > 0 && len(collectiveRefs) > 0 {
+				return fmt.Errorf("choose one selection: a transcript reference or --collective, not both")
+			}
+			if len(args) == 0 && len(collectiveRefs) == 0 {
+				return fmt.Errorf("nothing to pull: pass a transcript UUID or a village web URL, or one or more --collective values")
+			}
+
+			var ref pull.TranscriptRef
+			if len(args) == 1 {
+				parsed, err := pull.ParseTranscriptRef(args[0])
+				if err != nil {
+					return err
+				}
+				ref = parsed
 			}
 
 			creds, err := requireVillageCredentials(cmd)
@@ -114,6 +136,13 @@ reports what WOULD be pulled (and why / why-not) without writing anything.`,
 				return err
 			}
 			defer cleanup()
+
+			if len(collectiveRefs) > 0 {
+				return runVillageTranscriptsPullCollectives(cmd, db, newVillageClientFromCreds(creds),
+					villagePullPipeline(cmd, creds, db),
+					collectiveRefs,
+					collectivePullFlags{Force: force, DryRun: dryRun, JSON: jsonOutput, Level: level})
+			}
 
 			pipeline := villagePullPipeline(cmd, creds, db)
 
@@ -148,6 +177,8 @@ reports what WOULD be pulled (and why / why-not) without writing anything.`,
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show extra pull detail (village host, pull directory, served-blob hash)")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary; print only errors and a final result line")
+	cmd.Flags().StringArrayVar(&collectiveRefs, "collective", nil,
+		"Pull every transcript a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values pull the union, each transcript once")
 
 	return cmd
 }
@@ -169,6 +200,14 @@ type jsonPullResult struct {
 // printPullJSON writes the pull result as JSON. The status is the typed
 // PullStatus string (the single serialization boundary).
 func printPullJSON(cmd *cobra.Command, ref pull.TranscriptRef, result *pull.PullResult, pullErr error) error {
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetIndent("", "  ")
+	return enc.Encode(buildJSONPullResult(ref, result, pullErr))
+}
+
+// buildJSONPullResult maps one pull outcome onto the JSON shape, so the
+// single-transcript and collective envelopes report a transcript identically.
+func buildJSONPullResult(ref pull.TranscriptRef, result *pull.PullResult, pullErr error) jsonPullResult {
 	out := jsonPullResult{
 		TranscriptID: ref.ID.String(),
 		FromURL:      ref.FromURL,
@@ -191,9 +230,7 @@ func printPullJSON(cmd *cobra.Command, ref pull.TranscriptRef, result *pull.Pull
 	if pullErr != nil {
 		out.Error = pullErr.Error()
 	}
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return out
 }
 
 // printPullSummary writes the human-readable pull summary to stdout, routed by
