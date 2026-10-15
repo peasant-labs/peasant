@@ -15,8 +15,12 @@ import (
 // This file proves the store-side read contract of latest-attempt
 // coexistence: which generation each read answers for, which counts it
 // reports, and which selection surfaces treat the latest attempt as settled.
-// The mounted and end-to-end evidence over the same seams belongs to the
-// integration family, not here.
+// The same seams have other homes, and this file is not a second copy of them:
+// the mounted detail payload (BuildSnapshotPreviewBytes, with the attempt's own
+// counts) is proven in internal/api/snapshot_detail_test.go; the mounted
+// kickstart pane and the share-wizard source read in cmd/peasant; the harvest's
+// literal summary and durable-log observables in internal/ingest. A store row
+// read here is not mounted or end-to-end proof.
 
 // authorityStats and latestAttemptStats are the two DISTINCT literal producer-stat
 // documents the counts-scope assertions use, so a read that reports the wrong
@@ -415,9 +419,13 @@ UPDATE sessions SET project_hash = '`+projectHash+`' WHERE session_id = '`+strin
 	if !bundle.LatestAttemptPending {
 		t.Fatal("LoadPublicationInput did not name the pending latest attempt")
 	}
-	if bundle.Readiness == ingest.PublicationReady {
-		t.Fatal("LoadPublicationInput reported a session with a latest attempt ready for publication")
-	}
+	// The refusal is the pending fact, not a bare "not ready": a session that
+	// is not ready for some unrelated reason would satisfy a readiness check
+	// alone. The discriminating transition (ready -> pending -> not ready ->
+	// complete -> ready again) is proven by
+	// TestLatestAttemptCompleteGenerationDisposesTheAttempt; the actionable
+	// coexistence reason is proven at the push seam by
+	// TestPublicationReadRefusesWithCoexistenceReasonAndLastGoodServesAuthority.
 
 	var selected ingest.PublicationInputBundle
 	if err := s.WithCommittedPublicationInputSelected(ctx, ingest.SessionID(sid), ingest.SessionReadSelection{LastGood: true}, func(input ingest.PublicationInputBundle) error {
@@ -527,7 +535,7 @@ VALUES (7, `+strconv.Itoa(int(ingest.CurrentSchemaVersion))+`, '{"seed":true}', 
 }
 
 // TestLatestAttemptStaleAttemptStillServesItsOwnContent proves the stale-attempt
-// read: with the retained pointer's pair identity differing from the session's
+// read: with the latest-attempt pointer's pair identity differing from the session's
 // current artifact hash, the attempt is still the actual last attempted
 // snapshot, so the mounted reads and the preview-snapshot read serve ITS own
 // entries, counts and partial flag — never the authority and never the
@@ -537,7 +545,7 @@ func TestLatestAttemptStaleAttemptStillServesItsOwnContent(t *testing.T) {
 	sid := schema.SessionID("aaaabbbb-2222-4333-8444-555566667777")
 	seedLatestAttemptCoexistence(t, s, sid)
 	// The pair moved on after the attempt: the row now carries a different
-	// identity than the one the retained pointer recorded.
+	// identity than the one the latest-attempt pointer recorded.
 	execGenerationSQL(t, s, `UPDATE sessions SET artifact_hash = '`+hexIdentity('9')+`' WHERE session_id = '`+string(sid)+`';`)
 	ctx := context.Background()
 
@@ -579,10 +587,10 @@ func TestLatestAttemptStaleAttemptStillServesItsOwnContent(t *testing.T) {
 		callbackRan = true
 		return nil
 	}); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
-		t.Fatalf("stale full read = %v, want the retained-attempt sentinel", err)
+		t.Fatalf("stale full read = %v, want the latest-attempt sentinel", err)
 	}
 	if callbackRan {
-		t.Fatal("the stale full read ran the callback for a retained session")
+		t.Fatal("the stale full read ran the callback for a session with a latest attempt")
 	}
 }
 

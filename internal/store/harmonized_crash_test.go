@@ -318,7 +318,7 @@ func runCrashSavepointIsolation(t *testing.T) {
 // supplying the verified pair identity. The batch seam returns only the
 // activation outcome and its error, so the case asserts exactly those facts:
 // the held disposition, the authority staying active and byte-identical, the
-// retained pointer recording the attempt, and the bootstrapped artifact hash.
+// latest-attempt pointer recording the attempt, and the bootstrapped artifact hash.
 // Written, entry counts and producer stats are NOT asserted here; the batch
 // seam does not return them, and the harvest-side family owns those literals.
 func TestLatestAttemptLegacyBatchRetainsThroughTheRealWriter(t *testing.T) {
@@ -337,7 +337,7 @@ func TestLatestAttemptLegacyBatchRetainsThroughTheRealWriter(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("install the read authority: %v", err)
 	}
-	// The row predates the artifact-hash column, so the retention must establish
+	// The row predates the artifact-hash column, so the write must establish
 	// the pair identity from the write rather than claim NULL equality.
 	execGenerationSQL(t, s, `UPDATE sessions SET artifact_hash = NULL WHERE session_id = '`+string(sid)+`';`)
 
@@ -355,7 +355,7 @@ func TestLatestAttemptLegacyBatchRetainsThroughTheRealWriter(t *testing.T) {
 		t.Fatalf("batch results = %d, want 1", len(results))
 	}
 	if results[0].Err != nil {
-		t.Fatalf("legacy retention batch write returned %v, want a held attempt", results[0].Err)
+		t.Fatalf("legacy batch write returned %v, want a held attempt", results[0].Err)
 	}
 	if results[0].Outcome.Disposition != ingest.ActivationLatestAttemptPreview {
 		t.Fatalf("batch disposition = %v, want ActivationLatestAttemptPreview", results[0].Outcome.Disposition)
@@ -367,10 +367,10 @@ func TestLatestAttemptLegacyBatchRetainsThroughTheRealWriter(t *testing.T) {
 
 	pointer := latestAttemptPointerFor(t, s, sid)
 	if pointer.generationID != "gen_attempt_b" {
-		t.Fatalf("retained generation = %q, want gen_attempt_b", pointer.generationID)
+		t.Fatalf("latest-attempt generation = %q, want gen_attempt_b", pointer.generationID)
 	}
 	if pointer.artifactHash != identity {
-		t.Fatalf("retained pair identity = %q, want the supplied %q", pointer.artifactHash, identity)
+		t.Fatalf("latest-attempt pair identity = %q, want the supplied %q", pointer.artifactHash, identity)
 	}
 	state := readIndexStateFor(t, s, sid)
 	if state.ArtifactHash == nil || *state.ArtifactHash != identity {

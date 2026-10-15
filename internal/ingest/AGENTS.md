@@ -137,7 +137,7 @@ When adding or changing a kind, update the adapter declaration beside its dispat
 production-owned census when the dispatch shape changes, regenerate the artifacts, and bump the
 relevant indexer version when settled sessions must be re-indexed.
 
-## Managed generations and the retained latest attempt
+## Managed generations and the latest attempt
 
 A store that can persist and read a managed generation replaces the relational
 format-1 projection with one immutable format-2 generation per session. The
@@ -159,7 +159,7 @@ before any mutation.
 Retention leaves the active authority byte-identical and reports through the
 existing durable vocabulary: the `skipped` outcome with the held reason and a
 literal zero entry count, so the pipeline counts no indexed session. The mounted
-reads and the preview-snapshot detail serve the retained attempt with partial
+reads and the preview-snapshot detail serve the latest attempt with partial
 diagnostics; the full read and export refuse with the retained-attempt sentinel;
 the explicit last-good selection serves the active full authority. The retained
 pointer clears with the active authority's own finalization — the active move, a

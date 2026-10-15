@@ -54,7 +54,7 @@ func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotRea
 		if _, payload, err := transcript.BuildSnapshotDetailBytes(ctx, reader, resolver, sessionID); err == nil {
 			return payload, nil
 		} else if errors.Is(err, transcript.ErrSnapshotIncomplete) || errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
-			// Preview-only completeness, or a retained incomplete attempt beside
+			// Preview-only completeness, or an incomplete latest attempt beside
 			// the last-good authority: explicitly select the bounded native
 			// preview builder from the same valid snapshot. Deep links stay
 			// available for incomplete content; corruption still fails closed

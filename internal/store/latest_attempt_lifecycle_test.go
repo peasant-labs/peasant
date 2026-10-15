@@ -2,10 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/schema"
 )
 
@@ -253,5 +257,299 @@ func TestLatestAttemptInvalidCandidateRefusesOnBothRoutes(t *testing.T) {
 	}
 	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
 		t.Fatalf("latest-attempt generation = %q, want the unchanged gen_preview_b", pointer.generationID)
+	}
+}
+
+// seedReadyCapturedPublication seeds a session whose publication capture is
+// current and bound to its index, so the session is ready to publish before any
+// attempt is kept. It is the same seeding idiom the publication fixtures use.
+func seedReadyCapturedPublication(t *testing.T, s *Store, sid schema.SessionID) int64 {
+	t.Helper()
+	ctx := context.Background()
+	entry := makeStoreEntry(t, string(sid), strings.Repeat("a", 64), "github.com-example-project", defaults.HarnessClaudeCode, 1700000000000, 100, 200)
+	entry.PublicationCapture = true
+	entry.CWDProvenance = ingest.CWDSourceAbsent
+	entry.Session.Origin = sessionorigin.User
+	entry.Metadata.ContentHash = schema.ComputeTranscriptHash([]byte("captured transcript"))
+	entry.Metadata.MetadataHash = schema.ComputeMetadataHash(entry.Metadata)
+	revisions, err := s.InsertSessionsWithRevisions(ctx, []ingest.StoreEntry{entry})
+	if err != nil {
+		t.Fatalf("seed the ready publication row: %v", err)
+	}
+	revision := revisions[ingest.SessionID(sid)]
+	result := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID:          sid,
+		Result:             indexformat.V1{},
+		IndexVersion:       1,
+		RequireFullContent: true,
+		CaptureRevision:    revision,
+		IndexerVersion:     ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion,
+		IndexedAtMs:        1700000000001,
+	}})
+	if len(result) != 1 || result[0].Err != nil {
+		t.Fatalf("seed the ready publication index: %+v", result)
+	}
+	return revision
+}
+
+// TestLatestAttemptCompleteGenerationDisposesTheAttempt proves the full
+// lifecycle of a kept latest attempt beside a ready publication: the session is
+// ready, keeping the attempt alone makes it not ready and names the pending
+// attempt, a later complete generation clears the pointer in the same commit,
+// the ordinary sweep disposes the attempt's rows, and readiness returns from
+// the completed authority.
+func TestLatestAttemptCompleteGenerationDisposesTheAttempt(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("c9c9c9c9-c9c9-49c9-89c9-c9c9c9c9c9c9")
+	ctx := context.Background()
+	revision := seedReadyCapturedPublication(t, s, sid)
+
+	ready, err := s.LoadPublicationInput(ctx, ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("read the seeded publication input: %v", err)
+	}
+	if ready.Readiness != ingest.PublicationReady {
+		t.Fatalf("seeded readiness = %q, want ready before any attempt is kept", ready.Readiness)
+	}
+
+	setStoredArtifactHash(t, s, sid, hexIdentity('6'))
+	outcome, err := s.ActivateGeneration(ctx, previewCandidate(t, sid, "gen_preview_b"))
+	if err != nil {
+		t.Fatalf("keep the latest attempt: %v", err)
+	}
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
+	}
+
+	// The discriminating pair: the seed was ready, so a readiness that stops
+	// being ready here is caused by the kept attempt and nothing else.
+	kept, err := s.LoadPublicationInput(ctx, ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("read the publication input with a kept attempt: %v", err)
+	}
+	if !kept.LatestAttemptPending {
+		t.Fatal("the kept attempt was not named as pending")
+	}
+	if kept.Readiness == ingest.PublicationReady {
+		t.Fatalf("readiness with a kept attempt = %q, want not ready", kept.Readiness)
+	}
+
+	// The later complete generation binds to the same publication capture, so
+	// the completed authority can be ready again.
+	next, nextBlobs := buildTestGeneration(t, sid, "gen_complete_c", "complete text", "complete input", "complete output")
+	complete, err := s.ActivateGeneration(ctx, GenerationActivation{
+		Generation: next, Blobs: nextBlobs, IndexerVersion: 18, IndexedAtMs: 5,
+		ContentCapture: recoveryCapture(t, next), CaptureRevision: revision,
+	})
+	if err != nil {
+		t.Fatalf("complete generation activation: %v", err)
+	}
+	if complete.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("complete disposition = %v, want ActivationCommittedNow", complete.Disposition)
+	}
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want it cleared by the active move", pointer)
+	}
+
+	if _, err := s.SweepSession(ctx, sid); err != nil {
+		t.Fatalf("sweep the superseded attempt: %v", err)
+	}
+	if got := generationRowCount(t, s, sid); got != 1 {
+		t.Fatalf("generation rows after the sweep = %d, want the completed authority alone", got)
+	}
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v after the sweep, want none", pointer)
+	}
+	after, err := s.LoadPublicationInput(ctx, ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("read the publication input after the complete generation: %v", err)
+	}
+	if after.LatestAttemptPending {
+		t.Fatal("the completed generation still reports a pending attempt")
+	}
+	if after.Readiness != ingest.PublicationReady {
+		t.Fatalf("readiness after the complete generation = %q, want ready again", after.Readiness)
+	}
+}
+
+// TestLatestAttemptPointerClearsOnRepairFinalization proves the third
+// pointer-clear site on its own route: a repair finalization of the active
+// authority rewrites its objects in place, clears the kept attempt's pointer
+// through the shared bookkeeping, and writes no new generation row. The
+// disposition is the repair return (CommittedNow); a skip would report
+// ActivationSkipped, which is the routing discrimination.
+func TestLatestAttemptPointerClearsOnRepairFinalization(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("d3d3d3d3-d3d3-43d3-83d3-d3d3d3d3d3d3")
+	ctx := context.Background()
+	seedFullAuthority(t, s, sid)
+	identity := hexIdentity('2')
+	setStoredArtifactHash(t, s, sid, identity)
+
+	outcome, err := s.ActivateGeneration(ctx, previewCandidate(t, sid, "gen_preview_b"))
+	if err != nil {
+		t.Fatalf("keep the latest attempt: %v", err)
+	}
+	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
+	}
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" {
+		t.Fatalf("latest-attempt generation = %q, want gen_preview_b", pointer.generationID)
+	}
+
+	// The production marking: a damaged body fails verification and the repair
+	// pass clears the consumed input proof, which is the repair predicate.
+	damageBodyPreview(t, s, sid, 0)
+	report, err := s.VerifyContent(ctx, true)
+	if err != nil {
+		t.Fatalf("verify content: %v", err)
+	}
+	if len(report.Damaged) != 1 || len(report.Repaired) != 1 {
+		t.Fatalf("verify report damaged=%d repaired=%d, want one damaged and repaired session", len(report.Damaged), len(report.Repaired))
+	}
+
+	repair, repairBlobs := buildTestGeneration(t, sid, "gen_full_prior_refresh", "full text", "full input", "full output")
+	proof := strings.Repeat("d", 64)
+	repairOutcome := activateRepairCandidate(t, s, sid, repair, repairBlobs, identity, proof)
+	if repairOutcome.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("repair disposition = %v, want ActivationCommittedNow", repairOutcome.Disposition)
+	}
+	if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+		t.Fatalf("latest-attempt pointer = %+v, want it cleared by the repair finalization", pointer)
+	}
+	if got := visibleGeneration(t, s, sid); got != "gen_full_prior" {
+		t.Fatalf("active generation = %q, want the unchanged authority", got)
+	}
+	if got := generationRowCount(t, s, sid); got != 2 {
+		t.Fatalf("generation rows = %d, want the authority and the attempt; the repair writes no new row", got)
+	}
+}
+
+// TestLatestAttemptFileBackedAuthorityRetainsOnBothRoutes proves a file-backed
+// read authority is a valid coexistence partner on BOTH activation routes: the
+// newer incomplete attempt is kept, the authority stays the file-backed
+// generation, the mounted read serves the attempt's bounded preview, the
+// explicit last-good read serves the file-backed authority, and the default
+// full content read refuses.
+func TestLatestAttemptFileBackedAuthorityRetainsOnBothRoutes(t *testing.T) {
+	for _, route := range []string{"single", "batch"} {
+		t.Run(route, func(t *testing.T) {
+			s, root := openGenerationStore(t)
+			sid := schema.SessionID("e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e4")
+			ctx := context.Background()
+			seedGenerationSession(t, s, string(sid))
+			authority, authorityBlobs := buildTestGeneration(t, sid, "gen-file-authority", "file authority text", "file authority input", "file authority output")
+			stampSeedMetadataHash(&authority)
+			seedFileBackedGeneration(t, s, root, sid, authority, authorityBlobs, true)
+			identity := hexIdentity('c')
+			setStoredArtifactHash(t, s, sid, identity)
+
+			candidate := previewCandidate(t, sid, "gen_preview_b")
+			var disposition ingest.ActivationDisposition
+			switch route {
+			case "single":
+				outcome, err := s.ActivateGeneration(ctx, candidate)
+				if err != nil {
+					t.Fatalf("single-route activation: %v", err)
+				}
+				disposition = outcome.Disposition
+			case "batch":
+				results := s.ActivateGenerationBatch(ctx, []GenerationActivation{candidate})
+				if len(results) != 1 {
+					t.Fatalf("batch results = %d, want 1", len(results))
+				}
+				if results[0].Err != nil {
+					t.Fatalf("batch activation: %v", results[0].Err)
+				}
+				disposition = results[0].Outcome.Disposition
+			}
+			if disposition != ingest.ActivationLatestAttemptPreview {
+				t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", disposition)
+			}
+			if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" || pointer.artifactHash != identity {
+				t.Fatalf("latest-attempt pointer = %+v, want the attempt and the verified identity", pointer)
+			}
+
+			available, err := s.ReadSessionAvailable(ctx, ingest.SessionID(sid))
+			if err != nil {
+				t.Fatalf("ReadSessionAvailable: %v", err)
+			}
+			if !PartialPreviewNeeded(available.Capture) {
+				t.Fatalf("available capture = %+v, want the attempt's partial preview state", available.Capture)
+			}
+			if available.Capture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly || available.Capture.Status != ingest.ContentCaptureIncomplete {
+				t.Fatalf("available capture = %s/%s, want preview_only/incomplete", available.Capture.CaptureFormat, available.Capture.Status)
+			}
+			if len(available.Entries) == 0 {
+				t.Fatal("the available read served no attempt entries")
+			}
+
+			served := ""
+			if err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(snapshot indexformat.ReadSnapshot) error {
+				served = snapshot.GenerationID
+				return nil
+			}); err != nil {
+				t.Fatalf("last-good read of the file-backed authority: %v", err)
+			}
+			if served != "gen-file-authority" {
+				t.Fatalf("last-good generation = %q, want the file-backed authority", served)
+			}
+			if _, err := s.ReadSessionContent(ctx, string(sid)); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+				t.Fatalf("default full content read = %v, want the latest-attempt sentinel", err)
+			}
+			if got := visibleGeneration(t, s, sid); got != "gen-file-authority" {
+				t.Fatalf("active generation = %q, want the unchanged file-backed authority", got)
+			}
+		})
+	}
+}
+
+// TestLatestAttemptRetentionRefusesMalformedEvidence proves a candidate whose
+// selected evidence does not validate is refused on BOTH activation routes, with
+// the authority intact and no attempt recorded: the latest-attempt path re-runs the
+// same unknown-evidence preflight the ordinary content write runs, so it is
+// never a bypass for a candidate the ordinary path would refuse.
+func TestLatestAttemptRetentionRefusesMalformedEvidence(t *testing.T) {
+	for _, route := range []string{"single", "batch"} {
+		t.Run(route, func(t *testing.T) {
+			s, _ := openGenerationStore(t)
+			sid := schema.SessionID("f6f6f6f6-f6f6-46f6-86f6-f6f6f6f6f6f6")
+			ctx := context.Background()
+			seedFullAuthority(t, s, sid)
+			setStoredArtifactHash(t, s, sid, hexIdentity('d'))
+
+			candidate := previewCandidate(t, sid, "gen_preview_b")
+			corrupt := `{"retainedUnknown":{"harness":"claude-code","namespace":42}}`
+			candidate.Generation.Generation.Main.Entries[0].Extra = &corrupt
+
+			var routeErr error
+			switch route {
+			case "single":
+				_, routeErr = s.ActivateGeneration(ctx, candidate)
+			case "batch":
+				results := s.ActivateGenerationBatch(ctx, []GenerationActivation{candidate})
+				if len(results) != 1 {
+					t.Fatalf("batch results = %d, want 1", len(results))
+				}
+				routeErr = results[0].Err
+			}
+			if routeErr == nil {
+				t.Fatal("malformed evidence was retained; the store must refuse it")
+			}
+			for _, want := range []string{"store content evidence validation", "prior capture remains authoritative"} {
+				if !strings.Contains(routeErr.Error(), want) {
+					t.Fatalf("refusal = %v, want it to contain %q", routeErr, want)
+				}
+			}
+			if got := visibleGeneration(t, s, sid); got != "gen_full_prior" {
+				t.Fatalf("active generation = %q, want the untouched authority", got)
+			}
+			if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+				t.Fatalf("latest-attempt pointer = %+v, want none after the refusal", pointer)
+			}
+			if got := generationRowCount(t, s, sid); got != 1 {
+				t.Fatalf("generation rows = %d, want the authority alone", got)
+			}
+		})
 	}
 }

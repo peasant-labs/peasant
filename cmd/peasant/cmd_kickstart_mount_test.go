@@ -48,12 +48,13 @@ const (
 	mountOmittedRecordsSessionID = "1b6d4f82-2a57-4c03-8d91-4e7f3a0b6c25"
 	mountFreshSessionID          = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
 	mountEmptySessionID          = "c60b9f74-9e36-4a22-a75e-7c4b5d9f1e80"
-	// A session whose last-good authority is a complete generation with a newer
-	// incomplete preview retained beside it. The pane must report the partial
-	// state, because the capture read it uses resolves the retained attempt.
-	mountRetainedSessionID = "d71c2e58-6f49-4b31-9c8d-3e5a7b2f4d96"
-	mountProjectRowID      = "git@github.com:acme/tool.git"
-	expectedMountSeedRows  = 1
+	// A session whose last-good authority is a complete managed generation with a
+	// newer incomplete preview kept as its latest attempt. The pane must report
+	// the partial state, because the capture read it uses resolves the latest
+	// attempt.
+	mountLatestAttemptSessionID = "d71c2e58-6f49-4b31-9c8d-3e5a7b2f4d96"
+	mountProjectRowID           = "git@github.com:acme/tool.git"
+	expectedMountSeedRows       = 1
 )
 
 type mountRetentionSeedFixture struct {
@@ -575,7 +576,7 @@ func TestKickstartPreview_ReadsTheLocalStore(t *testing.T) {
 	seedKickstartStore(t, dataHome, doc.Recorded)
 
 	cmd := mountTestCmd(t, dataHome)
-	db, closeStore := openKickstartStore(cmd)
+	db, closeStore := openKickstartStore(cmd, filepath.Join(dataHome, "peasant-sync"))
 	defer closeStore()
 	if db == nil {
 		t.Fatal("openKickstartStore returned no store for a seeded data directory")
@@ -626,7 +627,7 @@ func TestKickstartPreview_HighlightsCodeFromTheStore(t *testing.T) {
 	seedKickstartStore(t, dataHome, doc.Recorded)
 
 	cmd := mountTestCmd(t, dataHome)
-	db, closeStore := openKickstartStore(cmd)
+	db, closeStore := openKickstartStore(cmd, filepath.Join(dataHome, "peasant-sync"))
 	defer closeStore()
 
 	source := kickstartPreview(cmd, db, theme.New(theme.ModeDark), mountPreviewSessions(""))
@@ -650,55 +651,166 @@ func TestKickstartPreview_HighlightsCodeFromTheStore(t *testing.T) {
 	}
 }
 
-// TestKickstartPreview_RetainedAttemptReportsPartial proves the mounted partial
-// notice over a REAL generation-capable store: the session's last-good authority
-// is a complete generation and a newer incomplete preview is retained beside it.
-// The pane's capture read resolves the retained attempt, so the pane reports the
-// partial state and shows the retained attempt's own prose. Reading the store
-// row alone would not prove the mounted path.
-func TestKickstartPreview_RetainedAttemptReportsPartial(t *testing.T) {
+// TestKickstartPreview_LatestAttemptReportsPartial proves the mounted partial
+// notice over a REAL store read through the SAME open the flow uses: the
+// session's last-good authority is a complete MANAGED generation and a newer
+// incomplete preview is kept as its latest attempt. The pane's capture read
+// resolves the latest attempt, so the pane reports the partial state and shows
+// the attempt's own prose. The store handle is opened at the output base path
+// the writers use, so the mounted boundary resolves the managed generation
+// instead of refusing a format-2 session. Reading the store row alone would not
+// prove the mounted path.
+func TestKickstartPreview_LatestAttemptReportsPartial(t *testing.T) {
 	t.Parallel()
-	doc := loadPreviewDoc(t)
 	dataHome := t.TempDir()
 	dbPath := defaults.ResolveDBFilePathWith(dataHome).String()
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create data directory: %v", err)
 	}
 	now := time.Now().UnixMilli()
-	entry := storeEntryFor(mountRetainedSessionID, now)
+	entry := storeEntryFor(mountLatestAttemptSessionID, now)
 	entry.Metadata.SchemaVersion = ingest.CurrentSchemaVersion
 
 	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	retainedID := ingest.SessionID(mountRetainedSessionID)
-	testutil.SeedReadyPublication(t, db, entry.Metadata, sessionEntries(t, retainedID, doc.Recorded, now))
+	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 	if err := db.Close(); err != nil {
 		t.Fatalf("close seed store: %v", err)
 	}
-	seedRetainedPreview(t, dataHome, mountRetainedSessionID, "the retained attempt carries newer prose")
+	seedManagedAuthority(t, dataHome, mountLatestAttemptSessionID, "the managed authority body")
+	seedLatestAttemptPreview(t, dataHome, mountLatestAttemptSessionID, "the latest attempt carries newer prose")
 
-	readDB, err := openPreparedStore(t, dbPath, mustGenerationStoreOptions(t, filepath.Join(dataHome, "peasant-sync"))...)
-	if err != nil {
-		t.Fatalf("open the generation store the mount reads: %v", err)
+	cmd := mountTestCmd(t, dataHome)
+	readDB, closeStore := openKickstartStore(cmd, filepath.Join(dataHome, "peasant-sync"))
+	defer closeStore()
+	if readDB == nil {
+		t.Fatal("the production open yielded no store for a seeded data directory")
 	}
-	defer readDB.Close()
+	if !readDB.GenerationSnapshotsSupported() || !readDB.SupportsIndexFormat(2) {
+		t.Fatalf("the mounted store must resolve managed generations: snapshots=%v format2=%v",
+			readDB.GenerationSnapshotsSupported(), readDB.SupportsIndexFormat(2))
+	}
 
-	sessions := []ftue.SessionListing{{Harness: string(defaults.HarnessClaudeCode), SessionID: mountRetainedSessionID, ProjectName: "acme/tool"}}
-	body, err := kickstartPreview(mountTestCmd(t, dataHome), readDB, theme.New(theme.ModeDark), sessions).Body(mountRetainedSessionID)
+	sessions := []ftue.SessionListing{{Harness: string(defaults.HarnessClaudeCode), SessionID: mountLatestAttemptSessionID, ProjectName: "acme/tool"}}
+	body, err := kickstartPreview(cmd, readDB, theme.New(theme.ModeDark), sessions).Body(mountLatestAttemptSessionID)
 	if err != nil {
-		t.Fatalf("preview the retained session: %v", err)
+		t.Fatalf("preview the latest-attempt session: %v", err)
 	}
 	got := flattenPane(body.Render(100))
 	if !strings.Contains(got, needle("showing a partial preview of the session")) {
-		t.Fatalf("the pane must report the retained attempt as partial; got:\n%s", got)
+		t.Fatalf("the pane must report the latest attempt as partial; got:\n%s", got)
 	}
-	if !strings.Contains(got, needle("the retained attempt carries newer prose")) {
-		t.Fatalf("the pane must show the retained attempt's own prose; got:\n%s", got)
+	if !strings.Contains(got, needle("the latest attempt carries newer prose")) {
+		t.Fatalf("the pane must show the latest attempt's own prose; got:\n%s", got)
+	}
+	if strings.Contains(got, needle("the managed authority body")) {
+		t.Fatalf("the pane must not show the last-good authority's body beside the latest attempt; got:\n%s", got)
 	}
 	if strings.Contains(got, "not imported yet") {
-		t.Fatalf("a retained session is imported; the pane must not describe it as unimported; got:\n%s", got)
+		t.Fatalf("a session with a latest attempt is imported; the pane must not describe it as unimported; got:\n%s", got)
+	}
+}
+
+// seedManagedAuthority installs a complete managed generation as the session's
+// read authority, through the production activation the ingest pipeline uses.
+// The producer revision is the registered seed target, so the newer attempt the
+// mount case keeps is never refused as "newer than this writer's revision".
+func seedManagedAuthority(t *testing.T, dir, sessionID, authorityText string) {
+	t.Helper()
+	dbPath := string(defaults.ResolveDBFilePathWith(dir))
+	db, err := openPreparedStore(t, dbPath, mustGenerationStoreOptions(t, filepath.Join(dir, "peasant-sync"))...)
+	if err != nil {
+		t.Fatalf("open generation store: %v", err)
+	}
+	defer db.Close()
+	ctx := t.Context()
+	id, err := ingest.NewSessionID(sessionID)
+	if err != nil {
+		t.Fatalf("session id: %v", err)
+	}
+	bundle, err := db.LoadPublicationInput(ctx, id)
+	if err != nil {
+		t.Fatalf("load the session's own metadata: %v", err)
+	}
+	metadata := bundle.Metadata
+	if metadata.Stats.InputSubmissionCount == nil {
+		submissions := int64(0)
+		metadata.Stats.InputSubmissionCount = &submissions
+	}
+	ref := schema.SourceEntryRef("latest-attempt-authority-entry")
+	entry := schema.SessionEntry{
+		SessionID: schema.SessionID(sessionID), EntryIndex: 0, Harness: metadata.ModelHarness,
+		EntryType: schema.EntryTypeText, Role: schema.RoleUser, SourceEntryRef: ref, ContentPreview: &authorityText,
+	}
+	generation := indexformat.V2{Generation: indexformat.Generation{
+		ID:                   "gen-cli-managed-authority",
+		Completeness:         indexformat.GenerationCompletenessComplete,
+		Metadata:             metadata,
+		Main:                 indexformat.Partition{Entries: []schema.SessionEntry{entry}},
+		Content:              []indexformat.ContentRecord{{Ref: ref}},
+		SourceEvidenceDigest: strings.Repeat("a", 64),
+	}}
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: ingest.Harness(metadata.ModelHarness), Result: generation,
+		Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+	})
+	if err != nil {
+		t.Fatalf("assess the managed authority: %v", err)
+	}
+	capture, err := assessment.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1)
+	if err != nil {
+		t.Fatalf("build the managed authority's capture: %v", err)
+	}
+	state, err := db.ReadIndexState(ctx, id)
+	if err != nil {
+		t.Fatalf("capture index state: %v", err)
+	}
+	identity := strings.Repeat("e", 64)
+	outcome, err := db.ActivateGeneration(ctx, store.GenerationActivation{
+		Generation:       generation,
+		Blobs:            map[schema.SourceEntryRef][]byte{ref: []byte(authorityText)},
+		IndexerVersion:   testutil.HarvesterVersionsForSeed(t, metadata.ModelHarness).IndexerVersion,
+		IndexedAtMs:      1,
+		ExpectedState:    state,
+		ArtifactIdentity: &identity,
+		ContentCapture:   capture,
+	})
+	if err != nil {
+		t.Fatalf("install the managed authority: %v", err)
+	}
+	if outcome.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("managed authority disposition = %v, want ActivationCommittedNow", outcome.Disposition)
+	}
+}
+
+// TestResolveKickstartOutputRoot pins the root threading the mounted case cannot
+// observe: the loaded config's output base path is used verbatim, and an unset
+// base path falls back to the data directory the post-consent ingest runner uses.
+func TestResolveKickstartOutputRoot(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	cmd := mountTestCmd(t, dataHome)
+
+	configured := config.BaseConfig()
+	configured.Output.BasePath = filepath.Join(dataHome, "configured-output")
+	root, err := resolveKickstartOutputRoot(cmd, configured)
+	if err != nil {
+		t.Fatalf("resolve the configured output root: %v", err)
+	}
+	if string(root) != configured.Output.BasePath {
+		t.Fatalf("resolved root = %q, want the configured %q", root, configured.Output.BasePath)
+	}
+
+	unset := config.BaseConfig()
+	unset.Output.BasePath = ""
+	root, err = resolveKickstartOutputRoot(cmd, unset)
+	if err != nil {
+		t.Fatalf("resolve the fallback output root: %v", err)
+	}
+	if want := string(defaults.ResolveDataDirPathWith(dataHome)); string(root) != want {
+		t.Fatalf("fallback root = %q, want the data directory %q", root, want)
 	}
 }
 
@@ -710,9 +822,10 @@ func TestKickstartPreview_RetainedAttemptReportsPartial(t *testing.T) {
 func TestKickstartPreview_WithoutAStoreStillNamesSessions(t *testing.T) {
 	t.Parallel()
 	doc := loadPreviewDoc(t)
-	cmd := mountTestCmd(t, t.TempDir())
+	dataHome := t.TempDir()
+	cmd := mountTestCmd(t, dataHome)
 
-	db, closeStore := openKickstartStore(cmd)
+	db, closeStore := openKickstartStore(cmd, filepath.Join(dataHome, "peasant-sync"))
 	if db != nil {
 		t.Fatal("openKickstartStore opened a store for a data directory with no database")
 	}
@@ -741,7 +854,7 @@ func TestKickstartPreview_WithoutAStoreReadsTheHarnessTranscript(t *testing.T) {
 	dataHome := t.TempDir()
 	cmd := mountTestCmd(t, dataHome)
 
-	db, closeStore := openKickstartStore(cmd)
+	db, closeStore := openKickstartStore(cmd, filepath.Join(dataHome, "peasant-sync"))
 	if db != nil {
 		t.Fatal("openKickstartStore opened a store for a data directory with no database")
 	}
@@ -775,7 +888,7 @@ func TestIngestedSessionIDs_ReadsTheStore(t *testing.T) {
 	seedKickstartStore(t, dataHome, loadPreviewDoc(t).Recorded)
 
 	cmd := mountTestCmd(t, dataHome)
-	db, closeStore := openKickstartStore(cmd)
+	db, closeStore := openKickstartStore(cmd, filepath.Join(dataHome, "peasant-sync"))
 	defer closeStore()
 
 	ids := ingestedSessionIDs(cmd, db)

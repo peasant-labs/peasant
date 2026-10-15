@@ -81,6 +81,68 @@ func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
 	}
 }
 
+// TestStoredSessionEntriesPublishedPreviewServesTheLatestAttempt proves the
+// share-wizard source read over the coexistence shape: a last-good authority
+// with a newer incomplete attempt kept as its latest attempt. The wizard preview
+// must render the latest attempt's own text and report the partial state, never
+// the last-good authority's text.
+func TestStoredSessionEntriesPublishedPreviewServesTheLatestAttempt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const sessionID = "cccc4444-cccc-4ccc-8ccc-cccccccccccc"
+	seedUploadableSession(t, dir, sessionID)
+	seedEntryCarrying(t, dir, sessionID, "the last-good authority body")
+	seedLatestAttemptPreview(t, dir, sessionID, "the latest attempt carries newer prose")
+
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)), mustGenerationStoreOptions(t, filepath.Join(dir, "peasant-sync"))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	stored, err := storedSessionEntries(t.Context(), db)(sessionID)
+	if err != nil {
+		t.Fatalf("read the stored entries: %v", err)
+	}
+	if !stored.PartialNotice {
+		t.Fatal("a kept latest attempt must reach the wizard preview labelled partial")
+	}
+	joined := ""
+	for _, entry := range stored.Entries {
+		if entry.ContentPreview != nil {
+			joined += *entry.ContentPreview
+		}
+	}
+	if !strings.Contains(joined, "the latest attempt carries newer prose") {
+		t.Fatalf("the wizard source read served %q, want the latest attempt's own text", joined)
+	}
+	if strings.Contains(joined, "the last-good authority body") {
+		t.Fatalf("the wizard source read served the last-good authority's text: %q", joined)
+	}
+
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := push.NewPublishedTurns(storedSessionEntries(t.Context(), db), redactor)(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !published.PartialNotice {
+		t.Fatal("the published turns must carry the partial notice for a kept latest attempt")
+	}
+	content := ""
+	for _, turn := range published.Turns {
+		content += turn.Content
+	}
+	if !strings.Contains(content, "the latest attempt carries newer prose") {
+		t.Fatalf("the published turns served %q, want the latest attempt's own text", content)
+	}
+	if strings.Contains(content, "the last-good authority body") {
+		t.Fatalf("the published turns served the last-good authority's text: %q", content)
+	}
+}
+
 // capturedPublish is every part of one real multipart publish, keyed by form
 // name, as the village received it off the socket.
 type capturedPublish struct {

@@ -16,7 +16,7 @@ const previewOverFullReason = "preview replacement refused over full read author
 
 // assessedSourceOmittedPreview builds the REAL assessed capture the way
 // production does: the facts are set FIRST (SourceOmitted and Unaccounted, the
-// derivation prepareNativeGenerationResult performs), then AssessCapture and
+// derivation prepareGenerationResult performs), then AssessCapture and
 // ContentCapture derive the tuple. The recoveryCapture helper leaves those facts
 // unset and therefore certifies FULL coverage; it is the construction idiom for
 // the last-good authority, never a producer of the preview.
