@@ -73,6 +73,7 @@ func buildVillageTranscriptsPullCommand() *cobra.Command {
 		verbose        bool
 		quiet          bool
 		collectiveRefs []string
+		user           string
 	)
 
 	cmd := &cobra.Command{
@@ -89,7 +90,10 @@ village web URL. --collective names a collective the caller belongs to, by its
 name, its UUID, or its /groups/<uuid> page URL. It is repeatable, and several
 values pull the union, each transcript once. A collective holds the transcripts
 offered to it and approved, so a transcript the caller owns but never shared with
-a listed collective is not part of the selection.
+a listed collective is not part of the selection. --user keeps only the
+transcripts one village account contributed: combine it with --collective for a
+single collective, or pass it alone to span every collective the caller can pull
+from.
 
 --dry-run reports what WOULD be pulled (and why / why-not) without writing
 anything.`,
@@ -108,13 +112,15 @@ anything.`,
 				return levelErr
 			}
 
-			// Exactly one selection. Checked before any credential or database work
-			// so a misuse cannot half-run.
-			if len(args) > 0 && len(collectiveRefs) > 0 {
-				return fmt.Errorf("choose one selection: a transcript reference or --collective, not both")
+			// Exactly one selection: a transcript reference, or the collective/collaborator
+			// filters. Checked before any credential or database work so a misuse cannot
+			// half-run.
+			filters := len(collectiveRefs) > 0 || user != ""
+			if len(args) > 0 && filters {
+				return fmt.Errorf("choose one selection: a transcript reference, or --collective/--user, not both")
 			}
-			if len(args) == 0 && len(collectiveRefs) == 0 {
-				return fmt.Errorf("nothing to pull: pass a transcript UUID or a village web URL, or one or more --collective values")
+			if len(args) == 0 && !filters {
+				return fmt.Errorf("nothing to pull: pass a transcript UUID or a village web URL, or one or more --collective values, or --user")
 			}
 
 			var ref pull.TranscriptRef
@@ -137,11 +143,11 @@ anything.`,
 			}
 			defer cleanup()
 
-			if len(collectiveRefs) > 0 {
+			if len(collectiveRefs) > 0 || user != "" {
 				return runVillageTranscriptsPullCollectives(cmd, db, newVillageClientFromCreds(creds),
 					villagePullPipeline(cmd, creds, db),
 					collectiveRefs,
-					collectivePullFlags{Force: force, DryRun: dryRun, JSON: jsonOutput, Level: level})
+					collectivePullFlags{Force: force, DryRun: dryRun, JSON: jsonOutput, Level: level, User: user})
 			}
 
 			pipeline := villagePullPipeline(cmd, creds, db)
@@ -179,6 +185,8 @@ anything.`,
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary; print only errors and a final result line")
 	cmd.Flags().StringArrayVar(&collectiveRefs, "collective", nil,
 		"Pull every transcript a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values pull the union, each transcript once")
+	cmd.Flags().StringVar(&user, "user", "",
+		"Keep only the transcripts contributed by this village account. Combine with --collective for one collective; alone, it spans every collective you can pull from")
 
 	return cmd
 }

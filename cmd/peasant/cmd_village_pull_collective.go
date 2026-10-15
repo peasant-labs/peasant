@@ -21,6 +21,9 @@ type collectivePullFlags struct {
 	DryRun bool
 	JSON   bool
 	Level  outputLevel
+	// User, when non-empty, keeps only the transcripts contributed by that village
+	// account. It is applied over the fully-paged listing, so it is exact.
+	User string
 }
 
 // collectivePullOutcome is one transcript's result in a bulk pull. Result is nil
@@ -105,7 +108,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 		return err
 	}
 
-	listed, err := collectCollectiveTranscripts(ctx, client, collectives)
+	listed, err := collectCollectiveTranscripts(ctx, client, collectives, flags.User)
 	if err != nil {
 		if ctx.Err() != nil {
 			cmd.SilenceUsage = true
@@ -118,7 +121,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 		if flags.JSON {
 			return encodeCollectivePullJSON(cmd, collectives, names, nil)
 		}
-		fmt.Fprintf(writer, "no pullable transcripts in %s\n", collectiveLabel(names))
+		fmt.Fprintf(writer, "no pullable transcripts %s\n", selectionLabel(names, flags.User))
 		return nil
 	}
 
@@ -241,7 +244,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 			return err
 		}
 	} else {
-		printCollectivePullSummary(cmd, names, outcomes, flags.DryRun)
+		printCollectivePullSummary(cmd, names, outcomes, flags.DryRun, flags.User)
 	}
 
 	failures := 0
@@ -325,13 +328,18 @@ func currentHeldTranscripts(ctx context.Context, db *store.Store, client *villag
 	return current, nil
 }
 
-// collectCollectiveTranscripts pages the village's pullable listing, narrowed to
-// the given collectives, and returns the listed rows in first-seen order with
-// duplicates removed. The rows carry the metadata the pull needs — including the
-// served-blob hash — so no per-transcript metadata read follows. Duplicates are
-// removed client-side so a transcript held by two listed collectives is pulled
-// once.
-func collectCollectiveTranscripts(ctx context.Context, client *village.VillageClient, collectives []schema.VillageUUID) ([]schema.PullTranscriptInfo, error) {
+// collectCollectiveTranscripts pages the village's pullable listing and returns
+// the listed rows in first-seen order with duplicates removed. The rows carry
+// the metadata the pull needs — including the served-blob hash — so no
+// per-transcript metadata read follows. Duplicates are removed client-side so a
+// transcript held by two listed collectives is pulled once.
+//
+// An empty collectives slice lists everything the caller may pull (own plus
+// approved shares), which is what `--user` alone means: one contributor across
+// every collective the caller can pull from. A non-empty owner keeps only that
+// contributor's rows, filtered here because the listing pages to the end, so the
+// caller holds every row the filter must consider.
+func collectCollectiveTranscripts(ctx context.Context, client *village.VillageClient, collectives []schema.VillageUUID, owner string) ([]schema.PullTranscriptInfo, error) {
 	const pageLimit = 100
 
 	listed := make([]schema.PullTranscriptInfo, 0)
@@ -362,7 +370,7 @@ func collectCollectiveTranscripts(ctx context.Context, client *village.VillageCl
 			break
 		}
 	}
-	return listed, nil
+	return filterByOwner(listed, owner), nil
 }
 
 // renderCollectivePullOutcome writes one transcript's outcome line, matching the
@@ -385,7 +393,7 @@ func landedBeforeCancel(result *pull.PullResult, pullErr error) bool {
 }
 
 // printCollectivePullSummary writes the closing count line for a bulk pull.
-func printCollectivePullSummary(cmd *cobra.Command, names []string, outcomes []collectivePullOutcome, dryRun bool) {
+func printCollectivePullSummary(cmd *cobra.Command, names []string, outcomes []collectivePullOutcome, dryRun bool, owner string) {
 	var pulled, upToDate, failed int
 	for _, outcome := range outcomes {
 		switch {
@@ -401,21 +409,28 @@ func printCollectivePullSummary(cmd *cobra.Command, names []string, outcomes []c
 	if dryRun {
 		verb = "would pull"
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "%s %d, up to date %d, failed %d of %d in %s\n",
-		verb, pulled, upToDate, failed, len(outcomes), collectiveLabel(names))
+	fmt.Fprintf(cmd.OutOrStdout(), "%s %d, up to date %d, failed %d of %d %s\n",
+		verb, pulled, upToDate, failed, len(outcomes), selectionLabel(names, owner))
 }
 
-// collectiveLabel names the selection for output: the collective itself, or a
-// count when several were given.
-func collectiveLabel(names []string) string {
+// selectionLabel names what a bulk pull selected: the collectives when any were
+// given, and the contributor when one was.
+func selectionLabel(names []string, owner string) string {
+	label := "in the selected collectives"
 	switch len(names) {
 	case 0:
-		return "the selected collectives"
 	case 1:
-		return fmt.Sprintf("collective %s", names[0])
+		label = fmt.Sprintf("in collective %s", names[0])
 	default:
-		return fmt.Sprintf("%d collectives (%s)", len(names), joinNames(names))
+		label = fmt.Sprintf("in %d collectives (%s)", len(names), joinNames(names))
 	}
+	if owner == "" {
+		return label
+	}
+	if len(names) == 0 {
+		return fmt.Sprintf("contributed by %s across your collectives", owner)
+	}
+	return fmt.Sprintf("%s contributed by %s", label, owner)
 }
 
 // joinNames renders names for a one-line summary.

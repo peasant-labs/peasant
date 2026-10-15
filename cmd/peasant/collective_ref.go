@@ -102,6 +102,24 @@ func resolveCollectiveRefs(ctx context.Context, client *village.VillageClient, v
 	return ids, names, nil
 }
 
+// filterByOwner keeps only the listed rows contributed by one village account,
+// compared case-insensitively because a username is case-insensitive at the
+// village. An empty owner keeps every row, so callers can pass the flag value
+// straight through.
+func filterByOwner(rows []schema.PullTranscriptInfo, owner string) []schema.PullTranscriptInfo {
+	if owner == "" {
+		return rows
+	}
+	wanted := strings.ToLower(strings.TrimSpace(owner))
+	kept := make([]schema.PullTranscriptInfo, 0, len(rows))
+	for i := range rows {
+		if strings.ToLower(rows[i].OwnerUsername) == wanted {
+			kept = append(kept, rows[i])
+		}
+	}
+	return kept
+}
+
 // collectiveRefCandidate returns the reference with surrounding space removed,
 // accepting either a bare identifier or name, or a pasted collective web URL.
 // A URL that is not a collective page is refused: the path must be exactly

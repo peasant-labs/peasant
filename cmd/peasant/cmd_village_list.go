@@ -31,6 +31,7 @@ func buildVillageTranscriptsListCommand() *cobra.Command {
 		jsonOutput     bool
 		limit          int
 		collectiveRefs []string
+		user           string
 	)
 
 	cmd := &cobra.Command{
@@ -42,19 +43,21 @@ pulled locally (--local; reads only local data and works offline).
 
 --collective narrows the remote listing to one or more collectives you belong
 to, named by a collective name, its UUID, or its /groups/<uuid> page URL, and
-pages to the end so the listing matches what a pull would take. --limit sets the
-page size. Both apply to the remote listing only.`,
+pages to the end so the listing matches what a pull would take. --user keeps only
+the transcripts one village account contributed: combine it with --collective for
+a single collective, or pass it alone to span every collective you can pull from.
+--limit sets the page size. All three apply to the remote listing only.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
 			if local {
-				if len(collectiveRefs) > 0 || cmd.Flags().Changed("limit") {
-					return fmt.Errorf("--collective and --limit apply to the remote listing; --local reads only the local inventory")
+				if len(collectiveRefs) > 0 || user != "" || cmd.Flags().Changed("limit") {
+					return fmt.Errorf("--collective, --user and --limit apply to the remote listing; --local reads only the local inventory")
 				}
 				return runVillageTranscriptsListLocal(cmd, jsonOutput)
 			}
-			return runVillageTranscriptsListRemote(cmd, jsonOutput, collectiveRefs, limit)
+			return runVillageTranscriptsListRemote(cmd, jsonOutput, collectiveRefs, user, limit)
 		},
 	}
 
@@ -63,6 +66,8 @@ page size. Both apply to the remote listing only.`,
 	cmd.Flags().IntVar(&limit, "limit", villageListDefaultLimit, "Page size for the remote listing")
 	cmd.Flags().StringArrayVar(&collectiveRefs, "collective", nil,
 		"List the transcripts a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values list the union")
+	cmd.Flags().StringVar(&user, "user", "",
+		"Keep only the transcripts contributed by this village account. Combine with --collective for one collective; alone, it spans every collective you can pull from")
 
 	return cmd
 }
@@ -90,10 +95,11 @@ func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool) error {
 
 // runVillageTranscriptsListRemote fetches and renders the village's pullable
 // listing. Login is REQUIRED. NegotiatePull is called EXACTLY ONCE before the
-// listing GET used by the transcript list command. A collective listing follows
-// the pages to the end, so the listing matches what a pull would take; the plain
-// listing keeps its single-page behavior.
-func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collectiveRefs []string, limit int) error {
+// listing GET used by the transcript list command. A collective listing, and any
+// listing narrowed to one contributor, follows the pages to the end, so the
+// listing matches what a pull would take; the plain listing keeps its
+// single-page behavior.
+func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collectiveRefs []string, owner string, limit int) error {
 	creds, err := requireVillageCredentials(cmd)
 	if err != nil {
 		return err
@@ -115,9 +121,17 @@ func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collec
 		return err
 	}
 
-	response, err := listPullableTranscripts(cmd.Context(), client, collectives, limit, len(collectiveRefs) > 0)
+	// A contributor filter is applied here, so the listing must be complete first:
+	// filtering a single page would under-report and make the total a lie.
+	allPages := len(collectiveRefs) > 0 || owner != ""
+	response, err := listPullableTranscripts(cmd.Context(), client, collectives, limit, allPages)
 	if err != nil {
 		return fmt.Errorf("list pullable transcripts: %w", err)
+	}
+
+	if owner != "" {
+		response.Transcripts = filterByOwner(response.Transcripts, owner)
+		response.Total = len(response.Transcripts)
 	}
 
 	if jsonOutput {
