@@ -428,6 +428,12 @@ func TestDetailPayloadWithReaderRealStore(t *testing.T) {
 		if len(payload.Turns) != 1 || payload.Turns[0].Content != "mounted retained prose" {
 			t.Fatalf("mounted retained turns = %+v, want the retained attempt's bounded prose", payload.Turns)
 		}
+		// The counts must be the latest attempt's own: the authority reports
+		// 2 turns / 0 tool calls, so a payload that blended the authority's
+		// metadata would report those instead.
+		if payload.TurnCount != 1 || payload.ToolCallCount != 3 {
+			t.Fatalf("mounted retained counts = %d/%d, want the latest attempt's 1/3", payload.TurnCount, payload.ToolCallCount)
+		}
 	})
 }
 
@@ -436,6 +442,10 @@ func TestDetailPayloadWithReaderRealStore(t *testing.T) {
 func retainMountedCandidate(t *testing.T, db *store.Store, sid schema.SessionID, genID string, texts []string) {
 	t.Helper()
 	v2, blobs := mountedV2(t, sid, genID, "complete", texts)
+	// The latest attempt's own producer stats: the authority reports 2 turns and
+	// 0 tool calls, so the counts the detail payload reports name which
+	// generation the read bound.
+	v2.Generation.Metadata.Stats.ToolCallCount = 3
 	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
 		Harness: ingest.Harness("claude-code"), Result: v2,
 		Policy: ingest.CaptureFreshCandidate, Authoritative: true,
