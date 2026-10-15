@@ -30,7 +30,8 @@
 # (authorityTarget), the child under the populated parent, and the uncached
 # session (uncached) with no parent at all, then calls the shared cache writer
 # directly. The populated child must keep its cache and its settled watermark,
-# and the NULL cache must be healed and re-queued by the same statement. The
+# and the NULL cache must be healed by the same statement; the requeue that rides
+# it is pinned by the heal arm, on the production path. The
 # case must hand the writer a logical parent that differs from the cache it
 # expects to survive, so the NULL-only clause — not a caller's own guard — is
 # what refuses the write.

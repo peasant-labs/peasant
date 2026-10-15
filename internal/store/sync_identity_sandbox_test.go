@@ -139,9 +139,9 @@ CASE WHEN r.target_state IN ('unknown','conflicting_current_native_evidence') TH
 FROM sessions s
 JOIN session_metrics m ON m.session_id = s.session_id
 LEFT JOIN session_relationship_evidence r
- ON r.session_id = s.session_id AND r.generation_id = s.active_generation_id AND r.kind = 'started_by'
+ ON r.session_id = s.session_id AND r.generation_id = `+parentGenerationScopeSQL("s")+` AND r.kind = 'started_by'
 LEFT JOIN session_relationship_evidence x
- ON x.session_id = s.session_id AND x.generation_id = s.active_generation_id AND x.kind = 'context_from'
+ ON x.session_id = s.session_id AND x.generation_id = `+parentGenerationScopeSQL("s")+` AND x.kind = 'context_from'
 LEFT JOIN session_publication_metadata pm ON pm.session_id = s.session_id`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
 		rows = append(rows, ParentIdentityRow{SessionID: stmt.ColumnText(0), ParentIdentity: stmt.ColumnText(1), ParentUnresolved: stmt.ColumnInt(2) != 0})
 		return nil
