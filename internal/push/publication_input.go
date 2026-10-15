@@ -15,11 +15,23 @@ import (
 // A legacy input returns a nil detail. A managed error never falls back to a
 // different source. No blob reads are needed after this function returns.
 func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputReader, rawID string) (input ingest.PublicationInputBundle, detail *schema.SessionDetailPayload, err error) {
+	return LoadPublicationInputSelected(ctx, reader, rawID, ingest.SessionReadSelection{})
+}
+
+// LoadPublicationInputSelected is the explicit-selection form of
+// LoadPublicationInput. A LastGood selection bypasses only the latest-attempt
+// refusal and reads the last-good authority through the unchanged active read,
+// so an explicit publication can still send the last-good full transcript while
+// a newer incomplete attempt is kept beside it. The selector carries only the
+// last-good intent: the store resolves the generation internally, so no
+// caller-supplied identifier can select a full read, and every other
+// publication check still applies.
+func LoadPublicationInputSelected(ctx context.Context, reader ingest.PublicationInputReader, rawID string, selection ingest.SessionReadSelection) (input ingest.PublicationInputBundle, detail *schema.SessionDetailPayload, err error) {
 	id, err := ingest.NewSessionID(rawID)
 	if err != nil {
 		return input, nil, fmt.Errorf("load committed publication input: %w", err)
 	}
-	err = reader.WithCommittedPublicationInput(ctx, id, func(captured ingest.PublicationInputBundle) error {
+	err = reader.WithCommittedPublicationInputSelected(ctx, id, selection, func(captured ingest.PublicationInputBundle) error {
 		input = captured
 		if captured.Readiness != ingest.PublicationReady || captured.Generation == nil {
 			return nil

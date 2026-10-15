@@ -36,3 +36,12 @@ func readPublicationSnapshot(ctx context.Context, reader availableContentReader,
 func exportSessionTranscript(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, managedRoots ...string) (*schema.SessionDetailPayload, error) {
 	return export.ExportSession(ctx, db, fs, sessionID, managedRoots...)
 }
+
+// exportSessionTranscriptSelected is the explicit-selection form of
+// exportSessionTranscript. It is used ONLY when the caller names the read
+// explicitly (--last-good); the default seam above stays on the authority read,
+// so a default export cannot be routed onto a selected one by accident. A zero
+// selection is byte-identical to the default seam.
+func exportSessionTranscriptSelected(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, selection ingest.SessionReadSelection, managedRoots ...string) (*schema.SessionDetailPayload, error) {
+	return export.ExportSessionSelected(ctx, db, fs, sessionID, selection, managedRoots...)
+}

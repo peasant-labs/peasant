@@ -54,7 +54,7 @@ func TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback(t *testing.T) 
 	if decl == nil {
 		t.Fatalf("%s no longer declares BuildSnapshotDetailBytes; the shared durable payload boundary the runtime tests exercise is gone", path)
 	}
-	callback := snapshotCallbackLiteral(decl)
+	callback := snapshotCallbackLiteral(decl, "WithSessionSnapshot")
 	if callback == nil {
 		t.Fatal("BuildSnapshotDetailBytes no longer calls reader.WithSessionSnapshot with a callback literal; the boundary no longer shows that hydration and serialization run inside the snapshot lock")
 	}
@@ -75,6 +75,43 @@ func TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback(t *testing.T) 
 	}
 }
 
+// TestBuildSnapshotDetailBytesSelectedSerializesInsideSnapshotCallback is the
+// same source guard for the explicit-selection boundary: hydration, folding,
+// validation AND the final json.Marshal must all run inside the
+// reader.WithSessionSnapshotSelected callback, so a concurrent activation cannot
+// remove the captured generation mid-encode.
+func TestBuildSnapshotDetailBytesSelectedSerializesInsideSnapshotCallback(t *testing.T) {
+	path := filepath.Join(testutil.ModuleRoot(t), "internal", "transcript", "snapshot_detail.go")
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, path, nil, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	decl := findFuncDecl(parsed, "BuildSnapshotDetailBytesSelected")
+	if decl == nil {
+		t.Fatalf("%s no longer declares BuildSnapshotDetailBytesSelected; the explicit-selection durable payload boundary is gone", path)
+	}
+	callback := snapshotCallbackLiteral(decl, "WithSessionSnapshotSelected")
+	if callback == nil {
+		t.Fatal("BuildSnapshotDetailBytesSelected no longer calls reader.WithSessionSnapshotSelected with a callback literal; the boundary no longer shows that hydration and serialization run inside the snapshot lock")
+	}
+
+	marshalPackage := jsonMarshalSelectorName(parsed)
+	if marshalPackage == "" {
+		t.Fatalf("%s no longer imports encoding/json; the guard cannot locate the production serialization call", path)
+	}
+	marshalResult := assignTargetForSelectorCall(callback.Body, marshalPackage, "Marshal")
+	if marshalResult == "" {
+		t.Fatal("the final json.Marshal is not inside the WithSessionSnapshotSelected callback; serialization would run after the shared lock is released, where a concurrent activation can remove the captured generation mid-encode")
+	}
+	if !assignsIdentFrom(callback.Body, "owned", marshalResult) {
+		t.Fatalf("the callback no longer assigns the owned bytes from the marshal result %q; the bytes handed to callers must be materialized under the shared lock", marshalResult)
+	}
+	if !assignsAny(callback.Body, "payload") {
+		t.Fatal("the callback no longer assigns the validated payload; the boundary no longer returns the payload it serialized under the shared lock")
+	}
+}
+
 func findFuncDecl(file *ast.File, name string) *ast.FuncDecl {
 	for _, decl := range file.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == name {
@@ -84,9 +121,9 @@ func findFuncDecl(file *ast.File, name string) *ast.FuncDecl {
 	return nil
 }
 
-// snapshotCallbackLiteral returns the function literal passed to the
-// WithSessionSnapshot call inside decl.
-func snapshotCallbackLiteral(decl *ast.FuncDecl) *ast.FuncLit {
+// snapshotCallbackLiteral returns the function literal passed to the named
+// snapshot-read method inside decl.
+func snapshotCallbackLiteral(decl *ast.FuncDecl, method string) *ast.FuncLit {
 	var found *ast.FuncLit
 	ast.Inspect(decl.Body, func(node ast.Node) bool {
 		if found != nil {
@@ -97,7 +134,7 @@ func snapshotCallbackLiteral(decl *ast.FuncDecl) *ast.FuncLit {
 			return true
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "WithSessionSnapshot" || len(call.Args) == 0 {
+		if !ok || selector.Sel.Name != method || len(call.Args) == 0 {
 			return true
 		}
 		literal, ok := call.Args[len(call.Args)-1].(*ast.FuncLit)

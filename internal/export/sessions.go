@@ -34,6 +34,19 @@ func ExportSnapshotPayload(ctx context.Context, reader indexformat.SnapshotReade
 	return redactExportWithBaseline(payload)
 }
 
+// ExportSnapshotPayloadSelected is the explicit-selection form of
+// ExportSnapshotPayload. A LastGood selection serves the last-good full
+// authority so an explicit export can still reach it while a newer incomplete
+// attempt is kept beside it; the store resolves the generation internally and
+// refuses an active authority that is itself only a preview.
+func ExportSnapshotPayloadSelected(ctx context.Context, reader ingest.SelectedSnapshotReader, resolver indexformat.ContentResolver, sessionID schema.SessionID, selection ingest.SessionReadSelection) (*schema.SessionDetailPayload, error) {
+	_, payload, err := transcript.BuildSnapshotDetailBytesSelected(ctx, reader, resolver, selection, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return redactExportWithBaseline(payload)
+}
+
 // ExportSnapshotPayloadWithRedactor builds the export payload with an explicit
 // baseline engine. A nil engine refuses fail-closed when retained records are
 // present (RedactExportRetained nil refusal); callers that need the standard
@@ -70,19 +83,40 @@ func redactExportWithBaseline(payload *schema.SessionDetailPayload) (*schema.Ses
 // sessions without a generation use the preserved content-capture path. A
 // corrupt managed artifact fails the export; it never falls back to truncated
 // content.
+//
+// A session that keeps a newer incomplete attempt beside its last-good
+// generation is REFUSED here rather than falling through to the legacy read: the
+// newer attempt must never be served as the session, and the preserved legacy
+// path must never leak the last-good content past the refusal. The explicit
+// last-good exit is ExportSessionSelected with LastGood.
 func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, managedRoots ...string) (*schema.SessionDetailPayload, error) {
+	return ExportSessionSelected(ctx, db, fs, sessionID, ingest.SessionReadSelection{}, managedRoots...)
+}
+
+// ExportSessionSelected is the explicit-selection form of ExportSession. A
+// LastGood selection serves the last-good full authority: the active managed
+// generation when one exists, and the preserved legacy/certificate full read
+// when the session has none. It still refuses an active authority that is itself
+// only a preview, so an active preview is never exported as a full transcript.
+// The selector carries only the last-good intent; the store resolves the
+// generation internally, so no caller-supplied identifier can select a full
+// read.
+func ExportSessionSelected(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, selection ingest.SessionReadSelection, managedRoots ...string) (*schema.SessionDetailPayload, error) {
 	if db.GenerationSnapshotsSupported() {
 		sid, err := ingest.NewSessionID(sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("export session %s: %w", sessionID, err)
 		}
-		if payload, err := ExportSnapshotPayload(ctx, db, db, sid); err == nil {
+		if payload, err := ExportSnapshotPayloadSelected(ctx, db, db, sid, selection); err == nil {
 			return payload, nil
 		} else if !errors.Is(err, transcript.ErrLegacySnapshot) {
+			// A latest-attempt refusal, a corrupt artifact, or any other managed
+			// failure is returned as-is: the preserved legacy path must never be
+			// reached with a managed generation present.
 			return nil, fmt.Errorf("export session %s: %w", sessionID, err)
 		}
 	}
-	return exportLegacySession(ctx, db, fs, sessionID)
+	return exportLegacySession(ctx, db, fs, sessionID, selection)
 }
 
 // ExportSessionWithRedactor exports through the same paths with an explicit
@@ -100,23 +134,23 @@ func ExportSessionWithRedactor(ctx context.Context, db *store.Store, fs ingest.F
 			return nil, fmt.Errorf("export session %s: %w", sessionID, err)
 		}
 	}
-	payload, err := buildLegacyExportPayload(ctx, db, fs, sessionID)
+	payload, err := buildLegacyExportPayload(ctx, db, fs, sessionID, ingest.SessionReadSelection{})
 	if err != nil {
 		return nil, err
 	}
 	return applyExportRedaction(payload, engine)
 }
 
-func exportLegacySession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string) (*schema.SessionDetailPayload, error) {
-	payload, err := buildLegacyExportPayload(ctx, db, fs, sessionID)
+func exportLegacySession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, selection ingest.SessionReadSelection) (*schema.SessionDetailPayload, error) {
+	payload, err := buildLegacyExportPayload(ctx, db, fs, sessionID, selection)
 	if err != nil {
 		return nil, err
 	}
 	return redactExportWithBaseline(payload)
 }
 
-func buildLegacyExportPayload(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string) (*schema.SessionDetailPayload, error) {
-	snapshot, err := db.ReadSessionContent(ctx, sessionID)
+func buildLegacyExportPayload(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, selection ingest.SessionReadSelection) (*schema.SessionDetailPayload, error) {
+	snapshot, err := db.ReadSessionContentSelected(ctx, sessionID, selection)
 	if err != nil {
 		return nil, fmt.Errorf("export session %s: %w", sessionID, err)
 	}
