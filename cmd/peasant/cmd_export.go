@@ -665,15 +665,21 @@ Requires either --session for a single session or --session-from-file for a batc
 			}
 			ctx := cmd.Context()
 			fs := &ingest.OSFileSystem{}
-			// The explicit last-good selection is resolved server-side: the
-			// selector carries only the intent, and the store picks the
-			// last-good authority itself. No session or generation identifier
-			// is accepted from the caller.
-			selection := ingest.SessionReadSelection{LastGood: lastGood}
 
 			var succeeded, failed int
 			for _, sid := range sessionIDs {
-				exported, exportErr := exportSessionTranscriptSelected(ctx, db, fs, sid, selection, cfg.Output.BasePath)
+				// The default seam stays on the authority read; only the explicit
+				// flag routes through the selected one. The last-good selection is
+				// resolved server-side: the selector carries only the intent, and
+				// the store picks the last-good authority itself. No session or
+				// generation identifier is accepted from the caller.
+				var exported *schema.SessionDetailPayload
+				var exportErr error
+				if lastGood {
+					exported, exportErr = exportSessionTranscriptSelected(ctx, db, fs, sid, ingest.SessionReadSelection{LastGood: true}, cfg.Output.BasePath)
+				} else {
+					exported, exportErr = exportSessionTranscript(ctx, db, fs, sid, cfg.Output.BasePath)
+				}
 				if exportErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
 					failed++
