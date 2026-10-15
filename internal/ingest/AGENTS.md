@@ -160,8 +160,8 @@ Retention leaves the active authority byte-identical and reports through the
 existing durable vocabulary: the `skipped` outcome with the held reason and a
 literal zero entry count, so the pipeline counts no indexed session. The mounted
 reads and the preview-snapshot detail serve the latest attempt with partial
-diagnostics; the full read and export refuse with the retained-attempt sentinel;
-the explicit last-good selection serves the active full authority. The retained
+diagnostics; the full read and export refuse with the latest-attempt sentinel;
+the explicit last-good selection serves the active full authority. The latest-attempt
 pointer clears with the active authority's own finalization — the active move, a
 representation replacement, or the shared bookkeeping a skip or repair runs —
 and never with an identical-candidate retry. Retention consumes the capture the
