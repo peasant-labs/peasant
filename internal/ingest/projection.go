@@ -797,7 +797,7 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 // NativeCorrelationKey. The proof is explicit native correlation; the
 // projection never infers it from equal bytes, equal evidence or first-wins
 // order. Every unproved representation keeps its own ref, and the mirror's
-// native key aliases the inherited owner so a later capture cannot reallocate.
+// native key aliases the kept owner so a later capture cannot reallocate.
 func collapseProvedMirrors(resolved []*resolvedBlock) {
 	groups := make(map[string][]*resolvedBlock)
 	for _, rb := range resolved {
@@ -818,11 +818,11 @@ func collapseProvedMirrors(resolved []*resolvedBlock) {
 	}
 }
 
-// allocateBlockRefs assigns one opaque block ref per inherited block, reusing a
+// allocateBlockRefs assigns one opaque block ref per non-dropped block, reusing a
 // prior alias when one exists. When two distinct native keys inherited the same
 // prior ref because an earlier generation merged them (an unproved pair since
 // proven distinct, or a proved mirror whose proof was withdrawn), the first
-// inherited owner keeps the ref and the newly distinct representation gets a
+// owner keeps the ref and the newly distinct representation gets a
 // fresh one. A persisted alias is never silently cleared or re-merged.
 func allocateBlockRefs(resolved []*resolvedBlock, prior ProjectionPriorState, allocator RefAllocator) error {
 	used := make(map[schema.SourceEntryRef]string, len(resolved))
