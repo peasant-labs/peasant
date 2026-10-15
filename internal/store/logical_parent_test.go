@@ -54,6 +54,7 @@ const (
 	logicalParentStateLatestAttemptOnly        = "latest-attempt-only"
 	logicalParentStateActiveAndLatestAttempt   = "active-and-latest-attempt"
 	logicalParentStateActiveWithoutEvidence    = "active-without-evidence"
+	logicalParentStatePreviewWithoutEvidence   = "preview-without-evidence"
 	logicalParentStateNoEvidence               = "no-evidence"
 	logicalParentStateManagedTargetUnstored    = "managed-target-unstored"
 	logicalParentStateCacheAgrees              = "cache-agrees"
@@ -104,6 +105,7 @@ func loadLogicalParentFixture(t *testing.T) logicalParentFixture {
 		case logicalParentStateLatestAttemptOnly,
 			logicalParentStateActiveAndLatestAttempt,
 			logicalParentStateActiveWithoutEvidence,
+			logicalParentStatePreviewWithoutEvidence,
 			logicalParentStateNoEvidence,
 			logicalParentStateManagedTargetUnstored,
 			logicalParentStateCacheAgrees,
@@ -176,6 +178,8 @@ func runLogicalParentCase(t *testing.T, fixture logicalParentFixture, tc logical
 		runLogicalParentActiveAndLatestAttempt(t, ctx, db, fixture, tc, child)
 	case logicalParentStateActiveWithoutEvidence:
 		runLogicalParentActiveWithoutEvidence(t, ctx, db, fixture, tc, child)
+	case logicalParentStatePreviewWithoutEvidence:
+		runLogicalParentPreviewWithoutEvidence(t, ctx, db, fixture, tc, child)
 	case logicalParentStateNoEvidence:
 		runLogicalParentNoEvidence(t, ctx, db, fixture, tc, child)
 	case logicalParentStateManagedTargetUnstored:
@@ -572,6 +576,54 @@ func runLogicalParentActiveWithoutEvidence(t *testing.T, ctx context.Context, db
 	assertLogicalParentChildList(t, ctx, db, *latestTarget, child, false)
 	assertLogicalParentGrouping(t, ctx, db, child, "", nil)
 	assertLogicalParentCache(t, ctx, db, child, nil)
+}
+
+// runLogicalParentPreviewWithoutEvidence pins the generation-scoped document's
+// fallback arm: the preview read serves the latest attempt, whose own
+// relationships carry no started_by row, so the document's parent must be the
+// session-level rendering (the active generation's target) and never the raw
+// cache. The active generation's target is deliberately unstored, which keeps
+// the availability cache NULL: a document filled from the raw cache would
+// answer no parent while every session-level reader answers the target.
+func runLogicalParentPreviewWithoutEvidence(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {
+	t.Helper()
+	target := logicalParentTokenID(t, fixture, tc.ActiveEvidence)
+	if target == nil {
+		t.Fatalf("case %q names no active-generation evidence target", tc.Name)
+	}
+	// The target is deliberately NOT stored, so the cache stays NULL while the
+	// active generation's evidence answers it.
+	insertLogicalParentSession(t, ctx, db, child)
+	activateLogicalParentEvidence(t, db, child, fixture.ActiveGeneration, logicalParentEvidenceTargetKnown, target)
+	activateLogicalParentEvidence(t, db, child, fixture.LatestAttemptGeneration, "", nil)
+	active := fixture.ActiveGeneration
+	latest := fixture.LatestAttemptGeneration
+	arrangeLogicalParentPointers(t, db, child, &active, &latest, nil)
+
+	assertLogicalParentCache(t, ctx, db, child, nil)
+	assertLogicalParentAnswer(t, ctx, db, child, target)
+
+	// The preview read serves the latest attempt's generation. Its own
+	// relationships answer nothing, so the document must carry the
+	// session-level rendering and stay a coherent read.
+	served := (*schema.SessionID)(nil)
+	document := (*schema.SessionID)(nil)
+	if err := db.WithSessionPreviewSnapshot(ctx, child, func(snapshot indexformat.ReadSnapshot) error {
+		served = snapshot.Session.ParentSessionID
+		document = snapshot.Metadata.ParentUUID
+		if err := snapshot.Validate(); err != nil {
+			t.Fatalf("the preview snapshot of %s is not a coherent read: %v", child, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("WithSessionPreviewSnapshot(%s): %v", child, err)
+	}
+	if !logicalParentEqual(served, target) {
+		t.Fatalf("preview snapshot parent of %s = %s, want the session-level rendering %s", child, logicalParentString(served), logicalParentString(target))
+	}
+	if !logicalParentEqual(document, target) {
+		t.Fatalf("preview document parentUuid of %s = %s, want the session-level rendering %s", child, logicalParentString(document), logicalParentString(target))
+	}
 }
 
 func runLogicalParentNoEvidence(t *testing.T, ctx context.Context, db *Store, fixture logicalParentFixture, tc logicalParentCase, child schema.SessionID) {

@@ -25,6 +25,14 @@
 #                         all while the latest attempt names a target. The
 #                         session-level answer is nil: the latest attempt is
 #                         not consulted.
+#   preview-without-evidence
+#                         the active generation names a target that is not
+#                         stored, so the availability cache stays NULL, and
+#                         the latest attempt carries no started_by row at all.
+#                         The preview read serves the latest attempt, whose own
+#                         evidence answers nothing: the document's parent must
+#                         fall back to the session-level rendering (the active
+#                         generation's target), never the raw cache.
 #   no-evidence           a session with no generation at all. The answer is
 #                         the availability cache, and a NULL cache answers nil.
 #   managed-target-unstored
@@ -74,6 +82,9 @@ cases:
   - name: active-without-evidence-ignores-latest-attempt
     state: active-without-evidence
     latestAttemptEvidence: target
+  - name: preview-without-evidence-falls-back-to-the-rendering
+    state: preview-without-evidence
+    activeEvidence: target
   - name: no-evidence-falls-back-to-cache
     state: no-evidence
     cacheParent: target
