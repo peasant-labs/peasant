@@ -51,6 +51,7 @@ func BuildPushCommand() *cobra.Command {
 		nonInteractiveFlag     bool
 		requireAutoPublishRule bool
 		autoPublishEvent       string
+		lastGood               bool
 		yesFlag                bool
 		annotationIDs          []string
 		annotationHash         []string
@@ -83,6 +84,12 @@ func BuildPushCommand() *cobra.Command {
 			"publishes collectives-only: private, with no license, and each bound transcript it sent\n" +
 			"is shared with its rule's collectives. --visibility and --license are then refused. A\n" +
 			"session a paused rule covers, or whose transcript is already public, is not published.\n\n" +
+			"Last-good — a session may keep a newer incomplete attempt beside its last-good full\n" +
+			"generation. Such a session is refused by default: the incomplete attempt is never\n" +
+			"published as the session, and readiness stays not-ready so stale content is never sent\n" +
+			"automatically. --last-good publishes the last-good full transcript instead, as an\n" +
+			"explicit hand-run choice; it is refused together with --auto-publish-event and\n" +
+			"--require-auto-publish-rule, and no generated hook file carries it.\n\n" +
 			"Exit status — a caller that branches on it, including a generated Git hook, needs the\n" +
 			"one distinction it cannot read out of prose: whether anything was published at all.\n\n" +
 			"  0  the run succeeded.\n" +
@@ -100,6 +107,18 @@ func BuildPushCommand() *cobra.Command {
 			// every commit. Cobra still prints usage for genuine arg/flag misuse,
 			// which it handles before RunE.
 			cmd.SilenceUsage = true
+
+			// --last-good is a deliberate, hand-run publication of the last-good
+			// full transcript. It is REFUSED together with the hook flags: those
+			// exist so a managed hook publishes automatically, and an automatic
+			// publication must never send stale last-good content. The flag is
+			// never written into a generated hook file, so the refusal is the
+			// second half of the same guarantee. Checked before any local work,
+			// so a bad combination is reported at once rather than after a run
+			// that can exhaust the command's --timeout budget.
+			if lastGood && (autoPublishEvent != "" || requireAutoPublishRule) {
+				return fmt.Errorf("village push: --last-good cannot be combined with --auto-publish-event or --require-auto-publish-rule; the hook flags exist so a managed hook publishes automatically, and an automatic publication must never send the last-good transcript in place of a newer incomplete attempt; nothing was uploaded; drop --last-good, or publish the last-good by hand without the hook flags")
+			}
 
 			ctx := cmd.Context()
 			// Honours --config-dir when --config was not given explicitly, so a
@@ -352,6 +371,7 @@ func BuildPushCommand() *cobra.Command {
 					Quiet:            level == outputQuiet,
 					Concurrency:      resolvedConcurrency,
 					CommandBinding:   run.binding,
+					LastGood:         lastGood,
 				}
 				if cmd.Flags().Changed("repository") {
 					// An empty --repository is rejected rather than ignored. The
@@ -472,6 +492,17 @@ func BuildPushCommand() *cobra.Command {
 				if visibilityPolicy.Downgraded() {
 					fmt.Fprintln(cmd.ErrOrStderr(),
 						quietAware(level, visibilityPolicy.Disclosure(), visibilityPolicy.BriefDisclosure()))
+				}
+
+				// The last-good publication is an explicit consent statement: the
+				// user asked to send the last-good full transcript in place of a
+				// newer incomplete attempt, and that choice must be on the record
+				// before anything leaves the machine. --quiet still prints it in
+				// brief, exactly like the other disclosures above.
+				if lastGood {
+					fmt.Fprintln(cmd.ErrOrStderr(), quietAware(level,
+						"warning: --last-good publishes the last-good full transcript instead of the newer incomplete attempt. The newer attempt is never sent. This is an explicit, hand-run choice: it cannot be combined with the auto-publish hook flags, and no hook file ever carries it.",
+						"warning: --last-good publishes the last-good full transcript instead of the newer incomplete attempt."))
 				}
 
 				// The redaction report is the published-content record CI logs
@@ -856,6 +887,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")
 	cmd.Flags().StringVar(&autoPublishEvent, "auto-publish-event", "", "Require consent for this hook event (post-commit or pre-push)")
 	cmd.Flags().BoolVar(&requireAutoPublishRule, "require-auto-publish-rule", false, "Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)")
+	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Publish the last-good full transcript when a newer incomplete attempt is kept beside it. A hand-run, non-interactive choice: it is refused together with --auto-publish-event/--require-auto-publish-rule and is never written into a hook file, so an automatic publication never sends stale last-good content. The store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 	cmd.Flags().BoolVar(&nonInteractiveFlag, "non-interactive", false, "Run without the interactive wizard or public-consent prompt (for CI/scripts)")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "(alias for --non-interactive)")
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")

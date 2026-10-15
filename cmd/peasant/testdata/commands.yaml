@@ -121,6 +121,7 @@ commands:
       - { name: timeout, type: duration, default: "0s" }
       - { name: require-auto-publish-rule, type: bool, default: "false" }
       - { name: auto-publish-event, type: string, default: "" }
+      - { name: last-good, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
@@ -241,6 +242,7 @@ commands:
           - { name: session, type: string, default: "" }
           - { name: session-from-file, type: string, default: "" }
           - { name: output-dir, type: string, default: "." }
+          - { name: last-good, type: bool, default: "false" }
       - use: annotations
         flags:
           - { name: session, type: string, default: "" }

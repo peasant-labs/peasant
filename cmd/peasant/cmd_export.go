@@ -619,7 +619,10 @@ func printExportSummary(w io.Writer, result *export.ExportResult[export.EEEMetri
 // Exports session transcripts as JSON files with full turn content (not truncated).
 // Each session is written to <output-dir>/<session-id>.json.
 func buildExportSessionsCommand() *cobra.Command {
-	var outputDir string
+	var (
+		outputDir string
+		lastGood  bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "sessions",
@@ -628,6 +631,11 @@ func buildExportSessionsCommand() *cobra.Command {
 
 Each session uses a coherent snapshot of stored input and indexed coordinates,
 producing a JSON envelope with full content. Stale or unproven inputs are refused.
+
+A session that keeps a newer incomplete attempt beside its last-good generation
+is refused by default: the newer attempt is never exported as the session, and
+the last-good content is not leaked past the refusal. Pass --last-good to export
+the last-good full authority explicitly.
 
 Requires either --session for a single session or --session-from-file for a batch.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -657,10 +665,15 @@ Requires either --session for a single session or --session-from-file for a batc
 			}
 			ctx := cmd.Context()
 			fs := &ingest.OSFileSystem{}
+			// The explicit last-good selection is resolved server-side: the
+			// selector carries only the intent, and the store picks the
+			// last-good authority itself. No session or generation identifier
+			// is accepted from the caller.
+			selection := ingest.SessionReadSelection{LastGood: lastGood}
 
 			var succeeded, failed int
 			for _, sid := range sessionIDs {
-				exported, exportErr := exportSessionTranscript(ctx, db, fs, sid, cfg.Output.BasePath)
+				exported, exportErr := exportSessionTranscriptSelected(ctx, db, fs, sid, selection, cfg.Output.BasePath)
 				if exportErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
 					failed++
@@ -705,6 +718,7 @@ Requires either --session for a single session or --session-from-file for a batc
 	cmd.Flags().String("session", "", "Single session ID to export")
 	cmd.Flags().String("session-from-file", "", "Path to a newline-delimited file of session IDs to export")
 	cmd.Flags().StringVar(&outputDir, "output-dir", ".", "Directory to write exported session JSON files")
+	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Export the last-good full transcript when a newer incomplete attempt is kept beside it. Without it such a session is refused rather than exporting the incomplete attempt; the store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 
 	return cmd
 }
