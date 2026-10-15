@@ -291,12 +291,12 @@ func sanitizeOpenCodeRefusal(sessionID, step, reason, recovery string, err error
 // BuildOpenCodeProvenanceCapture resolves one snapshot into the shared
 // classified-capture contract: materialized copy proof and emission plan,
 // per-message native classification with delivery correlation applied, ordered
-// segments, and the declared earlier section for retained uncertain copies.
+// segments, and the declared earlier section for uncertain copies.
 // The caller supplies the generation identity, the session metadata the
 // pipeline owns, and the prior alias/captured-prefix evidence an earlier
 // candidate or activation left behind; the builder verifies the metadata
 // agrees with the snapshot and reuses the prior identities. Proven inherited
-// copies are handed to the shared builder as retained segment evidence, so they
+// copies are handed to the shared builder as inherited segment evidence, so they
 // never become child-owned main chat.
 func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generationID string, metadata schema.UnifiedMetadata, prior OpenCodeProvenancePrior) (ClassifiedCapture, error) {
 	if strings.TrimSpace(generationID) == "" {
@@ -358,9 +358,9 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 		}
 		for _, block := range blocks {
 			block.Section = section
-			if msg.Attribution.Inherited && msg.Emit && msg.RetainedSegment != nil && len(block.RetainedUnknown) == 0 {
-				block.Retained = true
-				block.SegmentOrdinal = *msg.RetainedSegment
+			if msg.Attribution.Inherited && msg.Emit && msg.InheritedSegment != nil && len(block.RetainedUnknown) == 0 {
+				block.Inherited = true
+				block.SegmentOrdinal = *msg.InheritedSegment
 				block.Section = ProjectionSection{}
 				block.Uncertain = false
 			}

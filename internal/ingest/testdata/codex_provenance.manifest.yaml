@@ -18,8 +18,8 @@ requiredNames:
   - generic-child-user-text-unknown
   - media-only-action-answer-framing
   - native-section4-count
-  - inherited-copied-prefix-retained
-  - inherited-multi-segment-retained
+  - inherited-copied-prefix
+  - inherited-multi-segment
   - candidate-refusal-keeps-private-location-safe
   - metadata-mutation-barrier
   - graph-current-parent-supersedes-projection

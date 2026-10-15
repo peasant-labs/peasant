@@ -84,15 +84,16 @@ type ClassifiedBlock struct {
 	// UncertainSubtree moves the whole tool subtree rooted at this carrier into
 	// the first earlier-history section when the parent/child split is unknown.
 	UncertainSubtree bool
-	// Retained marks inherited evidence that is preserved locally without
-	// becoming a main or earlier conversational entry. A retained block keeps
-	// its full content in the generation catalog, receives a stable ref and
+	// Inherited marks an inherited block: evidence the source proved came from
+	// inherited context, preserved locally without becoming a main or earlier
+	// conversational entry. An inherited block keeps its full content in the
+	// generation catalog, receives a stable ref and
 	// alias, and is attached to the captured context segment named by
 	// SegmentOrdinal, so the copied bytes stay recoverable while they never
 	// inflate the main stream, the turn count, or a prose title.
-	Retained bool
-	// SegmentOrdinal names the captured context segment a retained block's ref
-	// is attached to. It is required when Retained is set and must match one of
+	Inherited bool
+	// SegmentOrdinal names the captured context segment an inherited block's ref
+	// is attached to. It is required when Inherited is set and must match one of
 	// the capture's declared segments.
 	SegmentOrdinal int
 	Role           schema.Role
@@ -187,9 +188,9 @@ type ClassifiedCapture struct {
 type resolvedBlock struct {
 	block   ClassifiedBlock
 	section int
-	// retained marks a block captured as inherited evidence: allocated and
+	// inherited marks a block captured as inherited evidence: allocated and
 	// aliased, but never emitted into a partition.
-	retained   bool
+	inherited  bool
 	ref        schema.SourceEntryRef
 	dropped    bool
 	dropTo     *resolvedBlock
@@ -263,7 +264,7 @@ func buildGenerationAndContent(capture ClassifiedCapture, allocator RefAllocator
 	if err := validateProjectionProvenance(partitions); err != nil {
 		return indexformat.Generation{}, nil, err
 	}
-	if err := validateRetainedProvenance(resolved); err != nil {
+	if err := validateInheritedProvenance(resolved); err != nil {
 		return indexformat.Generation{}, nil, err
 	}
 	if err := validateUniqueProjectionRefs(partitions); err != nil {
@@ -277,7 +278,7 @@ func buildGenerationAndContent(capture ClassifiedCapture, allocator RefAllocator
 	if err != nil {
 		return indexformat.Generation{}, nil, err
 	}
-	segments, err := attachRetainedSegmentRefs(capture.Segments, resolved)
+	segments, err := attachInheritedSegmentRefs(capture.Segments, resolved)
 	if err != nil {
 		return indexformat.Generation{}, nil, err
 	}
@@ -300,26 +301,26 @@ func buildGenerationAndContent(capture ClassifiedCapture, allocator RefAllocator
 	return generation, contentBytes, nil
 }
 
-// validateRetainedProvenance validates each retained inherited block's
-// provenance against the schema closed sets. Retained blocks are not entries,
+// validateInheritedProvenance validates each inherited block's
+// provenance against the schema closed sets. Inherited blocks are not entries,
 // so the partition check cannot see them.
-func validateRetainedProvenance(resolved []*resolvedBlock) error {
+func validateInheritedProvenance(resolved []*resolvedBlock) error {
 	for _, rb := range resolved {
-		if rb.dropped || !rb.retained || rb.block.Provenance == nil {
+		if rb.dropped || !rb.inherited || rb.block.Provenance == nil {
 			continue
 		}
 		if err := rb.block.Provenance.Validate(); err != nil {
-			return fmt.Errorf("ingest.BuildGeneration retained block %q: %w; the inherited provenance is invalid; correct the classified block", rb.block.NativeKey, err)
+			return fmt.Errorf("ingest.BuildGeneration inherited block %q: %w; the inherited provenance is invalid; correct the classified block", rb.block.NativeKey, err)
 		}
 	}
 	return nil
 }
 
-// attachRetainedSegmentRefs attaches every retained block's allocated ref to
+// attachInheritedSegmentRefs attaches every inherited block's allocated ref to
 // the captured context segment its native node belongs to. The segment already
 // carries the capture's own refs; this adds the classified identity so the
 // stored content record and alias resolve through the durable generation.
-func attachRetainedSegmentRefs(segments []indexformat.ContextSegment, resolved []*resolvedBlock) ([]indexformat.ContextSegment, error) {
+func attachInheritedSegmentRefs(segments []indexformat.ContextSegment, resolved []*resolvedBlock) ([]indexformat.ContextSegment, error) {
 	if len(resolved) == 0 {
 		return segments, nil
 	}
@@ -330,15 +331,15 @@ func attachRetainedSegmentRefs(segments []indexformat.ContextSegment, resolved [
 	}
 	seen := make(map[int]map[schema.SourceEntryRef]struct{}, len(out))
 	for _, rb := range resolved {
-		if rb.dropped || !rb.retained {
+		if rb.dropped || !rb.inherited {
 			continue
 		}
 		index, ok := byOrdinal[rb.block.SegmentOrdinal]
 		if !ok {
-			return nil, fmt.Errorf("ingest.BuildGeneration: retained block %q names captured segment %d, which the capture does not declare; the inherited evidence has no segment; capture the owning segment or drop the block", rb.block.NativeKey, rb.block.SegmentOrdinal)
+			return nil, fmt.Errorf("ingest.BuildGeneration: inherited block %q names captured segment %d, which the capture does not declare; the inherited evidence has no segment; capture the owning segment or drop the block", rb.block.NativeKey, rb.block.SegmentOrdinal)
 		}
 		if rb.ref == "" {
-			return nil, fmt.Errorf("ingest.BuildGeneration: retained block %q has no allocated ref; the inherited evidence cannot be persisted; allocate its identity before validating the generation", rb.block.NativeKey)
+			return nil, fmt.Errorf("ingest.BuildGeneration: inherited block %q has no allocated ref; the inherited evidence cannot be persisted; allocate its identity before validating the generation", rb.block.NativeKey)
 		}
 		if seen[index] == nil {
 			seen[index] = make(map[schema.SourceEntryRef]struct{}, len(out[index].CapturedRefs))
@@ -398,19 +399,19 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 		if err := validateClassifiedChannels(i, block); err != nil {
 			return err
 		}
-		if block.Retained {
+		if block.Inherited {
 			if len(block.RetainedUnknown) > 0 {
-				return fmt.Errorf("ingest.BuildGeneration: retained block[%d] carries opaque evidence without an entry; export could lose it; use an evidence-only entry carrier with explicit ownership", i)
+				return fmt.Errorf("ingest.BuildGeneration: inherited block[%d] carries opaque evidence without an entry; export could lose it; use an evidence-only entry carrier with explicit ownership", i)
 			}
-			// Retained inherited evidence never enters a conversational
+			// Inherited evidence never enters a conversational
 			// partition, so its section is ignored. Uncertainty belongs to the
 			// earlier-history path instead, and a partition-bound native
 			// attachment cannot be placed without an emitted entry.
 			if block.Uncertain || block.UncertainSubtree || block.AmbiguousPairKey != "" {
-				return fmt.Errorf("ingest.BuildGeneration: retained block[%d] native key %q also carries uncertain evidence; inherited context and uncertain earlier history cannot share one block; retain it as inherited or move it to an earlier section", i, block.NativeKey)
+				return fmt.Errorf("ingest.BuildGeneration: inherited block[%d] native key %q also carries uncertain evidence; inherited context and uncertain earlier history cannot share one block; keep it inherited or move it to an earlier section", i, block.NativeKey)
 			}
 			if len(block.NativeAttachments) != 0 {
-				return fmt.Errorf("ingest.BuildGeneration: retained block[%d] native key %q carries a native attachment that cannot attach without an emitted entry; keep partition-bound enrichment with an emitted block", i, block.NativeKey)
+				return fmt.Errorf("ingest.BuildGeneration: inherited block[%d] native key %q carries a native attachment that cannot attach without an emitted entry; keep partition-bound enrichment with an emitted block", i, block.NativeKey)
 			}
 			if err := validateClassifiedUsage(i, block); err != nil {
 				return err
@@ -482,8 +483,8 @@ func validateClassifiedChannels(index int, block ClassifiedBlock) error {
 		return err
 	}
 	if block.Omitted != nil {
-		if block.Retained {
-			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q is both retained and an omission placeholder; a retained block never becomes an entry, so the placeholder would be lost; emit it or drop the omission", index, block.NativeKey)
+		if block.Inherited {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q is both inherited and an omission placeholder; an inherited block never becomes an entry, so the placeholder would be lost; emit it or drop the omission", index, block.NativeKey)
 		}
 		if block.Depth != 0 {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder at depth %d; a placeholder stands at the omitted record's own position and never nests; record depth 0", index, block.NativeKey, block.Depth)
@@ -521,8 +522,8 @@ func validateClassifiedChannels(index int, block ClassifiedBlock) error {
 		return nil
 	}
 	if block.ToolCallID != nil {
-		if block.Retained {
-			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries a direct source tool id on a retained block; a retained block never becomes an entry, so the id would be lost; emit it or drop the id", index, block.NativeKey)
+		if block.Inherited {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries a direct source tool id on an inherited block; an inherited block never becomes an entry, so the id would be lost; emit it or drop the id", index, block.NativeKey)
 		}
 		if block.Depth != 0 {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries a direct source tool id at depth %d; only an unpaired depth-0 tool_result names its own id, and a nested result pairs through its carrier's call key; drop the direct id or pair it", index, block.NativeKey, block.Depth)
@@ -549,8 +550,8 @@ func validateClassifiedExtra(index int, block ClassifiedBlock) error {
 	if block.Extra == "" {
 		return nil
 	}
-	if block.Retained {
-		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an extension document on a retained block; a retained block never becomes an entry, so the extension would be lost; emit it or drop the extension", index, block.NativeKey)
+	if block.Inherited {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an extension document on an inherited block; an inherited block never becomes an entry, so the extension would be lost; emit it or drop the extension", index, block.NativeKey)
 	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(block.Extra), &object); err != nil {
@@ -618,7 +619,7 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 		if _, duplicate := byKey[block.NativeKey]; duplicate {
 			return nil, fmt.Errorf("ingest.BuildGeneration: native key %q repeats in one capture; a later capture could not tell the blocks apart; keep one block per native key", block.NativeKey)
 		}
-		rb := &resolvedBlock{block: block, section: block.Section.Index, retained: block.Retained}
+		rb := &resolvedBlock{block: block, section: block.Section.Index, inherited: block.Inherited}
 		resolved[i] = rb
 		byKey[block.NativeKey] = rb
 	}
@@ -627,7 +628,7 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 	hasEarlier := len(capture.EarlierStates) > 0
 
 	for _, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.AmbiguousPairKey != "" {
@@ -706,10 +707,10 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 			parent[rb] = ra
 		}
 	}
-	// Carrier edges. Retained inherited blocks never enter a partition, so
+	// Carrier edges. Inherited blocks never enter a partition, so
 	// their carrier/call edges do not originate a partition-closed subtree.
 	for i, rb := range resolved {
-		if rb.retained || rb.block.Depth == 0 {
+		if rb.inherited || rb.block.Depth == 0 {
 			continue
 		}
 		carrier, ok := byKey[rb.block.CarrierNativeKey]
@@ -724,7 +725,7 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 	// Shared native call identities.
 	byCall := make(map[string][]int)
 	for i, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.ToolCallKey != "" {
@@ -741,7 +742,7 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 	// group into earlier history before the collapse keeps the owner's entry.
 	byCorrelation := make(map[string][]int)
 	for i, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.NativeCorrelationKey != "" {
@@ -755,7 +756,7 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 	}
 	components := make(map[int][]*resolvedBlock)
 	for i, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		root := find(i)
@@ -796,11 +797,11 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 // NativeCorrelationKey. The proof is explicit native correlation; the
 // projection never infers it from equal bytes, equal evidence or first-wins
 // order. Every unproved representation keeps its own ref, and the mirror's
-// native key aliases the retained owner so a later capture cannot reallocate.
+// native key aliases the inherited owner so a later capture cannot reallocate.
 func collapseProvedMirrors(resolved []*resolvedBlock) {
 	groups := make(map[string][]*resolvedBlock)
 	for _, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.NativeCorrelationKey != "" {
@@ -817,11 +818,11 @@ func collapseProvedMirrors(resolved []*resolvedBlock) {
 	}
 }
 
-// allocateBlockRefs assigns one opaque block ref per retained block, reusing a
+// allocateBlockRefs assigns one opaque block ref per inherited block, reusing a
 // prior alias when one exists. When two distinct native keys inherited the same
 // prior ref because an earlier generation merged them (an unproved pair since
 // proven distinct, or a proved mirror whose proof was withdrawn), the first
-// retained owner keeps the ref and the newly distinct representation gets a
+// inherited owner keeps the ref and the newly distinct representation gets a
 // fresh one. A persisted alias is never silently cleared or re-merged.
 func allocateBlockRefs(resolved []*resolvedBlock, prior ProjectionPriorState, allocator RefAllocator) error {
 	used := make(map[schema.SourceEntryRef]string, len(resolved))
@@ -915,7 +916,7 @@ func layoutProjectionPartitions(capture ClassifiedCapture, resolved []*resolvedB
 		out.earlier[i] = indexformat.EarlierPartition{State: state}
 	}
 	for _, rb := range resolved {
-		if rb.dropped || rb.retained {
+		if rb.dropped || rb.inherited {
 			continue
 		}
 		entry, err := projectionEntry(capture, rb)
@@ -1151,7 +1152,7 @@ func attachProjectionNativeMetadata(partitions *projectionPartitions, resolved [
 		toolIDs[callKey{partition: rb.section, native: rb.block.ToolCallKey}] = string(rb.ref)
 	}
 	for _, rb := range resolved {
-		if rb.dropped || rb.retained || len(rb.block.NativeAttachments) == 0 {
+		if rb.dropped || rb.inherited || len(rb.block.NativeAttachments) == 0 {
 			continue
 		}
 		for j := range rb.block.NativeAttachments {
@@ -1238,7 +1239,7 @@ func validateUniqueProjectionRefs(partitions projectionPartitions) error {
 }
 
 // buildProjectionContent records the full bytes once per emitted ref and once
-// per retained inherited ref. The relative blob path is a validated
+// per inherited ref. The relative blob path is a validated
 // owned-generation path; the digest is local integrity evidence only. The
 // returned byte map is keyed by ref so an activation can stage every record the
 // generation names without reopening the native source.
@@ -1284,10 +1285,10 @@ func buildProjectionContent(partitions projectionPartitions, resolved []*resolve
 		}
 	}
 	for _, rb := range resolved {
-		if rb.dropped || !rb.retained {
+		if rb.dropped || !rb.inherited {
 			continue
 		}
-		if err := add(rb.ref, retainedBlockContent(rb.block)); err != nil {
+		if err := add(rb.ref, inheritedBlockContent(rb.block)); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -1295,10 +1296,10 @@ func buildProjectionContent(partitions projectionPartitions, resolved []*resolve
 	return records, content, nil
 }
 
-// retainedBlockContent returns the full canonical content bytes one retained
-// inherited block owns, matching the same field selection the emitted-entry
+// inheritedBlockContent returns the full canonical content bytes one inherited
+// block owns, matching the same field selection the emitted-entry
 // path uses.
-func retainedBlockContent(block ClassifiedBlock) string {
+func inheritedBlockContent(block ClassifiedBlock) string {
 	switch block.EntryType {
 	case schema.EntryTypeToolUse:
 		return block.ToolArguments

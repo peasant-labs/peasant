@@ -573,13 +573,14 @@ type codexBlockClassifier struct {
 	registry       map[string]codexKindAttribution
 	correlated     map[string]bool
 	blocks         []ClassifiedBlock
-	// retained holds inherited blocks whose bytes are preserved locally without
-	// becoming main or earlier conversational entries. They carry Retained and
-	// the captured segment ordinal instead of a projection section.
-	retained        []ClassifiedBlock
-	retaining       bool
-	retainedSegment int
-	useKeys         map[string]bool
+	// inherited holds the blocks the source proved came from inherited context:
+	// their bytes are preserved locally without becoming main or earlier
+	// conversational entries. They carry Inherited and the captured segment
+	// ordinal instead of a projection section.
+	inherited        []ClassifiedBlock
+	inheriting       bool
+	inheritedSegment int
+	useKeys          map[string]bool
 	// callCarriers maps one native call identity to the depth-0 assistant
 	// carrier its tool_use created. A matching tool_result attaches to that
 	// SAME carrier instead of inventing a second empty carrier, so one folded
@@ -595,30 +596,30 @@ type codexBlockClassifier struct {
 }
 
 // emit appends one classified block to the active stream. While the current
-// node is proven inherited, the block is held as retained local evidence
+// node is proven inherited, the block is held as inherited local evidence
 // instead: it keeps its content, native key and provenance, is attached to the
 // captured segment it came from, and never enters a main or earlier
 // conversational partition.
 func (c *codexBlockClassifier) emit(block ClassifiedBlock) {
-	if !c.retaining {
+	if !c.inheriting {
 		c.blocks = append(c.blocks, block)
 		return
 	}
-	block.Retained = true
-	block.SegmentOrdinal = c.retainedSegment
+	block.Inherited = true
+	block.SegmentOrdinal = c.inheritedSegment
 	block.Section = ProjectionSection{}
 	block.Uncertain = false
 	block.UncertainSubtree = false
 	block.AmbiguousPairKey = ""
 	block.SubmissionKey = ""
-	c.retained = append(c.retained, block)
+	c.inherited = append(c.inherited, block)
 }
 
 // finish demotes orphan tool results to depth-0 entries and reports whether
 // an uncertain earlier section is declared. A result without its call block
 // in this capture keeps its content and identity at depth 0 instead of
 // failing the candidate: the pairing evidence is absent, not the content.
-// Retained inherited blocks are appended after the emitted blocks; they carry
+// Inherited blocks are appended after the emitted blocks; they carry
 // no partition and need no orphan demotion.
 func (c *codexBlockClassifier) finish() ([]ClassifiedBlock, []schema.EarlierHistoryState, error) {
 	for i := range c.blocks {
@@ -636,7 +637,7 @@ func (c *codexBlockClassifier) finish() ([]ClassifiedBlock, []schema.EarlierHist
 	if c.uncertain {
 		earlier = append(earlier, schema.EarlierHistoryUncertainMigrated)
 	}
-	return append(append([]ClassifiedBlock(nil), c.blocks...), c.retained...), earlier, nil
+	return append(append([]ClassifiedBlock(nil), c.blocks...), c.inherited...), earlier, nil
 }
 
 // classifyNode converts one captured node into zero or more classified
@@ -651,15 +652,15 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 	}
 	metadata := decodeCodexEnvelopeMetadata(node.Metadata)
 	// A node whose captured ownership or per-record envelope proves it inherited
-	// is retained as local evidence, never emitted as a main or earlier
+	// is held as inherited local evidence, never emitted as a main or earlier
 	// conversational entry.
 	if ownershipOf(node, metadata) == schema.ContentOwnershipInherited {
-		c.retaining = true
-		c.retainedSegment = node.SegmentOrdinal
+		c.inheriting = true
+		c.inheritedSegment = node.SegmentOrdinal
 	}
 	defer func() {
-		c.retaining = false
-		c.retainedSegment = 0
+		c.inheriting = false
+		c.inheritedSegment = 0
 	}()
 	if len(node.RetainedUnknown) > 0 {
 		ownership := ownershipOf(node, metadata)
@@ -669,7 +670,7 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		// Evidence-only carriers use the common entry metadata channel even
 		// for inherited sources. They carry no conversational content, count,
 		// title, or display; provenance and the source segment retain ownership.
-		c.retaining = false
+		c.inheriting = false
 		block := ClassifiedBlock{NativeKey: node.NativeKey + "/retained-unknown", Section: sectionOf(ownership), Uncertain: ownership == schema.ContentOwnershipUncertain, Role: RoleSystem, EntryType: EntryTypeSystem, RetainedUnknown: node.RetainedUnknown,
 			Provenance: &schema.ContentProvenance{Origin: schema.ContentOriginUnknown, Actor: schema.ActorOriginUnknown, Delivery: schema.DeliveryOriginUnknown, Ownership: ownership, Evidence: schema.EvidenceNativeTyped, InputModality: schema.InputModalityNone}}
 		c.emit(block)
@@ -1323,8 +1324,8 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 		delivery = schema.DeliveryOriginInheritedContext
 	}
 	partType := payload.Type
-	// Retained inherited calls are evidence, not emitted parents.
-	if !c.retaining {
+	// Inherited calls are evidence, not emitted parents.
+	if !c.inheriting {
 		if c.callCarriers == nil {
 			c.callCarriers = map[string]string{}
 		}
@@ -1352,7 +1353,7 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 			InputModality: schema.InputModalityNone,
 		},
 	})
-	if !c.retaining {
+	if !c.inheriting {
 		if c.useKeys == nil {
 			c.useKeys = map[string]bool{}
 		}

@@ -82,18 +82,18 @@ type OpenCodeHistorySnapshot struct {
 }
 
 // OpenCodeMaterializedMessage is one snapshot row with its decided ownership:
-// emitted main content, or retained uncertain evidence for a declared earlier
+// emitted main content, or uncertain evidence for a declared earlier
 // section.
 type OpenCodeMaterializedMessage struct {
 	Row         OpenCodeHistoryRow
 	Attribution OpenCodeMessageAttribution
 	Emit        bool
-	// RetainedSegment names the ordered captured-context segment that owns this
+	// InheritedSegment names the ordered captured-context segment that owns this
 	// message's blocks when it is proven inherited context. It is set only for
-	// an emitted inherited copy; the builder retains those blocks as local
-	// evidence under the segment instead of emitting them as child chat.
-	RetainedSegment *int
-	EarlierIndex    int // 1-based earlier section when Emit is false but retained
+	// an emitted inherited copy; the builder keeps those blocks as inherited
+	// local evidence under the segment instead of emitting them as child chat.
+	InheritedSegment *int
+	EarlierIndex     int // 1-based earlier section when Emit is false but kept
 }
 
 // OpenCodeMaterializedHistory is the settled copy proof plus the emission
@@ -271,7 +271,7 @@ func resolveOpenCodeCopies(snapshot OpenCodeHistorySnapshot) ([]indexformat.Cont
 		}
 		if segmentIndex >= 0 {
 			index := segmentIndex
-			message.RetainedSegment = &index
+			message.InheritedSegment = &index
 		}
 		messages = append(messages, message)
 	}
@@ -337,7 +337,7 @@ func openCodeCopyBounds(fork *OpenCodeForkProof) (admitBelow, disputeBelow int64
 	return admitBelow, disputeBelow, hasBound
 }
 
-// needsOpenCodeUncertainSection reports whether any retained message needs a
+// needsOpenCodeUncertainSection reports whether any uncertain message needs a
 // declared earlier-history section.
 func needsOpenCodeUncertainSection(messages []OpenCodeMaterializedMessage) bool {
 	for _, msg := range messages {

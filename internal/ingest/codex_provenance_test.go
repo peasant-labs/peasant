@@ -73,13 +73,13 @@ type codexEarlierFixture struct {
 	Entries []codexEntryFixture `yaml:"entries"`
 }
 
-// codexRetainedFixture is one inherited evidence block that must stay
+// codexInheritedFixture is one inherited evidence block that must stay
 // recoverable from the managed generation catalog without being emitted as a
 // main or earlier conversational entry.
-type codexRetainedFixture struct {
+type codexInheritedFixture struct {
 	Ref     string `yaml:"ref"`
 	Content string `yaml:"content"`
-	// SegmentInclusion names the captured context segment the retained ref must
+	// SegmentInclusion names the captured context segment the inherited ref must
 	// be attached to, so the inherited evidence keeps its segment provenance.
 	SegmentInclusion string `yaml:"segmentInclusion"`
 }
@@ -110,7 +110,7 @@ type codexExpectFixture struct {
 	TitleRefs             []string                   `yaml:"titleRefs"`
 	Main                  []codexEntryFixture        `yaml:"main"`
 	Earlier               []codexEarlierFixture      `yaml:"earlier"`
-	Retained              []codexRetainedFixture     `yaml:"retained"`
+	Inherited             []codexInheritedFixture    `yaml:"inherited"`
 	MetadataCWD           string                     `yaml:"metadataCWD"`
 }
 
@@ -543,8 +543,8 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 		}
 		codexAssertEntries(t, fmt.Sprintf("earlier[%d]", i), want.Entries, generation.Earlier[i].Content.Entries)
 	}
-	codexAssertRetained(t, candidate, c.Expected.Retained)
-	// Every allocated content identity, including retained call evidence, must
+	codexAssertInherited(t, candidate, c.Expected.Inherited)
+	// Every allocated content identity, including inherited call evidence, must
 	// remain reachable through the native alias catalog.
 	aliased := make(map[schema.SourceEntryRef]bool)
 	for _, alias := range generation.Aliases {
@@ -557,13 +557,13 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 	}
 }
 
-// codexAssertRetained proves that inherited evidence stays recoverable from the
+// codexAssertInherited proves that inherited evidence stays recoverable from the
 // managed generation catalog while never entering a main or earlier
-// conversational partition. A retained ref must carry full content, must be
+// conversational partition. An inherited ref must carry full content, must be
 // attached to a captured context segment, and must not appear in either the
-// main or the earlier entry streams. The retained set is derived from the
+// main or the earlier entry streams. The inherited set is derived from the
 // generation itself, never from a bare count.
-func codexAssertRetained(t *testing.T, candidate ingest.CodexCandidate, want []codexRetainedFixture) {
+func codexAssertInherited(t *testing.T, candidate ingest.CodexCandidate, want []codexInheritedFixture) {
 	t.Helper()
 	generation := candidate.V2.Generation
 	emitted := make(map[schema.SourceEntryRef]struct{}, len(generation.Main.Entries))
@@ -584,19 +584,19 @@ func codexAssertRetained(t *testing.T, candidate ingest.CodexCandidate, want []c
 			segmentInclusions[ref][segment.Inclusion] = struct{}{}
 		}
 	}
-	retained := make(map[schema.SourceEntryRef]struct{})
+	inherited := make(map[schema.SourceEntryRef]struct{})
 	for _, record := range generation.Content {
 		if _, ok := emitted[record.Ref]; !ok {
-			retained[record.Ref] = struct{}{}
+			inherited[record.Ref] = struct{}{}
 		}
 	}
-	if len(retained) != len(want) {
-		t.Fatalf("retained refs = %v, want %d named retained entries", codexReferenceStrings(mapKeysOfSet(retained)), len(want))
+	if len(inherited) != len(want) {
+		t.Fatalf("inherited refs = %v, want %d named inherited entries", codexReferenceStrings(mapKeysOfSet(inherited)), len(want))
 	}
 	for _, expected := range want {
 		ref := schema.SourceEntryRef(expected.Ref)
-		if _, ok := retained[ref]; !ok {
-			t.Errorf("ref %q is not retained inherited evidence; inherited content would be lost", expected.Ref)
+		if _, ok := inherited[ref]; !ok {
+			t.Errorf("ref %q is not inherited evidence; inherited content would be lost", expected.Ref)
 			continue
 		}
 		if _, ok := emitted[ref]; ok {
@@ -604,14 +604,14 @@ func codexAssertRetained(t *testing.T, candidate ingest.CodexCandidate, want []c
 		}
 		inclusions := segmentInclusions[ref]
 		if len(inclusions) == 0 {
-			t.Errorf("retained ref %q is not attached to any captured context segment; the evidence is not recoverable", expected.Ref)
+			t.Errorf("inherited ref %q is not attached to any captured context segment; the evidence is not recoverable", expected.Ref)
 		} else if expected.SegmentInclusion != "" {
 			if _, ok := inclusions[indexformat.SegmentInclusion(expected.SegmentInclusion)]; !ok {
-				t.Errorf("retained ref %q is not captured by a %q segment; its segment provenance was lost", expected.Ref, expected.SegmentInclusion)
+				t.Errorf("inherited ref %q is not captured by a %q segment; its segment provenance was lost", expected.Ref, expected.SegmentInclusion)
 			}
 		}
 		if got := string(candidate.Content[ref]); got != expected.Content {
-			t.Errorf("retained content for %q = %q, want %q", expected.Ref, got, expected.Content)
+			t.Errorf("inherited content for %q = %q, want %q", expected.Ref, got, expected.Content)
 		}
 	}
 }
@@ -803,13 +803,13 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 	fixture := loadCodexProvenanceFixture(t)
 	var testCase codexProvenanceCase
 	for _, candidateCase := range fixture.Cases {
-		if candidateCase.Name == "inherited-copied-prefix-retained" {
+		if candidateCase.Name == "inherited-copied-prefix" {
 			testCase = candidateCase
 			break
 		}
 	}
 	if testCase.Name == "" {
-		t.Fatal("fixture case inherited-copied-prefix-retained is missing")
+		t.Fatal("fixture case inherited-copied-prefix is missing")
 	}
 	candidate, err := runCodexProvenanceCandidate(t, testCase)
 	if err != nil {
@@ -821,9 +821,9 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 		t.Fatalf("converted turns = %d, want %d", len(turns), testCase.Expected.TurnCount)
 	}
 	for _, turn := range turns {
-		for _, retained := range testCase.Expected.Retained {
-			if strings.Contains(turn.Content, retained.Content) {
-				t.Errorf("rendered turn %d leaked inherited content %q", turn.Index, retained.Content)
+		for _, inherited := range testCase.Expected.Inherited {
+			if strings.Contains(turn.Content, inherited.Content) {
+				t.Errorf("rendered turn %d leaked inherited content %q", turn.Index, inherited.Content)
 			}
 		}
 	}
@@ -842,9 +842,9 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 		t.Errorf("detail turns = %d, want %d", len(detail.Turns), testCase.Expected.TurnCount)
 	}
 	for _, turn := range detail.Turns {
-		for _, retained := range testCase.Expected.Retained {
-			if strings.Contains(turn.Content, retained.Content) {
-				t.Errorf("detail turn %d leaked inherited content %q", turn.Index, retained.Content)
+		for _, inherited := range testCase.Expected.Inherited {
+			if strings.Contains(turn.Content, inherited.Content) {
+				t.Errorf("detail turn %d leaked inherited content %q", turn.Index, inherited.Content)
 			}
 		}
 	}
