@@ -105,7 +105,12 @@ func resolveCollectiveRefs(ctx context.Context, client *village.VillageClient, v
 // collectiveRefCandidate returns the reference with surrounding space removed,
 // accepting either a bare identifier or name, or a pasted collective web URL.
 // A URL that is not a collective page is refused: the path must be exactly
-// /groups/<uuid>, so a lookalike such as /users/<uuid> never resolves.
+// /groups/<uuid> or /collectives/<uuid> with a collective identifier as the
+// last segment, so lookalikes such as /users/<uuid> or /groups/<slug> never
+// resolve as a name. A bare identifier or name is returned as is for the
+// caller to resolve against the membership list; only a pasted URL is refused
+// here, mirroring pull.ParseTranscriptRef's separation of a bare identifier
+// from a URL whose last segment is wrong.
 func collectiveRefCandidate(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -132,6 +137,14 @@ func collectiveRefCandidate(raw string) (string, error) {
 				"  why:  only a collective's own page URL names a collective\n"+
 				"  fix:  copy the collective's page URL (…/groups/<uuid> or …/collectives/<uuid>), or pass its name or UUID",
 			trimmed, parsed.Path)
+	}
+	if _, ok := collectiveRefUUID(segments[1]); !ok {
+		return "", fmt.Errorf(
+			"invalid --collective value %q: the URL is not a collective page: last segment %q is not a collective identifier\n"+
+				"  what: the URL path has the /groups/<uuid> or /collectives/<uuid> shape but the last segment is not a collective UUID (got %q)\n"+
+				"  why:  a collective page URL must end in the collective's UUID, so a slug cannot name a collective\n"+
+				"  fix:  copy the collective's page URL (…/groups/<uuid> or …/collectives/<uuid>), or pass its name or UUID",
+			trimmed, segments[1], segments[1])
 	}
 	return segments[1], nil
 }
