@@ -67,7 +67,7 @@ func runKickstartFlow(
 		return fmt.Errorf(
 			"prepare the kickstart store root: %w.\n"+
 				"what: Peasant could not resolve the output base path the kickstart store opens at.\n"+
-				"why: the configured output.basePath is not a usable path.\n"+
+				"why: the output base path (configured output.basePath, or the data-dir fallback when it is unset) is not a usable absolute path.\n"+
 				"where: runKickstartFlow, before the selection screen opened.\n"+
 				"when: while preparing the stored-session snapshot and preview bodies.\n"+
 				"meaning: Peasant opened no store and started no ingest, so the flow had no preview or already-imported marks.\n"+
@@ -259,20 +259,20 @@ func kickstartStoreOpenError(mode config.SelectionMode, err error) error {
 		return fmt.Errorf(
 			"prepare legacy project selection: %w.\n"+
 				"what: Peasant could not open the stored sessions needed to build exact project choices.\n"+
-				"why: Peasant could not read the local session store as a Peasant database.\n"+
+				"why: the Peasant data directory, the local session store database, or the output base path is not usable.\n"+
 				"where: runKickstartFlow, before the selection screen opened.\n"+
 				"when: while converting the saved all-projects setting.\n"+
 				"meaning: Peasant did not change the saved setting or start setup.\n"+
-				"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+				"fix: check the Peasant data directory and database, and set output.basePath in config.yaml to a usable directory (or unset it to use the default output location), then run `peasant kickstart` again.", err)
 	}
 	return fmt.Errorf(
 		"prepare saved project availability: %w.\n"+
 			"what: Peasant could not open the stored sessions needed to verify the saved project choice.\n"+
-			"why: Peasant could not read the local session store as a Peasant database.\n"+
+			"why: the Peasant data directory, the local session store database, or the output base path is not usable.\n"+
 			"where: runKickstartFlow, before the selection screen opened.\n"+
 			"when: while aligning the no-project save check with the web viewer and push chooser.\n"+
 			"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
-			"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+			"fix: check the Peasant data directory and database, and set output.basePath in config.yaml to a usable directory (or unset it to use the default output location), then run `peasant kickstart` again.", err)
 }
 
 func kickstartStoreReadError(mode config.SelectionMode, err error) error {

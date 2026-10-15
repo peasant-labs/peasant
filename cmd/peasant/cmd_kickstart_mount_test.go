@@ -814,6 +814,83 @@ func TestResolveKickstartOutputRoot(t *testing.T) {
 	}
 }
 
+// TestKickstartRootFailureNamesOutputBasePath proves the store-open refusal
+// names the output base path the managed-generation reader opens at, not only
+// the data directory: a configured output.basePath that is an existing regular
+// file is refused before the selection screen, and the copy names both the
+// cause and the set/unset remedy. The flow runner is a fail-closed guard: the
+// refusal must land before anything is mounted.
+func TestKickstartRootFailureNamesOutputBasePath(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	// A real store, so the database stat succeeds and the ONLY failure is the
+	// owned-artifact root the reader opens at.
+	seedKickstartStore(t, dataHome, loadPreviewDoc(t).Recorded)
+
+	rootFile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(rootFile, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write the unusable output base path: %v", err)
+	}
+	cfg := config.BaseConfig()
+	cfg.Output.BasePath = rootFile
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.SaveAtomic(configPath, cfg); err != nil {
+		t.Fatalf("save the config: %v", err)
+	}
+
+	deps := defaultKickstartCommandDeps()
+	deps.runModel = func(tea.Model) error {
+		t.Fatal("the flow reached the selection screen; the store-open refusal must happen first")
+		return nil
+	}
+	err := runKickstartFlow(mountTestCmd(t, dataHome), deps, configPath, ftue.ProviderInventory{}, nil, nil)
+	if err == nil {
+		t.Fatal("an unusable output base path must refuse the store open")
+	}
+	for _, want := range []string{"output base path", "output.basePath"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("store-open refusal = %v, want it to contain %q", err, want)
+		}
+	}
+}
+
+// TestKickstartPreflightRootFailureNamesTheFallback proves the pre-flight copy
+// names the data-dir fallback: with output.basePath unset, the root comes from
+// the --data-dir override, and a RELATIVE override resolves to a relative path
+// the path constructor refuses. The refusal names both the fallback and the
+// output base path, and the flow runner guard proves nothing was mounted.
+func TestKickstartPreflightRootFailureNamesTheFallback(t *testing.T) {
+	t.Parallel()
+	cfg := config.BaseConfig()
+	cfg.Output.BasePath = ""
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.SaveAtomic(configPath, cfg); err != nil {
+		t.Fatalf("save the config: %v", err)
+	}
+	loaded, err := loadConfig(configPath)
+	if err != nil {
+		t.Fatalf("load the saved config: %v", err)
+	}
+	if loaded.Output.BasePath != "" {
+		t.Fatalf("the empty output.basePath did not survive the round trip: %q", loaded.Output.BasePath)
+	}
+
+	deps := defaultKickstartCommandDeps()
+	deps.runModel = func(tea.Model) error {
+		t.Fatal("the flow reached the selection screen; the pre-flight refusal must happen first")
+		return nil
+	}
+	err = runKickstartFlow(mountTestCmd(t, "relative-data-dir"), deps, configPath, ftue.ProviderInventory{}, nil, nil)
+	if err == nil {
+		t.Fatal("a relative data-dir fallback must refuse the store root")
+	}
+	for _, want := range []string{"data-dir fallback", "output base path"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("pre-flight refusal = %v, want it to contain %q", err, want)
+		}
+	}
+}
+
 // TestKickstartPreview_WithoutAStoreStillNamesSessions proves the first-run
 // path: with no database on disk yet, openKickstartStore yields no store and a
 // no-op close, and the preview still names each discovered session by its
