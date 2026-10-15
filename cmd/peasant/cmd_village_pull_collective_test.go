@@ -1,15 +1,27 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/pull"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/tui/gates"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
+	"github.com/spf13/cobra"
 )
 
 //go:embed testdata/village_pull_collectives.yaml
@@ -46,6 +58,20 @@ func TestVillagePullCollectivesFixtures(t *testing.T) {
 				testVillagePullCollectiveSkipGatePruning(t)
 			case "skip-gate fallback pulls every transcript individually when the gate does not answer":
 				testVillagePullCollectiveSkipGateFallback(t)
+			case "progress renders on a terminal with done over total":
+				testVillagePullCollectiveProgressTTY(t)
+			case "progress stays silent when stderr is not a terminal":
+				testVillagePullCollectiveProgressSuppressedOffTerminal(t)
+			case "progress stays silent under json and the aggregate is unchanged":
+				testVillagePullCollectiveProgressSuppressedUnderJSON(t)
+			case "cancel reports after N of M and exits non-zero":
+				testVillagePullCollectiveCancelReports(t)
+			case "cancel leaves no partial copy and earlier transcripts stay landed":
+				testVillagePullCollectiveCancelNoPartial(t)
+			case "resume after cancel downloads only what was missing":
+				testVillagePullCollectiveResumeAfterCancel(t)
+			case "progress composes through the kit primitives only":
+				testVillagePullCollectiveKitGate(t)
 			default:
 				t.Fatalf("unknown bulk pull case %q", c.Name)
 			}
@@ -259,5 +285,247 @@ func testVillagePullCollectiveSkipGateFallback(t *testing.T) {
 	}
 	if n := countPulledRows(t, dir); n != 2 {
 		t.Errorf("fallback pull must keep 2 rows, got %d", n)
+	}
+}
+
+// testVillagePullCollectiveProgressTTY proves the stderr bar renders
+// done/total on a terminal: the reporter is enabled on a PTY writer and
+// the bytes it writes carry the count and the bar cells.
+func testVillagePullCollectiveProgressTTY(t *testing.T) {
+	t.Helper()
+	master, terminal := openTestTerminal(t)
+	setTestTerminalSize(t, terminal, 24, 80)
+	progress := newCollectivePullProgress(terminal, false, theme.New(theme.ModeDark))
+	if !progress.Enabled() {
+		t.Fatal("progress must be enabled on a terminal stderr without --json")
+	}
+	out := newSignalWriter("1/4")
+	copied := make(chan struct{})
+	go func() { _, _ = io.Copy(out, master); close(copied) }()
+	t.Cleanup(func() { _ = terminal.Close(); _ = master.Close(); <-copied })
+	progress.SetTotal(4)
+	progress.Advance(1)
+	testwait.Receive(t, out.seen, "the progress bar rendered done/total on a terminal")
+	rendered := out.String()
+	if !strings.Contains(rendered, "1/4") {
+		t.Errorf("terminal bar must show done/total 1/4; got %q", rendered)
+	}
+	if !strings.Contains(rendered, "█") && !strings.Contains(rendered, "░") {
+		t.Errorf("terminal bar must carry bar cells; got %q", rendered)
+	}
+}
+
+// testVillagePullCollectiveProgressSuppressedOffTerminal proves no bar is
+// written when stderr is not a terminal. The per-transcript lines and the
+// closing summary keep printing because they travel on stdout.
+func testVillagePullCollectiveProgressSuppressedOffTerminal(t *testing.T) {
+	t.Helper()
+	var stderr bytes.Buffer
+	progress := newCollectivePullProgress(&stderr, false, theme.New(theme.ModeDark))
+	if progress.Enabled() {
+		t.Error("progress must stay silent when stderr is not a terminal")
+	}
+	progress.SetTotal(3)
+	progress.Advance(1)
+	progress.Advance(2)
+	if stderr.Len() != 0 {
+		t.Errorf("non-terminal stderr must receive no bar bytes, got %q", stderr.String())
+	}
+
+	dir := t.TempDir()
+	server := newPullCollectiveDouble(t)
+	ids := pullCollectiveTestIDs(2)
+	seedPullTranscripts(t, server, ids, pullCollectiveAID)
+	writeCredsAt(t, dir, server.URL())
+
+	out, err := runVillage(t, dir, "transcripts", "pull", "--collective", pullCollectiveAName)
+	if err != nil {
+		t.Fatalf("suppressed-progress pull must exit 0, got err=%v out=%q", err, out)
+	}
+	if strings.Contains(out, "█") || strings.Contains(out, "░") {
+		t.Errorf("non-terminal run must print no bar cells; out=%q", out)
+	}
+	if !strings.Contains(out, "pulled 2") || !strings.Contains(out, "failed 0") {
+		t.Errorf("per-transcript lines and summary must keep printing without a terminal; out=%q", out)
+	}
+}
+
+// testVillagePullCollectiveProgressSuppressedUnderJSON proves --json forces
+// the bar off even on a terminal, and the aggregate stays machine-parseable.
+func testVillagePullCollectiveProgressSuppressedUnderJSON(t *testing.T) {
+	t.Helper()
+	_, terminal := openTestTerminal(t)
+	progress := newCollectivePullProgress(terminal, true, theme.New(theme.ModeDark))
+	if progress.Enabled() {
+		t.Error("progress must stay silent under --json even on a terminal")
+	}
+
+	dir := t.TempDir()
+	server := newPullCollectiveDouble(t)
+	ids := pullCollectiveTestIDs(2)
+	seedPullTranscripts(t, server, ids, pullCollectiveAID)
+	writeCredsAt(t, dir, server.URL())
+
+	out, err := runVillage(t, dir, "transcripts", "pull", "--collective", pullCollectiveAName, "--json")
+	if err != nil {
+		t.Fatalf("json pull must exit 0, got err=%v out=%q", err, out)
+	}
+	var parsed jsonPullCollective
+	if jErr := json.Unmarshal([]byte(out), &parsed); jErr != nil {
+		t.Fatalf("json pull must stay machine-parseable with progress suppressed: %v\nout=%q", jErr, out)
+	}
+	if parsed.Totals.Pulled != 2 || parsed.Totals.Total != 2 || len(parsed.Results) != 2 {
+		t.Errorf("json aggregate must report 2 pulled of 2; got %+v", parsed.Totals)
+	}
+	if strings.Contains(out, "█") || strings.Contains(out, "░") {
+		t.Errorf("json run must print no bar cells; out=%q", out)
+	}
+}
+
+// cancelAfterFirstPuller wraps the real pipeline and cancels the run context
+// after the first transcript lands, so cancellation is deterministic with no
+// timing: the second transcript never starts.
+type cancelAfterFirstPuller struct {
+	inner  collectivePuller
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (s *cancelAfterFirstPuller) PullTranscript(ctx context.Context, ref pull.TranscriptRef, opts pull.PullOptions) (*pull.PullResult, error) {
+	s.calls++
+	result, err := s.inner.PullTranscript(ctx, ref, opts)
+	if s.calls == 1 {
+		s.cancel()
+	}
+	return result, err
+}
+
+// runCancelOnce seeds three transcripts, pulls with a pipeline that cancels
+// after the first lands, and returns the sandbox with the interrupted run's
+// stdout, stderr, and error. Each cancel case starts from this one
+// deterministic interruption.
+func runCancelOnce(t *testing.T) (string, *testutil.CollectiveVillage, []schema.TranscriptID, string, string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	server := newPullCollectiveDouble(t)
+	ids := pullCollectiveTestIDs(3)
+	seedPullTranscripts(t, server, ids, pullCollectiveAID)
+
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer db.Close()
+	client := village.NewVillageClient(server.URL(), "test-api-key", nil)
+	pullsRoot := string(defaults.ResolveVillagePullsDirPathWith(dir))
+	realPipeline := pull.NewPipeline(client, &ingest.OSFileSystem{}, db,
+		pull.SystemClock{},
+		pull.Credentials{UserID: testutil.TestOwnerUserID, VillageURL: server.URL()},
+		pullsRoot)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stub := &cancelAfterFirstPuller{inner: realPipeline, cancel: cancel}
+	cmd := &cobra.Command{Use: "pull"}
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetContext(ctx)
+	runErr := runVillageTranscriptsPullCollectives(cmd, db, client, stub,
+		[]string{pullCollectiveAName}, collectivePullFlags{})
+	return dir, server, ids, stdout.String(), stderr.String(), runErr
+}
+
+// testVillagePullCollectiveCancelReports proves an interrupt stops the run
+// cleanly, reports cancelled after N of M, and exits non-zero.
+func testVillagePullCollectiveCancelReports(t *testing.T) {
+	t.Helper()
+	_, _, _, _, _, runErr := runCancelOnce(t)
+	if runErr == nil {
+		t.Fatal("a cancelled bulk pull must exit non-zero")
+	}
+	if !strings.Contains(runErr.Error(), "cancelled after 1 of 3") {
+		t.Errorf("cancellation must report cancelled after 1 of 3; got: %v", runErr)
+	}
+	if got := exitCodeFor(runErr); got != defaults.ExitFailure {
+		t.Errorf("cancellation exit code = %v, want %v", got, defaults.ExitFailure)
+	}
+}
+
+// testVillagePullCollectiveCancelNoPartial proves cancellation leaves no
+// partial transcript on disk: the interrupted transcript has no pull
+// directory and no staging directory, while the earlier transcript stays
+// landed. The pipeline removes its staging directory on any failure before
+// the write stage; this asserts that mechanism, it does not re-implement it.
+func testVillagePullCollectiveCancelNoPartial(t *testing.T) {
+	t.Helper()
+	dir, server, ids, _, _, runErr := runCancelOnce(t)
+	if runErr == nil {
+		t.Fatal("a cancelled bulk pull must exit non-zero")
+	}
+	if n := countPulledRows(t, dir); n != 1 {
+		t.Errorf("cancelled run must keep exactly the 1 landed transcript, got %d rows", n)
+	}
+	landed := pullDirFor(t, dir, server.URL(), ids[0])
+	if _, statErr := os.Stat(landed); statErr != nil {
+		t.Errorf("the transcript that landed before the interrupt must stay on disk (%s): %v", landed, statErr)
+	}
+	for _, id := range ids[1:] {
+		if _, statErr := os.Stat(pullDirFor(t, dir, server.URL(), id)); !os.IsNotExist(statErr) {
+			t.Errorf("interrupted transcript %s must leave no pull directory (stat err=%v)", id, statErr)
+		}
+	}
+	host := strings.TrimPrefix(server.URL(), "http://")
+	staging, globErr := filepath.Glob(filepath.Join(string(defaults.ResolveVillagePullsDirPathWith(dir)), host, defaults.TempDirPrefix+"*"))
+	if globErr != nil {
+		t.Fatalf("list staging directories: %v", globErr)
+	}
+	if len(staging) != 0 {
+		t.Errorf("cancelled run must leave no staging directory, found %v", staging)
+	}
+}
+
+// testVillagePullCollectiveResumeAfterCancel proves a re-run resumes: the
+// current transcript is skipped, so only what is missing repeats.
+func testVillagePullCollectiveResumeAfterCancel(t *testing.T) {
+	t.Helper()
+	dir, server, ids, _, _, runErr := runCancelOnce(t)
+	if runErr == nil {
+		t.Fatal("a cancelled bulk pull must exit non-zero")
+	}
+	writeCredsAt(t, dir, server.URL())
+	out, err := runVillage(t, dir, "transcripts", "pull", "--collective", pullCollectiveAName)
+	if err != nil {
+		t.Fatalf("resume pull must exit 0, got err=%v out=%q", err, out)
+	}
+	if n := countPulledRows(t, dir); n != 3 {
+		t.Errorf("resume must land all 3 transcripts, got %d rows (out=%q)", n, out)
+	}
+	if got := server.ContentCalls(ids[0]); got != 1 {
+		t.Errorf("resume must skip the current transcript %s, got %d content calls (want 1: first run only)", ids[0], got)
+	}
+	for _, id := range ids[1:] {
+		if got := server.ContentCalls(id); got != 1 {
+			t.Errorf("resume must download missing transcript %s once, got %d content calls", id, got)
+		}
+	}
+	if !strings.Contains(out, "failed 0") {
+		t.Errorf("resume summary must report 0 failed; out=%q", out)
+	}
+}
+
+// testVillagePullCollectiveKitGate proves the progress surface composes
+// through the kit primitives only: no file under
+// internal/tui/pullprogress pads, places, aligns, or paints a background
+// itself.
+func testVillagePullCollectiveKitGate(t *testing.T) {
+	t.Helper()
+	matches, err := gates.ScanForHandRolledLayout(testutil.ModuleRoot(t))
+	if err != nil {
+		t.Fatalf("scan for hand-rolled layout: %v", err)
+	}
+	for _, m := range matches {
+		if strings.HasPrefix(m.Path, "internal/tui/pullprogress/") {
+			t.Errorf("pullprogress surface pads or paints by hand: %+v", m)
+		}
 	}
 }
