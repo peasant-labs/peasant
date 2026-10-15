@@ -415,9 +415,13 @@ UPDATE sessions SET project_hash = '`+projectHash+`' WHERE session_id = '`+strin
 	if !bundle.LatestAttemptPending {
 		t.Fatal("LoadPublicationInput did not name the pending latest attempt")
 	}
-	if bundle.Readiness == ingest.PublicationReady {
-		t.Fatal("LoadPublicationInput reported a session with a latest attempt ready for publication")
-	}
+	// The refusal is the pending fact, not a bare "not ready": a session that
+	// is not ready for some unrelated reason would satisfy a readiness check
+	// alone. The discriminating transition (ready -> pending -> not ready ->
+	// complete -> ready again) is proven by
+	// TestLatestAttemptCompleteGenerationDisposesTheAttempt; the actionable
+	// coexistence reason is proven at the push seam by
+	// TestPublicationReadRefusesWithCoexistenceReasonAndLastGoodServesAuthority.
 
 	var selected ingest.PublicationInputBundle
 	if err := s.WithCommittedPublicationInputSelected(ctx, ingest.SessionID(sid), ingest.SessionReadSelection{LastGood: true}, func(input ingest.PublicationInputBundle) error {
