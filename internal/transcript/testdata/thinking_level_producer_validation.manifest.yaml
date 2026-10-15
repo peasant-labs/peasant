@@ -1,0 +1,11 @@
+requiredNames:
+  - assistant_accepted
+  - assistant_ultracode_accepted
+  - user_refused
+  - system_refused
+  - tool_refused
+  - absent_accepted
+  - edge_whitespace_refused
+  - unknown_canonical_refused
+  - raw_only_accepted
+  - earlier_history_refused

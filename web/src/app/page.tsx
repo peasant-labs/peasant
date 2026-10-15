@@ -20,7 +20,6 @@ import { ExplainerToggle, useExplainer } from "@/components/Explainer";
 import { Skeleton, SkeletonList } from "@/lib/skeleton";
 import {
   subscribe,
-  type DashboardPayload,
   type QualityPayload,
   type SessionsPayload,
   type SessionSummary,
@@ -515,9 +514,10 @@ export default function HomePage() {
     invalidationKey: sessionSetKey,
   });
   const rootRows = groupedSectionVisible ? rootSessions.rows : null;
+  const childGroups = rootSessions.status === 'ready' ? rootSessions.childGroups : undefined;
   const publicationById = useMemo(
-    () => new Map((rootRows ?? []).map((row) => [row.sync.id, row])),
-    [rootRows],
+    () => new Map([...(rootRows ?? []), ...[...(childGroups?.values() ?? [])].flat()].map((row) => [row.sync.id, row])),
+    [rootRows, childGroups],
   );
   const previews = useMemo(
     () =>
@@ -529,14 +529,13 @@ export default function HomePage() {
     [sessions],
   );
 
-  // The stats strip: each pair from its own topic, left out until it loads.
-  const { data: dashboard } = useChannel<DashboardPayload>(subscribe.dashboard());
+  // The stats strip: visible roots and independent topics, omitted until ready.
   const { data: trends } = useChannel<TrendsPayload>(subscribe.trends());
   const { data: quality } = useChannel<QualityPayload>(subscribe.quality());
   const nowMs = Date.now();
   const statsItems = groupedSectionVisible
     ? rootStatsItems({
-        dashboardSessions: dashboard ? dashboard.totalSessions : null,
+        rootSessions: rootRows ? rootRows.length : null,
         projects: summaries && !summariesFailed ? summaries.projects.length : null,
         published: rootRows ? publishFilterCounts(rootRows).published : null,
         trendDays: trends ? trends.days ?? [] : null,
@@ -675,7 +674,7 @@ export default function HomePage() {
             ) : rootRows === null ? (
               <SkeletonList rows={6} label="Loading your sessions" />
             ) : (
-              <RootSessionList rows={rootRows} titles={sessionTitles} previews={previews} />
+              <RootSessionList rows={rootRows} childGroups={childGroups} titles={sessionTitles} previews={previews} />
             )}
 
             <MoreWaysToBrowse

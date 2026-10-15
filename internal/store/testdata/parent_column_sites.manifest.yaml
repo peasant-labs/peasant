@@ -35,6 +35,7 @@ requiredRouted:
   - store-read-session-parent
   - store-read-stored-metadata
   - store-list-stale-origin-sessions
+  - store-invalidate-stale-parent-origins
   - codemap-sessions-for-project
   - cmd-annotate-research-root-filter
 requiredForeign:
@@ -60,6 +61,10 @@ requiredForeign:
   - ingest-opencode-v2-parents-first
   - ingest-opencode-v2-records-after
   - ingest-opencode-v2-records-first
+  - ingest-opencode-model-after
+  - ingest-opencode-model-first
+  - ingest-opencode-v2-model-after
+  - ingest-opencode-v2-model-first
   - ingest-opencode-session-records
   - ingest-testfixture-current-missing-seq
   - ingest-testfixture-current-nullable-seq

@@ -83,7 +83,7 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
-			_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1}})
+			_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: schema.AllContentCapabilities})
 			return
 		}
 		captured.record(r)

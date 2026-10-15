@@ -8,7 +8,7 @@
      CHROME_PATH=$(command -v google-chrome) node scripts/visual/shell-nav-default-gate.mjs
 
    Env:
-     PEASANT_BIN               binary to boot (default <repo>/bin/peasant; build it with make build)
+     PEASANT_BIN               binary to boot (default <repo>/peasant; build it with make build)
      PEASANT_OFFLINE_PORT      port to boot it on (default 8698; must be free)
      PEASANT_OFFLINE_CONFIG_DIR config dir for the booted server (default a fresh temp dir, removed
                                afterwards; a supplied dir is kept)
@@ -18,7 +18,7 @@
  */
 import { spawn } from 'node:child_process'
 import YAML from 'yaml'
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -34,7 +34,7 @@ const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core'))
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BASE = process.argv[2] || HERE
 const REPO = resolve(WEB_ROOT, '..')
-const BIN = process.env.PEASANT_BIN || join(REPO, 'bin', 'peasant')
+const BIN = process.env.PEASANT_BIN || join(REPO, 'peasant')
 const PORT = Number(process.env.PEASANT_OFFLINE_PORT || 8698)
 const ORIGIN = `http://localhost:${PORT}`
 const OUT = process.env.SHELL_OFFLINE_CAPTURE_DIR || join(BASE, 'shell-offline')
@@ -96,6 +96,11 @@ const RECOVER_WITHIN_MS = 10000
 
 if (!CHROME) {
   console.error('ERROR [shell-nav-default-gate.mjs] CHROME_PATH is unset. Set it to your Chrome/Chromium binary before running the offline gate.')
+  process.exit(1)
+}
+
+if (!existsSync(BIN)) {
+  console.error(`ERROR [shell-nav-default-gate.mjs] ${BIN} is missing. Run make build in this worktree, or set PEASANT_BIN.`)
   process.exit(1)
 }
 
@@ -484,7 +489,7 @@ try {
     `  Why: when the peasant app on this computer stops, every page must say so under the header — this computer, not the internet — with the start command and try again, reachable on any screen and on a scrolled page, keep the reader's place and full-height pages readable, announce the stop, a failed retry and the return, clear when the app is back, and hand keyboard focus back to the page.\n` +
     `  Where: shell-nav-default-gate.mjs driving ${BIN} on ${ORIGIN} (server log: ${serverLog}).\n` +
     `  Means: a user whose local app stopped may see no notice, a notice that reads as an internet outage, a notice covering the page or out of reach, a crushed transcript, silence for a screen reader, or a notice that never clears.\n` +
-    `  Fix: make build so bin/peasant embeds this checkout's web/out, free port ${PORT}, then fix the reported notice, header or page geometry.`,
+    `  Fix: make build so ./peasant embeds this checkout's web/out, free port ${PORT}, then fix the reported notice, header or page geometry.`,
   )
   process.exitCode = 1
 } finally {

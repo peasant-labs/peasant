@@ -189,6 +189,14 @@ func TestCursorAdapter_ExtractMetadata(t *testing.T) {
 	if meta.ModelHarness != ingest.HarnessCursor {
 		t.Errorf("ModelHarness = %q, want %q", meta.ModelHarness, ingest.HarnessCursor)
 	}
+	if meta.ThinkingLevel != "" || meta.ThinkingLevelRaw != "" {
+		t.Fatalf("Cursor has no recorded thinking-level source, got (%q,%q)", meta.ThinkingLevel, meta.ThinkingLevelRaw)
+	}
+	entries, err := ingest.NewCursorIndexer(mfs).IndexTranscript(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoThinkingLevelEntries(t, entries)
 	if meta.Source.Format != ingest.SourceFormatJSONL {
 		t.Errorf("Source.Format = %q, want %q", meta.Source.Format, ingest.SourceFormatJSONL)
 	}

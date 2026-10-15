@@ -21,8 +21,9 @@ import (
 // route renders for it. The grouped sync view is opt-in over exactly this set,
 // so it can never list a session the flat route withholds.
 type syncSessionEntry struct {
-	row    ingest.PushSessionRow
-	status schema.SyncStatus
+	row      ingest.PushSessionRow
+	status   schema.SyncStatus
+	identity store.ParentIdentityRow
 	// hold says why a held row waits; it is empty on every other row.
 	hold schema.SyncHoldReason
 }
@@ -36,6 +37,14 @@ func loadSyncEntries(ctx context.Context, db syncSessionReader) ([]syncSessionEn
 	sessions, err := db.AllPushableSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("api.loadSyncEntries: query pushable sessions for the local sync list: %w; no sync rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
+	}
+	identities, err := db.SyncParentIdentities(ctx, sessions)
+	if err != nil {
+		return nil, fmt.Errorf("api.loadSyncEntries: read durable parent identities for the local sync list: %w; no sync rows returned; retry after verifying the store", err)
+	}
+	identityByID := make(map[string]store.ParentIdentityRow, len(identities))
+	for _, identity := range identities {
+		identityByID[identity.SessionID] = identity
 	}
 
 	heldMap := make(map[string]bool)
@@ -52,7 +61,7 @@ func loadSyncEntries(ctx context.Context, db syncSessionReader) ([]syncSessionEn
 		input := metadata[session.SessionID]
 		metadataReady := metadataErr == nil && push.PublicationMetadataReady(input) && input.Readiness == ingest.PublicationReady
 		status, hold := computeSyncStatus(session, heldMap[session.SessionID], metadataReady)
-		entries = append(entries, syncSessionEntry{row: session, status: status, hold: hold})
+		entries = append(entries, syncSessionEntry{row: session, status: status, hold: hold, identity: identityByID[session.SessionID]})
 	}
 	return entries, nil
 }
@@ -161,6 +170,7 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 // only hold or fail closed here rather than downstream.
 func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, preview string) (schema.SessionSummary, schema.LocalSyncSummary, error) {
 	row := entry.row
+	parentID, unresolved := syncParentMarkers(entry.identity)
 	projectHash, hashErr := schema.NewProjectHash(row.ProjectHash)
 	if hashErr != nil {
 		return schema.SessionSummary{}, schema.LocalSyncSummary{}, fmt.Errorf("api.buildSyncGroupedRow: session %q has an invalid stored project hash %q while building the sync chooser row: %w; run `peasant ingest verify` and repair the store, then retry", row.SessionID, row.ProjectHash, hashErr)
@@ -178,11 +188,13 @@ func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, p
 		ToolCallCount:        row.ToolCalls,
 		// The sync arm validates Project against Sync.ProjectName, so both carry
 		// the stored project name verbatim rather than a display transform.
-		Project:       row.ProjectName,
-		ProjectHash:   projectHash,
-		Preview:       preview,
-		SessionOrigin: schema.SessionOrigin(row.SessionOrigin),
-		Purpose:       ev.Purpose,
+		Project:          row.ProjectName,
+		ProjectHash:      projectHash,
+		Preview:          preview,
+		SessionOrigin:    schema.SessionOrigin(row.SessionOrigin),
+		Purpose:          ev.Purpose,
+		ParentSessionID:  parentID,
+		ParentUnresolved: unresolved,
 	}
 	syncSummary := schema.LocalSyncSummary{
 		ID:                   row.SessionID,
@@ -199,8 +211,20 @@ func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, p
 		SyncStatus:           entry.status,
 		HoldReason:           entry.hold,
 		PreviouslyPushed:     row.PushedAt != nil,
+		ParentSessionID:      parentID,
+		ParentUnresolved:     unresolved,
 	}
 	return summary, syncSummary, nil
+}
+
+func syncParentMarkers(identity store.ParentIdentityRow) (*string, *bool) {
+	if identity.ParentUnresolved {
+		return nil, &identity.ParentUnresolved
+	}
+	if identity.ParentIdentity != "" {
+		return &identity.ParentIdentity, nil
+	}
+	return nil, nil
 }
 
 // syncSelectionPolicy returns the persisted selection projection the grouped

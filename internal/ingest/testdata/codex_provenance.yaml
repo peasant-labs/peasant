@@ -1,4 +1,115 @@
 cases:
+  - name: turn-context-replaced-item-effort
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-replaced-effort
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"turn_context","payload":{"effort":"high"}}
+        {"type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","id":"m1","content":[{"type":"output_text","text":"old"}]}}}
+        {"type":"turn_context","payload":{"effort":"none"}}
+        {"type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","id":"m1","content":[{"type":"output_text","text":"updated"}]}}}
+    entryRefs: [e_replaced]
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 0
+      main:
+        - ref: e_replaced
+          role: assistant
+          entryType: text
+          content: updated
+          thinkingLevel: "off"
+          thinkingLevelRaw: none
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+  - name: turn-context-effort-high
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-effort-high
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"turn_context","payload":{"effort":"high"}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m1","content":[{"type":"output_text","text":"answer"}]}}
+        {"type":"turn_context","payload":{"effort":"none"}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"next"}]}}
+    entryRefs: [e_first, e_next]
+    expected:
+      purpose: interaction
+      turnCount: 2
+      inputSubmissionCount: 0
+      main:
+        - ref: e_first
+          role: assistant
+          entryType: text
+          content: answer
+          thinkingLevel: high
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_next
+          role: assistant
+          entryType: text
+          content: next
+          thinkingLevel: "off"
+          thinkingLevelRaw: none
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+  - name: turn-context-effort-absent-invalid
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-effort-absent
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"turn_context","payload":{}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m1","content":[{"type":"output_text","text":"answer"}]}}
+        {"type":"turn_context","payload":{"effort":42}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"next"}]}}
+    entryRefs: [e_first, e_next]
+    expected:
+      purpose: interaction
+      turnCount: 2
+      inputSubmissionCount: 0
+      main:
+        - ref: e_first
+          role: assistant
+          entryType: text
+          content: answer
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_next
+          role: assistant
+          entryType: text
+          content: next
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+  - name: turn-context-effort-edge-whitespace-dropped
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-effort-edge-whitespace
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"turn_context","payload":{"effort":" high"}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m1","content":[{"type":"output_text","text":"answer"}]}}
+    entryRefs: [e_first]
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 0
+      diagnostics:
+        - thinking_level_raw_dropped
+      main:
+        - ref: e_first
+          role: assistant
+          entryType: text
+          content: answer
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
   - &boundary_pair
     name: inherited-function-call-local-result
     stableThreadID: "11111111-1111-4111-8111-111111111111"

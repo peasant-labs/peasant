@@ -1,0 +1,108 @@
+# Pi thinking-level extraction corpus. Each case is a retained Pi session run
+# through the real retained metadata extraction (session seed) and the real
+# indexer (per-turn evidence on each depth-0 assistant row, in order). A
+# thinking_level_change sets the level for the assistant rows that follow; an
+# assistant record's own thinkingLevel wins for that row. An omitted seed or
+# an empty turn means "absent" (unknown), never off.
+cases:
+  - name: invalid_raw_is_dropped_with_diagnostic
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"thinking_level_change","id":"t1","parentId":null,"thinkingLevel":" high"}
+      {"type":"message","id":"a1","parentId":"t1","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+    diagnostic: thinking_level_raw_dropped
+    turns:
+      - {}
+  - name: off_is_off_identity
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"thinking_level_change","id":"t1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","thinkingLevel":"off"}
+      {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"hi"}]}}
+    seed: {level: "off"}
+    turns:
+      - {level: "off"}
+  - name: medium_then_high_seed_is_earliest
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"thinking_level_change","id":"t1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","thinkingLevel":"medium"}
+      {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"thinking_level_change","id":"t2","parentId":"a1","timestamp":"2026-01-02T00:00:04Z","thinkingLevel":"high"}
+      {"type":"message","id":"a2","parentId":"t2","timestamp":"2026-01-02T00:00:05Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: medium}
+    history:
+      - {level: high}
+    turns:
+      - {level: medium}
+      - {level: high}
+  - name: first_valid_observation_after_absent_row_seeds
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"thinking_level_change","id":"t1","parentId":"a1","timestamp":"2026-01-02T00:00:03Z","thinkingLevel":"high"}
+      {"type":"message","id":"a2","parentId":"t1","timestamp":"2026-01-02T00:00:04Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: high}
+    turns:
+      - {}
+      - {level: high}
+  - name: change_records_preserve_source_order
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"thinking_level_change","id":"t1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","thinkingLevel":"low"}
+      {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"thinking_level_change","id":"t2","parentId":"a1","timestamp":"2026-01-02T00:00:04Z","thinkingLevel":"medium"}
+      {"type":"message","id":"a2","parentId":"t2","timestamp":"2026-01-02T00:00:05Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"second"}]}}
+      {"type":"thinking_level_change","id":"t3","parentId":"a2","timestamp":"2026-01-02T00:00:06Z","thinkingLevel":"high"}
+      {"type":"message","id":"a3","parentId":"t3","timestamp":"2026-01-02T00:00:07Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"third"}]}}
+    seed: {level: low}
+    history:
+      - {level: medium}
+      - {level: high}
+    turns:
+      - {level: low}
+      - {level: medium}
+      - {level: high}
+  - name: repeated_governing_level_collapses_in_history
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"thinking_level_change","id":"t1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","thinkingLevel":"medium"}
+      {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"message","id":"a2","parentId":"a1","timestamp":"2026-01-02T00:00:04Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"second"}]}}
+      {"type":"thinking_level_change","id":"t2","parentId":"a2","timestamp":"2026-01-02T00:00:05Z","thinkingLevel":"max"}
+      {"type":"message","id":"a3","parentId":"t2","timestamp":"2026-01-02T00:00:06Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"third"}]}}
+    seed: {level: medium}
+    history:
+      - {level: max}
+    turns:
+      - {level: medium}
+      - {level: medium}
+      - {level: max}
+  - name: assistant_record_level_wins
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"thinking_level_change","id":"t1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","thinkingLevel":"low"}
+      {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","model":"pi-fixture","thinkingLevel":"high","content":[{"type":"text","text":"hi"}]}}
+    seed: {level: high}
+    turns:
+      - {level: high}
+  - name: unrecognized_level_is_absent_with_raw
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"thinking_level_change","id":"t1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","thinkingLevel":"turbo"}
+      {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"hi"}]}}
+    seed: {raw: turbo}
+    turns:
+      - {raw: turbo}
+  - name: no_level_evidence_stays_absent
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"hello"}}
+      {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","message":{"role":"assistant","model":"pi-fixture","content":[{"type":"text","text":"hi"}]}}
+    turns:
+      - {}

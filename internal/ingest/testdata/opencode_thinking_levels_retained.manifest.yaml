@@ -1,0 +1,10 @@
+requiredNames:
+  - ultra_is_canonical_identity
+  - current_layout_projection_variant_identity
+  - legacy_projection_variant_identity
+  - legacy_message_file_variant_identity
+  - no_variant_sibling_stays_absent
+  - arbitrary_label_is_absent_with_raw
+  - default_is_absent_with_raw
+  - none_maps_off_with_raw
+  - user_variant_is_never_evidence

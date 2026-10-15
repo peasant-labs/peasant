@@ -1,0 +1,104 @@
+# Session thinking-level seed and per-turn projection through the real fold
+# (EntriesToTurns) and SessionToDetail. Each entry's level/raw is written into
+# the entry Extra keys thinking_level / thinking_level_raw.
+negativeSeedFailures:
+  - per_turn_levels_fold_from_assistant_extra
+  - earliest_root_observation_beats_stored_seed
+  - latest_observation_is_not_seed
+  - most_common_observation_is_not_seed
+  - nested_observation_does_not_replace_root_seed
+  - raw_first_observation_seeds_unknown
+  - identical_text_with_changed_level_is_retained
+negativeScopeFailures:
+  - per_turn_levels_fold_from_assistant_extra
+  - latest_observation_is_not_seed
+  - most_common_observation_is_not_seed
+  - nested_observation_does_not_replace_root_seed
+  - raw_first_observation_seeds_unknown
+  - identical_text_with_changed_level_is_retained
+  - turn_observations_win_over_stored_history
+cases:
+  - name: raw_first_observation_seeds_unknown
+    storedSeed: {level: high}
+    entries:
+      - {index: 1, role: assistant, depth: 0, content: first, raw: deep}
+      - {index: 2, role: assistant, depth: 0, content: second, level: high}
+    expectedSeed: {raw: deep}
+    expectedHistory: [{level: high}]
+    expectedTurns: [{raw: deep}, {level: high}]
+  - name: identical_text_with_changed_level_is_retained
+    entries:
+      - {index: 1, role: assistant, depth: 0, content: answer, level: medium}
+      - {index: 2, role: assistant, depth: 0, content: answer, level: high}
+    expectedSeed: {level: medium}
+    expectedHistory: [{level: high}]
+    expectedTurns: [{level: medium}, {level: high}]
+  - name: per_turn_levels_fold_from_assistant_extra
+    entries:
+      - {index: 1, role: user, depth: 0, content: request, level: high}
+      - {index: 2, role: assistant, depth: 0, content: first answer, level: medium}
+      - {index: 3, role: assistant, depth: 0, content: unmapped answer, raw: deep}
+      - {index: 4, role: assistant, depth: 0, content: disabled answer, level: "off", raw: none}
+      - {index: 5, role: assistant, depth: 0, content: plain answer}
+    expectedSeed: {level: medium}
+    expectedHistory:
+      - {raw: deep}
+      - {level: "off", raw: none}
+    expectedTurns:
+      - {}
+      - {level: medium}
+      - {raw: deep}
+      - {level: "off", raw: none}
+      - {}
+  - name: earliest_root_observation_beats_stored_seed
+    storedSeed: {level: low}
+    entries:
+      - {index: 1, role: user, depth: 0, content: request}
+      - {index: 2, role: assistant, depth: 0, content: answer, level: xhigh}
+    expectedSeed: {level: xhigh}
+    expectedTurns: [{}, {level: xhigh}]
+  - name: stored_seed_without_observations
+    storedSeed: {level: ultracode}
+    entries:
+      - {index: 1, role: user, depth: 0, content: request}
+      - {index: 2, role: assistant, depth: 0, content: answer}
+    expectedSeed: {level: ultracode}
+    expectedTurns: [{}, {}]
+  - name: turn_observations_win_over_stored_history
+    storedSeed: {level: low}
+    storedHistory: [{level: max}]
+    entries:
+      - {index: 1, role: assistant, depth: 0, content: first, level: low}
+      - {index: 2, role: assistant, depth: 0, content: second, level: high}
+    expectedSeed: {level: low}
+    expectedHistory: [{level: high}]
+    expectedTurns: [{level: low}, {level: high}]
+  - name: stored_history_is_the_fallback_without_turn_evidence
+    storedSeed: {level: low}
+    storedHistory: [{level: max}]
+    entries:
+      - {index: 1, role: assistant, depth: 0, content: answer}
+    expectedSeed: {level: low}
+    expectedHistory: [{level: max}]
+    expectedTurns: [{}]
+  - name: latest_observation_is_not_seed
+    entries:
+      - {index: 1, role: assistant, depth: 0, content: first, level: medium}
+      - {index: 2, role: assistant, depth: 0, content: second, level: high}
+    expectedSeed: {level: medium}
+    expectedHistory: [{level: high}]
+    expectedTurns: [{level: medium}, {level: high}]
+  - name: most_common_observation_is_not_seed
+    entries:
+      - {index: 1, role: assistant, depth: 0, content: first, level: low}
+      - {index: 2, role: assistant, depth: 0, content: second, level: max}
+      - {index: 3, role: assistant, depth: 0, content: third, level: max}
+    expectedSeed: {level: low}
+    expectedHistory: [{level: max}]
+    expectedTurns: [{level: low}, {level: max}, {level: max}]
+  - name: nested_observation_does_not_replace_root_seed
+    entries:
+      - {index: 1, role: assistant, depth: 0, content: root, level: minimal}
+      - {index: 2, role: assistant, depth: 1, parentIndex: 1, content: nested, level: max}
+    expectedSeed: {level: minimal}
+    expectedTurns: [{level: minimal}, {level: max}]

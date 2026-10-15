@@ -122,17 +122,16 @@ printf '{"schema":"%s","fairtrade":"%s","transcriptBrowser":"%s","peasant":"%s"}
   >"$tmp/peasant/web/out/exact-replay.json"
 marker_sha=$(sha256sum "$tmp/peasant/web/out/exact-replay.json" | cut -d' ' -f1)
 
-mkdir -p "$tmp/peasant/bin"
 (
   cd "$tmp/peasant"
   go mod edit -replace "github.com/peasant-labs/schema=$tmp/schema"
   GOWORK=off go build -buildvcs=false \
     -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=exact-replay" \
-    -o bin/peasant ./cmd/peasant
+    -o peasant ./cmd/peasant
 )
-peasant_binary_sha=$(sha256sum "$tmp/peasant/bin/peasant" | cut -d' ' -f1)
+peasant_binary_sha=$(sha256sum "$tmp/peasant/peasant" | cut -d' ' -f1)
 peasant_binary="$output/peasant-${peasant_binary_sha}"
-cp "$tmp/peasant/bin/peasant" "$peasant_binary"
+cp "$tmp/peasant/peasant" "$peasant_binary"
 grep -aq 'gmp-changes-root' "$peasant_binary"
 
 chrome=${CHROME_PATH:-}

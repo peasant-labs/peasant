@@ -1,0 +1,287 @@
+# Native thinking-level mapping table: one case per harness/native value.
+# Every exact canonical spelling is identity (no raw) for every harness,
+# checked before harness aliases.
+# level empty = unknown (absent), never off. raw empty = no raw evidence.
+# rawDropped = the native value could not be kept as raw and the mapper
+# reports one thinking_level_raw_dropped diagnostic. nativeGo is a Go
+# double-quoted literal for bytes YAML cannot carry (invalid UTF-8).
+cases:
+  - name: codex_none_maps_off_with_raw
+    harness: codex
+    native: "none"
+    level: off
+    raw: "none"
+  - name: codex_minimal_identity
+    harness: codex
+    native: "minimal"
+    level: minimal
+  - name: codex_low_identity
+    harness: codex
+    native: "low"
+    level: low
+  - name: codex_medium_identity
+    harness: codex
+    native: "medium"
+    level: medium
+  - name: codex_high_identity
+    harness: codex
+    native: "high"
+    level: high
+  - name: codex_xhigh_identity
+    harness: codex
+    native: "xhigh"
+    level: xhigh
+  - name: codex_max_identity
+    harness: codex
+    native: "max"
+    level: max
+  - name: codex_ultra_identity_without_raw
+    harness: codex
+    native: "ultra"
+    level: ultra
+  - name: codex_persistent_maps_off_with_raw
+    harness: codex
+    native: "persistent"
+    level: off
+    raw: "persistent"
+  - name: codex_custom_is_unknown_with_raw
+    harness: codex
+    native: "custom"
+    raw: "custom"
+  - name: codex_arbitrary_is_unknown_with_exact_bytes
+    harness: codex
+    native: "Turbo-Mode"
+    raw: "Turbo-Mode"
+  - name: codex_off_identity
+    harness: codex
+    native: "off"
+    level: off
+  - name: codex_case_is_not_folded
+    harness: codex
+    native: "High"
+    raw: "High"
+  - name: codex_numeric_budget_is_never_a_level
+    harness: codex
+    native: "8192"
+    raw: "8192"
+    note: "a budget-like string reaching the effort field is unknown evidence, never a level"
+  - name: codex_empty_is_not_observed
+    harness: codex
+    native: ""
+  - name: claude_effort_low_identity
+    harness: claude
+    native: "low"
+    level: low
+  - name: claude_effort_medium_identity
+    harness: claude
+    native: "medium"
+    level: medium
+  - name: claude_effort_high_identity
+    harness: claude
+    native: "high"
+    level: high
+  - name: claude_effort_xhigh_identity
+    harness: claude
+    native: "xhigh"
+    level: xhigh
+  - name: claude_effort_max_identity
+    harness: claude
+    native: "max"
+    level: max
+  - name: claude_effort_ultra_identity_without_raw
+    harness: claude
+    native: "ultra"
+    level: ultra
+  - name: claude_effort_ultracode_identity_without_raw
+    harness: claude
+    native: "ultracode"
+    level: ultracode
+  - name: claude_effort_none_maps_off_with_raw
+    harness: claude
+    native: "none"
+    level: off
+    raw: "none"
+  - name: claude_effort_small_is_unknown_with_raw
+    harness: claude
+    native: "small"
+    raw: "small"
+  - name: claude_effort_trivial_is_unknown_with_raw
+    harness: claude
+    native: "trivial"
+    raw: "trivial"
+  - name: claude_effort_minimal_identity
+    harness: claude
+    native: "minimal"
+    level: minimal
+  - name: claude_effort_empty_is_not_observed
+    harness: claude
+    native: ""
+  - name: claude_legacy_none_maps_off_with_raw
+    harness: claude_legacy
+    native: "none"
+    level: off
+    raw: "none"
+  - name: claude_legacy_high_identity
+    harness: claude_legacy
+    native: "high"
+    level: high
+  - name: claude_legacy_off_identity
+    harness: claude_legacy
+    native: "off"
+    level: off
+  - name: claude_legacy_ultra_identity
+    harness: claude_legacy
+    native: "ultra"
+    level: ultra
+  - name: claude_legacy_other_is_unknown_with_raw
+    harness: claude_legacy
+    native: "think-hard"
+    raw: "think-hard"
+  - name: claude_legacy_budget_string_is_never_a_level
+    harness: claude_legacy
+    native: "31999"
+    raw: "31999"
+    note: "maxThinkingTokens is never passed to the mapper; even a numeric string reaching level is not mapped to a canonical"
+  - name: opencode_minimal_identity
+    harness: opencode
+    native: "minimal"
+    level: minimal
+  - name: opencode_low_identity
+    harness: opencode
+    native: "low"
+    level: low
+  - name: opencode_medium_identity
+    harness: opencode
+    native: "medium"
+    level: medium
+  - name: opencode_high_identity
+    harness: opencode
+    native: "high"
+    level: high
+  - name: opencode_xhigh_identity
+    harness: opencode
+    native: "xhigh"
+    level: xhigh
+  - name: opencode_max_identity
+    harness: opencode
+    native: "max"
+    level: max
+  - name: opencode_none_maps_off_with_raw
+    harness: opencode
+    native: "none"
+    level: off
+    raw: "none"
+  - name: opencode_off_identity
+    harness: opencode
+    native: "off"
+    level: off
+  - name: opencode_default_is_unknown_with_raw
+    harness: opencode
+    native: "default"
+    raw: "default"
+  - name: opencode_thinking_label_is_unknown_with_raw
+    harness: opencode
+    native: "thinking"
+    raw: "thinking"
+  - name: opencode_fast_label_is_unknown_with_raw
+    harness: opencode
+    native: "fast"
+    raw: "fast"
+  - name: opencode_deep_label_is_unknown_with_raw
+    harness: opencode
+    native: "deep"
+    raw: "deep"
+  - name: opencode_multibyte_label_kept_exact
+    harness: opencode
+    native: "思考"
+    raw: "思考"
+  - name: pi_off_identity
+    harness: pi
+    native: "off"
+    level: off
+  - name: pi_minimal_identity
+    harness: pi
+    native: "minimal"
+    level: minimal
+  - name: pi_low_identity
+    harness: pi
+    native: "low"
+    level: low
+  - name: pi_medium_identity
+    harness: pi
+    native: "medium"
+    level: medium
+  - name: pi_high_identity
+    harness: pi
+    native: "high"
+    level: high
+  - name: pi_xhigh_identity
+    harness: pi
+    native: "xhigh"
+    level: xhigh
+  - name: pi_max_identity
+    harness: pi
+    native: "max"
+    level: max
+  - name: pi_ultra_identity
+    harness: pi
+    native: "ultra"
+    level: ultra
+  - name: pi_other_is_unknown_with_raw
+    harness: pi
+    native: "extreme"
+    raw: "extreme"
+  - name: pi_none_is_not_a_pi_spelling
+    harness: pi
+    native: "none"
+    raw: "none"
+  - name: claude_effort_off_identity
+    harness: claude
+    native: "off"
+    level: off
+  - name: claude_legacy_minimal_identity
+    harness: claude_legacy
+    native: "minimal"
+    level: minimal
+  - name: claude_legacy_low_identity
+    harness: claude_legacy
+    native: "low"
+    level: low
+  - name: claude_legacy_medium_identity
+    harness: claude_legacy
+    native: "medium"
+    level: medium
+  - name: claude_legacy_xhigh_identity
+    harness: claude_legacy
+    native: "xhigh"
+    level: xhigh
+  - name: claude_legacy_max_identity
+    harness: claude_legacy
+    native: "max"
+    level: max
+  - name: opencode_ultra_identity
+    harness: opencode
+    native: "ultra"
+    level: ultra
+  - name: raw_edge_whitespace_is_dropped_with_diagnostic
+    harness: codex
+    native: " high"
+    rawDropped: true
+    note: "nothing is trimmed: the padded value is not identity and cannot be raw"
+  - name: raw_invalid_utf8_is_dropped_with_diagnostic
+    harness: opencode
+    nativeGo: "\"fast\\xff\""
+    rawDropped: true
+  - name: raw_over_byte_bound_is_dropped_with_diagnostic
+    harness: pi
+    native: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    rawDropped: true
+  - name: raw_multibyte_over_byte_bound_is_dropped_with_diagnostic
+    harness: claude
+    native: "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+    rawDropped: true
+    note: "65 code points, 130 encoded bytes"
+  - name: raw_at_byte_bound_is_kept
+    harness: claude_legacy
+    native: "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    raw: "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"

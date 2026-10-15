@@ -1,4 +1,8 @@
 requiredNames:
+  - turn-context-replaced-item-effort
+  - turn-context-effort-high
+  - turn-context-effort-absent-invalid
+  - turn-context-effort-edge-whitespace-dropped
   - inherited-function-call-local-result
   - inherited-custom-call-local-result
   - local-function-pair

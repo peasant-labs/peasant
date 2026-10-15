@@ -79,7 +79,7 @@ func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discovere
 			}
 			// Validate the candidate before ordering it: a newer corrupt transcript
 			// must never replace a valid older copy with the same header identity.
-			if _, err := NewPiIndexer(a.fs).project(doc, sid); err != nil {
+			if _, _, err := NewPiIndexer(a.fs).project(doc, sid); err != nil {
 				a.diagnose(path, err)
 				continue
 			}
@@ -201,7 +201,7 @@ func (a *PiAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSessi
 // piTranscriptMetadata reads only the captured document; native project and Git
 // attribution stay in ExtractMetadata and are preserved during stored refresh.
 func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMetadata, error) {
-	rows, err := NewPiIndexer(nil).project(doc, session.SessionID)
+	rows, thinkingDiagnostics, err := NewPiIndexer(nil).project(doc, session.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +217,11 @@ func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMe
 		if timestamp := parseIndexTimestamp(entry.Timestamp); timestamp != nil && *timestamp > meta.Timestamp.End {
 			meta.Timestamp.End = *timestamp
 		}
+	}
+	// The projection maps every native observation exactly once and returns the
+	// resulting diagnostics, so the extraction rules are not re-derived here.
+	for _, diagnostic := range thinkingDiagnostics {
+		appendThinkingLevelDiagnostic(&meta, diagnostic, 0)
 	}
 	if meta.Timestamp.End < meta.Timestamp.Start {
 		meta.Timestamp.End = meta.Timestamp.Start
@@ -235,22 +240,24 @@ func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMe
 		if row.Role != RoleAssistant || row.Depth != 0 {
 			continue
 		}
+		extra, _, err := DecodePiEntryExtra(row)
+		if err != nil {
+			return nil, piSourceError("PiAdapter.ExtractMetadata assistant evidence", 0, err)
+		}
 		// The publication preflight needs the session model as well as per-turn
 		// observations. Use the first actual assistant observation, never state
 		// changes or configuration, just as other file-backed harnesses do.
-		if meta.Model == "" {
-			extra, _, err := DecodePiEntryExtra(row)
+		if meta.Model == "" && extra.ModelID != "" {
+			model, err := NewModelID(string(extra.ModelID))
 			if err != nil {
 				return nil, piSourceError("PiAdapter.ExtractMetadata model", 0, err)
 			}
-			if extra.ModelID != "" {
-				model, err := NewModelID(string(extra.ModelID))
-				if err != nil {
-					return nil, piSourceError("PiAdapter.ExtractMetadata model", 0, err)
-				}
-				meta.Model = model
-			}
+			meta.Model = model
 		}
+		// The governing level of each depth-0 assistant row is one ordered
+		// observation: the first valid one seeds the session and later distinct
+		// governing levels are recorded as in-session changes in source order.
+		applyThinkingLevelObservation(&meta, thinkingLevelMapping{Level: extra.ThinkingLevel, Raw: extra.ThinkingLevelRaw})
 		const maxSafe = 9007199254740991
 		if row.TokensIn != nil {
 			if meta.Stats.TokensIn > maxSafe-*row.TokensIn {

@@ -1,0 +1,14 @@
+requiredNames:
+  - off_and_minimal_are_canonical_identity
+  - effort_medium_identity
+  - two_efforts_seed_is_earliest
+  - two_efforts_xhigh_then_medium_records_history
+  - consecutive_duplicate_efforts_collapse_in_history
+  - ultracode_enter_before_first_assistant_seeds_ultracode
+  - ultracode_mid_session_enter_marks_later_turns_only
+  - ultracode_exit_reverts_to_recorded_effort
+  - no_level_evidence_stays_absent
+  - budget_only_stays_absent
+  - legacy_level_none_is_seed_only_off_fallback
+  - legacy_level_ignored_when_any_modern_effort_exists
+  - unrecognized_efforts_are_absent_with_raw

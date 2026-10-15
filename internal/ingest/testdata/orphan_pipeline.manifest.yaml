@@ -16,3 +16,7 @@ requiredNames:
   - other-harness-legacy-orphan-skip
   - parent-only-backfill-retries-after-transient-failure
   - incremental-harvest-reads-no-unrelated-root-metadata
+  - no-target-requeues-stuck-child-keeps-parent-root
+  - no-heal-updates-requeues-stuck-child-keeps-parent-root
+  - stored-child-heals-then-reclassifies-agent-over-two-harvests
+  - origin-requeue-failure-warns-heals-and-retries-without-discovery

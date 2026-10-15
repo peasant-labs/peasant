@@ -15,7 +15,7 @@ import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const SOURCE = join(WEB, 'src/components/picker/SelectionRecoveryPanel.tsx')
 const FIXTURE = join(WEB, 'src/components/picker/testdata/project_viewer_states.yaml')
 const CHUNKS = join(WEB, 'out/_next/static/chunks')

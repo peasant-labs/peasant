@@ -1,0 +1,82 @@
+# Session thinking-level seed through the real store write and read paths:
+# InsertSessions -> sessions columns -> SessionByID / SessionDetailByID ->
+# ReadStoredMetadata -> UnifiedMetadata. Absence (both empty) must stay absent
+# and never become "off". Each round-trip case writes `first`, and when `then`
+# is present writes it again for the same session (the newest extraction is
+# the producer's evidence, so it replaces the stored pair). Deletion
+# protection is by required NAME, never a declared count.
+
+required_round_trip_names:
+  - a canonical level with its native raw spelling round-trips
+  - a canonical level without a raw spelling round-trips
+  - ultracode round-trips without raw evidence
+  - a raw-only unmapped spelling round-trips with the level absent
+  - a session without thinking-level evidence stays absent
+  - a multibyte raw spelling round-trips exact bytes
+  - re-extraction replaces the stored pair with the newest evidence
+  - re-extraction without evidence clears the stored pair
+  - a session thinking-level history round-trips in source order
+  - re-extraction replaces the stored history
+
+required_refusal_names:
+  - an out-of-set canonical level is refused before the upsert
+  - a case-variant canonical level is refused before the upsert
+  - a history entry with neither level nor raw is refused before the upsert
+
+round_trips:
+  - name: a canonical level with its native raw spelling round-trips
+    session_id: 62000000-0000-4000-8000-000000000001
+    first: {level: high, raw: High}
+  - name: a canonical level without a raw spelling round-trips
+    session_id: 62000000-0000-4000-8000-000000000002
+    first: {level: ultra}
+  - name: ultracode round-trips without raw evidence
+    session_id: 62000000-0000-4000-8000-000000000008
+    first: {level: ultracode}
+  - name: a raw-only unmapped spelling round-trips with the level absent
+    session_id: 62000000-0000-4000-8000-000000000003
+    first: {raw: custom}
+  - name: a session without thinking-level evidence stays absent
+    session_id: 62000000-0000-4000-8000-000000000004
+    first: {}
+  - name: a multibyte raw spelling round-trips exact bytes
+    session_id: 62000000-0000-4000-8000-000000000005
+    first: {level: max, raw: "思考-最大-é"}
+  - name: re-extraction replaces the stored pair with the newest evidence
+    session_id: 62000000-0000-4000-8000-000000000006
+    first: {level: low, raw: think}
+    then: {level: "off", raw: none}
+  - name: re-extraction without evidence clears the stored pair
+    session_id: 62000000-0000-4000-8000-000000000007
+    first: {level: medium}
+    first_history: [{level: high}]
+    then: {}
+  - name: a session thinking-level history round-trips in source order
+    session_id: 62000000-0000-4000-8000-000000000009
+    first: {level: medium}
+    first_history:
+      - {level: high}
+      - {level: "off", raw: none}
+  - name: re-extraction replaces the stored history
+    session_id: 62000000-0000-4000-8000-000000000010
+    first: {level: low}
+    first_history: [{level: medium}]
+    then: {level: high}
+    then_history: [{level: xhigh}]
+
+# Canonical values the writer must refuse with an actionable error before the
+# sessions CHECK is reached, leaving the batch unwritten.
+refusals:
+  - name: an out-of-set canonical level is refused before the upsert
+    session_id: 62000000-0000-4000-8000-000000000101
+    level: extreme
+    expected_fragments: ["thinking level \"extreme\"", "insertSessionsOnConn", "ThinkingLevelRaw"]
+  - name: a case-variant canonical level is refused before the upsert
+    session_id: 62000000-0000-4000-8000-000000000102
+    level: High
+    expected_fragments: ["thinking level \"High\"", "not one of the canonical levels"]
+  - name: a history entry with neither level nor raw is refused before the upsert
+    session_id: 62000000-0000-4000-8000-000000000103
+    level: medium
+    history: [{}]
+    expected_fragments: ["thinking level history entry 0", "insertSessionsOnConn"]

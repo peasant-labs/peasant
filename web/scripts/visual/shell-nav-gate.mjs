@@ -36,7 +36,7 @@
    code-map capability must not bring a route-only section back). The gate logs the served mode
    (from GET /api/v1/config/capabilities); set SHELL_EXPECT_MODE to require one. Start a server
    first, for example:
-     ./bin/peasant web start --port 8690 --foreground --no-browser \
+     ./peasant web start --port 8690 --foreground --no-browser \
        --mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations
 
    Run:
@@ -438,7 +438,7 @@ try {
     `  Why: the local header must match testdata/shell-header.yaml on every page and width, the palette must offer no route-only jump, every route-only section must still resolve, and a click must never steer Tab or keyboard scrolling to <main>.\n` +
     `  Where: shell-nav-gate.mjs while driving ${ORIGIN}.\n` +
     `  Means: users may see a removed control, a dead or hidden-section link, a clipped header, or a route that stopped resolving.\n` +
-    `  Fix: serve a fresh build at PEASANT_REAL_ORIGIN (make build, then bin/peasant web start with the mock store), then fix the reported header, palette or route.`,
+    `  Fix: serve a fresh build at PEASANT_REAL_ORIGIN (make build, then peasant web start with the mock store), then fix the reported header, palette or route.`,
   )
   try { await browser.close() } catch {}
   process.exit(1)

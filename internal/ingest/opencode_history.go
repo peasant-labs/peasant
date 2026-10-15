@@ -450,6 +450,8 @@ func writeSnapshotMessage(sb *strings.Builder, msg OpenCodeProvenanceMessage) {
 	writeSnapshotField(sb, "m.shellcmd", msg.ShellCommand)
 	writeSnapshotField(sb, "m.shellout", msg.ShellOutput)
 	writeSnapshotField(sb, "m.compaction", msg.CompactionSummary)
+	writeSnapshotField(sb, "m.thinking.level", string(msg.ThinkingLevel))
+	writeSnapshotField(sb, "m.thinking.raw", string(msg.ThinkingLevelRaw))
 	fmt.Fprintf(sb, "m.files=%d;", len(msg.Files))
 	for _, file := range msg.Files {
 		writeSnapshotField(sb, "m.file.name", file.Name)

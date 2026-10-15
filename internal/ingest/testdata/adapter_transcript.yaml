@@ -19,6 +19,9 @@ requiredNames:
   - cursor-retained-clock
   - codex-missing-session-metadata
   - malformed-retained-jsonl
+  - claude-retained-thinking-level
+  - codex-retained-thinking-level
+  - pi-retained-thinking-level
 cases:
   - name: claude-retained-context
     harness: claude-code
@@ -56,3 +59,27 @@ cases:
     harness: claude-code
     transcript: '{"type":"user"'
     insufficient: true
+  - name: claude-retained-thinking-level
+    harness: claude-code
+    transcript: |
+      {"type":"attachment","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}
+      {"type":"assistant","effort":"xhigh","message":{"role":"assistant","content":"answer"}}
+    turns: 1
+    thinkingLevel: ultracode
+  - name: codex-retained-thinking-level
+    harness: codex
+    transcript: |
+      {"type":"session_meta","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/retained/project"}}
+      {"type":"turn_context","payload":{"effort":"none"}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}
+    turns: 1
+    thinkingLevel: "off"
+    thinkingLevelRaw: none
+  - name: pi-retained-thinking-level
+    harness: pi
+    transcript: |
+      {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"thinking_level_change","id":"t1","parentId":null,"thinkingLevel":"off"}
+      {"type":"message","id":"a1","parentId":"t1","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+    turns: 1
+    thinkingLevel: "off"

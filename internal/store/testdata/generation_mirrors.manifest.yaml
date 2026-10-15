@@ -3,3 +3,14 @@ requiredNames:
   - missing-parent-preserved
   - absent-input-count-preserved
   - zero-input-count-measured
+  - no-relationships-preserves-populated-cache
+  - context-from-only-clears-populated-cache
+  - started-by-known-stored-sets-cache
+  - started-by-known-retained-stored-sets-cache
+  - started-by-known-missing-clears-populated-cache
+  - started-by-explicit-none-clears-populated-cache
+  - started-by-unknown-clears-populated-cache
+  - started-by-conflicting-clears-populated-cache
+  - codex-started-by-explicit-none-clears-populated-cache
+  - codex-started-by-known-stored-sets-cache
+  - authoritative-activation-requeues-origin

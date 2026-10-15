@@ -84,14 +84,18 @@ VALUES (?, ?, ?, ?)`
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
+    thinking_level, thinking_level_raw, thinking_level_history,
     adapter_version, metric_seed_json, source_fingerprint, artifact_hash
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id = CASE WHEN ? THEN excluded.parent_id ELSE COALESCE(excluded.parent_id, sessions.parent_id) END,
     opaque_host_id = excluded.opaque_host_id,
     project_hash = excluded.project_hash,
     model_harness = excluded.model_harness,
     model_id = excluded.model_id,
+    thinking_level = excluded.thinking_level,
+    thinking_level_raw = excluded.thinking_level_raw,
+    thinking_level_history = excluded.thinking_level_history,
     start_ms = excluded.start_ms,
     end_ms = excluded.end_ms,
     ingested_ms = excluded.ingested_ms,
@@ -111,11 +115,14 @@ ON CONFLICT(session_id) DO UPDATE SET
 	sqlInsertSessionBeforeSourceFingerprint = `INSERT INTO sessions (
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
-    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
+    thinking_level, thinking_level_raw, thinking_level_history
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id=CASE WHEN ? THEN excluded.parent_id ELSE COALESCE(excluded.parent_id, sessions.parent_id) END, model_harness=excluded.model_harness,
-    model_id=excluded.model_id, opaque_host_id=excluded.opaque_host_id,
+    model_id=excluded.model_id, thinking_level=excluded.thinking_level,
+    thinking_level_raw=excluded.thinking_level_raw, thinking_level_history=excluded.thinking_level_history,
+    opaque_host_id=excluded.opaque_host_id,
     project_hash=excluded.project_hash, start_ms=excluded.start_ms,
     end_ms=excluded.end_ms, ingested_ms=excluded.ingested_ms,
     source_path=excluded.source_path, source_format=excluded.source_format,
@@ -405,10 +412,14 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		// nil), logical parent evidence, or relationship evidence. Durable
 		// evidence of no parent (explicit-none) therefore clears the cache,
 		// while a write with no evidence at all preserves whatever is
-		// stored instead of clearing it.
+		// stored instead of clearing it. The relationship disjunct is
+		// hasRelationshipAuthority, the predicate the V2 activation write
+		// (pointSessionAtGenerationOnConn in index_format_v2.go) shares, so
+		// the two writers cannot drift; the scheduling and legacy ParentUUID
+		// disjuncts exist only at write time and stay here.
 		parentAuthoritative := sorted[i].SchedulingParentResolved ||
 			m.ParentUUID != nil ||
-			len(m.Relationships) > 0
+			hasRelationshipAuthority(m.Relationships)
 		cacheParent := m.ParentUUID
 		if sorted[i].SchedulingParentResolved && ingest.IndependentAdmissionHarness(m.ModelHarness) {
 			scheduling := sorted[i].SchedulingParentID
@@ -458,6 +469,27 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			sessionOrigin = sessionorigin.Unknown
 		}
 
+		// The canonical thinking level is a closed set mirrored by the
+		// sessions CHECK; refuse an out-of-set value here so the caller gets
+		// an actionable error instead of a bare constraint failure. The raw
+		// spelling is source evidence bounded at ingest, not by the writer.
+		if !m.ThinkingLevel.IsValid() {
+			return fmt.Errorf("store: insert session %s: thinking level %q is not one of the canonical levels %v (store.insertSessionsOnConn, before the sessions upsert); the batch is not written; map the native value through the ingest thinking-level mapping, or leave the level empty and keep the native spelling in ThinkingLevelRaw", m.SessionID, m.ThinkingLevel, schema.AllThinkingLevels)
+		}
+		for i, change := range m.ThinkingLevelHistory {
+			if err := change.Validate(); err != nil {
+				return fmt.Errorf("store: insert session %s: thinking level history entry %d is not a valid in-session change (store.insertSessionsOnConn, before the sessions upsert); the batch is not written; keep at least one of level or raw on the entry, use a canonical level, and bound the raw spelling: %w", m.SessionID, i, err)
+			}
+		}
+		historyArg := any(nil)
+		if len(m.ThinkingLevelHistory) > 0 {
+			encoded, err := json.Marshal(m.ThinkingLevelHistory)
+			if err != nil {
+				return fmt.Errorf("store: insert session %s: encode thinking level history: %w", m.SessionID, err)
+			}
+			historyArg = string(encoded)
+		}
+
 		// V23+: opaque_host_id replaces host_slug in sessions FK.
 		// The FK cache follows the resolved cacheParent, never the raw logical
 		// evidence: an orphaned Codex/OpenCode child stores NULL while its
@@ -470,6 +502,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			string(m.Source.Format), m.SchemaVersion, derefString(m.Git.Branch),
 			derefString(m.Git.Worktree), derefString(m.Git.Tracking), m.Version,
 			sessionOrigin.String(),
+			nullableString(string(m.ThinkingLevel)), nullableString(string(m.ThinkingLevelRaw)), historyArg,
 		}
 		if hasSourceFingerprint {
 			sessionArgs = append(sessionArgs, adapterVersion, seedJSON, sorted[i].SourceFingerprint, derefString(sorted[i].ArtifactHash))

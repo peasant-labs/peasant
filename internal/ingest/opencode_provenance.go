@@ -69,10 +69,14 @@ type OpenCodeProvenanceAssistantPart struct {
 // populate it; the classifier never reparses native bytes itself, so the
 // envelope always names the evidence the decoder actually proved.
 type OpenCodeProvenanceMessage struct {
-	RetainedUnknown []RetainedUnknown `json:"retainedUnknown,omitempty"`
-	MessageID       string
-	SessionID       string
-	Shape           OpenCodeProvenanceShape
+	// Thinking evidence is mapped at decode; native variant labels never reach
+	// the classifier except as validated raw evidence in the mapped pair.
+	ThinkingLevel    schema.ThinkingLevel
+	ThinkingLevelRaw schema.ThinkingLevelRaw
+	RetainedUnknown  []RetainedUnknown `json:"retainedUnknown,omitempty"`
+	MessageID        string
+	SessionID        string
+	Shape            OpenCodeProvenanceShape
 	// NativeType is the current storage discriminator (user, assistant, shell,
 	// synthetic, system, skill, compaction, agent-switched, model-switched, or
 	// a newer value). Empty for legacy and semantic shapes, which have no
@@ -686,6 +690,12 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 			},
 			TimestampMs: nonEmptyTimestamp(msg.TimeCreated),
 		})
+	}
+	for i := range blocks {
+		if blocks[i].Role == schema.RoleAssistant {
+			blocks[i].ThinkingLevel = msg.ThinkingLevel
+			blocks[i].ThinkingLevelRaw = msg.ThinkingLevelRaw
+		}
 	}
 	if attr.UncertainCopy {
 		markOpenCodeUncertain(blocks)

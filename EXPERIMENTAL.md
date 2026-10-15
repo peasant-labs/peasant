@@ -36,7 +36,7 @@ Error: peasant memory is experimental; rebuild with -tags=experimental
 Rebuild with the tag to unlock the full command tree:
 
 ```bash
-go build -tags=experimental -o bin/peasant ./cmd/peasant
+go build -tags=experimental -o peasant ./cmd/peasant
 ```
 
 This enables `peasant memory build / embed / inject on|off / retrieve / augment /

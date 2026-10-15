@@ -8,7 +8,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const WEB = resolve(HERE, '..')
 const REPO = resolve(WEB, '..')
 const OUT = resolve(WEB, 'out')
-const BINARY = resolve(REPO, 'bin/peasant')
+const BINARY = resolve(REPO, 'peasant')
 const OFFICIAL_STRIKE_PATH = 'M18.5 6L11 17.5h5.2L13.5 26 21 14.5h-5.2L18.5 6z'
 const STRIKE_POLICY_MARKERS = Object.freeze([
   'strike:"Strike"',
@@ -46,7 +46,7 @@ function routeChunks(route, htmlPath) {
       'the route was not emitted by the clean Next production export',
       'provider-build-provenance.mjs route discovery',
       `${route} cannot be proven to serve the canonical provider policy`,
-      'run the pnpm production build and restore the route export before embedding bin/peasant',
+      'run the pnpm production build and restore the route export before embedding the binary',
     )
   }
   const html = readFileSync(htmlPath, 'utf8')
@@ -141,21 +141,21 @@ if (!existsSync(BINARY)) {
     'the Go artifact has not been built after the web export',
     'provider-build-provenance.mjs binary check',
     'embedded production bytes cannot be verified',
-    'run make build so bin/peasant embeds the audited web/out tree',
+    'run make build so ./peasant embeds the audited web/out tree',
   )
 }
 const binary = readFileSync(BINARY)
 const missingBinaryMarkers = STRIKE_POLICY_MARKERS.filter((marker) => !binary.includes(Buffer.from(marker)))
 if (missingBinaryMarkers.length > 0) {
   fail(
-    `bin/peasant is missing ${JSON.stringify(missingBinaryMarkers)}`,
+    `./peasant is missing ${JSON.stringify(missingBinaryMarkers)}`,
     'the binary does not contain the same complete Strike policy proven in web/out',
     BINARY,
     'the served artifact may differ from the inspected web export',
-    'rebuild bin/peasant only after the clean provider-capable web export succeeds',
+    'rebuild ./peasant only after the clean provider-capable web export succeeds',
   )
 }
 
 const binarySHA256 = createHash('sha256').update(binary).digest('hex')
 console.log(`provider build provenance: ${routeEvidence.map(({ route, chunks }) => `${route}=[${chunks.join(',')}]`).join(' ')}`)
-console.log(`provider build provenance: eight harnesses, official Strike SVG/policy, and fail-closed validation found in web/out and bin/peasant (${binarySHA256})`)
+console.log(`provider build provenance: eight harnesses, official Strike SVG/policy, and fail-closed validation found in web/out and ./peasant (${binarySHA256})`)

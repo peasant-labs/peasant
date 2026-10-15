@@ -10,7 +10,7 @@
    It needs a backend with data. The simplest is the served app + mock store on one port (include
    `review` so the lifted Changes arm reaches /api/v1/review):
      make build
-     ./bin/peasant web start --port 8690 --foreground --no-browser \
+     ./peasant web start --port 8690 --foreground --no-browser \
          --mock-data-store=web,sessions,qualitySessions,annotations,review
    then point this at it (PEASANT_REAL_ORIGIN). Or run `make dev`, where the backend proxies `next dev` on
    its own origin, and keep PEASANT_REAL_ORIGIN at the backend. The backend refuses a WebSocket from

@@ -326,7 +326,7 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 	if err != nil {
 		return CodexCandidate{}, err
 	}
-	blocks, earlierStates, err := ClassifyCodexBlocks(input.History.StableThreadID, input.History.Nodes, thread, input.History.Correlations)
+	blocks, earlierStates, err := ClassifyCodexBlocks(input.History.StableThreadID, input.History.Nodes, input.History.Controls, thread, input.History.Correlations)
 	if err != nil {
 		return CodexCandidate{}, err
 	}

@@ -57,11 +57,11 @@ integration suites. Publication requires validated retained evidence, partial
 signaling and the receiver's preservation capability; failed or oversized
 transfer must not silently discard evidence. Schema release/tag precedes pins.
 
-## claude-code (adapter 2, indexer 18)
+## claude-code (adapter 3, indexer 19)
 
 Baseline index format: 1.
 
-Managed generation: adapter 2, indexer 19, index format 2.
+Managed generation: adapter 3, indexer 20, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -142,11 +142,11 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 | native-generation | content_block | `tool_reference` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 
-## codex (adapter 1, indexer 17)
+## codex (adapter 2, indexer 18)
 
 Baseline index format: 1.
 
-Managed generation: adapter 2, indexer 20, index format 2.
+Managed generation: adapter 3, indexer 20, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -310,11 +310,11 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments |  | `content_capture.go captureContentBlockKinds` |
 | retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds` |
 
-## opencode (adapter 2, indexer 17)
+## opencode (adapter 3, indexer 18)
 
 Baseline index format: 1.
 
-Managed generation: adapter 3, indexer 18, index format 2.
+Managed generation: adapter 4, indexer 19, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -362,7 +362,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | tool_content | `text` | literal | represented | yes | tool output |  | `opencode_v2_projection.go decodeOpenCodeV2ToolState; opencode_unknown.go prepareOpenCodeToolContent` |
 | native-generation | tool_content | `file` | literal | represented | no | structured tool output URI/MIME |  | `opencode_v2_projection.go decodeOpenCodeV2ToolState; opencode_unknown.go prepareOpenCodeToolContent` |
 
-## pi (adapter 2, indexer 17)
+## pi (adapter 3, indexer 18)
 
 Baseline index format: 1.
 

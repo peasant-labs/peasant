@@ -194,11 +194,14 @@ func hydratePartitionEntries(ctx context.Context, snapshot indexformat.ReadSnaps
 func snapshotToSession(snapshot indexformat.ReadSnapshot) *ingest.Session {
 	metadata := snapshot.Metadata
 	session := &ingest.Session{
-		ID:        ingest.SessionID(snapshot.Session.ID),
-		Harness:   metadata.ModelHarness,
-		Model:     string(metadata.Model),
-		StartTime: unixMilliToTime(metadata.Timestamp.Start),
-		EndTime:   unixMilliToTime(metadata.Timestamp.End),
+		ID:                   ingest.SessionID(snapshot.Session.ID),
+		Harness:              metadata.ModelHarness,
+		Model:                string(metadata.Model),
+		ThinkingLevel:        metadata.ThinkingLevel,
+		ThinkingLevelRaw:     metadata.ThinkingLevelRaw,
+		ThinkingLevelHistory: append([]schema.ThinkingLevelChange(nil), metadata.ThinkingLevelHistory...),
+		StartTime:            unixMilliToTime(metadata.Timestamp.Start),
+		EndTime:              unixMilliToTime(metadata.Timestamp.End),
 		Metadata: ingest.SessionMetadata{
 			TurnCount:     snapshot.Session.TurnCount,
 			ToolCallCount: snapshot.Session.ToolCallCount,

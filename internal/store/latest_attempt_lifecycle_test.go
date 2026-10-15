@@ -338,7 +338,7 @@ func TestLatestAttemptCompleteGenerationDisposesTheAttempt(t *testing.T) {
 	// the completed authority can be ready again.
 	next, nextBlobs := buildTestGeneration(t, sid, "gen_complete_c", "complete text", "complete input", "complete output")
 	complete, err := s.ActivateGeneration(ctx, GenerationActivation{
-		Generation: next, Blobs: nextBlobs, IndexerVersion: 18, IndexedAtMs: 5,
+		Generation: next, Blobs: nextBlobs, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 5,
 		ContentCapture: recoveryCapture(t, next), CaptureRevision: revision,
 	})
 	if err != nil {

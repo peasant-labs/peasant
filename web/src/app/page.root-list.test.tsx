@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import HomePage from './page';
 import type { DecodedProjectSummariesPayload } from '@/lib/api/map';
 import { ALPHA_HASH, BETA_HASH, makeSession } from '@/app/review/[[...segments]]/test-fixtures';
+import { formatMinutes } from '@/lib/home/rootStats';
+import { formatRelative } from '@/app/review/[[...segments]]/format';
 import {
   parseStrictYAML,
   requireExactFields,
@@ -58,6 +60,7 @@ const FILTER_KEYS: Record<string, CountKey> = {
 interface SessionSpec {
   id: string;
   count?: number;
+  chainLength?: number;
   project: ProjectKey;
   syncStatus: 'new' | 'updated' | 'synced';
   state: 'unpublished' | 'published';
@@ -66,19 +69,34 @@ interface SessionSpec {
   audienceStatuses?: ('approved' | 'pending')[];
   outsideSelection?: boolean;
   publication?: boolean;
+  parentSessionId?: string;
+  parentUnresolved?: boolean;
+  title?: string;
+  preview?: string;
+  turnCount?: number;
+  durationMs?: number;
+  startTime?: string;
 }
 
 interface FilterCase {
   name: string;
+  readState?: 'pending' | 'error';
+  expectedSessions?: null;
   sessions: SessionSpec[];
   filter: string;
   expectedCounts: Record<CountKey, number>;
   expectedRows: string[];
   expectedPages?: number[];
   expectedLabels?: Record<string, string>;
+  expectedGroups?: string[];
+  steps?: { expand?: string; children: string[]; groups?: string[]; refresh?: boolean; filter?: string }[];
+  childLabels?: Record<string, string>;
+  searchChild?: string;
 }
 
 const REQUIRED_NAMES = [
+  'pending-root-read-omits-session-stat',
+  'failed-root-read-omits-session-stat',
   'all-counts',
   'not-published-counts',
   'published-counts',
@@ -86,6 +104,17 @@ const REQUIRED_NAMES = [
   'outside-selection-hidden',
   'load-more',
   'pending-collectives-cannot-read',
+  'parent-visible-child-grouped',
+  'recursive-family-and-refresh',
+  'deep-family-expands-one-level-at-a-time',
+  'snapshot-and-evidence-children-with-absent-parents-hidden',
+  'unresolved-child-hidden',
+  'cache-only-child-grouped',
+  'filtered-parent-omits-child',
+  'selection-hidden-parent-and-child',
+  'fork-without-markers-top-level',
+  'paging-keeps-child-with-parent',
+  'child-search-keeps-publish-label',
 ] as const;
 
 function loadFilterCases(): FilterCase[] {
@@ -100,7 +129,14 @@ function loadFilterCases(): FilterCase[] {
   requireUniqueNames(cases, 'root publish filters fixture.cases');
   cases.forEach((testCase, index) => {
     const where = `root publish filters fixture.cases[${index}]`;
-    requireExactFields(testCase, ['name', 'sessions', 'filter', 'expectedCounts', 'expectedRows', 'expectedPages', 'expectedLabels'], where);
+    requireExactFields(testCase, ['name', 'readState', 'expectedSessions', 'sessions', 'filter', 'expectedCounts', 'expectedRows', 'expectedPages', 'expectedLabels', 'expectedGroups', 'steps', 'childLabels', 'searchChild'], where);
+    if (testCase.readState !== undefined && (!['pending', 'error'].includes(String(testCase.readState)) || testCase.expectedSessions !== null)) {
+      throw new Error(`${where}: an unavailable root read must name pending or error and expect null sessions`);
+    }
+    if (testCase.steps !== undefined) {
+      if (!Array.isArray(testCase.steps)) throw new Error(`${where}.steps must be a list`);
+      for (const step of testCase.steps) requireExactFields(requireRecord(step, where), ['expand', 'children', 'groups', 'refresh', 'filter'], where);
+    }
     for (const field of ['name', 'sessions', 'filter', 'expectedCounts', 'expectedRows']) {
       if (!(field in testCase)) throw new Error(`${where} is missing ${field}`);
     }
@@ -110,7 +146,10 @@ function loadFilterCases(): FilterCase[] {
     testCase.sessions.forEach((session, sessionIndex) => {
       const at = `${where}.sessions[${sessionIndex}]`;
       const spec = requireRecord(session, at);
-      requireExactFields(spec, ['id', 'count', 'project', 'syncStatus', 'state', 'autoPublish', 'audience', 'audienceStatuses', 'outsideSelection', 'publication'], at);
+      requireExactFields(spec, ['id', 'count', 'chainLength', 'project', 'syncStatus', 'state', 'autoPublish', 'audience', 'audienceStatuses', 'outsideSelection', 'publication', 'parentSessionId', 'parentUnresolved', 'title', 'preview', 'turnCount', 'durationMs', 'startTime'], at);
+      if (spec.chainLength !== undefined && (!Number.isSafeInteger(spec.chainLength) || Number(spec.chainLength) < 2 || spec.count !== undefined || spec.parentSessionId !== undefined)) {
+        throw new Error(`${at}.chainLength must be an integer >= 2 on a root without count or parentSessionId`);
+      }
       if (!(String(spec.project) in PROJECTS)) throw new Error(`${at}.project must be alpha or beta`);
       if (!['new', 'updated', 'synced'].includes(String(spec.syncStatus))) throw new Error(`${at}.syncStatus is invalid`);
       if (!['unpublished', 'published'].includes(String(spec.state))) throw new Error(`${at}.state is invalid`);
@@ -125,10 +164,12 @@ function loadFilterCases(): FilterCase[] {
   return cases as unknown as FilterCase[];
 }
 
-/** The fixture's sessions with every `count` expanded. */
+/** Expand fixture repetitions and predecessor-linked chains into served session rows. */
 function expand(specs: SessionSpec[]): SessionSpec[] {
   return specs.flatMap((spec) =>
-    spec.count && spec.count > 1
+    spec.chainLength
+      ? Array.from({ length: spec.chainLength }, (_, index) => ({ ...spec, id: `${spec.id}-${index}`, parentSessionId: index ? `${spec.id}-${index - 1}` : undefined, chainLength: undefined }))
+      : spec.count && spec.count > 1
       ? Array.from({ length: spec.count }, (_, index) => ({ ...spec, id: `${spec.id}-${String(index).padStart(2, '0')}`, count: undefined }))
       : [spec],
   );
@@ -146,13 +187,15 @@ function syncRow(spec: SessionSpec, index: number) {
     projectName: project.name,
     projectHash: project.hash,
     hostSlug: 'fixture-host',
-    startTime: new Date(Date.UTC(2026, 5, 1) - index * 3_600_000).toISOString(),
-    durationMs: 25 * 60_000,
+    startTime: spec.startTime ?? new Date(Date.UTC(2026, 5, 1) - index * 3_600_000).toISOString(),
+    durationMs: spec.durationMs ?? 25 * 60_000,
     totalTokens: 12_000,
-    turnCount: 8,
+    turnCount: spec.turnCount ?? 8,
     model: 'fixture-model',
     syncStatus: spec.syncStatus,
     previouslyPushed: spec.state === 'published',
+    parentSessionId: spec.parentSessionId,
+    parentUnresolved: spec.parentUnresolved,
   };
 }
 
@@ -183,10 +226,14 @@ function publicationRow(spec: SessionSpec, index: number, withAudience: boolean)
 }
 
 interface ServeOptions {
+  syncPending?: Promise<void>;
   audienceStatus?: number;
   publicationsError?: { status: number; code: string; error: string };
   search?: unknown;
 }
+
+/** Every audience read, with whether its row was rendered at request time. */
+const audienceChecks: Array<{ id: string; rendered: boolean }> = [];
 
 function json(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) };
@@ -197,7 +244,15 @@ function serve(specs: SessionSpec[], options: ServeOptions = {}) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     requests.push(url);
-    if (url.pathname === '/api/v1/sync/sessions') return json({ sessions: specs.map(syncRow) });
+    if (url.searchParams.get('include') === 'audience') {
+      for (const id of url.searchParams.get('sessionIds')!.split(',')) {
+        audienceChecks.push({ id, rendered: !!document.querySelector(`[data-session-id="${id}"], [data-session-group-child="${id}"]`) });
+      }
+    }
+    if (url.pathname === '/api/v1/sync/sessions') {
+      await options.syncPending;
+      return json({ sessions: specs.map(syncRow) });
+    }
     if (url.pathname === '/api/v1/publications') {
       if (options.publicationsError) {
         return json({ error: options.publicationsError.error, code: options.publicationsError.code }, options.publicationsError.status);
@@ -265,12 +320,13 @@ function loadAll(list: HTMLElement): number[] {
 }
 
 function stateLabel(list: HTMLElement, id: string): string {
-  const row = list.querySelector(`[data-session-id="${id}"]`)?.closest('tr');
+  const row = list.querySelector(`[data-session-id="${id}"], [data-session-group-child="${id}"]`)?.closest('tr');
   return row?.querySelector('.pub-state-text')?.textContent ?? '';
 }
 
 beforeEach(() => {
   for (const key of Object.keys(topics)) delete topics[key];
+  audienceChecks.length = 0;
   topics.sessions = { sessions: [makeSession({ id: 'channel-row', project: 'alpha-project' })] };
   api.fetchProjectSummaries.mockResolvedValue(summaries());
 });
@@ -285,18 +341,152 @@ describe('root page publish filters', () => {
   for (const testCase of loadFilterCases()) {
     it(testCase.name, async () => {
       const specs = expand(testCase.sessions);
-      serve(specs);
-      render(<HomePage />);
-      const list = await screen.findByRole('region', { name: 'sessions' });
+      topics.dashboard = { totalSessions: 1284 };
+      if (testCase.readState) {
+        let release!: () => void;
+        const syncPending = new Promise<void>((resolve) => { release = resolve; });
+        serve(specs, testCase.readState === 'pending' ? { syncPending } : {
+          publicationsError: { status: 503, code: 'service_unavailable', error: 'publication state is unavailable; retry the session list' },
+        });
+        render(<HomePage />);
+        try {
+          const strip = await screen.findByRole('list', { name: 'your sessions in numbers' });
+          if (testCase.readState === 'error') await screen.findByRole('button', { name: 'retry the session list' });
+          const pair = within(strip).getAllByRole('listitem').find((item) => / sessions$/.test(item.textContent ?? ''));
+          expect(pair?.textContent ?? null).toBe(testCase.expectedSessions);
+        } finally {
+          cleanup();
+          await act(async () => { release(); });
+        }
+        return;
+      }
+       const searchSpec = specs.find((spec) => spec.id === testCase.searchChild);
+       const search = searchSpec ? {
+         items: [{ kind: 'transcript', transcript: {
+           session: makeSession({ id: searchSpec.id, project: PROJECTS[searchSpec.project].name, projectHash: PROJECTS[searchSpec.project].hash }),
+           matches: [{ entryIndex: 0, project: PROJECTS[searchSpec.project].name, projectHash: PROJECTS[searchSpec.project].hash, role: 'user', score: 1, sessionId: searchSpec.id, snippet: 'child search match' }],
+         }, helperGroups: [] }], page: 1, limit: 20, totalItems: 1, ordinarySessionTotal: 1, helperThreadTotal: 0,
+       } : undefined;
+       const requests = serve(specs, { search });
+       topics.quality = { sessions: specs.filter((spec) => spec.title).map((spec) => ({ id: spec.id, title: spec.title })) };
+       if (specs.some((spec) => spec.preview)) topics.sessions = { sessions: specs.filter((spec) => spec.preview).map((spec) => makeSession({ id: spec.id, preview: spec.preview })) };
+       const view = render(<HomePage />);
+      // Under full-suite parallel load the mounted region can take longer than the
+      // 1s default findBy timeout (observed on a cold Vite dep cache); wait up to
+      // five seconds. The assertions below are unchanged.
+      let list = await screen.findByRole('region', { name: 'sessions' }, { timeout: 5000 });
+      const assertSessionsStat = () => {
+        const strip = screen.getByRole('list', { name: 'your sessions in numbers' });
+        expect(within(strip).getAllByRole('listitem').find((item) => / sessions$/.test(item.textContent ?? ''))?.textContent).toBe(`${testCase.expectedCounts.all.toLocaleString('en-US')} sessions`);
+      };
+      assertSessionsStat();
+
+      const assertGroupAttachment = (group: Element) => {
+        const parentId = group.getAttribute('data-session-group');
+        const parent = list.querySelector(`[data-session-id="${parentId}"], [data-session-group-child="${parentId}"]`);
+        expect(parent, `parent content for ${parentId}`).not.toBeNull();
+        const cell = parent!.closest('td');
+        expect(cell, `primary cell for ${parentId}`).not.toBeNull();
+        expect(group.closest('td')).toBe(cell);
+        expect(cell!.parentElement!.firstElementChild).toBe(cell);
+        expect(parent!.nextElementSibling).toBe(group);
+        expect(parent!.contains(group)).toBe(false);
+        expect(group.querySelector('[data-session-id]')).toBeNull();
+        expect(group.querySelector('.sgd')).toHaveClass('sgd-bare', 'sgd-indent');
+      };
 
       for (const key of Object.keys(FILTER_LABELS) as CountKey[]) {
         expect(countOf(filterButton(list, key)), `${key} count`).toBe(testCase.expectedCounts[key]);
       }
 
       fireEvent.click(filterButton(list, FILTER_KEYS[testCase.filter]));
+      assertSessionsStat();
+      if (testCase.expectedGroups) {
+        expect([...list.querySelectorAll('[data-session-group]')].map((node) => node.getAttribute('data-session-group'))).toEqual(testCase.expectedGroups);
+        expect(list.querySelectorAll('[data-session-group-child]')).toHaveLength(0);
+        for (const group of list.querySelectorAll('[data-session-group]')) {
+          assertGroupAttachment(group);
+          expect(within(group as HTMLElement).getByRole('button')).toHaveAttribute('aria-expanded', 'false');
+        }
+      }
       const pages = loadAll(list);
+      assertSessionsStat();
       expect(pages).toEqual(testCase.expectedPages ?? [testCase.expectedRows.length]);
       expect(rowsOnScreen(list)).toEqual(testCase.expectedRows);
+
+      const errors = vi.spyOn(console, 'error');
+      for (const step of testCase.steps ?? []) {
+        if (step.filter) fireEvent.click(filterButton(list, FILTER_KEYS[step.filter]));
+        if (step.expand) {
+          const group = list.querySelector(`[data-session-group="${step.expand}"]`) as HTMLElement;
+          fireEvent.click(within(group).getAllByRole('button')[0]);
+        }
+        if (step.refresh) {
+          const before = requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length;
+          topics.sessions = { sessions: [...specs.filter((spec) => spec.preview).map((spec) => makeSession({ id: spec.id, preview: spec.preview })), makeSession({ id: 'refresh-root', project: 'alpha-project' })] };
+          await act(async () => { view.rerender(<HomePage />); });
+          await waitFor(() => expect(requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length).toBeGreaterThan(before));
+        }
+        const children = [...list.querySelectorAll('[data-session-group-child]')];
+        expect(children.map((node) => node.getAttribute('data-session-group-child'))).toEqual(step.children);
+        if (step.groups) {
+          expect([...list.querySelectorAll('[data-session-group]')].map((node) => node.getAttribute('data-session-group'))).toEqual(step.groups);
+          for (const group of list.querySelectorAll('[data-session-group]')) {
+            assertGroupAttachment(group);
+            const toggle = within(group as HTMLElement).getAllByRole('button')[0];
+            expect(toggle).toHaveAttribute('aria-expanded', String(step.children.some((id) => specs.find((spec) => spec.id === id)?.parentSessionId === group.getAttribute('data-session-group'))));
+          }
+        }
+        expect(rowsOnScreen(list)).toEqual(testCase.expectedRows);
+        assertSessionsStat();
+        expect(list.querySelectorAll('[data-session-group]')).toHaveLength(new Set([...list.querySelectorAll('[data-session-group]')].map((node) => node.getAttribute('data-session-group'))).size);
+        for (const child of children) {
+          const spec = specs.find((row) => row.id === child.getAttribute('data-session-group-child'))!;
+          expect(child).not.toHaveAttribute('data-session-id');
+          expect(child.querySelector('.pub-state')).toBeNull();
+          const link = within(child as HTMLElement).getByRole('link');
+          expect(link).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
+          expect(link.textContent?.trim()).not.toBe('');
+          if (testCase.childLabels?.[spec.id]) expect(link).toHaveTextContent(testCase.childLabels[spec.id]);
+          // Each child is its own table row, immediately under its parent, with
+          // every column showing the child's own served values.
+          const row = child.closest('tr')!;
+          const cells = [...row.querySelectorAll('td')];
+          expect(cells).toHaveLength(6);
+          const served = syncRow(spec, specs.indexOf(spec));
+          expect(cells[1].textContent).toContain(PROJECTS[spec.project].name);
+          expect(cells[1].querySelector('a')?.getAttribute('href')).toContain(PROJECTS[spec.project].hash);
+          expect(cells[2].textContent?.trim()).toBe(served.turnCount.toLocaleString('en-US'));
+          expect(cells[3].textContent?.trim()).toBe(formatMinutes(served.durationMs / 60_000));
+          const started = Date.parse(served.startTime);
+          expect(cells[4].textContent?.trim()).toBe(Number.isNaN(started) ? '—' : formatRelative(started));
+          expect(child.id).toBe(`session-group-rows:${spec.id}`);
+          const parentRow = list.querySelector(`[data-session-id="${spec.parentSessionId}"], [data-session-group-child="${spec.parentSessionId}"]`)!.closest('tr');
+          if (row.previousElementSibling !== parentRow) {
+            const prevId = row.previousElementSibling?.querySelector('[data-session-group-child]')?.getAttribute('data-session-group-child');
+            expect(prevId).toBeTruthy();
+            expect(specs.find((entry) => entry.id === prevId)?.parentSessionId).toBe(spec.parentSessionId);
+          }
+        }
+      }
+      expect(errors.mock.calls.flat().join(' ')).not.toMatch(/same key|unique.*key/i);
+      errors.mockRestore();
+      const audienceReads = requests.filter((url) => url.searchParams.get('include') === 'audience');
+      for (const check of audienceChecks) {
+        expect(check.rendered, `audience was read for a row that was not rendered at request time: ${check.id}`).toBe(true);
+      }
+      for (const request of audienceReads) {
+        for (const id of request.searchParams.get('sessionIds')!.split(',')) {
+          expect(specs.find((spec) => spec.id === id)?.state).toBe('published');
+        }
+      }
+      if (searchSpec) {
+        fireEvent.change(screen.getByRole('searchbox', { name: 'search transcripts' }), { target: { value: 'child' } });
+        const match = await screen.findByText('child search match');
+        expect(match.closest('[data-grouped-sessions-section]')?.querySelector('.pub-state-text')?.textContent).toBe('published · up to date');
+        fireEvent.click(screen.getByRole('button', { name: 'clear search' }));
+        list = await screen.findByRole('region', { name: 'sessions' });
+      }
 
       for (const [id, label] of Object.entries(testCase.expectedLabels ?? {})) {
         await waitFor(() => expect(stateLabel(list, id)).toBe(label));
@@ -309,6 +499,7 @@ describe('root page publish filters', () => {
         expect(button).toHaveAttribute('aria-pressed', 'true');
         loadAll(list);
         expect(rowsOnScreen(list).length, `${key} rows`).toBe(countOf(button));
+        assertSessionsStat();
       }
 
       // A session the selection leaves out, or one the publications read did
@@ -396,7 +587,7 @@ describe('root page list reads', () => {
     const strip = await screen.findByRole('list', { name: 'your sessions in numbers' });
     await waitFor(() =>
       expect(within(strip).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-        '1,284 sessions', // dashboard.totalSessions
+        '2 sessions', // selection-visible top-level roots
         '2 projects', // GET /api/v1/projects/summary
         '1 published', // the publications read
         '0 this week', // trends: no day this week

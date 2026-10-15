@@ -672,6 +672,19 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := messageData(RoleAssistant.String(), "", value.Model.ID, value.Agent, value.ParentID, value.Metadata, value.Time.openCodeCurrentTime, value.Tokens); err != nil {
 			return message, err
 		}
+		// Preserve native variant evidence for metadata replay and the retained
+		// indexer. A model without a variant contributes no level.
+		if value.Model.Variant != "" {
+			var normalized map[string]json.RawMessage
+			if err := json.Unmarshal(message.Data, &normalized); err != nil {
+				return message, err
+			}
+			normalized["model"], _ = json.Marshal(value.Model)
+			message.Data, err = json.Marshal(normalized)
+			if err != nil {
+				return message, err
+			}
+		}
 		for _, content := range value.Content {
 			if err := appendOpenCodeCurrentAssistantContent(&message, content, registry, appendPart); err != nil {
 				return message, err

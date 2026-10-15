@@ -1,17 +1,172 @@
 package ingest
 
 import (
+	"bytes"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/opencode_thinking_levels.yaml
+var openCodeSessionThinkingYAML []byte
+
+//go:embed testdata/opencode_thinking_levels.session.manifest.yaml
+var openCodeSessionThinkingManifest []byte
+
+type openCodeThinkingChange struct {
+	Level string `yaml:"level"`
+	Raw   string `yaml:"raw"`
+}
+
+type openCodeSessionThinkingCase struct {
+	Name             string                   `yaml:"name"`
+	ModelColumn      bool                     `yaml:"modelColumn"`
+	ModelJSON        string                   `yaml:"modelJSON"`
+	ChangedModelJSON string                   `yaml:"changedModelJSON"`
+	MessageVariant   string                   `yaml:"messageVariant"`
+	LaterVariant     string                   `yaml:"laterVariant"`
+	WantVariant      string                   `yaml:"wantVariant"`
+	WantLevel        string                   `yaml:"wantLevel"`
+	WantRaw          string                   `yaml:"wantRaw"`
+	WantHistory      []openCodeThinkingChange `yaml:"wantHistory"`
+	WantDiagnostic   bool                     `yaml:"wantDiagnostic"`
+}
+
+func TestOpenCodeSessionThinkingLevels(t *testing.T) {
+	var fixture struct {
+		SessionRows []openCodeSessionThinkingCase `yaml:"sessionRows"`
+	}
+	if err := yaml.Unmarshal(openCodeSessionThinkingYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(openCodeSessionThinkingManifest, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.RequiredNames) == 0 {
+		t.Fatal("session thinking fixture declares no requiredNames inventory; name every case the fixture must retain")
+	}
+	names := map[string]bool{}
+	for _, c := range fixture.SessionRows {
+		if c.Name == "" || names[c.Name] {
+			t.Fatalf("empty or repeated case %q", c.Name)
+		}
+		names[c.Name] = true
+	}
+	required := map[string]bool{}
+	for _, name := range manifest.RequiredNames {
+		if name == "" || required[name] {
+			t.Fatalf("empty or repeated required case name %q", name)
+		}
+		required[name] = true
+	}
+	for name := range names {
+		if !required[name] {
+			t.Fatalf("session thinking case %q is not declared in requiredNames; name every case the fixture must retain", name)
+		}
+	}
+	for name := range required {
+		if !names[name] {
+			t.Fatalf("missing session thinking case %q", name)
+		}
+	}
+	for _, c := range fixture.SessionRows {
+		t.Run(c.Name, func(t *testing.T) {
+			source := testfixture.MaterializeByName(t, "native-current-rows")
+			conn, err := sqlite.OpenConn(source.Path, sqlite.OpenReadWrite)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			const sessionID = "ses_thinkingSession"
+			if err := sqlitex.Execute(conn, "INSERT INTO session (id, parent_id, time_created, time_updated) VALUES (?1, NULL, 1000, 2000)", &sqlitex.ExecOptions{Args: []any{sessionID}}); err != nil {
+				t.Fatal(err)
+			}
+			if c.ModelColumn {
+				if err := sqlitex.ExecuteScript(conn, "ALTER TABLE session ADD COLUMN model TEXT", nil); err != nil {
+					t.Fatal(err)
+				}
+				if err := sqlitex.Execute(conn, "UPDATE session SET model = ?1 WHERE id = ?2", &sqlitex.ExecOptions{Args: []any{c.ModelJSON, sessionID}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			insertMessage := func(id, variant string, seq int64) {
+				model := map[string]string{"id": "gpt-5", "providerID": "openai"}
+				if variant != "" {
+					model["variant"] = variant
+				}
+				data, err := json.Marshal(map[string]any{"agent": "build", "model": model, "content": []any{map[string]any{"type": "text", "id": "part_" + id, "text": "answer"}}, "time": map[string]int64{"created": 1000 + seq, "completed": 2000 + seq}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := sqlitex.Execute(conn, "INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, 'assistant', ?3, ?4, ?5, ?6)", &sqlitex.ExecOptions{Args: []any{id, sessionID, 1000 + seq, 2000 + seq, string(data), seq}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			insertMessage("msg_firstThinking", c.MessageVariant, 1)
+			if c.LaterVariant != "" {
+				insertMessage("msg_laterThinking", c.LaterVariant, 2)
+			}
+			records := readExtendedSessionRecords(t, source.Path)
+			record, ok := records[sessionID]
+			if !ok || record.ModelVariant != c.WantVariant {
+				t.Fatalf("session row = %+v, present=%t, want variant %q", record, ok, c.WantVariant)
+			}
+			fs := &OSFileSystem{}
+			adapter := NewOpenCodeAdapter(fs, semanticNoGit{}, salt.Salt{})
+			path, err := NewResolvedPath(source.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			captured, err := adapter.MaterializeTranscript(t.Context(), DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: path, SourceFormat: SourceFormatJSON, TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if captured.Metadata == nil || string(captured.Metadata.ThinkingLevel) != c.WantLevel || string(captured.Metadata.ThinkingLevelRaw) != c.WantRaw {
+				t.Fatalf("materialized metadata = %+v, want thinking %q/%q", captured.Metadata, c.WantLevel, c.WantRaw)
+			}
+			var gotHistory []openCodeThinkingChange
+			for _, change := range captured.Metadata.ThinkingLevelHistory {
+				gotHistory = append(gotHistory, openCodeThinkingChange{Level: string(change.Level), Raw: string(change.Raw)})
+			}
+			if fmt.Sprint(gotHistory) != fmt.Sprint(c.WantHistory) {
+				t.Fatalf("materialized history = %+v, want %+v", gotHistory, c.WantHistory)
+			}
+			diagnostic := false
+			for _, warning := range captured.Metadata.Diagnostics.Warnings {
+				if warning.ErrorType == ThinkingLevelRawDroppedErrorType {
+					diagnostic = true
+				}
+			}
+			if diagnostic != c.WantDiagnostic {
+				t.Fatalf("raw-drop diagnostic = %t, want %t", diagnostic, c.WantDiagnostic)
+			}
+			if c.ChangedModelJSON != "" {
+				if err := sqlitex.Execute(conn, "UPDATE session SET model = ?1 WHERE id = ?2", &sqlitex.ExecOptions{Args: []any{c.ChangedModelJSON, sessionID}}); err != nil {
+					t.Fatal(err)
+				}
+				changed, err := adapter.MaterializeTranscript(t.Context(), *captured.Session)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if bytes.Equal(changed.SourceFingerprint, captured.SourceFingerprint) {
+					t.Fatal("session model-only rewrite did not change the captured input fingerprint")
+				}
+			}
+		})
+	}
+}
 
 // readAllSessionRecords drains every bounded session-record page of one source
 // and returns the records keyed by session identifier.
@@ -105,13 +260,16 @@ type openCodeSessionRecordColumnsFixture struct {
 }
 
 type openCodeSessionRecordColumnCase struct {
-	Table    string                           `yaml:"table"`
-	Name     string                           `yaml:"name"`
-	Extended bool                             `yaml:"extended"`
-	Rows     []openCodeSessionRecordColumnRow `yaml:"rows"`
+	ModelColumn bool                             `yaml:"model_column"`
+	Table       string                           `yaml:"table"`
+	Name        string                           `yaml:"name"`
+	Extended    bool                             `yaml:"extended"`
+	Rows        []openCodeSessionRecordColumnRow `yaml:"rows"`
 }
 
 type openCodeSessionRecordColumnRow struct {
+	ModelJSON        string  `yaml:"model_json"`
+	WantVariant      string  `yaml:"want_variant"`
 	ID               string  `yaml:"id"`
 	ParentID         string  `yaml:"parent_id"`
 	TimeCreated      int64   `yaml:"time_created"`
@@ -211,6 +369,16 @@ func materializeExtendedSessionDatabase(t *testing.T, testCase openCodeSessionRe
 			t.Fatalf("insert base session row %q: %v", row.ID, err)
 		}
 	}
+	if testCase.ModelColumn {
+		if err := sqlitex.ExecuteScript(conn, "ALTER TABLE session ADD COLUMN model TEXT", nil); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range testCase.Rows {
+			if err := sqlitex.Execute(conn, "UPDATE session SET model = ?1 WHERE id = ?2", &sqlitex.ExecOptions{Args: []any{row.ModelJSON, row.ID}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if testCase.Table == "session_v2" {
 		if err := sqlitex.ExecuteScript(conn, "ALTER TABLE session RENAME TO session_v2", nil); err != nil {
 			t.Fatal(err)
@@ -280,6 +448,9 @@ func TestSessionRecordsReadExtendedColumns(t *testing.T) {
 				record, ok := records[row.ID]
 				if !ok {
 					t.Fatalf("session %q missing from records %v", row.ID, records)
+				}
+				if record.ModelVariant != row.WantVariant {
+					t.Fatalf("variant = %q, want %q", record.ModelVariant, row.WantVariant)
 				}
 				if record.ParentID.String() != row.ParentID || record.TimeUpdated != row.TimeUpdated {
 					t.Fatalf("session %q parent/clock = %q/%d, want %q/%d", row.ID, record.ParentID.String(), record.TimeUpdated, row.ParentID, row.TimeUpdated)

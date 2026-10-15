@@ -63,6 +63,12 @@ cases:
     test: TestSchedulingLookupWarningRefusesRawDependencyDetail
     hazard: slog.SetDefault
 
+  - name: transcript-thinking-level-slog-default
+    file: internal/transcript/thinking_level_entry_validation_test.go
+    line: 80
+    test: TestThinkingLevelStoredEvidenceDropsWithWarning
+    hazard: slog.SetDefault
+
 mutations:
   - name: parallel-test-is-rejected
     file: cmd/peasant/web_capabilities_matrix_test.go

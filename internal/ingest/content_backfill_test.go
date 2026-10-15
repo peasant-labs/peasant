@@ -87,10 +87,8 @@ func TestStoredContentBackfill(t *testing.T) {
 					meta.Project.Hash = ""
 				}
 				meta.ModelHarness = harness
-				if harness == ingest.HarnessClaudeCode {
-					adapterVersion := ingest.HarvesterVersionRegistry[harness].AdapterVersion
-					meta.AdapterVersion = &adapterVersion
-				}
+				adapterVersion := ingest.HarvesterVersionRegistry[harness].AdapterVersion
+				meta.AdapterVersion = &adapterVersion
 				meta.Source.FilePath = "/synthetic/missing.jsonl"
 				meta.Source.Format = ingest.SourceFormatJSONL
 				dir := filepath.Join(testOutputDir, testutil.TestHostSlug)

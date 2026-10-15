@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -156,15 +155,11 @@ func TestContentWriteBudgetFamily(t *testing.T) {
 }
 
 // ingestNonTestSources returns the contents of every non-test Go source file
-// in internal/ingest, anchored at this test file so the guard holds wherever
-// the test runs from.
+// in internal/ingest, relative to the source package working directory used
+// by go test.
 func ingestNonTestSources(t *testing.T) []string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate the ingest sources: runtime.Caller failed")
-	}
-	dir := filepath.Join(filepath.Dir(file), "..", "ingest")
+	dir := filepath.Join("..", "ingest")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read the ingest sources: %v", err)

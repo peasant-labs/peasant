@@ -1,0 +1,11 @@
+requiredNames:
+  - missing_or_invalid_context_clears_turn_evidence
+  - off_is_canonical_identity
+  - high_identity_seed
+  - none_maps_off_with_raw
+  - ultra_is_identity_without_raw
+  - persistent_maps_off_with_raw
+  - custom_is_absent_with_raw
+  - two_turn_contexts_seed_is_earliest
+  - repeated_turn_context_effort_collapses_in_history
+  - no_effort_stays_absent

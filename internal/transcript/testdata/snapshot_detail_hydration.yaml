@@ -10,6 +10,19 @@
 # one uncertain earlier block plus five main records from one qualifying
 # submission, with a folded tool whose call and result refs stay distinct.
 cases:
+  - name: v2_opencode_session_row_seed_carries_to_payload
+    harness: opencode
+    thinkingSeed: {level: "off", raw: none}
+    thinkingHistory:
+      - {level: medium}
+      - {raw: custom}
+    expectedThinkingSeed: {level: "off", raw: none}
+    expectedThinkingHistory:
+      - {level: medium}
+      - {raw: custom}
+    main:
+      - {index: 0, role: assistant, depth: 0, ref: "e_row_seed", content: answer}
+    expectedMainIndices: [0]
   - name: section4_exact_layout
     harness: codex
     purpose: interaction

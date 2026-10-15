@@ -16,6 +16,8 @@ requiredNames:
   - declared_version_10_survives_the_next_contract_bump
   - version_before_the_declared_set_is_still_refreshed_after_the_bump
   - declared_version_11_survives_a_later_bump
+  - declared_version_12_is_read_as_it_stands
+  - declared_version_12_survives_a_later_bump
   - a_newer_recorded_version_is_never_refreshed_backwards
 cases:
   - name: absent_version_is_refreshed
@@ -52,6 +54,14 @@ cases:
   - name: declared_version_11_survives_a_later_bump
     recorded: 11
     current: 12
+    want: keep
+  - name: declared_version_12_is_read_as_it_stands
+    recorded: 12
+    current: 12
+    want: keep
+  - name: declared_version_12_survives_a_later_bump
+    recorded: 12
+    current: 13
     want: keep
   - name: a_newer_recorded_version_is_never_refreshed_backwards
     recorded: 12

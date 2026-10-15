@@ -593,6 +593,7 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 		Completeness:     completeness,
 		Nodes:            state.nodes,
 		Correlations:     state.correlations,
+		Controls:         state.controls,
 		RawBytes:         currentData,
 		Diagnostics:      state.diagnostics,
 	}
@@ -808,6 +809,7 @@ func codexRefsForOwnership(nodes []CodexCapturedNode, ownership CodexOwnership) 
 type codexReplayState struct {
 	registry       *CodexRefRegistry
 	nodes          []CodexCapturedNode
+	controls       []CodexCapturedControl
 	correlations   []CodexCapturedCorrelation
 	diagnostics    []DiagnosticEntry
 	responseByItem map[string]int
@@ -1029,7 +1031,10 @@ func (state *codexReplayState) replayRecord(threadID string, segment codexDecode
 	}
 
 	switch record.EnvelopeType {
-	case codexTypeSessionMeta, codexTypeTurnContext:
+	case codexTypeSessionMeta:
+		return nil
+	case codexTypeTurnContext:
+		state.replayTurnContext(threadID, segment, record)
 		return nil
 	case codexTypeResponse:
 		return state.replayResponseItem(threadID, segment, record, payload, ownership, mode)
@@ -1040,6 +1045,33 @@ func (state *codexReplayState) replayRecord(threadID string, segment codexDecode
 	default:
 		return nil
 	}
+}
+
+// replayTurnContext surfaces one turn_context record as control evidence at
+// its source position. It emits no node and no ref. The mapped effort governs
+// the nodes that follow; an absent or non-string effort yields the zero
+// mapping, so later assistant blocks carry no level.
+func (state *codexReplayState) replayTurnContext(threadID string, segment codexDecodedSegment, record codexHistoryRecord) {
+	var payload struct {
+		Effort json.RawMessage `json:"effort"`
+	}
+	var effort string
+	if len(record.Payload) > 0 && json.Unmarshal(record.Payload, &payload) == nil {
+		if json.Unmarshal(payload.Effort, &effort) != nil {
+			effort = ""
+		}
+	}
+	mapping, diagnostic := mapCodexEffort(effort)
+	if diagnostic != nil {
+		diagnostic.Location = codexRecordLocation(threadID, record)
+		state.diagnostics = append(state.diagnostics, *diagnostic)
+	}
+	state.controls = append(state.controls, CodexCapturedControl{
+		NodeIndex:      len(state.nodes),
+		SegmentOrdinal: segment.ordinal,
+		Ordinal:        record.Ordinal,
+		ThinkingLevel:  mapping,
+	})
 }
 
 // replayResponseItem emits one captured node for a recognized response_item,

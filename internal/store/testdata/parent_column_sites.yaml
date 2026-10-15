@@ -60,7 +60,10 @@ residual:
     class: availability
     reason: >-
       The push row carries the availability cache so consumers can build on-disk
-      paths. It answers which cached row exists, not who the parent is.
+      paths. It answers which cached row exists, not who the parent is. The sync
+      identity reader is the one consumer that reads it, and only as its LAST
+      fallback arm after generation evidence and the stored document parent are
+      both silent; it never reports the cache as a session's parent answer.
   - name: store-lookup-session-location
     file: internal/store/metrics_reader.go
     declaration: sqlLookupSessionLocation
@@ -254,6 +257,14 @@ routed:
     declaration: sqlListStaleOriginSessions
     class: routed
     reason: Stored-origin verdict input, rendered.
+  - name: store-invalidate-stale-parent-origins
+    file: internal/store/parent_reconcile.go
+    declaration: sqlInvalidateStaleParentOrigins
+    class: routed
+    reason: >-
+      The re-queue set is the resolver's own parent test, rendered: a raw-cache
+      predicate would miss an evidenced child whose cache is NULL, which is
+      exactly the row the resolve pass judges parent-linked.
   - name: codemap-sessions-for-project
     file: internal/codemap/store_queries.go
     declaration: sqlSessionsForProject
@@ -402,10 +413,46 @@ foreign:
     literals: 1
     class: foreign-database
     reason: OpenCode's own source database schema.
+  - name: ingest-opencode-model-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionModelAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session table column, not this
+      store's availability cache.
+  - name: ingest-opencode-model-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionModelFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session table column, not this
+      store's availability cache.
+  - name: ingest-opencode-v2-model-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ModelAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session_v2 table column, not
+      this store's availability cache.
+  - name: ingest-opencode-v2-model-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ModelFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session_v2 table column, not
+      this store's availability cache.
   - name: ingest-opencode-session-records
     file: internal/ingest/opencode_sqlite_source_zombiezen.go
     declaration: zombiezenOpenCodeSQLiteSource.SessionRecords
-    literals: 16
+    literals: 18
     class: foreign-database
     reason: OpenCode's own source database schema, read as row statements.
   - name: ingest-testfixture-current-missing-seq

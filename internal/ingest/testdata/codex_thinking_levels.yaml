@@ -1,0 +1,91 @@
+# Codex thinking-level extraction corpus. Cases with builderEffort drive the
+# shared representative rollout builder (one turn_context carrying that
+# effort, one assistant message); cases with a transcript spell out
+# multi-turn rollouts. Both run through the real retained metadata extraction
+# (session seed: the first non-empty turn_context effort) and the real
+# indexer (per-turn evidence on each assistant message, in order). An omitted
+# seed or an empty turn means "absent" (unknown), never off.
+cases:
+  - name: missing_or_invalid_context_clears_turn_evidence
+    transcript: |
+      {"type":"session_meta","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/retained/project"}}
+      {"type":"turn_context","payload":{"effort":"high"}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first"}]}}
+      {"type":"turn_context","payload":{"effort":17}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second"}]}}
+      {"type":"turn_context","payload":{}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"third"}]}}
+    seed: {level: high}
+    turns:
+      - {level: high}
+      - {}
+      - {}
+  - name: off_is_canonical_identity
+    builderEffort: "off"
+    seed: {level: "off"}
+    turns:
+      - {level: "off"}
+  - name: high_identity_seed
+    builderEffort: high
+    seed: {level: high}
+    turns:
+      - {level: high}
+  - name: none_maps_off_with_raw
+    builderEffort: none
+    seed: {level: "off", raw: none}
+    turns:
+      - {level: "off", raw: none}
+  - name: ultra_is_identity_without_raw
+    builderEffort: ultra
+    seed: {level: ultra}
+    turns:
+      - {level: ultra}
+  - name: persistent_maps_off_with_raw
+    builderEffort: persistent
+    seed: {level: "off", raw: persistent}
+    turns:
+      - {level: "off", raw: persistent}
+  - name: custom_is_absent_with_raw
+    builderEffort: custom
+    seed: {raw: custom}
+    turns:
+      - {raw: custom}
+  - name: two_turn_contexts_seed_is_earliest
+    transcript: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","cli_version":"fixture","cwd":"/retained/project"}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"medium"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:02Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first answer"}]}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"high"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:03Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:04Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second answer"}]}}
+    seed: {level: medium}
+    history:
+      - {level: high}
+    turns:
+      - {level: medium}
+      - {level: high}
+  - name: repeated_turn_context_effort_collapses_in_history
+    transcript: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","cli_version":"fixture","cwd":"/retained/project"}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"low"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first answer"}]}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"low"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:02Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second answer"}]}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture","effort":"max"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:03Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"third answer"}]}}
+    seed: {level: low}
+    history:
+      - {level: max}
+    turns:
+      - {level: low}
+      - {level: low}
+      - {level: max}
+  - name: no_effort_stays_absent
+    transcript: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","cli_version":"fixture","cwd":"/retained/project"}}
+      {"type":"turn_context","payload":{"model":"gpt-fixture"}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:02Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}
+    turns:
+      - {}
