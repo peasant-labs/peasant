@@ -464,6 +464,12 @@ func (p *Pipeline) commitGenerationResult(ctx context.Context, prepared prepared
 	return p.finishGenerationResult(ctx, prepared, outcome, logPrefix, activationOutcome, activationErr)
 }
 
+// latestAttemptHeldReason is the durable free-text reason a kept latest attempt
+// records. The index_log outcome stays the existing skipped value: the write
+// held the latest preview instead of advancing the active authority, and the
+// cause line names why and what the user can do about it.
+const latestAttemptHeldReason = "latest capture retained as an incomplete preview; the last-good generation stays the read authority; re-index the complete source to publish"
+
 // finishGenerationResult is shared by single and batched activation so
 // refusal, retained accounting, skip, and post-commit sweep have one owner.
 func (p *Pipeline) finishGenerationResult(ctx context.Context, prepared preparedGeneration, outcome IndexOutcome, logPrefix string, activationOutcome ActivationOutcome, activationErr error) (indexedMeta, IndexLogEntry, IndexProfileSession) {
@@ -513,6 +519,20 @@ func (p *Pipeline) finishGenerationResult(ctx context.Context, prepared prepared
 	var committed []RetainedUnknownKindCount
 	if activationOutcome.Disposition == ActivationCommittedNow {
 		committed = candidates
+	}
+	if activationOutcome.Disposition == ActivationLatestAttemptPreview {
+		// The write kept the candidate as the latest attempt and left the active
+		// authority untouched. This is a DEDICATED branch, never the skip mapping:
+		// the skip branch reports the parsed entry count and returns indexed=true,
+		// which would claim parser work and a committed install that did not
+		// happen. The durable log carries the existing skipped outcome with the
+		// held reason, a literal zero entry count, and indexed=false so the
+		// pipeline summary counts no indexed session. The sweep does not run: the
+		// active authority did not move.
+		reason := latestAttemptHeldReason
+		logEntry := p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+		profile := p.makeIndexProfileSession(result, logEntry, 0)
+		return indexedMeta{session: im.session, startMs: im.startMs, indexed: false}, logEntry, profile
 	}
 	if activationOutcome.Disposition == ActivationSkipped {
 		// An identical refresh: the projection is unchanged, so the

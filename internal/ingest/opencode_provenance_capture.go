@@ -584,13 +584,18 @@ func openCodeGenerationPrior(ctx context.Context, session DiscoveredSession, sou
 	if err != nil {
 		return OpenCodeProvenancePrior{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load prior evidence", "the last-good alias and captured-prefix evidence could not be loaded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", err)
 	}
-	if loaded == nil {
+	if loaded == nil || priorCarriesNoEvidenceDocument(loaded) {
 		authority, authorityErr := source.ReadStoredCaptureAuthority(ctx)
 		if authorityErr != nil {
 			return OpenCodeProvenancePrior{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load stored capture authority", "the stored last-good capture certificate could not be read", "verify the stored capture store and retry; no candidate was produced and the last good generation stays active", authorityErr)
 		}
 		if authority != nil {
 			prior.CaptureAuthority = authority
+		}
+		if loaded != nil {
+			// The certificate-only coexistence state still reuses the latest
+			// attempt's aliases; only the evidence document is absent.
+			prior.Aliases = generationPriorState(loaded)
 		}
 		return prior, nil
 	}
@@ -605,6 +610,15 @@ func openCodeGenerationPrior(ctx context.Context, session DiscoveredSession, sou
 	}
 	translated.Aliases = generationPriorState(loaded)
 	return translated, nil
+}
+
+// priorCarriesNoEvidenceDocument reports the certificate-only coexistence
+// state: the prior names the latest attempt's reusable aliases but carries no
+// evidence document and no complete generation. The stored capture certificate
+// is still the full-authority proof, so the candidate must still be judged
+// against it.
+func priorCarriesNoEvidenceDocument(prior *GenerationPrior) bool {
+	return prior.Metadata == nil && len(prior.PriorEvidence) == 0 && !prior.HasCompleteGeneration
 }
 
 // recordedSourceLocator returns the recorded source locator the attempt was

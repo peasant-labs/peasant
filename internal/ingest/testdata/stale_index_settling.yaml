@@ -201,3 +201,17 @@ cases:
     harness: codex
     transcript: codex-unknown-block-before-missing-text
     refused: true
+
+# Coexistence section of the same family: a full read authority with a fully
+# settled latest attempt beside it. The attempt already consumed the current
+# pair under this build's producer and adapter targets, so the ordinary harvest
+# must select no work for the session: no transcript read, no indexed session,
+# and no change to the authority's producer stamp or the latest-attempt pointer.
+# The per-facet selection surfaces and the replace/true-no-op lifecycle are the
+# store family's; these rows prove the production harvest path obeys them.
+latest_attempt_required_names:
+  - settled-latest-attempt-owes-no-parse
+latest_attempt_cases:
+  - name: settled-latest-attempt-owes-no-parse
+    harness: claude-code
+    transcript: claude-certifiable

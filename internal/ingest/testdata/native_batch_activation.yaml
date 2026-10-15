@@ -1,4 +1,4 @@
-required_names: [fills-to-activation-cap, byte-cap-splits, oversized-alone, refused-session-isolated, skip-routed-single]
+required_names: [fills-to-activation-cap, byte-cap-splits, oversized-alone, refused-session-isolated, skip-routed-single, latest-attempt-routed-single]
 cases:
   - name: fills-to-activation-cap
     entries: [2, 2, 2]
@@ -26,4 +26,10 @@ cases:
     activation_cap: 3
     byte_cap_units: 10
     skip: 1
+    batches: [3]
+  - name: latest-attempt-routed-single
+    entries: [2, 2, 2]
+    activation_cap: 3
+    byte_cap_units: 10
+    retained: 1
     batches: [3]
