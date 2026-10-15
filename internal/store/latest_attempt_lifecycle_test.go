@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -421,5 +422,84 @@ func TestLatestAttemptPointerClearsOnRepairFinalization(t *testing.T) {
 	}
 	if got := generationRowCount(t, s, sid); got != 2 {
 		t.Fatalf("generation rows = %d, want the authority and the attempt; the repair writes no new row", got)
+	}
+}
+
+// TestLatestAttemptFileBackedAuthorityRetainsOnBothRoutes proves a file-backed
+// read authority is a valid coexistence partner on BOTH activation routes: the
+// newer incomplete attempt is kept, the authority stays the file-backed
+// generation, the mounted read serves the attempt's bounded preview, the
+// explicit last-good read serves the file-backed authority, and the default
+// full content read refuses.
+func TestLatestAttemptFileBackedAuthorityRetainsOnBothRoutes(t *testing.T) {
+	for _, route := range []string{"single", "batch"} {
+		t.Run(route, func(t *testing.T) {
+			s, root := openGenerationStore(t)
+			sid := schema.SessionID("e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e4")
+			ctx := context.Background()
+			seedGenerationSession(t, s, string(sid))
+			authority, authorityBlobs := buildTestGeneration(t, sid, "gen-file-authority", "file authority text", "file authority input", "file authority output")
+			stampSeedMetadataHash(&authority)
+			seedFileBackedGeneration(t, s, root, sid, authority, authorityBlobs, true)
+			identity := hexIdentity('c')
+			setStoredArtifactHash(t, s, sid, identity)
+
+			candidate := previewCandidate(t, sid, "gen_preview_b")
+			var disposition ingest.ActivationDisposition
+			switch route {
+			case "single":
+				outcome, err := s.ActivateGeneration(ctx, candidate)
+				if err != nil {
+					t.Fatalf("single-route activation: %v", err)
+				}
+				disposition = outcome.Disposition
+			case "batch":
+				results := s.ActivateGenerationBatch(ctx, []GenerationActivation{candidate})
+				if len(results) != 1 {
+					t.Fatalf("batch results = %d, want 1", len(results))
+				}
+				if results[0].Err != nil {
+					t.Fatalf("batch activation: %v", results[0].Err)
+				}
+				disposition = results[0].Outcome.Disposition
+			}
+			if disposition != ingest.ActivationLatestAttemptPreview {
+				t.Fatalf("disposition = %v, want ActivationLatestAttemptPreview", disposition)
+			}
+			if pointer := latestAttemptPointerFor(t, s, sid); pointer.generationID != "gen_preview_b" || pointer.artifactHash != identity {
+				t.Fatalf("latest-attempt pointer = %+v, want the attempt and the verified identity", pointer)
+			}
+
+			available, err := s.ReadSessionAvailable(ctx, ingest.SessionID(sid))
+			if err != nil {
+				t.Fatalf("ReadSessionAvailable: %v", err)
+			}
+			if !PartialPreviewNeeded(available.Capture) {
+				t.Fatalf("available capture = %+v, want the attempt's partial preview state", available.Capture)
+			}
+			if available.Capture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly || available.Capture.Status != ingest.ContentCaptureIncomplete {
+				t.Fatalf("available capture = %s/%s, want preview_only/incomplete", available.Capture.CaptureFormat, available.Capture.Status)
+			}
+			if len(available.Entries) == 0 {
+				t.Fatal("the available read served no attempt entries")
+			}
+
+			served := ""
+			if err := s.WithSessionSnapshotSelected(ctx, sid, ingest.SessionReadSelection{LastGood: true}, func(snapshot indexformat.ReadSnapshot) error {
+				served = snapshot.GenerationID
+				return nil
+			}); err != nil {
+				t.Fatalf("last-good read of the file-backed authority: %v", err)
+			}
+			if served != "gen-file-authority" {
+				t.Fatalf("last-good generation = %q, want the file-backed authority", served)
+			}
+			if _, err := s.ReadSessionContent(ctx, string(sid)); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+				t.Fatalf("default full content read = %v, want the latest-attempt sentinel", err)
+			}
+			if got := visibleGeneration(t, s, sid); got != "gen-file-authority" {
+				t.Fatalf("active generation = %q, want the unchanged file-backed authority", got)
+			}
+		})
 	}
 }
