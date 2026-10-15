@@ -12,6 +12,7 @@ requiredNames:
   - reindex-suppresses-bridge
   - store-without-authority-reader-bridges-nothing
   - authority-reader-error-is-actionable
+  - certificate-only-aliases-only-prior-bridges-authority
 sessionId: ses_bridge_authority_test
 # The certificate every authority-present case serves. The bridge must preserve
 # it verbatim, including an accounted incomplete status and its failure code.
@@ -66,3 +67,12 @@ cases:
     authority: absent
     authorityError: true
     wantError: true
+  # The certificate-only state: the prior names the kept latest attempt's
+  # aliases and carries no evidence document, so the stored certificate is
+  # still bridged and the attempt's own aliases are reused.
+  - name: certificate-only-aliases-only-prior-bridges-authority
+    prior: aliases-only
+    authority: present
+    wantPrior: bridge
+    wantCaptureAuthority: true
+    wantAuthorityReads: 1
