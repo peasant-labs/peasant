@@ -194,6 +194,39 @@ func TestLoadStoredBackfillFixturesRejectsAmbiguousMessages(t *testing.T) {
 		!strings.Contains(err.Error(), "sets both first_user_message and user_messages") {
 		t.Fatalf("ambiguous message fields must name the case and both fields: %v", err)
 	}
+
+	// The two stored_version refusals must each fail the decode on their own.
+	// The first case's first row is the vehicle; its ordered message run is
+	// cleared so each refusal is observed in isolation.
+	row := &fixture.Cases[0].Rows[0]
+	row.FirstUserMessage = nil
+	row.UserMessages = nil
+
+	version := 2
+	row.StoredVersion = &version
+	row.AtPriorRuleVersion = true
+	data, err = yaml.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("marshal the fixture seeding an exact version and a relative version flag: %v", err)
+	}
+	_, err = LoadStoredBackfillFixtures(data)
+	if err == nil || !strings.Contains(err.Error(), fixture.Cases[0].Name) ||
+		!strings.Contains(err.Error(), "stored_version together with a relative rule-version flag") {
+		t.Fatalf("a row seeding an exact version and a relative version flag must name the case and the ambiguous seed: %v", err)
+	}
+	row.AtPriorRuleVersion = false
+
+	zero := 0
+	row.StoredVersion = &zero
+	data, err = yaml.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("marshal the fixture seeding a sub-watermark version: %v", err)
+	}
+	_, err = LoadStoredBackfillFixtures(data)
+	if err == nil || !strings.Contains(err.Error(), fixture.Cases[0].Name) ||
+		!strings.Contains(err.Error(), "below the supported watermark 1") {
+		t.Fatalf("a row seeding a sub-watermark rule version must name the case and the watermark: %v", err)
+	}
 }
 
 // storedBackfillWorld is one fixture case realised: a real local store holding
