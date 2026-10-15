@@ -73,6 +73,7 @@ type parentReconcileAuthorityFixture struct {
 	Child     string                         `yaml:"child"`
 	Legacy    string                         `yaml:"legacy"`
 	Alternate string                         `yaml:"alternate"`
+	Unstored  string                         `yaml:"unstored"`
 	Cases     []parentReconcileAuthorityCase `yaml:"cases"`
 }
 
@@ -291,7 +292,10 @@ func runParentReconcileHealResetCase(t *testing.T, fixture parentReconcileAuthor
 // unknown at the current rule version. Only the parent-linked independently
 // admitted child is re-queued: the Claude Code control keeps its watermark, and
 // the parent root keeps its settled verdict because it carries no parent link.
-// A second application re-queues nothing.
+// A second application re-queues nothing. A case that declares authorityState
+// activates that relationship for the child first, so the child is parent-linked
+// by evidence while its cache follows expectParentCache: the re-queue set is the
+// logical-parent answer, never the raw cache.
 func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAuthorityFixture, tc parentReconcileAuthorityCase) {
 	t.Helper()
 	ctx := t.Context()
@@ -304,10 +308,18 @@ func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAutho
 	insertAuthoritySession(t, ctx, db, parent, harness, nil)
 	insertAuthoritySession(t, ctx, db, child, harness, &parent)
 	insertAuthoritySession(t, ctx, db, control, ingest.HarnessClaudeCode, &parent)
+	wantCache := &parent
+	if tc.AuthorityState != "" {
+		// An authoritative activation rewrites the child's cache from its
+		// relationship evidence, so the fixture names what it expects (nil when
+		// the evidence target is not stored).
+		activateAuthorityRelationship(t, db, child, tc.AuthorityState, authorityOptionalID(t, fixture, tc.AuthorityTarget))
+		wantCache = authorityOptionalID(t, fixture, tc.ExpectParentCache)
+	}
 	for _, id := range []ingest.SessionID{parent, child, control} {
 		settleAuthorityOrigin(t, ctx, db, id)
 	}
-	assertAuthorityParentCache(t, ctx, db, child, &parent)
+	assertAuthorityParentCache(t, ctx, db, child, wantCache)
 	assertAuthorityParentCache(t, ctx, db, control, &parent)
 	assertAuthorityParentCache(t, ctx, db, parent, nil)
 
@@ -381,6 +393,9 @@ func authorityOptionalID(t *testing.T, fixture parentReconcileAuthorityFixture, 
 		return &id
 	case "alternate":
 		id := authorityRequiredID(t, "alternate", fixture.Alternate)
+		return &id
+	case "unstored":
+		id := authorityRequiredID(t, "unstored", fixture.Unstored)
 		return &id
 	default:
 		t.Fatalf("authority fixture names unknown id token %q", token)
