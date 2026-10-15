@@ -66,9 +66,9 @@ func lastGoodOpenStore(t *testing.T) *store.Store {
 	return db
 }
 
-// lastGoodGeneration builds a complete generation whose single user entry reads
-// the supplied text through its managed blob, so an export that served the wrong
-// generation is observable in the turn content.
+// lastGoodGeneration builds a complete generation whose single user entry
+// carries the supplied text, so an export that served the wrong generation is
+// observable in the turn content.
 func lastGoodGeneration(t *testing.T, sid schema.SessionID, genID, text string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
 	t.Helper()
 	meta := ingest.NewUnifiedMetadata()
@@ -102,7 +102,7 @@ func lastGoodGeneration(t *testing.T, sid schema.SessionID, genID, text string) 
 }
 
 // lastGoodSeedAuthority seeds the session with a complete full generation (A)
-// carrying the supplied authority text and returns the session id.
+// carrying the supplied authority text.
 func lastGoodSeedAuthority(t *testing.T, db *store.Store, sid schema.SessionID, authorityText string) {
 	t.Helper()
 	generation, blobs := lastGoodGeneration(t, sid, "gen_last_good_a", authorityText)
