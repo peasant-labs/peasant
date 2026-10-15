@@ -86,7 +86,7 @@ cases:
 
   # The same retention over a row that predates the artifact-hash column: the
   # write supplies the verified pair identity, so the bootstrap establishes the
-  # row's artifact hash and the retained pointer records the same value.
+  # row's artifact hash and latest-attempt pointer records the same value.
   - name: claude_legacy_null_artifact_retains_with_provided_identity
     harness: claude-code
     scenario: latest_attempt_retention
@@ -111,7 +111,7 @@ cases:
       {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"9c9c9c9c-9999-4999-8999-9c9c9c9c9c9c","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"the certificate keeps its full authority"}]}}
 
   # The operator override: a forced harvest replaces the authority with the
-  # preview and clears the retained pointer in the same commit, so the explicit
+  # preview and clears latest-attempt pointer in the same commit, so the explicit
   # last-good read afterwards refuses the active preview.
   - name: claude_explicit_rebuild_over_retained_clears_pointer
     harness: claude-code

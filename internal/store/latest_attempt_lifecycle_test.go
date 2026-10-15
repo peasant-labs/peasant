@@ -505,8 +505,8 @@ func TestLatestAttemptFileBackedAuthorityRetainsOnBothRoutes(t *testing.T) {
 }
 
 // TestLatestAttemptRetentionRefusesMalformedEvidence proves a candidate whose
-// selected evidence does not validate is refused on BOTH retention routes, with
-// the authority intact and no attempt recorded: the retention path re-runs the
+// selected evidence does not validate is refused on BOTH activation routes, with
+// the authority intact and no attempt recorded: the latest-attempt path re-runs the
 // same unknown-evidence preflight the ordinary content write runs, so it is
 // never a bypass for a candidate the ordinary path would refuse.
 func TestLatestAttemptRetentionRefusesMalformedEvidence(t *testing.T) {

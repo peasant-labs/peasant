@@ -49,10 +49,10 @@ type nativeRefreshRepairCase struct {
 	// generation whose row predates the artifact-hash column.
 	Authority string `yaml:"authority"`
 	// RetentionRepeat runs the harvest a second time to prove the settled
-	// retained attempt is a true no-op.
+	// latest attempt is a true no-op.
 	RetentionRepeat bool `yaml:"retentionRepeat"`
 	// ExplicitRebuild runs a forced harvest after retention to prove the
-	// operator override replaces the authority and clears the retained pointer.
+	// operator override replaces the authority and clears the latest-attempt pointer.
 	ExplicitRebuild bool `yaml:"explicitRebuild"`
 }
 
@@ -455,7 +455,7 @@ func TestNativeRefreshRepair(t *testing.T) {
 				return
 			}
 			if tc.Scenario == "latest_attempt_retention" {
-				runLatestAttemptRetention(t, tc)
+				runLatestAttemptCase(t, tc)
 				return
 			}
 			sid, err := ingest.NewSessionID(tc.SessionID)

@@ -531,7 +531,7 @@ VALUES (7, `+strconv.Itoa(int(ingest.CurrentSchemaVersion))+`, '{"seed":true}', 
 }
 
 // TestLatestAttemptStaleAttemptStillServesItsOwnContent proves the stale-attempt
-// read: with the retained pointer's pair identity differing from the session's
+// read: with the latest-attempt pointer's pair identity differing from the session's
 // current artifact hash, the attempt is still the actual last attempted
 // snapshot, so the mounted reads and the preview-snapshot read serve ITS own
 // entries, counts and partial flag — never the authority and never the
@@ -541,7 +541,7 @@ func TestLatestAttemptStaleAttemptStillServesItsOwnContent(t *testing.T) {
 	sid := schema.SessionID("aaaabbbb-2222-4333-8444-555566667777")
 	seedLatestAttemptCoexistence(t, s, sid)
 	// The pair moved on after the attempt: the row now carries a different
-	// identity than the one the retained pointer recorded.
+	// identity than the one the latest-attempt pointer recorded.
 	execGenerationSQL(t, s, `UPDATE sessions SET artifact_hash = '`+hexIdentity('9')+`' WHERE session_id = '`+string(sid)+`';`)
 	ctx := context.Background()
 
@@ -583,10 +583,10 @@ func TestLatestAttemptStaleAttemptStillServesItsOwnContent(t *testing.T) {
 		callbackRan = true
 		return nil
 	}); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
-		t.Fatalf("stale full read = %v, want the retained-attempt sentinel", err)
+		t.Fatalf("stale full read = %v, want the latest-attempt sentinel", err)
 	}
 	if callbackRan {
-		t.Fatal("the stale full read ran the callback for a retained session")
+		t.Fatal("the stale full read ran the callback for a session with a latest attempt")
 	}
 }
 

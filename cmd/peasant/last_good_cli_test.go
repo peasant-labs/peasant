@@ -23,16 +23,16 @@ import (
 // warning is printed before the upload, a generated hook never carries it, and
 // the export and push commands serve the last-good authority only when the flag
 // is set — never the newer incomplete attempt. Every case seeds the coexistence
-// shape (a last-good authority with a newer retained attempt), so a flag that
+// shape (a last-good authority with a newer latest attempt), so a flag that
 // stops reaching the selected read turns these tests red.
 
-// seedRetainedPreview retains one incomplete preview attempt over the session
+// seedLatestAttemptPreview keeps one incomplete preview attempt as the latest attempt over the session
 // seedUploadableSession wrote, through the production activation the ingest
 // pipeline uses. The store is opened with the same managed-generation writer the
 // push command uses, rooted at the config's output base path, and the candidate
 // carries the session's OWN recorded metadata so the activation guard sees the
 // identity the row holds.
-func seedRetainedPreview(t *testing.T, dir, sessionID, previewText string) {
+func seedLatestAttemptPreview(t *testing.T, dir, sessionID, previewText string) {
 	t.Helper()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
 	db, err := openPreparedStore(t, dbPath, mustGenerationStoreOptions(t, filepath.Join(dir, "peasant-sync"))...)
@@ -97,7 +97,7 @@ func seedRetainedPreview(t *testing.T, dir, sessionID, previewText string) {
 		t.Fatalf("retain latest attempt: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
-		t.Fatalf("retention disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
+		t.Fatalf("latest-attempt disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 }
 
@@ -220,7 +220,7 @@ func TestPushCmd_LastGoodPrintsConsentWarningAndUploads(t *testing.T) {
 	const previewText = "the newer incomplete attempt body"
 	cfgPath := seedUploadableSession(t, dir, sessionID)
 	seedEntryCarrying(t, dir, sessionID, authorityText)
-	seedRetainedPreview(t, dir, sessionID, previewText)
+	seedLatestAttemptPreview(t, dir, sessionID, previewText)
 
 	// The default push refuses the session: the newer attempt must never be
 	// published as the session, and the refusal names the way out.
@@ -259,11 +259,11 @@ func TestPushCmd_LastGoodPrintsConsentWarningAndUploads(t *testing.T) {
 	}
 }
 
-// TestExportCmd_LastGoodServesAuthorityOverRetainedAttempt drives the
+// TestExportCmd_LastGoodServesAuthorityOverLatestAttempt drives the
 // coexistence shape through `peasant export sessions`: the default export
 // refuses the session and writes no file, while --last-good writes the last-good
 // authority and never the newer incomplete attempt.
-func TestExportCmd_LastGoodServesAuthorityOverRetainedAttempt(t *testing.T) {
+func TestExportCmd_LastGoodServesAuthorityOverLatestAttempt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	const sessionID = "ffff6666-ffff-4fff-8fff-ffffffffffff"
@@ -271,7 +271,7 @@ func TestExportCmd_LastGoodServesAuthorityOverRetainedAttempt(t *testing.T) {
 	const previewText = "the newer incomplete attempt body"
 	seedUploadableSession(t, dir, sessionID)
 	seedEntryCarrying(t, dir, sessionID, authorityText)
-	seedRetainedPreview(t, dir, sessionID, previewText)
+	seedLatestAttemptPreview(t, dir, sessionID, previewText)
 	outDir := filepath.Join(dir, "exported")
 
 	if _, err := executeWithDataDir(t, BuildExportCommand(), dir, []string{

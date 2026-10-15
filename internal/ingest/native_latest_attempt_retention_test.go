@@ -24,21 +24,21 @@ import (
 // whose row predates the artifact-hash column, so the verified pair identity is
 // supplied by the write rather than the row.
 const (
-	retentionAuthorityManaged           = "managed"
-	retentionAuthorityCertificate       = "certificate"
-	retentionAuthorityManagedLegacyNull = "managed_legacy_null"
+	latestAttemptAuthorityManaged           = "managed"
+	latestAttemptAuthorityCertificate       = "certificate"
+	latestAttemptAuthorityManagedLegacyNull = "managed_legacy_null"
 )
 
-// retentionHeldReason is the substring every retention case asserts in the
+// latestAttemptHeldReason is the substring every retention case asserts in the
 // durable held reason. It is the production reason's own opening clause, so a
-// reason that stops naming the retained preview fails instead of drifting.
-const retentionHeldReason = "latest capture retained"
+// reason that stops naming the latest attempt fails instead of drifting.
+const latestAttemptHeldReason = "latest capture retained"
 
-// retentionFlagWarning is the stored metadata warning that makes a refresh's
+// latestAttemptFlagWarning is the stored metadata warning that makes a refresh's
 // capture the assessed unaccounted-SourceOmitted preview: the stored pair
 // records that a source record was left out, and the stored transcript carries
 // no positional stand-in for it, so the output cannot account for the omission.
-func retentionFlagWarning() schema.DiagnosticEntry {
+func latestAttemptFlagWarning() schema.DiagnosticEntry {
 	return schema.DiagnosticEntry{
 		ErrorType: "record_too_large",
 		Location:  "line 4",
@@ -46,23 +46,23 @@ func retentionFlagWarning() schema.DiagnosticEntry {
 	}
 }
 
-// retentionAuthorityState is the comparable read authority a retention case
+// latestAttemptAuthorityState is the comparable read authority a retention case
 // snapshots before and after the harvest, so A's byte-identity is asserted
 // rather than assumed.
-type retentionAuthorityState struct {
+type latestAttemptAuthorityState struct {
 	format       int
 	entries      []schema.SessionEntry
-	certificate  retentionCertificate
+	certificate  latestAttemptCertificate
 	stamps       storedStamps
 	generationID string
 	indexVersion int
 }
 
-// retentionCertificate is the stored authority certificate read directly from
-// its own row. The display-effective capture read resolves the retained attempt
-// after retention, so the byte-identity assertion reads the row the authority
+// latestAttemptCertificate is the stored authority certificate read directly from
+// its own row. The display-effective capture read resolves the latest attempt
+// after the attempt was kept, so the byte-identity assertion reads the row the authority
 // owns instead.
-type retentionCertificate struct {
+type latestAttemptCertificate struct {
 	status         string
 	captureFormat  string
 	failureCode    string
@@ -72,14 +72,14 @@ type retentionCertificate struct {
 }
 
 // readAuthorityCertificate reads the authority's own capture row.
-func readAuthorityCertificate(t *testing.T, db *store.Store, sid ingest.SessionID) retentionCertificate {
+func readAuthorityCertificate(t *testing.T, db *store.Store, sid ingest.SessionID) latestAttemptCertificate {
 	t.Helper()
 	conn, err := db.Pool().Take(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Pool().Put(conn)
-	var certificate retentionCertificate
+	var certificate latestAttemptCertificate
 	found := false
 	if err := sqlitex.ExecuteTransient(conn, `SELECT status, capture_format, COALESCE(failure_code, ''), COALESCE(failure_message, ''), COALESCE(entry_count, 0), COALESCE(captured_at_ms, 0) FROM session_content_captures WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
@@ -102,12 +102,12 @@ func readAuthorityCertificate(t *testing.T, db *store.Store, sid ingest.SessionI
 	return certificate
 }
 
-// runLatestAttemptRetention drives the REAL harvest over a real store holding a
+// runLatestAttemptCase drives the REAL harvest over a real store holding a
 // full read authority whose stored pair records an unaccounted source omission.
 // The refresh's candidate is the assessed unaccounted-SourceOmitted preview, so
 // the harvest must retain it as the latest attempt, leave the authority
 // byte-identical, and report the held outcome with literal zero counts.
-func runLatestAttemptRetention(t *testing.T, tc nativeRefreshRepairCase) {
+func runLatestAttemptCase(t *testing.T, tc nativeRefreshRepairCase) {
 	t.Helper()
 	sid, err := ingest.NewSessionID(tc.SessionID)
 	if err != nil {
@@ -122,18 +122,18 @@ func runLatestAttemptRetention(t *testing.T, tc nativeRefreshRepairCase) {
 	const outputDir = "/output"
 
 	meta := nativeRepairMeta(t, tc.SessionID, tc.Harness, "/native/"+tc.SessionID+".jsonl")
-	meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, retentionFlagWarning())
+	meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, latestAttemptFlagWarning())
 	storetest.SeedManagedInput(t, db, fs, outputDir, *meta, []byte(tc.Source))
 
 	switch tc.Authority {
-	case retentionAuthorityManaged, retentionAuthorityManagedLegacyNull:
-		installRetentionAuthority(t, db, sid, tc.Harness)
-	case retentionAuthorityCertificate:
+	case latestAttemptAuthorityManaged, latestAttemptAuthorityManagedLegacyNull:
+		installLatestAttemptAuthority(t, db, sid, tc.Harness)
+	case latestAttemptAuthorityCertificate:
 		// No active managed generation: the stored V1 projection is the authority.
 	default:
 		t.Fatalf("latest-attempt retention case %q declares unknown authority %q", tc.Name, tc.Authority)
 	}
-	if tc.Authority == retentionAuthorityManagedLegacyNull {
+	if tc.Authority == latestAttemptAuthorityManagedLegacyNull {
 		execBridgeSQL(t, db, `UPDATE sessions SET artifact_hash = NULL WHERE session_id = ?`, string(sid))
 	}
 	// The session is already at the adapter target, so the refresh does not
@@ -144,23 +144,23 @@ func runLatestAttemptRetention(t *testing.T, tc nativeRefreshRepairCase) {
 	// pair. The representation the authority installed is left untouched.
 	execBridgeSQL(t, db, `UPDATE sessions SET index_version = ? WHERE session_id = ?`, tc.StoredIndexerVersion, string(sid))
 
-	before := readRetentionAuthority(t, db, sid)
+	before := readLatestAttemptAuthority(t, db, sid)
 	transcriptPath := storedTranscriptPath(outputDir, sid)
 
 	result := runNativeRepairPipeline(t, db, fs, outputDir)
-	assertRetainedPreview(t, result, db, sid, before, tc.Authority)
+	assertLatestAttemptRetained(t, result, db, sid, before, tc.Authority)
 
 	if tc.RetentionRepeat {
 		fs.ResetCounts()
 		repeat := runNativeRepairPipeline(t, db, fs, outputDir)
 		if repeat.Summary.Indexed != 0 {
-			t.Fatalf("the retained repeat indexed %d sessions, want 0", repeat.Summary.Indexed)
+			t.Fatalf("the repeated harvest indexed %d sessions, want 0", repeat.Summary.Indexed)
 		}
 		if reads := fs.ReadCount(transcriptPath); reads != 0 {
-			t.Fatalf("the retained repeat read the stored transcript %d time(s), want 0", reads)
+			t.Fatalf("the repeated harvest read the stored transcript %d time(s), want 0", reads)
 		}
-		if after := readRetentionAuthority(t, db, sid); !reflect.DeepEqual(before, after) {
-			t.Fatalf("the retained repeat moved the read authority:\nbefore=%+v\nafter=%+v", before, after)
+		if after := readLatestAttemptAuthority(t, db, sid); !reflect.DeepEqual(before, after) {
+			t.Fatalf("the repeated harvest moved the read authority:\nbefore=%+v\nafter=%+v", before, after)
 		}
 	}
 
@@ -169,8 +169,8 @@ func runLatestAttemptRetention(t *testing.T, tc nativeRefreshRepairCase) {
 		if forced.Summary.Indexed == 0 {
 			t.Fatalf("the explicit rebuild reported no indexed session: %+v", forced.IndexLog)
 		}
-		if pointer := readRetentionPointer(t, db, sid); pointer.generationID != "" {
-			t.Fatalf("the explicit rebuild left the retained pointer at %q, want it cleared", pointer.generationID)
+		if pointer := readLatestAttemptPointer(t, db, sid); pointer.generationID != "" {
+			t.Fatalf("the explicit rebuild left the latest-attempt pointer at %q, want it cleared", pointer.generationID)
 		}
 		callbackRan := false
 		err := db.WithSessionSnapshotSelected(t.Context(), sid, ingest.SessionReadSelection{LastGood: true}, func(_ indexformat.ReadSnapshot) error {
@@ -186,10 +186,10 @@ func runLatestAttemptRetention(t *testing.T, tc nativeRefreshRepairCase) {
 	}
 }
 
-// installRetentionAuthority installs a complete V2 generation as the active
+// installLatestAttemptAuthority installs a complete V2 generation as the active
 // read authority through the store's real activation, exactly as a completed
 // harvest leaves one.
-func installRetentionAuthority(t *testing.T, db *store.Store, sid ingest.SessionID, harness ingest.Harness) {
+func installLatestAttemptAuthority(t *testing.T, db *store.Store, sid ingest.SessionID, harness ingest.Harness) {
 	t.Helper()
 	authority, blobs := buildSettlingGeneration(t, schema.SessionID(sid), "gen_authority_a", "authority text", "authority input", "authority output")
 	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
@@ -213,11 +213,11 @@ func installRetentionAuthority(t *testing.T, db *store.Store, sid ingest.Session
 	}
 }
 
-// readRetentionAuthority snapshots the parts of the read authority a retention
+// readLatestAttemptAuthority snapshots the parts of the read authority a retention
 // case must find unchanged: the stored representation, its canonical entries,
 // its certificate, its producer/adapter/format stamps, and the generation the
 // explicit last-good read resolves.
-func readRetentionAuthority(t *testing.T, db *store.Store, sid ingest.SessionID) retentionAuthorityState {
+func readLatestAttemptAuthority(t *testing.T, db *store.Store, sid ingest.SessionID) latestAttemptAuthorityState {
 	t.Helper()
 	entries, err := db.ListEntries(t.Context(), sid)
 	if err != nil {
@@ -230,7 +230,7 @@ func readRetentionAuthority(t *testing.T, db *store.Store, sid ingest.SessionID)
 	}); err != nil {
 		t.Fatalf("read the authority snapshot: %v", err)
 	}
-	return retentionAuthorityState{
+	return latestAttemptAuthorityState{
 		format:       rawIndexFormat(t, db, sid),
 		entries:      entries,
 		certificate:  readAuthorityCertificate(t, db, sid),
@@ -240,33 +240,33 @@ func readRetentionAuthority(t *testing.T, db *store.Store, sid ingest.SessionID)
 	}
 }
 
-// assertRetainedPreview asserts the literal retention observables: the pipeline
+// assertLatestAttemptRetained asserts the literal retention observables: the pipeline
 // summary and the durable log carry zero indexed counts with the held reason,
 // the authority is byte-identical, the latest attempt is readable as a bounded
 // partial preview, the default full reads refuse, and the explicit last-good
 // read still serves the authority.
-func assertRetainedPreview(t *testing.T, result *ingest.PipelineResult, db *store.Store, sid ingest.SessionID, before retentionAuthorityState, authorityKind string) {
+func assertLatestAttemptRetained(t *testing.T, result *ingest.PipelineResult, db *store.Store, sid ingest.SessionID, before latestAttemptAuthorityState, authorityKind string) {
 	t.Helper()
 	if result.Summary.Indexed != 0 {
 		t.Fatalf("retention indexed %d sessions, want 0: %+v", result.Summary.Indexed, result.IndexLog)
 	}
-	entry := retentionLogEntryFor(t, result, sid)
+	entry := latestAttemptLogEntryFor(t, result, sid)
 	if entry.Outcome != ingest.IndexOutcomeSkipped {
 		t.Fatalf("retention outcome = %q, want skipped", entry.Outcome)
 	}
 	if entry.EntriesCount != 0 {
 		t.Fatalf("retention reported %d entries, want the literal 0", entry.EntriesCount)
 	}
-	if entry.Reason == nil || !strings.Contains(*entry.Reason, retentionHeldReason) {
-		t.Fatalf("retention reason = %v, want it to name the retained preview", entry.Reason)
+	if entry.Reason == nil || !strings.Contains(*entry.Reason, latestAttemptHeldReason) {
+		t.Fatalf("retention reason = %v, want it to name the latest attempt", entry.Reason)
 	}
 
 	durable := readDurableIndexLog(t, db, sid)
-	if durable.outcome != "skipped" || durable.entriesCount != 0 || !strings.Contains(durable.reason, retentionHeldReason) {
+	if durable.outcome != "skipped" || durable.entriesCount != 0 || !strings.Contains(durable.reason, latestAttemptHeldReason) {
 		t.Fatalf("durable index_log = %+v, want skipped with zero entries and the held reason", durable)
 	}
 
-	after := readRetentionAuthority(t, db, sid)
+	after := readLatestAttemptAuthority(t, db, sid)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("the write changed the read authority:\nbefore=%+v\nafter=%+v", before, after)
 	}
@@ -276,13 +276,13 @@ func assertRetainedPreview(t *testing.T, result *ingest.PipelineResult, db *stor
 		t.Fatalf("read the retained available snapshot: %v", err)
 	}
 	if !store.PartialPreviewNeeded(available.Capture) {
-		t.Fatalf("retained available capture = %+v, want the partial preview state", available.Capture)
+		t.Fatalf("the latest attempt available capture = %+v, want the partial preview state", available.Capture)
 	}
 	if available.Capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted {
-		t.Fatalf("retained available failure code = %q, want source_records_omitted", available.Capture.FailureCode)
+		t.Fatalf("the latest attempt available failure code = %q, want source_records_omitted", available.Capture.FailureCode)
 	}
 	if len(available.Entries) == 0 {
-		t.Fatal("the retained latest attempt serves no entries")
+		t.Fatal("the latest attempt serves no entries")
 	}
 
 	callbackRan := false
@@ -293,32 +293,32 @@ func assertRetainedPreview(t *testing.T, result *ingest.PipelineResult, db *stor
 		t.Fatalf("default full read = %v, want the latest-attempt sentinel", err)
 	}
 	if callbackRan {
-		t.Fatal("the default full read ran the callback for a retained session")
+		t.Fatal("the default full read ran the callback for a session with a latest attempt")
 	}
 	if _, err := db.ReadSessionContent(t.Context(), string(sid)); !errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
 		t.Fatalf("default content read = %v, want the latest-attempt sentinel", err)
 	}
 
-	lastGood := retentionAuthorityState{}
+	lastGood := latestAttemptAuthorityState{}
 	if err := db.WithSessionSnapshotSelected(t.Context(), sid, ingest.SessionReadSelection{LastGood: true}, func(snapshot indexformat.ReadSnapshot) error {
 		lastGood.generationID = snapshot.GenerationID
 		lastGood.indexVersion = snapshot.IndexVersion
 		return nil
 	}); err != nil {
-		t.Fatalf("explicit last-good read after retention: %v", err)
+		t.Fatalf("explicit last-good read after the attempt was kept: %v", err)
 	}
 	if lastGood.generationID != before.generationID || lastGood.indexVersion != before.indexVersion {
 		t.Fatalf("last-good served generation %q/index %d, want the authority's %q/%d", lastGood.generationID, lastGood.indexVersion, before.generationID, before.indexVersion)
 	}
 
-	pointer := readRetentionPointer(t, db, sid)
+	pointer := readLatestAttemptPointer(t, db, sid)
 	if pointer.generationID == "" {
 		t.Fatal("retention recorded no latest-attempt generation")
 	}
 	if pointer.artifactHash == "" {
 		t.Fatal("retention recorded no latest-attempt pair identity")
 	}
-	if authorityKind == retentionAuthorityManagedLegacyNull {
+	if authorityKind == latestAttemptAuthorityManagedLegacyNull {
 		// The write supplied the verified pair identity, so the bootstrap
 		// establishes the row's artifact hash and the pointer records it.
 		storedHash := readSessionArtifactHash(t, db, sid)
@@ -331,8 +331,8 @@ func assertRetainedPreview(t *testing.T, result *ingest.PipelineResult, db *stor
 	}
 }
 
-// retentionLogEntryFor returns the pipeline log entry for one session.
-func retentionLogEntryFor(t *testing.T, result *ingest.PipelineResult, sid ingest.SessionID) ingest.IndexLogEntry {
+// latestAttemptLogEntryFor returns the pipeline log entry for one session.
+func latestAttemptLogEntryFor(t *testing.T, result *ingest.PipelineResult, sid ingest.SessionID) ingest.IndexLogEntry {
 	t.Helper()
 	for _, entry := range result.IndexLog {
 		if entry.SessionID == sid {
@@ -379,22 +379,22 @@ func readDurableIndexLog(t *testing.T, db *store.Store, sid ingest.SessionID) du
 	return row
 }
 
-// retentionPointer is the persisted latest-attempt pointer a retention case
+// latestAttemptPointer is the persisted latest-attempt pointer a retention case
 // reads back directly.
-type retentionPointer struct {
+type latestAttemptPointer struct {
 	generationID string
 	artifactHash string
 }
 
-// readRetentionPointer reads the latest-attempt pointer columns.
-func readRetentionPointer(t *testing.T, db *store.Store, sid ingest.SessionID) retentionPointer {
+// readLatestAttemptPointer reads the latest-attempt pointer columns.
+func readLatestAttemptPointer(t *testing.T, db *store.Store, sid ingest.SessionID) latestAttemptPointer {
 	t.Helper()
 	conn, err := db.Pool().Take(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Pool().Put(conn)
-	var pointer retentionPointer
+	var pointer latestAttemptPointer
 	if err := sqlitex.ExecuteTransient(conn, `SELECT COALESCE(latest_attempt_generation_id, ''), COALESCE(latest_attempt_artifact_hash, '') FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {

@@ -92,7 +92,7 @@ func TestStoredSessionEntriesPublishedPreviewServesTheLatestAttempt(t *testing.T
 	const sessionID = "cccc4444-cccc-4ccc-8ccc-cccccccccccc"
 	seedUploadableSession(t, dir, sessionID)
 	seedEntryCarrying(t, dir, sessionID, "the last-good authority body")
-	seedRetainedPreview(t, dir, sessionID, "the latest attempt carries newer prose")
+	seedLatestAttemptPreview(t, dir, sessionID, "the latest attempt carries newer prose")
 
 	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)), mustGenerationStoreOptions(t, filepath.Join(dir, "peasant-sync"))...)
 	if err != nil {

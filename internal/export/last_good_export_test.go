@@ -93,7 +93,7 @@ func lastGoodRetainPreview(t *testing.T, db *store.Store, sid schema.SessionID, 
 		t.Fatalf("retain latest attempt: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
-		t.Fatalf("retention disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
+		t.Fatalf("latest-attempt disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 }
 

@@ -19,7 +19,7 @@ import (
 // The flag's contract is that it "skips the push wizard" on a hand-run
 // interactive push. The wizard previews the session's available
 // (latest-attempt) content while the flag publishes the last-good authority,
-// and a session with a retained attempt is not even selectable in the wizard,
+// and a session with a latest attempt is not even selectable in the wizard,
 // so an interactive --last-good that reopened the wizard would make the
 // documented exit unreachable for the very sessions the flag exists for.
 //
@@ -64,7 +64,7 @@ func TestPushCmd_LastGoodOnATTYDoesNotEnterTheWizard(t *testing.T) {
 	const previewText = "the newer incomplete attempt body"
 	cfgPath := seedUploadableSession(t, dir, sessionID)
 	seedEntryCarrying(t, dir, sessionID, authorityText)
-	seedRetainedPreview(t, dir, sessionID, previewText)
+	seedLatestAttemptPreview(t, dir, sessionID, previewText)
 
 	master, terminal := openTestTerminal(t)
 	if _, err := master.WriteString("q\n"); err != nil {

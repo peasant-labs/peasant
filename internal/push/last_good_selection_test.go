@@ -52,7 +52,7 @@ func lastGoodPushStore(t *testing.T) *store.Store {
 	return db
 }
 
-// lastGoodPushSeed seeds a complete full authority (A) plus one retained
+// lastGoodPushSeed seeds a complete full authority (A) plus one latest-attempt
 // incomplete preview attempt (B) over it.
 func lastGoodPushSeed(t *testing.T, db *store.Store, sid schema.SessionID, authorityText, previewText string) {
 	t.Helper()
@@ -82,7 +82,7 @@ func lastGoodPushSeed(t *testing.T, db *store.Store, sid schema.SessionID, autho
 		t.Fatalf("retain latest attempt: %v", err)
 	}
 	if outcome.Disposition != ingest.ActivationLatestAttemptPreview {
-		t.Fatalf("retention disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
+		t.Fatalf("latest-attempt disposition = %v, want ActivationLatestAttemptPreview", outcome.Disposition)
 	}
 }
 
@@ -156,12 +156,12 @@ func TestPublicationReadRefusesWithCoexistenceReasonAndLastGoodServesAuthority(t
 	}
 }
 
-// TestPipelineLastGoodPublishesAuthorityOverRetainedAttempt pins the hop the
+// TestPipelineLastGoodPublishesAuthorityOverLatestAttempt pins the hop the
 // CLI cannot: PipelineConfig.LastGood is what makes readPublicationInput read
 // the last-good authority. Without it the pipeline refuses the session (the
 // negative control), and with it the uploaded transcript carries the authority
 // content and never the newer incomplete attempt.
-func TestPipelineLastGoodPublishesAuthorityOverRetainedAttempt(t *testing.T) {
+func TestPipelineLastGoodPublishesAuthorityOverLatestAttempt(t *testing.T) {
 	db := lastGoodPushStore(t)
 	sid := schema.SessionID("b2b2b2b2-2222-4222-8222-222222222222")
 	const authorityText = "authority publication transcript"

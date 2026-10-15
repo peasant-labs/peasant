@@ -437,7 +437,7 @@ func BuildPushCommand() *cobra.Command {
 				// Skipped for --dry-run, --json, non-TTY, --non-interactive/--yes,
 				// or --last-good. The last-good flag skips it because the wizard
 				// previews the newer attempt while the push sends the last-good
-				// authority, and a session with a retained attempt is not even
+				// authority, and a session with a latest attempt is not even
 				// selectable in the wizard; the flag does NOT imply
 				// --non-interactive, so the public-consent prompt below still
 				// applies.
@@ -2222,7 +2222,7 @@ func buildPushWizardSessions(
 // pushWizardEnabled reports whether this run opens the interactive push wizard.
 // --last-good skips it: the wizard's preview reads the session's available
 // (latest attempt) content while the flag publishes the last-good authority,
-// and a session with a retained attempt is not even selectable in the wizard
+// and a session with a latest attempt is not even selectable in the wizard
 // (it reads as NeedsIngest). The flag does not imply --non-interactive: the
 // public-consent prompt still applies.
 func pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood bool) bool {

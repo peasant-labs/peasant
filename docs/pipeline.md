@@ -196,7 +196,7 @@ carried annotation targets. If remapping would detach existing entry annotations
 the rewrite is refused and logged as a warning instead of corrupting annotation
 targets.
 
-### Managed generations and the retained latest attempt
+### Managed generations and the latest attempt
 
 A store that can persist and read a managed generation replaces the relational
 format-1 projection with one immutable format-2 generation per session. The
@@ -219,9 +219,9 @@ session's latest attempt instead of installed:
 - The durable report is the existing `skipped` outcome with the held reason and
   a literal zero entry count, so the harvest counts no indexed session.
 - The mounted reads (`ReadSessionAvailable`, the kickstart pane, the share-wizard
-  preview) and the preview-snapshot detail serve the retained attempt's own
+  preview) and the preview-snapshot detail serve the latest attempt's own
   entries, capture and counts, with partial diagnostics. The full read and the
-  export refuse with the retained-attempt sentinel instead of serving either
+  export refuse with the latest-attempt sentinel instead of serving either
   generation blended.
 - The explicit last-good selection (`--last-good`,
   `SessionReadSelection{LastGood}`) serves the active full authority. It is
@@ -231,8 +231,8 @@ session's latest attempt instead of installed:
 
 The attempt settles once the pair, the producer target and the adapter target
 all match the recorded facets. A newer complete generation, an explicit rebuild,
-or a skip/repair finalization clears the retained pointer in the same
-transaction; the ordinary sweep keeps the retained attempt's rows until then.
+or a skip/repair finalization clears the latest-attempt pointer in the same
+transaction; the ordinary sweep keeps the latest attempt's rows until then.
 
 ### ANNOTATE fast paths
 

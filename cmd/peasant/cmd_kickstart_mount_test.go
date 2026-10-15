@@ -680,7 +680,7 @@ func TestKickstartPreview_LatestAttemptReportsPartial(t *testing.T) {
 		t.Fatalf("close seed store: %v", err)
 	}
 	seedManagedAuthority(t, dataHome, mountLatestAttemptSessionID, "the managed authority body")
-	seedRetainedPreview(t, dataHome, mountLatestAttemptSessionID, "the latest attempt carries newer prose")
+	seedLatestAttemptPreview(t, dataHome, mountLatestAttemptSessionID, "the latest attempt carries newer prose")
 
 	cmd := mountTestCmd(t, dataHome)
 	readDB, closeStore := openKickstartStore(cmd, filepath.Join(dataHome, "peasant-sync"))
