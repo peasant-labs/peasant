@@ -505,8 +505,8 @@ func runLogicalParentLatestAttemptOnly(t *testing.T, ctx context.Context, db *St
 	assertLogicalParentGrouping(t, ctx, db, child, logicalParentEvidenceTargetKnown, target)
 	assertLogicalParentLegacySnapshot(t, ctx, db, child, target)
 	assertLogicalParentStoredMetadata(t, ctx, db, child, target)
-	// The documented exception: the retained-only state never writes the cache,
-	// so the answer comes from evidence while the cache stays NULL.
+	// The documented exception: the latest-attempt-only state never writes the
+	// cache, so the answer comes from evidence while the cache stays NULL.
 	assertLogicalParentCache(t, ctx, db, child, nil)
 }
 

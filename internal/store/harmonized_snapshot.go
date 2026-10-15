@@ -256,8 +256,9 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 	//     answer every session-level reader gives.
 	//
 	// Reading the raw cache here would inject the availability artifact into a
-	// generation-scoped document and the validator would refuse a retained
-	// generation whose evidence names a different target than the cache.
+	// generation-scoped document and the validator would refuse a
+	// latest-attempt generation whose evidence names a different target than the
+	// cache.
 	metadata.ParentUUID = renderedParent
 	if target := startedByTarget(children.relationships); target != nil {
 		metadata.ParentUUID = target
