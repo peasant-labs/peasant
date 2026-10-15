@@ -19,6 +19,8 @@ type indexSelectionFixtures struct {
 		Name               string `yaml:"name"`
 		Surface            string `yaml:"surface"`
 		Force              bool   `yaml:"force"`
+		Reindex            bool   `yaml:"reindex"`
+		ZeroTarget         bool   `yaml:"zero_target"`
 		ProducerDelta      int    `yaml:"producer_delta"`
 		MissingInputHash   bool   `yaml:"missing_input_hash"`
 		DifferentInputHash bool   `yaml:"different_input_hash"`
@@ -74,15 +76,19 @@ func TestCapturedInputNeedsWork(t *testing.T) {
 			if fixture.DeclaredFormat != 0 {
 				target.IndexVersion = fixture.DeclaredFormat
 			}
+			if fixture.ZeroTarget {
+				target = HarvesterVersions{}
+			}
 			versions[harness] = target
 			var indexer TranscriptIndexer = NewClaudeIndexer(nil)
 			if fixture.LenientIndexer {
 				indexer = lenientIndexer{}
 			}
 			// A decision table over the fields capturedInputNeedsWork and
-			// certifiesContent read: config.Force, harvesterVersions, indexers.
+			// certifiesContent read: config.Force, config.Reindex,
+			// harvesterVersions, indexers.
 			pipeline := &Pipeline{
-				config:            PipelineConfig{Force: fixture.Force},
+				config:            PipelineConfig{Force: fixture.Force, Reindex: fixture.Reindex},
 				harvesterVersions: versions,
 				indexers:          map[Harness]TranscriptIndexer{harness: indexer},
 			}
@@ -121,9 +127,14 @@ func TestCapturedInputNeedsWork(t *testing.T) {
 				inputArtifact = "other-pair"
 			}
 			input := &CapturedIndexInput{session: DiscoveredSession{SessionID: sid, Harness: harness}, inputHash: inputHash, expected: state, artifactHash: inputArtifact}
-			got := pipeline.capturedInputNeedsWork(input)
-			if fixture.Surface == "stored_state" {
+			var got bool
+			switch fixture.Surface {
+			case "", "captured_input":
+				got = pipeline.capturedInputNeedsWork(input)
+			case "stored_state":
 				got = pipeline.stateNeedsIndexWork(state, target)
+			default:
+				t.Fatalf("unknown index-selection surface %q", fixture.Surface)
 			}
 			if got != fixture.NeedsWork {
 				t.Fatalf("needs work = %t, want %t for state %+v", got, fixture.NeedsWork, *state)

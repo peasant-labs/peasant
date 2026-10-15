@@ -55,8 +55,14 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 	// parser work: the attempt already consumed the current pair under this
 	// build. The pair facet is bound to the work selector's own evidence here,
 	// so an input captured from a different pair is never treated as settled.
-	settled := latestAttemptPreviewSettles(expected, target) &&
-		input.artifactHash == *expected.LatestAttemptArtifactHash
+	// A deliberate reindex disables the short-circuit (settled stays false), so
+	// a pending term re-attempts the session once; Force selects outright. The
+	// nil guard is local, so the dereference never depends on the helper's own
+	// nil check.
+	settled := false
+	if pair := expected.LatestAttemptArtifactHash; pair != nil && !p.config.Reindex {
+		settled = latestAttemptPreviewSettles(expected, target) && input.artifactHash == *pair
+	}
 	return p.config.Force ||
 		(expected.IndexerVersion < target.IndexerVersion && !settled) ||
 		(expected.IndexedInputHash == nil || *expected.IndexedInputHash != input.inputHash) && !settled ||
@@ -90,6 +96,11 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 // ordinary selection predicate is unchanged for it. A facet that moved keeps
 // the session selected: the next run re-attempts once and settles.
 func latestAttemptPreviewSettles(state *SessionIndexState, target HarvesterVersions) bool {
+	// A target that cannot express a settle decision never settles, mirroring
+	// the store surfaces' own guard.
+	if target.IndexerVersion < 1 || target.AdapterVersion < 1 {
+		return false
+	}
 	if state == nil || state.LatestAttemptArtifactHash == nil || state.ArtifactHash == nil {
 		return false
 	}
@@ -223,10 +234,12 @@ func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target Harveste
 	}
 	// A settled latest attempt short-circuits every pending-work term except an
 	// explicit rebuild: the attempt already consumed the current pair under this
-	// build, so re-parsing it would be pure churn. Force and the deliberate
-	// reindex bypass the settle (the first term below), exactly as they bypass
-	// the other steady states.
-	settled := latestAttemptPreviewSettles(state, target)
+	// build, so re-parsing it would be pure churn. Force selects outright; the
+	// deliberate reindex disables the short-circuit (settled stays false), so
+	// the ordinary terms decide and a pending fact re-attempts the session
+	// once. A reindex is not a full bypass: a session with no pending term
+	// still settles.
+	settled := !p.config.Reindex && latestAttemptPreviewSettles(state, target)
 	return p.config.Force ||
 		(state.IndexerVersion < target.IndexerVersion && !settled) ||
 		(state.IndexedInputHash == nil && !settled) ||
