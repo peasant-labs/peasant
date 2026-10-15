@@ -31,5 +31,5 @@ cases:
     entries: [2, 2, 2]
     activation_cap: 3
     byte_cap_units: 10
-    retained: 1
+    latest_attempt: 1
     batches: [3]

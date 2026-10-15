@@ -113,7 +113,7 @@ cases:
   # The operator override: a forced harvest replaces the authority with the
   # preview and clears latest-attempt pointer in the same commit, so the explicit
   # last-good read afterwards refuses the active preview.
-  - name: claude_explicit_rebuild_over_retained_clears_pointer
+  - name: claude_explicit_rebuild_over_latest_attempt_clears_pointer
     harness: claude-code
     scenario: latest_attempt_retention
     sessionId: adadadad-aaaa-4aaa-8aaa-adadadadadad

@@ -29,7 +29,7 @@ type nativeLaneCase struct {
 	CapUnits      int64  `yaml:"cap_units"`
 	Refuse        *int   `yaml:"refuse"`
 	Skip          *int   `yaml:"skip"`
-	Retained      *int   `yaml:"retained"`
+	LatestAttempt *int   `yaml:"latest_attempt"`
 	Cancel        bool   `yaml:"cancel"`
 	Mode          string `yaml:"mode"`
 	Batches       []int  `yaml:"batches"`
@@ -58,7 +58,7 @@ func loadNativeLaneFixtures(t *testing.T, data []byte) []nativeLaneCase {
 type nativeBatchRecordingStore struct {
 	*sweepRecordingStore
 	stageBatches, activationBatches []int
-	refuse, skip, retained          *int
+	refuse, skip, latestAttempt     *int
 	gate                            *stagedBytesGate
 	maxObserved                     int64
 }
@@ -95,7 +95,7 @@ func (s *nativeBatchRecordingStore) ActivateStagedGenerationCandidates(_ context
 		if s.skip != nil && id == fmt.Sprintf("g_bench_%d", *s.skip) {
 			r[i].Outcome.Disposition = ActivationSkipped
 		}
-		if s.retained != nil && id == fmt.Sprintf("g_bench_%d", *s.retained) {
+		if s.latestAttempt != nil && id == fmt.Sprintf("g_bench_%d", *s.latestAttempt) {
 			r[i].Outcome.Disposition = ActivationLatestAttemptPreview
 		}
 	}
@@ -105,7 +105,7 @@ func (s *nativeBatchRecordingStore) ActivateStagedGenerationCandidates(_ context
 func TestGenerationBatchActivation(t *testing.T) {
 	for _, c := range loadNativeLaneFixtures(t, nativeBatchActivationYAML) {
 		t.Run(c.Name, func(t *testing.T) {
-			store := &nativeBatchRecordingStore{sweepRecordingStore: &sweepRecordingStore{}, refuse: c.Refuse, skip: c.Skip, retained: c.Retained}
+			store := &nativeBatchRecordingStore{sweepRecordingStore: &sweepRecordingStore{}, refuse: c.Refuse, skip: c.Skip, latestAttempt: c.LatestAttempt}
 			var results []indexParseResult
 			for i, n := range c.Entries {
 				results = append(results, benchNativeResult(t, i, n))
@@ -118,7 +118,7 @@ func TestGenerationBatchActivation(t *testing.T) {
 			}
 			for i, im := range flush.indexed {
 				want := c.Refuse == nil || i != *c.Refuse
-				if c.Retained != nil && i == *c.Retained {
+				if c.LatestAttempt != nil && i == *c.LatestAttempt {
 					want = false
 				}
 				if im.indexed != want {
@@ -127,7 +127,7 @@ func TestGenerationBatchActivation(t *testing.T) {
 				if c.Skip != nil && i == *c.Skip && flush.logEntries[i].Outcome != IndexOutcomeSkipped {
 					t.Fatalf("skip outcome=%v", flush.logEntries[i])
 				}
-				if c.Retained != nil && i == *c.Retained {
+				if c.LatestAttempt != nil && i == *c.LatestAttempt {
 					entry := flush.logEntries[i]
 					if entry.Outcome != IndexOutcomeSkipped {
 						t.Fatalf("latest attempt outcome=%v, want %v", entry.Outcome, IndexOutcomeSkipped)
