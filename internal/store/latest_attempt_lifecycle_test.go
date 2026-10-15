@@ -503,3 +503,53 @@ func TestLatestAttemptFileBackedAuthorityRetainsOnBothRoutes(t *testing.T) {
 		})
 	}
 }
+
+// TestLatestAttemptRetentionRefusesMalformedEvidence proves a candidate whose
+// selected evidence does not validate is refused on BOTH retention routes, with
+// the authority intact and no attempt recorded: the retention path re-runs the
+// same unknown-evidence preflight the ordinary content write runs, so it is
+// never a bypass for a candidate the ordinary path would refuse.
+func TestLatestAttemptRetentionRefusesMalformedEvidence(t *testing.T) {
+	for _, route := range []string{"single", "batch"} {
+		t.Run(route, func(t *testing.T) {
+			s, _ := openGenerationStore(t)
+			sid := schema.SessionID("f6f6f6f6-f6f6-46f6-86f6-f6f6f6f6f6f6")
+			ctx := context.Background()
+			seedFullAuthority(t, s, sid)
+			setStoredArtifactHash(t, s, sid, hexIdentity('d'))
+
+			candidate := previewCandidate(t, sid, "gen_preview_b")
+			corrupt := `{"retainedUnknown":{"harness":"claude-code","namespace":42}}`
+			candidate.Generation.Generation.Main.Entries[0].Extra = &corrupt
+
+			var routeErr error
+			switch route {
+			case "single":
+				_, routeErr = s.ActivateGeneration(ctx, candidate)
+			case "batch":
+				results := s.ActivateGenerationBatch(ctx, []GenerationActivation{candidate})
+				if len(results) != 1 {
+					t.Fatalf("batch results = %d, want 1", len(results))
+				}
+				routeErr = results[0].Err
+			}
+			if routeErr == nil {
+				t.Fatal("malformed evidence was retained; the store must refuse it")
+			}
+			for _, want := range []string{"store content evidence validation", "prior capture remains authoritative"} {
+				if !strings.Contains(routeErr.Error(), want) {
+					t.Fatalf("refusal = %v, want it to contain %q", routeErr, want)
+				}
+			}
+			if got := visibleGeneration(t, s, sid); got != "gen_full_prior" {
+				t.Fatalf("active generation = %q, want the untouched authority", got)
+			}
+			if pointer := latestAttemptPointerFor(t, s, sid); pointer.found() {
+				t.Fatalf("latest-attempt pointer = %+v, want none after the refusal", pointer)
+			}
+			if got := generationRowCount(t, s, sid); got != 1 {
+				t.Fatalf("generation rows = %d, want the authority alone", got)
+			}
+		})
+	}
+}
