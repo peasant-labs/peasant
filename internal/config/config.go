@@ -779,6 +779,17 @@ func defaultWriteConfig() ingest.WriteConfig {
 //
 // Users who want a config file should run `peasant kickstart`.
 func Load(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, error) {
+	return load(path, fs, git, nil)
+}
+
+// LoadForHarnessOnly loads and validates configuration for harness-scoped
+// native discovery. An empty path list for the selected harness is filled from
+// its documented default before the normal validation rules run.
+func LoadForHarnessOnly(path string, fs ingest.FileSystem, git ingest.GitResolver, harness defaults.Harness) (*Config, error) {
+	return load(path, fs, git, &harness)
+}
+
+func load(path string, fs ingest.FileSystem, git ingest.GitResolver, harnessOnly *defaults.Harness) (*Config, error) {
 	if path == "" {
 		return LoadDefaults(context.Background(), git), nil
 	}
@@ -799,14 +810,14 @@ func Load(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, e
 				if err != nil {
 					return nil, fmt.Errorf("config: read migrated %q: %w", path, err)
 				}
-				return Parse(data)
+				return parse(data, harnessOnly)
 			}
 			return LoadDefaults(context.Background(), git), nil
 		}
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
 
-	return Parse(data)
+	return parse(data, harnessOnly)
 }
 
 // LoadDefaults returns a Config populated with sensible production defaults.
@@ -829,10 +840,29 @@ func LoadDefaults(ctx context.Context, git ingest.GitResolver) *Config {
 // Parse decodes raw YAML bytes into a Config, applies missing-field defaults, and
 // validates the result. Returns an error if any field fails validation.
 func Parse(data []byte) (*Config, error) {
+	return parse(data, nil)
+}
+
+// ParseForHarnessOnly parses and validates configuration for harness-scoped
+// native discovery, applying only the selected harness's documented default.
+func ParseForHarnessOnly(data []byte, harness defaults.Harness) (*Config, error) {
+	return parse(data, &harness)
+}
+
+func parse(data []byte, harnessOnly *defaults.Harness) (*Config, error) {
 	cfg := BaseConfig()
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
+	}
+	if harnessOnly != nil {
+		fallback, known := defaults.SourcePathFor(*harnessOnly)
+		if !known {
+			return nil, fmt.Errorf("config: harness-only source %q has no documented default path", *harnessOnly)
+		}
+		if provider, ok := cfg.Sources.Provider(*harnessOnly); ok && len(provider.Paths) == 0 {
+			provider.Paths = []string{fallback.String()}
+		}
 	}
 
 	if err := validate(cfg); err != nil {
