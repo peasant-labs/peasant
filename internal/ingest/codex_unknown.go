@@ -26,23 +26,63 @@ func (err *codexEvidenceRetentionError) Unwrap() error { return err.cause }
 // Unknown blocks are replaced only in the interpretation copy; their complete
 // redacted source values retain their original JSON pointers and physical line.
 func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool) ([]byte, []RetainedUnknown, error) {
+	prepared, err := prepareCodexRecordParsed(raw, position, native)
+	return prepared.JSON, prepared.Unknown, err
+}
+
+// codexPreparedRecord keeps the interpretation envelope beside its JSON so the
+// native replay can consume the filtered payload without decoding it again.
+// A nil JSON still means that the whole record was retained as opaque evidence.
+type codexPreparedRecord struct {
+	JSON     []byte
+	Envelope map[string]json.RawMessage
+	Unknown  []RetainedUnknown
+}
+
+func (prepared codexPreparedRecord) replayPayload() (json.RawMessage, error) {
+	for key := range prepared.Envelope {
+		// Map lookup and struct decoding differ for case-folded keys. Keep the
+		// original decoder's ordering and error semantics for those envelopes.
+		if (key != "payload" && strings.EqualFold(key, "payload")) ||
+			(key != "type" && strings.EqualFold(key, "type")) ||
+			(key != "timestamp" && strings.EqualFold(key, "timestamp")) {
+			var envelope codexHistoryEnvelope
+			err := json.Unmarshal(prepared.JSON, &envelope)
+			return envelope.Payload, err
+		}
+	}
+	// Preserve the replay envelope's scalar timestamp validation without
+	// walking the payload again. Type was validated during preparation.
+	if raw, ok := prepared.Envelope["timestamp"]; ok {
+		var timestamp string
+		if err := json.Unmarshal(raw, &timestamp); err != nil {
+			return nil, err
+		}
+	}
+	return prepared.Envelope["payload"], nil
+}
+
+func prepareCodexRecordParsed(raw []byte, position UnknownSourcePosition, native bool) (codexPreparedRecord, error) {
 	var envelope map[string]json.RawMessage
 	if err := requireJSONObject(raw); err != nil {
-		return nil, nil, err
+		return codexPreparedRecord{}, err
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return nil, nil, err
+		return codexPreparedRecord{}, err
 	}
 	var kind string
 	if err := json.Unmarshal(envelope["type"], &kind); err != nil || kind == "" {
-		return nil, nil, fmt.Errorf("Codex record requires a string type")
+		return codexPreparedRecord{}, fmt.Errorf("Codex record requires a string type")
 	}
 	var unknown []RetainedUnknown
-	traversal := codexTraversalPointers(raw)
+	var traversal map[string]int64
 	retain := func(namespace, kind, pointer string, value json.RawMessage) error {
 		at := position
 		at.JSONPointer = pointer
 		if position.Public != nil {
+			if traversal == nil {
+				traversal = codexTraversalPointers(raw)
+			}
 			public := *position.Public
 			if index, ok := traversal[pointer]; ok {
 				public.Position += index
@@ -60,21 +100,21 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 	}
 	if !slices.Contains(codexStrictEnvelopeKinds(), kind) && !(native && slices.Contains(codexNativeEnvelopeKinds(), kind)) {
 		err := retain("envelope", kind, "", raw)
-		return nil, unknown, err
+		return codexPreparedRecord{Unknown: unknown}, err
 	}
 	if err := requireJSONObject(envelope["payload"]); err != nil {
-		return nil, nil, err
+		return codexPreparedRecord{}, err
 	}
 	if kind != codexTypeResponse && kind != codexTypeEventMsg {
-		return raw, nil, nil
+		return codexPreparedRecord{JSON: raw, Envelope: envelope}, nil
 	}
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(envelope["payload"], &payload); err != nil {
-		return nil, nil, err
+		return codexPreparedRecord{}, err
 	}
 	var variant string
 	if err := json.Unmarshal(payload["type"], &variant); err != nil || variant == "" {
-		return nil, nil, fmt.Errorf("Codex payload requires a string type")
+		return codexPreparedRecord{}, fmt.Errorf("Codex payload requires a string type")
 	}
 	known := slices.Contains(codexStrictResponsePayloadKinds(), variant)
 	if kind == codexTypeEventMsg {
@@ -96,13 +136,13 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			namespace = "event"
 		}
 		err := retain(namespace, variant, "/payload", envelope["payload"])
-		return nil, unknown, err
+		return codexPreparedRecord{Unknown: unknown}, err
 	}
 	var delivery codexDelivery
 	if raw := payload["delivery"]; native && len(raw) > 0 {
 		if json.Unmarshal(raw, &delivery) == nil && delivery.needsRetention() {
 			if err := retain("item_delivery", string(delivery.Shape), "/payload/delivery", raw); err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 		}
 	}
@@ -114,7 +154,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		// Retention never replaces a known message with an opaque item.
 		if err := json.Unmarshal(payload["item"], &deliveryFields); err == nil && deliveryFields.Delivery.needsRetention() {
 			if err := retain("item_delivery", string(deliveryFields.Delivery.Shape), "/payload/item/delivery", deliveryFields.Delivery.Raw); err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 		}
 		var header struct {
@@ -123,17 +163,17 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		if err := json.Unmarshal(payload["item"], &header); err != nil || header.Type == "" {
 			// The history reader diagnoses malformed carried items; the candidate
 			// boundary refuses that diagnostic without replacing prior state.
-			return raw, nil, nil
+			return codexPreparedRecord{JSON: raw, Envelope: envelope}, nil
 		}
 		if _, _, ok := codexItemNativeType(codexItemBody{Type: header.Type}); !ok {
 			if err := retain("item_body", header.Type, "/payload/item", payload["item"]); err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 			delete(payload, "item")
 		} else if nativeType, role, _ := codexItemNativeType(codexItemBody{Type: header.Type}); nativeType == "message" || nativeType == "reasoning" {
 			var item map[string]json.RawMessage
 			if err := json.Unmarshal(payload["item"], &item); err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 			// Parse-once index of the original carried item's content/summary
 			// arrays. Record-local lifetime: built once here, used to resolve
@@ -142,7 +182,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			// from marshaled output, so original lexical bytes survive.
 			originalBlocks, err := indexCodexOriginalBlocks(payload["item"])
 			if err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 			originalType, originalRole, originalDelivery := item["type"], item["role"], item["delivery"]
 			// The outer item already retained delivery at its original pointer.
@@ -154,17 +194,17 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			}
 			itemRaw, err := json.Marshal(item)
 			if err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 			wrapper, err := json.Marshal(map[string]json.RawMessage{"type": json.RawMessage(`"response_item"`), "payload": itemRaw})
 			if err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
-			prepared, nested, err := prepareCodexRecord(wrapper, position, true)
+			prepared, err := prepareCodexRecordParsed(wrapper, position, true)
 			if err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
-			for _, record := range nested {
+			for _, record := range prepared.Unknown {
 				// Normalization above is an interpretation copy. Rebind every
 				// retained leaf to the original item's raw value before redaction;
 				// marshaling the wrapper compacts RawMessage whitespace. The
@@ -173,24 +213,20 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 				// the leaf retain.
 				field, index, err := parseCodexOriginalPointer(record.Position.JSONPointer)
 				if err != nil {
-					return nil, nil, err
+					return codexPreparedRecord{}, err
 				}
 				original, err := originalBlocks.at(field, index)
 				if err != nil {
-					return nil, nil, err
+					return codexPreparedRecord{}, err
 				}
 				pointer := "/payload/item" + strings.TrimPrefix(record.Position.JSONPointer, "/payload")
 				if err := retain(record.Namespace, record.Kind, pointer, original); err != nil {
-					return nil, nil, err
+					return codexPreparedRecord{}, err
 				}
 			}
-			if len(nested) > 0 {
-				var value map[string]json.RawMessage
-				if err := json.Unmarshal(prepared, &value); err != nil {
-					return nil, nil, err
-				}
-				if err := json.Unmarshal(value["payload"], &item); err != nil {
-					return nil, nil, err
+			if len(prepared.Unknown) > 0 {
+				if err := json.Unmarshal(prepared.Envelope["payload"], &item); err != nil {
+					return codexPreparedRecord{}, err
 				}
 				item["type"] = originalType
 				if len(originalDelivery) > 0 {
@@ -203,7 +239,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 				}
 				payload["item"], err = json.Marshal(item)
 				if err != nil {
-					return nil, nil, err
+					return codexPreparedRecord{}, err
 				}
 			}
 		}
@@ -212,15 +248,15 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		if variant == codexResponseMessage {
 			var role string
 			if err := json.Unmarshal(payload["role"], &role); err != nil || role == "" {
-				return nil, nil, fmt.Errorf("Codex message requires a string role")
+				return codexPreparedRecord{}, fmt.Errorf("Codex message requires a string role")
 			}
 			if role != "developer" {
 				if err := validateCaptureRole(role); err != nil {
-					return nil, nil, err
+					return codexPreparedRecord{}, err
 				}
 			}
 			if len(payload["content"]) == 0 || string(payload["content"]) == "null" {
-				return nil, nil, fmt.Errorf("Codex message requires content")
+				return codexPreparedRecord{}, fmt.Errorf("Codex message requires content")
 			}
 		}
 		for _, field := range []string{"content", "summary"} {
@@ -230,14 +266,14 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			}
 			var blocks []json.RawMessage
 			if err := json.Unmarshal(value, &blocks); err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 			for i, block := range blocks {
 				var header struct {
 					Type string `json:"type"`
 				}
 				if err := json.Unmarshal(block, &header); err != nil || header.Type == "" {
-					return nil, nil, fmt.Errorf("Codex %s block requires a string type", field)
+					return codexPreparedRecord{}, fmt.Errorf("Codex %s block requires a string type", field)
 				}
 				kinds := codexStrictMessageBlockKinds()
 				if variant == codexResponseReasoning {
@@ -256,7 +292,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 							Text *string `json:"text"`
 						}
 						if err := json.Unmarshal(block, &text); err != nil || text.Text == nil {
-							return nil, nil, fmt.Errorf("Codex known text block requires string text")
+							return codexPreparedRecord{}, fmt.Errorf("Codex known text block requires string text")
 						}
 					}
 					continue
@@ -266,7 +302,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 					namespace = "reasoning_" + field
 				}
 				if err := retain(namespace, header.Type, fmt.Sprintf("/payload/%s/%d", field, i), block); err != nil {
-					return nil, nil, err
+					return codexPreparedRecord{}, err
 				}
 				// Preserve vector alignment for native provenance. The empty placeholder
 				// contains no source text and cannot be mistaken for interpreted content.
@@ -278,21 +314,21 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			}
 			encoded, err := json.Marshal(blocks)
 			if err != nil {
-				return nil, nil, err
+				return codexPreparedRecord{}, err
 			}
 			payload[field] = encoded
 		}
 	}
 	if len(unknown) == 0 {
-		return raw, nil, nil
+		return codexPreparedRecord{JSON: raw, Envelope: envelope}, nil
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return nil, nil, err
+		return codexPreparedRecord{}, err
 	}
 	envelope["payload"] = encoded
 	encoded, err = json.Marshal(envelope)
-	return encoded, unknown, err
+	return codexPreparedRecord{JSON: encoded, Envelope: envelope, Unknown: unknown}, err
 }
 
 // codexOriginalBlocks is the parse-once index of a canonical carried item's
