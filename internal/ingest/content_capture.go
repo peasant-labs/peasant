@@ -400,6 +400,12 @@ func claudeCaptureRecordValidator(raw []byte) (*IgnoredSourceRecord, error) {
 	if err := json.Unmarshal(raw, &line); err != nil {
 		return nil, err
 	}
+	return validateClaudeDecodedRecord(line)
+}
+
+// validateClaudeDecodedRecord shares the strict envelope checks with callers
+// that already decoded a record for classification.
+func validateClaudeDecodedRecord(line claudeIndexLine) (*IgnoredSourceRecord, error) {
 	if line.Type == "" {
 		// A missing discriminator is corruption, not vocabulary:
 		// settling it would hide an actionable malformed record.

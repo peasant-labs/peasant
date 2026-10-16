@@ -156,6 +156,18 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 }
 
 func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	return idx.parseClaudeRecords(context.Background(), sessionID, data, completion, false)
+}
+
+// parseClaudeRecords keeps the decoded envelope local to one record. Managed
+// candidates validate that same envelope before projecting it and decomposing
+// its content; the tolerant stored index path retains its existing behavior.
+func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool) ([]schema.SessionEntry, error) {
+	if strict {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	var traversal unknownJSONLTraversal
 	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
@@ -170,6 +182,11 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 	var levelState claudeThinkingLevelState
 
 	for scanner.Scan() {
+		if strict {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		var placeholderErr error
 		entries, placeholderErr = appendOmissionPlaceholders(entries, scanner, sessionID, HarnessClaudeCode, &entryIndex)
 		if placeholderErr != nil {
@@ -203,6 +220,16 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 
 		var line claudeIndexLine
 		decodeErr := json.Unmarshal(trimmed, &line)
+		if strict {
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if _, omitted := parseOmittedRecordSentinel(trimmed); !omitted {
+				if _, err := validateClaudeDecodedRecord(line); err != nil {
+					return nil, err
+				}
+			}
+		}
 		if completion != nil {
 			if err := completion.record(trimmed); err != nil {
 				return nil, err
@@ -246,7 +273,7 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 
 		// Full-depth decomposition: emit depth=1 entries for each content block.
 		if idx.fullDepth {
-			childEntries := decomposeClaudeContentBlocks(sessionID, &entryIndex, parentIndex, trimmed, idx.fullContent, askUserCallIDs)
+			childEntries := decomposeClaudeContentBlocks(sessionID, &entryIndex, parentIndex, line, idx.fullContent, askUserCallIDs)
 			// Propagate reclassified role to depth=1 children — if the parent
 			// was reclassified (e.g. system-injected skill body), children must
 			// inherit the reclassified role, not the original JSONL role.
@@ -308,8 +335,23 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		}
 	}
 
+	// An omission-only scan can consume physical records without yielding an
+	// iteration above. Still honor cancellation before emitting its placeholders.
+	if strict {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	if err := scanner.Err(); err != nil {
 		return entries, fmt.Errorf("claude indexer: scanner error for %s: %w", sessionID, err)
+	}
+	if strict && scanner.SawOversized() {
+		// The classifier skips oversized physical records, while the strict
+		// capture validator checks even those bytes. Preserve that distinction
+		// on this exceptional path rather than silently relaxing validation.
+		if _, err := validateClaudeProducerRecords(ctx, DiscoveredSession{SessionID: sessionID, Harness: HarnessClaudeCode}, data); err != nil {
+			return nil, err
+		}
 	}
 
 	if completion != nil && scanner.SawOversized() {
@@ -647,18 +689,7 @@ type claudeFullBlock struct {
 // askUserCallIDs is the set of tool_call_ids that correspond to AskUserQuestion tool_use blocks
 // seen earlier in the transcript; tool_result blocks that reference these IDs keep role=user
 // (genuine user responses), while all other tool_result blocks are reclassified to role=tool.
-func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, raw []byte, fullContent bool, askUserCallIDs map[string]bool) []schema.SessionEntry {
-	var line struct {
-		Type    string          `json:"type"`
-		Content json.RawMessage `json:"content"`
-		Message struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal(raw, &line); err != nil {
-		return nil
-	}
+func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, line claudeIndexLine, fullContent bool, askUserCallIDs map[string]bool) []schema.SessionEntry {
 	if fullContent && len(line.Message.Content) == 0 && line.Type == "system" {
 		line.Message.Content = line.Content
 		line.Message.Role = RoleSystem.String()
