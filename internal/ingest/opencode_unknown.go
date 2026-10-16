@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -54,14 +56,27 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 	if kind == "" {
 		return nil, nil, fmt.Errorf("OpenCode row requires its native type; restore the row before capture")
 	}
-	if err := requireJSONObject(raw); err != nil {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, nil, err
 	}
-	var identity map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &identity); err != nil {
-		return nil, nil, err
+	return prepareOpenCodeCurrentFields(kind, raw, fields, position)
+}
+
+// prepareOpenCodeCurrentFields borrows the decoded envelope without changing it:
+// structural normalization still needs the original native fields afterward.
+func prepareOpenCodeCurrentFields(kind string, raw []byte, fields map[string]json.RawMessage, position UnknownSourcePosition) ([]byte, []RetainedUnknown, error) {
+	return prepareOpenCodeCurrentFieldsWithTraversal(kind, raw, fields, position, nil)
+}
+
+func prepareOpenCodeCurrentFieldsWithTraversal(kind string, raw []byte, fields map[string]json.RawMessage, position UnknownSourcePosition, traversal *openCodeCurrentTraversal) ([]byte, []RetainedUnknown, error) {
+	if kind == "" {
+		return nil, nil, fmt.Errorf("OpenCode row requires its native type; restore the row before capture")
 	}
-	if identity["messageID"] != nil && identity["message_id"] != nil && !bytes.Equal(identity["messageID"], identity["message_id"]) {
+	if fields == nil {
+		return nil, nil, errors.New("must be a JSON object")
+	}
+	if fields["messageID"] != nil && fields["message_id"] != nil && !bytes.Equal(fields["messageID"], fields["message_id"]) {
 		return nil, nil, fmt.Errorf("OpenCode row has conflicting messageID and message_id pairing identities")
 	}
 	retain := func(namespace, kind, pointer string, value json.RawMessage, offset int64) (RetainedUnknown, error) {
@@ -81,10 +96,6 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 	if kind != "assistant" {
 		return raw, nil, nil
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, nil, err
-	}
 	var content []json.RawMessage
 	if err := json.Unmarshal(fields["content"], &content); err != nil {
 		return nil, nil, err
@@ -94,7 +105,14 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 	var blockPosition int64 = 1
 	for i, block := range content {
 		at := blockPosition
-		blockPosition += openCodeToolTraversalSize(block)
+		// Reuse only the exact source block. The traversal decoder uses Go's
+		// typed duplicate/case-fold rules, while this envelope uses map keys;
+		// unusual spellings keep their independent historical behavior.
+		if traversal != nil && i < len(traversal.content) && bytes.Equal(block, traversal.content[i]) {
+			blockPosition += traversal.blockSizes[i]
+		} else {
+			blockPosition += openCodeToolTraversalSize(block)
+		}
 		var header struct {
 			Type string `json:"type"`
 		}
@@ -133,23 +151,45 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 	if err != nil {
 		return nil, nil, err
 	}
+	fields = maps.Clone(fields)
 	fields["content"] = encoded
 	encoded, err = json.Marshal(fields)
 	return encoded, unknown, err
 }
 
 func openCodeCurrentTraversalSize(raw []byte) int64 {
+	return decodeOpenCodeCurrentTraversal(raw, false).size
+}
+
+// openCodeCurrentTraversal belongs to one source row only. Its owned blocks
+// let native preparation reuse coordinate work without a cross-row cache or
+// changing the independent decoder's acceptance rules.
+type openCodeCurrentTraversal struct {
+	size       int64
+	content    []json.RawMessage
+	blockSizes []int64
+}
+
+func decodeOpenCodeCurrentTraversal(raw []byte, keepBlocks bool) openCodeCurrentTraversal {
 	var row struct {
 		Content []json.RawMessage `json:"content"`
 	}
 	if json.Unmarshal(raw, &row) != nil {
-		return 1
+		return openCodeCurrentTraversal{size: 1}
 	}
-	size := int64(1)
-	for _, block := range row.Content {
-		size += openCodeToolTraversalSize(block)
+	traversal := openCodeCurrentTraversal{size: 1}
+	if keepBlocks {
+		traversal.content = row.Content
+		traversal.blockSizes = make([]int64, len(row.Content))
 	}
-	return size
+	for i, block := range row.Content {
+		size := openCodeToolTraversalSize(block)
+		if keepBlocks {
+			traversal.blockSizes[i] = size
+		}
+		traversal.size += size
+	}
+	return traversal
 }
 
 func openCodeToolTraversalSize(raw []byte) int64 {

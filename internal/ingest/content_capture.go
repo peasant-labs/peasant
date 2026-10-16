@@ -400,6 +400,12 @@ func claudeCaptureRecordValidator(raw []byte) (*IgnoredSourceRecord, error) {
 	if err := json.Unmarshal(raw, &line); err != nil {
 		return nil, err
 	}
+	return validateClaudeDecodedRecord(line)
+}
+
+// validateClaudeDecodedRecord shares the strict envelope checks with callers
+// that already decoded a record for classification.
+func validateClaudeDecodedRecord(line claudeIndexLine) (*IgnoredSourceRecord, error) {
 	if line.Type == "" {
 		// A missing discriminator is corruption, not vocabulary:
 		// settling it would hide an actionable malformed record.
@@ -683,81 +689,60 @@ func (idx *StrikeIndexer) IndexTranscriptForCapture(ctx context.Context, s Disco
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	calls := make(map[string]bool)
-	processes := make(map[string]string)
-	pending := make(map[string]bool)
-	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
-		if strikeRecordTooLarge(raw, 0) {
-			return nil, fmt.Errorf("record exceeds Strike format limit")
-		}
-		var env strikeEnvelope
-		if err := json.Unmarshal(raw, &env); err != nil {
-			return nil, err
-		}
-		if !isKnownStrikeEvent(env.Type) {
-			return nil, fmt.Errorf("event lacks its type")
-		}
-		if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
-			return nil, fmt.Errorf("event requires data object")
-		}
-		event, err := decodeStrikeEventData(env.Data)
-		if err != nil {
-			return nil, err
-		}
-		if slices.Contains(strikeMetadataEventKinds(), env.Type) {
-			return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordMetadata}, nil
-		}
-		switch env.Type {
-		case strikeEventToolBegin:
-			if event.CallID == "" || firstNonEmpty(event.Name, event.Title) == "" || (len(event.Args) == 0 && len(event.Input) == 0) {
-				return nil, fmt.Errorf("tool begin requires callId, name and input")
-			}
-			calls[event.CallID] = true
-		case strikeEventToolEnd:
-			if event.CallID == "" {
-				return nil, fmt.Errorf("tool end requires callId")
-			}
-			delete(pending, event.CallID)
-		case strikeEventToolOutput:
-			if !calls[event.CallID] {
-				return nil, fmt.Errorf("tool output has no represented call")
-			}
-			pending[event.CallID] = true
-		case strikeEventProcessStarted:
-			if event.ProcessID == "" || !calls[event.CallID] {
-				return nil, fmt.Errorf("process requires processId and represented callId")
-			}
-			processes[event.ProcessID] = event.CallID
-		case strikeEventProcessOutput, strikeEventProcessExited:
-			call := firstNonEmpty(event.CallID, processes[event.ProcessID])
-			if !calls[call] {
-				return nil, fmt.Errorf("process output has no represented call")
-			}
-			pending[call] = true
-		case strikeEventUserMessage, strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
-			if event.Text == "" && event.Delta == "" && len(event.Content) == 0 && len(event.Message) == 0 {
-				return nil, fmt.Errorf("conversation event requires text payload")
-			}
-		case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
-			if strikeReasoningText(event) == "" && !bytes.Equal(bytes.TrimSpace(event.Content), []byte("[]")) && !bytes.Equal(bytes.TrimSpace(event.Message), []byte("[]")) {
-				return nil, fmt.Errorf("reasoning event requires text payload")
-			}
-		}
-		return nil, nil
-	})
-	if err != nil {
-		return TranscriptCaptureResult{}, err
+	return idx.captureDecodedStrike(ctx, s, data)
+}
+
+type strikeCaptureValidation struct {
+	calls     map[string]bool
+	processes map[string]string
+	pending   map[string]bool
+}
+
+func (v *strikeCaptureValidation) observe(env strikeEnvelope, event strikeEventData) (*IgnoredSourceRecord, error) {
+	if !isKnownStrikeEvent(env.Type) {
+		return nil, fmt.Errorf("event lacks its type")
 	}
-	if len(pending) != 0 {
-		return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("tool output has no terminal event; restore complete tool trace"))
+	if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
+		return nil, fmt.Errorf("event requires data object")
 	}
-	copy := *idx
-	copy.fullContent = true
-	copy.retainUnknown = true
-	entries, err := copy.parseWithCompletion(s.SessionID, data, nil)
-	if err != nil {
-		return TranscriptCaptureResult{}, err
+	if slices.Contains(strikeMetadataEventKinds(), env.Type) {
+		return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordMetadata}, nil
 	}
-	unknown, err := retainedUnknownEntries(entries)
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
+	switch env.Type {
+	case strikeEventToolBegin:
+		if event.CallID == "" || firstNonEmpty(event.Name, event.Title) == "" || (len(event.Args) == 0 && len(event.Input) == 0) {
+			return nil, fmt.Errorf("tool begin requires callId, name and input")
+		}
+		v.calls[event.CallID] = true
+	case strikeEventToolEnd:
+		if event.CallID == "" {
+			return nil, fmt.Errorf("tool end requires callId")
+		}
+		delete(v.pending, event.CallID)
+	case strikeEventToolOutput:
+		if !v.calls[event.CallID] {
+			return nil, fmt.Errorf("tool output has no represented call")
+		}
+		v.pending[event.CallID] = true
+	case strikeEventProcessStarted:
+		if event.ProcessID == "" || !v.calls[event.CallID] {
+			return nil, fmt.Errorf("process requires processId and represented callId")
+		}
+		v.processes[event.ProcessID] = event.CallID
+	case strikeEventProcessOutput, strikeEventProcessExited:
+		call := firstNonEmpty(event.CallID, v.processes[event.ProcessID])
+		if !v.calls[call] {
+			return nil, fmt.Errorf("process output has no represented call")
+		}
+		v.pending[call] = true
+	case strikeEventUserMessage, strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
+		if event.Text == "" && event.Delta == "" && len(event.Content) == 0 && len(event.Message) == 0 {
+			return nil, fmt.Errorf("conversation event requires text payload")
+		}
+	case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
+		if strikeReasoningText(event) == "" && !bytes.Equal(bytes.TrimSpace(event.Content), []byte("[]")) && !bytes.Equal(bytes.TrimSpace(event.Message), []byte("[]")) {
+			return nil, fmt.Errorf("reasoning event requires text payload")
+		}
+	}
+	return nil, nil
 }

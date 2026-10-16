@@ -136,30 +136,22 @@ func (idx *OpenCodeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, 
 	if err != nil {
 		return TranscriptCaptureResult{}, err
 	}
-	projection, err := decodeManagedOpenCodeProjection(data, format, version, s.SessionID)
+	projection, messages, unknown, err := decodeManagedOpenCodeSemanticProjection(data, format, version, s.SessionID)
 	if err != nil {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
 	if projection.ContentOmitted {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("managed projection omitted unsupported native records; upgrade Peasant and regenerate harvest before retrying full capture"))
 	}
-	for _, message := range projection.Messages {
+	for _, message := range messages {
 		if err := ctx.Err(); err != nil {
 			return TranscriptCaptureResult{}, err
 		}
-		for _, row := range message.Parts {
-			part, err := parseOpenCodeSemanticPart(row.ID, row.TimeCreated, row.Data)
-			if err != nil {
-				return TranscriptCaptureResult{}, captureFailure(s, 0, err)
-			}
+		for _, part := range message.Parts {
 			if isOpenCodeCaptureControl(part.Data.Type) && (part.Data.Text != "" || len(part.Data.Input) > 0 || len(part.Data.Content) > 0 || len(part.Data.Output) > 0 || part.Data.State != nil) {
 				return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("control part unexpectedly carries conversation/tool content"))
 			}
 		}
-	}
-	messages, unknown, err := parseManagedOpenCodeSemanticMessages(projection, managedOpenCodeProjectionKind(s.TranscriptOrigin))
-	if err != nil {
-		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
 	var ignored []IgnoredSourceRecord
 	for kind, count := range unknown {
@@ -267,7 +259,7 @@ func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s Disco
 	copy := *idx
 	copy.fullContent = true
 	copy.fullDepth = true
-	entries, err := copy.indexSemanticMessages(s.SessionID, messages)
+	entries, err := copy.indexRetainedSemanticMessages(s.SessionID, messages)
 	if err != nil {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
