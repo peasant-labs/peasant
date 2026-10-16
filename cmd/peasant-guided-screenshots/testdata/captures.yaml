@@ -35,6 +35,11 @@ sheets:
     title: "mounted kickstart completion: warning details, scrolling, and successful control"
     theme: dark
     viewport: {width: 1800, height: 3420}
+  - name: pull-progress
+    kind: pull-progress
+    title: "mounted collective pull progress: running, canceling, and canceled in both themes"
+    theme: dark
+    viewport: {width: 1800, height: 3600}
 
 completion:
   new: 2
@@ -172,6 +177,17 @@ ingestProgressStates:
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 9s", "estimate: 6s", canceling harvest]
   - key: harvest-canceled
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 12s", "estimate: 6s", harvest canceled]
+
+pullProgressStates:
+  - key: running
+    wantContains: [collective pull progress, 1/4, "█", "elapsed: 2s", ctrl+c to cancel]
+    wantAbsent: [canceling pull, pull canceled]
+  - key: canceling
+    wantContains: [collective pull progress, 2/4, "█", "elapsed: 9s", canceling pull...]
+    wantAbsent: [ctrl+c to cancel, pull canceled, waiting for current work]
+  - key: canceled
+    wantContains: [collective pull progress, 2/4, "█", "elapsed: 12s", pull canceled]
+    wantAbsent: [ctrl+c to cancel, canceling pull]
 
 selection:
   repositories:
@@ -475,3 +491,17 @@ ingestProgressCaptures:
   - {name: ingest-progress-harvest-canceled-dark-120x40, state: harvest-canceled, theme: dark, width: 120, height: 40}
   - {name: ingest-progress-harvest-canceled-light-80x24, state: harvest-canceled, theme: light, width: 80, height: 24}
   - {name: ingest-progress-harvest-canceled-light-120x40, state: harvest-canceled, theme: light, width: 120, height: 40}
+
+pullProgressCaptures:
+  - {name: pull-progress-running-dark-80x24, state: running, theme: dark, width: 80, height: 24}
+  - {name: pull-progress-running-dark-120x40, state: running, theme: dark, width: 120, height: 40}
+  - {name: pull-progress-running-light-80x24, state: running, theme: light, width: 80, height: 24}
+  - {name: pull-progress-running-light-120x40, state: running, theme: light, width: 120, height: 40}
+  - {name: pull-progress-canceling-dark-80x24, state: canceling, theme: dark, width: 80, height: 24}
+  - {name: pull-progress-canceling-dark-120x40, state: canceling, theme: dark, width: 120, height: 40}
+  - {name: pull-progress-canceling-light-80x24, state: canceling, theme: light, width: 80, height: 24}
+  - {name: pull-progress-canceling-light-120x40, state: canceling, theme: light, width: 120, height: 40}
+  - {name: pull-progress-canceled-dark-80x24, state: canceled, theme: dark, width: 80, height: 24}
+  - {name: pull-progress-canceled-dark-120x40, state: canceled, theme: dark, width: 120, height: 40}
+  - {name: pull-progress-canceled-light-80x24, state: canceled, theme: light, width: 80, height: 24}
+  - {name: pull-progress-canceled-light-120x40, state: canceled, theme: light, width: 120, height: 40}

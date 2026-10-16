@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/signal"
+	"syscall"
 
 	"github.com/peasant-labs/peasant/internal/pull"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -63,12 +65,31 @@ func (o collectivePullOutcome) failed() bool {
 // A per-transcript failure does not stop the run. Each outcome is reported and
 // the command fails at the end, because a bulk pull that pulled nine of ten
 // transcripts is neither a success nor a silent partial.
-func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, client *village.VillageClient, pipeline *pull.Pipeline, values []string, flags collectivePullFlags) error {
-	ctx := cmd.Context()
+//
+// SIGINT and SIGTERM stop the run cleanly through the signal-aware context:
+// the loop checks it before each transcript and after each pipeline call, so
+// an interrupt lands at a transcript boundary with no partial copy (the
+// pipeline removes its staging directory on any failure before the write
+// stage). The run then reports how many of the listed transcripts completed
+// and exits non-zero; a re-run resumes because current transcripts are
+// skipped by the skip-gate and the pipeline diff.
+func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, client *village.VillageClient, pipeline collectivePuller, values []string, flags collectivePullFlags) error {
+	signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	ctx, cancelOperation := context.WithCancel(signalCtx)
+	defer cancelOperation()
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return collectivePullCancellationError(0, 0, nil, err)
+	}
 	writer := cmd.OutOrStdout()
 
 	collectives, names, err := resolveCollectiveRefs(ctx, client, values)
 	if err != nil {
+		if ctx.Err() != nil {
+			cmd.SilenceUsage = true
+			return collectivePullCancellationError(0, 0, names, ctx.Err())
+		}
 		return err
 	}
 
@@ -77,11 +98,19 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	// predates the collectives filter advertises an older window here, which is
 	// what stops this CLI from over-pulling.
 	if err := client.NegotiatePull(ctx); err != nil {
+		if ctx.Err() != nil {
+			cmd.SilenceUsage = true
+			return collectivePullCancellationError(0, 0, names, ctx.Err())
+		}
 		return err
 	}
 
 	listed, err := collectCollectiveTranscripts(ctx, client, collectives)
 	if err != nil {
+		if ctx.Err() != nil {
+			cmd.SilenceUsage = true
+			return collectivePullCancellationError(0, 0, names, ctx.Err())
+		}
 		return err
 	}
 
@@ -100,6 +129,10 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	if !flags.Force {
 		current, err = currentHeldTranscripts(ctx, db, client, listed)
 		if err != nil {
+			if ctx.Err() != nil {
+				cmd.SilenceUsage = true
+				return collectivePullCancellationError(0, len(listed), names, ctx.Err())
+			}
 			// The gate is an optimization, never a correctness dependency: a village
 			// that cannot answer it must not cost the pull. Say so and check every
 			// transcript individually, which is what the pipeline does anyway.
@@ -112,8 +145,39 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 		fmt.Fprintf(cmd.ErrOrStderr(), "Dry run — no transcript will be written\n\n")
 	}
 
+	// The stderr bar shows done/total with the elapsed run time while the run
+	// proceeds, throttled to one refresh per floor interval plus the initial
+	// and final bars. It stays silent when stderr is not a terminal and under
+	// --json; the per-transcript lines and the closing summary keep printing
+	// either way because they travel on stdout.
+	//
+	// Nothing here wipes the panel. The bar and its final footer are the ending
+	// state: a user who looks back after a cancelled run must still find them on
+	// the terminal, so every write appends and the last one to land stays.
+	progress := newCollectivePullProgress(cmd.ErrOrStderr(), flags.JSON, pullProgressTheme(cmd))
+	progress.SetTotal(len(listed))
+
+	// Paint the canceling state the moment the interrupt arrives, while the
+	// transcript in flight finishes. Without it the bar sits on its last refresh
+	// for the whole unwind, which reads as an unresponsive command. The watcher
+	// yields to the final state; Cancel is the last panel to land.
+	cancelWatch := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			progress.MarkCanceling()
+		case <-cancelWatch:
+		}
+	}()
+	defer close(cancelWatch)
+
 	outcomes := make([]collectivePullOutcome, 0, len(listed))
 	for _, row := range listed {
+		if err := ctx.Err(); err != nil {
+			progress.Cancel()
+			cmd.SilenceUsage = true
+			return collectivePullCancellationError(len(outcomes), len(listed), names, err)
+		}
 		ref := pull.TranscriptRef{ID: row.TranscriptID}
 
 		// Already current per the gate: report it without touching the village.
@@ -131,6 +195,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 			if !flags.JSON {
 				renderCollectivePullOutcome(cmd, outcome, flags.DryRun, flags.Level)
 			}
+			progress.Advance(len(outcomes))
 			continue
 		}
 
@@ -143,11 +208,32 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 			Meta:          &meta,
 			SkipNegotiate: true,
 		})
+		if err := ctx.Err(); err != nil {
+			// The interrupt wins over the pipeline result: a failure here is
+			// the cancellation, not a transcript failure. When the
+			// transcript landed just before the interrupt raced it, keep
+			// that outcome so the report counts what is on disk; otherwise
+			// the attempt left no partial copy (the pipeline removes its
+			// staging directory on any failure before the write stage) and
+			// is simply not recorded.
+			if landedBeforeCancel(result, pullErr) {
+				outcome := collectivePullOutcome{Ref: ref, Result: result, Err: pullErr}
+				outcomes = append(outcomes, outcome)
+				if !flags.JSON {
+					renderCollectivePullOutcome(cmd, outcome, flags.DryRun, flags.Level)
+				}
+				progress.Advance(len(outcomes))
+			}
+			progress.Cancel()
+			cmd.SilenceUsage = true
+			return collectivePullCancellationError(len(outcomes), len(listed), names, err)
+		}
 		outcome := collectivePullOutcome{Ref: ref, Result: result, Err: pullErr}
 		outcomes = append(outcomes, outcome)
 		if !flags.JSON {
 			renderCollectivePullOutcome(cmd, outcome, flags.DryRun, flags.Level)
 		}
+		progress.Advance(len(outcomes))
 	}
 
 	if flags.JSON {
@@ -283,6 +369,19 @@ func collectCollectiveTranscripts(ctx context.Context, client *village.VillageCl
 // single-transcript rendering.
 func renderCollectivePullOutcome(cmd *cobra.Command, outcome collectivePullOutcome, dryRun bool, level outputLevel) {
 	printPullSummary(cmd, outcome.Ref, outcome.Result, dryRun, level)
+}
+
+// landedBeforeCancel reports whether a pipeline result counts as landed work
+// when an interrupt races it. Only a successful pulled or up-to-date result
+// is kept in the cancellation report; any failure left no partial copy
+// because the pipeline removes its staging directory on any failure before
+// the write stage.
+func landedBeforeCancel(result *pull.PullResult, pullErr error) bool {
+	if pullErr != nil || result == nil {
+		return false
+	}
+	return result.Status == pull.PullStatusPulled ||
+		result.Status == pull.PullStatusUpToDate
 }
 
 // printCollectivePullSummary writes the closing count line for a bulk pull.

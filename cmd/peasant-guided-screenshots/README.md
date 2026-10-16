@@ -1,7 +1,8 @@
 # Guided TUI screenshot harness
 
 This manually invoked harness renders deterministic visual evidence for Peasant's guided setup UI.
-It mounts the real `settings.Flow`, `kickstart.Program`, and `push.PushWizardModel` production paths
+It mounts the real `settings.Flow`, `kickstart.Program`, `push.PushWizardModel`, and
+`pullprogress.Model` production paths
 over synthetic fixture data, composes their ANSI output into labeled contact sheets with Lip Gloss, and asks
 [Freeze](https://github.com/charmbracelet/freeze) to rasterize the sheets.
 
@@ -30,7 +31,7 @@ Run the opt-in fixture and mounted-render tests with:
 make guided-screenshots-test
 ```
 
-The six PNGs are written to:
+The seven PNGs are written to:
 
 ```text
 out/test/screenshots/peasant-guided-final-<commit>/guided-dark.png
@@ -39,6 +40,7 @@ out/test/screenshots/peasant-guided-final-<commit>/selection.png
 out/test/screenshots/peasant-guided-final-<commit>/push.png
 out/test/screenshots/peasant-guided-final-<commit>/ingest-progress.png
 out/test/screenshots/peasant-guided-final-<commit>/ingest-completion.png
+out/test/screenshots/peasant-guided-final-<commit>/pull-progress.png
 ```
 
 An explicit dirty capture uses `peasant-guided-final-<commit>-dirty` instead. Generated evidence is
@@ -56,8 +58,10 @@ local and gitignored.
   branch-aware selection withheld;
 - local ingest progress and completion, including multiple nonfatal warnings, scrolled remediation
   and next steps, and a no-warning control, in both themes and both sizes;
+- the bulk collective-pull progress bar — running, canceling, and canceled — mounted from the real
+  `pullprogress.Model` over scrubbed synthetic counts, in both themes and both sizes;
 - synthetic discovery data, row-count guards, required text, and exact matrix coverage; and
-- the six accepted contact-sheet names and pixel dimensions.
+- the seven accepted contact-sheet names and pixel dimensions.
 
 Unknown fields, trailing YAML documents, duplicate rows, missing matrix entries, and changed count
 declarations fail before any PNG is published. No local config, transcript, repository, or credential

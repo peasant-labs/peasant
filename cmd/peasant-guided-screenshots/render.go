@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/pullprogress"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -124,6 +125,22 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		ingestProgressCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
 	}
 
+	pullProgressCaptures := make(map[string]terminalCapture, len(document.PullProgressCaptures))
+	pullProgressStates := make(map[pullProgressState]pullProgressStateFixture, len(document.PullProgressStates))
+	for _, state := range document.PullProgressStates {
+		pullProgressStates[state.Key] = state
+	}
+	for _, capture := range document.PullProgressCaptures {
+		view, renderErr := renderPullProgressCapture(capture)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, pullProgressStates[capture.State].WantContains, pullProgressStates[capture.State].WantAbsent); err != nil {
+			return nil, err
+		}
+		pullProgressCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
+	}
+
 	sheets := make([]renderedSheet, 0, len(document.Sheets))
 	for _, sheet := range document.Sheets {
 		var content string
@@ -137,6 +154,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, rows, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
 		case sheetKindIngest:
 			content, rows, err = composeIngestProgressSheet(sheet, document.IngestProgressStates, document.IngestProgressCaptures, ingestProgressCaptures)
+		case sheetKindPullProgress:
+			content, rows, err = composePullProgressSheet(sheet, document.PullProgressStates, document.PullProgressCaptures, pullProgressCaptures)
 		case sheetKindCompletion:
 			content, rows, err = renderCompletionSheet(workingDirectory, sheet, document.Completion)
 		default:
@@ -215,6 +234,47 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 	// The inline program intentionally occupies only its content rows. The
 	// capture canvas represents the remaining terminal viewport, without
 	// changing the production view or concealing overflow.
+	canvas := kit.NewPanel(captureThemeValue(capture.Theme))
+	canvas.SetSize(capture.Width, capture.Height)
+	canvas.Rendered(view)
+	return canvas.View(), nil
+}
+
+// renderPullProgressCapture mounts the REAL bulk-pull progress surface —
+// the same pullprogress.Model the collective-pull stderr reporter renders
+// on its throttled refreshes — over scrubbed synthetic counts and a fixed
+// elapsed run time per state. The running bar advances 1/4; the canceling
+// and canceled states retain the reached 2/4 beside their footers, exactly
+// as the interrupted run does.
+func renderPullProgressCapture(capture pullProgressCaptureFixture) (string, error) {
+	model := pullprogress.New(captureThemeValue(capture.Theme))
+	switch capture.State {
+	case pullProgressStateRunning:
+		model.SetTotal(4)
+		model.SetDone(1)
+		model.SetElapsed(2 * time.Second)
+	case pullProgressStateCanceling:
+		model.SetTotal(4)
+		model.SetDone(2)
+		model.SetElapsed(9 * time.Second)
+		model.MarkCanceling()
+	case pullProgressStateCanceled:
+		model.SetTotal(4)
+		model.SetDone(2)
+		model.SetElapsed(12 * time.Second)
+		model.MarkCanceled()
+	default:
+		return "", fmt.Errorf("render pull progress capture %q: unknown pull progress state %q", capture.Name, capture.State)
+	}
+	model.SetSize(capture.Width, 0)
+	view := model.View()
+	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {
+		return "", fmt.Errorf("pull progress overflows the capture terminal")
+	}
+	// The production surface is three content rows by design. The capture
+	// canvas represents the remaining terminal viewport, without changing
+	// the production view or concealing overflow — the same canvas
+	// discipline as the inline harvest capture.
 	canvas := kit.NewPanel(captureThemeValue(capture.Theme))
 	canvas.SetSize(capture.Width, capture.Height)
 	canvas.Rendered(view)
@@ -807,6 +867,54 @@ func ingestProgressCaptureFor(
 		}
 	}
 	return terminalCapture{}, fmt.Errorf("compose ingest progress sheet: no capture for %s/%s/%dx%d", state, captureTheme, width, height)
+}
+
+func composePullProgressSheet(
+	sheet sheetFixture,
+	states []pullProgressStateFixture,
+	cases []pullProgressCaptureFixture,
+	captures map[string]terminalCapture,
+) (string, []sheetRow, error) {
+	rows := make([]string, 0, len(states)*2)
+	meta := make([]sheetRow, 0, len(states)*2)
+	for _, state := range states {
+		themes := []captureTheme{captureThemeDark}
+		if state.Key.requiresBothThemes() {
+			themes = append(themes, captureThemeLight)
+		}
+		for _, name := range themes {
+			left, err := pullProgressCaptureFor(cases, captures, state.Key, name, 80, 24)
+			if err != nil {
+				return "", nil, err
+			}
+			right, err := pullProgressCaptureFor(cases, captures, state.Key, name, 120, 40)
+			if err != nil {
+				return "", nil, err
+			}
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("pull progress state %q (%s)", state.Key, name),
+				lines: strings.Count(row, "\n") + 1,
+			})
+		}
+	}
+	return renderContactSheet(sheet.Title, rows), meta, nil
+}
+
+func pullProgressCaptureFor(
+	cases []pullProgressCaptureFixture,
+	captures map[string]terminalCapture,
+	state pullProgressState,
+	captureTheme captureTheme,
+	width, height int,
+) (terminalCapture, error) {
+	for _, capture := range cases {
+		if capture.State == state && capture.Theme == captureTheme && capture.Width == width && capture.Height == height {
+			return captures[capture.Name], nil
+		}
+	}
+	return terminalCapture{}, fmt.Errorf("compose pull progress sheet: no capture for %s/%s/%dx%d", state, captureTheme, width, height)
 }
 
 func pushCaptureFor(
