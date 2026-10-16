@@ -90,7 +90,7 @@ func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 	if row.HasSeq && row.Seq > 0 {
 		position.Sequence = int(row.Seq)
 	}
-	prepared, unknown, err := prepareOpenCodeCurrent(row.Type, data, position)
+	prepared, unknown, err := prepareOpenCodeCurrentFields(row.Type, data, envelope, position)
 	if err != nil {
 		return OpenCodeProvenanceMessage{}, false, err
 	}

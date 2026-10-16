@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -54,14 +56,23 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 	if kind == "" {
 		return nil, nil, fmt.Errorf("OpenCode row requires its native type; restore the row before capture")
 	}
-	if err := requireJSONObject(raw); err != nil {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, nil, err
 	}
-	var identity map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &identity); err != nil {
-		return nil, nil, err
+	return prepareOpenCodeCurrentFields(kind, raw, fields, position)
+}
+
+// prepareOpenCodeCurrentFields borrows the decoded envelope without changing it:
+// structural normalization still needs the original native fields afterward.
+func prepareOpenCodeCurrentFields(kind string, raw []byte, fields map[string]json.RawMessage, position UnknownSourcePosition) ([]byte, []RetainedUnknown, error) {
+	if kind == "" {
+		return nil, nil, fmt.Errorf("OpenCode row requires its native type; restore the row before capture")
 	}
-	if identity["messageID"] != nil && identity["message_id"] != nil && !bytes.Equal(identity["messageID"], identity["message_id"]) {
+	if fields == nil {
+		return nil, nil, errors.New("must be a JSON object")
+	}
+	if fields["messageID"] != nil && fields["message_id"] != nil && !bytes.Equal(fields["messageID"], fields["message_id"]) {
 		return nil, nil, fmt.Errorf("OpenCode row has conflicting messageID and message_id pairing identities")
 	}
 	retain := func(namespace, kind, pointer string, value json.RawMessage, offset int64) (RetainedUnknown, error) {
@@ -80,10 +91,6 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 	}
 	if kind != "assistant" {
 		return raw, nil, nil
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, nil, err
 	}
 	var content []json.RawMessage
 	if err := json.Unmarshal(fields["content"], &content); err != nil {
@@ -133,6 +140,7 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 	if err != nil {
 		return nil, nil, err
 	}
+	fields = maps.Clone(fields)
 	fields["content"] = encoded
 	encoded, err = json.Marshal(fields)
 	return encoded, unknown, err

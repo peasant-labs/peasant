@@ -205,20 +205,31 @@ func (b *piContentBlock) UnmarshalJSON(raw []byte) error {
 }
 
 func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, error) {
+	content, err := decodePiContent(raw, assistant)
+	return content.Text, content.Tools, err
+}
+
+type piDecodedContent struct {
+	Text        string
+	Tools       []piContentBlock
+	HasThinking bool
+}
+
+func decodePiContent(raw json.RawMessage, assistant bool) (piDecodedContent, error) {
 	if len(raw) == 0 {
-		return "", nil, fmt.Errorf("content is missing")
+		return piDecodedContent{}, fmt.Errorf("content is missing")
 	}
 	if raw[0] == '"' {
 		var text string
 		err := json.Unmarshal(raw, &text)
-		return text, nil, err
+		return piDecodedContent{Text: text}, err
 	}
 	if raw[0] != '[' {
-		return "", nil, fmt.Errorf("content must be text or a content-block array")
+		return piDecodedContent{}, fmt.Errorf("content must be text or a content-block array")
 	}
 	var blocks []piContentBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", nil, err
+		return piDecodedContent{}, err
 	}
 	var text []string
 	var thinking []string
@@ -227,26 +238,26 @@ func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, e
 		switch block.Type {
 		case piBlockText:
 			if block.Text == nil {
-				return "", nil, fmt.Errorf("text block requires string text")
+				return piDecodedContent{}, fmt.Errorf("text block requires string text")
 			}
 			text = append(text, *block.Text)
 		case piBlockThinking:
 			if !assistant || block.Thinking == nil {
-				return "", nil, fmt.Errorf("thinking requires an assistant and string thinking text")
+				return piDecodedContent{}, fmt.Errorf("thinking requires an assistant and string thinking text")
 			}
 			thinking = append(thinking, *block.Thinking)
 		case piBlockImage:
 			if block.ImageData == nil || block.MimeType == nil {
-				return "", nil, fmt.Errorf("image block requires string data and mimeType")
+				return piDecodedContent{}, fmt.Errorf("image block requires string data and mimeType")
 			}
 			text = append(text, "[image omitted]")
 		case piBlockToolCall:
 			if !assistant || block.ID == "" || block.Name == "" || !bytes.HasPrefix(bytes.TrimSpace(block.Arguments), []byte{'{'}) {
-				return "", nil, fmt.Errorf("toolCall requires id, name, and object arguments")
+				return piDecodedContent{}, fmt.Errorf("toolCall requires id, name, and object arguments")
 			}
 			tools = append(tools, block)
 		default:
-			return "", nil, fmt.Errorf("unknown content block type")
+			return piDecodedContent{}, fmt.Errorf("unknown content block type")
 		}
 	}
 	content := strings.Join(text, "\n")
@@ -255,7 +266,7 @@ func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, e
 		// this leading disclosure and leaves the answer/images visible.
 		content = "<thinking>" + strings.Join(thinking, "\n") + "</thinking>\n" + content
 	}
-	return content, tools, nil
+	return piDecodedContent{Text: content, Tools: tools, HasThinking: len(thinking) > 0}, nil
 }
 
 // project returns the projected entries plus the thinking-level diagnostics
@@ -352,24 +363,17 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				}
 				continue
 			}
-			var err error
-			content, tools, err = piContent(message.Content, message.Role == piRoleAssistant)
+			decodedContent, err := decodePiContent(message.Content, message.Role == piRoleAssistant)
 			if err != nil {
 				return nil, nil, piSourceError("message content", entry.line, err)
 			}
+			content, tools = decodedContent.Text, decodedContent.Tools
 			switch message.Role {
 			case piRoleUser:
 				row.Role, row.EntryType = RoleUser, EntryTypeText
 			case piRoleAssistant:
 				row.Role, row.EntryType = RoleAssistant, EntryTypeText
-				var blocks []piContentBlock
-				if json.Unmarshal(message.Content, &blocks) == nil {
-					for _, block := range blocks {
-						if block.Type == piBlockThinking {
-							row.HasThinking = true
-						}
-					}
-				}
+				row.HasThinking = decodedContent.HasThinking
 				scope, rawUsage = schema.UsageScopeAssistant, message.Usage
 				model := message.Model
 				if len(message.ResponseModel) > 0 {
