@@ -214,12 +214,12 @@ func (p *collectivePullProgress) renderLocked() {
 // the run stopped before the listing finished). The fix names the resume:
 // current transcripts are skipped, so a re-run repeats only what is
 // missing.
-func collectivePullCancellationError(done, total int, names []string, ctxErr error) error {
+func collectivePullCancellationError(done, total int, names []string, owner string, ctxErr error) error {
 	return fmt.Errorf(
-		"cancelled after %d of %d transcripts in %s\n"+
+		"cancelled after %d of %d transcripts %s\n"+
 			"  what: the bulk pull stopped before every transcript was pulled\n"+
 			"  why:  %v\n"+
 			"  where: collective pull loop\n"+
 			"  fix:  re-run the same command — current transcripts are skipped, so only what is missing repeats",
-		done, total, collectiveLabel(names), ctxErr)
+		done, total, selectionLabel(names, owner), ctxErr)
 }

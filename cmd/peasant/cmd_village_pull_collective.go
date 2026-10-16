@@ -83,7 +83,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	defer cancelOperation()
 	if err := ctx.Err(); err != nil {
 		cmd.SilenceUsage = true
-		return collectivePullCancellationError(0, 0, nil, err)
+		return collectivePullCancellationError(0, 0, nil, flags.User, err)
 	}
 	writer := cmd.OutOrStdout()
 
@@ -91,7 +91,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	if err != nil {
 		if ctx.Err() != nil {
 			cmd.SilenceUsage = true
-			return collectivePullCancellationError(0, 0, names, ctx.Err())
+			return collectivePullCancellationError(0, 0, names, flags.User, ctx.Err())
 		}
 		return err
 	}
@@ -103,7 +103,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	if err := client.NegotiatePull(ctx); err != nil {
 		if ctx.Err() != nil {
 			cmd.SilenceUsage = true
-			return collectivePullCancellationError(0, 0, names, ctx.Err())
+			return collectivePullCancellationError(0, 0, names, flags.User, ctx.Err())
 		}
 		return err
 	}
@@ -112,7 +112,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	if err != nil {
 		if ctx.Err() != nil {
 			cmd.SilenceUsage = true
-			return collectivePullCancellationError(0, 0, names, ctx.Err())
+			return collectivePullCancellationError(0, 0, names, flags.User, ctx.Err())
 		}
 		return err
 	}
@@ -134,7 +134,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 		if err != nil {
 			if ctx.Err() != nil {
 				cmd.SilenceUsage = true
-				return collectivePullCancellationError(0, len(listed), names, ctx.Err())
+				return collectivePullCancellationError(0, len(listed), names, flags.User, ctx.Err())
 			}
 			// The gate is an optimization, never a correctness dependency: a village
 			// that cannot answer it must not cost the pull. Say so and check every
@@ -179,7 +179,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 		if err := ctx.Err(); err != nil {
 			progress.Cancel()
 			cmd.SilenceUsage = true
-			return collectivePullCancellationError(len(outcomes), len(listed), names, err)
+			return collectivePullCancellationError(len(outcomes), len(listed), names, flags.User, err)
 		}
 		ref := pull.TranscriptRef{ID: row.TranscriptID}
 
@@ -229,7 +229,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 			}
 			progress.Cancel()
 			cmd.SilenceUsage = true
-			return collectivePullCancellationError(len(outcomes), len(listed), names, err)
+			return collectivePullCancellationError(len(outcomes), len(listed), names, flags.User, err)
 		}
 		outcome := collectivePullOutcome{Ref: ref, Result: result, Err: pullErr}
 		outcomes = append(outcomes, outcome)
