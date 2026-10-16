@@ -222,12 +222,23 @@ func (v *CollectiveVillage) SetPromptRequests(requests ...schema.VillagePromptRe
 }
 
 // SetPullTranscript stores a pullable transcript's served blob and its authored
-// annotations, deriving the metadata view the pull surface serves (the content
-// hash over the blob bytes, the annotation count, and the group visibility a
-// shared transcript carries). A transcript with pull data is treated as owned
-// and therefore pullable unless public; a filtered pull listing further
-// requires an APPROVED share into a listed member collective (see Share).
+// annotations under the test's default owner account.
 func (v *CollectiveVillage) SetPullTranscript(transcript schema.TranscriptID, blob []byte, annotations []schema.PullAnnotation) {
+	v.SetPullTranscriptOwnedBy(transcript, blob, annotations, TestOwnerUserID, TestOwnerUsername)
+}
+
+// SetPullTranscriptOwnedBy stores a pullable transcript's served blob and its
+// authored annotations, deriving the metadata view the pull surface serves (the
+// content hash over the blob bytes, the annotation count, and the group
+// visibility a shared transcript carries). A transcript with pull data is
+// treated as owned and therefore pullable unless public; a filtered pull
+// listing further requires an APPROVED share into a listed member collective
+// (see Share).
+//
+// The owner names the village account that contributed the transcript, so a
+// listing narrowed to one contributor has more than one account to select
+// between.
+func (v *CollectiveVillage) SetPullTranscriptOwnedBy(transcript schema.TranscriptID, blob []byte, annotations []schema.PullAnnotation, ownerUserID, ownerUsername string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	cp := append([]byte(nil), blob...)
@@ -237,8 +248,8 @@ func (v *CollectiveVillage) SetPullTranscript(transcript schema.TranscriptID, bl
 	hash := schema.ComputeTranscriptHash(cp)
 	v.pullInfos[transcript] = schema.PullTranscriptInfo{
 		TranscriptID:    transcript,
-		OwnerUserID:     TestOwnerUserID,
-		OwnerUsername:   TestOwnerUsername,
+		OwnerUserID:     ownerUserID,
+		OwnerUsername:   ownerUsername,
 		Title:           "pull title for " + transcript.String(),
 		Harness:         schema.HarnessClaudeCode,
 		Visibility:      schema.VisibilityGroup,
