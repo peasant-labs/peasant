@@ -34,8 +34,13 @@ import (
 // identity the row holds.
 func seedLatestAttemptPreview(t *testing.T, dir, sessionID, previewText string) {
 	t.Helper()
+	seedLatestAttemptPreviewAtRoot(t, dir, filepath.Join(dir, "peasant-sync"), sessionID, previewText)
+}
+
+func seedLatestAttemptPreviewAtRoot(t *testing.T, dir, outputRoot, sessionID, previewText string) {
+	t.Helper()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	db, err := openPreparedStore(t, dbPath, mustGenerationStoreOptions(t, filepath.Join(dir, "peasant-sync"))...)
+	db, err := openPreparedStore(t, dbPath, mustGenerationStoreOptions(t, outputRoot)...)
 	if err != nil {
 		t.Fatalf("open generation store: %v", err)
 	}
@@ -76,6 +81,14 @@ func seedLatestAttemptPreview(t *testing.T, dir, sessionID, previewText string) 
 		t.Fatalf("capture index state: %v", err)
 	}
 	identity := strings.Repeat("e", 64)
+	// Real managed ingests already record the consumed pair and producer revision;
+	// preserve those facts rather than claiming the synthetic V1 seed's identity.
+	if state.ArtifactHash != nil {
+		identity = *state.ArtifactHash
+	}
+	if state.IndexerVersion > versions.IndexerVersion {
+		versions.IndexerVersion = state.IndexerVersion
+	}
 	outcome, err := db.ActivateGeneration(ctx, store.GenerationActivation{
 		Generation:       generation,
 		Blobs:            map[schema.SourceEntryRef][]byte{ref: []byte(previewText)},
