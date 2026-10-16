@@ -260,86 +260,90 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 		if completion != nil {
 			completion.recognized++
 		}
-		timestamp := parseIndexTimestamp(envelope.Time)
-
-		switch envelope.Type {
-		case strikeEventUserMessage:
-			a.beginTurn(event.TurnID)
-			content := strikeEventText(event)
-			if content != "" {
-				a.appendUser(content, timestamp, len(trimmed))
-			}
-
-		case strikeEventTurnStarted:
-			a.beginTurn(event.TurnID)
-
-		case strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
-			content := strikeEventText(event)
-			if content == "" {
-				return
-			}
-			key := a.eventKey(event)
-			parent := a.ensureParent(key, event, timestamp, len(trimmed), EntryTypeText)
-			a.appendParentContent(parent, strikeContentText, content)
-
-		case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
-			content := strikeReasoningText(event)
-			if content == "" {
-				return
-			}
-			key := a.eventKey(event)
-			parent := a.ensureParent(key, event, timestamp, len(trimmed), EntryTypeThinking)
-			a.appendParentContent(parent, strikeContentReasoning, content)
-
-		case strikeEventToolBegin:
-			a.beginTool(event, timestamp, len(trimmed))
-
-		case strikeEventToolOutput:
-			a.appendCallOutput(event.CallID, a.outputText(event))
-
-		case strikeEventProcessStarted:
-			if event.ProcessID != "" && event.CallID != "" {
-				a.processCalls[event.ProcessID] = event.CallID
-			}
-
-		case strikeEventProcessOutput:
-			callID := event.CallID
-			if callID == "" {
-				callID = a.processCalls[event.ProcessID]
-			}
-			a.appendCallOutput(callID, a.outputText(event))
-
-		case strikeEventProcessExited:
-			callID := event.CallID
-			if callID == "" {
-				callID = a.processCalls[event.ProcessID]
-			}
-			a.finishProcess(callID, event)
-
-		case strikeEventToolEnd:
-			a.endTool(event, timestamp, len(trimmed))
-
-		case strikeEventUsageReported:
-			if parent := a.lookupParent(event); parent != nil {
-				in, inKnown, out, outKnown := strikeUsageCounts(event)
-				if inKnown {
-					a.entries[parent.position].TokensIn = &in
-				}
-				if outKnown {
-					a.entries[parent.position].TokensOut = &out
-				}
-			}
-
-		case strikeEventTurnCompleted:
-			if parent := a.lookupParent(event); parent != nil {
-				if reason, ok := strikeStopReason(event.StopReason); ok {
-					a.entries[parent.position].StopReason = &reason
-				}
-			}
-		}
+		a.applyDecodedEvent(envelope, event, len(trimmed))
 	})
 
 	return a.entries, parseErr
+}
+
+func (a *strikeAssembly) applyDecodedEvent(envelope strikeEnvelope, event strikeEventData, rawLength int) {
+	timestamp := parseIndexTimestamp(envelope.Time)
+
+	switch envelope.Type {
+	case strikeEventUserMessage:
+		a.beginTurn(event.TurnID)
+		content := strikeEventText(event)
+		if content != "" {
+			a.appendUser(content, timestamp, rawLength)
+		}
+
+	case strikeEventTurnStarted:
+		a.beginTurn(event.TurnID)
+
+	case strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
+		content := strikeEventText(event)
+		if content == "" {
+			return
+		}
+		key := a.eventKey(event)
+		parent := a.ensureParent(key, event, timestamp, rawLength, EntryTypeText)
+		a.appendParentContent(parent, strikeContentText, content)
+
+	case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
+		content := strikeReasoningText(event)
+		if content == "" {
+			return
+		}
+		key := a.eventKey(event)
+		parent := a.ensureParent(key, event, timestamp, rawLength, EntryTypeThinking)
+		a.appendParentContent(parent, strikeContentReasoning, content)
+
+	case strikeEventToolBegin:
+		a.beginTool(event, timestamp, rawLength)
+
+	case strikeEventToolOutput:
+		a.appendCallOutput(event.CallID, a.outputText(event))
+
+	case strikeEventProcessStarted:
+		if event.ProcessID != "" && event.CallID != "" {
+			a.processCalls[event.ProcessID] = event.CallID
+		}
+
+	case strikeEventProcessOutput:
+		callID := event.CallID
+		if callID == "" {
+			callID = a.processCalls[event.ProcessID]
+		}
+		a.appendCallOutput(callID, a.outputText(event))
+
+	case strikeEventProcessExited:
+		callID := event.CallID
+		if callID == "" {
+			callID = a.processCalls[event.ProcessID]
+		}
+		a.finishProcess(callID, event)
+
+	case strikeEventToolEnd:
+		a.endTool(event, timestamp, rawLength)
+
+	case strikeEventUsageReported:
+		if parent := a.lookupParent(event); parent != nil {
+			in, inKnown, out, outKnown := strikeUsageCounts(event)
+			if inKnown {
+				a.entries[parent.position].TokensIn = &in
+			}
+			if outKnown {
+				a.entries[parent.position].TokensOut = &out
+			}
+		}
+
+	case strikeEventTurnCompleted:
+		if parent := a.lookupParent(event); parent != nil {
+			if reason, ok := strikeStopReason(event.StopReason); ok {
+				a.entries[parent.position].StopReason = &reason
+			}
+		}
+	}
 }
 
 func (a *strikeAssembly) beginTurn(turnID string) {
