@@ -775,6 +775,11 @@ backed by an in-memory SQLite store. The WebSocket E2E pattern in `AGENTS.md` ex
 
 ## Experimental features
 
+File familiarity / understanding coverage is an **incomplete experiment**, not a
+shipped app feature. See the [experimental feature register](docs/EXPERIMENTAL_FEATURES.md)
+for its current surfaces and remaining work. Feature completion and its opt-in
+flag are deferred; no familiarity flag is implemented today.
+
 Some features are shelved in the default build and gated behind a flag: the
 `peasant memory` command group (Go build tag `-tags=experimental`), the
 `/review` page's real-data mode (env `NEXT_PUBLIC_EXPERIMENTAL_REVIEW=1`), and the
