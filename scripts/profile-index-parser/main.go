@@ -8,11 +8,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
+	"math"
 	"os"
 	"reflect"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"time"
 
@@ -52,9 +55,10 @@ func (r *refs) NewSubmissionRef() (schema.SubmissionRef, error) {
 var _ ingest.RefAllocator = (*refs)(nil)
 
 type corpusItem struct {
-	Metadata   string `json:"metadata"`
-	Transcript string `json:"transcript"`
-	Snapshot   string `json:"snapshot,omitempty"` // Actual captured OpenCodeHistorySnapshot, never synthesized.
+	Metadata       string `json:"metadata"`
+	Transcript     string `json:"transcript"`
+	Snapshot       string `json:"snapshot,omitempty"`       // Actual captured OpenCodeHistorySnapshot, never synthesized.
+	ContentOmitted bool   `json:"contentOmitted,omitempty"` // Actual composition flag, not inferred from transcript text.
 	// OpenCode retained SQLite projections require the real recorded origin:
 	// 1 = legacy SQLite, 2 = current SQLite. Directory reads are unsupported.
 	Origin *int `json:"origin,omitempty"`
@@ -111,14 +115,15 @@ func main() {
 	phase := flag.String("phase", "parity", "parity, timing, or profile; never combined")
 	compare := flag.String("compare", "", "baseline parity report to compare exactly (parity only)")
 	cpu := flag.String("cpuprofile", "", "scratch CPU profile destination (profile only)")
+	profileBudget := flag.Int64("profile-max-bytes", 512<<20, "maximum preloaded profile input bytes; timing/parity load one case at a time")
 	flag.Parse()
-	if err := run(*manifest, *mode, *phase, *compare, *cpu); err != nil {
+	if err := run(*manifest, *mode, *phase, *compare, *cpu, *profileBudget); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func load(manifest, mode string) ([]input, error) {
+func loadManifest(manifest string) ([]corpusItem, error) {
 	raw, err := os.ReadFile(manifest)
 	if err != nil {
 		return nil, errors.New("manifest read failed; supply an explicit readable sandbox manifest")
@@ -127,74 +132,95 @@ func load(manifest, mode string) ([]input, error) {
 	if json.Unmarshal(raw, &items) != nil || len(items) == 0 {
 		return nil, errors.New("manifest decode failed or empty corpus; supply a non-empty JSON array")
 	}
-	inputs := make([]input, 0, len(items))
-	for i, item := range items {
-		metaBytes, err := os.ReadFile(item.Metadata)
-		if err != nil {
-			return nil, fmt.Errorf("case %d: metadata read failed; repair the sandbox manifest", i)
-		}
-		var in input
-		if json.Unmarshal(metaBytes, &in.meta) != nil {
-			return nil, fmt.Errorf("case %d: metadata decode failed; repair the sandbox input", i)
-		}
-		id, err := ingest.NewSessionID(in.meta.SessionID.String())
-		if err != nil {
-			return nil, fmt.Errorf("case %d: invalid session identity; repair metadata", i)
-		}
-		path, err := ingest.NewResolvedPath(in.meta.Source.FilePath)
-		if err != nil {
-			return nil, fmt.Errorf("case %d: invalid recorded path; repair metadata", i)
-		}
-		in.session = ingest.DiscoveredSession{SessionID: id, Harness: in.meta.ModelHarness, SourcePath: path, SourceFormat: in.meta.Source.Format, ParentUUID: in.meta.ParentUUID}
-		capturedOpenCode := in.session.Harness == ingest.HarnessOpenCode && item.Snapshot != ""
-		if mode == "generation" && in.session.Harness != ingest.HarnessClaudeCode && !capturedOpenCode {
-			return nil, fmt.Errorf("case %d: native generation acquisition is unsupported; use retained capture mode", i)
-		}
-		if in.session.Harness == ingest.HarnessOpenCode && mode != "generation" {
-			if item.Origin == nil || (*item.Origin != 1 && *item.Origin != 2) {
-				return nil, fmt.Errorf("case %d: OpenCode requires recorded SQLite projection origin 1 or 2; directory acquisition is unsupported", i)
-			}
-			in.session.TranscriptOrigin, err = ingest.NewTranscriptOrigin(*item.Origin)
-			if err != nil {
-				return nil, fmt.Errorf("case %d: invalid origin; repair manifest", i)
-			}
-		} else if item.Origin != nil {
-			return nil, fmt.Errorf("case %d: origin is only supported for OpenCode retained projections", i)
-		}
-		in.data, err = os.ReadFile(item.Transcript)
-		if err != nil {
-			return nil, fmt.Errorf("case %d: transcript read failed; repair the sandbox manifest", i)
-		}
-		h := sha256.New()
-		// Length framing prevents ambiguity between metadata and transcript bytes.
-		fmt.Fprintf(h, "%d:", len(metaBytes))
-		h.Write(metaBytes)
-		fmt.Fprintf(h, "%d:", len(in.data))
-		h.Write(in.data)
-		originBytes, _ := json.Marshal(item.Origin)
-		h.Write(originBytes)
-		if item.Snapshot != "" {
-			if mode != "generation" || in.session.Harness != ingest.HarnessOpenCode {
-				return nil, fmt.Errorf("case %d: snapshot requires OpenCode generation mode", i)
-			}
-			snapshotBytes, err := os.ReadFile(item.Snapshot)
-			if err != nil {
-				return nil, fmt.Errorf("case %d: snapshot read failed; supply actual captured source evidence", i)
-			}
-			in.snapshot = &fixedSnapshot{}
-			if json.Unmarshal(snapshotBytes, &in.snapshot.value) != nil {
-				return nil, fmt.Errorf("case %d: snapshot decode failed; supply actual captured source evidence", i)
-			}
-			fmt.Fprintf(h, "%d:", len(snapshotBytes))
-			h.Write(snapshotBytes)
-		}
-		in.digest = fmt.Sprintf("%x", h.Sum(nil))
-		inputs = append(inputs, in)
-	}
-	return inputs, nil
+	return items, nil
 }
 
-func run(manifest, mode, phase, compare, cpu string) error {
+func loadInput(item corpusItem, i int, mode string, budget *int64) (*input, error) {
+	read := func(path string) ([]byte, error) {
+		if budget == nil {
+			return os.ReadFile(path)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		data, err := io.ReadAll(io.LimitReader(f, *budget+1))
+		if int64(len(data)) > *budget {
+			return nil, errors.New("profile preload budget exceeded")
+		}
+		*budget -= int64(len(data))
+		return data, err
+	}
+	metaBytes, err := read(item.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("case %d: metadata read failed; repair the sandbox manifest or raise -profile-max-bytes", i)
+	}
+	var in input
+	if json.Unmarshal(metaBytes, &in.meta) != nil {
+		return nil, fmt.Errorf("case %d: metadata decode failed; repair the sandbox input", i)
+	}
+	if !slices.Contains(schema.Harnesses(), in.meta.ModelHarness) || !in.meta.Source.Format.IsValid() {
+		return nil, fmt.Errorf("case %d: invalid harness or source format enum; repair metadata", i)
+	}
+	id, err := ingest.NewSessionID(in.meta.SessionID.String())
+	if err != nil {
+		return nil, fmt.Errorf("case %d: invalid session identity; repair metadata", i)
+	}
+	path, err := ingest.NewResolvedPath(in.meta.Source.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("case %d: invalid recorded path; repair metadata", i)
+	}
+	in.session = ingest.DiscoveredSession{SessionID: id, Harness: in.meta.ModelHarness, SourcePath: path, SourceFormat: in.meta.Source.Format, ParentUUID: in.meta.ParentUUID}
+	in.session.ContentOmitted = item.ContentOmitted
+	capturedOpenCode := in.session.Harness == ingest.HarnessOpenCode && item.Snapshot != ""
+	if mode == "generation" && in.session.Harness != ingest.HarnessClaudeCode && !capturedOpenCode {
+		return nil, fmt.Errorf("case %d: native generation acquisition is unsupported; use retained capture mode", i)
+	}
+	if in.session.Harness == ingest.HarnessOpenCode && mode != "generation" {
+		if item.Origin == nil || (*item.Origin != 1 && *item.Origin != 2) {
+			return nil, fmt.Errorf("case %d: OpenCode requires recorded SQLite projection origin 1 or 2; directory acquisition is unsupported", i)
+		}
+		in.session.TranscriptOrigin, err = ingest.NewTranscriptOrigin(*item.Origin)
+		if err != nil {
+			return nil, fmt.Errorf("case %d: invalid origin; repair manifest", i)
+		}
+	} else if item.Origin != nil {
+		return nil, fmt.Errorf("case %d: origin is only supported for OpenCode retained projections", i)
+	}
+	in.data, err = read(item.Transcript)
+	if err != nil {
+		return nil, fmt.Errorf("case %d: transcript read failed; repair the sandbox manifest or raise -profile-max-bytes", i)
+	}
+	h := sha256.New()
+	// Length framing prevents ambiguity between metadata and transcript bytes.
+	fmt.Fprintf(h, "%d:", len(metaBytes))
+	h.Write(metaBytes)
+	fmt.Fprintf(h, "%d:", len(in.data))
+	h.Write(in.data)
+	originBytes, _ := json.Marshal(item.Origin)
+	h.Write(originBytes)
+	fmt.Fprintf(h, ":%t:", item.ContentOmitted)
+	if item.Snapshot != "" {
+		if mode != "generation" || in.session.Harness != ingest.HarnessOpenCode {
+			return nil, fmt.Errorf("case %d: snapshot requires OpenCode generation mode", i)
+		}
+		snapshotBytes, err := read(item.Snapshot)
+		if err != nil {
+			return nil, fmt.Errorf("case %d: snapshot read failed; supply actual captured source evidence or raise -profile-max-bytes", i)
+		}
+		in.snapshot = &fixedSnapshot{}
+		if json.Unmarshal(snapshotBytes, &in.snapshot.value) != nil {
+			return nil, fmt.Errorf("case %d: snapshot decode failed; supply actual captured source evidence", i)
+		}
+		fmt.Fprintf(h, "%d:", len(snapshotBytes))
+		h.Write(snapshotBytes)
+	}
+	in.digest = fmt.Sprintf("%x", h.Sum(nil))
+	return &in, nil
+}
+
+func run(manifest, mode, phase, compare, cpu string, profileBudget int64) error {
 	if mode != "generation" && mode != "entries" && mode != "capture" {
 		return errors.New("use -mode=generation, capture, or entries")
 	}
@@ -204,24 +230,25 @@ func run(manifest, mode, phase, compare, cpu string) error {
 	if (phase == "profile") != (cpu != "") || (compare != "" && phase != "parity") {
 		return errors.New("use -cpuprofile only and always with profile; use -compare only with parity")
 	}
-	inputs, err := load(manifest, mode)
+	items, err := loadManifest(manifest)
 	if err != nil {
 		return err
 	}
 	indexers := ingest.NewIndexerRegistry(deniedSources{}, ingest.IndexerRegistryOptions{FullContent: true})
-	for i, in := range inputs {
-		if indexers[in.session.Harness] == nil {
-			return fmt.Errorf("case %d: unsupported harness; repair metadata", i)
-		}
-		if mode == "generation" {
-			if _, ok := indexers[in.session.Harness].(ingest.GenerationBuilder); !ok {
-				return fmt.Errorf("case %d: generation builder unavailable in this revision; use capture mode", i)
-			}
-		}
-	}
 	// A single serial worker keeps allocation deltas attributable. Inputs are
-	// preloaded; source I/O and corpus hashing never enter the measured region.
+	// preloaded only for profiling; timing/parity hold one case's source bytes.
+	var preloaded []*input
 	if phase == "profile" {
+		if profileBudget <= 0 || profileBudget == math.MaxInt64 {
+			return errors.New("set a positive, bounded -profile-max-bytes preload budget")
+		}
+		for i, item := range items {
+			in, err := loadInput(item, i, mode, &profileBudget)
+			if err != nil {
+				return err
+			}
+			preloaded = append(preloaded, in)
+		}
 		f, err := os.OpenFile(cpu, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			return errors.New("profile creation failed; choose a new writable scratch destination")
@@ -234,9 +261,24 @@ func run(manifest, mode, phase, compare, cpu string) error {
 	}
 	out := report{Mode: mode, Phase: phase}
 	byHarness := make(map[ingest.Harness]*summary)
-	for i := range inputs {
-		in := &inputs[i]
+	for i, item := range items {
+		var in *input
+		if phase == "profile" {
+			in = preloaded[i]
+		} else {
+			in, err = loadInput(item, i, mode, nil)
+			if err != nil {
+				return err
+			}
+		}
 		idx := indexers[in.session.Harness]
+		if idx == nil {
+			return fmt.Errorf("case %d: unsupported harness; repair metadata", i)
+		}
+		builder, supportsGeneration := idx.(ingest.GenerationBuilder)
+		if mode == "generation" && !supportsGeneration {
+			return fmt.Errorf("case %d: generation builder unavailable; use capture mode", i)
+		}
 		buildInput := ingest.GenerationBuildInput{Session: in.session, GenerationID: "gen-parse-profile", RecordedMetadata: &in.meta, CapturedTranscript: in.data, Allocator: &refs{}}
 		if in.snapshot != nil {
 			buildInput.OpenCode = in.snapshot
@@ -250,7 +292,7 @@ func run(manifest, mode, phase, compare, cpu string) error {
 			start = time.Now()
 		}
 		if mode == "generation" {
-			result, buildErr = idx.(ingest.GenerationBuilder).BuildGeneration(context.Background(), buildInput)
+			result, buildErr = builder.BuildGeneration(context.Background(), buildInput)
 		} else if mode == "capture" {
 			result, buildErr = idx.IndexTranscriptBytesForCapture(context.Background(), in.session, in.data)
 		} else {

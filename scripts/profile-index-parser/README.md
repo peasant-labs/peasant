@@ -2,13 +2,21 @@
 
 Internal developer command; no store, discovery, redaction, or native acquisition.
 Use copied sandbox inputs only. All indexer filesystem operations are denied,
-including fallback reads of paths in metadata. The process preloads the explicit
-corpus into memory and uses one serial worker. Size the manifest for available RAM.
+including fallback reads of paths in metadata. One serial worker loads one case
+at a time outside each timing region. Profile runs preload the explicit corpus
+before sampling, bounded by `-profile-max-bytes` (512 MiB of raw inputs by default).
+This is an operator memory guard, not a performance target; decoded working memory
+is additional. Use a smaller sample if it cannot fit comfortably in available RAM.
 
 Manifest: a JSON array of `{"metadata":"/sandbox/metadata.json",
 "transcript":"/sandbox/transcript.jsonl"}`. OpenCode additionally requires
 `"origin":1` (legacy SQLite projection) or `2` (current SQLite projection), taken
 from the real capture. Legacy directory sources are not supported.
+The optional `"contentOmitted":true` carries the actual production composition
+flag and participates in corpus identity. The production metadata-to-flag helper
+is unexported; this driver does not duplicate its warning-code policy. When the
+flag applies, set it explicitly in the sandbox manifest; do not infer completeness
+from a successful parser result with the flag omitted.
 
 Build **the identical driver source** against each revision:
 
@@ -30,11 +38,21 @@ is still part of corpus identity but is not the source used by this builder.
 `TranscriptCaptureResult` (entries, ignored records, diagnostics, retained unknowns).
 Use this for Cursor, Strike, and Pi strict capture measurements. Codex capture can
 measure retained unknown preparation, but **not** native managed record replay.
+OpenCode capture measures the retained projection decoder, semantic retention,
+and nested tool-content preparation. It does **not** call `prepareOpenCodeCurrent`
+or `DecodeOpenCodeProvenanceRow`, so it is not evidence for the native row wrapper
+or native-generation optimization. Origin 2 must name an actual current SQLite
+projection, not a legacy native JSON document relabeled as a projection.
 
 `entries` calls the retained compatibility `IndexTranscriptBytes` exit
 with full content/depth for Claude, Codex, Cursor, Strike, Pi, and OpenCode. These
 are different workloads: retained capture/entries results do **not** prove native-generation
-coverage. Codex native generation is unsupported. OpenCode generation requires the
+coverage. Codex native generation is unsupported: its authority resolution can
+scan sibling rollouts, open native pointer storage, and resolve history dependencies.
+Binding a retained artifact to one native pathname would not establish that source
+authority; the supplied corpora do not include captured original source/dependency
+evidence. Those paths need a separate actual-source fixture or sandbox measurement.
+OpenCode generation requires the
 explicit real snapshot; retained projection inputs alone do not cover native row
 decoding. This command does not fabricate or acquire native evidence. No prior generation is
 supplied; this measures a fresh build, not identity reuse on refresh.
