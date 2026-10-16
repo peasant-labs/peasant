@@ -399,11 +399,34 @@ selection. Only `approved` shares into a listed collective the caller is a
 member of count; `pending`/rejected, public, and preview shares never do (the
 [auth matrices](auth.md#4-authorization-matrices--web-vs-pull) apply unchanged).
 
-Listing paging differs by selection: a collective listing pages to the end
+### Contributor filter (`--user`)
+
+`--user <username>` keeps only the transcripts one village account contributed.
+Both `pull` and `list` take it, and it combines with `--collective`: with a
+collective it narrows that collective to one contributor, and alone it spans
+every collective the caller can pull from. `--user` alone needs no collective
+argument, because the unfiltered pullable listing is already everything the
+caller may pull, so filtering it by contributor is exactly "this account, across
+my collectives".
+
+The username matches case-insensitively, the same rule a collective name uses.
+The filter runs client-side over the fully-paged listing, so it is exact: a
+listing narrowed to one contributor pages to the end even without
+`--collective`, because filtering a single page would under-report and make the
+reported total a lie. The total is recomputed from the filtered set, so the
+`Showing N of M` note stays truthful. An account with nothing in the selection is
+an empty result, never an error — answering "no such account" would reveal which
+accounts exist to a caller who can see none of their work.
+
+`--user` is exclusive with a positional transcript reference and refused with
+`--local`, exactly as `--collective` is.
+
+Listing paging differs by selection: a collective listing, and any listing
+narrowed to one contributor, pages to the end
 (follows the pages, merges, and de-duplicates) so the listing matches what a
 pull would take, while the plain listing keeps its single-page behaviour.
 `--limit` sets the page size for the remote listing only (`--local` reads the
-local inventory and refuses `--collective`/`--limit`).
+local inventory and refuses `--collective`/`--user`/`--limit`).
 
 A village which predates the filter is refused rather than over-pulled. The
 bulk pull negotiates the pull window once, before any download; a village that
@@ -413,11 +436,14 @@ A mistyped collective likewise fails before any download.
 
 Tested by `TestCollectiveRefsFixtures` (`cmd/peasant/collective_ref_test.go`,
 driven by `testdata/collective_refs.yaml`) for every accepted and refused
-`--collective` form, and by `TestVillagePullCollectivesFixtures`
+`--collective` form, by `TestVillagePullCollectivesFixtures`
 (`cmd/peasant/cmd_village_pull_collective_test.go`, driven by
 `testdata/village_pull_collectives.yaml`) for multi-page paging with
 de-duplication, continue-on-error with a non-zero result, skip-gate pruning of
-current transcripts, and skip-gate fallback to per-transcript checks.
+current transcripts, and skip-gate fallback to per-transcript checks, and by
+`TestVillageUserFilterFixtures` (`cmd/peasant/village_user_filter_test.go`,
+driven by `testdata/village_user_filter.yaml`) for the contributor filter on
+both the listing and the bulk pull.
 
 ---
 

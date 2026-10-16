@@ -15,7 +15,10 @@ village web URL. --collective names a collective the caller belongs to, by its
 name, its UUID, or its /groups/<uuid> page URL. It is repeatable, and several
 values pull the union, each transcript once. A collective holds the transcripts
 offered to it and approved, so a transcript the caller owns but never shared with
-a listed collective is not part of the selection.
+a listed collective is not part of the selection. --user keeps only the
+transcripts one village account contributed: combine it with --collective for a
+single collective, or pass it alone to span every collective the caller can pull
+from.
 
 --dry-run reports what WOULD be pulled (and why / why-not) without writing
 anything.
@@ -33,6 +36,7 @@ peasant village transcripts pull [<uuid|url>] [--collective <ref>]... [flags]
   -h, --help                     help for pull
       --json                     Output as JSON instead of human-readable
       --quiet                    Suppress the summary; print only errors and a final result line
+      --user string              Keep only the transcripts contributed by this village account. Combine with --collective for one collective; alone, it spans every collective you can pull from
       --verbose                  Show extra pull detail (village host, pull directory, served-blob hash)
 ```
 

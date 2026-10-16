@@ -62,9 +62,9 @@ require login; purely-local reads are **offline**.
 | Command | Contacts village? | Gate | Source |
 |---------|-------------------|------|--------|
 | `village transcripts pull <ref>` | yes | **login required** — `requireVillageCredentials` (mirrors `cmd_push.go`) | `cmd_village_pull.go` |
-| `village transcripts pull --collective <ref>...` (bulk) | yes | **login required** (same gate; exactly one selection: a ref or `--collective`, not both) | `cmd_village_pull.go` + `cmd_village_pull_collective.go` |
+| `village transcripts pull --collective <ref>... [--user <name>]` (bulk) | yes | **login required** (same gate; exactly one selection: a ref, or `--collective`/`--user`, not both) | `cmd_village_pull.go` + `cmd_village_pull_collective.go` |
 | `village transcripts list` (remote, default) | yes | **login required** | `cmd_village_list.go` |
-| `village transcripts list --collective <ref>... [--limit N]` (remote) | yes | **login required** (same gate; pages to the end, `--limit` sets the page size) | `cmd_village_list.go` |
+| `village transcripts list --collective <ref>... [--user <name>] [--limit N]` (remote) | yes | **login required** (same gate; pages to the end, `--limit` sets the page size) | `cmd_village_list.go` |
 | `village annotations sync` | yes | **login required** | `cmd_village_annotations.go` |
 | `village transcripts list --local` | **no** | **OFFLINE** — no credentials loaded | `cmd_village_list.go` (`runVillageTranscriptsListLocal`) |
 | `village transcripts context <ref>` | **no** | **OFFLINE** — reads only the V34 index + on-disk blob | `cmd_village_transcripts.go` |
@@ -156,6 +156,20 @@ filter lists everything pullable (own + approved-shared). A collective listing
 pages to the end so the listing matches what a pull would take, while the plain
 listing keeps its single-page behaviour; `--limit` sets the remote page size
 (`--local` refuses `--collective`/`--limit`).
+
+### 4.6 Contributor filter (`--user`)
+
+`pull --user` and `list --user` narrow the same listing to the transcripts one
+village account contributed, matched case-insensitively on the exact username.
+The filter runs client-side over the *fully-paged* listing, so a listing
+narrowed to one contributor pages to the end even without `--collective`; the
+reported total is recomputed from the filtered set. With `--collective` the two
+filters intersect; alone, `--user` spans every collective the caller can pull
+from, because the unfiltered pullable listing is already everything the caller
+may pull. An account with no rows in the selection is an **empty result, not an
+error**: the listing never contained that contributor's rows, so there is no
+"unknown user" state to report without leaking existence. `--user` is exclusive
+with a positional transcript reference and refused with `--local`.
 
 A village which predates the filter is refused rather than over-pulled: the
 bulk pull negotiates the pull window once before any download, and a village

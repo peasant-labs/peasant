@@ -10,8 +10,10 @@ pulled locally (--local; reads only local data and works offline).
 
 --collective narrows the remote listing to one or more collectives you belong
 to, named by a collective name, its UUID, or its /groups/<uuid> page URL, and
-pages to the end so the listing matches what a pull would take. --limit sets the
-page size. Both apply to the remote listing only.
+pages to the end so the listing matches what a pull would take. --user keeps only
+the transcripts one village account contributed: combine it with --collective for
+a single collective, or pass it alone to span every collective you can pull from.
+--limit sets the page size. All three apply to the remote listing only.
 
 ```
 peasant village transcripts list [flags]
@@ -25,6 +27,7 @@ peasant village transcripts list [flags]
       --json                     Output as JSON instead of a table
       --limit int                Page size for the remote listing (default 50)
       --local                    List already-pulled transcripts from the local inventory (offline; no login)
+      --user string              Keep only the transcripts contributed by this village account. Combine with --collective for one collective; alone, it spans every collective you can pull from
 ```
 
 ### Options inherited from parent commands
