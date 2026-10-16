@@ -6,6 +6,16 @@ backup to lie under `-sandbox-root` and refuses a database that is itself the
 recorded metadata source. The production source opens it restrictively read-only.
 No store, redaction, publication, or source write is performed.
 
+The driver confines discovery's filesystem probes and every SQLite source open
+to the exact resolved backup path. Conventional sibling databases, aliases and
+legacy directory trees are denied before source I/O, even when a sibling symlink
+points outside the sandbox. The discovery filesystem also permits the approved
+backup's optional regular WAL sidecar metadata for its freshness clock, but
+denies sidecar symlinks and content reads. Every selected session must name
+that exact approved source, not merely a matching SQLite layout. Keep the backup
+and its parent directory stable for the run; this path check is not an OS-level
+sandbox against concurrent filesystem replacement.
+
 The manifest is the retained profiler's JSON array of `{"metadata":"..."}`
 selections. Only metadata is loaded in advance; neither exported rows nor fixed
 snapshots are accepted. Production discovery runs against only the backup before

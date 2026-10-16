@@ -9,6 +9,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,6 +63,71 @@ func (e sandboxEnvironment) LookupEnv(key string) (string, bool) {
 }
 
 var _ ingest.OpenCodeEnvironmentLookup = sandboxEnvironment{}
+
+// Discovery also considers conventional sibling databases and legacy trees.
+// The override alone does not confine it: deny every other source before I/O.
+type backupFileSystem struct{ db string }
+
+func (f backupFileSystem) approved(path string) bool {
+	if filepath.Clean(path) != f.db {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	return err == nil && resolved == f.db
+}
+
+func (f backupFileSystem) Stat(path string) (os.FileInfo, error) {
+	// Discovery uses only this sidecar's mtime, not its contents. Preserve
+	// ordinary absent-WAL freshness behavior without following a symlink.
+	if filepath.Clean(path) == f.db+"-wal" {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, os.ErrPermission
+		}
+		return info, nil
+	}
+	if !f.approved(path) {
+		return nil, os.ErrPermission
+	}
+	return os.Stat(path)
+}
+
+func (f backupFileSystem) Lstat(path string) (os.FileInfo, error) {
+	if !f.approved(path) {
+		return nil, os.ErrPermission
+	}
+	return os.Lstat(path)
+}
+
+func (f backupFileSystem) Open(path string) (io.ReadCloser, error) {
+	if !f.approved(path) {
+		return nil, os.ErrPermission
+	}
+	return os.Open(path)
+}
+
+func (backupFileSystem) ReadFile(string) ([]byte, error)             { return nil, os.ErrPermission }
+func (backupFileSystem) ReadDir(string) ([]os.DirEntry, error)       { return nil, os.ErrPermission }
+func (backupFileSystem) WalkDir(string, fs.WalkDirFunc) error        { return os.ErrPermission }
+func (backupFileSystem) WriteFile(string, []byte, os.FileMode) error { return os.ErrPermission }
+func (backupFileSystem) MkdirAll(string, os.FileMode) error          { return os.ErrPermission }
+func (backupFileSystem) Rename(string, string) error                 { return os.ErrPermission }
+func (backupFileSystem) Remove(string) error                         { return os.ErrPermission }
+func (backupFileSystem) RemoveAll(string) error                      { return os.ErrPermission }
+func (backupFileSystem) CopyFile(string, string, os.FileMode) error  { return os.ErrPermission }
+
+var _ ingest.FileSystem = backupFileSystem{}
+var _ ingest.OpenCodeCandidateFileSystem = backupFileSystem{}
+
+func (f backupFileSystem) openSource(ctx context.Context, path ingest.OpenCodeSQLiteSourcePath, options ingest.OpenCodeSQLiteSourceOptions) (ingest.OpenCodeSQLiteSource, error) {
+	if !f.approved(path.String()) {
+		return nil, os.ErrPermission
+	}
+	return ingest.OpenOpenCodeSQLiteSource(ctx, path, options)
+}
 
 type nativeAccess struct {
 	adapter *ingest.OpenCodeAdapter
@@ -177,8 +244,14 @@ func run(db, root, manifest, mode, phase, cpu string) error {
 		}
 		inputs[i] = fmt.Sprintf("%x", sha256.Sum256(data))
 	}
-	filesystem := &ingest.OSFileSystem{}
-	adapter := ingest.NewOpenCodeAdapter(filesystem, unavailableGit{}, salt.Salt{}, ingest.WithOpenCodeEnvironment(sandboxEnvironment{db: db}))
+	filesystem := backupFileSystem{db: db}
+	adapter, err := ingest.NewOpenCodeAdapterWithCandidateProbe(
+		filesystem, unavailableGit{}, salt.Salt{}, "latest", sandboxEnvironment{db: db},
+		filesystem, filesystem.openSource, ingest.DefaultOpenCodeSQLiteSourceOptions(),
+	)
+	if err != nil {
+		return errors.New("sandbox source configuration refused")
+	}
 	rootPath, err := ingest.NewResolvedPath(filepath.Dir(db))
 	if err != nil {
 		return err
@@ -214,6 +287,9 @@ func run(db, root, manifest, mode, phase, cpu string) error {
 		session, exists := sessions[meta.SessionID]
 		if !exists || (session.TranscriptOrigin != ingest.TranscriptOriginOpenCodeCurrentSQLite && session.TranscriptOrigin != ingest.TranscriptOriginOpenCodeLegacySQLite) {
 			return errors.New("selected session has no discovered SQLite authority")
+		}
+		if !filesystem.approved(session.SourcePath.String()) {
+			return errors.New("selected session authority is not the approved backup")
 		}
 		requiresCurrent := mode == "generation" || mode == "current" || mode == "fresh"
 		if requiresCurrent && session.TranscriptOrigin != ingest.TranscriptOriginOpenCodeCurrentSQLite {
