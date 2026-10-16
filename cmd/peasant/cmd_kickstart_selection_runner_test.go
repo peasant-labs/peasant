@@ -38,6 +38,8 @@ type selectionRunnerSourceSession struct {
 	WorkingDir  string `yaml:"workingDir"`
 	Branch      string `yaml:"branch"`
 	Title       string `yaml:"title"`
+	Prompt      string `yaml:"prompt,omitempty"`
+	Reply       string `yaml:"reply,omitempty"`
 }
 
 func (s selectionRunnerSourceSession) listing() ftue.SessionListing {
@@ -161,12 +163,19 @@ func writeSelectionRunnerSources(t *testing.T, root string, sessions []selection
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatalf("create selection runner source directory: %v", err)
 		}
+		prompt, reply := session.Prompt, session.Reply
+		if prompt == "" {
+			prompt = "fixture prompt"
+		}
+		if reply == "" {
+			reply = "fixture reply"
+		}
 		user := fmt.Sprintf(
-			`{"sessionId":%q,"version":"2.1.14","cwd":%q,"gitBranch":%q,"type":"user","message":{"role":"user","content":"fixture prompt"},"timestamp":"2026-08-09T12:%02d:00Z","uuid":"fixture-user-%d"}`,
-			session.SessionID, session.WorkingDir, session.Branch, index, index)
+			`{"sessionId":%q,"version":"2.1.14","cwd":%q,"gitBranch":%q,"type":"user","message":{"role":"user","content":%q},"timestamp":"2026-08-09T12:%02d:00Z","uuid":"fixture-user-%d"}`,
+			session.SessionID, session.WorkingDir, session.Branch, prompt, index, index)
 		assistant := fmt.Sprintf(
-			`{"sessionId":%q,"version":"2.1.14","type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"fixture reply"}]},"timestamp":"2026-08-09T12:%02d:01Z","uuid":"fixture-assistant-%d"}`,
-			session.SessionID, index, index)
+			`{"sessionId":%q,"version":"2.1.14","type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":%q}]},"timestamp":"2026-08-09T12:%02d:01Z","uuid":"fixture-assistant-%d"}`,
+			session.SessionID, reply, index, index)
 		if err := os.WriteFile(path, []byte(user+"\n"+assistant+"\n"), 0o600); err != nil {
 			t.Fatalf("write selection runner source %q: %v", session.SessionID, err)
 		}

@@ -47,6 +47,11 @@ func TestKickstartManagedPublicationStage(t *testing.T) {
 			Incomplete    bool              `yaml:"incomplete"`
 			WantUpload    bool              `yaml:"wantUpload"`
 			ErrorContains []string          `yaml:"errorContains"`
+			ExpectedTurns []struct {
+				Role    schema.Role `yaml:"role"`
+				Content string      `yaml:"content"`
+				Depth   int         `yaml:"depth"`
+			} `yaml:"expectedTurns"`
 		} `yaml:"cases"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(kickstartManagedPublicationYAML))
@@ -68,12 +73,28 @@ func TestKickstartManagedPublicationStage(t *testing.T) {
 			t.Fatalf("unknown/duplicate publication case %q", row.Name)
 		}
 		seen[row.Name] = true
+		if row.WantUpload && len(row.ExpectedTurns) == 0 {
+			t.Fatalf("publication case %q requires expected turns", row.Name)
+		}
+		for _, turn := range row.ExpectedTurns {
+			if (turn.Role != schema.RoleUser && turn.Role != schema.RoleAssistant) || strings.TrimSpace(turn.Content) == "" {
+				t.Fatalf("publication case %q has an invalid expected text turn: %+v", row.Name, turn)
+			}
+		}
 	}
 	if err := testutil.RequireFixtureNames("managed publication", "case", required, seen); err != nil {
 		t.Fatal(err)
 	}
 	if len(fixture.Sessions) != 2 {
 		t.Fatal("publication witness requires a selected session and an unselected sibling")
+	}
+	for _, session := range fixture.Sessions {
+		if strings.TrimSpace(session.Prompt) == "" || strings.TrimSpace(session.Reply) == "" {
+			t.Fatalf("publication source %q requires explicit prompt and reply", session.SessionID)
+		}
+	}
+	if fixture.Sessions[0].Prompt == fixture.Sessions[1].Prompt || fixture.Sessions[0].Reply == fixture.Sessions[1].Reply {
+		t.Fatal("selected and sibling publication prompts and replies must be distinct")
 	}
 	for _, row := range fixture.Cases {
 		t.Run(row.Name, func(t *testing.T) {
@@ -240,8 +261,30 @@ func TestKickstartManagedPublicationStage(t *testing.T) {
 				}
 				parts := captured.snapshot()
 				body := parts["transcript_file"]
-				if !strings.Contains(body, "fixture prompt") || !strings.Contains(body, "fixture reply") || strings.Contains(strings.Join(mapValues(parts), "\n"), fixture.Sessions[1].SessionID) {
-					t.Fatalf("wrong selected content: %v", parts)
+				content, err := schema.DecodeTranscriptContentRaw([]byte(body))
+				if err != nil {
+					t.Fatalf("decode uploaded transcript: %v", err)
+				}
+				if content.SessionDetail == nil {
+					t.Fatal("uploaded transcript lacks session detail")
+				}
+				turns := content.SessionDetail.Turns
+				if len(turns) != len(row.ExpectedTurns) {
+					t.Fatalf("uploaded turn cardinality=%d want %d", len(turns), len(row.ExpectedTurns))
+				}
+				for index, want := range row.ExpectedTurns {
+					if turns[index].Role != want.Role || turns[index].Content != want.Content {
+						t.Errorf("uploaded turn %d role/content=%q/%q want %q/%q", index, turns[index].Role, turns[index].Content, want.Role, want.Content)
+					}
+					if turns[index].Depth != want.Depth {
+						t.Errorf("uploaded turn %d depth=%d want %d", index, turns[index].Depth, want.Depth)
+					}
+					if len(turns[index].ToolCalls) != 0 {
+						t.Errorf("uploaded text turn %d has unexpected tool calls: %+v", index, turns[index].ToolCalls)
+					}
+				}
+				if strings.Contains(strings.Join(mapValues(parts), "\n"), fixture.Sessions[1].SessionID) {
+					t.Fatalf("uploaded parts contain sibling session: %v", parts)
 				}
 				metadata, err := schema.DecodeAuthoritativePublishRequest([]byte(parts["metadata"]))
 				if err != nil {
