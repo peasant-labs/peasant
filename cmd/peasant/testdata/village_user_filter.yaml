@@ -40,7 +40,14 @@ requiredNames:
   - user filter with collective intersects
   - user filter unknown user is empty
   - user filter forces a complete listing
-  - user filter refused with local
+  - local user filter works offline without credentials
+  - local user filter matches case insensitively
+  - local unknown user is empty
+  - local listing without user retains every transcript
+  - local user filter applies to table output
+  - local unknown user has an empty table
+  - local collective filter remains refused
+  - local explicit limit remains refused
   - user filter exclusive with a transcript reference
   - user filter narrows a collective pull to one contributor
   - user filter alone spans collectives on a pull
@@ -107,10 +114,58 @@ cases:
     expectTotal: 2
     expectListCalls: 3
 
-  # The listing flags are remote-only, exactly as --collective and --limit are.
-  - name: user filter refused with local
+  # Local cases first pull the synthetic world, then stop the server and remove
+  # credentials. The assertions therefore cannot depend on a remote read.
+  - name: local user filter works offline without credentials
     command: list-local
     user: alice
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+
+  - name: local user filter matches case insensitively
+    command: list-local
+    user: ALICE
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+
+  - name: local unknown user is empty
+    command: list-local
+    user: nobody
+    expect: []
+
+  - name: local listing without user retains every transcript
+    command: list-local
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+      - aaaaaaaa-bbbb-cccc-dddd-000000000005
+
+  - name: local user filter applies to table output
+    command: list-local-table
+    user: bob
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+
+  - name: local unknown user has an empty table
+    command: list-local-table
+    user: nobody
+    expect: []
+
+  - name: local collective filter remains refused
+    command: list-local
+    user: alice
+    collective: platform-team
+    errorContains: apply to the remote listing
+
+  - name: local explicit limit remains refused
+    command: list-local
+    user: alice
+    limit: 2
     errorContains: apply to the remote listing
 
   # One selection: a positional transcript reference and the filters are

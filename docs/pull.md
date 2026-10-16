@@ -418,15 +418,19 @@ reported total a lie. The total is recomputed from the filtered set, so the
 an empty result, never an error — answering "no such account" would reveal which
 accounts exist to a caller who can see none of their work.
 
-`--user` is exclusive with a positional transcript reference and refused with
-`--local`, exactly as `--collective` is.
+`--user` is exclusive with a positional transcript reference on `pull`.
+On `list`, combine `--local --user <username>` to filter already-pulled
+transcripts by their stored owner username. This reads the local inventory
+only, requires no login, and makes no Village request. Matching is
+case-insensitive and exact; no matches produce an empty listing. Stored owner
+names are snapshots from the last pull, not a live Village lookup.
 
 Listing paging differs by selection: a collective listing, and any listing
 narrowed to one contributor, pages to the end
 (follows the pages, merges, and de-duplicates) so the listing matches what a
 pull would take, while the plain listing keeps its single-page behaviour.
 `--limit` sets the page size for the remote listing only (`--local` reads the
-local inventory and refuses `--collective`/`--user`/`--limit`).
+local inventory and refuses `--collective`/`--limit`).
 
 A village which predates the filter is refused rather than over-pulled. The
 bulk pull negotiates the pull window once, before any download; a village that

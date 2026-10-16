@@ -66,7 +66,7 @@ require login; purely-local reads are **offline**.
 | `village transcripts list` (remote, default) | yes | **login required** | `cmd_village_list.go` |
 | `village transcripts list --collective <ref>... [--user <name>] [--limit N]` (remote) | yes | **login required** (same gate; pages to the end, `--limit` sets the page size) | `cmd_village_list.go` |
 | `village annotations sync` | yes | **login required** | `cmd_village_annotations.go` |
-| `village transcripts list --local` | **no** | **OFFLINE** — no credentials loaded | `cmd_village_list.go` (`runVillageTranscriptsListLocal`) |
+| `village transcripts list --local [--user <name>]` | **no** | **OFFLINE** — no credentials loaded; `--user` filters stored owner usernames | `cmd_village_list.go` (`runVillageTranscriptsListLocal`) |
 | `village transcripts context <ref>` | **no** | **OFFLINE** — reads only the V34 index + on-disk blob | `cmd_village_transcripts.go` |
 | `village push` (existing) | yes | login required + public-consent | `cmd_push.go` |
 
@@ -169,7 +169,10 @@ from, because the unfiltered pullable listing is already everything the caller
 may pull. An account with no rows in the selection is an **empty result, not an
 error**: the listing never contained that contributor's rows, so there is no
 "unknown user" state to report without leaking existence. `--user` is exclusive
-with a positional transcript reference and refused with `--local`.
+with a positional transcript reference on `pull`. On `list --local`, it filters
+the stored owner username with the same case-insensitive exact match, without
+credentials or network access. An unmatched name gives an empty local listing.
+This reports the last-pulled owner snapshot, not current remote account state.
 
 A village which predates the filter is refused rather than over-pulled: the
 bulk pull negotiates the pull window once before any download, and a village

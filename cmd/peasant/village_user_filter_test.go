@@ -3,6 +3,8 @@ package main
 import (
 	_ "embed"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,6 +55,8 @@ func (c userFilterCase) args() []string {
 	case "list":
 		args = append(args, "list", "--json")
 	case "list-local":
+		args = append(args, "list", "--local", "--json")
+	case "list-local-table":
 		args = append(args, "list", "--local")
 	default:
 		args = append(args, "pull")
@@ -114,6 +118,15 @@ func TestVillageUserFilterFixtures(t *testing.T) {
 				}
 			}
 			writeCredsAt(t, dir, server.URL())
+			if strings.HasPrefix(c.Command, "list-local") {
+				if out, err := runVillage(t, dir, "transcripts", "pull", "--collective", pullCollectiveAName, "--collective", pullCollectiveBName); err != nil {
+					t.Fatalf("seed local inventory: %v (out=%q)", err, out)
+				}
+				server.Close()
+				if err := os.Remove(filepath.Join(string(defaults.ResolveConfigDirPathWith(dir)), string(defaults.CredentialsFile))); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			out, err := runVillage(t, dir, c.args()...)
 
@@ -131,6 +144,31 @@ func TestVillageUserFilterFixtures(t *testing.T) {
 			}
 
 			switch c.Command {
+			case "list-local":
+				var rows []jsonLocalListRow
+				if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rows); err != nil {
+					t.Fatalf("decode offline listing: %v (out=%q)", err, out)
+				}
+				got := make([]schema.TranscriptID, 0, len(rows))
+				for _, row := range rows {
+					id, err := schema.NewTranscriptID(row.TranscriptID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					got = append(got, id)
+				}
+				if !sameTranscriptSet(got, c.Expect) {
+					t.Errorf("offline listing = %v, want %v", got, c.Expect)
+				}
+			case "list-local-table":
+				for _, row := range fixture.World.Transcripts {
+					if strings.Contains(out, row.ID.String()) != slices.Contains(c.Expect, row.ID) {
+						t.Errorf("unexpected presence of transcript %s in %q", row.ID, out)
+					}
+				}
+				if len(c.Expect) == 0 && !strings.Contains(out, "No transcripts pulled yet.") {
+					t.Errorf("missing empty inventory message: %q", out)
+				}
 			case "list":
 				var response schema.PullListResponse
 				if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &response); err != nil {

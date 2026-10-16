@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -46,16 +47,18 @@ to, named by a collective name, its UUID, or its /groups/<uuid> page URL, and
 pages to the end so the listing matches what a pull would take. --user keeps only
 the transcripts one village account contributed: combine it with --collective for
 a single collective, or pass it alone to span every collective you can pull from.
---limit sets the page size. All three apply to the remote listing only.`,
+With --local, --user filters already-pulled transcripts by their stored owner
+username, without login or network access. --limit sets the remote page size;
+--collective and --limit apply to the remote listing only.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
 			if local {
-				if len(collectiveRefs) > 0 || user != "" || cmd.Flags().Changed("limit") {
-					return fmt.Errorf("--collective, --user and --limit apply to the remote listing; --local reads only the local inventory")
+				if len(collectiveRefs) > 0 || cmd.Flags().Changed("limit") {
+					return fmt.Errorf("--collective and --limit apply to the remote listing; --local reads only the local inventory")
 				}
-				return runVillageTranscriptsListLocal(cmd, jsonOutput)
+				return runVillageTranscriptsListLocal(cmd, jsonOutput, user)
 			}
 			return runVillageTranscriptsListRemote(cmd, jsonOutput, collectiveRefs, user, limit)
 		},
@@ -67,14 +70,14 @@ a single collective, or pass it alone to span every collective you can pull from
 	cmd.Flags().StringArrayVar(&collectiveRefs, "collective", nil,
 		"List the transcripts a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values list the union")
 	cmd.Flags().StringVar(&user, "user", "",
-		"Keep only the transcripts contributed by this village account. Combine with --collective for one collective; alone, it spans every collective you can pull from")
+		"Keep only this contributor's transcripts; with --local, filter the stored owner username offline")
 
 	return cmd
 }
 
 // runVillageTranscriptsListLocal renders the offline pulled-transcripts
 // inventory. NO credentials are loaded — this is a purely-local read.
-func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool) error {
+func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool, owner string) error {
 	db, cleanup, err := openDB(cmd)
 	if err != nil {
 		return err
@@ -84,6 +87,15 @@ func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool) error {
 	rows, err := db.ListPulledTranscripts(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("list pulled transcripts: %w", err)
+	}
+	if owner != "" {
+		selected := make([]store.PulledTranscriptRow, 0, len(rows))
+		for _, row := range rows {
+			if strings.EqualFold(row.OwnerUsername, strings.TrimSpace(owner)) {
+				selected = append(selected, row)
+			}
+		}
+		rows = selected
 	}
 
 	if jsonOutput {
