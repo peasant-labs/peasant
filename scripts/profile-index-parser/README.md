@@ -33,6 +33,8 @@ to a JSON-encoded, actually captured `ingest.OpenCodeHistorySnapshot`; that evid
 is injected through `OpenCodeSourceAccess`, never constructed from retained text.
 The complete candidate digest includes `PriorEvidence`. The provided transcript
 is still part of corpus identity but is not the source used by this builder.
+The injected snapshot already contains decoded rows: this mode does not measure
+`DecodeOpenCodeProvenanceRow`. Use `scripts/profile-opencode-rows` for that seam.
 
 `capture` calls `IndexTranscriptBytesForCapture` and compares the entire
 `TranscriptCaptureResult` (entries, ignored records, diagnostics, retained unknowns).
