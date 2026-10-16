@@ -1076,6 +1076,25 @@ func managedOpenCodeFormatMarker(data []byte) string {
 }
 
 func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expectedVersion int, sessionID SessionID) (openCodeLegacyProjection, error) {
+	projection, _, _, err := decodeManagedOpenCodeSemanticProjection(data, expectedFormat, expectedVersion, sessionID)
+	return projection, err
+}
+
+// decodeManagedOpenCodeSemanticProjection keeps the semantic validation result
+// beside its envelope, so readers do not decode every message and part again.
+func decodeManagedOpenCodeSemanticProjection(data []byte, expectedFormat string, expectedVersion int, sessionID SessionID) (openCodeLegacyProjection, []openCodeSemanticMessage, map[string]int, error) {
+	projection, err := decodeManagedOpenCodeProjectionEnvelope(data, expectedFormat, expectedVersion, sessionID)
+	if err != nil {
+		return projection, nil, nil, err
+	}
+	messages, unknown, err := parseManagedOpenCodeSemanticMessages(projection, "managed OpenCode")
+	if err != nil {
+		return projection, nil, nil, fmt.Errorf("validate managed envelope semantic corpus: %w", err)
+	}
+	return projection, messages, unknown, nil
+}
+
+func decodeManagedOpenCodeProjectionEnvelope(data []byte, expectedFormat string, expectedVersion int, sessionID SessionID) (openCodeLegacyProjection, error) {
 	fields, err := decodeOpenCodeProjectionObject(data, "managed envelope", []string{"format", "version", "session_id", "messages"}, "content_omitted")
 	if err != nil {
 		return openCodeLegacyProjection{}, err
@@ -1115,9 +1134,6 @@ func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expecte
 			return projection, fmt.Errorf("decode managed envelope message %d: %w", index, messageErr)
 		}
 		projection.Messages = append(projection.Messages, message)
-	}
-	if _, _, err := parseManagedOpenCodeSemanticMessages(projection, "managed OpenCode"); err != nil {
-		return projection, fmt.Errorf("validate managed envelope semantic corpus: %w", err)
 	}
 	return projection, nil
 }
@@ -1173,10 +1189,10 @@ func decodeManagedOpenCodeProjectionMessage(raw json.RawMessage, sessionID strin
 	if err := json.Unmarshal(fields["time_updated"], &message.TimeUpdated); err != nil {
 		return message, fmt.Errorf("decode time_updated: %w", err)
 	}
-	if err := requireJSONObject(fields["data"]); err != nil {
+	if err := requireOpenCodeProjectionDataObject(fields["data"]); err != nil {
 		return message, fmt.Errorf("decode data: %w", err)
 	}
-	message.Data = append(json.RawMessage(nil), fields["data"]...)
+	message.Data = fields["data"]
 	if prior, exists := identities[message.ID]; exists {
 		return message, fmt.Errorf("id %q duplicates %s", message.ID, prior)
 	}
@@ -1228,10 +1244,10 @@ func decodeManagedOpenCodeProjectionPart(raw json.RawMessage, messageID, session
 	if err := json.Unmarshal(fields["time_updated"], &part.TimeUpdated); err != nil {
 		return part, fmt.Errorf("decode time_updated: %w", err)
 	}
-	if err := requireJSONObject(fields["data"]); err != nil {
+	if err := requireOpenCodeProjectionDataObject(fields["data"]); err != nil {
 		return part, fmt.Errorf("decode data: %w", err)
 	}
-	part.Data = append(json.RawMessage(nil), fields["data"]...)
+	part.Data = fields["data"]
 	if part.ID != "" {
 		identities[part.ID] = "a part"
 	}
@@ -1315,4 +1331,16 @@ func requireJSONObject(data json.RawMessage) error {
 		return errors.New("must be a JSON object")
 	}
 	return nil
+}
+
+// The projection field decoder has already validated the entire JSON value and
+// copied it into an owned RawMessage. Check its object shape without decoding
+// and copying all of its payload fields a second time. Keep the general decoder
+// for non-objects so their existing error behavior is unchanged.
+func requireOpenCodeProjectionDataObject(data json.RawMessage) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		return nil
+	}
+	return requireJSONObject(data)
 }
