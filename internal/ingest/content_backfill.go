@@ -69,7 +69,7 @@ type StoredContentIncompleteError struct {
 }
 
 func (e *StoredContentIncompleteError) Error() string {
-	return fmt.Sprintf("content recovery %s: the retained %s input omits rows the adapter filtered or could not read, so it cannot certify a complete capture; nothing was written and the stored capture stays incomplete; regenerate harvest from the complete native source", e.SessionID, e.Harness)
+	return fmt.Sprintf("content recovery %s: the stored %s input omits rows the adapter filtered or could not read, so it cannot certify a complete capture; nothing was written and the stored capture stays incomplete; regenerate harvest from the complete native source", e.SessionID, e.Harness)
 }
 
 // ContentShapeMismatchError means the stored content parsed to a different
@@ -185,7 +185,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 			// per row (an unreadable project identifier, say) refuses this
 			// session here and again at selection, and the two entries collapse
 			// to one only because both are built by the funnel. The session is
-			// refused before any retained read, store write or index-log entry.
+			// refused before any stored read, store write or index-log entry.
 			if err := p.checkStoredMetadataVersion(ctx, id); err != nil {
 				p.reportMetadataRefusal(string(id), err)
 				continue
@@ -203,7 +203,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 				}
 				p.reportSessionDiagnostic(id, DiagnosticEntry{
 					ErrorType: "content_recovery_refused", Location: fmt.Sprintf("session %s stored-content recovery", id),
-					Message:     err.Error() + "; recovery was refused before any retained read or store write, so the stored entries and producer evidence were preserved",
+					Message:     err.Error() + "; recovery was refused before any stored read or store write, so the stored entries and producer evidence were preserved",
 					Remediation: "Use a Peasant build whose indexer is at least the stored producer revision and supports the stored index format, then retry harvest.",
 				})
 				continue
@@ -425,14 +425,14 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	return contentRecovery{session: session, entries: len(capture.Entries), recoveredAt: now, charged: capture.InputBytes}, nil
 }
 
-// captureStoredContent produces the ContentCaptureResult for one retained
+// captureStoredContent produces the ContentCaptureResult for one stored
 // session. An indexer that knows about filtered or omitted rows reports its
-// own completeness; every other strict parser either certifies the retained
+// own completeness; every other strict parser either certifies the stored
 // bytes or refuses them. InputHash is the index input digest over the bytes
 // actually parsed, so an ordinary index run later recognizes the same input.
 //
-// The retained-batch route uses the same capture assessment as the ordinary
-// path: validated omission stand-ins in the immutable retained stream are the
+// The stored-batch route uses the same capture assessment as the ordinary
+// path: validated omission stand-ins in the immutable stored stream are the
 // omission evidence, not guessed original bytes. An invalid or unaccounted
 // candidate refuses before any counting or persistence.
 func (p *Pipeline) captureStoredContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {

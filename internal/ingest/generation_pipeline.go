@@ -32,7 +32,7 @@ func (p *Pipeline) generationIdentity(session DiscoveredSession) string {
 // buildGenerationCandidate builds one session's managed generation through the
 // harness indexer's own GenerationBuilder. Dispatch is a capability assertion,
 // never a concrete-type switch: an indexer that does not implement the builder
-// returns false and the caller keeps the retained parse path, so a
+// returns false and the caller keeps the stored parse path, so a
 // deliberately non-authoritative wrapper never gains a builder surface it did
 // not declare. Activation happens after the parse, in the write path, so no
 // format target is enabled here.
@@ -164,7 +164,7 @@ func (a openCodeSnapshotAccess) Snapshot(ctx context.Context, locator string) (O
 // and may omit the local project, host and content identity the capture
 // contract requires, so it is not the snapshot.
 //
-// The provenance kind comes from the one rule the retained write path uses, and
+// The provenance kind comes from the one rule the stored write path uses, and
 // the pipeline is what certifies it: the store records exactly what is supplied
 // here and never derives a kind of its own. The whole agreement is then judged by
 // the ONE capture rule the store enforces (ValidatePublicationCaptureSnapshot)

@@ -28,7 +28,7 @@ type InsufficientRetainedInputError struct {
 }
 
 func (e *InsufficientRetainedInputError) Error() string {
-	return fmt.Sprintf("extract metadata from retained %s session %s during adapter refresh: %s; previous artifacts and adapter provenance were preserved; restore the native source and retry harvest", e.Harness, e.SessionID, e.Reason)
+	return fmt.Sprintf("extract metadata from stored %s session %s during adapter refresh: %s; previous artifacts and adapter provenance were preserved; restore the native source and retry harvest", e.Harness, e.SessionID, e.Reason)
 }
 
 var _ TranscriptMetadataExtractor = (*ClaudeAdapter)(nil)
@@ -46,7 +46,7 @@ func (a *PiAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []by
 		return nil, err
 	}
 	if doc.header.ID != original.SessionID.String() {
-		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessPi, Reason: "retained header identifies another session"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessPi, Reason: "stored header identifies another session"}
 	}
 	parsed, err := piTranscriptMetadata(doc, DiscoveredSession{SessionID: original.SessionID, CreatedAt: time.UnixMilli(original.Timestamp.Start), ModTime: time.UnixMilli(original.Timestamp.End)})
 	if err != nil {
@@ -73,7 +73,7 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 		return &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: harness, Reason: reason}
 	}
 	if original.ModelHarness != harness || original.Source.Format != SourceFormatJSONL || metadataNeedsNativeRefresh(original.SchemaVersion) || original.SchemaVersion > CurrentSchemaVersion {
-		return nil, insufficient("the retained harness, format or metadata schema does not support JSONL metadata extraction")
+		return nil, insufficient("the stored harness, format or metadata schema does not support JSONL metadata extraction")
 	}
 	if _, err := NewHostSlug(string(original.HostSlug)); err != nil {
 		return nil, insufficient("the original managed project locator is missing or invalid")

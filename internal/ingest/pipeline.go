@@ -265,7 +265,7 @@ type indexedMeta struct {
 	capturedSource  *captureFileSystem
 	// published reports that this run committed the artifact being indexed,
 	// so its full-content capture is attributed to the new ingest rather than
-	// to the retained snapshot it would otherwise be read from.
+	// to the stored snapshot it would otherwise be read from.
 	published            bool
 	session              DiscoveredSession
 	startMs              int64
@@ -2023,7 +2023,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	var output indexformat.Result
 	parsed := false
 	// The effective declared format follows the session's own captured layout:
-	// a session whose native snapshot this build cannot read keeps the retained
+	// a session whose native snapshot this build cannot read keeps the stored
 	// baseline format and is served by the ordinary adapter refresh, even when
 	// the harness target is the managed-generation override.
 	declaredSession := im.session
@@ -2035,7 +2035,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		result.input = input
 		// The write binds the index to the current metadata capture when the
 		// input is one the capture vouches for; otherwise the caller's
-		// revision stands, and a retained fallback's is unbound, so a tree
+		// revision stands, and a stored fallback's is unbound, so a tree
 		// re-read without byte proof holds publication instead of certifying it.
 		if input.bindsPublication() {
 			result.im.captureRevision = input.expected.PublicationCaptureRevision
@@ -2045,7 +2045,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// A harness whose declared output format is a managed generation is
 			// produced through its GenerationBuilder, which carries the captured
 			// bytes and prior evidence the activation stages. Only the strict
-			// format-1 path keeps the retained parser dispatch.
+			// format-1 path keeps the stored parser dispatch.
 			//
 			// An indexer that declares a managed format without implementing the
 			// builder keeps the versioned exit below: that combination is a REAL
@@ -2485,7 +2485,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 
 // contentAuthorityFor names where a certified full capture's bytes came from:
 // an artifact this run committed is new ingest, a native OpenCode directory
-// tree is the provider source, and anything else was parsed from the retained
+// tree is the provider source, and anything else was parsed from the stored
 // managed snapshot. The label never claims a native read that did not happen.
 func contentAuthorityFor(result indexParseResult) ContentSourceAuthority {
 	switch {
@@ -3879,7 +3879,7 @@ func indexWithSourceKind(
 // SourcePath) are preserved on result and meta; we recover them here.
 // workerMetadataJSON returns the metadata bytes the index path uses directly
 // instead of reading the metadata file back: the bytes the worker committed
-// when it published a pair this run, or the exact bytes a retained fallback
+// when it published a pair this run, or the exact bytes a stored fallback
 // already validated when it committed nothing.
 func workerMetadataJSON(wr *workerResult) []byte {
 	if len(wr.retainedMetadataJSON) != 0 {
@@ -5131,7 +5131,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		}
 		// A targeted session whose scanned pair is damaged cannot be indexed
 		// from stored input, whatever maintenance path would otherwise run:
-		// the repair is checked before the retained/adapter split. Only
+		// the repair is checked before the stored/adapter split. Only
 		// selected sessions are checked, so no tree is walked and no pair is
 		// read for work this run does not owe.
 		if p.pairNeedsRepair(ctx, t.session.SessionID) {
@@ -5147,7 +5147,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			// old artifact and adapter stamp. Routine version-driven indexing
 			// stays stored-first and never reacquires native input here.
 			// A native refresh needs the session as discovery saw it (workspace,
-			// worktree, commit context); a locator rebuilt from the retained
+			// worktree, commit context); a locator rebuilt from the stored
 			// sidecar alone would degrade attribution. Only a session this run
 			// discovered is refreshed natively.
 			if p.config.Force {
@@ -5401,7 +5401,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 // forcedNativeRefreshUsable decides whether harvest index --force re-reads a
 // discovered native source or indexes the stored input. Force is an
-// explicit manual refresh, so the native source is captured when the retained
+// explicit manual refresh, so the native source is captured when the stored
 // input cannot settle the session: the source shows change evidence against
 // the stored capture (a newer clock, a moved locator, a changed parent, an
 // advanced cursor), or the stored input is a directory tree, which has no

@@ -721,7 +721,7 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 	// before declaring native discovery failure fatal.
 	staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
 	if err != nil {
-		p.reportMetadataRefusal("retained discovery recovery", fmt.Errorf("read stored recovery candidates after native discovery failed: %w; no recovery was attempted; restore database access and retry harvest", err))
+		p.reportMetadataRefusal("stored discovery recovery", fmt.Errorf("read stored recovery candidates after native discovery failed: %w; no recovery was attempted; restore database access and retry harvest", err))
 		return false
 	}
 	for _, sid := range staleIDs {

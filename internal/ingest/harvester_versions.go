@@ -29,7 +29,7 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 // targets that replace the stored baseline ONLY for a store that can persist
 // and read a managed generation: a registered format-2 writer, a configured
 // snapshot reader with its owned-artifact root and lock, a managed generation
-// activator and a prior reader. A store that cannot is served by the retained
+// activator and a prior reader. A store that cannot is served by the stored
 // baseline, so the managed-generation path is never advertised before its writer and reader
 // exist. When a harness is absent from the baseline it is also absent here.
 var GenerationRepairTargets = map[Harness]HarvesterVersions{
@@ -44,7 +44,7 @@ var GenerationRepairTargets = map[Harness]HarvesterVersions{
 // stored from the older message/part layout, or from a JSON tree, has no
 // snapshot this build can read, so the stored adapter refresh serves it
 // instead of failing the managed-generation lane. A harness without a declared native
-// target is always served by its retained path.
+// target is always served by its stored path.
 func generationTargetApplicable(session DiscoveredSession) bool {
 	if session.Harness != HarnessOpenCode {
 		return true

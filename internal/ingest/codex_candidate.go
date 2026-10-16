@@ -48,7 +48,7 @@ func MapCodexGraph(thread CodexThreadEvidence, prior *schema.UnifiedMetadata) (C
 		return CodexGraphMapping{}, &codexCandidateRefusal{
 			Operation: "MapCodexGraph",
 			Reason:    "the mapped Codex relationships are not a valid navigation graph",
-			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Effect:    "no candidate was emitted and the stored generation is unchanged",
 			Recovery:  "retain the capture, correct the native parent evidence, and retry harvest",
 		}
 	}
@@ -312,7 +312,7 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 		return CodexCandidate{}, &codexCandidateRefusal{
 			Operation: "BuildCodexCandidate",
 			Reason:    "the captured stable thread identity is not a canonical identifier",
-			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Effect:    "no candidate was emitted and the stored generation is unchanged",
 			Recovery:  "recapture the native history and retry harvest",
 		}
 	}
@@ -428,7 +428,7 @@ func (idx *CodexIndexer) BuildCodexCandidateForSession(ctx context.Context, sess
 // native source, so a replacement, append, or delete after verification cannot
 // mix one incarnation's entries with another incarnation's metadata. Project
 // identity derivation needs the harvester's salt and git resolver, so it stays
-// with the retained path and maintenance activation.
+// with the stored path and maintenance activation.
 func (idx *CodexIndexer) extractCandidateMetadata(ctx context.Context, session DiscoveredSession, data []byte) (*UnifiedMetadata, error) {
 	meta := NewUnifiedMetadata()
 	meta.SessionID = session.SessionID
@@ -447,7 +447,7 @@ func (idx *CodexIndexer) extractCandidateMetadata(ctx context.Context, session D
 		return nil, &codexCandidateRefusal{
 			Operation: "CodexIndexer.extractCandidateMetadata",
 			Reason:    "the captured metadata is not self-consistent with the captured identity",
-			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Effect:    "no candidate was emitted and the stored generation is unchanged",
 			Recovery:  "recapture the native history and retry harvest",
 		}
 	}

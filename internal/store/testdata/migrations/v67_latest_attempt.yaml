@@ -24,7 +24,7 @@ required_rejection_names:
   - a negative indexer revision is refused
   - a negative captured-at is refused
   - invalid stats JSON is refused
-  - a bare JSON fragment is refused
+  - unquoted non-JSON text is refused
 
 records:
   - name: all seven columns null round-trip as null
@@ -138,7 +138,7 @@ rejections:
       INSERT INTO sessions
       (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_stats_json)
       VALUES ('bad-json', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '{')
-  - name: a bare JSON fragment is refused
+  - name: unquoted non-JSON text is refused
     sql: >-
       INSERT INTO sessions
       (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, latest_attempt_stats_json)

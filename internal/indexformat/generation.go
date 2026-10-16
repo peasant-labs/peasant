@@ -430,7 +430,7 @@ func (g Generation) Validate() error {
 	for _, alias := range g.Aliases {
 		if _, ok := entryRefs[alias.Ref]; !ok {
 			if _, retained := retainedRefs[alias.Ref]; !retained {
-				return fmt.Errorf("indexformat.Generation.Validate id %q: native alias key %q targets ref %q outside the emitted partitions and captured segments; the alias cannot be resolved after reopen; map aliases only to latest-attempt generation refs", g.ID, alias.NativeKey, alias.Ref)
+				return fmt.Errorf("indexformat.Generation.Validate id %q: native alias key %q targets ref %q outside the emitted partitions and captured segments; the alias cannot be resolved after reopen; map aliases only to refs this generation emits or captures as inherited evidence", g.ID, alias.NativeKey, alias.Ref)
 			}
 		}
 	}
