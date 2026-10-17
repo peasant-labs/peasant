@@ -1,10 +1,9 @@
 # Root page publish-state filters, asserted on the mounted page.
 #
-# Each case serves the page a flat sync list (GET /api/v1/sync/sessions) and a
-# publications read (GET /api/v1/publications), presses `filter`, and checks the
-# four filter counts and the rows the filter lists, in order, after `load more`
-# has been pressed until the list is complete. Every case also checks that each
-# of the four filters lists exactly as many rows as its count says.
+# Each case supplies the canonical sync/publication stimulus for the mocked
+# GET /api/v1/sync/sessions?view=home projection, presses `filter`, and checks
+# the rows in order after explicit `load more`. expectedCounts describes this
+# complete fixture population for membership assertions; no UI total is shown.
 #
 # sessions: the sync list, newest first. `count` > 1 expands one entry into that
 #   many sessions named `<id>-00`, `<id>-01`, ... A session with

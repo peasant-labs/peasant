@@ -247,7 +247,8 @@ function serve(specs: SessionSpec[], options: ServeOptions = {}) {
     const url = new URL(String(input));
     requests.push(url);
     if (url.pathname === '/api/v1/sync/auth') return json({ authenticated: false });
-    if (url.pathname === '/api/v1/home/sessions') {
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') return json({ projects: Object.values(PROJECTS).map(project => ({ projectHash: project.hash, projectName: project.name })) });
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
       await options.syncPending;
       if (options.publicationsError) return json({ error: options.publicationsError.error, code: options.publicationsError.code }, options.publicationsError.status);
       const parent = url.searchParams.get('parentSessionId');
@@ -255,8 +256,8 @@ function serve(specs: SessionSpec[], options: ServeOptions = {}) {
       const source = specs.filter(spec => spec.publication !== false && !spec.outsideSelection && !spec.parentUnresolved
         && (parent ? spec.parentSessionId === parent : !spec.parentSessionId)
         && (parent || filter === 'all' || (filter === 'published' && spec.state === 'published') || (filter === 'not-published' && spec.state === 'unpublished') || (filter === 'auto' && spec.autoPublish)));
-      const offset = Number(url.searchParams.get('offset'));
-      return json({ rows: source.slice(offset, offset + 25).map((spec) => ({ sync: syncRow(spec, specs.indexOf(spec)), publication: publicationRow(spec, specs.indexOf(spec), false), title: spec.title ?? '', preview: spec.preview ?? '', childCount: specs.filter(child => child.parentSessionId === spec.id && !child.outsideSelection && child.publication !== false).length })), offset, limit: 25, ...(offset + 25 < source.length ? { nextOffset: offset + 25 } : {}) });
+      const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0;
+      return json({ items: source.slice(start, start + 25).map((spec) => ({ sync: syncRow(spec, specs.indexOf(spec)), publication: publicationRow(spec, specs.indexOf(spec), false), title: spec.title ?? '', preview: spec.preview ?? '', childCount: specs.filter(child => child.parentSessionId === spec.id && !child.outsideSelection && child.publication !== false).length })), next: start + 25 < source.length ? 'more-sessions' : '' });
     }
     if (url.searchParams.get('include') === 'audience') {
       for (const id of url.searchParams.get('sessionIds')!.split(',')) {
@@ -437,10 +438,10 @@ describe('root page publish filters', () => {
           fireEvent.click(within(group).getAllByRole('button')[0]);
         }
         if (step.refresh) {
-           const before = requests.filter((url) => url.pathname === '/api/v1/home/sessions').length;
+           const before = requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length;
           topics.sessions = { sessions: [...specs.filter((spec) => spec.preview).map((spec) => makeSession({ id: spec.id, preview: spec.preview })), makeSession({ id: 'refresh-root', project: 'alpha-project' })] };
            fireEvent(window, new Event('focus'));
-           await waitFor(() => expect(requests.filter((url) => url.pathname === '/api/v1/home/sessions').length).toBeGreaterThan(before));
+           await waitFor(() => expect(requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length).toBeGreaterThan(before));
         }
          await waitFor(() => expect([...list.querySelectorAll('[data-session-group-child]')].map(node => node.getAttribute('data-session-group-child'))).toEqual(step.children));
          const children = [...list.querySelectorAll('[data-session-group-child]')];
@@ -550,7 +551,7 @@ describe('root page list reads', () => {
     const view = render(<HomePage />);
     await screen.findByRole('region', { name: 'sessions' });
     await screen.findByRole('link', { name: 's-new' });
-    const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/home/sessions').length;
+    const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length;
     const before = syncReads();
 
     topics.sessions = { sessions: [makeSession({ id: 'channel-row', project: 'alpha-project', turnCount: 99 })] };
@@ -720,7 +721,7 @@ describe('root publication refresh also refreshes visible audience counts', () =
       const options: ServeOptions = { audienceStatus: testCase.initialStatus === 200 ? undefined : testCase.initialStatus };
       const requests = serve(specs, options);
       const audienceReads = () => requests.filter((url) => url.pathname === '/api/v1/publications' && url.searchParams.get('include') === 'audience');
-      const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/home/sessions').length;
+      const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length;
       const view = render(<HomePage />);
       const list = await screen.findByRole('region', { name: 'sessions' });
       await waitFor(() => expect(audienceReads()).toHaveLength(1));

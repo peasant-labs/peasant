@@ -13,6 +13,7 @@ import type { LocalSessionRow } from '@/lib/api/grouped';
 import { type PublishFilter } from '@/lib/home/publishState';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { discoveryErrorCode, DiscoveryErrorCode } from '@/lib/api/errors';
+import type { LocalSyncProjectOption } from '@/lib/api/home';
 
 const LegacyHomeBrowse = lazy(() => import('@/components/home/LegacyHomeBrowse'));
 type BrowseView = 'projects' | 'grouped' | 'flat';
@@ -38,11 +39,15 @@ function SearchDetail({ row }: { row: LocalSessionRow }) {
 
 export default function HomePage() {
   const [filter, setFilter] = useState<PublishFilter>('all');
+  const [project, setProject] = useState<LocalSyncProjectOption | null>(null);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [browse, setBrowse] = useState<ReadonlySet<BrowseView>>(() => new Set());
   const { settled } = usePublishState();
-  const home = useHomeSessions({ publication: filter }, settled);
+  const home = useHomeSessions({ publication: filter, projectHash: project?.projectHash }, settled);
+  useEffect(() => {
+    if (project && home.projects !== null && !home.projects.some(option => option.projectHash === project.projectHash)) setProject(null);
+  }, [home.projects, project]);
   useEffect(() => {
     const timer = setTimeout(() => setSearch(query.trim()), query ? 250 : 0);
     return () => clearTimeout(timer);
@@ -50,8 +55,8 @@ export default function HomePage() {
   const roots = home.groups.get('');
   const selectionFailed = discoveryErrorCode(roots?.error) === DiscoveryErrorCode.SelectionVisibility;
   const rootPages = roots?.pages;
-  const rows = useMemo(() => [...new Map((rootPages ?? []).flatMap(page => page.rows).map(row => [row.sync.id, row])).values()], [rootPages]);
-  const children = new Map([...home.groups].filter(([id]) => id !== '').map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.rows).map(row => [row.sync.id, row])).values()]]));
+  const rows = useMemo(() => [...new Map((rootPages ?? []).flatMap(page => page.items).map(row => [row.sync.id, row])).values()], [rootPages]);
+  const children = new Map([...home.groups].filter(([id]) => id !== '').map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.items).map(row => [row.sync.id, row])).values()]]));
   const allRows = [...rows, ...[...children.values()].flat()];
   const titles = new Map(allRows.map(row => [row.sync.id, row.title]));
   const previews = new Map(allRows.map(row => [row.sync.id, row.preview]));
@@ -66,7 +71,7 @@ export default function HomePage() {
     </div>}
     {!selectionFailed && (search ? <GroupedSessionsSection key={`${search}-${home.revision}`} variant="search" query={search} heading="search results" rowDetail={row => <SearchDetail row={row} />} />
       : !roots?.pages.length && roots?.error != null ? null
-      : <RootSessionList rows={rows} childGroups={children} titles={titles} previews={previews} home={home} filter={filter} onFilter={setFilter} loading={!roots?.pages.length && roots?.error == null} />)}
+      : <RootSessionList rows={rows} childGroups={children} titles={titles} previews={previews} home={home} filter={filter} onFilter={setFilter} project={project} onProject={hash => setProject(home.projects?.find(option => option.projectHash === hash) ?? null)} loading={!roots?.pages.length && roots?.error == null} />)}
     <section className="flex flex-col gap-4 border-t border-rule pt-6" aria-label="more ways to browse">
       <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold lowercase text-ink">more ways to browse</h2>
       <div className="flex flex-wrap gap-2">{(Object.keys(browseLabels) as BrowseView[]).map(view => <Button key={view} variant="secondary" size="sm" aria-expanded={browse.has(view)} aria-controls={`home-browse-${view}`} onClick={() => setBrowse(previous => { const next = new Set(previous); if (next.has(view)) next.delete(view); else next.add(view); return next; })}>{browseLabels[view]}</Button>)}</div>

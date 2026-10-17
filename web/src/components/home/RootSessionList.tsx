@@ -3,12 +3,15 @@
 import { useMemo } from 'react';
 import type { useHomeSessions } from '@/hooks/useHomeSessions';
 import { SkeletonList } from '@/lib/skeleton';
+import type { LocalSyncProjectOption } from '@/lib/api/home';
+import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import Link from 'next/link';
 import {
   DataTable,
   ProviderIcon,
   PublishStateLabel,
   Segmented,
+  Select,
   SessionGroupDisclosure,
   Button,
   type DataTableColumn,
@@ -74,6 +77,8 @@ export interface RootSessionListProps {
   filter: PublishFilter;
   onFilter: (filter: PublishFilter) => void;
   loading?: boolean;
+  project: LocalSyncProjectOption | null;
+  onProject: (hash: string) => void;
 }
 
 interface SessionChildrenGroupProps {
@@ -113,7 +118,7 @@ function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent =
  * `load more`. Home owns server filters and pages; page lengths never stand
  * in for global totals or the complete project catalog.
  */
-export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, onFilter, loading }: RootSessionListProps) {
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, onFilter, loading, project, onProject }: RootSessionListProps) {
   const expandedGroups = home.expanded;
   const visible = rows;
 
@@ -138,7 +143,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
     [renderRows],
   );
   const audience = usePublicationAudience(publishedOnScreen, rows);
-  const childCounts = useMemo(() => new Map([...home.groups.values()].flatMap(group => group.pages.flatMap(page => page.rows)).map(row => [row.sync.id, row.childCount])), [home.groups]);
+  const childCounts = useMemo(() => new Map([...home.groups.values()].flatMap(group => group.pages.flatMap(page => page.items)).map(row => [row.sync.id, row.childCount])), [home.groups]);
 
   const columns = useMemo<DataTableColumn<ListRow>[]>(
     () => [
@@ -158,7 +163,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
                 {expandedGroups.has(row.id) && <div className="flex items-center gap-2" role="status">
                   {home.groups.get(row.id)?.loading && 'loading subagents…'}
                   {home.groups.get(row.id)?.error != null && <Button variant="secondary" size="sm" onClick={() => home.retry(row.id)}>retry subagents</Button>}
-                  {home.groups.get(row.id)?.pages.at(-1)?.nextOffset !== undefined && <Button variant="secondary" size="sm" disabled={home.groups.get(row.id)?.loading} onClick={() => home.more(row.id)}>load more subagents</Button>}
+                  {(home.groups.get(row.id)?.pages.at(-1)?.next ?? '') !== '' && <Button variant="secondary" size="sm" disabled={home.groups.get(row.id)?.loading} onClick={() => home.more(row.id)}>load more subagents</Button>}
                 </div>}
               </div>
             </>
@@ -289,7 +294,14 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
             ),
           }))}
         />
+        <Select aria-label="project" value={project?.projectHash ?? ''} onFocus={() => { void home.loadProjects(); }} onChange={event => onProject(event.target.value)} options={[
+          { value: '', label: 'all projects' },
+          ...(project && !home.projects?.some(option => option.projectHash === project.projectHash) ? [{ value: project.projectHash, label: project.projectName }] : []),
+          ...(home.projects ?? []).map(option => ({ value: option.projectHash, label: option.projectName })),
+        ]} />
       </div>
+      {home.projectsLoading && <p role="status" className="m-0 text-base text-ink-2">loading project choices…</p>}
+      {home.projectError != null && <div className="flex items-center gap-2" role="status"><span>{discoveryErrorMessage(home.projectError)}</span><Button variant="secondary" size="sm" onClick={() => { void home.loadProjects(); }}>retry project choices</Button></div>}
 
       {loading ? <SkeletonList rows={6} label="Loading your sessions" /> : rows.length === 0 ? (
         <p className="border-y border-rule py-6 text-base text-ink-2">{EMPTY_FILTER_COPY[filter]}</p>
@@ -305,7 +317,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         />
       )}
 
-      {home.groups.get('')?.pages.at(-1)?.nextOffset !== undefined && (
+      {(home.groups.get('')?.pages.at(-1)?.next ?? '') !== '' && (
         <Button variant="secondary" size="sm" disabled={home.groups.get('')?.loading} onClick={() => home.more()}>load more</Button>
       )}
     </section>
