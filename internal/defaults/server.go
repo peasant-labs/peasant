@@ -67,6 +67,8 @@ const (
 	// RoutePublications reads the publication state of named sessions for the
 	// signed-in Village account, whatever the saved selection lists.
 	RoutePublications Route = "/api/v1/publications"
+	// RouteHomeSessions reads one bounded root or immediate-child page.
+	RouteHomeSessions Route = "/api/v1/home/sessions"
 	// RouteVillageCollectives lists the Village collectives the signed-in user
 	// belongs to, read with this computer's stored credential.
 	RouteVillageCollectives Route = "/api/v1/village/collectives"
