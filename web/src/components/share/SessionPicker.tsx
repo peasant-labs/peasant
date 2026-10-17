@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox } from '@/lib/ft-ui';
 import type { ShareSession, ShareHierarchySession, ShareHelperContext, ShareHelperGroup } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
@@ -349,7 +349,7 @@ export function SessionPicker({
   const selectedTokens = useMemo(() => sessions.reduce((total, session) => selectedIds.has(session.id) ? total + session.totalTokens : total, 0), [sessions, selectedIds]);
   const selectedTokensLabel = selectedTokens >= 1000 ? `${Math.round(selectedTokens / 1000)}k` : String(selectedTokens);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onFooterActionsChange({
       primary: { label: 'Continue', onClick: onNext, disabled: selectedCount === 0 },
     });

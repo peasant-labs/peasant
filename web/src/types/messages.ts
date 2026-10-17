@@ -190,7 +190,7 @@ export function subscriptionKey(sub: SubscriptionMessage): string {
 }
 
 /** Browser-only category labels returned by the redaction review endpoint. */
-export type RedactionCategory = 'CREDENTIAL' | 'PII' | 'PATH' | 'INTERNAL';
+export type RedactionCategory = import('@peasant-labs/schema').RedactionCategoryLabel;
 
 /** Browser-only review state for one proposed redaction. */
 export interface Redaction {

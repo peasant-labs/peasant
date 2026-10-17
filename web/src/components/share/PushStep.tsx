@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { WhereDoesThisGo, Button } from '@/lib/ft-ui';
 import { displayProject } from '@/lib/quality/utils';
 import { runPush } from '@/lib/share/push';
@@ -252,7 +252,7 @@ export function PushStep({
   const { states, phase, topError, start, summary } = usePush(sessionIds, redactionLevel, useMock);
   const destination = villageUrl();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onFooterActionsChange(
       phase === 'idle' || phase === 'error'
         ? { primary: { label: phase === 'error' ? 'Try again' : 'Submit', onClick: start } }

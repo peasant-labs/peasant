@@ -1,0 +1,6 @@
+requiredNames: [collectives-read-failed, audience-unknown, login-start-failed, publication-read-failed]
+cases:
+  - { name: collectives-read-failed, route: /api/v1/village/collectives, method: GET }
+  - { name: audience-unknown, route: /api/v1/publications, method: GET }
+  - { name: login-start-failed, route: /api/v1/sync/login, method: POST }
+  - { name: publication-read-failed, route: /api/v1/publications, method: GET }

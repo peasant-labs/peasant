@@ -36,7 +36,7 @@ payload:
       hasCommitBinding: false
 expected:
   linkedGroupLabel: sessions linked to shared implementation
-  overflowAction: 1 more sessions
+  overflowAction: 1 more session
   linkedActions:
     - {name: first recorded session, sessionId: session-a}
     - {name: second recorded session, sessionId: session-b}

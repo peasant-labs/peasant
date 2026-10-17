@@ -43,6 +43,9 @@ type syncHandler struct {
 	// carries. The server owns the bounded scope cache; the sync route only
 	// consumes the issuer seam so its members replay the sync predicate.
 	scopeIssuer groupedScopeIssuer
+	// detectReview allows the scan's detector dependency to be supplied without
+	// changing the offered redaction policy. Nil uses the configured engine.
+	detectReview func(string) []redact.Match
 
 	// Ingest state (protected by mu).
 	mu             sync.Mutex
@@ -333,7 +336,11 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	content := document.text
 
 	// Detect matches.
-	matches := redactor.Detect(content)
+	detect := redactor.Detect
+	if h.detectReview != nil {
+		detect = h.detectReview
+	}
+	matches := detect(content)
 
 	// Build replacement lookup.
 	replacements := buildReplacementLookup()

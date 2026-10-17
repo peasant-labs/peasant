@@ -43,6 +43,8 @@ Release, which holds the signed artifacts and checksums.
   substitutes the last-good copy (#627).
 - The first harvest after the indexer and origin-rule updates may take longer
   while affected sessions are refreshed (#604, #620, #627).
+- Re-pin Fairtrade to 0.0.29 and the browser Schema package to 0.29.1, using
+  canonical typed redaction category bindings in both publication review paths.
 
 ### Fixed
 - Home preserves parent relationships and groups subagents. Expanded children
@@ -61,6 +63,10 @@ Release, which holds the signed artifacts and checksums.
 - The retained kickstart publication path opens managed-session readers using
   the configured output location, so consented publication can read imported
   managed sessions without changing onboarding defaults.
+- Invalid redaction review data blocks continuation and publication, while
+  prerequisite recovery stays separate from publication retries (#634).
+- Home keeps its existing search and load-more controls, with all supplied
+  parent and child rows visible without an extra table pager or height cap.
 
 ### Documentation
 - The experimental feature register clarifies that file familiarity /

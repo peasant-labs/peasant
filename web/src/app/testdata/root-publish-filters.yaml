@@ -75,8 +75,8 @@ cases:
     expectedRows: [s-new, s-pub, s-turns, s-auto]
     expectedLabels:
       s-new: not published
-      s-pub: published · 2 collectives · up to date
-      s-turns: published · 1 collective · new turns
+      s-pub: published, 2 collectives, up to date
+      s-turns: published, 1 collective, new turns
       s-auto: auto-publish on
 
   - name: not-published-counts
@@ -98,7 +98,7 @@ cases:
     expectedCounts: { all: 3, notPublished: 1, published: 2, auto: 1 }
     expectedRows: [s-a, s-c]
     expectedLabels:
-      s-c: published · 0 collectives · new turns
+      s-c: published, 0 collectives, new turns
 
   - name: auto-counts
     sessions:
@@ -137,8 +137,8 @@ cases:
     expectedCounts: { all: 2, notPublished: 0, published: 2, auto: 0 }
     expectedRows: [s-approved, s-pending]
     expectedLabels:
-      s-approved: published · 1 collective · up to date
-      s-pending: published · 0 collectives · up to date
+      s-approved: published, 1 collective, up to date
+      s-pending: published, 0 collectives, up to date
 
   - name: parent-visible-child-grouped
     sessions:
@@ -155,7 +155,7 @@ cases:
       - { expand: root, children: [child, child-two] }
     childLabels: { child: Delegate Task, child-two: 'Lint Run' }
     expectedLabels:
-      child: 'published · 1 collective · up to date'
+      child: 'published, 1 collective, up to date'
       child-two: 'not published'
 
   - name: recursive-family-and-refresh

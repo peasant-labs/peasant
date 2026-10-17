@@ -1,0 +1,10 @@
+requiredNames: [all_engine_categories, unknown_engine_category]
+cases:
+  - name: all_engine_categories
+    categories: [secrets, pii, paths, project]
+    labels: [CREDENTIAL, PII, PATH, INTERNAL]
+    status: 200
+  - name: unknown_engine_category
+    categories: [location]
+    labels: []
+    status: 500

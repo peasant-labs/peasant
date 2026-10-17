@@ -155,7 +155,7 @@ describe('lifted <Changes> — interaction + state', () => {
   it('mounts candidate and merged changes from the strict YAML fixture', () => {
     render(<Changes payload={changesPayload} projectLabel="proj" nowMs={NOW} />);
     expect(screen.getAllByText(mountedChangesFixture.expected.candidateBranch).length).toBeGreaterThan(0);
-    expect(screen.getByText(/1 open · 1 merged/)).toBeInTheDocument();
+    expect(screen.getByText(/1 open, 1 merged/)).toBeInTheDocument();
     expect(changesPayload.changes.some((change) => change.branch === mountedChangesFixture.expected.mergedBranch && change.merged)).toBe(true);
   });
 
@@ -232,7 +232,7 @@ describe('lifted <Changes> — interaction + state', () => {
 
   it('(ii) an empty/not-a-repo payload renders without crashing (no commit rows)', () => {
     render(<Changes payload={{ repoFound: false, changes: [], recentCommits: [], sessions: [], rewrittenCommits: [] }} projectLabel="proj" nowMs={NOW} />);
-    expect(screen.getByText(/0 open · 0 merged/)).toBeTruthy();
+    expect(screen.getByText(/0 open, 0 merged/)).toBeTruthy();
   });
 });
 

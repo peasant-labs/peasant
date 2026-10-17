@@ -10,6 +10,7 @@
    that drifted from the contract fails at the page's own trust boundary. */
 
 import { parseDocument } from 'yaml'
+import { parseRedactionCategoryLabel, redactionCategoryFromLabel } from '@peasant-labs/schema'
 
 const CASE_FIELDS = ['name', 'publication', 'signIn', 'village', 'scan', 'push', 'steps', 'expect']
 const ROOT_FIELDS = ['requiredNames', 'mobileCases', 'visualEquivalentCases', 'wizardLinks', 'collectives', 'matches', 'pullRequest', 'cases']
@@ -151,7 +152,7 @@ export function loadPublishStates(source) {
     const fields = ['category', 'rule', 'display', 'original', 'replacement', 'entryIndex', 'count']
     exactFields(match, fields, fields.filter((field) => field !== 'count'), where)
     if (match.count !== undefined && (!Number.isSafeInteger(match.count) || match.count < 1)) fail(`${where}.count`, 'expected a positive occurrence count')
-    oneOf(match.category, ['CREDENTIAL', 'PII', 'PATH', 'INTERNAL'], `${where}.category`)
+    redactionCategoryFromLabel(parseRedactionCategoryLabel(match.category))
     for (const field of ['rule', 'display', 'original', 'replacement']) text(match[field], `${where}.${field}`)
     if (!Number.isSafeInteger(match.entryIndex) || match.entryIndex < 0) fail(`${where}.entryIndex`, 'expected a turn index')
     return match

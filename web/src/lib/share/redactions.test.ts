@@ -5,6 +5,7 @@ import {
   isSelectableRedactionLevel,
 } from '@/lib/share/redactions';
 import { ALL_REDACTION_LEVELS } from '@/lib/share/redaction-policy.generated';
+import { boundaryResponse, REDACTION_REVIEW_BOUNDARIES } from '@/test/fixtures/redaction-review-boundaries';
 import {
   REDACTION_CATEGORY_FIXTURES,
   UNKNOWN_REDACTION_LEVEL_FIXTURES,
@@ -36,6 +37,15 @@ describe('fetchRedactionPreview category contract', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
+
+  for (const entry of REDACTION_REVIEW_BOUNDARIES.filter((row) => row.source === 'network')) {
+    it(`validates the generated response and cross-field counts: ${entry.name}`, async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json(boundaryResponse(entry.mutation))));
+      const result = fetchRedactionPreview('fixture-session', 'standard');
+      if (entry.error) await expect(result).rejects.toThrow(entry.error);
+      else await expect(result).resolves.toHaveLength(4);
+    });
+  }
 
   for (const fixture of REDACTION_CATEGORY_FIXTURES) {
     it(fixture.name, async () => {

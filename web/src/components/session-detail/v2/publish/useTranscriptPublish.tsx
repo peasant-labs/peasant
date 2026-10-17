@@ -17,6 +17,7 @@ import {
 } from '@/lib/share/publishing';
 import { useRedactionPipeline, type RedactionScanTarget } from '@/lib/share/redactionScan';
 import { DEFAULT_REDACTION_LEVEL } from '@/lib/share/redactions';
+import { guardReviewMatches } from '@/lib/share/reviewMatches';
 import { fetchSettings } from '@/lib/api/settings';
 import { AutomaticPublishingError, enableAutomaticPublishing } from './automaticPublishing';
 import {
@@ -203,6 +204,8 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   }, [openOnArrival, openPopup]);
 
   const close = useCallback(() => {
+    publishGuard.current.ready = false;
+    recoveryGuard.current.allowed = false;
     openGeneration.current += 1;
     setOpen(false);
     setOutcome(null);
@@ -355,11 +358,13 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   );
   const scan = useRedactionPipeline(scanTargets, DEFAULT_REDACTION_LEVEL, false, redactionCache, updateRedactionCache);
   const scanResult = scan.sessionRedactions.get(sessionId);
-  const scanClean = scan.phase === 'ready' && scan.scanError == null && scanResult !== undefined;
-  const scanProp = scan.scanError != null
-    ? { failure: `the scan failed, so publish is off. ${scan.scanError}` }
+  const adaptation = guardReviewMatches(() => scanResult ? reviewMatches(sessionId, scanResult) : []);
+  const reviewError = scan.scanError ?? adaptation.error;
+  const scanClean = scan.phase === 'ready' && reviewError == null && scanResult !== undefined;
+  const scanProp = reviewError != null
+    ? { failure: `the scan failed, so publish is off. ${reviewError}` }
     : scanResult
-      ? { matches: reviewMatches(sessionId, scanResult), total: scanResult.length, matchCount: scan.sessionMatchCounts.get(sessionId) }
+      ? { matches: adaptation.matches, total: scanResult.length, matchCount: scan.sessionMatchCounts.get(sessionId) }
       : undefined;
 
   // ── who can read it ──────────────────────────────────────────────────────
@@ -384,7 +389,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       stoppedAt: signInFailure.step === 'check'
         ? `checking this computer’s village sign-in: ${oneLine(signInFailure.message)}`
         : `starting the github sign-in: ${oneLine(signInFailure.message)}`,
-      retry: () => { setSignInFailure(null); setSignIn('unknown'); },
+      retry: signInFailure.step === 'start' ? connect : () => { setSignInFailure(null); setSignIn('unknown'); },
     }
     : read.status === 'error'
       ? {
@@ -407,9 +412,23 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // "no change" until the reader makes one.
   const canPublish = scanClean && signIn === 'signed-in' && blocked === null && read.status === 'ready'
     && (draft !== null || publishedNow === 'update');
+  const publishGuard = useRef({ ready: false, check: scan.isReviewReady });
+  publishGuard.current = { ready: open && canPublish && publishingTo === undefined && !submitting, check: scan.isReviewReady };
+  useEffect(() => () => { publishGuard.current.ready = false; }, []);
+  // Recovery only re-reads a prerequisite. It may run before an audience or
+  // scan exists, but never through an explicitly refused review or stale open.
+  const recoveryGuard = useRef<{ allowed: boolean; run?: () => void }>({ allowed: false });
+  recoveryGuard.current = { allowed: open && reviewError === null && !submitting && publishingTo === undefined, run: blocked?.retry };
+  const recover = useCallback(() => {
+    const current = recoveryGuard.current;
+    if (current.allowed) current.run?.();
+  }, []);
+  useEffect(() => () => { recoveryGuard.current.allowed = false; }, []);
 
+  const publishGeneration = openGeneration.current;
   const runPublish = useCallback(async () => {
-    if (!canPublish || publishingTo !== undefined || submitting) return;
+    if (publishGeneration !== openGeneration.current || !publishGuard.current.ready || !publishGuard.current.check()) return;
+    publishGuard.current.ready = false;
     const request = pushRequest(sessionId, DEFAULT_REDACTION_LEVEL, activeDraft, { listed, readers });
     const audienceBefore = publication?.audience ?? [];
     setOutcome(null);
@@ -467,7 +486,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     } finally {
       setSubmitting(false);
     }
-  }, [access, activeDraft, automaticChecked, canPublish, listed, names, publication, publish, readerCount, readers, reread, sessionId, publishingTo, submitting]);
+  }, [access, activeDraft, automaticChecked, automaticPreference, canPublish, listed, names, publication, publish, publishGeneration, readerCount, readers, reread, sessionId, publishingTo, submitting]);
 
   // The order matters: a finished publish shows its link; anything that stops
   // the flow before the push (a failed read, a sign-in) comes next; then the
@@ -480,7 +499,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     if (signIn === 'waiting') return 'waiting-github';
     if (signIn === 'signed-out') return 'connect';
     if (signIn === 'unknown' || read.status === 'loading' || scan.phase === 'scanning') return 'checking';
-    if (scan.scanError != null) return 'scan-failed';
+    if (reviewError != null) return 'scan-failed';
     if (outcome?.kind === 'stopped') return 'stopped';
     if (collectivesRead.status === 'ready' && collectivesRead.collectives.length === 0 && access.length === 0) return 'no-collective';
     return 'ready';
@@ -571,7 +590,8 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       onConnect={connect}
       joinHref={`${villageUrl ?? defaultVillageUrl()}${VILLAGE_COLLECTIVES_PATH}`}
       stoppedAt={stopped?.stoppedAt}
-      onRetry={stopped?.retry}
+      onRecover={blocked?.retry ? recover : undefined}
+      onRetry={blocked === null ? stopped?.retry : undefined}
       done={outcome && outcome.kind !== 'stopped' ? outcome.done : undefined}
     />
   );
