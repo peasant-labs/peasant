@@ -9,6 +9,19 @@ requiredNames:
   - overlapping-refresh-does-not-race
   - collapse-cancels-expanded-refresh
   - collapsed-ancestor-skips-descendant-refresh
+  - successful-refresh-invalidates-collapsed-family
+  - successful-refresh-invalidates-collapsed-descendant
+  - canonical-missing-parent-commits-refreshed-roots
+  - generic-child404-retains-visible-content
+  - publish-settlement-refreshes-loaded-window
+  - publish-during-refresh-queues-one-loaded-window
+publish:
+  request: { sessionIds: [root-0], redactionLevel: standard }
+  response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
+  loadedOffsets:
+    - { parent: null, offset: '0' }
+    - { parent: null, offset: '25' }
+    - { parent: root-0, offset: '0' }
 visual:
   themes: [dark, light]
   viewports:
@@ -45,4 +58,24 @@ cases:
     children: 30
   - name: collapsed-ancestor-skips-descendant-refresh
     roots: 30
+    children: 30
+  - name: successful-refresh-invalidates-collapsed-family
+    roots: 30
+    children: 30
+  - name: successful-refresh-invalidates-collapsed-descendant
+    roots: 30
+    children: 30
+  - name: canonical-missing-parent-commits-refreshed-roots
+    roots: 30
+    children: 30
+    parentErrorCode: home_parent_not_found
+  - name: generic-child404-retains-visible-content
+    roots: 30
+    children: 30
+    parentErrorCode: route_not_found
+  - name: publish-settlement-refreshes-loaded-window
+    roots: 80
+    children: 30
+  - name: publish-during-refresh-queues-one-loaded-window
+    roots: 80
     children: 30
