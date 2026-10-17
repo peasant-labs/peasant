@@ -1,0 +1,98 @@
+requiredNames:
+  - short-and-empty-root-continuation
+  - empty-first-page-can-continue
+  - continuation-retries-same-token
+  - child-empty-continuation-retries
+  - finite-refresh-follows-fresh-root-and-child-tokens
+  - scope-error-restarts-once
+  - generic400-does-not-restart
+  - project-options-do-not-block-rows
+  - project-filter-aborts-old-continuation
+  - late-options-cannot-win-filter-reset
+  - account-reset-reloads-project-options
+  - project-options-error-retains-rows-and-retries
+  - project-options-selection-error-clears-content
+projects:
+  - { projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, projectName: alpha }
+  - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: beta }
+cases:
+  - name: short-and-empty-root-continuation
+    pages:
+      '': { ids: [root-one], next: sparse }
+      sparse: { ids: [], next: remaining }
+      remaining: { ids: [root-last], next: '' }
+    expectedTokens: ['', sparse, remaining]
+  - name: empty-first-page-can-continue
+    pages:
+      '': { ids: [], next: remaining }
+      remaining: { ids: [root-last], next: '' }
+    expectedTokens: ['', remaining]
+  - name: continuation-retries-same-token
+    pages:
+      '': { ids: [root-one], next: retry-this }
+      retry-this: { ids: [root-last], next: '', failOnce: 503 }
+    expectedTokens: ['', retry-this, retry-this]
+  - name: child-empty-continuation-retries
+    pages:
+      '': { ids: [root-one], next: '' }
+    children:
+      '': { ids: [], next: child-more }
+      child-more: { ids: [child-one], next: '', failOnce: 503 }
+    expectedTokens: ['', child-more, child-more]
+  - name: finite-refresh-follows-fresh-root-and-child-tokens
+    pages:
+      '': { ids: [root-one], next: old-root-a }
+      old-root-a: { ids: [], next: old-root-b }
+      old-root-b: { ids: [root-last], next: old-unvisited }
+    children:
+      '': { ids: [child-one], next: old-child-a }
+      old-child-a: { ids: [], next: old-child-unvisited }
+    refreshed:
+      '': { ids: [root-one], next: fresh-root-a }
+      fresh-root-a: { ids: [], next: fresh-root-b }
+      fresh-root-b: { ids: [], next: fresh-unvisited }
+    refreshedChildren:
+      '': { ids: [child-one], next: fresh-child-a }
+      fresh-child-a: { ids: [], next: fresh-child-unvisited }
+    expectedTokens: ['', fresh-root-a, fresh-root-b]
+    expectedChildTokens: ['', fresh-child-a]
+  - name: scope-error-restarts-once
+    pages:
+      '': { ids: [root-one], next: wrong-scope }
+      wrong-scope: { ids: [], next: '', status: 400, code: sync_page_scope_changed }
+    rejectRestart: true
+    expectedTokens: ['', wrong-scope, '']
+  - name: generic400-does-not-restart
+    pages:
+      '': { ids: [root-one], next: bad-query }
+      bad-query: { ids: [], next: '', status: 400, code: invalid_query }
+    expectedTokens: ['', bad-query]
+  - name: project-options-do-not-block-rows
+    pages:
+      '': { ids: [root-one], next: '' }
+    deferOptions: true
+    expectedTokens: ['']
+  - name: project-filter-aborts-old-continuation
+    pages:
+      '': { ids: [root-one], next: delayed-more }
+      delayed-more: { ids: [old-off-page], next: '', deferred: true }
+    expectedTokens: ['', delayed-more, '']
+  - name: late-options-cannot-win-filter-reset
+    pages:
+      '': { ids: [root-one], next: '' }
+    deferOptions: true
+    expectedTokens: ['', '']
+  - name: account-reset-reloads-project-options
+    pages:
+      '': { ids: [root-one], next: '' }
+    expectedTokens: ['', '']
+  - name: project-options-error-retains-rows-and-retries
+    pages:
+      '': { ids: [root-one], next: '' }
+    optionsError: { status: 503, code: sync_page_unavailable }
+    expectedTokens: ['']
+  - name: project-options-selection-error-clears-content
+    pages:
+      '': { ids: [root-one], next: '' }
+    optionsError: { status: 500, code: selection_visibility }
+    expectedTokens: ['']

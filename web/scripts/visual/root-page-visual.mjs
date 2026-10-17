@@ -7,7 +7,7 @@
  *     retained browse, project summaries, transcript details and search;
  *   - with no mock store, for the empty install.
  * The mock store holds no Home pages or publication receipts, so the
- * browser fulfils GET /api/v1/home/sessions and GET /api/v1/publications from
+ * browser fulfils the home/project-options sync views and publications from
  * the mock sessions and the pattern in testdata/root-page.yaml. The project
  * summary is intercepted only for the selection notice and recovery states.
  * Global statistics are deliberately absent. The complementary bounded-page
@@ -192,10 +192,14 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
     if (url.origin !== MOCK_ORIGIN && url.origin !== EMPTY_ORIGIN) return route.continue()
     // Hide the development mock badge so the capture shows the production chrome.
     if (url.pathname === '/api/v1/config/mock') return respond(json({ enabled: false }))
-    if (url.pathname === '/api/v1/home/sessions') {
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') {
+      const options = new Map((answers?.sync ?? []).filter(row => !row.parentSessionId && !row.parentUnresolved && !answers.publications.get(row.id)?.outsideSelection).map(row => [row.projectHash, { projectHash: row.projectHash, projectName: row.projectName }]))
+      return respond(json({ projects: [...options.values()].sort((a, b) => a.projectName.localeCompare(b.projectName) || a.projectHash.localeCompare(b.projectHash)) }))
+    }
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
       const parent = url.searchParams.get('parentSessionId')
       const publication = url.searchParams.get('publication') ?? 'all'
-      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0
       const source = !answers || (summary?.projects?.length === 0 && summary.selection?.active) ? [] : answers.sync.filter(row => {
         const receipt = answers.publications.get(row.id)
         return receipt && !receipt.outsideSelection && !row.parentUnresolved
@@ -203,11 +207,11 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
           && (parent || publication === 'all' || publication === 'auto' && receipt.autoPublish
             || publication === 'published' && receipt.state === 'published' || publication === 'not-published' && receipt.state === 'unpublished')
       })
-      return respond(json({ rows: source.slice(offset, offset + 25).map(sync => {
+      return respond(json({ items: source.slice(start, start + 25).map(sync => {
         const { audience, ...publication } = answers.publications.get(sync.id)
         const session = answers.sessions.find(session => session.id === sync.id)
         return { sync, publication, title: session?.title ?? '', preview: sync.firstPrompt ?? session?.preview ?? '', childCount: answers.sync.filter(child => child.parentSessionId === sync.id && !answers.publications.get(child.id)?.outsideSelection).length }
-      }), offset, limit: 25, ...(offset + 25 < source.length ? { nextOffset: offset + 25 } : {}) }))
+      }), next: start + 25 < source.length ? 'more-sessions' : '' }))
     }
     if (answers && url.pathname === '/api/v1/sync/sessions') return respond(json({ sessions: answers.sync }))
     if (answers && url.pathname === '/api/v1/publications') {

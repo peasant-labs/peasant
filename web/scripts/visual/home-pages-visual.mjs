@@ -49,6 +49,7 @@ try {
     return { sync: { id, harness: 'claude-code', projectName: 'fixture-project', projectHash: fixture.visual.projectHash, hostSlug: 'fixture-host', startTime: '2026-10-15T10:00:00Z', durationMs: 60000, totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false }, publication: { sessionId: id, state: 'unpublished', autoPublish: false, outsideSelection: false }, title: `session ${id}`, preview: '', childCount };
   }
   const roots = Array.from({ length: stimulus.roots }, (_, index) => row(`root-${index}`, index === 0 ? stimulus.children : 0));
+  Object.assign(roots.at(-1).sync, fixture.visual.projects[1]);
   const children = Array.from({ length: stimulus.children }, (_, index) => row(`child-${index}`));
   for (const theme of fixture.visual.themes) for (const viewport of fixture.visual.viewports) {
     const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height }, reducedMotion: 'reduce' });
@@ -60,12 +61,13 @@ try {
     page.on('websocket', socket => socket.on('framesent', event => { subscriptions.push(String(event.payload)); }));
     await page.route('**/api/v1/**', async route => {
       const url = new URL(route.request().url());
-      if (url.pathname === '/api/v1/home/sessions') {
+      if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') return route.fulfill({ json: { projects: fixture.visual.projects } });
+      if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
         reads.push(url);
         if (fail) return route.fulfill({ status: 503, json: { error: 'temporary local read failure; retry the session list' } });
         const source = url.searchParams.has('parentSessionId') ? children : roots;
-        const offset = Number(url.searchParams.get('offset'));
-        return route.fulfill({ json: { rows: source.slice(offset, offset + 25), offset, limit: 25, ...(offset + 25 < source.length ? { nextOffset: offset + 25 } : {}) } });
+        const start = url.searchParams.get('pageToken') === 'after-first' ? 25 : url.searchParams.get('pageToken') === 'after-second' ? 50 : 0;
+        return route.fulfill({ json: { items: source.slice(start, start + 25), next: start + 25 < source.length ? start === 0 ? 'after-first' : 'after-second' : '' } });
       }
       if (url.pathname === '/api/v1/sync/auth') return route.fulfill({ json: { authenticated: false } });
       if (url.pathname === '/api/v1/publications') return route.fulfill({ json: { publications: [] } });
@@ -75,7 +77,9 @@ try {
     await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
     await page.getByRole('link', { name: 'session root-0', exact: true }).waitFor();
     assert.equal(reads.length, 1);
-    assert.equal(reads[0].searchParams.get('limit'), '25');
+    assert.equal(reads[0].searchParams.get('maxItems'), '25');
+    await page.getByRole('combobox', { name: 'project', exact: true }).waitFor();
+    assert.equal(await page.getByRole('option', { name: 'unseen-project', exact: true }).count(), 1, 'Project metadata must include off-page projects');
     assert.deepEqual(forbidden, []);
     assert.ok(!subscriptions.some(frame => /"(?:sessions|quality|trends)"/.test(frame)), `Eager subscription: ${subscriptions}`);
     assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
@@ -89,7 +93,7 @@ try {
     fail = true;
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.getByRole('button', { name: 'retry the session list' }).waitFor();
-    assert.equal(reads.length, before + 3, 'Refresh must read only two loaded root offsets and one expanded child offset');
+    assert.equal(reads.length, before + 2, 'Failed first pages must not drain later continuation');
     assert.equal(await page.getByRole('link', { name: 'session root-25', exact: true }).count(), 1);
     fail = false;
     await page.getByRole('button', { name: 'retry the session list' }).click();
