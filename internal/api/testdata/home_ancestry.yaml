@@ -1,0 +1,53 @@
+requiredNames:
+  - roots
+  - general-children
+  - recursive-immediate-only
+  - latest-attempt-children
+  - selected-parent-only
+  - hidden-parent
+  - invalid-selection
+sessions:
+  - {id: sess_a}
+  - {id: sess_b}
+  - {id: sess_cache, cache: sess_a}
+  - {id: sess_snapshot, cache: sess_b, snapshot: sess_a}
+  - {id: sess_generation, cache: sess_b, snapshot: sess_b, state: target_known, target: sess_a}
+  - {id: sess_grandchild, state: target_known, target: sess_generation}
+  - {id: sess_none, cache: sess_a, snapshot: sess_a, state: explicit_none}
+  - {id: sess_context, cache: sess_a, snapshot: sess_a, kind: context_from, state: target_known, target: sess_b}
+  - {id: sess_unknown, snapshot: sess_a, state: unknown}
+  - {id: sess_conflict, snapshot: sess_a, state: conflicting_current_native_evidence}
+  - {id: sess_external, state: target_known, target: sess_missing}
+  - {id: sess_latest, latest: true, state: target_known, target: sess_b}
+  - {id: sess_old, snapshot: sess_a, inactive: true}
+  - {id: sess_self, state: target_known, target: sess_self}
+  - {id: sess_cycle1, state: target_known, target: sess_cycle2}
+  - {id: sess_cycle2, state: target_known, target: sess_cycle1}
+cases:
+  - name: roots
+    ids: [sess_a, sess_b, sess_context, sess_none]
+    children: [4, 1, 0, 0]
+  - name: general-children
+    query: parentSessionId=sess_a
+    ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
+    children: [0, 1, 0, 0]
+  - name: recursive-immediate-only
+    query: parentSessionId=sess_generation
+    ids: [sess_grandchild]
+    children: [0]
+  - name: latest-attempt-children
+    query: parentSessionId=sess_b
+    ids: [sess_latest]
+    children: [0]
+  - name: selected-parent-only
+    selected: [sess_a]
+    query: parentSessionId=sess_a
+    ids: []
+    children: []
+  - name: hidden-parent
+    selected: [sess_b]
+    query: parentSessionId=sess_a
+    status: 404
+  - name: invalid-selection
+    invalidSelection: true
+    status: 500

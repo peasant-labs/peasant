@@ -45,8 +45,8 @@ LEFT JOIN session_relationship_evidence x
  ON x.session_id = s.session_id AND x.generation_id = ` + parentGenerationScopeSQL("s") + ` AND x.kind = 'context_from'`
 
 // SyncParentIdentities reads one raw row per pushable session, without changing
-// the push readers. It consumes the sync list's existing base read, scans the
-// indexed snapshot channel, and reads sparse evidence in bounded batches.
+// the push readers. It consumes the sync list's existing base read, reading
+// requested snapshot parents and sparse generation evidence in bounded batches.
 // Generation evidence (the shared scope: the active generation, or the latest
 // attempt when there is none) precedes snapshot and cache. Evidence rows remain
 // raw: duplicate query results are never collapsed into an identity map here.
@@ -59,25 +59,30 @@ func (s *Store) SyncParentIdentities(ctx context.Context, sessions []ingest.Push
 		return nil, fmt.Errorf("store.SyncParentIdentities: acquire connection while listing sync parents: %w; no identities returned; retry the sync list", err)
 	}
 	defer s.pool.Put(conn)
-	snapshots := make(map[string]string)
-	err = sqlitex.ExecuteTransient(conn, `SELECT session_id,json_extract(metadata_json,'$.parentUuid')
-FROM session_publication_metadata WHERE json_extract(metadata_json,'$.parentUuid') IS NOT NULL`, &sqlitex.ExecOptions{
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			snapshots[stmt.ColumnText(0)] = stmt.ColumnText(1)
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store.SyncParentIdentities: read snapshot parents while listing sync sessions: %w; no identities returned; run peasant ingest verify and retry", err)
-	}
 	rows := make([]ParentIdentityRow, 0, len(sessions))
 	for start := 0; start < len(sessions); start += indexFormatReadBatchSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		selected := sessions[start:min(start+indexFormatReadBatchSize, len(sessions))]
 		args := make([]any, len(selected))
 		placeholders := make([]string, len(selected))
 		fallback := make(map[string]string, len(selected))
 		for i, session := range selected {
 			args[i], placeholders[i] = session.SessionID, "?"
+		}
+		snapshots := make(map[string]string, len(selected))
+		err = sqlitex.ExecuteTransient(conn, `SELECT session_id,json_extract(metadata_json,'$.parentUuid') FROM session_publication_metadata WHERE session_id IN (`+strings.Join(placeholders, ",")+")", &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			snapshots[stmt.ColumnText(0)] = stmt.ColumnText(1)
+			return nil
+		}})
+		if err != nil {
+			return nil, fmt.Errorf("store.SyncParentIdentities: read requested snapshot parents: %w; no identities returned; inspect the store and retry", err)
+		}
+		for _, session := range selected {
 			parent := snapshots[session.SessionID]
 			if parent == "" {
 				parent = session.ParentID
@@ -86,6 +91,9 @@ FROM session_publication_metadata WHERE json_extract(metadata_json,'$.parentUuid
 		}
 		seen := make(map[string]bool)
 		err := sqlitex.ExecuteTransient(conn, syncParentEvidenceQuery+strings.Join(placeholders, ",")+syncParentEvidenceJoins, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			row := ParentIdentityRow{SessionID: stmt.ColumnText(0), ParentIdentity: stmt.ColumnText(1), ParentUnresolved: stmt.ColumnInt(2) != 0}
 			// Snapshot/cache fallback is reachable only when BOTH generation
 			// evidence arms are silent, never when authority supplied an

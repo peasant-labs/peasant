@@ -1,4 +1,6 @@
 cases:
+  - name: subset-skips-unrequested-snapshot
+    poisonOtherSnapshot: true
   - name: evidence-known-child
     state: target_known
     target: sess_unstoredparent

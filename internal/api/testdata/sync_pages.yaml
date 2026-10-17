@@ -1,0 +1,79 @@
+requiredNames: [default, empty-token, zero, clamped, custom, negative, malformed, repeated-max, repeated-token, bad-token, huge-token, child-root-filter, empty-parent, unknown-parent, bad-project, bad-publication, old-offset, flat-paging, grouped-paging, options-paging]
+roots: 107
+newestIndex: 80
+cases:
+  - {name: default, query: 'view=home', status: 200, count: 25, next: true}
+  - {name: empty-token, query: 'view=home&pageToken=', status: 200, count: 25, next: true}
+  - {name: zero, query: 'view=home&maxItems=0', status: 200, count: 25, next: true}
+  - {name: clamped, query: 'view=home&maxItems=999', status: 200, count: 100, next: true}
+  - {name: custom, query: 'view=home&maxItems=2', status: 200, count: 2, next: true}
+  - {name: negative, query: 'view=home&maxItems=-1', status: 400}
+  - {name: malformed, query: 'view=home&maxItems=abc', status: 400}
+  - {name: repeated-max, query: 'view=home&maxItems=1&maxItems=2', status: 400}
+  - {name: repeated-token, query: 'view=home&pageToken=a&pageToken=b', status: 400}
+  - {name: bad-token, query: 'view=home&pageToken=!!!!', status: 400}
+  - {name: huge-token, query: 'view=home', hugeToken: true, status: 400}
+  - {name: child-root-filter, query: 'view=home&parentSessionId=sess_root000&publication=all', status: 400}
+  - {name: empty-parent, query: 'view=home&parentSessionId=', status: 400}
+  - {name: unknown-parent, query: 'view=home&parentSessionId=sess_unknown', status: 404}
+  - {name: bad-project, query: 'view=home&projectHash=bad', status: 400}
+  - {name: bad-publication, query: 'view=home&publication=bad', status: 400}
+  - {name: old-offset, query: 'view=home&offset=25', status: 400}
+  - {name: flat-paging, query: 'maxItems=2', status: 400}
+  - {name: grouped-paging, query: 'view=grouped&pageToken=x', status: 400}
+  - {name: options-paging, query: 'view=project-options&maxItems=2', status: 400}
+traversals:
+  - name: consumed-not-fetched-boundary
+    roots: 13
+    maxima: [2, 3, 100]
+    counts: [2, 3, 8]
+    first: [0, 2, 5]
+    next: [true, true, false]
+  - name: deleted-tied-boundary
+    roots: 13
+    maxima: [2, 2]
+    counts: [2, 2]
+    first: [0, 2]
+    next: [true, true]
+    deleteBoundary: true
+  - name: sparse-short-continuation
+    roots: 13
+    selected: [sess_root006, sess_root012]
+    maxima: [2, 2]
+    counts: [1, 1]
+    first: [6, 12]
+    next: [true, false]
+  - name: sparse-empty-continuation
+    roots: 13
+    selected: [sess_root012]
+    maxima: [2, 2]
+    counts: [0, 1]
+    first: [0, 12]
+    next: [true, false]
+  - name: sparse-beyond-many-windows
+    roots: 25
+    selected: [sess_root024]
+    maxima: [2, 2, 2, 2]
+    counts: [0, 0, 0, 1]
+    first: [0, 0, 0, 24]
+    next: [true, true, true, false]
+  - name: immediate-children-only
+    roots: 13
+    parent: sess_parent
+    maxima: [2, 100]
+    counts: [2, 11]
+    first: [0, 2]
+    next: [true, false]
+requiredTraversals: [consumed-not-fetched-boundary, deleted-tied-boundary, sparse-short-continuation, sparse-empty-continuation, sparse-beyond-many-windows, immediate-children-only]
+scopeCases:
+  - {name: project, query: 'projectHash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', code: sync_page_scope_changed}
+  - {name: publication, query: 'publication=published', code: sync_page_scope_changed}
+  - {name: parent, query: 'parentSessionId=sess_root000', code: sync_page_scope_changed}
+  - {name: selection, selection: true, code: sync_page_scope_changed}
+  - {name: account-origin, origin: 'https://village.example', code: sync_page_scope_changed}
+  - {name: account-owner, owner: true, code: sync_page_scope_changed}
+  - {name: token-version, version: 2, code: sync_page_token_invalid}
+  - {name: missing-boundary, missing: true, code: sync_page_token_invalid}
+  - {name: malformed-boundary, invalidID: true, code: sync_page_token_invalid}
+  - {name: duplicate-token-key, duplicate: true, code: sync_page_token_invalid}
+requiredScopes: [project, publication, parent, selection, account-origin, account-owner, token-version, missing-boundary, malformed-boundary, duplicate-token-key]
