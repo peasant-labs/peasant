@@ -12,7 +12,6 @@ import { fetchPublications } from '@/lib/api/publications';
 import type { LocalSessionRow } from '@/lib/api/grouped';
 import { type PublishFilter } from '@/lib/home/publishState';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
-import { discoveryErrorCode, DiscoveryErrorCode } from '@/lib/api/errors';
 import type { LocalSyncProjectOption } from '@/lib/api/home';
 
 const LegacyHomeBrowse = lazy(() => import('@/components/home/LegacyHomeBrowse'));
@@ -53,7 +52,8 @@ export default function HomePage() {
     return () => clearTimeout(timer);
   }, [query]);
   const roots = home.groups.get('');
-  const selectionFailed = discoveryErrorCode(roots?.error) === DiscoveryErrorCode.SelectionVisibility;
+  const selectionFailed = home.selectionError !== null;
+  const discoveryError = home.selectionError ?? roots?.error;
   const rootPages = roots?.pages;
   const rows = useMemo(() => [...new Map((rootPages ?? []).flatMap(page => page.items).map(row => [row.sync.id, row])).values()], [rootPages]);
   const children = new Map([...home.groups].filter(([id]) => id !== '').map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.items).map(row => [row.sync.id, row])).values()]]));
@@ -65,8 +65,8 @@ export default function HomePage() {
     <AutoPublishTip />
     <Input label="search transcripts" type="search" placeholder="search titles, prompts, tool output" value={query} onChange={event => setQuery(event.target.value)} />
     {query && <Button variant="secondary" size="sm" onClick={() => setQuery('')}>clear search</Button>}
-    {roots?.error != null && <div className="flex flex-col items-start gap-3">
-      <FeedbackPanel variant="error">{discoveryErrorMessage(roots.error)}</FeedbackPanel>
+    {discoveryError != null && <div className="flex flex-col items-start gap-3">
+      <FeedbackPanel variant="error">{discoveryErrorMessage(discoveryError)}</FeedbackPanel>
       <Button variant="secondary" size="sm" onClick={() => home.retry()}>retry the session list</Button>
     </div>}
     {!selectionFailed && (search ? <GroupedSessionsSection key={`${search}-${home.revision}`} variant="search" query={search} heading="search results" rowDetail={row => <SearchDetail row={row} />} />

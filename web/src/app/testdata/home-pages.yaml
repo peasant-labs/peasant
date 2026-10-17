@@ -15,6 +15,8 @@ requiredNames:
   - generic-child404-retains-visible-content
   - publish-settlement-refreshes-loaded-window
   - publish-during-refresh-queues-one-loaded-window
+  - selection-recovery-survives-failed-retry
+  - selection-recovery-survives-account-reset
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
@@ -85,3 +87,14 @@ cases:
   - name: publish-during-refresh-queues-one-loaded-window
     roots: 80
     children: 30
+  - name: selection-recovery-survives-failed-retry
+    roots: 30
+    children: 0
+    cachedSessionId: cached-selection-session
+    cachedProject: cached-selection-project
+  - name: selection-recovery-survives-account-reset
+    roots: 30
+    children: 0
+    cachedSessionId: cached-selection-session
+    cachedProject: cached-selection-project
+    accountAfterFailure: second-account

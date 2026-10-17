@@ -33,6 +33,8 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
   const [projects, setProjects] = useState<LocalSyncProjectOption[] | null>(null);
   const [projectError, setProjectError] = useState<unknown>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
+  // A transport error or scope reset is not evidence that selection recovered.
+  const [selectionError, setSelectionError] = useState<unknown>(null);
   const scopeRestarted = useRef(false);
   const state = useRef(groups);
   const opened = useRef(expanded);
@@ -64,6 +66,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     : { ...currentQuery.current, maxItems: 25, pageToken }, []);
   const fail = useCallback((error: unknown, parent: string, retryToken?: PageToken) => {
     if (discoveryErrorCode(error) === DiscoveryErrorCode.SelectionVisibility) {
+      setSelectionError(error);
       reset();
       update(new Map([[ROOT, { ...empty(), error }]]));
     } else {
@@ -86,6 +89,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
       const result = new Map(state.current);
       const old = result.get(parent) ?? empty();
       result.set(parent, { pages: [...old.pages, page], loading: false, error: null });
+      if (parent === ROOT) setSelectionError(null);
       update(result);
     } catch (error) {
       if (generation.current === token && !controller.signal.aborted) {
@@ -178,6 +182,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
       }
       opened.current = nextExpanded;
       setExpanded(nextExpanded);
+      setSelectionError(null);
       update(next);
     } catch (error) {
       if (token === generation.current && !controller.signal.aborted) {
@@ -280,5 +285,5 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     if (group?.retryToken !== undefined) return load(parent, group.retryToken);
     return parent ? load(parent, group?.pages.at(-1)?.next ?? '') : refresh();
   };
-  return { groups: loadedQueryKey.current === queryKey ? groups : new Map<string, HomePages>([[ROOT, empty()]]), expanded, toggle, more, refresh, revision: generation.current, retry, projects: loadedQueryKey.current === queryKey ? projects : null, projectError, projectsLoading, loadProjects };
+  return { groups: loadedQueryKey.current === queryKey ? groups : new Map<string, HomePages>([[ROOT, empty()]]), expanded, toggle, more, refresh, revision: generation.current, retry, projects: loadedQueryKey.current === queryKey ? projects : null, projectError, projectsLoading, loadProjects, selectionError };
 }

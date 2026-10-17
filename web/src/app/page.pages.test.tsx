@@ -6,16 +6,16 @@ import { parse } from 'yaml';
 import HomePage from './page';
 import { PublishProvider, usePublishState } from '@/contexts/PublishContext';
 import { zSyncPushRequest, zSyncPushResponse } from '@peasant-labs/schema';
-import { ALPHA_HASH } from '@/app/review/[[...segments]]/test-fixtures';
+import { ALPHA_HASH, makeSession } from '@/app/review/[[...segments]]/test-fixtures';
 import type { LocalSyncSessionRow } from '@/lib/api/home';
 
-const channels = vi.hoisted(() => vi.fn(() => ({ connected: true, data: { sessions: [] }, error: null })));
+const channels = vi.hoisted(() => vi.fn<(subscriptions: unknown) => { connected: boolean; data: unknown; error: null }>());
 vi.mock('@/contexts/WebSocketContext', () => ({ useChannel: channels }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string }
+interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedTokens: { parent: string | null; token: string }[]; failedRefreshTokens: { parent: string | null; token: string }[] } };
-const required = ['first-page-and-explicit-more', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-refresh-clears-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window'];
+const required = ['first-page-and-explicit-more', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-refresh-clears-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-recovery-survives-failed-retry', 'selection-recovery-survives-account-reset'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
@@ -57,7 +57,8 @@ function mount() { return render(<PublishProvider><HomePage /><PublishAction /><
 
 beforeEach(() => {
   requests = []; signals = []; fail = false; selectionFailure = false; account = 'first'; delayed = undefined; delayFilter = ''; delayParent = '';
-  channels.mockClear();
+  channels.mockReset();
+  channels.mockReturnValue({ connected: true, data: { sessions: [] }, error: null });
   childSources = new Map(); parentFailure = undefined; pushReply = deferred<Response>(); holdPages = false; releasePages = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, 'http://localhost');
@@ -179,6 +180,44 @@ describe('mounted bounded Home', () => {
         selectionFailure = false;
         fireEvent.click(screen.getByRole('button', { name: 'retry the session list' }));
         await screen.findByRole('link', { name: 'title root-0' });
+      }
+      if (testCase.name.startsWith('selection-recovery-survives-')) {
+        // Prime only the lazy module: its actual hooks must stay unmounted
+        // until the current-scope root read validates recovery.
+        await import('@/components/home/LegacyHomeBrowse');
+        channels.mockReturnValue({ connected: true, data: { sessions: [makeSession({ id: testCase.cachedSessionId!, project: testCase.cachedProject! })] }, error: null });
+        selectionFailure = true;
+        await act(async () => { fireEvent(window, new Event('focus')); });
+        await screen.findByRole('button', { name: 'retry the session list' });
+        expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'filter and page through every session' }));
+        expect(screen.getByRole('button', { name: 'filter and page through every session' })).toHaveAttribute('aria-expanded', 'true');
+        expect(channels).not.toHaveBeenCalled();
+
+        selectionFailure = false;
+        fail = true;
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'retry the session list' })); });
+        expect(channels).not.toHaveBeenCalled();
+        expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: 'sessions' })).not.toBeInTheDocument();
+        expect(document.body.textContent).not.toContain(testCase.cachedProject);
+        expect(document.body.textContent).not.toContain(testCase.cachedSessionId);
+
+        if (testCase.accountAfterFailure) {
+          account = testCase.accountAfterFailure;
+          await act(async () => { fireEvent(window, new Event('focus')); });
+          expect(channels).not.toHaveBeenCalled();
+          expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
+          expect(document.body.textContent).not.toContain(testCase.cachedSessionId);
+        }
+
+        fail = false;
+        roots = [row('revalidated-root')];
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'retry the session list' })); });
+        await screen.findByRole('link', { name: 'title revalidated-root' });
+        await waitFor(() => expect(channels.mock.calls.length).toBeGreaterThan(0));
+        expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
+        expect(screen.getByRole('searchbox', { name: 'search sessions' })).toBeInTheDocument();
       }
       if (testCase.name === 'overlapping-refresh-does-not-race') {
         delayed = deferred<Response>(); delayFilter = 'all';
