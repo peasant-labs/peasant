@@ -107,26 +107,60 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 		return
 	}
 	creds := h.signedIn()
+	publications, err := h.localPublications(r.Context(), ids, scope, creds)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "Publication state could not be read: "+err.Error()+"; no rows returned; inspect the store and retry.", "")
+		return
+	}
+	var client *village.VillageClient
+	for i := range publications {
+		row := &publications[i]
+		if include != publicationsIncludeAudience || row.TranscriptID == nil {
+			continue
+		}
+		if client == nil {
+			client = village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
+		}
+		audience, err := publicationAudience(r.Context(), client, *row.TranscriptID)
+		var refusal *village.StatusError
+		if errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
+			writeAPIError(w, http.StatusBadGateway, "Village no longer holds transcript "+row.TranscriptID.String()+" for session "+row.SessionID+". Nothing was returned. Run 'peasant village push --force' choosing only this session, or omit include=audience, then retry.", villageTranscriptMissingCode)
+			return
+		}
+		if err != nil {
+			writeAPIError(w, http.StatusBadGateway, "Publication audience could not be read from Village: "+err.Error()+". Nothing was returned. Check the connection or omit include=audience, then retry.", villageUnreachableCode)
+			return
+		}
+		row.Audience = &audience
+	}
+	response := schema.LocalPublicationsResponse{Publications: publications}
+	if err := response.Validate(); err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			"The publication state breaks the Local API contract, so it is not returned: "+err.Error()+". Retry; if the failure repeats, inspect the Peasant store.",
+			publishingContractBreachCode)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// localPublications is shared by the by-ID deep-link read and bounded Home
+// pages. The caller supplies selection membership; no audience HTTP runs here.
+func (h *publishingHandler) localPublications(ctx context.Context, ids []string, scope map[string]bool, creds *auth.Credentials) ([]schema.LocalPublication, error) {
+	var err error
 	receipts := map[string]store.PublicationRecord{}
 	attempts := map[string]store.PublicationAttemptDiagnostic{}
 	if creds != nil {
-		if receipts, err = h.store.SessionPublications(r.Context(), creds.VillageURL, creds.UserID, ids); err == nil {
-			attempts, err = h.store.SessionPublicationAttempts(r.Context(), creds.VillageURL, creds.UserID, ids)
+		if receipts, err = h.store.SessionPublications(ctx, creds.VillageURL, creds.UserID, ids); err == nil {
+			attempts, err = h.store.SessionPublicationAttempts(ctx, creds.VillageURL, creds.UserID, ids)
 		}
 		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError,
-				"The publication state could not be read from the local store: "+err.Error()+". Nothing was returned. Retry; if the failure repeats, inspect the Peasant store.",
-				"")
-			return
+			return nil, err
 		}
 	}
 
-	dirs, err := h.store.SessionDirectories(r.Context(), ids)
+	dirs, err := h.store.SessionDirectories(ctx, ids)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError,
-			"The publication state could not be read from the local store: "+err.Error()+". Nothing was returned. Retry; if the failure repeats, inspect the Peasant store.",
-			"")
-		return
+		return nil, err
 	}
 	// A hook push applies the saved selection, so a session the selection
 	// leaves out is never published by a hook, whatever is installed.
@@ -134,38 +168,12 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 	// repository once, and each repository's hooks are read once. A hook push
 	// publishes nothing for a session a paused rule covers, and nothing at all
 	// while the rules cannot be read.
-	rules, rulesErr := autopublish.Load(autopublish.Path(defaults.ResolveConfigDirPathWith(h.configHome)))
-	remotes := slices.ContainsFunc(rules, func(rule autopublish.Rule) bool { return rule.Kind == schema.AutoPublishRuleRemote })
-	lifecycle := githooks.New(githooks.NewExecGit())
-	git := &ingest.ExecGitResolver{}
-	byDir := map[string]bool{}
-	uploads := map[string]bool{}
-	autoPublishes := func(dir string) bool {
-		if rulesErr != nil || dir == "" {
-			return false
-		}
-		if known, ok := byDir[dir]; ok {
-			return known
-		}
-		publishes := false
-		if repo, err := autopublish.Resolve(r.Context(), git, dir, remotes); err == nil {
-			decision := autopublish.Decide(rules, repo)
-			if _, known := uploads[repo.Root]; !known {
-				events := make([]githooks.Event, len(decision.Events))
-				for i, event := range decision.Events {
-					events[i] = githooks.Event(event)
-				}
-				uploads[repo.Root] = lifecycle.Uploads(r.Context(), repo.Root, events)
-			}
-			publishes = uploads[repo.Root] && decision.Outcome() != autopublish.Paused
-		}
-		byDir[dir] = publishes
-		return publishes
-	}
-
-	var client *village.VillageClient
+	autoPublishes := h.autoPublicationChecker(ctx)
 	publications := make([]schema.LocalPublication, 0, len(ids))
 	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		inSelection, stored := scope[id]
 		if !stored {
 			continue
@@ -182,37 +190,42 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 			row.TranscriptID = &transcriptID
 			row.TranscriptURL = record.Receipt.TranscriptURL
 			row.PublishedAt = &publishedAt
-			if include == publicationsIncludeAudience {
-				if client == nil {
-					client = village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
-				}
-				audience, err := publicationAudience(r.Context(), client, transcriptID)
-				var refusal *village.StatusError
-				if errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
-					writeAPIError(w, http.StatusBadGateway,
-						"Village no longer holds transcript "+transcriptID.String()+", which this computer's receipt names for session "+id+", for example because it was deleted on Village. Nothing was returned. Run 'peasant village push --force' choosing only this session to publish it again, or omit include=audience, then retry.",
-						villageTranscriptMissingCode)
-					return
-				}
-				if err != nil {
-					writeAPIError(w, http.StatusBadGateway,
-						"The publication state could not name who can read transcript "+transcriptID.String()+" because Village could not be read: "+err.Error()+". Nothing was returned. Check the connection to Village, or omit include=audience, then retry.",
-						villageUnreachableCode)
-					return
-				}
-				row.Audience = &audience
-			}
 		}
 		publications = append(publications, row)
 	}
-	response := schema.LocalPublicationsResponse{Publications: publications}
-	if err := response.Validate(); err != nil {
-		writeAPIError(w, http.StatusInternalServerError,
-			"The publication state breaks the Local API contract, so it is not returned: "+err.Error()+". Retry; if the failure repeats, inspect the Peasant store.",
-			publishingContractBreachCode)
-		return
+	return publications, nil
+}
+
+func (h *publishingHandler) autoPublicationChecker(ctx context.Context) func(string) bool {
+	rules, rulesErr := autopublish.Load(autopublish.Path(defaults.ResolveConfigDirPathWith(h.configHome)))
+	remotes := slices.ContainsFunc(rules, func(rule autopublish.Rule) bool { return rule.Kind == schema.AutoPublishRuleRemote })
+	lifecycle := githooks.New(githooks.NewExecGit())
+	git := &ingest.ExecGitResolver{}
+	byDir := map[string]bool{}
+	uploads := map[string]bool{}
+	return func(dir string) bool {
+		if rulesErr != nil || dir == "" {
+			return false
+		}
+		if known, ok := byDir[dir]; ok {
+			return known
+		}
+		publishes := false
+		if repo, err := autopublish.Resolve(ctx, git, dir, remotes); err == nil {
+			decision := autopublish.Decide(rules, repo)
+			if _, known := uploads[repo.Root]; !known {
+				events := make([]githooks.Event, len(decision.Events))
+				for i, event := range decision.Events {
+					events[i] = githooks.Event(event)
+				}
+				uploads[repo.Root] = lifecycle.Uploads(ctx, repo.Root, events)
+			}
+			publishes = uploads[repo.Root] && decision.Outcome() != autopublish.Paused
+		}
+		byDir[dir] = publishes
+		return publishes
 	}
-	_ = json.NewEncoder(w).Encode(response)
+
 }
 
 // publicationAudience lists the collectives that can read the transcript, or

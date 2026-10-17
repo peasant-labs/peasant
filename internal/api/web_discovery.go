@@ -180,6 +180,9 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 	byPath := map[string]preparedWebDiscoveryIdentity{}
 	for i := range rows {
 		raw := rows[i].GitWorktree
+		if err := ctx.Err(); err != nil {
+			return nil, nil, nil, err
+		}
 		if raw == "" {
 			prepared[i] = unavailableWebDiscoveryIdentity(rows[i])
 			continue

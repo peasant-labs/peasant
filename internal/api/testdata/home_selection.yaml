@@ -1,0 +1,17 @@
+requiredNames: [clone-and-branch, ambiguous-remote-with-nonpushable-clone, branch-mismatch, explicit-session-does-not-widen]
+cases:
+  - name: clone-and-branch
+    clone: true
+    branch: main
+    ids: [session-linked-feature, session-selected-main]
+  - name: ambiguous-remote-with-nonpushable-clone
+    dropIndependentMetrics: true
+    branch: main
+    ids: []
+  - name: branch-mismatch
+    clone: true
+    branch: missing-branch
+    ids: []
+  - name: explicit-session-does-not-widen
+    explicit: session-selected-main
+    ids: [session-selected-main]

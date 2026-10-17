@@ -511,6 +511,18 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 			if len(got.Publications) != 1 || got.Publications[0].AutoPublish != c.Expect {
 				t.Fatalf("publications: %+v; expected autoPublish=%v", got.Publications, c.Expect)
 			}
+			var home schema.LocalHomeSessionsPage
+			world.decode(t, http.MethodGet, defaults.RouteHomeSessions.String(), &home)
+			if len(home.Rows) != 1 || home.Rows[0].Sync.ID != recordedInsideSessionID || home.Rows[0].Publication.AutoPublish != c.Expect {
+				t.Fatalf("Home ordinary page disagrees with canonical hook projection: %+v", home.Rows)
+			}
+			var automatic schema.LocalHomeSessionsPage
+			world.decode(t, http.MethodGet, defaults.RouteHomeSessions.String()+"?publication=auto", &automatic)
+			missingAutomatic := c.Expect && (len(automatic.Rows) != 1 || automatic.Rows[0].Sync.ID != recordedInsideSessionID)
+			unexpectedAutomatic := !c.Expect && len(automatic.Rows) != 0
+			if missingAutomatic || unexpectedAutomatic {
+				t.Fatalf("Home explicit auto filter disagrees with canonical hook decision: %+v; expected=%v", automatic.Rows, c.Expect)
+			}
 			if raw := prePushHook(t, world.recorded); raw == nil {
 				t.Fatal("binding deletion must retain hook bytes")
 			}

@@ -63,6 +63,9 @@ func (s *Store) SyncParentIdentities(ctx context.Context, sessions []ingest.Push
 	err = sqlitex.ExecuteTransient(conn, `SELECT session_id,json_extract(metadata_json,'$.parentUuid')
 FROM session_publication_metadata WHERE json_extract(metadata_json,'$.parentUuid') IS NOT NULL`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			snapshots[stmt.ColumnText(0)] = stmt.ColumnText(1)
 			return nil
 		},
@@ -72,6 +75,9 @@ FROM session_publication_metadata WHERE json_extract(metadata_json,'$.parentUuid
 	}
 	rows := make([]ParentIdentityRow, 0, len(sessions))
 	for start := 0; start < len(sessions); start += indexFormatReadBatchSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		selected := sessions[start:min(start+indexFormatReadBatchSize, len(sessions))]
 		args := make([]any, len(selected))
 		placeholders := make([]string, len(selected))
@@ -86,6 +92,9 @@ FROM session_publication_metadata WHERE json_extract(metadata_json,'$.parentUuid
 		}
 		seen := make(map[string]bool)
 		err := sqlitex.ExecuteTransient(conn, syncParentEvidenceQuery+strings.Join(placeholders, ",")+syncParentEvidenceJoins, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			row := ParentIdentityRow{SessionID: stmt.ColumnText(0), ParentIdentity: stmt.ColumnText(1), ParentUnresolved: stmt.ColumnInt(2) != 0}
 			// Snapshot/cache fallback is reachable only when BOTH generation
 			// evidence arms are silent, never when authority supplied an
