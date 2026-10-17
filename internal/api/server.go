@@ -250,8 +250,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	if identityResolver == nil {
 		identityResolver = ingest.NewGitRepositoryIdentityResolver()
 	}
-	hh := &homeHandler{reader: homeStore, sync: sh, publishing: ph, resolver: identityResolver}
-	mux.HandleFunc("GET "+defaults.RouteHomeSessions.String(), hh.handleSessions)
+	sh.home = &homeHandler{reader: homeStore, sync: sh, publishing: ph, resolver: identityResolver}
 	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
 
 	// Auto-publish rules: save or remove a rule, and install its hooks in one

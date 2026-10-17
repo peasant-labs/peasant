@@ -17,26 +17,27 @@ receipts:
 cases:
   - name: historical-project-receipt
     origin: https://village.example
-    query: publication=published&limit=1
+    query: publication=published&maxItems=1
     ids: [sess_a]
     states: [published]
     transcript: '22222222-2222-4222-8222-222222222222'
-    next: 1
+    next: true
   - name: unpublished-filter-before-page
     origin: https://village.example
-    query: publication=not-published&limit=1
+    query: publication=not-published&maxItems=1
     ids: [sess_b]
     states: [unpublished]
+    next: true
   - name: signed-out
     query: publication=published
     ids: []
     states: []
   - name: other-origin
     origin: https://absent.example
-    query: publication=not-published&limit=1
+    query: publication=not-published&maxItems=1
     ids: [sess_a]
     states: [unpublished]
-    next: 1
+    next: true
   - name: published-parent-unpublished-child
     origin: https://village.example
     query: parentSessionId=sess_a
@@ -44,15 +45,16 @@ cases:
     states: [unpublished]
   - name: poison-on-page-refuses
     origin: https://village.example
-    query: publication=published&limit=1&offset=1
+    query: publication=published&maxItems=1
+    second: true
     status: 500
   - name: current-project-filter
     origin: https://village.example
-    query: publication=published&limit=1&projectHash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    query: publication=published&maxItems=1&projectHash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     ids: [sess_a]
     states: [published]
     transcript: '22222222-2222-4222-8222-222222222222'
-    next: 1
+    next: true
   - name: historical-receipt-is-not-current-project
     origin: https://village.example
     query: publication=published&projectHash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

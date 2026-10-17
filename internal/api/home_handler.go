@@ -1,26 +1,32 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"net/url"
 	"sort"
-	"strconv"
+	"strings"
 
+	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
 
 type homeReader interface {
 	ingest.PublicationMetadataReader
-	HomeCandidates(context.Context, string, string) ([]store.HomeCandidate, error)
+	HomeIdentityCohort(context.Context) ([]store.HomeCandidate, error)
+	SyncHomeWindow(context.Context, *store.SyncPageBoundary, int, store.SyncWindowFilter) (store.SyncCandidateWindow, error)
 	HomePageRows(context.Context, []string) ([]store.HomePageRow, error)
 	SyncParentIdentities(context.Context, []ingest.PushSessionRow) ([]store.ParentIdentityRow, error)
 	FirstUserMessageBulk(context.Context, []string) (map[string]string, error)
@@ -36,113 +42,166 @@ type homeHandler struct {
 	resolver   ingest.RepositoryIdentityResolver
 }
 
-func parseHomeQuery(values url.Values) (schema.LocalHomeSessionsQuery, error) {
-	q := schema.LocalHomeSessionsQuery{}
-	for key, list := range values {
-		if len(list) != 1 {
-			return q, fmt.Errorf("query %s repeats; supply it once", key)
-		}
-		v := list[0]
-		switch key {
-		case "limit", "offset":
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				return q, fmt.Errorf("query %s must be an integer: %w", key, err)
-			}
-			if key == "limit" {
-				q.Limit = &n
-			} else {
-				q.Offset = &n
-			}
-		case "parentSessionId":
-			q.ParentSessionID = &v
-		case "projectHash":
-			hash, err := schema.NewProjectHash(v)
-			if err != nil {
-				return q, err
-			}
-			q.ProjectHash = &hash
-		case "publication":
-			filter := schema.LocalHomePublicationFilter(v)
-			q.Publication = &filter
-		default:
-			return q, fmt.Errorf("unknown Home query %q; use limit, offset, parentSessionId, projectHash or publication", key)
-		}
-	}
-	return q, q.Validate()
+const syncPageScopeCode = "sync_page_scope_changed"
+const syncPageTokenCode = "sync_page_token_invalid"
+
+type syncPageError struct{ code, message string }
+
+func (e *syncPageError) Error() string { return e.message }
+func pageTokenError(code, reason string) error {
+	return &syncPageError{code: code, message: "api.syncHomePageReader.ReadPage: " + reason + "; no page is usable; discard continuation and restart the sync Home traversal"}
 }
 
-func (h *homeHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	q, err := parseHomeQuery(r.URL.Query())
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "Home page query rejected before reading sessions: "+err.Error()+"; correct the query and retry.", "home_query_invalid")
-		return
-	}
-	if h.reader == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "Home sessions cannot be read because the local store is unavailable; start Peasant with its normal store and retry.", "home_unavailable")
-		return
-	}
-	page, status, err := h.page(r.Context(), q)
-	if err != nil {
-		if status == http.StatusNotFound {
-			writeAPIError(w, status, "Home children could not be listed because the parent is unknown or outside the saved selection; choose a visible parent and retry.", "home_parent_not_found")
-			return
-		}
-		writeDiscoveryError(w, "Home sessions could not be read; no page returned; retry or inspect the store", err)
-		return
-	}
-	if err := page.Validate(); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "Home page violates the Local API contract: "+err.Error()+"; no page returned; inspect the store and retry.", "home_contract_breach")
-		return
-	}
-	_ = json.NewEncoder(w).Encode(page)
+// The token is an opaque order position and scope digest, not a credential.
+// No private path, API key, server-side cursor or snapshot is retained.
+type syncPageToken struct {
+	Version int    `json:"v"`
+	Scope   string `json:"scope"`
+	StartMs int64  `json:"startMs"`
+	ID      string `json:"id"`
 }
 
-func (h *homeHandler) page(ctx context.Context, q schema.LocalHomeSessionsQuery) (schema.LocalHomeSessionsPage, int, error) {
-	limit, offset := 25, 0
-	if q.Limit != nil {
-		limit = *q.Limit
+type syncHomePageReader struct {
+	db         homeReader
+	query      schema.LocalSyncSessionsQuery
+	config     *config.Config
+	publishing *publishingHandler
+	account    *auth.Credentials
+	resolver   ingest.RepositoryIdentityResolver
+	scope      string
+}
+
+var _ schema.PageReader[schema.LocalSyncSessionRow] = (*syncHomePageReader)(nil)
+
+func (h *homeHandler) newReader(q schema.LocalSyncSessionsQuery) *syncHomePageReader {
+	r := &syncHomePageReader{db: h.reader, query: q, config: h.sync.currentConfig(), publishing: h.publishing, account: h.publishing.signedIn(), resolver: h.resolver}
+	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
+	if r.config != nil {
+		selection = r.config.Selection
 	}
-	if q.Offset != nil {
-		offset = *q.Offset
+	filter := schema.LocalSyncPublicationAll
+	if q.Publication != nil {
+		filter = *q.Publication
 	}
-	page := schema.LocalHomeSessionsPage{Rows: make([]schema.LocalHomeSessionRow, 0), Limit: limit, Offset: offset}
-	creds := h.publishing.signedIn()
-	origin, owner := "", ""
-	if creds != nil {
-		origin, owner = creds.VillageURL, creds.UserID
+	origin, owner := r.accountScope()
+	// Immutable request configuration, including canonical selection. MaxItems
+	// is intentionally absent, so callers can change their page size.
+	encoded, _ := json.Marshal(struct {
+		Resource, Order, Parent, Project, Publication, Origin, Owner string
+		Selection                                                    config.SelectionConfig
+	}{"sync/home", "start-desc-id-asc/v1", value(q.ParentSessionID), projectValue(q.ProjectHash), filter.String(), origin, owner, selection})
+	sum := sha256.Sum256(encoded)
+	r.scope = hex.EncodeToString(sum[:])
+	return r
+}
+func projectValue(p *schema.ProjectHash) string {
+	if p == nil {
+		return ""
 	}
-	cohort, err := h.reader.HomeCandidates(ctx, origin, owner)
+	return p.String()
+}
+func (r *syncHomePageReader) accountScope() (string, string) {
+	if r.account == nil {
+		return "", ""
+	}
+	return r.account.VillageURL, r.account.UserID
+}
+
+func (r *syncHomePageReader) boundary(token schema.PageToken) (*store.SyncPageBoundary, error) {
+	if token == "" {
+		return nil, nil
+	}
+	if len(token) > 4096 {
+		return nil, pageTokenError(syncPageTokenCode, "pageToken exceeds 4096 bytes")
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(string(token))
 	if err != nil {
-		return page, 0, err
+		return nil, pageTokenError(syncPageTokenCode, "pageToken is not valid base64url")
 	}
-	cfg := h.sync.currentConfig()
-	policy, err := syncSelectionPolicy(cfg)
+	var decoded struct {
+		Version *int    `json:"v"`
+		Scope   *string `json:"scope"`
+		StartMs *int64  `json:"startMs"`
+		ID      *string `json:"id"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, pageTokenError(syncPageTokenCode, "pageToken shape is malformed")
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, pageTokenError(syncPageTokenCode, "pageToken contains trailing values")
+	}
+	missingScope := decoded.Version == nil || decoded.Scope == nil
+	missingBoundary := decoded.StartMs == nil || decoded.ID == nil
+	if missingScope || missingBoundary {
+		return nil, pageTokenError(syncPageTokenCode, "pageToken is missing its order boundary or scope")
+	}
+	badIDLength := len(*decoded.ID) == 0 || len(*decoded.ID) > 1024
+	badIDText := strings.TrimSpace(*decoded.ID) != *decoded.ID || strings.ContainsAny(*decoded.ID, "/\\\x00\r\n")
+	if *decoded.Version != 1 || badIDLength || badIDText {
+		return nil, pageTokenError(syncPageTokenCode, "pageToken version or boundary is unsupported")
+	}
+	scopeBytes, err := hex.DecodeString(*decoded.Scope)
+	if err != nil || len(scopeBytes) != sha256.Size {
+		return nil, pageTokenError(syncPageTokenCode, "pageToken scope digest is malformed")
+	}
+	canonical, _ := json.Marshal(syncPageToken{Version: *decoded.Version, Scope: *decoded.Scope, StartMs: *decoded.StartMs, ID: *decoded.ID})
+	if !bytes.Equal(raw, canonical) {
+		return nil, pageTokenError(syncPageTokenCode, "pageToken encoding or shape is unsupported")
+	}
+	if *decoded.Scope != r.scope {
+		return nil, pageTokenError(syncPageScopeCode, "pageToken scope no longer matches selection, account, parent, project or publication filter")
+	}
+	return &store.SyncPageBoundary{StartMs: *decoded.StartMs, ID: *decoded.ID}, nil
+}
+func (r *syncHomePageReader) token(boundary store.SyncPageBoundary) schema.PageToken {
+	raw, _ := json.Marshal(syncPageToken{Version: 1, Scope: r.scope, StartMs: boundary.StartMs, ID: boundary.ID})
+	return schema.PageToken(base64.RawURLEncoding.EncodeToString(raw))
+}
+
+// syncHomeCohort is per-read metadata only. Complete clone multiplicity and
+// exact ancestry/counts remain explicit O(N) work, separate from window paging.
+type syncHomeCohort struct {
+	rows     map[string]store.HomeCandidate
+	visible  map[string]bool
+	parents  map[string]store.ParentIdentityRow
+	children map[string]int
+}
+
+func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error) {
+	c := syncHomeCohort{rows: map[string]store.HomeCandidate{}, visible: map[string]bool{}, parents: map[string]store.ParentIdentityRow{}, children: map[string]int{}}
+	rows, err := r.db.HomeIdentityCohort(ctx)
 	if err != nil {
-		return page, 0, err
+		return c, err
+	}
+	policy, err := syncSelectionPolicy(r.config)
+	if err != nil {
+		return c, err
 	}
 	mode, matcher, err := policy.ProjectionInputs()
 	if err != nil {
-		return page, 0, err
-	}
-	identityRows := make([]store.SessionRow, len(cohort))
-	for i := range cohort {
-		identityRows[i] = cohort[i].Identity
+		return c, err
 	}
 	var prepared []preparedWebDiscoveryIdentity
 	var remotes, names []ingest.DiscoveryIdentityMultiplicity
 	if mode != config.SelectionModeAll {
-		prepared, remotes, names, err = prepareWebDiscoveryIdentities(ctx, identityRows, cfg.Selection, h.resolver)
+		identities := make([]store.SessionRow, len(rows))
+		for i, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return c, err
+			}
+			identities[i] = row.Identity
+		}
+		prepared, remotes, names, err = prepareWebDiscoveryIdentities(ctx, identities, r.config.Selection, r.resolver)
 		if err != nil {
-			return page, 0, err
+			return c, err
 		}
 	}
-	visible := make(map[string]bool, len(cohort))
-	pushRows := make([]ingest.PushSessionRow, 0, len(cohort))
-	for i, candidate := range cohort {
+	pushRows := make([]ingest.PushSessionRow, 0, len(rows))
+	for i, candidate := range rows {
 		if err := ctx.Err(); err != nil {
-			return page, 0, err
+			return c, err
 		}
 		row := candidate.Identity
 		selected := true
@@ -154,157 +213,236 @@ func (h *homeHandler) page(ctx context.Context, q schema.LocalHomeSessionsQuery)
 			case ingest.BranchMatchNo:
 				selected = false
 			default:
-				// Policy.Visible returns the canonical discovery error for a
-				// conflicting selection, preserving existing recovery status/copy.
-				_, err = policy.Visible(h.syncCandidate(row))
+				_, err = policy.Visible(syncVisibilityCandidate(ingest.PushSessionRow{SessionID: row.SessionID, ModelHarness: row.ModelHarness, GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ProjectPath: row.GitWorktree, GitBranch: row.GitBranch}))
 				if err == nil {
-					err = fmt.Errorf("Home selection matcher returned an unsupported result for %q; run peasant kickstart and retry", row.SessionID)
+					err = fmt.Errorf("api.syncHomePageReader: unsupported selection result for %q; no page returned; repair kickstart selection and retry", row.SessionID)
 				}
-				return page, 0, err
+				return c, err
 			}
 		}
+		c.rows[row.SessionID] = candidate
 		if candidate.Pushable {
-			visible[row.SessionID] = selected
+			c.visible[row.SessionID] = selected
 			pushRows = append(pushRows, ingest.PushSessionRow{SessionID: row.SessionID, ParentID: value(row.ParentID)})
 		}
 	}
-	parents, err := h.reader.SyncParentIdentities(ctx, pushRows)
+	parents, err := r.db.SyncParentIdentities(ctx, pushRows)
 	if err != nil {
-		return page, 0, err
+		return c, err
 	}
-	parentByID := make(map[string]store.ParentIdentityRow, len(parents))
-	children := make(map[string]int)
 	for _, parent := range parents {
 		if err := ctx.Err(); err != nil {
-			return page, 0, err
+			return c, err
 		}
-		if _, duplicate := parentByID[parent.SessionID]; duplicate {
-			return page, 0, fmt.Errorf("Home parent evidence repeats session %q; repair the store and retry", parent.SessionID)
+		if _, exists := c.parents[parent.SessionID]; exists {
+			return c, fmt.Errorf("api.syncHomePageReader: duplicate parent evidence for %q; no page returned; repair the store and retry", parent.SessionID)
 		}
-		parentByID[parent.SessionID] = parent
-		if visible[parent.SessionID] && !parent.ParentUnresolved && parent.ParentIdentity != "" {
-			children[parent.ParentIdentity]++
+		c.parents[parent.SessionID] = parent
+		if c.visible[parent.SessionID] && !parent.ParentUnresolved && parent.ParentIdentity != "" {
+			c.children[parent.ParentIdentity]++
 		}
 	}
-	if q.ParentSessionID != nil && !visible[*q.ParentSessionID] {
-		return page, http.StatusNotFound, fmt.Errorf("parent not visible")
+	return c, nil
+}
+func (c syncHomeCohort) matches(id, parent string) bool {
+	if !c.visible[id] {
+		return false
 	}
-	filter := schema.LocalHomePublicationAll
-	if q.Publication != nil {
-		filter = *q.Publication
+	p, ok := c.parents[id]
+	return ok && !p.ParentUnresolved && p.ParentIdentity == parent
+}
+
+func (r *syncHomePageReader) ReadPage(ctx context.Context, request schema.PageRequest) (schema.Page[schema.LocalSyncSessionRow], error) {
+	page := schema.Page[schema.LocalSyncSessionRow]{Items: make([]schema.LocalSyncSessionRow, 0)}
+	if request.MaxItems < 0 {
+		return page, pageTokenError(syncPageTokenCode, "MaxItems is negative; supply zero/default or a positive maximum")
+	}
+	maximum := request.MaxItems
+	if maximum == 0 {
+		maximum = 25
+	}
+	maximum = min(maximum, 100)
+	boundary, err := r.boundary(request.Token)
+	if err != nil {
+		return page, err
+	}
+	cohort, err := r.cohort(ctx)
+	if err != nil {
+		return page, err
+	}
+	parent := value(r.query.ParentSessionID)
+	if parent != "" && !cohort.visible[parent] {
+		return page, &syncPageError{code: "home_parent_not_found", message: "api.syncHomePageReader: parent is unknown or unselected; no child identities returned; choose a visible parent and retry"}
+	}
+	filter := schema.LocalSyncPublicationAll
+	if r.query.Publication != nil {
+		filter = *r.query.Publication
+	}
+	origin, owner := r.accountScope()
+	window, err := r.db.SyncHomeWindow(ctx, boundary, 4*maximum, store.SyncWindowFilter{ProjectHash: projectValue(r.query.ProjectHash), Origin: origin, Owner: owner, Publication: filter})
+	if err != nil {
+		return page, err
 	}
 	var auto func(string) bool
-	if filter == schema.LocalHomePublicationAuto {
-		auto = h.publishing.autoPublicationChecker(ctx)
+	if filter == schema.LocalSyncPublicationAuto {
+		auto = r.publishing.autoPublicationChecker(ctx)
 	}
-	matches := make([]store.HomeCandidate, 0)
-	for _, candidate := range cohort {
+	ids := make([]string, 0, maximum)
+	for i, candidate := range window.Candidates {
 		if err := ctx.Err(); err != nil {
-			return page, 0, err
+			return page, err
 		}
-		row := candidate.Identity
-		if !visible[row.SessionID] {
-			continue
+		if cohort.matches(candidate.ID, parent) && (auto == nil || auto(cohort.rows[candidate.ID].Identity.GitWorktree)) {
+			ids = append(ids, candidate.ID)
 		}
-		parent, ok := parentByID[row.SessionID]
-		if !ok {
-			return page, 0, fmt.Errorf("Home parent evidence missing for %q; repair the store and retry", row.SessionID)
-		}
-		if q.ParentSessionID != nil {
-			if parent.ParentUnresolved || parent.ParentIdentity != *q.ParentSessionID {
-				continue
-			}
+		// Only consumed candidates advance traversal. An empty/short eligible
+		// page can continue through the next raw metadata window.
+		if i+1 < len(window.Candidates) || window.More {
+			page.Next = r.token(candidate)
 		} else {
-			if parent.ParentUnresolved || parent.ParentIdentity != "" {
-				continue
-			}
-			if q.ProjectHash != nil && row.ProjectHash != q.ProjectHash.String() {
-				continue
-			}
-			wrongPublished := filter == schema.LocalHomePublicationPublished && !candidate.Published
-			wrongUnpublished := filter == schema.LocalHomePublicationNotPublished && candidate.Published
-			if wrongPublished || wrongUnpublished {
-				continue
-			}
-			if auto != nil && !auto(row.GitWorktree) {
-				continue
-			}
+			page.Next = ""
 		}
-		matches = append(matches, candidate)
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		a, b := matches[i].Identity, matches[j].Identity
-		if a.StartMs != b.StartMs {
-			return a.StartMs > b.StartMs
+		if len(ids) == maximum {
+			break
 		}
-		return a.SessionID < b.SessionID
-	})
-	if err := ctx.Err(); err != nil {
-		return page, 0, err
 	}
-	if offset >= len(matches) {
-		return page, 0, nil
+	if len(ids) == 0 {
+		return page, nil
 	}
-	end := offset + min(limit, len(matches)-offset)
-	if end < len(matches) {
-		page.NextOffset = &end
-	}
-	ids := make([]string, 0, end-offset)
-	scope := make(map[string]bool, end-offset)
-	for _, candidate := range matches[offset:end] {
-		id := candidate.Identity.SessionID
-		ids = append(ids, id)
-		scope[id] = true
-	}
-	rows, err := h.reader.HomePageRows(ctx, ids)
+	page.Items, err = r.hydrate(ctx, ids, cohort)
+	return page, err
+}
+
+func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort syncHomeCohort) ([]schema.LocalSyncSessionRow, error) {
+	rows, err := r.db.HomePageRows(ctx, ids)
 	if err != nil {
-		return page, 0, err
+		return nil, err
 	}
 	byID := make(map[string]store.HomePageRow, len(rows))
 	hydrated := make([]ingest.PushSessionRow, 0, len(rows))
+	scope := map[string]bool{}
 	for _, row := range rows {
 		byID[row.Sync.SessionID] = row
 		hydrated = append(hydrated, row.Sync)
+		scope[row.Sync.SessionID] = true
 	}
-	metadata, err := push.LoadPublicationMetadata(ctx, h.reader, hydrated)
+	metadata, err := push.LoadPublicationMetadata(ctx, r.db, hydrated)
 	if err != nil {
-		return page, 0, err
+		return nil, err
 	}
-	previews, err := h.reader.FirstUserMessageBulk(ctx, ids)
+	previews, err := r.db.FirstUserMessageBulk(ctx, ids)
 	if err != nil {
-		return page, 0, err
+		return nil, err
 	}
-	evidence, err := h.reader.GroupingEvidenceForSessions(ctx, ids)
+	evidence, err := r.db.GroupingEvidenceForSessions(ctx, ids)
 	if err != nil {
-		return page, 0, err
+		return nil, err
 	}
-	publications, err := h.publishing.localPublications(ctx, ids, scope, creds)
+	publications, err := r.publishing.localPublications(ctx, ids, scope, r.account)
 	if err != nil {
-		return page, 0, err
+		return nil, err
 	}
-	publicationByID := make(map[string]schema.LocalPublication, len(publications))
+	publicationByID := map[string]schema.LocalPublication{}
 	for _, p := range publications {
 		publicationByID[p.SessionID] = p
 	}
+	items := make([]schema.LocalSyncSessionRow, 0, len(ids))
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
-			return page, 0, err
+			return nil, err
 		}
 		row, ok := byID[id]
 		if !ok {
-			return page, 0, fmt.Errorf("Home page session %q changed while reading; refresh the page", id)
+			return nil, fmt.Errorf("api.syncHomePageReader: session %q changed during hydration; no page returned; restart traversal", id)
 		}
-		input := metadata[id]
-		status, hold := computeSyncStatus(row.Sync, false, push.PublicationMetadataReady(input))
-		_, summary, err := buildSyncGroupedRow(syncSessionEntry{row: row.Sync, status: status, hold: hold, identity: parentByID[id]}, evidence[id], previews[id])
+		status, hold := computeSyncStatus(row.Sync, false, push.PublicationMetadataReady(metadata[id]))
+		_, summary, err := buildSyncGroupedRow(syncSessionEntry{row: row.Sync, status: status, hold: hold, identity: cohort.parents[id]}, evidence[id], previews[id])
 		if err != nil {
-			return page, 0, err
+			return nil, err
 		}
-		page.Rows = append(page.Rows, schema.LocalHomeSessionRow{Sync: summary, Publication: publicationByID[id], Title: row.Title, Preview: previews[id], ChildCount: children[id]})
+		items = append(items, schema.LocalSyncSessionRow{Sync: summary, Publication: publicationByID[id], Title: row.Title, Preview: previews[id], ChildCount: cohort.children[id]})
 	}
-	return page, 0, nil
+	return items, nil
 }
 
-func (h *homeHandler) syncCandidate(row store.SessionRow) sessionvisibility.Candidate {
-	return syncVisibilityCandidate(ingest.PushSessionRow{SessionID: row.SessionID, ModelHarness: row.ModelHarness, GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ProjectPath: row.GitWorktree, GitBranch: row.GitBranch})
+func (r *syncHomePageReader) projectOptions(ctx context.Context) (schema.LocalSyncProjectOptions, error) {
+	options := schema.LocalSyncProjectOptions{Projects: make([]schema.LocalSyncProjectOption, 0)}
+	cohort, err := r.cohort(ctx)
+	if err != nil {
+		return options, err
+	}
+	seen := map[string]bool{}
+	for id, candidate := range cohort.rows {
+		if err := ctx.Err(); err != nil {
+			return options, err
+		}
+		row := candidate.Identity
+		if !cohort.matches(id, "") || seen[row.ProjectHash] {
+			continue
+		}
+		hash, err := schema.NewProjectHash(row.ProjectHash)
+		if err != nil {
+			return options, err
+		}
+		seen[row.ProjectHash] = true
+		options.Projects = append(options.Projects, schema.LocalSyncProjectOption{ProjectHash: hash, ProjectName: row.ProjectName})
+	}
+	sort.Slice(options.Projects, func(i, j int) bool {
+		a, b := options.Projects[i], options.Projects[j]
+		if a.ProjectName != b.ProjectName {
+			return a.ProjectName < b.ProjectName
+		}
+		return a.ProjectHash < b.ProjectHash
+	})
+	if err := ctx.Err(); err != nil {
+		return options, err
+	}
+	return options, options.Validate()
+}
+
+func (h *homeHandler) handleSessions(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+	query, err := schema.ParseLocalSyncSessionsQuery(req.URL.Query())
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "sync_page_query_invalid")
+		return
+	}
+	for name := range req.URL.Query() {
+		switch name {
+		case "view", "maxItems", "pageToken", "parentSessionId", "projectHash", "publication":
+		default:
+			writeAPIError(w, http.StatusBadRequest, "api.syncHomePageReader: unknown query field "+name+"; no page returned; use the published sync view query fields", "sync_page_query_invalid")
+			return
+		}
+	}
+	if h.reader == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "api.syncHomePageReader: store unavailable; no page returned; start Peasant with its normal store and retry", "sync_page_unavailable")
+		return
+	}
+	r := h.newReader(query)
+	var result any
+	if query.View == "project-options" {
+		result, err = r.projectOptions(req.Context())
+	} else {
+		var page schema.LocalSyncSessionPage
+		page, err = r.ReadPage(req.Context(), query.PageRequest())
+		if err == nil {
+			err = page.Validate()
+		}
+		result = page
+	}
+	if err != nil {
+		var refusal *syncPageError
+		if errors.As(err, &refusal) {
+			status := http.StatusBadRequest
+			if refusal.code == "home_parent_not_found" {
+				status = http.StatusNotFound
+			}
+			writeAPIError(w, status, err.Error(), refusal.code)
+			return
+		}
+		writeDiscoveryError(w, "sync Home projection failed", err)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(result)
 }
