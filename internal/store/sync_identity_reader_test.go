@@ -19,13 +19,14 @@ var pushIdentityYAML []byte
 var pushIdentityManifestYAML []byte
 
 type pushIdentityCase struct {
-	Name             string `yaml:"name"`
-	Kind             string `yaml:"kind"`
-	State            string `yaml:"state"`
-	Target           string `yaml:"target"`
-	Snapshot         string `yaml:"snapshot"`
-	Cache            string `yaml:"cache"`
-	InactiveEvidence bool   `yaml:"inactiveEvidence"`
+	Name                string `yaml:"name"`
+	Kind                string `yaml:"kind"`
+	State               string `yaml:"state"`
+	Target              string `yaml:"target"`
+	Snapshot            string `yaml:"snapshot"`
+	Cache               string `yaml:"cache"`
+	InactiveEvidence    bool   `yaml:"inactiveEvidence"`
+	PoisonOtherSnapshot bool   `yaml:"poisonOtherSnapshot"`
 	// LatestAttempt puts the case's evidence generation in the session's latest
 	// attempt instead of its active generation, so the identity lane must
 	// consult the shared generation scope rather than the active generation
@@ -77,6 +78,14 @@ func TestSyncParentIdentities(t *testing.T) {
 			}
 			exec(`INSERT OR IGNORE INTO session_metrics(session_id) VALUES ('sess_child')`)
 			exec(`DELETE FROM session_metrics WHERE session_id='sess_cacheparent'`)
+			if tc.PoisonOtherSnapshot {
+				// Model an unrelated corrupt snapshot. A subset parent read must
+				// neither parse it nor widen its requested session IDs.
+				exec(`DROP INDEX idx_session_publication_parent_uuid`)
+				exec(`PRAGMA ignore_check_constraints=ON`)
+				exec(`INSERT INTO session_publication_metadata(session_id,capture_revision,schema_version,metadata_json,metadata_hash,content_hash,captured_at) VALUES('sess_cacheparent',1,1,'not-json',?,?,1)`, hash, hash)
+				exec(`PRAGMA ignore_check_constraints=OFF`)
+			}
 			exec(`UPDATE sessions SET active_generation_id='active', parent_id=NULLIF(?, '') WHERE session_id='sess_child'`, tc.Cache)
 			if tc.LatestAttempt {
 				// The evidence generation is the session's only generation: no

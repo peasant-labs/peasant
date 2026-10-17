@@ -1,4 +1,5 @@
 requiredNames:
+  - subset-skips-unrequested-snapshot
   - evidence-known-child
   - evidence-known-retained
   - explicit-none-despite-snapshot-and-cache

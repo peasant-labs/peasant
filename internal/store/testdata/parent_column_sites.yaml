@@ -45,6 +45,16 @@
 # and the exact-set assertion fails if the move is half-done in either
 # direction.
 residual:
+  - name: store-home-identity-parent-cache
+    file: internal/store/home_reader.go
+    declaration: Store.HomeIdentityCohort
+    literals: 1
+    class: availability
+    reason: >-
+      The narrow identity cohort carries the cache only as input to
+      SyncParentIdentities. The shared identity reader applies generation and
+      snapshot authority before this last fallback; candidate root/child
+      membership and child counts never use the cache directly.
   - name: store-logical-parent-renderer
     file: internal/store/parent_reader.go
     declaration: LogicalParentSQL
