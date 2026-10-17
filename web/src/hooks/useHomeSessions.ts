@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchHomeSessions, type LocalHomeSessionsPage, type LocalHomeSessionsQuery } from '@/lib/api/home';
-import { discoveryErrorCode, DiscoveryErrorCode } from '@/lib/api/errors';
+import { discoveryErrorCode, DiscoveryErrorCode, DiscoveryRequestError } from '@/lib/api/errors';
 import { fetchVillageAuth } from '@/lib/api/settings';
 
 export interface HomePages {
@@ -132,19 +132,25 @@ export function useHomeSessions(query: LocalHomeSessionsQuery, publicationRevisi
           return [parent, { pages, loading: false, error: null }] as const;
         } catch (error) {
           if (parent && target.signal.aborted) return null;
+          if (parent && error instanceof DiscoveryRequestError && error.path === '/api/v1/home/sessions'
+            && error.status === 404 && error.code === DiscoveryErrorCode.HomeParentNotFound) return null;
           throw error;
         } finally {
           if (parent && controllers.current.get(parent) === target) controllers.current.delete(parent);
         }
       }));
       if (token !== generation.current || controller.signal.aborted) return;
-      const next = new Map(state.current);
-      const stillVisible = visibleExpanded(state.current, opened.current);
-      for (const replacement of replacements) {
-        if (replacement === null) continue;
-        const [parent, group] = replacement;
-        if (parent === ROOT || stillVisible.has(parent)) next.set(parent, group);
+      // Only successful reads are current visibility evidence. In particular,
+      // collapsed/cancelled groups cannot survive a successful selection refresh.
+      const validated = new Map(replacements.filter(replacement => replacement !== null));
+      const stillVisible = visibleExpanded(validated, opened.current);
+      const next = new Map([...validated].filter(([parent]) => parent === ROOT || stillVisible.has(parent)));
+      const nextExpanded = new Set([...opened.current].filter(parent => next.has(parent)));
+      for (const [parent, pending] of controllers.current) {
+        if (parent !== 'refresh' && !next.has(parent)) { pending.abort(); controllers.current.delete(parent); }
       }
+      opened.current = nextExpanded;
+      setExpanded(nextExpanded);
       update(next);
     } catch (error) {
       if (token === generation.current && !controller.signal.aborted) {
