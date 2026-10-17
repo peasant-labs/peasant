@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createAutomaticConsentWorld, loadAutomaticConsent } from './testdata/publish-automatic-consent.mjs';
-import type { ReactNode } from 'react';
+import { useEffect, type ComponentProps, type ReactNode } from 'react';
 import { parseDocument } from 'yaml';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -9,7 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseSessionDetailPayloadValue, type SessionDetailPayload } from '@peasant-labs/schema';
 import { ProjectsRouter } from '@/app/projects/[[...segments]]/ProjectsRouter';
 import { SharePageClient } from '@/app/share/SharePageClient';
-import { PublishProvider } from '@/contexts/PublishContext';
+import { PublishProvider, usePublishState } from '@/contexts/PublishContext';
+import * as reviewAdapter from '@/lib/share/reviewMatches';
+import * as scans from '@/lib/share/redactions';
+import { boundaryDomain, boundaryResponse, REDACTION_REVIEW_BOUNDARIES } from '@/test/fixtures/redaction-review-boundaries';
+import type { PublishDialog } from '@/lib/ft-ui';
 import { transcriptHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import {
   createPublishWorld,
@@ -29,7 +33,7 @@ import {
 const FIXTURE_PATH = 'src/app/share/testdata/publish-popup-states.yaml';
 const fixtureSource = readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8');
 const fixture = loadPublishStates(fixtureSource);
-const readyScanSummary = fixture.cases.find((entry) => entry.name === 'ready-to-publish')?.expect.popup?.texts.find((text) => text.includes('matches · all redacted'));
+const readyScanSummary = fixture.cases.find((entry) => entry.name === 'ready-to-publish')?.expect.popup?.texts.find((text) => text.includes('matches, all redacted'));
 if (!readyScanSummary) throw new Error('ready-to-publish must pin the scan occurrence summary');
 
 const PROJECT_HASH = 'b'.repeat(64) as ProjectHash;
@@ -43,6 +47,14 @@ let search = '';
 const replaced: string[] = [];
 const pushed: string[] = [];
 const fetchProjectResolution = vi.fn();
+let latestDialogProps: ComponentProps<typeof PublishDialog>;
+vi.mock('@/lib/ft-ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ft-ui')>();
+  return { ...actual, PublishDialog: (props: ComponentProps<typeof PublishDialog>) => {
+    latestDialogProps = props;
+    return <actual.PublishDialog {...props} />;
+  } };
+});
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathname,
@@ -128,6 +140,165 @@ const detail: SessionDetailPayload = (() => {
 
 let sessionDetail: SessionDetailPayload | undefined = detail;
 
+describe('mounted category review boundary', () => {
+  for (const entry of REDACTION_REVIEW_BOUNDARIES) {
+    it(`${entry.name} guards publication and recovers through explicit re-scan`, async () => {
+      const ready = fixture.cases.find((row) => row.name === 'ready-to-publish')!;
+      const world = createPublishWorld(fixture, ready, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+      const respond = world.respond;
+      let response = boundaryResponse(entry.source === 'adapter' ? 'none' : entry.mutation);
+      world.respond = (request) => {
+        const result = respond(request);
+        return request.url.includes('/sync/redactions') ? { status: 200, json: response } : result;
+      };
+      installWorld(world);
+      const originalAdapter = reviewAdapter.reviewMatches;
+      const adapter = entry.source === 'adapter' ? vi.spyOn(reviewAdapter, 'reviewMatches').mockImplementation((id, redactions) => {
+        if (entry.mutation === 'none') throw new TypeError('injected conversion rejection');
+        const matches = originalAdapter(id, redactions);
+        if (matches[0]) Object.assign(matches[0], { category: 'LOCATION' });
+        return matches;
+      }) : null;
+      const mock = entry.source === 'mock' ? vi.spyOn(scans, 'fetchRedactionScan').mockResolvedValue({ redactions: boundaryDomain(entry.mutation), matchCount: 4 }) : null;
+      render(<Page><>{entry.source === 'cache' && <SeedScan mutation={entry.mutation} />}<ProjectsRouter /></></Page>);
+      const user = userEvent.setup();
+      await runStep('open', user);
+      if (entry.error) {
+        const expectedError = entry.error;
+        await waitFor(() => expect(dialog()).toHaveTextContent(expectedError), WAIT);
+        expect(primaryButton()).toBeDisabled();
+        await act(async () => latestDialogProps.onPublish?.());
+        await act(async () => latestDialogProps.onRetry?.());
+        expect(world.pushRequests).toEqual([]);
+        if (entry.source === 'cache') expect(world.scanRequests).toBe(0);
+        response = boundaryResponse();
+        adapter?.mockRestore();
+        mock?.mockRestore();
+        await runStep('rescan', user);
+      }
+      await waitFor(() => expect(primaryButton()).toBeEnabled(), WAIT);
+      await user.click(within(dialog()).getByRole('button', { name: 'show matches' }));
+      for (const item of boundaryDomain('none')) {
+        const row = within(dialog()).getByText(item.originalText).closest('.rdx-card');
+        expect(row).not.toBeNull();
+        expect(row!.querySelector('.rdx-badge-cat')?.textContent).toBe(item.category);
+      }
+      expect(within(dialog()).queryByRole('button', { name: /^keep$/ })).not.toBeInTheDocument();
+      const stalePublish = latestDialogProps.onPublish;
+      response = boundaryResponse('unknown-item');
+      // Invalidate before React has rendered the disabled state, then attempt
+      // the formerly enabled callback rather than trusting the button alone.
+      await act(async () => { latestDialogProps.onRescan?.(); stalePublish?.(); });
+      await waitFor(() => expect(dialog()).toHaveTextContent('is not recognized'), WAIT);
+      expect(primaryButton()).toBeDisabled();
+      await act(async () => stalePublish?.());
+      expect(world.pushRequests).toEqual([]);
+      response = boundaryResponse();
+      await runStep('rescan', user);
+      await waitFor(() => expect(primaryButton()).toBeEnabled(), WAIT);
+      await runStep('publish', user);
+      await waitFor(() => expect(world.pushRequests).toHaveLength(1), WAIT);
+    }, 15000);
+  }
+});
+
+describe('stopped publication retry', () => {
+  it('guards a real stopped-write callback during re-scan, after refusal, and recovers', async () => {
+    const entry = fixture.cases.find((row) => row.name === 'partial-publish-removes-reader')!;
+    const world = createPublishWorld(fixture, entry, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+    const respond = world.respond;
+    let response = boundaryResponse();
+    let release!: () => void;
+    let held: Promise<void> | undefined;
+    world.respond = (request) => request.url.includes('/sync/redactions') ? { status: 200, json: response } : respond(request);
+    installWorld(world, { hold: (url) => url.includes('/sync/redactions') ? held : undefined });
+    render(<Page />);
+    const user = userEvent.setup();
+    await runStep('open', user);
+    await runStep('publish', user);
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'retry' })).toBeEnabled(), WAIT);
+    expect(world.pushRequests).toHaveLength(1);
+    expect(latestDialogProps.onRecover).toBeUndefined();
+    const staleRetry = latestDialogProps.onRetry;
+    if (typeof staleRetry !== 'function') throw new Error('the real stopped-write retry callback was not installed');
+    const rescan = latestDialogProps.onRescan;
+    if (typeof rescan !== 'function') throw new Error('the stopped-write review has no rescan callback');
+    held = new Promise<void>((done) => { release = done; });
+    response = boundaryResponse('unknown-item');
+    act(() => { rescan(); staleRetry(); });
+    expect(world.pushRequests).toHaveLength(1);
+    expect(primaryButton()).toBeDisabled();
+    await act(async () => release());
+    await waitFor(() => expect(dialog()).toHaveTextContent('is not recognized'), WAIT);
+    expect(primaryButton()).toBeDisabled();
+    await act(async () => staleRetry());
+    expect(world.pushRequests).toHaveLength(1);
+    response = boundaryResponse();
+    held = undefined;
+    await runStep('rescan', user);
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'retry' })).toBeEnabled(), WAIT);
+    expect(latestDialogProps.onRetry).toBeTypeOf('function');
+    expect(latestDialogProps.onRecover).toBeUndefined();
+    await user.click(within(dialog()).getByRole('button', { name: 'retry' }));
+    await waitFor(() => expect(world.pushRequests).toHaveLength(2), WAIT);
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'done' })).toBeEnabled(), WAIT);
+  });
+});
+
+const recoveryFixture = parseDocument(readFileSync(resolve(process.cwd(), 'src/app/share/testdata/publish-review-recovery.yaml'), 'utf8')).toJS() as {
+  requiredNames: string[];
+  cases: { name: string; route: string; method: string }[];
+};
+describe('prerequisite recovery through the actual popup action', () => {
+  it('retains every required recovery', () => {
+    expect(new Set(recoveryFixture.cases.map((entry) => entry.name))).toEqual(new Set(recoveryFixture.requiredNames));
+  });
+  for (const recovery of recoveryFixture.cases) {
+    it(`${recovery.name} restarts its intended operation without a push`, async () => {
+      const entry = fixture.cases.find((row) => row.name === recovery.name)!;
+      const world = createPublishWorld(fixture, entry, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+      const fixed = createPublishWorld(fixture, {
+        ...entry,
+        signIn: recovery.name === 'login-start-failed' ? 'already-authenticated' : 'signed-in',
+        village: fixture.collectives.map((collective) => collective.name),
+        publication: { ...entry.publication, audienceRead: 'ok' },
+      }, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+      const respond = world.respond;
+      let recovering = false;
+      const operations: string[] = [];
+      world.respond = (request) => {
+        operations.push(`${request.method} ${new URL(request.url, 'http://peasant.local').pathname}`);
+        return recovering ? fixed.respond(request) : respond(request);
+      };
+      installWorld(world);
+      if (entry.steps.includes('arrive')) search = 'publish=open';
+      render(<Page />);
+      const user = userEvent.setup();
+      for (const step of entry.steps) await runStep(step, user);
+      const retry = await waitFor(() => {
+        const button = within(dialog()).getByRole('button', { name: 'retry' });
+        expect(button).toBeEnabled();
+        return button;
+      }, WAIT);
+      expect(latestDialogProps.onRecover).toBeTypeOf('function');
+      expect(latestDialogProps.onRetry).toBeUndefined();
+      const operation = `${recovery.method} ${recovery.route}`;
+      const before = operations.filter((value) => value === operation).length;
+      expect(before).toBeGreaterThan(0);
+      recovering = true;
+      await user.click(retry);
+      await waitFor(() => expect(operations.filter((value) => value === operation).length).toBeGreaterThan(before), WAIT);
+      await waitFor(() => {
+        expect(latestDialogProps.state).toBe('ready');
+        expect(latestDialogProps.onRecover).toBeUndefined();
+        expect(primaryButton()).toBeEnabled();
+      }, WAIT);
+      expect(world.pushRequests).toEqual([]);
+      expect(fixed.pushRequests).toEqual([]);
+    });
+  }
+});
+
 type World = ReturnType<typeof createPublishWorld>;
 
 interface WorldOptions {
@@ -167,6 +338,14 @@ function installWorld(world: World, options: WorldOptions = {}) {
 
 function Page({ children }: { children?: ReactNode }) {
   return <PublishProvider>{children ?? <ProjectsRouter />}</PublishProvider>;
+}
+
+function SeedScan({ mutation }: { mutation: Parameters<typeof boundaryDomain>[0] }) {
+  const { updateRedactionCache } = usePublishState();
+  useEffect(() => updateRedactionCache((cache) => new Map(cache).set(`standard:${SESSION_ID}`, {
+    status: 'success', version: String(detail.turns?.length), redactions: boundaryDomain(mutation),
+  })), [mutation, updateRedactionCache]);
+  return null;
 }
 
 function bar(): HTMLElement {
@@ -237,6 +416,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   vi.unstubAllGlobals();
 });

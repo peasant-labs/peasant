@@ -23,6 +23,7 @@
  * Env:  PEASANT_PUBLISH_STATES_PORT         server port (default 8847)
  *       PEASANT_PUBLISH_STATES_CAPTURE_DIR  output root (default /tmp/peasant-publish-states)
  *       PEASANT_PUBLISH_STATES_ONLY         comma-separated case names to shoot
+ *       PEASANT_PUBLISH_EXPAND_REVIEW       1 to show the actual redaction matches
  *       PEASANT_AUTOMATIC_CONSENT_ONLY      named checkbox/setup cases from the consent fixture
  *       PEASANT_AUTOMATIC_CONSENT_STAGE     review or result (default review)
  *       PUPPETEER_CORE                      explicit puppeteer-core module path
@@ -55,7 +56,7 @@ const ONLY = (process.env.PEASANT_PUBLISH_STATES_ONLY || '').split(',').map((nam
 const PROJECT = 'fortuna'
 const SESSION = 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'
 /** Bytes only this change introduces, located in the binary and the served chunk. */
-const FEATURE_BYTES = ['reading your collectives on village', 'village no longer holds this transcript: run peasant village push --force for this session', 'confirming automatic publishing consent']
+const FEATURE_BYTES = ['reading your collectives on village', 'redaction review could not classify the scan while preparing publication', 'confirming automatic publishing consent']
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const DESKTOP = { width: 1440, height: 1080, deviceScaleFactor: 1 }
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
@@ -89,9 +90,13 @@ function assertBuildProvenance() {
   const binary = readFileSync(BIN)
   const missing = FEATURE_BYTES.filter((signature) => !binary.includes(Buffer.from(signature)))
   if (missing.length) throw fail('verifying build provenance', `the embedded binary carries no ${missing.join(', ')}; rebuild this exact worktree so peasant matches web/out`)
-  const chunk = filesBelow(chunks).filter((path) => path.endsWith('.js')).find((path) => FEATURE_BYTES.every((signature) => readFileSync(path, 'utf8').includes(signature)))
-  if (!chunk) throw fail('verifying build provenance', `no exported chunk carries ${FEATURE_BYTES.join(', ')}; rebuild this exact worktree`)
-  return chunk
+  const files = filesBelow(chunks).filter((path) => path.endsWith('.js'))
+  const found = FEATURE_BYTES.map((signature) => {
+    const chunk = files.find((path) => readFileSync(path, 'utf8').includes(signature))
+    if (!chunk) throw fail('verifying build provenance', `no exported chunk carries ${signature}; rebuild this exact worktree`)
+    return chunk
+  })
+  return [...new Set(found)]
 }
 
 async function assertServedChunk(chunkPath) {
@@ -99,7 +104,8 @@ async function assertServedChunk(chunkPath) {
   const response = await fetch(`${ORIGIN}${servedPath}`).catch(() => null)
   if (!response || response.status !== 200) throw fail('verifying the served artifact', `GET ${servedPath} returned ${response?.status ?? 0}`)
   const body = await response.text()
-  if (!FEATURE_BYTES.every((signature) => body.includes(signature))) throw fail('verifying the served artifact', `the served chunk ${servedPath} does not carry ${FEATURE_BYTES.join(', ')}`)
+  const signatures = FEATURE_BYTES.filter((signature) => readFileSync(chunkPath, 'utf8').includes(signature))
+  if (!signatures.length || !signatures.every((signature) => body.includes(signature))) throw fail('verifying the served artifact', `the served chunk ${servedPath} does not carry ${signatures.join(', ')}`)
   const sha256 = hash(Buffer.from(body))
   if (sha256 !== hash(readFileSync(chunkPath))) throw fail('verifying the served artifact', `the served chunk differs from this worktree's export`)
   return { path: servedPath, sha256 }
@@ -296,6 +302,13 @@ async function shoot(browser, gate, fixture, entry, theme, viewport, turns, evid
       throw error
     }
     await pause(300)
+    if (process.env.PEASANT_PUBLISH_EXPAND_REVIEW === '1') {
+      const toggle = await page.$('[role="dialog"] .pub-toggle[aria-expanded="false"]')
+      if (toggle) {
+        await toggle.click()
+        await page.waitForSelector('[role="dialog"] .rdx-card', { timeout: 10000 })
+      }
+    }
     const probes = await probe(page, theme, entry)
     const size = viewport.isMobile ? 'mobile' : 'desktop'
     const directory = join(OUT, theme, size)
@@ -337,8 +350,9 @@ const cases = AUTOMATIC_ONLY.length
 if (AUTOMATIC_ONLY.length && cases.length !== AUTOMATIC_ONLY.length) throw fail('selecting automatic consent captures', 'a requested named fixture does not exist')
 if (ONLY.length && cases.length !== ONLY.length) { console.error(`ERROR [publish-states-shoot] unknown case in PEASANT_PUBLISH_STATES_ONLY=${ONLY.join(',')}`); process.exit(1) }
 
-const chunkPath = assertBuildProvenance()
-console.log(`[publish-states-shoot] provenance OK: ${relative(REPO, chunkPath)} carries ${FEATURE_BYTES.join(', ')}`)
+const chunkPaths = assertBuildProvenance()
+const chunkPath = chunkPaths[0]
+console.log(`[publish-states-shoot] provenance OK: ${chunkPaths.map((path) => relative(REPO, path)).join(', ')} carry ${FEATURE_BYTES.join(', ')}`)
 
 console.log(`[publish-states-shoot] starting ${relative(REPO, BIN)} on :${PORT} (mock store: ${SMOKE_MOCKS}) …`)
 const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', `--mock-data-store=${SMOKE_MOCKS}`], { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] })
@@ -365,6 +379,8 @@ if (!healthy) { console.error(`ERROR [publish-states-shoot] the real binary did 
 const evidence = { sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim(), binarySha256: hash(readFileSync(BIN)), packagePins: JSON.parse(readFileSync(join(WEB, 'package.json'), 'utf8')).dependencies, fixture: AUTOMATIC_ONLY.length ? 'web/src/app/share/testdata/publish-automatic-consent.yaml' : 'web/src/app/share/testdata/publish-popup-states.yaml', automaticStage: AUTOMATIC_ONLY.length ? AUTOMATIC_STAGE : null, chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunk: null, captures: [] }
 try {
   evidence.servedChunk = await assertServedChunk(chunkPath)
+  evidence.chunks = chunkPaths.map((path) => relative(REPO, path))
+  evidence.servedChunks = await Promise.all(chunkPaths.map(assertServedChunk))
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new' })
   const turns = await sessionTurns(browser)
   evidence.turns = turns.length

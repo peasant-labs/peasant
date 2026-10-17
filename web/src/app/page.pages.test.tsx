@@ -333,7 +333,7 @@ describe('mounted bounded Home', () => {
           holdPages = false;
           await act(async () => { releasePages.forEach(release => release()); });
         }
-        await waitFor(() => expect(screen.getByRole('link', { name: 'title root-0' }).closest('tr')).toHaveTextContent('published · up to date'));
+        await waitFor(() => expect(screen.getByRole('link', { name: 'title root-0' }).closest('tr')).toHaveTextContent('published, up to date'));
         expect(tokens(pageRequests().slice(before))).toEqual(overlap ? [...fixture.publish.loadedTokens, ...fixture.publish.loadedTokens] : fixture.publish.loadedTokens);
         expect(screen.getByRole('link', { name: 'title child-0' })).toBeInTheDocument();
       }

@@ -7,6 +7,72 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-16
+
+### Added
+- `peasant migrate` converts file-backed sessions to the harmonized content
+  model in place, with a dry-run, resumable batches, and per-session verification
+  before old data is removed. `peasant harvest verify --content` checks content
+  and search integrity; `--repair` marks damaged content for repair (#586).
+- Village transcript listing and bulk pull accept repeatable `--collective`
+  selections, page through the union, and de-duplicate transcripts. Bulk pull
+  shows live progress and supports cancellation while retaining completed pulls.
+  `--user <username>` filters listing and bulk pull by contributor, including
+  offline `list --local --user` over stored owner names (#631).
+- Session thinking level and its changes are captured from Claude Code, Codex,
+  OpenCode, and Pi evidence and carried through storage, session detail, export,
+  and publication (#620).
+- Harvest audits retain best-effort per-session outcomes and validated reason
+  codes for the latest 100 runs, without copying transcript content, raw error
+  messages, or filesystem locations. `docs/harvest-audit.md` explains their
+  limits and read-only inspection; a harvest-audit skill documents the workflow
+  (#601, #607, #610).
+
+### Changed
+- The harmonized content model gives each content string one storage home,
+  unifies search, and bounds write batches by bytes and session count through
+  `write.*` configuration. Session detail, publication transcript, and
+  authoritative publication metadata documents share a 128 MiB limit; retained
+  unknown payloads keep their separate 8 MiB limit (#586).
+- Managed generations use one builder contract, including Claude Code format 2.
+  A newer capture with unaccounted missing content is kept beside the last-good
+  full copy: previews show the newer partial attempt, while normal full export
+  and publication refuse rather than silently sending the older copy. Explicit
+  `peasant export sessions --last-good` and hand-run
+  `peasant village push --last-good` remain available; automatic publishing never
+  substitutes the last-good copy (#627).
+- The first harvest after the indexer and origin-rule updates may take longer
+  while affected sessions are refreshed (#604, #620, #627).
+- Re-pin Fairtrade to 0.0.29 and the browser Schema package to 0.29.1, using
+  canonical typed redaction category bindings in both publication review paths.
+
+### Fixed
+- Home preserves parent relationships and groups subagents. Expanded children
+  now occupy their own rows with their own project, turns, duration, time, and
+  publication state (#619).
+- Command-palette session-ID and project-hash matches display session/project
+  identities instead of empty snippet rows (#544).
+- Claude fork, agent-file, and continuation transcripts are accepted on verified
+  structural ownership evidence; corrupt cached identities are re-mined rather
+  than trusted (#604, #608, #609).
+- Harvest recovers inherited-pair Codex results, retains native Codex delivery
+  records, accepts successful Cursor turn endings, and preserves OpenCode's
+  last-good authority during incomplete refreshes (#591, #595).
+- Unavailable native sources no longer repeat repair warnings on every run;
+  locator failures do not incorrectly mark a source unavailable (#600, #606).
+- The retained kickstart publication path opens managed-session readers using
+  the configured output location, so consented publication can read imported
+  managed sessions without changing onboarding defaults.
+- Invalid redaction review data blocks continuation and publication, while
+  prerequisite recovery stays separate from publication retries (#634).
+- Home keeps its existing search and load-more controls, with all supplied
+  parent and child rows visible without an extra table pager or height cap.
+
+### Documentation
+- The experimental feature register clarifies that file familiarity /
+  understanding coverage is incomplete, not a shipped end-to-end app feature;
+  completion and an opt-in flag remain deferred (#630).
+
 ## [0.9.0] - 2026-10-07
 
 ### Added
@@ -663,6 +729,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.10.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.10.0
 [0.9.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.9.0
 [0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
 [0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1

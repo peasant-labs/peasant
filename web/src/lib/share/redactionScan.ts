@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { MockRedaction } from '@/lib/session-detail/mock-redactions';
-import { fetchRedactionScan, type RedactionLevel } from '@/lib/share/redactions';
+import { fetchRedactionScan, validateRedactionPreview, type RedactionLevel } from '@/lib/share/redactions';
 import type { Redaction } from '@/types/messages';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +28,12 @@ const REDACTION_LEVEL_ORDER = {
 
 /** Apply the fixture's rule-level minimum (the real endpoint filters server-side). */
 function filterMockByLevel(items: MockRedaction[], level: RedactionLevel): Redaction[] {
+  // Validate the producer before filtering: an invalid inactive mock rule is
+  // not a clean empty result, just as an invalid empty wire group is not.
+  validateRedactionPreview({ redactions: items, matchCount: items.length });
+  if (items.some((item) => !Object.hasOwn(REDACTION_LEVEL_ORDER, item.minimumLevel))) {
+    throw new Error('redaction mock has an unknown rule minimum while preparing the local scan; sharing remains blocked. Correct the mock producer and re-scan.');
+  }
   return items.filter(
     (item) => REDACTION_LEVEL_ORDER[item.minimumLevel] <= REDACTION_LEVEL_ORDER[level],
   );
@@ -68,6 +74,16 @@ function entryIsCurrent(entry: RedactionCacheEntry | undefined, target: Redactio
   return entry.version === target.version;
 }
 
+function validatedEntry(entry: RedactionCacheEntry): RedactionCacheEntry {
+  if (entry.status !== 'success') return entry;
+  try {
+    validateRedactionPreview({ redactions: entry.redactions, matchCount: entry.matchCount ?? (Array.isArray(entry.redactions) ? entry.redactions.length : NaN) });
+    return entry;
+  } catch (error) {
+    return { status: 'failure', version: entry.version, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export interface RedactionPipeline {
   phase: 'scanning' | 'ready';
   scanProgress: number;
@@ -81,6 +97,8 @@ export interface RedactionPipeline {
   scanError: string | null;
   /** Scan the targets; `force` replaces kept entries (the explicit re-scan). */
   runScan: (force?: boolean) => void;
+  /** Recheck at the action boundary, including a re-scan not yet rendered. */
+  isReviewReady: () => boolean;
 }
 
 /**
@@ -92,9 +110,16 @@ export function useRedactionPipeline(
   targets: RedactionScanTarget[],
   redactionLevel: RedactionLevel,
   useMock: boolean,
-  cache: RedactionCache,
+  storedCache: RedactionCache,
   onCacheChange: RedactionCacheUpdate,
 ): RedactionPipeline {
+  const cache = useMemo(() => new Map([...storedCache].map(([key, entry]) => [key, validatedEntry(entry)])), [storedCache]);
+  // Rejected cached success is failure in this render, never after an effect.
+  // Persist the honest failure too, so a revisit cannot silently retry it.
+  useEffect(() => {
+    if (![...cache].some(([key, entry]) => entry !== storedCache.get(key))) return;
+    onCacheChange((prev) => new Map([...prev].map(([key, entry]) => [key, validatedEntry(entry)])));
+  }, [storedCache, cache, onCacheChange]);
   const allSettled =
     targets.length === 0 ||
     targets.every((target) => {
@@ -181,13 +206,18 @@ export function useRedactionPipeline(
               );
               result = { redactions, matchCount: redactions.length };
             } else result = await fetchRedactionScan(target.id, redactionLevel);
+            validateRedactionPreview(result);
+            const entry: RedactionCacheEntry = { status: 'success', ...result, version: target.version };
+            cacheRef.current = new Map(cacheRef.current).set(key, entry);
             onCacheChange((prev) =>
-              new Map(prev).set(key, { status: 'success', ...result, version: target.version }),
+              new Map(prev).set(key, entry),
             );
           } catch (e: unknown) {
             const error = e instanceof Error ? e.message : String(e);
+            const entry: RedactionCacheEntry = { status: 'failure', error, version: target.version };
+            cacheRef.current = new Map(cacheRef.current).set(key, entry);
             onCacheChange((prev) =>
-              new Map(prev).set(key, { status: 'failure', error, version: target.version }),
+              new Map(prev).set(key, entry),
             );
           }
         }
@@ -215,5 +245,9 @@ export function useRedactionPipeline(
     sessionMatchCounts,
     scanError,
     runScan,
+    isReviewReady: () => activeScanRef.current === null && targets.length > 0 && targets.every((target) => {
+      const entry = cacheRef.current.get(redactionCacheKey(redactionLevel, target.id));
+      return entry?.status === 'success' && entryIsCurrent(entry, target) && validatedEntry(entry).status === 'success';
+    }),
   };
 }

@@ -19,7 +19,8 @@ import type {
 import type { PublishAccessItem as AccessItem, PublishState } from '@/lib/ft-ui';
 import { pushRequestBody } from '@/lib/share/push';
 import type { SelectableRedactionLevel } from '@/lib/share/redactions';
-import type { Redaction } from '@/types/messages';
+export { reviewMatches } from '@/lib/share/reviewMatches';
+export type { ReviewMatch } from '@/lib/share/reviewMatches';
 
 export type { AccessItem };
 
@@ -29,16 +30,6 @@ export interface PickerSuggestion {
   name: string;
   members?: number;
   note?: string;
-}
-
-/** A redaction match in the shape fairtrade's RedactionReview takes. */
-export interface ReviewMatch {
-  id: string;
-  category: string;
-  confidence: number;
-  before: string;
-  after: string;
-  kept: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,22 +250,6 @@ export function changesSummary(newTurns: number): string {
 // ---------------------------------------------------------------------------
 // What leaves your machine
 // ---------------------------------------------------------------------------
-
-/**
- * A scan's findings as fairtrade review matches. The category is the engine's
- * rendered label (CREDENTIAL, PII, PATH, INTERNAL), validated at the fetch.
- * Nothing is kept un-redacted: the popup's review is read-only.
- */
-export function reviewMatches(sessionId: string, redactions: readonly Redaction[]): ReviewMatch[] {
-  return redactions.map((redaction) => ({
-    id: `${sessionId}::${redaction.id}`,
-    category: redaction.category,
-    confidence: redaction.confidence / 100,
-    before: redaction.originalText,
-    after: redaction.redactedReplacement,
-    kept: false,
-  }));
-}
 
 // ---------------------------------------------------------------------------
 // Publishing
