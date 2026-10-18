@@ -303,7 +303,17 @@ jobs:
           TESTGATE_OUT="$RUNNER_TEMP/testgate/$(date -u +%Y%m%dT%H%M%SZ)"
           echo "TESTGATE_DIR=$TESTGATE_OUT" >> "$GITHUB_ENV"
           export TESTGATE_OUT
-          make check RACE=${{ env.RACE }}
+          # Root in the container pool otherwise bypasses the DAC permissions
+          # that filesystem tests must exercise. Drop only those bypass powers
+          # irreversibly for this command and its children, not the runner.
+          if [ "$(id -u)" -eq 0 ]; then
+            setpriv --bounding-set=-dac_override,-dac_read_search \
+              --inh-caps=-dac_override,-dac_read_search \
+              --ambient-caps=-dac_override,-dac_read_search --no-new-privs \
+              make check RACE=${{ env.RACE }}
+          else
+            make check RACE=${{ env.RACE }}
+          fi
           end=$(date +%s)
           {
             echo "### amd64 pool gate — phase wall"

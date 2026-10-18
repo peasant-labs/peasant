@@ -53,9 +53,8 @@ func loadInstallPermissionsFixtures(t *testing.T) []installPermissionsCase {
 }
 
 func TestContentInstallSearchOnlyAncestor(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Fatal("permission regression requires an unprivileged Unix test runner; root bypasses directory read permission and cannot provide valid evidence")
-	}
+	// Test the effective kernel boundary below, not the numeric UID: container
+	// CI can run as root with both DAC bypass capabilities irreversibly removed.
 	for _, fixture := range loadInstallPermissionsFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			outer := t.TempDir()

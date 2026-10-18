@@ -77,6 +77,12 @@ the host.
 
 ## Windows-specific behavior and sharp edges
 
+- **Writable-file mode bits do not prove privacy.** Go reports synthetic `0666`
+  on Windows regardless of a requested POSIX `0600`; `Chmod` only controls the
+  read-only attribute there. Credential round-trip, profile isolation and clearing
+  tests still run, but their strict `0600` assertion applies only on POSIX hosts.
+  These tests do not claim to verify Windows ACLs.
+
 - **A colon in a path component names an NTFS alternate data stream, not a file.** The
   background server's PID file is `web-<port>.pid`; the pre-rename `web:<port>.pid` is kept
   as a read-only fallback so an older server can still be stopped.

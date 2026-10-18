@@ -15,6 +15,16 @@ test layer to its entry point.
 
 ## Test gate
 
+The Linux container-pool gate may have UID 0. Its command uses the image's
+`setpriv` to remove `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` from bounding,
+inheritable and ambient sets, with `no_new_privs`, before `make check` starts.
+This only reduces the gate child process's privileges; it changes no runner user,
+image, service or global directory. Non-root runners execute the same gate directly.
+Permission fixtures still require a real `os.Open` permission denial on the
+search-only ancestor before exercising production code. A root invocation that
+retains DAC bypass capabilities fails that assertion rather than skipping or
+claiming permission evidence. Test selection, race policy and budgets are unchanged.
+
 `make check` runs the Go suite through `cmd/testgate`. The gate exists to move
 the suite's expensive non-race work out of the race pass **without dropping it**,
 and to prove that every test still runs exactly once across the passes.
