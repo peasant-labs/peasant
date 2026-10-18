@@ -242,6 +242,15 @@ func (s *Server) Listen(ctx context.Context) error {
 		ph.selection = selection
 	}
 	mux.HandleFunc("GET "+defaults.RoutePublications.String(), ph.handlePublications)
+	var homeStore homeReader
+	if s.cfg.Store != nil {
+		homeStore = s.cfg.Store
+	}
+	identityResolver := s.cfg.RepositoryIdentityResolver
+	if identityResolver == nil {
+		identityResolver = ingest.NewGitRepositoryIdentityResolver()
+	}
+	sh.home = &homeHandler{reader: homeStore, sync: sh, publishing: ph, resolver: identityResolver}
 	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
 
 	// Auto-publish rules: save or remove a rule, and install its hooks in one

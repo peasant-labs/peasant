@@ -1,18 +1,17 @@
-/* Real-binary mounted evidence for the root page: the stats strip, the search
+/* Real-binary mounted regression evidence for the root page: the shell, search
  * box, and the session list with its publish-state filters.
  *
  * It boots peasant twice, each on its own throwaway XDG directories so no
  * real session store is read:
- *   - with the mock store (`web,dashboard,sessions,trends,qualitySessions,search`), which serves the WebSocket topics
- *     (sessions, titles, dashboard, trends), the project summary and search;
+ *   - with the mock store (`web,sessions,qualitySessions,search`), which serves
+ *     retained browse, project summaries, transcript details and search;
  *   - with no mock store, for the empty install.
- * The mock store holds no sync list and no publication receipts, so the
- * browser fulfils GET /api/v1/sync/sessions and GET /api/v1/publications from
+ * The mock store holds no Home pages or publication receipts, so the
+ * browser fulfils the home/project-options sync views and publications from
  * the mock sessions and the pattern in testdata/root-page.yaml. The project
  * summary is intercepted only for the selection notice and recovery states.
- * The corpus's fixed historical dates leave current trends empty. The named
- * trends fixture replaces only trends payloads on the real WebSocket, so the
- * mounted stats strip and eight weekly bars have representative evidence.
+ * Global statistics are deliberately absent. The complementary bounded-page
+ * journey protects first25 and loaded-window refresh request counts.
  * The page, the shell, the fairtrade components and every request path stay
  * real.
  *
@@ -20,7 +19,7 @@
  * filter (all, not published, published, auto), the collapsed and expanded
  * child family, a search, the selection
  * notice, the selection recovery panel, and the empty install. Every filter's
- * count is checked against the rows it lists, with `load more` pressed until
+ * membership is checked against the rows it lists, with `load more` pressed until
  * the list is complete.
  *
  * Usage: CHROME_PATH=/path/to/chrome node scripts/visual/root-page-visual.mjs
@@ -62,19 +61,17 @@ const FILTERS = [
 // Bytes only this change introduces: the list marker and the strip's accessible
 // name live in the app chunk, the strip and publish-state classes in fairtrade's.
 const FEATURE_GROUPS = [
-  { label: 'root page', signatures: ['data-root-session-list', 'your sessions in numbers', 'rootSessions'] },
+  { label: 'root page', signatures: ['data-root-session-list', 'data-home-bounded'] },
   { label: 'recursive session family', signatures: ['data-session-group-child', 'session-group-rows:', 'var(--sp-5) + var(--sp-4)'] },
   { label: 'parent-attached session disclosure', signatures: ['data-session-family'] },
   { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', 'tick the auto-publish box the next time you publish'] },
-  { label: 'fairtrade stats strip and publish state', signatures: ['sst-pair', 'pub-state-text'] },
+  { label: 'fairtrade publish state', signatures: ['pub-state-text'] },
 ]
 const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
 const CONTEXT = loadContextNavigationFixture()
 const pause = (ms) => new Promise((done) => setTimeout(done, ms))
 const fail = (message) => { throw new Error(`Root page visual harness failed: ${message}`) }
-if (FIXTURE.trends?.name !== 'eight-active-weeks-show-the-summary-and-weekly-bars'
-  || !Array.isArray(FIXTURE.trends.weeklySessions) || FIXTURE.trends.weeklySessions.length !== 8
-  || !FIXTURE.trends.weeklySessions.every((count) => Number.isSafeInteger(count) && count >= 0)) fail('the named eight-week trends fixture is missing or invalid')
+if ([PORT, PORT + 1].includes(8690)) fail('the regression runner must use sandbox ports, never the user server')
 
 function filesBelow(directory) {
   if (!existsSync(directory)) return []
@@ -195,6 +192,27 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
     if (url.origin !== MOCK_ORIGIN && url.origin !== EMPTY_ORIGIN) return route.continue()
     // Hide the development mock badge so the capture shows the production chrome.
     if (url.pathname === '/api/v1/config/mock') return respond(json({ enabled: false }))
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') {
+      const options = new Map((answers?.sync ?? []).filter(row => !row.parentSessionId && !row.parentUnresolved && !answers.publications.get(row.id)?.outsideSelection).map(row => [row.projectHash, { projectHash: row.projectHash, projectName: row.projectName }]))
+      return respond(json({ projects: [...options.values()].sort((a, b) => a.projectName.localeCompare(b.projectName) || a.projectHash.localeCompare(b.projectHash)) }))
+    }
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
+      const parent = url.searchParams.get('parentSessionId')
+      const publication = url.searchParams.get('publication') ?? 'all'
+      const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0
+      const source = !answers || (summary?.projects?.length === 0 && summary.selection?.active) ? [] : answers.sync.filter(row => {
+        const receipt = answers.publications.get(row.id)
+        return receipt && !receipt.outsideSelection && !row.parentUnresolved
+          && (parent ? row.parentSessionId === parent : !row.parentSessionId)
+          && (parent || publication === 'all' || publication === 'auto' && receipt.autoPublish
+            || publication === 'published' && receipt.state === 'published' || publication === 'not-published' && receipt.state === 'unpublished')
+      })
+      return respond(json({ items: source.slice(start, start + 25).map(sync => {
+        const { audience, ...publication } = answers.publications.get(sync.id)
+        const session = answers.sessions.find(session => session.id === sync.id)
+        return { sync, publication, title: session?.title ?? '', preview: sync.firstPrompt ?? session?.preview ?? '', childCount: answers.sync.filter(child => child.parentSessionId === sync.id && !answers.publications.get(child.id)?.outsideSelection).length }
+      }), next: start + 25 < source.length ? 'more-sessions' : '' }))
+    }
     if (answers && url.pathname === '/api/v1/sync/sessions') return respond(json({ sessions: answers.sync }))
     if (answers && url.pathname === '/api/v1/publications') {
       const audience = url.searchParams.get('include') === 'audience'
@@ -229,26 +247,6 @@ async function openPage(browser, origin, theme, viewport, routes) {
     localStorage.setItem('peasant-theme', value)
     document.documentElement.setAttribute('data-theme', value)
   }, theme)
-  if (routes.answers) {
-    const dayMs = 86_400_000
-    const now = new Date()
-    const monday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - ((now.getUTCDay() + 6) % 7) * dayMs
-    const days = FIXTURE.trends.weeklySessions.map((sessions, index, weeks) => ({ date: new Date(monday - (weeks.length - 1 - index) * 7 * dayMs).toISOString().slice(0, 10), tokens: 0, sessions }))
-    await page.addInitScript(({ host, trends }) => {
-      const NativeWebSocket = window.WebSocket
-      window.WebSocket = class extends NativeWebSocket {
-        constructor(url, protocols) {
-          super(url, protocols)
-          if (new URL(url).host !== host) return
-          this.addEventListener('message', (event) => {
-            let message
-            try { message = JSON.parse(event.data) } catch { return }
-            if (message.type === 'trends') Object.defineProperty(event, 'data', { value: JSON.stringify({ ...message, data: trends }) })
-          })
-        }
-      }
-    }, { host: new URL(origin).host, trends: { days, totalTokens: 0, totalSessions: days.reduce((sum, day) => sum + day.sessions, 0) } })
-  }
   await installRoutes(page, routes)
   const response = await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' })
   if (response?.status() !== 200) fail(`${theme}/${viewport.id}: HTTP ${response?.status()} for ${origin}/`)
@@ -283,7 +281,7 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
     if (!headerBox || headerBox.height <= 0 || Math.abs(headerBox.width - layoutWidth) > 1) fail(`${label}: shell header missing or incomplete: box=${JSON.stringify(headerBox)} layoutWidth=${layoutWidth} viewport=${JSON.stringify(viewport)}`)
     const panel = await page.$(contentSelector)
     const panelBox = panel ? await panel.boundingBox() : null
-    if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > viewport.width + 1 || panelBox.y + panelBox.height > viewport.height + 1) fail(`${label}: mounted recovery panel is not fully visible (${contentSelector})`)
+     if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > full.w + 1 || panelBox.y + panelBox.height > full.h + 1) fail(`${label}: mounted recovery panel is not contained in the full shell/body capture (${contentSelector})`)
     const contentFile = file.replace(/\.png$/, '.content.png')
     await panel.screenshot({ path: contentFile })
     await gate.assert(`${label}/content`, contentFile, { sel: contentSelector, where: 'root-page-visual.mjs' })
@@ -296,7 +294,6 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
 async function probeStyles(page, where) {
   const probe = await page.evaluate(() => {
     const h1 = document.querySelector('main h1, h1')
-    const value = document.querySelector('.sst-value')
     const option = document.querySelector('.bs-seg-opt')
     const table = document.querySelector('[data-root-session-list] table')
     const title = document.querySelector('[data-root-session-list] [data-session-id] a')
@@ -307,7 +304,6 @@ async function probeStyles(page, where) {
       h1Font: h1 ? getComputedStyle(h1).fontFamily : '',
       h1Size: h1 ? getComputedStyle(h1).fontSize : '',
       h1Text: h1?.textContent?.trim() ?? '',
-      stripNums: value ? getComputedStyle(value).fontVariantNumeric : '',
       optionRadius: option ? getComputedStyle(option).borderRadius : '',
       tablePresent: !!table,
       titleSize: title ? getComputedStyle(title).fontSize : '',
@@ -322,7 +318,6 @@ async function probeStyles(page, where) {
   })
   if (!/atkinson\s*hyperlegible/i.test(probe.bodyFont) || /mono/i.test(probe.bodyFont.split(',')[0])) fail(`${where}: body font is ${probe.bodyFont}`)
   if (!/atkinson\s*hyperlegible\s*mono/i.test(probe.h1Font) || probe.h1Size !== '28px' || probe.h1Text !== 'your sessions') fail(`${where}: title probe ${JSON.stringify(probe)}`)
-  if (!/tabular-nums/.test(probe.stripNums)) fail(`${where}: stats strip values are not tabular (${probe.stripNums})`)
   if (probe.optionRadius !== '0px') fail(`${where}: filter option radius is ${probe.optionRadius}`)
   if (!probe.tablePresent || probe.titleSize !== '16px') fail(`${where}: session table probe ${JSON.stringify(probe)}`)
   if (probe.pageOverflow > 0) fail(`${where}: the page scrolls sideways by ${probe.pageOverflow}px`)
@@ -339,7 +334,7 @@ async function pressFilter(page, label) {
   }, label)
   if (!pressed) fail(`the ${label} filter option never mounted`)
   await pause(150)
-  return Number(pressed.replace(/^.*\s([\d,]+)$/, '$1').replace(/,/g, ''))
+  return pressed
 }
 
 /** Presses load more until the list is complete and returns the rows listed. */
@@ -359,7 +354,6 @@ async function listedRows(page) {
 async function resetList(page) {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail('the session list never mounted after a reload'))
-  await waitForStats(page, 'the reloaded list')
 }
 
 async function assertMissingParentOmitted(page, where) {
@@ -452,15 +446,6 @@ async function probeGroupAttachment(page, where) {
   console.log(`group attachment ${where} ${JSON.stringify(probe)}`)
 }
 
-async function waitForStats(page, where) {
-  const weeklyLabel = `sessions per week, last 8 weeks: ${FIXTURE.trends.weeklySessions.join(', ')}`
-  await page.waitForSelector(`[role="img"][aria-label="${weeklyLabel}"]`, { state: 'visible', timeout: 10000 }).catch(() => fail(`${where}: the weekly session bars never mounted with the fixture values`))
-  await page.waitForFunction(() => {
-    const stats = document.querySelector('[aria-label="general stats"]')?.textContent ?? ''
-    return stats.includes('this week') && stats.includes('longest streak') && stats.includes('median session')
-  }, undefined, { timeout: 10000 }).catch(() => fail(`${where}: the complete stats strip never mounted`))
-}
-
 /** Compare each expanded child row's glyph to its owning disclosure, never an ancestor. */
 async function probeChildAlignment(page, id, where) {
   const probe = await page.evaluate((id) => {
@@ -470,7 +455,11 @@ async function probeChildAlignment(page, id, where) {
     if (!control || !chevron || !parentRow || control.getAttribute('aria-expanded') !== 'true') return null
     const chevronBox = chevron.getBoundingClientRect()
     const table = parentRow.closest('table')
-    const ids = (control.getAttribute('aria-controls') ?? '').split(/\s+/).filter(Boolean)
+    const targets = (control.getAttribute('aria-controls') ?? '').split(/\s+/).filter(Boolean)
+    const ids = targets.flatMap(target => {
+      const node = document.getElementById(target)
+      return node?.hasAttribute('data-session-group-child') ? [target] : (node?.getAttribute('aria-owns') ?? '').split(/\s+/).filter(Boolean)
+    })
     // Each declared IDREF is a rendered child row, consecutive after the parent.
     let previous = parentRow
     const children = ids.map((childId) => {
@@ -538,8 +527,8 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
   const page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics })
   try {
     await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the session list never mounted`))
-    await page.waitForSelector('.sst-pair', { state: 'visible', timeout: 10000 }).catch(() => fail(`${where}: the stats strip never mounted`))
-    await waitForStats(page, where)
+    if (process.env.PEASANT_HOME_VISUAL_MUTATION === 'font') await page.evaluate(() => { document.body.style.fontFamily = 'Arial' })
+    if (process.env.PEASANT_HOME_VISUAL_MUTATION === 'navigation') await page.getByRole('link', { name: 'Peasant home', exact: true }).evaluate(node => node.remove())
     const tip = await page.evaluate(() => {
       const aside = document.querySelector('aside[aria-label="auto-publish tip"]')
       const text = aside?.querySelector('p')
@@ -562,18 +551,11 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       published: answers.expected.filter((entry) => entry.state === 'published').length,
       auto: answers.expected.filter((entry) => entry.autoPublish).length,
     }
-    const assertSessionsStat = async () => {
-      const pair = page.locator('[aria-label="general stats"] .sst-pair').filter({ hasText: / sessions$/ })
-      const value = await pair.textContent()
-      if (value?.trim() !== `${answers.expected.length.toLocaleString('en-US')} sessions`) fail(`${where}: sessions statistic ${JSON.stringify(value)} does not equal the selection-visible top-level count ${answers.expected.length}`)
-    }
     for (const filter of FILTERS) {
-      const count = await pressFilter(page, filter.label)
-      if (count !== expectedCounts[filter.id]) fail(`${where}: the ${filter.label} count is ${count}, the answers hold ${expectedCounts[filter.id]}`)
-      await assertSessionsStat()
+      await pressFilter(page, filter.label)
       await shoot(page, gate, join(OUT, theme, viewport.id, `filter-${filter.id}.png`), `${where}/filter-${filter.id}`)
       const rows = await listedRows(page)
-      if (rows !== count) fail(`${where}: the ${filter.label} filter says ${count} and lists ${rows} rows`)
+      if (rows !== expectedCounts[filter.id]) fail(`${where}: the ${filter.label} filter lists ${rows} rows, expected fixture membership ${expectedCounts[filter.id]}`)
       await assertMissingParentOmitted(page, `${where}/filter-${filter.id}/complete`)
       await resetList(page)
       await assertMissingParentOmitted(page, `${where}/filter-${filter.id}/reload`)
@@ -588,7 +570,6 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     await shoot(page, gate, join(OUT, theme, viewport.id, FIXTURE.family.states[0] + '.png'), `${where}/${FIXTURE.family.states[0]}`, {
       equivalentSurfaces: [`${where}/${FIXTURE.family.equivalentCollapsedSurface}`],
     })
-    await assertSessionsStat()
     await control.click()
     const child = page.locator(`[data-session-group-child="${CONTEXT.childSessionId}"]`)
     await child.waitFor({ state: 'visible' })
@@ -632,7 +613,6 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       fail(`${where}: the expanded child row does not carry its own column values; expected turns ${childTurns}, duration ${childDuration}, when ${childWhen}, a project containing ${childSync.projectName} and a publish state, got ${JSON.stringify(childCells)}`)
     }
     if (await listedRows(page) !== expectedCounts.all) fail(`${where}: expanding a family changed the top-level count`)
-    await assertSessionsStat()
     await assertMissingParentOmitted(page, `${where}/expanded-group`)
     await probeGroupAttachment(page, `${where}/${FIXTURE.family.states[1]}`)
     await probeChildAlignment(page, CONTEXT.parentId, `${where}/${FIXTURE.family.states[1]}`)
@@ -666,7 +646,6 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     await page.locator('input[type="search"]').fill(FIXTURE.searchQuery)
     await page.waitForSelector('[data-grouped-sessions-section]', { state: 'visible', timeout: 15000 }).catch(() => fail(`${where}: search results never mounted`))
     await pause(300)
-    await assertSessionsStat()
     await shoot(page, gate, join(OUT, theme, viewport.id, 'search.png'), `${where}/search`)
     if (diagnostics.length) fail(`${where}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
     return { probe, expectedCounts }
@@ -681,7 +660,8 @@ async function runSelection(browser, gate, theme, viewport, answers, summaryBase
   let page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { ...summaryBase, selection: FIXTURE.selectionNotice } })
   try {
     await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the list never mounted under a selection notice`))
-    await waitForStats(page, `${where}/selection-notice`)
+    await page.getByRole('button', { name: 'browse by project', exact: true }).click()
+    await page.getByRole('status').filter({ hasText: 'hidden by a saved selection' }).waitFor({ state: 'visible' })
     const notice = await page.evaluate(() => [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent.trim()).find((text) => text.includes('hidden by a saved selection')) ?? '')
     const { hiddenProjects, hiddenSessions } = FIXTURE.selectionNotice
     if (notice !== `${hiddenProjects} projects and ${hiddenSessions} sessions hidden by a saved selection`) fail(`${where}: selection notice reads ${JSON.stringify(notice)}`)
@@ -694,9 +674,10 @@ async function runSelection(browser, gate, theme, viewport, answers, summaryBase
 
   page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { projects: [], selection: FIXTURE.selectionRecovery } })
   try {
+    await page.getByRole('button', { name: 'browse by project', exact: true }).click()
     await page.waitForSelector('[role="status"][aria-label="project selection recovery"]', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the recovery panel never mounted`))
-    const leaked = await page.evaluate(() => ({ list: !!document.querySelector('[data-root-session-list]'), strip: !!document.querySelector('.sst') }))
-    if (leaked.list || leaked.strip) fail(`${where}: the recovery state still shows ${JSON.stringify(leaked)}`)
+    const leaked = await page.locator('[data-root-session-list] [data-session-id], [data-browse-view="projects"] a').count()
+    if (leaked) fail(`${where}: selection recovery leaked session/project identities`)
     await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-recovery.png'), `${where}/selection-recovery`, { contentSelector: '[role="status"][aria-label="project selection recovery"]' })
   } finally {
     await page.close()
@@ -709,10 +690,11 @@ async function runEmpty(browser, gate, theme, viewport) {
   const diagnostics = []
   const page = await openPage(browser, EMPTY_ORIGIN, theme, viewport, { diagnostics })
   try {
+    await page.getByRole('button', { name: 'browse by project', exact: true }).click()
     await page.waitForFunction(() => document.body.textContent.includes('no ai work recorded yet'), undefined, { timeout: 20000 }).catch(() => fail(`${where}: the empty install never showed its teaching state`))
     // The teaching state is short: capture the shell and the state, not the
     // blank page below it.
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'empty.png'), `${where}/empty`, { clipHeight: viewport.id === 'phone' ? 760 : 560 })
+    await shoot(page, gate, join(OUT, theme, viewport.id, 'empty.png'), `${where}/empty`)
   } finally {
     await page.close()
   }
@@ -727,7 +709,7 @@ const servers = []
 let browser
 try {
   browser = await chromium.launch({ executablePath: CHROME, headless: true })
-  const mockServer = boot(PORT, 'web,dashboard,sessions,trends,qualitySessions,search')
+  const mockServer = boot(PORT, 'web,sessions,qualitySessions,search')
   servers.push(mockServer)
   const emptyServer = boot(PORT + 1, 'none')
   servers.push(emptyServer)
@@ -747,7 +729,6 @@ try {
   const summaryBase = await (await fetch(`${MOCK_ORIGIN}/api/v1/projects/summary`)).json()
   if (!Array.isArray(mockSessions) || mockSessions.length < FIXTURE.pattern.length) fail(`the mock store served ${mockSessions?.length} sessions; the pattern needs at least ${FIXTURE.pattern.length}`)
   const answers = publishingAnswers(mockSessions)
-  if (FIXTURE.trends.weeklySessions.reduce((sum, count) => sum + count, 0) !== mockSessions.length) fail('the trends fixture does not total the mock session corpus')
 
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of THEMES) {

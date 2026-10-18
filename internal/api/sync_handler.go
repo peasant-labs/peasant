@@ -43,6 +43,10 @@ type syncHandler struct {
 	// carries. The server owns the bounded scope cache; the sync route only
 	// consumes the issuer seam so its members replay the sync predicate.
 	scopeIssuer groupedScopeIssuer
+	home        *homeHandler
+	// detectReview allows the scan's detector dependency to be supplied without
+	// changing the offered redaction policy. Nil uses the configured engine.
+	detectReview func(string) []redact.Match
 
 	// Ingest state (protected by mu).
 	mu             sync.Mutex
@@ -128,11 +132,24 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 	// exact legacy flat envelope; only the published grouped value selects the
 	// grouped sync payload, and any other value is refused rather than served
 	// as flat under a name the caller did not ask for.
-	view := r.URL.Query().Get("view")
-	if view != "" && view != groupedViewValue {
+	query, queryErr := schema.ParseLocalSyncSessionsQuery(r.URL.Query())
+	if queryErr != nil {
 		writeAPIError(w, http.StatusBadRequest,
-			fmt.Sprintf("Sync sessions could not be listed because query field \"view\" is %q in internal/api.handleSyncSessions. No sessions were returned, because an unpublished view value cannot be served safely. Omit view for the flat sync list or use view=%s, then retry.", view, groupedViewValue),
+			queryErr.Error(),
 			"grouped_view_unknown")
+		return
+	}
+	view := query.View
+	if view == "home" || view == "project-options" {
+		home := h.home
+		if home == nil {
+			var reader homeReader
+			if h.store != nil {
+				reader = h.store
+			}
+			home = &homeHandler{reader: reader, sync: h, publishing: &publishingHandler{store: h.store, configHome: h.configHome}, resolver: ingest.NewGitRepositoryIdentityResolver()}
+		}
+		home.handleSessions(w, r)
 		return
 	}
 	if view == groupedViewValue {
@@ -333,7 +350,11 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	content := document.text
 
 	// Detect matches.
-	matches := redactor.Detect(content)
+	detect := redactor.Detect
+	if h.detectReview != nil {
+		detect = h.detectReview
+	}
+	matches := detect(content)
 
 	// Build replacement lookup.
 	replacements := buildReplacementLookup()

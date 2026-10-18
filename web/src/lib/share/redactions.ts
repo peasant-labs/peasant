@@ -12,6 +12,7 @@
 
 import type { Redaction, RedactionCategory } from '@/types/messages';
 import { getApiBaseUrl } from '@/lib/api/base';
+import { parseRedactionCategoryLabel, redactionCategoryFromLabel, zSyncRedactionsResponse, type SyncRedactionsResponse } from '@peasant-labs/schema';
 
 /**
  * The redaction policy, re-exported from the module generated out of
@@ -49,44 +50,12 @@ export function isSelectableRedactionLevel(
   return (SELECTABLE_REDACTION_LEVELS as readonly string[]).includes(level);
 }
 
-interface WireItem {
-  category: unknown;
-  ruleId: string;
-  ruleDisplayName: string;
-  originalText: string;
-  redactedReplacement: string;
-  description: string;
-  lineNumber: number;
-  contextBefore: string[];
-  contextAfter: string[];
-}
-interface WireRule {
-  ruleId: string;
-  displayName: string;
-  count: number;
-  items: WireItem[];
-}
-interface WireCategory {
-  category: unknown;
-  totalCount: number;
-  rules: WireRule[];
-}
-interface WireResponse {
-  total: number;
-  categories: WireCategory[];
-}
-
-const VALID_CATEGORIES: ReadonlySet<string> = new Set([
-  'CREDENTIAL',
-  'PII',
-  'PATH',
-  'INTERNAL',
-]);
-
 function redactionCategory(value: unknown): RedactionCategory {
-  if (typeof value === 'string' && VALID_CATEGORIES.has(value)) {
-    return value as RedactionCategory;
-  }
+  try {
+    const label = parseRedactionCategoryLabel(value);
+    redactionCategoryFromLabel(label);
+    return label;
+  } catch {
   throw new Error([
     `what: redaction preview category ${JSON.stringify(value)} is not recognized`,
     'why: the local API and UI must use the same canonical redaction category rendering',
@@ -95,6 +64,30 @@ function redactionCategory(value: unknown): RedactionCategory {
     'means: the preview cannot safely classify this finding, so sharing remains blocked',
     'fix: update the producer and consumer to use CREDENTIAL, PII, PATH, or INTERNAL, then re-scan',
   ].join('\n'));
+  }
+}
+
+function requireCount(valid: boolean): void {
+  if (!valid) throw new Error('redaction scan returned invalid occurrence counts while validating the local preview; sharing remains blocked. Correct the scan producer and re-scan.');
+}
+
+/** Validate mock and cached domain results before either review owner sees success. */
+export function validateRedactionPreview(preview: RedactionPreview): RedactionPreview {
+  if (!preview || !Array.isArray(preview.redactions)) throw new Error('redaction preview is missing its findings while preparing review; sharing remains blocked. Re-scan using an updated producer.');
+  requireCount(Number.isSafeInteger(preview.matchCount) && preview.matchCount >= preview.redactions.length
+    && (preview.matchCount === 0) === (preview.redactions.length === 0));
+  for (const item of preview.redactions) {
+    if (!item || typeof item !== 'object') throw new Error('redaction preview has malformed findings while preparing review; sharing remains blocked. Correct the preview producer and re-scan.');
+    redactionCategory(item.category);
+    if (typeof item.id !== 'string' || typeof item.originalText !== 'string' || typeof item.redactedReplacement !== 'string'
+      || !Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 100
+      || !Number.isSafeInteger(item.lineNumber) || item.lineNumber < 0
+      || !Array.isArray(item.contextBefore) || !item.contextBefore.every((line) => typeof line === 'string')
+      || !Array.isArray(item.contextAfter) || !item.contextAfter.every((line) => typeof line === 'string')) {
+      throw new Error('redaction preview has malformed findings while preparing review; sharing remains blocked. Correct the preview producer and re-scan.');
+    }
+  }
+  return preview;
 }
 
 function requireMatchingCategory(
@@ -133,12 +126,18 @@ export async function fetchRedactionScan(
     const body = await resp.text().catch(() => '');
     throw new Error(`redaction scan failed (${resp.status}): ${body}`);
   }
-  const data = (await resp.json()) as WireResponse;
+  const parsed = zSyncRedactionsResponse.safeParse(await resp.json());
+  if (!parsed.success) throw new Error('redaction scan returned a malformed response while reading GET /api/v1/sync/redactions; sharing remains blocked. Update the local scan producer and re-scan.');
+  const data: SyncRedactionsResponse = parsed.data;
   const out: Redaction[] = [];
-  for (const cat of data.categories ?? []) {
+  let total = 0;
+  for (const cat of data.categories) {
     const category = redactionCategory(cat.category);
-    for (const rule of cat.rules ?? []) {
-      for (const it of rule.items ?? []) {
+    let categoryTotal = 0;
+    for (const rule of cat.rules) {
+      requireCount(Number.isSafeInteger(rule.count) && rule.count >= rule.items.length && (rule.count === 0) === (rule.items.length === 0));
+      categoryTotal += rule.count;
+      for (const it of rule.items) {
         const itemCategory = redactionCategory(it.category);
         requireMatchingCategory(category, itemCategory);
         out.push({
@@ -158,11 +157,13 @@ export async function fetchRedactionScan(
         });
       }
     }
+    requireCount(Number.isSafeInteger(categoryTotal) && categoryTotal === cat.totalCount);
+    total += categoryTotal;
   }
-  if (!Number.isSafeInteger(data.total) || data.total < out.length) {
-    throw new Error('redaction scan returned an invalid occurrence count; sharing remains blocked');
-  }
-  return { redactions: out, matchCount: data.total };
+  // The producer counts raw occurrences in total, but deduplicates each rule
+  // by matched text before grouping and capping preview items.
+  requireCount(Number.isSafeInteger(data.total) && Number.isSafeInteger(total) && total <= data.total);
+  return validateRedactionPreview({ redactions: out, matchCount: data.total });
 }
 
 /** The sample-only adapter used by existing review consumers. */

@@ -12,6 +12,7 @@
 
 import type { RedactionLevel } from '@/lib/share/redactions';
 import type { Redaction, RedactionCategory } from '@/types/messages';
+import { RedactionCategoryLabel } from '@peasant-labs/schema';
 
 // ---------------------------------------------------------------------------
 // Deterministic hash (same as mock-transcript.ts)
@@ -47,7 +48,7 @@ export type MockRedaction = Redaction & { minimumLevel: RedactionLevel };
 
 const REDACTION_POOL: RedactionTemplate[] = [
   {
-    category: 'CREDENTIAL',
+    category: RedactionCategoryLabel.Credential,
     minimumLevel: 'minimal',
     confidence: 98,
     description: "AWS access key ID (github.com/peasant-labs/redact rule: aws_access_key)",
@@ -58,7 +59,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["  }", "  const client = new S3Client(config);"],
   },
   {
-    category: 'PII',
+    category: RedactionCategoryLabel.PII,
     minimumLevel: 'standard',
     confidence: 94,
     description: "Email address (github.com/peasant-labs/redact rule: email)",
@@ -69,7 +70,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["  sendNotification(email)", "  console.log(\"Notification sent\");"],
   },
   {
-    category: 'PATH',
+    category: RedactionCategoryLabel.Path,
     minimumLevel: 'minimal',
     confidence: 72,
     description: "Unix home directory path with username (github.com/peasant-labs/redact rule: unix_home_path)",
@@ -80,7 +81,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["$ npm install", "$ npm run dev"],
   },
   {
-    category: 'CREDENTIAL',
+    category: RedactionCategoryLabel.Credential,
     minimumLevel: 'minimal',
     confidence: 96,
     description: "GitHub personal access token (github.com/peasant-labs/redact rule: github_pat)",
@@ -91,7 +92,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["    }`,", "    'Content-Type': 'application/json',"],
   },
   {
-    category: 'INTERNAL',
+    category: RedactionCategoryLabel.Internal,
     minimumLevel: 'maximum',
     confidence: 61,
     description: "Git remote URL exposing project identity (github.com/peasant-labs/redact rule: git_remote_https)",
@@ -102,7 +103,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["  await exec(`git clone ${remote}`);", "  process.chdir(repoDir);"],
   },
   {
-    category: 'PII',
+    category: RedactionCategoryLabel.PII,
     minimumLevel: 'standard',
     confidence: 89,
     description: "US phone number (github.com/peasant-labs/redact rule: phone_us)",
@@ -113,7 +114,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["    extension: \"4201\",", "  };"],
   },
   {
-    category: 'CREDENTIAL',
+    category: RedactionCategoryLabel.Credential,
     minimumLevel: 'minimal',
     confidence: 99,
     description: "URL with embedded basic-auth credentials (github.com/peasant-labs/redact rule: basic_auth_uri)",
@@ -124,7 +125,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["REDIS_URL=redis://cache.prod.internal:6379", "LOG_LEVEL=info"],
   },
   {
-    category: 'PATH',
+    category: RedactionCategoryLabel.Path,
     minimumLevel: 'minimal',
     confidence: 65,
     description: "Unix home directory path with username (github.com/peasant-labs/redact rule: unix_home_path)",
@@ -135,7 +136,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["    && git pull origin main \\", "    && systemctl restart billing\""],
   },
   {
-    category: 'PII',
+    category: RedactionCategoryLabel.PII,
     minimumLevel: 'standard',
     confidence: 85,
     description: "IPv4 address (github.com/peasant-labs/redact rule: ip_address)",
@@ -146,7 +147,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["  const port = 3000;", "  app.listen(port, devServer);"],
   },
   {
-    category: 'CREDENTIAL',
+    category: RedactionCategoryLabel.Credential,
     minimumLevel: 'minimal',
     confidence: 58,
     description: "Slack incoming webhook URL (github.com/peasant-labs/redact rule: slack_webhook_url)",
@@ -157,7 +158,7 @@ const REDACTION_POOL: RedactionTemplate[] = [
     contextAfter: ["  await postSlackMessage(webhookUrl, {", "    text: `Deploy ${version} complete`,"],
   },
   {
-    category: 'CREDENTIAL',
+    category: RedactionCategoryLabel.Credential,
     minimumLevel: 'minimal',
     confidence: 92,
     description: "Stripe API secret key (github.com/peasant-labs/redact rule: stripe_key)",

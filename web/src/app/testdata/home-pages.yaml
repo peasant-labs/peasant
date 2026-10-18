@@ -1,0 +1,100 @@
+requiredNames:
+  - first-page-and-explicit-more
+  - loaded-refresh-keeps-content-on-failure
+  - stale-filter-response
+  - lazy-children-and-child-more
+  - account-change-clears-old-rows
+  - collapsed-late-child-is-ignored
+  - selection-refresh-clears-loaded-content
+  - overlapping-refresh-does-not-race
+  - collapse-cancels-expanded-refresh
+  - collapsed-ancestor-skips-descendant-refresh
+  - successful-refresh-invalidates-collapsed-family
+  - successful-refresh-invalidates-collapsed-descendant
+  - canonical-missing-parent-commits-refreshed-roots
+  - generic-child404-retains-visible-content
+  - publish-settlement-refreshes-loaded-window
+  - publish-during-refresh-queues-one-loaded-window
+  - selection-recovery-survives-failed-retry
+  - selection-recovery-survives-account-reset
+publish:
+  request: { sessionIds: [root-0], redactionLevel: standard }
+  response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
+  loadedTokens:
+    - { parent: null, token: '' }
+    - { parent: root-0, token: '' }
+    - { parent: null, token: after-first }
+  failedRefreshTokens:
+    - { parent: null, token: '' }
+    - { parent: root-0, token: '' }
+visual:
+  themes: [dark, light]
+  viewports:
+    - { name: desktop, width: 1440, height: 1100 }
+    - { name: phone, width: 390, height: 844 }
+  projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90
+  projects:
+    - { projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90, projectName: fixture-project }
+    - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: unseen-project }
+cases:
+  - name: first-page-and-explicit-more
+    roots: 60
+    children: 0
+  - name: loaded-refresh-keeps-content-on-failure
+    roots: 80
+    children: 30
+  - name: stale-filter-response
+    roots: 30
+    children: 0
+  - name: lazy-children-and-child-more
+    roots: 30
+    children: 30
+  - name: account-change-clears-old-rows
+    roots: 30
+    children: 0
+  - name: collapsed-late-child-is-ignored
+    roots: 30
+    children: 30
+  - name: selection-refresh-clears-loaded-content
+    roots: 30
+    children: 0
+  - name: overlapping-refresh-does-not-race
+    roots: 30
+    children: 0
+  - name: collapse-cancels-expanded-refresh
+    roots: 30
+    children: 30
+  - name: collapsed-ancestor-skips-descendant-refresh
+    roots: 30
+    children: 30
+  - name: successful-refresh-invalidates-collapsed-family
+    roots: 30
+    children: 30
+  - name: successful-refresh-invalidates-collapsed-descendant
+    roots: 30
+    children: 30
+  - name: canonical-missing-parent-commits-refreshed-roots
+    roots: 30
+    children: 30
+    parentErrorCode: home_parent_not_found
+  - name: generic-child404-retains-visible-content
+    roots: 30
+    children: 30
+    parentErrorCode: route_not_found
+  - name: publish-settlement-refreshes-loaded-window
+    roots: 80
+    children: 30
+  - name: publish-during-refresh-queues-one-loaded-window
+    roots: 80
+    children: 30
+  - name: selection-recovery-survives-failed-retry
+    roots: 30
+    children: 0
+    cachedSessionId: cached-selection-session
+    cachedProject: cached-selection-project
+  - name: selection-recovery-survives-account-reset
+    roots: 30
+    children: 0
+    cachedSessionId: cached-selection-session
+    cachedProject: cached-selection-project
+    accountAfterFailure: second-account

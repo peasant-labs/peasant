@@ -1,5 +1,7 @@
 export const DiscoveryErrorCode = {
   SelectionVisibility: 'selection_visibility',
+  HomeParentNotFound: 'home_parent_not_found',
+  SyncPageScopeChanged: 'sync_page_scope_changed',
 } as const;
 
 export type DiscoveryErrorCode =
@@ -38,6 +40,10 @@ export function parseDiscoveryError(path: string, status: number, body: string):
       : 'the server returned no error details; retry, then inspect the Peasant server logs';
   const code = envelope.code === DiscoveryErrorCode.SelectionVisibility
     ? DiscoveryErrorCode.SelectionVisibility
+    : envelope.code === DiscoveryErrorCode.HomeParentNotFound
+      ? DiscoveryErrorCode.HomeParentNotFound
+    : envelope.code === DiscoveryErrorCode.SyncPageScopeChanged
+      ? DiscoveryErrorCode.SyncPageScopeChanged
     : undefined;
   return new DiscoveryRequestError(path, status, message, code);
 }

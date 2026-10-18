@@ -1,3 +1,4 @@
+requiredNames: [credential, pii, path, internal, unknown_group, unknown_item, group_item_mismatch]
 cases:
   - name: credential
     kind: success

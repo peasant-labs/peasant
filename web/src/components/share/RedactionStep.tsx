@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { guardReviewMatches, reviewMatches } from '@/lib/share/reviewMatches';
 import { RedactionReview } from '@/lib/ft-ui';
 import { LoaderIcon } from 'lucide-react';
 import type { ShareSession } from '@/lib/share/types';
@@ -32,19 +33,6 @@ export type { RedactionCache, RedactionCacheEntry } from '@/lib/share/redactionS
 // scale; its low-confidence caution fires below 0.70 — same threshold the old
 // per-card badge used at < 70).
 // ---------------------------------------------------------------------------
-
-interface ReviewMatch {
-  id: string;
-  category: string;
-  confidence: number;
-  before: string;
-  after: string;
-  kept: boolean;
-}
-
-function matchId(sessionId: string, redactionId: string): string {
-  return `${sessionId}::${redactionId}`;
-}
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -104,6 +92,7 @@ export function RedactionStep({
     sessionRedactions,
     scanError,
     runScan,
+    isReviewReady,
   } = useRedactionPipeline(selectedSessions, redactionLevel, useMock, cache, onCacheChange);
 
   // Per-match opt-out state. `kept` = the user opted this match OUT of
@@ -129,37 +118,31 @@ export function RedactionStep({
 
   // Flatten every selected session's findings into one match list — the
   // composite is a single safe-by-default review surface.
-  const matches = useMemo<ReviewMatch[]>(() => {
-    const out: ReviewMatch[] = [];
-    for (const session of selectedSessions) {
-      const items = sessionRedactions.get(session.id) ?? [];
-      for (const r of items) {
-        const id = matchId(session.id, r.id);
-        out.push({
-          id,
-          category: r.category,
-          confidence: r.confidence / 100,
-          before: r.originalText,
-          after: r.redactedReplacement,
-          kept: kept.has(id),
-        });
-      }
-    }
-    return out;
-  }, [selectedSessions, sessionRedactions, kept]);
+  const adaptation = guardReviewMatches(() => selectedSessions.flatMap((session) =>
+    reviewMatches(session.id, sessionRedactions.get(session.id) ?? []).map((match) => ({ ...match, kept: kept.has(match.id) })),
+  ));
+  const { matches } = adaptation;
+  const reviewError = scanError ?? adaptation.error;
 
   const isScanning = phase === 'scanning';
   const isReady = phase === 'ready';
   const sessionCount = selectedSessions.length;
-  const hasScanFailure = failureCount > 0;
+  const hasScanFailure = failureCount > 0 || reviewError !== null;
   const hasOnlyFailedEmptyResults = isReady && hasScanFailure && matches.length === 0;
-  const continueDisabled = isScanning || hasScanFailure;
+  const continueDisabled = !isReady || selectedSessions.length === 0 || hasScanFailure;
+  const actionRef = useRef({ continueDisabled, isReviewReady, onNext });
+  actionRef.current = { continueDisabled, isReviewReady, onNext };
+  const continueReview = useCallback(() => {
+    const current = actionRef.current;
+    if (!current.continueDisabled && current.isReviewReady()) current.onNext();
+  }, []);
+  useEffect(() => () => { actionRef.current.continueDisabled = true; }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onFooterActionsChange({
       primary: {
         label: 'Continue',
-        onClick: onNext,
+        onClick: continueReview,
         disabled: continueDisabled,
         title: isScanning
           ? 'Scanning in progress…'
@@ -172,7 +155,7 @@ export function RedactionStep({
         : undefined,
     });
     return () => onFooterActionsChange(null);
-  }, [continueDisabled, hasScanFailure, isReady, isScanning, onFooterActionsChange, onNext, runScan]);
+  }, [continueDisabled, continueReview, hasScanFailure, isReady, isScanning, onFooterActionsChange, runScan]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -200,7 +183,7 @@ export function RedactionStep({
           <div className="flex items-start gap-3 border border-rule-strong bg-surface-raised p-4" role="alert">
             <div>
               <p className="text-sm font-medium text-ink">redaction scan incomplete</p>
-              <p className="mt-1 text-sm text-ink-2">{scanError}</p>
+              <p className="mt-1 text-sm text-ink-2">{reviewError}</p>
             </div>
           </div>
           <div>
@@ -235,7 +218,7 @@ export function RedactionStep({
           onToggle={handleToggle}
           scanned={scannedCount}
           total={sessionCount}
-          failure={scanError ?? false}
+          failure={reviewError ?? false}
         />
       )}
     </div>

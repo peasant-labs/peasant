@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   RedactionStep,
@@ -22,6 +22,10 @@ import {
   REDACTION_STEP_STANDARD_MATCH,
 } from '@/test/fixtures/redaction-step';
 import { REDACTION_PREVIEW_UNKNOWN_ITEM_ERROR } from '@/test/fixtures/redaction-preview';
+import { boundaryDomain, boundaryResponse, REDACTION_REVIEW_BOUNDARIES } from '@/test/fixtures/redaction-review-boundaries';
+import * as reviewAdapter from '@/lib/share/reviewMatches';
+import * as mockData from '@/lib/share/mock-data';
+import type { ShareFooterActions } from './footer-actions';
 
 vi.mock('@/lib/share/redactions', async (importOriginal) => {
   const actual = await importOriginal<typeof redactionsApi>();
@@ -42,14 +46,17 @@ interface HarnessProps {
   multiple?: boolean;
   useMock?: boolean;
   onLevelChange?: (level: SelectableRedactionLevel) => void;
+  initialCache?: RedactionCache;
+  onNext?: () => void;
+  onActions?: (actions: ShareFooterActions | null) => void;
 }
 
-function Harness({ multiple = false, useMock = false, onLevelChange }: HarnessProps) {
-  const [cache, setCache] = useState<RedactionCache>(() => new Map());
+function Harness({ multiple = false, useMock = false, onLevelChange, initialCache, onNext = () => {}, onActions }: HarnessProps) {
+  const [cache, setCache] = useState<RedactionCache>(() => initialCache ?? new Map());
   const [level, setLevel] = useState<SelectableRedactionLevel>(DEFAULT_REDACTION_LEVEL);
   const [mounted, setMounted] = useState(true);
   const [footerActions, setFooterActions] = useState<import('@/components/share/footer-actions').ShareFooterActions | null>(null);
-  const onNext = useCallback(() => {}, []);
+  const setActions = useCallback((actions: ShareFooterActions | null) => { setFooterActions(actions); onActions?.(actions); }, [onActions]);
 
   const handleLevelChange = (next: SelectableRedactionLevel) => {
     setLevel(next);
@@ -68,7 +75,7 @@ function Harness({ multiple = false, useMock = false, onLevelChange }: HarnessPr
           redactionLevel={level}
           onLevelChange={handleLevelChange}
           onNext={onNext}
-          onFooterActionsChange={setFooterActions}
+          onFooterActionsChange={setActions}
           cache={cache}
           onCacheChange={setCache}
           useMock={useMock}
@@ -82,8 +89,51 @@ function Harness({ multiple = false, useMock = false, onLevelChange }: HarnessPr
 
 describe('RedactionStep → RedactionReview', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.resetAllMocks();
   });
+
+  for (const entry of REDACTION_REVIEW_BOUNDARIES) {
+    it(`guards the actual footer and direct callbacks, with recovery: ${entry.name}`, async () => {
+      const actual = await vi.importActual<typeof redactionsApi>('@/lib/share/redactions');
+      let response = boundaryResponse(entry.source === 'adapter' ? 'none' : entry.mutation);
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json(response)));
+      fetchPreview.mockImplementation((id, level) => actual.fetchRedactionPreview(id, level));
+      const mock = vi.spyOn(mockData, 'fetchMockRedactionPreview').mockReturnValue(boundaryDomain(entry.mutation).map((item) => ({ ...item, minimumLevel: entry.minimumLevel ?? 'standard' })));
+      const originalAdapter = reviewAdapter.reviewMatches;
+      const adapter = entry.source === 'adapter' ? vi.spyOn(reviewAdapter, 'reviewMatches').mockImplementation((id, redactions) => {
+        if (entry.mutation === 'none') throw new TypeError('injected conversion rejection');
+        const matches = originalAdapter(id, redactions);
+        if (matches[0]) Object.assign(matches[0], { category: 'LOCATION' });
+        return matches;
+      }) : null;
+      const onNext = vi.fn();
+      let actions: ShareFooterActions | null = null;
+      const onActions = (next: ShareFooterActions | null) => { actions = next; };
+      const initialCache: RedactionCache = entry.source === 'cache' ? new Map([[`standard:${REDACTION_STEP_SESSION.id}`, { status: 'success', redactions: boundaryDomain(entry.mutation) }]]) : new Map();
+      render(<Harness initialCache={initialCache} useMock={entry.source === 'mock'} onNext={onNext} onActions={onActions} />);
+      if (entry.error) {
+        expect(await screen.findByRole('alert')).toHaveTextContent(entry.error);
+        expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+        actions!.primary!.onClick();
+        expect(onNext).not.toHaveBeenCalled();
+        if (entry.source === 'cache') expect(fetchPreview).not.toHaveBeenCalled();
+        response = boundaryResponse();
+        adapter?.mockRestore();
+        mock.mockReturnValue(boundaryDomain('none').map((item) => ({ ...item, minimumLevel: 'standard' })));
+        await userEvent.click(await screen.findByRole('button', { name: 'Re-scan' }));
+      }
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+      for (const item of boundaryDomain('none')) expect(screen.getByText(item.originalText)).toBeInTheDocument();
+      const staleContinue = actions!.primary!.onClick;
+      const rescan = actions!.secondary!.onClick;
+      // The last enabled handler cannot advance even before the scan re-renders.
+      await act(async () => { rescan(); staleContinue(); });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+      expect(onNext).not.toHaveBeenCalled();
+    });
+  }
 
   it('scans, then renders each detected match as a before-and-after card', async () => {
     render(<Harness useMock />);

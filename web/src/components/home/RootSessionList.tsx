@@ -1,6 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import type { useHomeSessions } from '@/hooks/useHomeSessions';
+import { SkeletonList } from '@/lib/skeleton';
+import type { LocalSyncProjectOption } from '@/lib/api/home';
+import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import Link from 'next/link';
 import {
   DataTable,
@@ -17,8 +21,6 @@ import {
   PUBLISH_FILTERS,
   PUBLISH_FILTER_LABELS,
   isPublishFilter,
-  matchesPublishFilter,
-  publishFilterCounts,
   rowPublishState,
   type PublishFilter,
   type RootSessionRow,
@@ -27,11 +29,6 @@ import { formatMinutes } from '@/lib/home/rootStats';
 import { parseProjectHash, reviewHref, transcriptHref } from '@/lib/navigation/projectRoutes';
 import { displayProject } from '@/lib/quality/utils';
 import { formatRelative } from '@/app/review/[[...segments]]/format';
-
-/** Rows the list adds each time `load more` is pressed. */
-export const ROOT_LIST_PAGE_SIZE = 25;
-
-const ALL_PROJECTS = 'all';
 
 const tokenFormat = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 
@@ -72,10 +69,16 @@ const NO_CHILDREN: ReadonlyMap<string, readonly RootSessionRow[]> = new Map();
 export interface RootSessionListProps {
   rows: readonly RootSessionRow[];
   childGroups?: ReadonlyMap<string, readonly RootSessionRow[]>;
-  /** sessionId -> generated title (useSessionTitles). */
+  /** sessionId -> generated title supplied with the bounded page. */
   titles: ReadonlyMap<string, string>;
   /** sessionId -> first prompt, for sessions without a generated title. */
   previews: ReadonlyMap<string, string>;
+  home: ReturnType<typeof useHomeSessions>;
+  filter: PublishFilter;
+  onFilter: (filter: PublishFilter) => void;
+  loading?: boolean;
+  project: LocalSyncProjectOption | null;
+  onProject: (hash: string) => void;
 }
 
 interface SessionChildrenGroupProps {
@@ -84,13 +87,15 @@ interface SessionChildrenGroupProps {
   expanded: boolean;
   onToggle: () => void;
   indent?: boolean;
+  count?: number;
+  pendingTarget?: boolean;
 }
 
 /** The family disclosure. Its rows are the flattened child rows that follow the parent row. */
-function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent = false }: SessionChildrenGroupProps) {
-  const label = <>subagents <span className="tabular-nums">{childIds.length.toLocaleString('en-US')}</span></>;
+function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent = false, count, pendingTarget }: SessionChildrenGroupProps) {
+  const label = <>subagents <span className="tabular-nums">{(count ?? childIds.length).toLocaleString('en-US')}</span></>;
   // rowsID is an IDREF list: the rendered child rows are the revealed content.
-  const rowsID = childIds.map((id) => `session-group-rows:${id}`).join(' ');
+  const rowsID = pendingTarget ? `home-children-${parentId}` : childIds.map((id) => `session-group-rows:${id}`).join(' ');
   return (
     <div data-session-group={parentId}>
       <SessionGroupDisclosure
@@ -109,42 +114,22 @@ function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent =
 
 /**
  * The root page's session list: one row per session with its publish state,
- * the publish-state filters and a project filter over the same rows, and
- * `load more`. Every filter count is computed from the rows the filter lists.
+ * the server-owned publish-state filters over the same rows, and
+ * `load more`. Home owns server filters and pages; page lengths never stand
+ * in for global totals or the complete project catalog.
  */
-export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews }: RootSessionListProps) {
-  const [filter, setFilter] = useState<PublishFilter>('all');
-  const [project, setProject] = useState<string>(ALL_PROJECTS);
-  const [shown, setShown] = useState(ROOT_LIST_PAGE_SIZE);
-  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set());
-
-  const projects = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const row of rows) {
-      if (!names.has(row.sync.projectHash)) names.set(row.sync.projectHash, displayProject(row.sync.projectName));
-    }
-    return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [rows]);
-
-  // A project that left the rows (a reread, a narrower selection) resets the
-  // project filter rather than listing nothing under a stale name.
-  const activeProject = project !== ALL_PROJECTS && projects.some(([hash]) => hash === project) ? project : ALL_PROJECTS;
-  const inProject = useMemo(
-    () => (activeProject === ALL_PROJECTS ? rows : rows.filter((row) => row.sync.projectHash === activeProject)),
-    [rows, activeProject],
-  );
-  const counts = useMemo(() => publishFilterCounts(inProject), [inProject]);
-  const listed = useMemo(
-    () => inProject.filter((row) => matchesPublishFilter(row, filter)).map((row) => ({ ...row, id: row.sync.id })),
-    [inProject, filter],
-  );
-  const visible = listed.slice(0, shown);
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, onFilter, loading, project, onProject }: RootSessionListProps) {
+  const expandedGroups = home.expanded;
+  const visible = rows;
 
   // Depth-first: each expanded child becomes its own row immediately after its
   // parent. Folded groups materialize nothing, so a deep chain stays bounded.
   const renderRows = useMemo(() => {
     const out: ListRow[] = [];
+    const visited = new Set<string>();
     const walk = (row: RootSessionRow, kind: 'session' | 'child', depth: number) => {
+      if (visited.has(row.sync.id)) return;
+      visited.add(row.sync.id);
       out.push({ ...row, id: row.sync.id, kind, depth });
       if (!expandedGroups.has(row.sync.id)) return;
       for (const child of childGroups.get(row.sync.id) ?? []) walk(child, 'child', depth + 1);
@@ -158,6 +143,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
     [renderRows],
   );
   const audience = usePublicationAudience(publishedOnScreen, rows);
+  const childCounts = useMemo(() => new Map([...home.groups.values()].flatMap(group => group.pages.flatMap(page => page.items)).map(row => [row.sync.id, row.childCount])), [home.groups]);
 
   const columns = useMemo<DataTableColumn<ListRow>[]>(
     () => [
@@ -169,19 +155,18 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
           const hash = parseProjectHash(row.sync.projectHash);
           const title = rowTitle(row.id, titles, previews);
           const harness = row.sync.harness.replace(/-/g, ' ');
-          const group = children?.length ? (
-            <SessionChildrenGroup
-              parentId={row.id}
-              childIds={children.map((child) => child.sync.id)}
-              expanded={expandedGroups.has(row.id)}
-              onToggle={() => setExpandedGroups((previous) => {
-                const next = new Set(previous);
-                if (next.has(row.id)) next.delete(row.id);
-                else next.add(row.id);
-                return next;
-              })}
-              indent
-            />
+          const childCount = childCounts.get(row.id) ?? 0;
+          const group = childCount ? (
+            <>
+              <SessionChildrenGroup parentId={row.id} childIds={(children ?? []).map(child => child.sync.id)} count={childCount} pendingTarget expanded={expandedGroups.has(row.id)} onToggle={() => home.toggle(row.id)} indent />
+              <div id={`home-children-${row.id}`} aria-owns={expandedGroups.has(row.id) ? (children ?? []).map(child => `session-group-rows:${child.sync.id}`).join(' ') || undefined : undefined}>
+                {expandedGroups.has(row.id) && <div className="flex items-center gap-2" role="status">
+                  {home.groups.get(row.id)?.loading && 'loading subagents…'}
+                  {home.groups.get(row.id)?.error != null && <Button variant="secondary" size="sm" onClick={() => home.retry(row.id)}>retry subagents</Button>}
+                  {(home.groups.get(row.id)?.pages.at(-1)?.next ?? '') !== '' && <Button variant="secondary" size="sm" disabled={home.groups.get(row.id)?.loading} onClick={() => home.more(row.id)}>load more subagents</Button>}
+                </div>}
+              </div>
+            </>
           ) : null;
           if (row.kind === 'child') {
             return (
@@ -284,13 +269,12 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         },
       },
     ],
-    [titles, previews, audience, childGroups, expandedGroups],
+    [titles, previews, audience, childGroups, expandedGroups, home, childCounts],
   );
 
   const choose = (next: string) => {
     if (!isPublishFilter(next)) return;
-    setFilter(next);
-    setShown(ROOT_LIST_PAGE_SIZE);
+    onFilter(next);
   };
 
   return (
@@ -306,28 +290,20 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
             label: (
               <>
                 {PUBLISH_FILTER_LABELS[option]}{' '}
-                <span className="tabular-nums">{counts[option].toLocaleString('en-US')}</span>
               </>
             ),
           }))}
         />
-        {projects.length > 1 && (
-          <Select
-            aria-label="project"
-            value={activeProject}
-            onChange={(event) => {
-              setProject(event.target.value);
-              setShown(ROOT_LIST_PAGE_SIZE);
-            }}
-            options={[
-              { value: ALL_PROJECTS, label: 'all projects' },
-              ...projects.map(([hash, name]) => ({ value: hash, label: name })),
-            ]}
-          />
-        )}
+        <Select aria-label="project" value={project?.projectHash ?? ''} onFocus={() => { void home.loadProjects(); }} onChange={event => onProject(event.target.value)} options={[
+          { value: '', label: 'all projects' },
+          ...(project && !home.projects?.some(option => option.projectHash === project.projectHash) ? [{ value: project.projectHash, label: project.projectName }] : []),
+          ...(home.projects ?? []).map(option => ({ value: option.projectHash, label: option.projectName })),
+        ]} />
       </div>
+      {home.projectsLoading && <p role="status" className="m-0 text-base text-ink-2">loading project choices…</p>}
+      {home.projectError != null && <div className="flex items-center gap-2" role="status"><span>{discoveryErrorMessage(home.projectError)}</span><Button variant="secondary" size="sm" onClick={() => { void home.loadProjects(); }}>retry project choices</Button></div>}
 
-      {listed.length === 0 ? (
+      {loading ? <SkeletonList rows={6} label="Loading your sessions" /> : rows.length === 0 ? (
         <p className="border-y border-rule py-6 text-base text-ink-2">{EMPTY_FILTER_COPY[filter]}</p>
       ) : (
         <DataTable<ListRow>
@@ -341,18 +317,8 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         />
       )}
 
-      {listed.length > 0 && (
-        <div className="flex items-center justify-between gap-3">
-          <span className="font-mono text-sm text-ink-3" aria-live="polite">
-            showing <span className="tabular-nums">{visible.length.toLocaleString('en-US')}</span> of{' '}
-            <span className="tabular-nums">{listed.length.toLocaleString('en-US')}</span>
-          </span>
-          {visible.length < listed.length && (
-            <Button variant="secondary" size="sm" onClick={() => setShown((value) => value + ROOT_LIST_PAGE_SIZE)}>
-              load more
-            </Button>
-          )}
-        </div>
+      {(home.groups.get('')?.pages.at(-1)?.next ?? '') !== '' && (
+        <Button variant="secondary" size="sm" disabled={home.groups.get('')?.loading} onClick={() => home.more()}>load more</Button>
       )}
     </section>
   );

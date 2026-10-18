@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import HomePage from './page';
+vi.mock('@/contexts/PublishContext', () => ({ usePublishState: () => ({ settled: stableSettled }) }));
+const stableSettled = new Map();
 import type { DecodedProjectSummariesPayload } from '@/lib/api/map';
 import { ALPHA_HASH, BETA_HASH, makeSession } from '@/app/review/[[...segments]]/test-fixtures';
 import { formatMinutes } from '@/lib/home/rootStats';
@@ -244,6 +246,19 @@ function serve(specs: SessionSpec[], options: ServeOptions = {}) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     requests.push(url);
+    if (url.pathname === '/api/v1/sync/auth') return json({ authenticated: false });
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') return json({ projects: Object.values(PROJECTS).map(project => ({ projectHash: project.hash, projectName: project.name })) });
+    if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
+      await options.syncPending;
+      if (options.publicationsError) return json({ error: options.publicationsError.error, code: options.publicationsError.code }, options.publicationsError.status);
+      const parent = url.searchParams.get('parentSessionId');
+      const filter = url.searchParams.get('publication') ?? 'all';
+      const source = specs.filter(spec => spec.publication !== false && !spec.outsideSelection && !spec.parentUnresolved
+        && (parent ? spec.parentSessionId === parent : !spec.parentSessionId)
+        && (parent || filter === 'all' || (filter === 'published' && spec.state === 'published') || (filter === 'not-published' && spec.state === 'unpublished') || (filter === 'auto' && spec.autoPublish)));
+      const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0;
+      return json({ items: source.slice(start, start + 25).map((spec) => ({ sync: syncRow(spec, specs.indexOf(spec)), publication: publicationRow(spec, specs.indexOf(spec), false), title: spec.title ?? '', preview: spec.preview ?? '', childCount: specs.filter(child => child.parentSessionId === spec.id && !child.outsideSelection && child.publication !== false).length })), next: start + 25 < source.length ? 'more-sessions' : '' });
+    }
     if (url.searchParams.get('include') === 'audience') {
       for (const id of url.searchParams.get('sessionIds')!.split(',')) {
         audienceChecks.push({ id, rendered: !!document.querySelector(`[data-session-id="${id}"], [data-session-group-child="${id}"]`) });
@@ -294,7 +309,7 @@ function filterButtons(list: HTMLElement) {
 
 function filterButton(list: HTMLElement, key: CountKey): HTMLElement {
   const label = FILTER_LABELS[key];
-  const button = filterButtons(list).find((candidate) => candidate.textContent?.replace(/\s+[\d,]+$/, '') === label);
+  const button = filterButtons(list).find((candidate) => candidate.textContent?.trim() === label);
   if (!button) throw new Error(`no ${label} filter option`);
   return button;
 }
@@ -308,12 +323,13 @@ function rowsOnScreen(list: HTMLElement): string[] {
 }
 
 /** Presses load more until it is gone; returns the rows on screen after each step. */
-function loadAll(list: HTMLElement): number[] {
+async function loadAll(list: HTMLElement): Promise<number[]> {
   const pages = [rowsOnScreen(list).length];
   for (let press = 0; press < 100; press++) {
     const more = within(list).queryByRole('button', { name: 'load more' });
     if (!more) break;
     fireEvent.click(more);
+    await waitFor(() => expect(within(list).queryByRole('button', { name: 'load more' })?.hasAttribute('disabled') ?? false).toBe(false));
     pages.push(rowsOnScreen(list).length);
   }
   return pages;
@@ -350,10 +366,8 @@ describe('root page publish filters', () => {
         });
         render(<HomePage />);
         try {
-          const strip = await screen.findByRole('list', { name: 'your sessions in numbers' });
           if (testCase.readState === 'error') await screen.findByRole('button', { name: 'retry the session list' });
-          const pair = within(strip).getAllByRole('listitem').find((item) => / sessions$/.test(item.textContent ?? ''));
-          expect(pair?.textContent ?? null).toBe(testCase.expectedSessions);
+          expect(screen.queryByRole('list', { name: 'your sessions in numbers' })).not.toBeInTheDocument();
         } finally {
           cleanup();
           await act(async () => { release(); });
@@ -375,9 +389,8 @@ describe('root page publish filters', () => {
       // 1s default findBy timeout (observed on a cold Vite dep cache); wait up to
       // five seconds. The assertions below are unchanged.
       let list = await screen.findByRole('region', { name: 'sessions' }, { timeout: 5000 });
-      const assertSessionsStat = () => {
-        const strip = screen.getByRole('list', { name: 'your sessions in numbers' });
-        expect(within(strip).getAllByRole('listitem').find((item) => / sessions$/.test(item.textContent ?? ''))?.textContent).toBe(`${testCase.expectedCounts.all.toLocaleString('en-US')} sessions`);
+       const assertSessionsStat = () => {
+         expect(screen.queryByRole('list', { name: 'your sessions in numbers' })).not.toBeInTheDocument();
       };
       assertSessionsStat();
 
@@ -396,10 +409,13 @@ describe('root page publish filters', () => {
       };
 
       for (const key of Object.keys(FILTER_LABELS) as CountKey[]) {
-        expect(countOf(filterButton(list, key)), `${key} count`).toBe(testCase.expectedCounts[key]);
+         expect(filterButton(list, key)).toHaveTextContent(FILTER_LABELS[key]);
+         expect(filterButton(list, key).textContent).not.toMatch(/\d/);
       }
 
-      fireEvent.click(filterButton(list, FILTER_KEYS[testCase.filter]));
+       fireEvent.click(filterButton(list, FILTER_KEYS[testCase.filter]));
+       await waitFor(() => expect(list.querySelector('[aria-label="Loading your sessions"]')).toBeNull());
+       await waitFor(() => expect(rowsOnScreen(list).length).toBe(Math.min(testCase.expectedRows.length, 25)));
       assertSessionsStat();
       if (testCase.expectedGroups) {
         expect([...list.querySelectorAll('[data-session-group]')].map((node) => node.getAttribute('data-session-group'))).toEqual(testCase.expectedGroups);
@@ -409,7 +425,7 @@ describe('root page publish filters', () => {
           expect(within(group as HTMLElement).getByRole('button')).toHaveAttribute('aria-expanded', 'false');
         }
       }
-      const pages = loadAll(list);
+       const pages = await loadAll(list);
       assertSessionsStat();
       expect(pages).toEqual(testCase.expectedPages ?? [testCase.expectedRows.length]);
       expect(rowsOnScreen(list)).toEqual(testCase.expectedRows);
@@ -422,12 +438,13 @@ describe('root page publish filters', () => {
           fireEvent.click(within(group).getAllByRole('button')[0]);
         }
         if (step.refresh) {
-          const before = requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length;
+           const before = requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length;
           topics.sessions = { sessions: [...specs.filter((spec) => spec.preview).map((spec) => makeSession({ id: spec.id, preview: spec.preview })), makeSession({ id: 'refresh-root', project: 'alpha-project' })] };
-          await act(async () => { view.rerender(<HomePage />); });
-          await waitFor(() => expect(requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length).toBeGreaterThan(before));
+           fireEvent(window, new Event('focus'));
+           await waitFor(() => expect(requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length).toBeGreaterThan(before));
         }
-        const children = [...list.querySelectorAll('[data-session-group-child]')];
+         await waitFor(() => expect([...list.querySelectorAll('[data-session-group-child]')].map(node => node.getAttribute('data-session-group-child'))).toEqual(step.children));
+         const children = [...list.querySelectorAll('[data-session-group-child]')];
         expect(children.map((node) => node.getAttribute('data-session-group-child'))).toEqual(step.children);
         if (step.groups) {
           expect([...list.querySelectorAll('[data-session-group]')].map((node) => node.getAttribute('data-session-group'))).toEqual(step.groups);
@@ -483,7 +500,7 @@ describe('root page publish filters', () => {
       if (searchSpec) {
         fireEvent.change(screen.getByRole('searchbox', { name: 'search transcripts' }), { target: { value: 'child' } });
         const match = await screen.findByText('child search match');
-        expect(match.closest('[data-grouped-sessions-section]')?.querySelector('.pub-state-text')?.textContent).toBe('published · up to date');
+        await waitFor(() => expect(match.closest('[data-grouped-sessions-section]')?.querySelector('.pub-state-text')?.textContent).toBe('published, up to date'));
         fireEvent.click(screen.getByRole('button', { name: 'clear search' }));
         list = await screen.findByRole('region', { name: 'sessions' });
       }
@@ -492,13 +509,15 @@ describe('root page publish filters', () => {
         await waitFor(() => expect(stateLabel(list, id)).toBe(label));
       }
 
-      // Every filter lists exactly as many rows as its count says.
+       // Filter membership stays server-owned; totals are intentionally omitted.
       for (const key of Object.keys(FILTER_LABELS) as CountKey[]) {
-        const button = filterButton(list, key);
-        fireEvent.click(button);
-        expect(button).toHaveAttribute('aria-pressed', 'true');
-        loadAll(list);
-        expect(rowsOnScreen(list).length, `${key} rows`).toBe(countOf(button));
+         const button = filterButton(list, key);
+         const alreadySelected = button.getAttribute('aria-pressed') === 'true';
+         fireEvent.click(button);
+         expect(button).toHaveAttribute('aria-pressed', 'true');
+         if (!alreadySelected) await waitFor(() => expect(rowsOnScreen(list).length).toBe(Math.min(testCase.expectedCounts[key], 25)));
+         await loadAll(list);
+         expect(rowsOnScreen(list).length, `${key} rows`).toBe(testCase.expectedCounts[key]);
         assertSessionsStat();
       }
 
@@ -521,16 +540,18 @@ describe('root page list reads', () => {
     serve(SPECS);
     render(<HomePage />);
     const list = await screen.findByRole('region', { name: 'sessions' });
+    await screen.findByRole('link', { name: 's-pub' });
     const row = list.querySelector('[data-session-id="s-pub"]')!.closest('tr')!;
     expect(within(row).getByRole('link', { name: 's-pub' })).toHaveAttribute('href', `/projects/${BETA_HASH}/s-pub`);
     expect(within(row).getByRole('link', { name: 'changes in beta-project' })).toHaveAttribute('href', `/review/${BETA_HASH}`);
   });
 
-  it('reads the list again when the session set changes, not when a live session grows', async () => {
+  it('ignores session broadcasts and refreshes the loaded list on focus', async () => {
     const requests = serve(SPECS);
     const view = render(<HomePage />);
     await screen.findByRole('region', { name: 'sessions' });
-    const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length;
+    await screen.findByRole('link', { name: 's-new' });
+    const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length;
     const before = syncReads();
 
     topics.sessions = { sessions: [makeSession({ id: 'channel-row', project: 'alpha-project', turnCount: 99 })] };
@@ -545,6 +566,8 @@ describe('root page list reads', () => {
       ],
     };
     view.rerender(<HomePage />);
+    expect(syncReads()).toBe(before);
+    fireEvent(window, new Event('focus'));
     await waitFor(() => expect(syncReads()).toBe(before + 1));
   });
 
@@ -555,7 +578,7 @@ describe('root page list reads', () => {
     await waitFor(() =>
       expect(requests.some((url) => url.pathname === '/api/v1/publications' && url.searchParams.get('include') === 'audience')).toBe(true),
     );
-    expect(stateLabel(list, 's-pub')).toBe('published · up to date');
+    expect(stateLabel(list, 's-pub')).toBe('published, up to date');
   });
 
   it('fails closed with the selection guidance when the publications read cannot apply the saved selection', async () => {
@@ -569,7 +592,7 @@ describe('root page list reads', () => {
     expect(screen.getByRole('button', { name: 'retry the session list' })).toBeInTheDocument();
   });
 
-  it('shows each stats-strip value from its own source', async () => {
+  it('omits unavailable global statistics instead of substituting page lengths', async () => {
     topics.dashboard = { totalSessions: 1284, totalTokens: 0, avgDurationMins: 0, avgTurnsPerSession: 0, acceptanceRate: 0, harnessBreakdown: null };
     topics.trends = {
       days: [
@@ -584,18 +607,9 @@ describe('root page list reads', () => {
     serve(SPECS);
     render(<HomePage />);
     await screen.findByRole('region', { name: 'sessions' });
-    const strip = await screen.findByRole('list', { name: 'your sessions in numbers' });
-    await waitFor(() =>
-      expect(within(strip).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-        '2 sessions', // selection-visible top-level roots
-        '2 projects', // GET /api/v1/projects/summary
-        '1 published', // the publications read
-        '0 this week', // trends: no day this week
-        'longest streak 3 wk', // trends: three weeks in a row
-        'median session 34m', // quality: the middle duration
-      ]),
-    );
-    expect(screen.getByText(/of/, { selector: 'header p' })).toHaveTextContent('1 of 2 published. the rest stay on this machine.');
+    await screen.findByRole('link', { name: 's-new' });
+    expect(screen.queryByRole('list', { name: 'your sessions in numbers' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/the rest stay on this machine/)).not.toBeInTheDocument();
   });
 
   it('searches through the grouped search route and shows the match and the publish state', async () => {
@@ -625,7 +639,7 @@ describe('root page list reads', () => {
     const section = results.closest('[data-grouped-sessions-section]') as HTMLElement;
     expect(await within(section).findByText('the ingest test flakes on CI')).toBeInTheDocument();
     expect(within(section).getByText('you:', { exact: false })).toBeInTheDocument();
-    expect(section.querySelector('.pub-state-text')?.textContent).toBe('published · up to date');
+    expect(section.querySelector('.pub-state-text')?.textContent).toBe('published, up to date');
     expect(screen.queryByRole('region', { name: 'sessions' })).not.toBeInTheDocument();
     const searched = requests.find((url) => url.pathname === '/api/v1/search');
     expect(searched?.searchParams.get('q')).toBe('flakes');
@@ -654,7 +668,7 @@ for (const row of tipCases) {
     expect(tip.textContent?.replace(/\s+/g, ' ').trim()).toBe(row.copy);
     expect(tip.querySelector('code')).toHaveTextContent(String(row.command));
     expect(tip.querySelector('[data-brand="claude"]')).not.toBeNull();
-    const exit = within(list).getByRole('link', { name: spec.id });
+    const exit = await within(list).findByRole('link', { name: spec.id });
     expect(exit).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
     fireEvent.click(within(tip).getByRole('button', { name: String(row.dismiss) }));
     expect(screen.queryByRole('complementary', { name: 'auto-publish tip' })).not.toBeInTheDocument();
@@ -707,7 +721,7 @@ describe('root publication refresh also refreshes visible audience counts', () =
       const options: ServeOptions = { audienceStatus: testCase.initialStatus === 200 ? undefined : testCase.initialStatus };
       const requests = serve(specs, options);
       const audienceReads = () => requests.filter((url) => url.pathname === '/api/v1/publications' && url.searchParams.get('include') === 'audience');
-      const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions').length;
+      const syncReads = () => requests.filter((url) => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home').length;
       const view = render(<HomePage />);
       const list = await screen.findByRole('region', { name: 'sessions' });
       await waitFor(() => expect(audienceReads()).toHaveLength(1));
@@ -718,7 +732,7 @@ describe('root publication refresh also refreshes visible audience counts', () =
       specs[0].audience = testCase.nextCount;
       options.audienceStatus = undefined;
       topics.sessions = { sessions: [makeSession({ id: 'new-channel-row', project: 'alpha-project' })] };
-      await act(async () => { view.rerender(<HomePage />); });
+      fireEvent(window, new Event('focus'));
       await waitFor(() => expect(syncReads()).toBeGreaterThan(originalSyncReads));
       await waitFor(() => expect(audienceReads()).toHaveLength(2));
       await waitFor(() => expect(stateLabel(list, specs[0].id)).toBe(testCase.expectedAfter));

@@ -15,10 +15,11 @@
  */
 
 import type { LocalPublication, LocalSyncSummary } from '@/lib/api/publications';
+import { AllLocalSyncPublicationFilters, isLocalSyncPublicationFilter, type LocalSyncPublicationFilter } from '@peasant-labs/schema';
 
 /** The filters over the list, in the order the page shows them. */
-export const PUBLISH_FILTERS = ['all', 'not-published', 'published', 'auto'] as const;
-export type PublishFilter = (typeof PUBLISH_FILTERS)[number];
+export const PUBLISH_FILTERS = AllLocalSyncPublicationFilters;
+export type PublishFilter = LocalSyncPublicationFilter;
 
 /** The lowercase chrome label of each filter. */
 export const PUBLISH_FILTER_LABELS: Readonly<Record<PublishFilter, string>> = {
@@ -29,7 +30,7 @@ export const PUBLISH_FILTER_LABELS: Readonly<Record<PublishFilter, string>> = {
 };
 
 export function isPublishFilter(value: string): value is PublishFilter {
-  return (PUBLISH_FILTERS as readonly string[]).includes(value);
+  return isLocalSyncPublicationFilter(value);
 }
 
 /** The fairtrade publish state label a row shows. */
