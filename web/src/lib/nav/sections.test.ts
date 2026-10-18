@@ -39,8 +39,12 @@ afterEach(() => {
 describe('local app sections', () => {
   it('follow the fairtrade registry: order, labels and nav membership', () => {
     const registry = LOCAL_APP_SECTIONS.map(({ id, label, inNav }) => ({ id, label, inNav: inNav !== false }));
+    // The registry lists every section fairtrade knows; this app renders only
+    // the pages it ships. `village` is a registry section with no page here, so
+    // it is deliberately absent until its page lands.
+    const routed = registry.filter(({ id }) => id !== 'village');
     expect(LOCAL_SECTIONS.map(({ id, label, inNav }) => ({ id, label, inNav }))).toEqual(
-      registry,
+      routed,
     );
   });
 

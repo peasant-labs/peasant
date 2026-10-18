@@ -38,7 +38,7 @@ export interface LocalSection extends NavSection {
   inNav: boolean;
 }
 
-type LocalSectionId = 'home' | 'settings' | 'analytics' | 'changes' | 'map';
+type LocalSectionId = 'home' | 'village' | 'settings' | 'analytics' | 'changes' | 'map';
 
 type SectionRoute = Omit<NavSection, 'id' | 'label' | 'icon'>;
 
@@ -52,6 +52,10 @@ const ROUTES: Record<LocalSectionId, SectionRoute | null> = {
     href: '/',
     title: 'Your projects and the sessions recorded in them.',
   },
+  // The registry lists the village observations section in the nav, but this
+  // app has no page for it yet. A null route keeps it out of persistent chrome
+  // and the palette until the page ships, so no dead link is rendered.
+  village: null,
   settings: {
     href: '/settings',
     title: 'Manage recording, redaction, Village sign-in, and automatic publishing.',

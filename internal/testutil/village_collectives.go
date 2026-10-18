@@ -330,7 +330,7 @@ func (v *CollectiveVillage) recordLocked(transcript schema.TranscriptID, id sche
 		v.events[transcript] = map[schema.VillageUUID][]schema.VillageShareEvent{}
 	}
 	history := v.events[transcript][id]
-	v.events[transcript][id] = append(history, schema.VillageShareEvent{EventNum: int32(len(history) + 1), Status: status, RecordedAt: villageDoubleTime})
+	v.events[transcript][id] = append(history, villageShareEvent(int32(len(history)+1), status))
 	if v.transcripts[transcript] == nil {
 		v.transcripts[transcript] = map[schema.VillageUUID]schema.VillageShareStatus{}
 	}
@@ -340,6 +340,30 @@ func (v *CollectiveVillage) recordLocked(transcript schema.TranscriptID, id sche
 	default:
 		delete(v.transcripts[transcript], id)
 	}
+}
+
+// villageShareEvent builds one share event the way Village records it: the
+// status decides the actor capacity that decided it, and a terminal decision
+// carries the moment it was made. The schema validates both on decode, so a
+// double that leaves them at their zero values cannot be read back as history.
+func villageShareEvent(number int32, status schema.VillageShareStatus) schema.VillageShareEvent {
+	event := schema.VillageShareEvent{EventNum: number, Status: status, RecordedAt: villageDoubleTime}
+	actor, err := schema.VillageContributionAttemptActor(status)
+	if err != nil {
+		// Callers pass a status from the closed menu; an outside value stays
+		// invalid rather than inventing a deciding actor for it.
+		return event
+	}
+	event.DecidedByActor = actor
+	switch status {
+	case schema.VillageShareStatusPending, schema.VillageShareStatusApproved:
+		// Pending has no decision; an approved share may be initially
+		// auto-approved without a decision timestamp.
+	default:
+		decided := villageDoubleTime
+		event.DecidedAt = &decided
+	}
+	return event
 }
 
 // StallShare makes every share answer only after d, as a Village that

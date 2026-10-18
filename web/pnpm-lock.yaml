@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@peasant-labs/fairtrade':
-        specifier: 0.0.29
-        version: 0.0.29(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
+        specifier: 0.0.31
+        version: 0.0.31(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
       '@peasant-labs/schema':
-        specifier: 0.30.0
-        version: 0.30.0
+        specifier: 0.31.0
+        version: 0.31.0
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -589,8 +589,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@peasant-labs/fairtrade@0.0.29':
-    resolution: {integrity: sha512-DK/6RXRfwAD0HARDLd4RKazviHAe5cdiToNfXKkjt7K+UHdu3NgzZBxdBZwh9OvKFE+nInF/sbm9iZk2zNdxWw==}
+  '@peasant-labs/fairtrade@0.0.31':
+    resolution: {integrity: sha512-EK7sclCK7q1Jtr1kfNcqGGgC1m9Zewp7CrRVNUjaSu1HAD60yjQspv3v6Drqxcwiab97fVlXVbQQgB++54Xm8A==}
     engines: {node: '>=26'}
     peerDependencies:
       '@xyflow/react': ^12.0.0
@@ -604,8 +604,8 @@ packages:
     resolution: {integrity: sha512-8ZkHeR/ZEOU13C/JDJr90mRx8+q2zCXEJQ6iCF3Wd986q549Kb4gWxrOYvbnh8xK0CZrQ10tFcdDLZg82zou2A==}
     engines: {node: '>=26'}
 
-  '@peasant-labs/schema@0.30.0':
-    resolution: {integrity: sha512-5Sne1BWzF+qL9TZHzny8va7i4fK3MxLe2RBuUCYBqLZGXT9SNjalf8fRSF8Sd7fhVEFN7rqi/KExbmgMYvyVzg==}
+  '@peasant-labs/schema@0.31.0':
+    resolution: {integrity: sha512-ZfFOkyRkDebV0D4TrJfmVfIS9LUzwof9MgebEBEUXgv8CDdpz3SKQupmTCLJWvT8NY0tUo7ErDQItvzMb/VBIg==}
     engines: {node: '>=26'}
 
   '@puppeteer/browsers@3.0.5':
@@ -2602,7 +2602,7 @@ snapshots:
   '@next/swc-win32-x64-msvc@15.5.19':
     optional: true
 
-  '@peasant-labs/fairtrade@0.0.29(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)':
+  '@peasant-labs/fairtrade@0.0.31(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)':
     dependencies:
       '@peasant-labs/schema': 0.29.1
       '@tanstack/react-table': 8.21.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -2626,7 +2626,7 @@ snapshots:
       yaml: 2.9.0
       zod: 4.4.3
 
-  '@peasant-labs/schema@0.30.0':
+  '@peasant-labs/schema@0.31.0':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3
