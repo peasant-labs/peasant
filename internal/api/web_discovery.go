@@ -131,6 +131,14 @@ type preparedWebDiscoveryIdentity struct {
 	unavailable       bool
 }
 
+// resolvedWebDiscoveryPath caches one physical directory's repository identity
+// across every stored row recorded there. An empty cohort key means the
+// directory is an unavailable location, never a resolved repository.
+type resolvedWebDiscoveryPath struct {
+	identity  preparedWebDiscoveryIdentity
+	cohortKey ingest.RepositoryCohortKey
+}
+
 func unavailableWebDiscoveryIdentity(row store.SessionRow) preparedWebDiscoveryIdentity {
 	// ProjectHash is the canonical project identity used by the mounted Share
 	// hierarchy. Fall back to SessionID when an old row has no stable project
@@ -177,7 +185,7 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 			}
 		}
 	}
-	byPath := map[string]preparedWebDiscoveryIdentity{}
+	byPath := map[string]resolvedWebDiscoveryPath{}
 	for i := range rows {
 		raw := rows[i].GitWorktree
 		if err := ctx.Err(); err != nil {
@@ -187,35 +195,24 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 			prepared[i] = unavailableWebDiscoveryIdentity(rows[i])
 			continue
 		}
-		p, ok := byPath[raw]
+		resolved, ok := byPath[raw]
 		if !ok {
-			clone, err := pathResolver.Resolve(raw)
+			var err error
+			resolved, err = resolveWebDiscoveryPath(ctx, pathResolver, resolver, rows[i])
 			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					prepared[i] = unavailableWebDiscoveryIdentity(rows[i])
-					continue
-				}
-				return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is unavailable in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restore the repository or re-ingest the session, then retry: %w", rows[i].SessionID, err)
+				return nil, nil, nil, err
 			}
-			identity, err := resolver.ResolveRepositoryIdentity(ctx, clone)
-			if err != nil || identity.CohortKey == "" {
-				return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository topology for session %q in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned because repository identity would be ambiguous. Restore a valid Git repository and retry: %w", rows[i].SessionID, err)
-			}
-			digest := sha256.Sum256([]byte(identity.CohortKey.String()))
-			id := fmt.Sprintf("rl_%x", digest[:16])
-			matchPath := clone
-			if saved := selected[ingest.Harness(rows[i].ModelHarness)][identity.CohortKey]; saved != "" {
-				matchPath = saved
-			}
-			p = preparedWebDiscoveryIdentity{clonePath: matchPath, locationID: id}
-			byPath[raw] = p
-			cohortKeys[i] = identity.CohortKey
+			byPath[raw] = resolved
 		}
-		prepared[i] = p
-		if cohortKeys[i] == "" {
-			clone, _ := pathResolver.Resolve(raw)
-			identity, _ := resolver.ResolveRepositoryIdentity(ctx, clone)
-			cohortKeys[i] = identity.CohortKey
+		prepared[i] = resolved.identity
+		if resolved.cohortKey == "" {
+			// An unavailable location carries no cohort evidence, so it takes no
+			// part in ambiguity or label grouping.
+			continue
+		}
+		cohortKeys[i] = resolved.cohortKey
+		if saved := selected[ingest.Harness(rows[i].ModelHarness)][resolved.cohortKey]; saved != "" {
+			prepared[i].clonePath = saved
 		}
 		harness := ingest.Harness(rows[i].ModelHarness)
 		remoteEvidence[i] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeRemoteForMatch(value(rows[i].CanonicalRemote)), CohortKey: cohortKeys[i]}
@@ -233,6 +230,48 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 		}
 	}
 	return prepared, selectionprojection.CohortMultiplicities(remoteEvidence), selectionprojection.CohortMultiplicities(nameEvidence), nil
+}
+
+// resolveWebDiscoveryPath resolves one recorded directory to its repository
+// location.
+//
+// A session with a captured Git worktree must resolve to repository topology:
+// a failure there stays fail-closed, because a non-empty worktree that no
+// longer describes a repository is ambiguous evidence. A session without a
+// captured worktree only has a recorded directory — the canonical project
+// directory, which may be outside Git entirely — so a failed topology there
+// yields the unavailable location instead of failing the whole discovery
+// projection. Historical sessions whose project was never a Git checkout are
+// ordinary stored data; one of them must not take down every list that joins it.
+func resolveWebDiscoveryPath(ctx context.Context, pathResolver ingest.PathIdentityResolver, resolver ingest.RepositoryIdentityResolver, row store.SessionRow) (resolvedWebDiscoveryPath, error) {
+	raw := row.GitWorktree
+	clone, err := pathResolver.Resolve(raw)
+	if err != nil {
+		if row.RecordedWorktree == "" || errors.Is(err, fs.ErrNotExist) {
+			return resolvedWebDiscoveryPath{identity: unavailableWebDiscoveryIdentity(row)}, nil
+		}
+		return resolvedWebDiscoveryPath{}, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is unavailable in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restore the repository or re-ingest the session, then retry: %w", row.SessionID, err)
+	}
+	identity, identityErr := resolver.ResolveRepositoryIdentity(ctx, clone)
+	if identityErr == nil && identity.CohortKey != "" {
+		digest := sha256.Sum256([]byte(identity.CohortKey.String()))
+		return resolvedWebDiscoveryPath{
+			identity:  preparedWebDiscoveryIdentity{clonePath: clone, locationID: fmt.Sprintf("rl_%x", digest[:16])},
+			cohortKey: identity.CohortKey,
+		}, nil
+	}
+	if row.RecordedWorktree != "" {
+		if identityErr == nil {
+			identityErr = fmt.Errorf("the repository identity resolver returned no cohort key for %q", clone)
+		}
+		return resolvedWebDiscoveryPath{}, fmt.Errorf("Web discovery could not resolve repository topology for session %q in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned because repository identity would be ambiguous. Restore a valid Git repository and retry: %w", row.SessionID, identityErr)
+	}
+	unavailable := unavailableWebDiscoveryIdentity(row)
+	// The directory is still exact-path selection evidence even though it is not
+	// a repository location, so a configured project that records this directory
+	// keeps selecting its sessions.
+	unavailable.clonePath = clone
+	return resolvedWebDiscoveryPath{identity: unavailable}, nil
 }
 
 func value(v *string) string {

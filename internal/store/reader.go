@@ -60,8 +60,17 @@ type SessionRow struct {
 	// CanonicalRemote is the git remote URL from the projects table (nullable).
 	CanonicalRemote *string
 	// GitWorktree is the session's recorded worktree path. It is empty when the
-	// session predates worktree capture or did not come from Git.
+	// session predates worktree capture or did not come from Git. A reader that
+	// projects a recorded directory (the worktree when one exists, otherwise the
+	// canonical project directory) may put that directory here instead; see
+	// RecordedWorktree for the stored Git evidence.
 	GitWorktree string
+	// RecordedWorktree is the Git worktree Git recorded for the session. It is
+	// empty when no worktree was captured, in which case GitWorktree may carry
+	// the canonical project directory as path evidence. Repository topology is
+	// only required when this field is non-empty: a directory that is not a Git
+	// checkout was never ambiguous topology.
+	RecordedWorktree string
 
 	// IndexedAt is the Unix-ms time the session last completed an index pass,
 	// or nil when it has never been indexed. A nil value means the session row
@@ -1397,6 +1406,7 @@ func scanSessionRow(stmt *sqlite.Stmt) SessionRow {
 
 	// Column 31: s.git_worktree (COALESCE'd to an empty string)
 	row.GitWorktree = stmt.ColumnText(31)
+	row.RecordedWorktree = row.GitWorktree
 
 	// Column 32: s.session_origin. NOT NULL with a CHECK over the three menu
 	// tokens, so it always arrives as a value sessionorigin.Parse accepts.
