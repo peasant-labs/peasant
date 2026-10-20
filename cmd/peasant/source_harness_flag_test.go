@@ -18,15 +18,19 @@ import (
 var sourceHarnessFlagYAML []byte
 
 type sourceHarnessFlagFixture struct {
-	Name            string   `yaml:"name"`
-	Args            []string `yaml:"args"`
-	ErrorContains   string   `yaml:"error_contains"`
-	OutputContains  []string `yaml:"output_contains"`
-	OutputExcludes  []string `yaml:"output_excludes"`
-	StoredSession   string   `yaml:"stored_session"`
-	OtherSession    string   `yaml:"other_session"`
-	OtherTranscript string   `yaml:"other_transcript"`
-	DatabaseAbsent  bool     `yaml:"database_absent"`
+	Name                string   `yaml:"name"`
+	Args                []string `yaml:"args"`
+	ConfigYAML          string   `yaml:"config_yaml"`
+	PrivateHome         bool     `yaml:"private_home"`
+	DefaultStrikeSource bool     `yaml:"default_strike_source"`
+	ErrorContains       string   `yaml:"error_contains"`
+	OutputContains      []string `yaml:"output_contains"`
+	OutputExcludes      []string `yaml:"output_excludes"`
+	StoredSession       string   `yaml:"stored_session"`
+	OtherSession        string   `yaml:"other_session"`
+	OtherTranscript     string   `yaml:"other_transcript"`
+	OtherSourceInConfig bool     `yaml:"other_source_in_config"`
+	DatabaseAbsent      bool     `yaml:"database_absent"`
 }
 
 func LoadSourceHarnessFlagFixtures(t testing.TB) []sourceHarnessFlagFixture {
@@ -55,17 +59,39 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 	t.Parallel()
 	for _, fixture := range LoadSourceHarnessFlagFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
-			t.Parallel()
+			if !fixture.PrivateHome {
+				t.Parallel()
+			}
 			dir := t.TempDir()
+			if fixture.PrivateHome {
+				t.Setenv("HOME", dir)
+			}
 			source := filepath.Join(dir, "source")
+			otherRoot := filepath.Join(dir, "other-source")
 			if err := os.CopyFS(source, os.DirFS(filepath.Join("testdata", "strike"))); err != nil {
 				t.Fatalf("copy synthetic source fixture: %v", err)
 			}
+			if fixture.DefaultStrikeSource {
+				defaultSource := filepath.Join(dir, ".strike", "sessions")
+				if err := os.CopyFS(defaultSource, os.DirFS(filepath.Join("testdata", "strike"))); err != nil {
+					t.Fatalf("copy synthetic default source fixture: %v", err)
+				}
+			}
 			output := filepath.Join(dir, "managed")
 			configPath := writeTestConfigFile(t, dir)
+			replace := strings.NewReplacer(
+				"{source}", source,
+				"{other}", otherRoot,
+				"{output}", output,
+				"{home}", dir,
+			)
+			if fixture.ConfigYAML != "" {
+				if err := os.WriteFile(configPath, []byte(replace.Replace(fixture.ConfigYAML)), 0600); err != nil {
+					t.Fatalf("write fixture config: %v", err)
+				}
+			}
 			var otherPath string
 			if fixture.OtherSession != "" {
-				otherRoot := filepath.Join(dir, "other-source")
 				otherPath = filepath.Join(otherRoot, "-fixture-project", fixture.OtherSession+".jsonl")
 				if err := os.MkdirAll(filepath.Dir(otherPath), 0700); err != nil {
 					t.Fatal(err)
@@ -73,21 +99,22 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 				if err := os.WriteFile(otherPath, []byte(fixture.OtherTranscript), 0600); err != nil {
 					t.Fatal(err)
 				}
-				cfg, err := loadConfig(configPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				cfg.Sources.ClaudeCode.Enabled = true
-				cfg.Sources.ClaudeCode.Paths = []string{otherRoot}
-				data, err := yaml.Marshal(cfg)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(configPath, data, 0600); err != nil {
-					t.Fatal(err)
+				if !fixture.OtherSourceInConfig {
+					cfg, err := loadConfig(configPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg.Sources.ClaudeCode.Enabled = true
+					cfg.Sources.ClaudeCode.Paths = []string{otherRoot}
+					data, err := yaml.Marshal(cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(configPath, data, 0600); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
-			replace := strings.NewReplacer("{source}", source, "{output}", output)
 			args := []string{"--config", configPath, "--data-dir", dir, "--config-dir", dir, "--state-dir", dir}
 			for _, arg := range fixture.Args {
 				args = append(args, replace.Replace(arg))
@@ -113,11 +140,13 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 				}
 			}
 			for _, want := range fixture.OutputContains {
+				want = replace.Replace(want)
 				if !strings.Contains(buf.String(), want) {
 					t.Errorf("command output missing %q: %s", want, &buf)
 				}
 			}
 			for _, unwanted := range fixture.OutputExcludes {
+				unwanted = replace.Replace(unwanted)
 				if strings.Contains(buf.String(), unwanted) {
 					t.Errorf("command output still contains %q: %s", unwanted, &buf)
 				}

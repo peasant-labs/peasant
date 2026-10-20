@@ -17,12 +17,22 @@ import (
 )
 
 func loadRunConfig(path string, dryRun bool) (*config.Config, error) {
+	return loadRunConfigForHarnessOnly(path, dryRun, nil)
+}
+
+func loadRunConfigForHarnessOnly(path string, dryRun bool, harness *defaults.Harness) (*config.Config, error) {
 	if !dryRun {
+		if harness != nil {
+			return config.LoadForHarnessOnly(path, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, *harness)
+		}
 		return loadConfig(path)
 	}
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err == nil {
+			if harness != nil {
+				return config.ParseForHarnessOnly(data, *harness)
+			}
 			return config.Parse(data)
 		}
 		if !errors.Is(err, os.ErrNotExist) {
