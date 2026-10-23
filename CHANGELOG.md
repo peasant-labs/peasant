@@ -7,6 +7,39 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-23
+
+### Added
+- Scoped collective observations: `peasant village collectives fetch`, `list`,
+  `track` and `untrack`, and `peasant village contributions list`, record the
+  metadata of the collectives a signed-in account can see and dated evidence of
+  its contributions, guarded against a credential change mid-command. The local
+  web shows the saved observations offline on its online page (`/village`)
+  (#637).
+
+### Changed
+- The local web is redesigned on Fairtrade 0.0.32. Fairtrade's sidebar replaces
+  the one-row header: the registry's sections, a collectives link that opens
+  online, search (still on ⌘K), the theme toggle, an app switcher that opens
+  online and the docs and, when signed in, the account; on a phone it is a top
+  bar with a drawer. Home is a session table with search, a filters menu (status
+  and project) and a browse-by menu that keeps the project, helper-thread and
+  every-session views. Settings open one section at a time (account, automatic
+  publishing, redaction, projects, sources, advanced), and redaction leads with
+  the four categories and the label each one prints. Pages and settings sections
+  ease into view, and nothing moves for a reader who asks for reduced motion.
+- The local web calls the hosted app "peasant online" (or "online") in its own
+  copy, and the publish wizard says "publish" where it said "contribute" and
+  "submit". CLI commands, routes and API paths keep their names.
+- The offline notice sits at the top of the page column, pinned there on a
+  roomy screen, and the page keeps the reader's place when it appears.
+- Home loads its sessions through shared forward pages.
+- Re-pin Fairtrade to 0.0.32.
+
+### Fixed
+- Home stays available when a recorded project directory is not a Git
+  checkout (#640).
+
 ## [0.10.0] - 2026-10-16
 
 ### Added
@@ -729,6 +762,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.11.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.0
 [0.10.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.10.0
 [0.9.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.9.0
 [0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
