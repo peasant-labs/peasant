@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -110,6 +111,10 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 	var publications atomic.Int32
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 			_, _ = w.Write([]byte(`{}`))
 			return
@@ -215,9 +220,18 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 			t.Fatalf("%s missing redacted stored entry: %v", name, parts)
 		}
 	}
-	first, err := db.Publication(ctx, village.URL, "user-1", testutil.TestProjectHash, sessionID)
+	first, err := db.Publication(ctx, village.URL, testutil.VillageFixtureAccountID.String(), testutil.TestProjectHash, sessionID)
 	if err != nil || first == nil {
 		t.Fatalf("receipt missing: %v", err)
+	}
+	observations := collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: hs.Config})
+	history, err := observations.History(ctx, schema.LocalContributionHistoryQuery{Kind: schema.LocalContributionEvidenceReceipts, Page: 1, Limit: 1})
+	if err != nil || history.Total != 1 || len(history.Receipts) != 1 {
+		t.Fatalf("mounted publish did not record its actual confirmed effect: %+v %v", history, err)
+	}
+	observed := history.Receipts[0]
+	if observed.Operation != schema.CollectiveOperationPublish || observed.Outcome != schema.LocalConfirmedContributionPublished || observed.TranscriptID != first.Receipt.TranscriptID || observed.CollectiveID != nil || observed.SourceReceiptID == nil || *observed.SourceReceiptID != string(first.Receipt.RequestOperationFingerprint) {
+		t.Fatalf("mounted publication evidence does not refer to its authoritative receipt: %+v", observed)
 	}
 	response, err = http.Post(baseURL+defaults.RouteSyncPush.String(), "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -225,12 +239,16 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 	}
 	repeated, _ := io.ReadAll(response.Body)
 	response.Body.Close()
-	second, err := db.Publication(ctx, village.URL, "user-1", testutil.TestProjectHash, sessionID)
+	second, err := db.Publication(ctx, village.URL, testutil.VillageFixtureAccountID.String(), testutil.TestProjectHash, sessionID)
 	if err != nil || !reflect.DeepEqual(second, first) || publications.Load() != 1 || !bytes.Contains(repeated, []byte(`"skipped":1`)) {
 		t.Fatalf("repeat publication failed: count=%d receipt=%+v err=%v", publications.Load(), second, err)
 	}
 	if second.Receipt.RequestOperationFingerprint != first.Receipt.RequestOperationFingerprint {
 		t.Fatal("repeat changed publication identity")
+	}
+	again, err := observations.History(ctx, schema.LocalContributionHistoryQuery{Kind: schema.LocalContributionEvidenceReceipts, Page: 1, Limit: 1})
+	if err != nil || again.Total != history.Total || again.TraversalRevision != history.TraversalRevision {
+		t.Fatalf("unchanged content fabricated another successful action: %+v %v", again, err)
 	}
 }
 
@@ -283,7 +301,7 @@ func writeSyncDoorCredentials(t *testing.T, configHome, villageURL string) {
 		"village_url": villageURL,
 		"api_key":     "test-key",
 		"username":    "tester",
-		"user_id":     "user-1",
+		"user_id":     testutil.VillageFixtureAccountID.String(),
 		"key_id":      "key-1",
 	}
 	raw, err := json.Marshal(creds)

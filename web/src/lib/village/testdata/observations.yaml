@@ -1,0 +1,88 @@
+requiredNames:
+  - web-catalog-updated-history-old-502
+  - web-fetch-partial-domain-dates
+  - web-history-selected-revision-restart
+  - web-diagnostics-do-not-reset-other-pagers
+  - web-other-account
+  - web-late-old-account-report
+  - web-local-server-offline-vs-village-unavailable
+  - web-local-list-no-network
+  - web-history-filter-isolation
+  - web-track-online-untrack-offline
+  - web-cancel-keeps-committed-effects
+  - web-reselect-same-account-keeps-pagers
+  - web-empty
+  - web-long-content
+  - web-history-remote-attempt-details
+  - web-history-confirmed-receipt-not-approval
+  - web-history-diagnostic-not-contribution
+scope: &scope {villageUrl: 'https://village.example/base', userId: '123e4567-e89b-12d3-a456-426614174000'}
+otherScope: {villageUrl: 'https://village.example/base', userId: '123e4567-e89b-12d3-a456-426614174002'}
+incarnation: '123e4567-e89b-12d3-a456-426614174003'
+collectiveId: &collective '123e4567-e89b-12d3-a456-426614174004'
+transcriptId: '123e4567-e89b-12d3-a456-426614174005'
+observedAt: &now '2026-10-16T12:00:00Z'
+historyAt: &old '2026-10-15T12:00:00Z'
+issue: &issue {code: remote, operation: fetch, message: 'Owner history source failed; catalog committed', retry: 'Retry explicit metadata fetch'}
+catalog: &catalog
+  scope: *scope
+  cacheRevision: '1'
+  collectives:
+    - {id: *collective, name: 'Research Group With Preserved User Case', description: 'Dated permitted metadata, not a permission grant', reasons: [membership], observedAt: *now, state: observed}
+  fetch:
+    catalog: {state: complete, coverage: available, lastCompletedAt: *now, lastInstalledRevision: '1'}
+    history: {state: complete, coverage: available, lastCompletedAt: *old, lastInstalledRevision: '1'}
+    associations: {state: not_requested, coverage: unknown}
+report: &report
+  scope: *scope
+  cacheRevision: '2'
+  invocationId: '123e4567-e89b-12d3-a456-426614174006'
+  outcome: partial
+  domains:
+    - {domain: catalog, requested: true, state: complete, commit: updated, startedAt: *now, lastAttemptAt: *now, completedAt: *now, lastCompletedAt: *now, lastInstalledRevision: '2', coverage: available, sourceOutcomes: []}
+    - {domain: history, requested: true, state: failed, commit: retained, startedAt: *now, lastAttemptAt: *now, lastCompletedAt: *old, lastInstalledRevision: '1', coverage: unknown, sourceOutcomes: [], issue: *issue}
+    - {domain: associations, requested: false, state: not_requested, commit: retained, coverage: unknown, sourceOutcomes: []}
+  issues: []
+partialCases:
+  - name: web-catalog-updated-history-old-502
+    status: 502
+    report: *report
+  - name: web-fetch-partial-domain-dates
+    status: 504
+    report:
+      <<: *report
+      domains:
+        - {domain: catalog, requested: true, state: complete, commit: updated, startedAt: *now, lastAttemptAt: *now, completedAt: *now, lastCompletedAt: *now, lastInstalledRevision: '2', coverage: available, sourceOutcomes: []}
+        - {domain: history, requested: true, state: cancelled, commit: retained, startedAt: *now, lastAttemptAt: *now, lastCompletedAt: *old, lastInstalledRevision: '1', coverage: unknown, sourceOutcomes: [], issue: {<<: *issue, code: deadline}}
+        - {domain: associations, requested: false, state: not_requested, commit: retained, coverage: unknown, sourceOutcomes: []}
+categories: [remote-attempts, receipts, operation-diagnostics]
+conflictIssue: {code: superseded, operation: fetch, message: 'Selected evidence changed', retry: 'Restart only this evidence category'}
+historyCases:
+  - name: web-history-remote-attempt-details
+    kind: remote-attempts
+    expectedOutcome: pending
+    expectedDetail: {label: attempt, value: '1'}
+    arrayName: remoteAttempts
+    rows:
+      - collectiveId: *collective
+        transcriptId: '123e4567-e89b-12d3-a456-426614174005'
+        firstSeenAt: *now
+        attempt: {event_num: 1, status: pending, recorded_at: *old, decided_at: null, decided_by_actor: ''}
+  - name: web-history-confirmed-receipt-not-approval
+    kind: receipts
+    expectedOutcome: submitted
+    expectedDetail: {label: receipt, value: local-share-receipt}
+    arrayName: receipts
+    rows:
+      - {receiptId: local-share-receipt, collectiveId: *collective, transcriptId: '123e4567-e89b-12d3-a456-426614174005', operation: share, confirmedAt: *now, outcome: submitted}
+  - name: web-history-diagnostic-not-contribution
+    kind: operation-diagnostics
+    expectedOutcome: uncertain
+    expectedDetail: {label: issue, value: remote}
+    arrayName: operationDiagnostics
+    rows:
+      - operationId: '123e4567-e89b-12d3-a456-426614174007'
+        operation: share
+        attemptedAt: *now
+        outcome: uncertain
+        issue: {code: remote, operation: share, message: 'Share outcome is unknown after timeout', retry: 'Fetch available owner history before retrying'}

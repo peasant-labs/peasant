@@ -1,0 +1,261 @@
+cases:
+  - name: verified-stable-user-uuid
+    method: user
+    path: /api/v1/auth/me
+    body: '{"id":"11111111-1111-4111-8111-111111111111","github_username":"renamed-user"}'
+    wantUser:
+      id: 11111111-1111-4111-8111-111111111111
+      username: renamed-user
+  - name: username-without-stable-id-refused
+    method: user
+    path: /api/v1/auth/me
+    body: '{"github_username":"reused-name"}'
+    invalid: true
+  - name: foreign-viewer-dedicated-associations-only
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    body: '{"collectives":[{"id":"33333333-3333-4333-8333-333333333333","name":"visible","description":"permitted description","linked_github_org":"fixture-org","shared_at":"2026-01-01T00:00:00Z"},{"id":"44444444-4444-4444-8444-444444444444","name":"also visible","description":null,"linked_github_org":null,"shared_at":"2026-01-02T00:00:00Z"}]}'
+    wantAssociations:
+      - id: 33333333-3333-4333-8333-333333333333
+        name: visible
+        description: permitted description
+        linkedGithubOrg: fixture-org
+        sharedAt: 2026-01-01T00:00:00Z
+      - id: 44444444-4444-4444-8444-444444444444
+        name: also visible
+        description: null
+        linkedGithubOrg: null
+        sharedAt: 2026-01-02T00:00:00Z
+  - name: known-empty-complete-associations
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    body: '{"collectives":[]}'
+    wantAssociations: []
+  - name: missing-associations-not-empty
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    body: '{}'
+    invalid: true
+  - name: null-associations-not-empty
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    body: '{"collectives":null}'
+    invalid: true
+  - name: repeated-association-refused
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    body: '{"collectives":[{"id":"33333333-3333-4333-8333-333333333333","name":"visible","shared_at":"2026-01-01T00:00:00Z"},{"id":"33333333-3333-4333-8333-333333333333","name":"visible","shared_at":"2026-01-01T00:00:00Z"}]}'
+    invalid: true
+  - name: known-association-nondisclosure-preserves-status
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    status: 404
+    body: '{"error":"unavailable"}'
+    invalid: true
+  - name: available-owned-pair-discovery
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[{"group_id":"33333333-3333-4333-8333-333333333333","transcript_id":"22222222-2222-4222-8222-222222222222","title":"first contribution","event_num":1,"status":"pending","recorded_at":"2026-01-01T00:00:00Z"},{"group_id":"33333333-3333-4333-8333-333333333333","transcript_id":"55555555-5555-4555-8555-555555555555","title":null,"event_num":2,"status":"pending","recorded_at":"2026-01-02T00:00:00Z"}]'
+    wantSubmissions:
+      - collectiveId: 33333333-3333-4333-8333-333333333333
+        transcriptId: 22222222-2222-4222-8222-222222222222
+        title: first contribution
+        eventNum: 1
+        status: pending
+        recordedAt: 2026-01-01T00:00:00Z
+      - collectiveId: 33333333-3333-4333-8333-333333333333
+        transcriptId: 55555555-5555-4555-8555-555555555555
+        title: null
+        eventNum: 2
+        status: pending
+        recordedAt: 2026-01-02T00:00:00Z
+  - name: approved-owned-pair-discovery
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[{"group_id":"33333333-3333-4333-8333-333333333333","transcript_id":"22222222-2222-4222-8222-222222222222","event_num":3,"status":"approved","recorded_at":"2026-01-03T00:00:00Z"}]'
+    wantSubmissions:
+      - collectiveId: 33333333-3333-4333-8333-333333333333
+        transcriptId: 22222222-2222-4222-8222-222222222222
+        eventNum: 3
+        status: approved
+        recordedAt: 2026-01-03T00:00:00Z
+  - name: rejected-owned-pair-discovery
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[{"group_id":"33333333-3333-4333-8333-333333333333","transcript_id":"22222222-2222-4222-8222-222222222222","event_num":4,"status":"rejected","recorded_at":"2026-01-04T00:00:00Z"}]'
+    wantSubmissions:
+      - collectiveId: 33333333-3333-4333-8333-333333333333
+        transcriptId: 22222222-2222-4222-8222-222222222222
+        eventNum: 4
+        status: rejected
+        recordedAt: 2026-01-04T00:00:00Z
+  - name: retracted-owned-pair-discovery
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[{"group_id":"33333333-3333-4333-8333-333333333333","transcript_id":"22222222-2222-4222-8222-222222222222","event_num":5,"status":"retracted","recorded_at":"2026-01-05T00:00:00Z"}]'
+    wantSubmissions:
+      - collectiveId: 33333333-3333-4333-8333-333333333333
+        transcriptId: 22222222-2222-4222-8222-222222222222
+        eventNum: 5
+        status: retracted
+        recordedAt: 2026-01-05T00:00:00Z
+  - name: revoked-owned-pair-discovery
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[{"group_id":"33333333-3333-4333-8333-333333333333","transcript_id":"22222222-2222-4222-8222-222222222222","event_num":6,"status":"revoked","recorded_at":"2026-01-06T00:00:00Z"}]'
+    wantSubmissions:
+      - collectiveId: 33333333-3333-4333-8333-333333333333
+        transcriptId: 22222222-2222-4222-8222-222222222222
+        eventNum: 6
+        status: revoked
+        recordedAt: 2026-01-06T00:00:00Z
+  - name: cross-collective-pair-refused
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[{"group_id":"44444444-4444-4444-8444-444444444444","transcript_id":"22222222-2222-4222-8222-222222222222","event_num":1,"status":"pending","recorded_at":"2026-01-01T00:00:00Z"}]'
+    invalid: true
+  - name: unknown-submission-status-refused
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[{"group_id":"33333333-3333-4333-8333-333333333333","transcript_id":"22222222-2222-4222-8222-222222222222","event_num":1,"status":"invented","recorded_at":"2026-01-01T00:00:00Z"}]'
+    invalid: true
+  - name: null-discovery-not-complete
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: 'null'
+    invalid: true
+  - name: complete-known-empty-discovery
+    method: submissions
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/submissions
+    body: '[]'
+    wantSubmissions: []
+  - name: truncated-valid-json-prefix
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    body: '{"collectives":[]}'
+    paddingBytes: 4194304
+    invalid: true
+  - name: trailing-second-json-document-refused
+    method: associations
+    path: /api/v1/transcripts/22222222-2222-4222-8222-222222222222/collectives
+    body: '{"collectives":[]} {}'
+    invalid: true
+  - name: complete-membership-input
+    method: memberships
+    path: /api/v1/collectives
+    body: '[{"id":"33333333-3333-4333-8333-333333333333","name":"member collective","description":"permitted","role":"member","member_since":"2026-01-01T00:00:00Z","acceptance_mode":"curated","data_access":"members_only"}]'
+    wantMemberships:
+      - id: 33333333-3333-4333-8333-333333333333
+        name: member collective
+        description: permitted
+        role: member
+        membersince: 2026-01-01T00:00:00Z
+        acceptancemode: curated
+        dataaccess: members_only
+  - name: empty-membership-input
+    method: memberships
+    path: /api/v1/collectives
+    body: '[]'
+    wantMemberships: []
+  - name: null-membership-not-complete
+    method: memberships
+    path: /api/v1/collectives
+    body: 'null'
+    invalid: true
+  - name: repeated-membership-refused
+    method: memberships
+    path: /api/v1/collectives
+    body: '[{"id":"33333333-3333-4333-8333-333333333333","name":"member collective","role":"member","member_since":"2026-01-01T00:00:00Z","acceptance_mode":"curated","data_access":"members_only"},{"id":"33333333-3333-4333-8333-333333333333","name":"member collective","role":"member","member_since":"2026-01-01T00:00:00Z","acceptance_mode":"curated","data_access":"members_only"}]'
+    invalid: true
+  - name: unknown-membership-policy-refused
+    method: memberships
+    path: /api/v1/collectives
+    body: '[{"id":"33333333-3333-4333-8333-333333333333","name":"member collective","role":"member","member_since":"2026-01-01T00:00:00Z","acceptance_mode":"invented","data_access":"members_only"}]'
+    invalid: true
+  - name: permitted-detail-projection
+    method: collective
+    path: /api/v1/collectives/33333333-3333-4333-8333-333333333333
+    body: '{"group":{"id":"33333333-3333-4333-8333-333333333333","name":"visible collective","description":"permitted description","acceptance_mode":"open","data_access":"public"},"members":[],"transcripts":[],"models":[],"contributors":[]}'
+    wantCollective:
+      id: 33333333-3333-4333-8333-333333333333
+      name: visible collective
+      description: permitted description
+      acceptancemode: open
+      dataaccess: public
+  - name: detail-wrong-identity-refused
+    method: collective
+    path: /api/v1/collectives/33333333-3333-4333-8333-333333333333
+    body: '{"group":{"id":"44444444-4444-4444-8444-444444444444","name":"wrong collective","acceptance_mode":"open","data_access":"public"}}'
+    invalid: true
+  - name: detail-unavailable-not-empty
+    method: collective
+    path: /api/v1/collectives/33333333-3333-4333-8333-333333333333
+    status: 404
+    body: '{"error":"unavailable"}'
+    invalid: true
+  - name: complete-own-attempts
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: '[{"event_num":1,"status":"rejected","recorded_at":"2026-01-01T00:00:00.000000001Z","decided_at":"2026-01-02T00:00:00.000000002Z","decided_by_actor":"moderator"},{"event_num":3,"status":"pending","recorded_at":"2026-01-03T00:00:00Z","decided_at":null,"decided_by_actor":""}]'
+    wantEvents:
+      - eventnum: 1
+        status: rejected
+        recordedat: 2026-01-01T00:00:00.000000001Z
+        decidedat: 2026-01-02T00:00:00.000000002Z
+        decidedbyactor: moderator
+      - eventnum: 3
+        status: pending
+        recordedat: 2026-01-03T00:00:00Z
+        decidedat: null
+        decidedbyactor: ''
+  - name: empty-own-attempts
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: '[]'
+    wantEvents: []
+  - name: null-attempts-not-complete
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: 'null'
+    invalid: true
+  - name: repeated-attempt-ordinal-refused
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: '[{"event_num":1,"status":"pending","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":""},{"event_num":1,"status":"pending","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":""}]'
+    invalid: true
+  - name: malformed-attempt-actor-refused
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: '[{"event_num":1,"status":"rejected","recorded_at":"2026-01-01T00:00:00Z","decided_at":"2026-01-02T00:00:00Z","decided_by_actor":"owner"}]'
+    invalid: true
+  - name: history-unavailable-not-empty
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    status: 403
+    body: '{"error":"unavailable"}'
+    invalid: true
+  - name: complete-account-organizations
+    method: organizations
+    path: /api/v1/auth/orgs
+    body: '[{"org_login":"fixture-org","org_id":42,"avatar_url":null,"visible":false,"fetched_at":"2026-01-01T00:00:00Z"}]'
+    wantOrganizations:
+      - orglogin: fixture-org
+        orgid: 42
+        avatarurl: null
+        visible: false
+        fetchedat: 2026-01-01T00:00:00Z
+  - name: empty-account-organizations
+    method: organizations
+    path: /api/v1/auth/orgs
+    body: '[]'
+    wantOrganizations: []
+  - name: null-organizations-not-complete
+    method: organizations
+    path: /api/v1/auth/orgs
+    body: 'null'
+    invalid: true
+  - name: repeated-organization-login-refused
+    method: organizations
+    path: /api/v1/auth/orgs
+    body: '[{"org_login":"fixture-org","org_id":42,"visible":true,"fetched_at":"2026-01-01T00:00:00Z"},{"org_login":"FIXTURE-ORG","org_id":42,"visible":true,"fetched_at":"2026-01-01T00:00:00Z"}]'
+    invalid: true

@@ -3,7 +3,7 @@
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronUp, Copy, Link as LinkIcon, X } from 'lucide-react';
+import { Copy, Link as LinkIcon, X } from 'lucide-react';
 import { TrajectoryGraph } from '@peasant-labs/fairtrade/graph';
 // The demo's drop-in composite + its one wire→view adapter, plus the shared
 // transcript helpers, all render the SAME composite as the demo.
@@ -11,6 +11,7 @@ import {
   TranscriptViewer,
   adaptTranscript,
   annotateTranscript,
+  cleanSessionTitle,
   computeAnalytics,
   computePersonalMedians,
   type AdaptTranscriptOptions,
@@ -49,6 +50,7 @@ import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { TurnTouchedFiles } from './panels/TurnTouchedFiles';
 import { adaptQualitySessions } from '@/lib/quality/types';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
+import { SessionNotIndexed } from './SessionNotIndexed';
 
 /**
  * The heading shown for a session that has no generated title yet. The hero
@@ -116,7 +118,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Host element for the mounted viewer; the per-session reading state replays
   // the inner scroller offset against it on the way back.
   const transcriptHostRef = useRef<HTMLDivElement | null>(null);
-  const { data: detail, error } = useChannel<SessionDetailWire>(
+  const { data: detail, error, refresh: refreshDetail } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
   // The canonical wire permits `null` for an empty turn collection. Normalize
@@ -175,7 +177,13 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // The quality channel feeds the personal-median comparison line on the
   // scorecard. The package never fetches it — peasant computes the medians and
   // passes them in.
-  const { data: quality } = useChannel<QualityPayload>(subscribe.quality());
+  const { data: quality, refresh: refreshQuality } = useChannel<QualityPayload>(subscribe.quality());
+  // A re-index rewrites the session's detail and its stored title; both
+  // channels are sent once on subscribe, so the page reads both again.
+  const readSessionAgain = useCallback(() => {
+    refreshDetail();
+    refreshQuality();
+  }, [refreshDetail, refreshQuality]);
   const medians = useMemo(
     () =>
       computePersonalMedians(
@@ -206,8 +214,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // title, and the server only stores one for some sessions, so this stays
   // optional and the breadcrumb falls back to the short id.
   const sessionTitle = useMemo(() => {
-    const found = quality?.sessions?.find((s) => s.id === sessionId)?.title?.trim();
-    return found ? found : undefined;
+    const found = quality?.sessions?.find((s) => s.id === sessionId)?.title;
+    const clean = found ? cleanSessionTitle(found) : '';
+    return clean ? clean : undefined;
   }, [quality?.sessions, sessionId]);
 
   // The viewer's tab, lifted so the host can react to it. The composite
@@ -283,27 +292,19 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     announceCopied('copied the link');
   }, [announceCopied, projectHash, sessionId]);
 
-  // Session metrics disclosure, collapsed by default: the transcript is what
-  // you came to read, and duration/turns/tools/tokens are reference figures.
-  // The composite's hero always renders that strip and exposes no prop for it,
-  // so the toggle lives in the header's more menu and the strip is hidden by a
-  // class on the wrapper below (see `.txn-metrics-collapsed` in globals.css).
-  // Only the `.metaitem` figures collapse — the harness and model chips in the
-  // same row are identity, so they stay put.
-  const [metricsOpen, setMetricsOpen] = useState(false);
-
   // The header's overflow actions. The viewer's own share and more menus are
   // off (`showTail={false}`), so these are the page's only secondary actions,
-  // carried by the publish bar's more menu.
+  // carried by the publish bar's more menu. The session's figures (duration,
+  // turns, tools, tokens) always show under the title, so nothing here hides
+  // or reveals them.
   const moreItems = useMemo<MenuItem[]>(() => [
-    {
-      label: metricsOpen ? 'hide details' : 'show details',
-      icon: metricsOpen ? ChevronUp : ChevronDown,
-      onSelect: () => setMetricsOpen((open) => !open),
-    },
     { label: 'copy as markdown', icon: Copy, onSelect: copyMarkdown },
     { label: 'copy link', icon: LinkIcon, onSelect: copyLink },
-  ], [copyLink, copyMarkdown, metricsOpen]);
+  ], [copyLink, copyMarkdown]);
+
+  // The filters rail opens on request: the page leads with the conversation
+  // and its outline, and the rail's collapsed strip keeps the filters a click away.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // The publish bar and its popup. `/share?sessionId=` arrives here with
   // `?publish=open`; closing the popup drops that request from the route so a
@@ -322,6 +323,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     moreItems,
     openOnArrival: routeQuery.publish,
     onArrivalHandled: dropPublishRequest,
+    // A re-index from the popup changes the session, so the page reads it
+    // again instead of keeping the old transcript.
+    onReindexed: readSessionAgain,
   });
 
   // Host-derived inputs the package takes as props (it never derives them).
@@ -400,8 +404,8 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Project + breadcrumb for the origin-aware trail (Map/Review origin crumb).
   const project = detail?.project ?? projectName;
   const crumb = originCrumb(scope, projectHash);
-  // The trail is projects / {project} / {session} — the path you walked to get
-  // here, each crumb being the page it names. The project crumb leads to that
+  // The trail is sessions / {project} / {session} — the path you walked to get
+  // here, each crumb being the page it names. `sessions` is Home. The project crumb leads to that
   // project's SESSION LIST, not to the map: the map is capability-gated, so a
   // map crumb is a dead end on a default server and there is no reason to route
   // a reader there from a transcript.
@@ -420,7 +424,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // actually were survives alongside the way back to the top.
   const sessionCrumb = (detail?.id ?? sessionId).slice(0, 8);
   const breadcrumb: CrumbItem[] = [
-    { label: 'projects', href: '/' },
+    { label: 'sessions', href: '/' },
     ...(crumb ? [crumb] : []),
     { label: displayProject(project), href: sessionsHref(projectHash) },
     { label: sessionCrumb },
@@ -431,7 +435,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // skeleton with the error swallowed is how a dead backend hides.
     if (error) {
       return (
-        <div className="max-w-[1600px] mx-auto px-6 pt-6">
+        <div className="asb-page">
           <FeedbackPanel variant="error" title="transcript unavailable">
             {String(error)}
           </FeedbackPanel>
@@ -439,6 +443,12 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       );
     }
     return <SessionDetailSkeleton />;
+  }
+
+  // Recorded turns with nothing indexed: say so and offer the re-index,
+  // rather than a turn count above an empty transcript.
+  if (turns.length === 0 && detail.turnCount > 0) {
+    return <SessionNotIndexed sessionId={sessionId} turnCount={detail.turnCount} crumbs={breadcrumb} onReindexed={readSessionAgain} />;
   }
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
@@ -512,7 +522,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
         data-tour="transcript-view"
         className={[
           'flex h-[var(--app-body-height)] flex-col',
-          metricsOpen ? '' : 'txn-metrics-collapsed',
           activeTab === 'highlights' ? '' : 'txn-hints-hidden',
         ]
           .filter(Boolean)
@@ -524,6 +533,8 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             theme={theme}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            rightRailOpen={filtersOpen}
+            onRightRailOpenChange={setFiltersOpen}
             // Local capabilities: labelling is supported (via renderTurnActions);
             // contribute / visibility / edit / export are village-only or absent.
             capabilities={{
@@ -692,11 +703,11 @@ function ScopeChipRow({ label, onClear }: { label: string; onClear: () => void }
 
 function SessionDetailSkeleton() {
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12">
+    <div className="asb-page">
       {/* Header block: breadcrumb + title + subtitle stand-ins. */}
       <Skeleton avatar={false} lines={3} label="Loading session header" />
       {/* Transcript body stand-in: an avatar row plus a run of content lines. */}
-      <Skeleton lines={10} label="Loading transcript" className="mt-6" />
+      <Skeleton lines={10} label="Loading transcript" />
     </div>
   );
 }

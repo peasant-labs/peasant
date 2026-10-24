@@ -140,12 +140,10 @@ export default function VisualHarnessPage() {
   return (
     <div
       data-theme={theme}
-      // This dev route still mounts inside the shared root layout (`app/layout.tsx`'s
-      // `<main className="... pt-[var(--app-header-height)] ...">`), which already reserves
-      // `var(--app-header-height)` at the top even though no real TopNavbar renders on a `/dev/*`
-      // route — the padding is unconditional. This wrapper uses the SAME Tailwind arbitrary-value
+      // This dev route still mounts inside the shared root layout (`app/layout.tsx`), beside the
+      // sidebar (or under its phone top bar). This wrapper uses the SAME Tailwind arbitrary-value
       // class `SessionDetailV2` uses (`h-[var(--app-body-height)]`) to claim
-      // exactly the space below that reservation — a raw inline `style` calc() referencing the
+      // exactly the space the chrome leaves — a raw inline `style` calc() referencing the
       // custom property did not resolve reliably, so match production's proven class instead of
       // reinventing the subtraction. This harness's own 44px header strip is then a flex sibling
       // inside that same bound, with the composite taking the flex-1 remainder.

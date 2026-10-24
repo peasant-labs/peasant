@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DiscoveryRequestError } from '@/lib/api/errors';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
@@ -14,6 +14,7 @@ const fetchProjectResolution = vi.fn();
 const fetchReviewChanges = vi.fn();
 const fetchChangeDetail = vi.fn();
 const fetchChangeDiff = vi.fn();
+const fetchProjectSummaries = vi.fn();
 
 vi.mock('next/navigation', () => ({ usePathname: () => pathname, useSearchParams: () => new URLSearchParams(search), useRouter: () => ({ replace, push }) }));
 vi.mock('@/lib/api/map', () => ({
@@ -21,6 +22,8 @@ vi.mock('@/lib/api/map', () => ({
   fetchReviewChanges: (...args: unknown[]) => fetchReviewChanges(...args),
   fetchChangeDetail: (...args: unknown[]) => fetchChangeDetail(...args),
   fetchChangeDiff: (...args: unknown[]) => fetchChangeDiff(...args),
+  cachedProjectSummaries: () => null,
+  fetchProjectSummaries: () => fetchProjectSummaries(),
 }));
 vi.mock('@peasant-labs/fairtrade/graph', () => ({
   Changes: ({ projectLabel, payload }: { projectLabel: string; payload: { sessions: Array<{ sessionId: string; title: string }> } }) => (
@@ -55,6 +58,7 @@ function loadFixture(value: string): FixtureCase[] {
 
 const cases = loadFixture(source);
 const hash = 'a'.repeat(64);
+const MISSING_PROJECT_REASON = 'The project could not be opened because its canonical hash is not in the local index.';
 const reviewPayload = {
   repoFound: true,
   defaultBranch: 'main',
@@ -121,7 +125,12 @@ describe('mounted ReviewRouter fixture', () => {
     fetchReviewChanges.mockReset();
     fetchChangeDetail.mockReset();
     fetchChangeDiff.mockReset();
+    fetchProjectSummaries.mockReset();
     fetchReviewChanges.mockResolvedValue(reviewPayload);
+    fetchProjectSummaries.mockResolvedValue({
+      projects: [{ project: 'team alpha', projectHash: hash, sessions: 2, recordedFiles: 3, totalFiles: 9, lastWorkMs: 0, openChanges: 1 }],
+      selection: { active: false, hiddenProjects: 0, hiddenSessions: 0 },
+    });
   });
   afterEach(() => cleanup());
 
@@ -140,7 +149,7 @@ describe('mounted ReviewRouter fixture', () => {
     pathname = fixture.pathname;
     search = fixture.search;
     if (fixture.resolution === 'ready') fetchProjectResolution.mockResolvedValue({ project: fixture.scenario === 'canonical' ? fixture.expected : 'team alpha', projectHash: hash });
-    if (fixture.resolution === 'missing') fetchProjectResolution.mockRejectedValue(new DiscoveryRequestError('/api/v1/projects/resolve', 404, fixture.expected));
+    if (fixture.resolution === 'missing') fetchProjectResolution.mockRejectedValue(new DiscoveryRequestError('/api/v1/projects/resolve', 404, MISSING_PROJECT_REASON));
     if (fixture.resolution === 'transient') fetchProjectResolution.mockRejectedValueOnce(new Error('temporary provider failure')).mockResolvedValueOnce({ project: 'team', projectHash: hash });
     render(<ReviewRouter />);
 
@@ -160,15 +169,27 @@ describe('mounted ReviewRouter fixture', () => {
         expect(fetchChangeDetail).not.toHaveBeenCalled();
         expect(fetchChangeDiff).not.toHaveBeenCalled();
         break;
-      case 'route-missing':
-        expect(await screen.findByText(fixture.expected)).toBeInTheDocument();
+      case 'route-missing': {
+        // No project in the address: the page lists projects, each opening its changes.
+        expect(await screen.findByRole('heading', { level: 1, name: fixture.expected })).toBeInTheDocument();
+        const row = await screen.findByRole('link', { name: 'Open the changes of team alpha' });
+        expect(row).toHaveAttribute('href', `/review/${hash}`);
         expect(fetchReviewChanges).not.toHaveBeenCalled();
         break;
-      case 'missing':
-        expect(await screen.findByRole('button', { name: /retry project resolution/i })).toHaveTextContent(fixture.expected);
+      }
+      case 'missing': {
+        // One human line and a way forward; never the failed request or the
+        // server's internal reason.
+        const problem = await screen.findByTestId('project-identity-problem');
+        expect(within(problem).getByRole('heading', { level: 1 })).toHaveTextContent(fixture.expected);
+        expect(within(problem).getByRole('link', { name: 'go to home' })).toHaveAttribute('href', '/');
+        expect(within(problem).getByRole('button', { name: 'try again' })).toBeInTheDocument();
+        expect(problem).not.toHaveTextContent('/api/v1/');
+        expect(problem).not.toHaveTextContent(MISSING_PROJECT_REASON);
         break;
+      }
       case 'retry':
-        fireEvent.click(await screen.findByRole('button', { name: /retry project resolution/i }));
+        fireEvent.click(await screen.findByRole('button', { name: 'try again' }));
         await waitFor(() => expect(replace).toHaveBeenCalledWith(fixture.expected));
         expect(fetchProjectResolution).toHaveBeenCalledTimes(2);
         break;

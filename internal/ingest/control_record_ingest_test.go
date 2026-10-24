@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
@@ -202,6 +204,17 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			if preflightErr := push.ValidatePublicationInput(bundle); (preflightErr == nil) != fixture.PreflightAccepts {
 				t.Fatalf("publication preflight accepted=%v, want %v (%v)", preflightErr == nil, fixture.PreflightAccepts, preflightErr)
 			}
+			// The share scan redacts the same complete entries; a publishable
+			// capture must pass its strict Extra decode too.
+			if fixture.PublicationReady && readErr == nil {
+				redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, scanErr := push.RedactEntries(redactor, snapshot.Entries); scanErr != nil {
+					t.Fatalf("the share scan refused a publishable capture: %v", scanErr)
+				}
+			}
 		})
 	}
 }
@@ -222,4 +235,118 @@ func exportPayloadText(t *testing.T, payload *schema.SessionDetailPayload) strin
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// TestControlPayloadReindexesOnUpgradeAndPublishes drives the upgrade path the
+// Claude Code indexer bump exists for: a session indexed under the previous
+// Claude Code indexer target is re-indexed by the next ordinary harvest of
+// this build, with no command beyond that harvest, and then scans and
+// publishes. The control payload holds a lone surrogate escape, so the
+// published transcript and the redacted entries must carry only its identity
+// object, never the payload text.
+func TestControlPayloadReindexesOnUpgradeAndPublishes(t *testing.T) {
+	t.Parallel()
+	var fixture controlRecordIngestCase
+	for _, candidate := range loadControlRecordIngestFixtures(t) {
+		if candidate.Name == "control-payload-lone-surrogate-publishes" {
+			fixture = candidate
+		}
+	}
+	if fixture.Name == "" {
+		t.Fatal("missing the control-payload-lone-surrogate-publishes fixture")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	sourceDir := filepath.Join(root, "source", "-workspace")
+	if err := os.MkdirAll(sourceDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	transcript := strings.ReplaceAll(fixture.Transcript, "SESSION_ID", testutil.TestSessionUUID)
+	if err := os.WriteFile(filepath.Join(sourceDir, testutil.TestSessionUUID+".jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := storetest.CopyGoldenDB(t)
+	fs := &ingest.OSFileSystem{}
+	cfg := ingest.PipelineConfig{
+		Sources: map[ingest.Harness]ingest.SourceConfig{
+			ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(filepath.Join(root, "source"))}},
+		},
+		OutputDir:   ingest.ResolvedPath(filepath.Join(root, "output")),
+		Parallelism: 1,
+	}
+	harvest := func(opts ...ingest.PipelineOption) int {
+		t.Helper()
+		db, err := store.Open(path, store.WithSkipMigrations())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, append([]ingest.PipelineOption{
+			ingest.WithStore(db), ingest.WithMetricsStore(db),
+			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := pipeline.Run(ctx)
+		if err != nil {
+			t.Fatalf("ordinary harvest: %v", err)
+		}
+		return result.Summary.Indexed
+	}
+
+	previous := maps.Clone(ingest.HarvesterVersionRegistry)
+	claude := previous[ingest.HarnessClaudeCode]
+	claude.IndexerVersion--
+	previous[ingest.HarnessClaudeCode] = claude
+	if indexed := harvest(ingest.WithHarvesterVersions(previous)); indexed != 1 {
+		t.Fatalf("the harvest under the previous target indexed %d sessions, want 1", indexed)
+	}
+	// The upgrade: this build's targets re-index the settled session on the
+	// next ordinary harvest, and a further harvest finds nothing to do.
+	if indexed := harvest(); indexed != 1 {
+		t.Fatalf("the first harvest after the upgrade re-indexed %d sessions, want 1", indexed)
+	}
+	if indexed := harvest(); indexed != 0 {
+		t.Fatalf("a settled session was re-indexed again: %d", indexed)
+	}
+
+	db, err := store.Open(path, store.WithSkipMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	bundle, _, err := push.LoadPublicationInput(ctx, db, testutil.TestSessionUUID)
+	if err != nil {
+		t.Fatalf("load the publication input: %v", err)
+	}
+	if bundle.Readiness != ingest.PublicationReady {
+		t.Fatalf("publication readiness = %q, want ready", bundle.Readiness)
+	}
+	if err := push.ValidatePublicationInput(bundle); err != nil {
+		t.Fatalf("publication preflight: %v", err)
+	}
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	redacted, err := push.RedactEntries(redactor, bundle.Entries)
+	if err != nil {
+		t.Fatalf("the share scan refused the re-indexed session: %v", err)
+	}
+	encoded, err := json.Marshal(redacted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The identity object stands in for the payload: its kind and size only.
+	if strings.Contains(string(encoded), "build ok") || !strings.Contains(string(encoded), `\"rawBytes\"`) {
+		t.Fatalf("the redacted entries leak the control payload or lost its identity object: %s", encoded)
+	}
+	exported, err := export.ExportSession(ctx, db, fs, testutil.TestSessionUUID)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if strings.Contains(exportPayloadText(t, exported), "build ok") {
+		t.Fatal("the exported transcript leaks the control payload text")
+	}
 }

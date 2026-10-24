@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/pull"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/village"
@@ -17,10 +19,12 @@ import (
 // collectivePullFlags carries the pull command's flags into the collective
 // driver, so the driver does not reach back into the command builder's closure.
 type collectivePullFlags struct {
-	Force  bool
-	DryRun bool
-	JSON   bool
-	Level  outputLevel
+	Original     *auth.CredentialSnapshot
+	Observations *collectiveobservations.Service
+	Force        bool
+	DryRun       bool
+	JSON         bool
+	Level        outputLevel
 	// User, when non-empty, keeps only the transcripts contributed by that village
 	// account. It is applied over the fully-paged listing, so it is exact.
 	User string
@@ -61,9 +65,11 @@ func (o collectivePullOutcome) failed() bool {
 // annotations are still current, so a current transcript is not touched at all.
 // The pull-window preflight runs once here, not once per transcript.
 //
-// The order is deliberate: resolve the collectives against the caller's own
-// list, negotiate once, list, ask the gate, and only then download. A mistyped
-// collective or an incompatible village therefore costs no partial work.
+// Explicit live references resolve through the canonical original-account
+// service, including server-disclosed nonmember collectives. Bare-user discovery
+// and dry-run keep their existing membership listing. After negotiation and the
+// complete required listing, explicit live selections are tracked even when the
+// eligible shelf is empty; tracking never joins or publishes to the collective.
 //
 // A per-transcript failure does not stop the run. Each outcome is reported and
 // the command fails at the end, because a bulk pull that pulled nine of ten
@@ -87,7 +93,33 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	}
 	writer := cmd.OutOrStdout()
 
-	collectives, names, err := resolveCollectiveRefs(ctx, client, values)
+	var collectives []schema.VillageUUID
+	var names []string
+	var err error
+	var observations *collectiveobservations.Service
+	if len(values) > 0 && !flags.DryRun && flags.Original != nil {
+		observations = flags.Observations
+		if observations == nil {
+			return fmt.Errorf("resolve explicit collective selection: observation service is not configured; no references or preferences changed; construct the pull action with its original account service")
+		}
+		seen := map[schema.VillageUUID]bool{}
+		for _, value := range values {
+			var id schema.VillageUUID
+			id, err = observations.ResolveReferenceFor(ctx, *flags.Original, value, true)
+			if err != nil {
+				break
+			}
+			if !seen[id] {
+				seen[id] = true
+				collectives = append(collectives, id)
+				names = append(names, id.String())
+			}
+		}
+	} else {
+		// Bare --user retains membership-based discovery; dry-run retains its
+		// existing read-only path without new auth/detail or tracking requests.
+		collectives, names, err = resolveCollectiveRefs(ctx, client, values)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			cmd.SilenceUsage = true
@@ -115,6 +147,22 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 			return collectivePullCancellationError(0, 0, names, flags.User, ctx.Err())
 		}
 		return err
+	}
+	// Resolve the entire explicit selection before writing any preference. Track
+	// even an empty eligible shelf, but never an unresolved reference or dry run.
+	if observations != nil {
+		for i, id := range collectives {
+			response, err := observations.TrackFor(ctx, *flags.Original, id)
+			if err != nil {
+				return fmt.Errorf("record explicit collective selection %s: %w; no publication or membership change was requested", id, err)
+			}
+			for _, row := range response.Collectives {
+				if row.ID == id {
+					names[i] = row.Name
+					break
+				}
+			}
+		}
 	}
 
 	if len(listed) == 0 {
@@ -194,6 +242,12 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 				License:        local.License,
 				DryRun:         flags.DryRun,
 			}}
+			if observer, ok := pipeline.(interface {
+				ObservePulledAssociations(context.Context, *pull.PullResult)
+			}); ok {
+				observer.ObservePulledAssociations(ctx, outcome.Result)
+			}
+			printPullMetadataWarning(cmd, outcome.Result)
 			outcomes = append(outcomes, outcome)
 			if !flags.JSON {
 				renderCollectivePullOutcome(cmd, outcome, flags.DryRun, flags.Level)
@@ -211,6 +265,7 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 			Meta:          &meta,
 			SkipNegotiate: true,
 		})
+		printPullMetadataWarning(cmd, result)
 		if err := ctx.Err(); err != nil {
 			// The interrupt wins over the pipeline result: a failure here is
 			// the cancellation, not a transcript failure. When the

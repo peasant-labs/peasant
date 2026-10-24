@@ -1,0 +1,32 @@
+requiredNames:
+  - success-body
+  - partial-body-retained
+  - deadline-body-retained
+  - auth-refusal
+  - malformed-json
+  - invalid-contract
+cases:
+  - name: success-body
+    status: 200
+    body: '{"authenticated":false}'
+    valid: true
+  - name: partial-body-retained
+    status: 502
+    body: '{"authenticated":false}'
+    valid: true
+  - name: deadline-body-retained
+    status: 504
+    body: '{"authenticated":false}'
+    valid: true
+  - name: auth-refusal
+    status: 401
+    body: '{"error":"sign in to Village, then retry"}'
+    refusal: true
+  - name: malformed-json
+    status: 502
+    body: '<html>proxy failure</html>'
+    unreadable: true
+  - name: invalid-contract
+    status: 200
+    body: '{"authenticated":"yes"}'
+    valid: false

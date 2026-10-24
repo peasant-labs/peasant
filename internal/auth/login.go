@@ -68,7 +68,7 @@ func loginFromWith(
 		return nil, err
 	}
 	if credentials == nil {
-		return nil, fmt.Errorf("perform browser login: callback returned no credentials; no local credential file was changed; retry the village login")
+		return nil, fmt.Errorf("perform browser login: callback returned no credentials; no local credential file was changed; retry the peasant online login")
 	}
 	credentials.VillageURL = villageURL
 	credentials.LinkedAt = now()

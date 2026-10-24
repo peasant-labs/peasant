@@ -24,7 +24,7 @@ import type { SearchResult } from '@peasant-labs/schema';
  * (analytics, changes, code map) have no command, and there are no per-project
  * jumps into them.
  *
- * The server-side "Messages" group debounces queries of at least two characters,
+ * The server-side "messages" group debounces queries of at least two characters,
  * full-text-searches recorded transcripts via /api/v1/search, and deep-links each
  * hit to its task turn. These results are server-ranked, so —
  * unlike the local commands — they are NOT run through filterCommands; they are
@@ -34,7 +34,7 @@ import type { SearchResult } from '@peasant-labs/schema';
 export interface Command {
   id: string;
   label: string;
-  /** Right-aligned group label (e.g. "Messages", "Go to", "Action"). */
+  /** Right-aligned group label (e.g. "messages", "go to", "action"). */
   group: string;
   /** Extra text folded into the match (e.g. the raw project path). */
   keywords?: string;
@@ -208,14 +208,14 @@ export function CommandPalette() {
     const navCmds: Command[] = visibleNavSections(capabilities).map((s) => ({
       id: `nav:${s.href}`,
       label: `go to ${s.label}`,
-      group: 'Go to',
+      group: 'go to',
       run: go(s.href),
     }));
     const actionCmds: Command[] = [
       {
         id: 'action:theme',
         label: 'toggle light / dark theme',
-        group: 'Action',
+        group: 'action',
         keywords: 'dark light mode appearance',
         run: () => {
           close();
@@ -240,7 +240,7 @@ export function CommandPalette() {
         return [{
           id: `${direct ? 'id' : 'msg'}:${r.sessionId}:${r.entryIndex}`,
           label: direct ? directLookupLabel(r, projectHash) : messageLabel(r.snippet),
-          group: 'Messages',
+          group: 'messages',
           keywords: r.project,
           searchAnnotation: { discovery: r.discovery },
           run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),

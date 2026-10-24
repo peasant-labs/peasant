@@ -41,6 +41,9 @@ var homeSelectionYAML []byte
 //go:embed testdata/sync_project_options.yaml
 var syncProjectOptionsYAML []byte
 
+//go:embed testdata/home_repository_evidence.yaml
+var homeRepositoryEvidenceYAML []byte
+
 type boundedHomeReader struct {
 	*store.Store
 	allowed    map[string]bool
@@ -714,4 +717,81 @@ func TestSyncHomeCancellationAndUnavailable(t *testing.T) {
 		t.Fatal("cancelled identity read succeeded")
 	}
 	syncPageRequest(t, homeTestHandler(t, nil, db, config.BaseConfig()), "view=home", 503)
+}
+
+// TestSyncHomeRepositoryIdentityEvidence pins the difference between a stored
+// Git worktree and the canonical project directory used as recorded-path
+// evidence. A project recorded outside Git (the user's home directory, /tmp, a
+// scratch capture folder) is ordinary stored data: asking it for repository
+// topology must not fail the whole Home projection. A captured worktree that
+// no longer resolves remains ambiguous evidence and still fails closed.
+func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name           string   `yaml:"name"`
+			StoredWorktree bool     `yaml:"storedWorktree"`
+			Status         int      `yaml:"status"`
+			IDs            []string `yaml:"ids"`
+		} `yaml:"cases"`
+	}
+	if err := testutil.DecodeNamedFixtureYAML(homeRepositoryEvidenceYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "session-recorded-directory"
+	projectHash := strings.Repeat("a", 64)
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			db := storetest.Open(t)
+			seedHomeSessions(t, db, []string{sessionID})
+			// A real directory that is not a Git worktree: the production
+			// resolver must report that the directory is outside Git.
+			physical, err := ingest.NewPhysicalPathResolver().Resolve(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			homeExec(t, db, `INSERT INTO projects(project_hash,canonical_cwd) VALUES(?,?) ON CONFLICT(project_hash) DO UPDATE SET canonical_cwd=excluded.canonical_cwd`, projectHash, physical.String())
+			if tc.StoredWorktree {
+				homeExec(t, db, `UPDATE sessions SET git_worktree=? WHERE session_id=?`, physical.String(), sessionID)
+			}
+			cfg := config.BaseConfig()
+			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
+				// A path-bound project: only exact clone-path evidence selects
+				// this session, so an offered row proves the recorded directory
+				// still reaches the canonical matcher.
+				defaults.HarnessOpenCode.String(): {Projects: []config.ProjectSelection{{Name: "unrelated-name", ClonePaths: []string{physical.String()}}}},
+			}}
+			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
+			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: ingest.NewGitRepositoryIdentityResolver()}
+			response := httptest.NewRecorder()
+			http.HandlerFunc(sh.handleSyncSessions).ServeHTTP(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", nil))
+			if response.Code != tc.Status {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, tc.Status, response.Body.String())
+			}
+			if tc.Status == http.StatusOK {
+				var page schema.LocalSyncSessionPage
+				if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+					t.Fatal(err)
+				}
+				if err := page.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				ids := make([]string, 0, len(page.Items))
+				for _, item := range page.Items {
+					ids = append(ids, item.Sync.ID)
+				}
+				if !slices.Equal(ids, tc.IDs) {
+					t.Fatalf("ids = %v, want %v", ids, tc.IDs)
+				}
+				return
+			}
+			var body errorEnvelope
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(body.Error, sessionID) || !strings.Contains(body.Error, "ambiguous") {
+				t.Fatalf("failure body = %q, want the fail-closed topology error naming %q", body.Error, sessionID)
+			}
+		})
+	}
 }

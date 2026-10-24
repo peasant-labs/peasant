@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/pull"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -129,10 +128,12 @@ func pullCollectiveTestBlob(t *testing.T, id schema.TranscriptID) []byte {
 // collectives, for bulk pull tests to resolve `--collective` names against.
 func newPullCollectiveDouble(t *testing.T) *testutil.CollectiveVillage {
 	t.Helper()
-	return testutil.NewCollectiveVillage(t,
+	server := testutil.NewCollectiveVillage(t,
 		testutil.VillageCollective{ID: pullCollectiveAID, Name: pullCollectiveAName, Member: true},
 		testutil.VillageCollective{ID: pullCollectiveBID, Name: pullCollectiveBName, Member: true},
 	)
+	server.SetAuthenticatedUser(schema.VillageUUID(stubOwnerUserID), "owneruser")
+	return server
 }
 
 // seedPullTranscripts stores pull data for each id and shares it approved with
@@ -529,7 +530,7 @@ func runCancelOnce(t *testing.T) (string, *testutil.CollectiveVillage, []schema.
 	defer db.Close()
 	client := village.NewVillageClient(server.URL(), "test-api-key", nil)
 	pullsRoot := string(defaults.ResolveVillagePullsDirPathWith(dir))
-	realPipeline := pull.NewPipeline(client, &ingest.OSFileSystem{}, db,
+	realPipeline := pull.NewPipeline(client, pull.NewFileSystem(pullsRoot), db,
 		pull.SystemClock{},
 		pull.Credentials{UserID: testutil.TestOwnerUserID, VillageURL: server.URL()},
 		pullsRoot)

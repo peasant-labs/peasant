@@ -1,0 +1,21 @@
+requiredNames: [typed-partial-report-discarded, village-back-in-nav, village-body-missing]
+cases:
+  - name: typed-partial-report-discarded
+    testName: web-catalog-updated-history-old-502
+    asset: /app/village/
+    find: 's=await h(t,{method:"POST",signal:e});if(!l.rHE.safeParse(s.body)'
+    replace: 's=await h(t,{method:"POST",signal:e});if(!s.ok)throw Error("typed partial report discarded");if(!l.rHE.safeParse(s.body)'
+    expectedError: metadata fetch partial
+  - name: village-back-in-nav
+    testName: village-route-only-from-home
+    # fairtrade's registry lands in a shared numbered chunk; the find is unique across them.
+    asset: /_next/static/chunks/
+    find: 'Object.freeze({id:"village",label:"online",inNav:!1})'
+    replace: 'Object.freeze({id:"village",label:"online",inNav:!0})'
+    expectedError: 'a[href^="/village"]'
+  - name: village-body-missing
+    testName: village-direct-link-mounts-body
+    asset: /app/village/
+    find: '(0,a.jsxs)("div",{className:"village-page",children:'
+    replace: '(0,a.jsxs)("section",{className:"village-page",hidden:!0,children:'
+    expectedError: online observations

@@ -587,10 +587,10 @@ func sharedPathState(slot Slot) string {
 			embeddedRootOrUnknown(slot))
 	case OwnershipForeign:
 		if slot.UploadsFromForeignFile() {
-			return "that file was not written by Peasant - or is no longer intact - but it still carries a village upload section, so uploads run from it for every worktree and repository that executes it. It is left exactly as it is."
+			return "that file was not written by Peasant - or is no longer intact - but it still carries a peasant online upload section, so uploads run from it for every worktree and repository that executes it. It is left exactly as it is."
 		}
 		if slot.CarriesUploadSection() {
-			return "that file was not written by Peasant - or is no longer intact - and it carries a village upload section, but git does not currently run it because it is not executable. It is left exactly as it is; restoring its executable mode would make the upload run for every worktree and repository that executes this shared slot."
+			return "that file was not written by Peasant - or is no longer intact - and it carries a peasant online upload section, but git does not currently run it because it is not executable. It is left exactly as it is; restoring its executable mode would make the upload run for every worktree and repository that executes this shared slot."
 		}
 		return "that file was not written by Peasant and is left exactly as it is."
 	default:
@@ -1112,7 +1112,7 @@ func foreignUploadRefusal(plan Plan, repo Repository, binding Binding) string {
 		deleteNote = fmt.Sprintf(
 			"or, to stop this repository running it without touching a file you share, delete only the link with: rm %s", shellQuote(plan.Path))
 	}
-	foundState := strings.Join(found, ", and ") + ", so a village upload still runs from it"
+	foundState := strings.Join(found, ", and ") + ", so a peasant online upload still runs from it"
 	impact := fmt.Sprintf("nothing was removed. The file is exactly as it was, and it still uploads on every %s", plan.Event)
 	if !plan.UploadsFromForeignFile() {
 		foundState = strings.Join(found, ", and ") + ", but git does not currently run that file because it is not executable"

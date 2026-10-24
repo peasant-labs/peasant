@@ -1,17 +1,18 @@
-import { Settings, type LucideIcon } from 'lucide-react';
+import { Globe, House, Settings, type LucideIcon } from 'lucide-react';
 import { LOCAL_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
 import { UI_CAPABILITY, type UICapabilityToken } from '@/lib/capabilities/tokens';
 
 /**
- * App sections — the single source of truth for the header and the Cmd+K
+ * App sections — the single source of truth for the sidebar and the Cmd+K
  * command palette, so "what sections exist, where they live, and which ones
  * persistent chrome may link to" is defined once. This is the only
  * section-visibility policy point: consumers hold no raw section-id logic.
  *
  * WHICH sections exist, their order, their labels, and whether each one is
  * listed in the navigation come from @peasant-labs/fairtrade/graph's
- * LOCAL_APP_SECTIONS: `home` and `settings` are nav sections; `analytics`,
- * `changes` and `code map` are reached by route only. This module adds only
+ * LOCAL_APP_SECTIONS: `home` and `settings` are nav sections; `village` (labelled
+ * `online`), `analytics`, `changes` and `code map` are reached by route only.
+ * This module adds only
  * the local route each id owns. `/share` is not a section: it stays outside
  * this registry.
  */
@@ -22,7 +23,7 @@ export interface NavSection {
   label: string;
   /** Hover description (also reusable as a palette hint). */
   title?: string;
-  /** The glyph the section's header link leads with. */
+  /** The glyph the section's sidebar item leads with. */
   icon?: LucideIcon;
   /**
    * The server-advertised capability token required to expose this section in
@@ -52,13 +53,13 @@ const ROUTES: Record<LocalSectionId, SectionRoute | null> = {
     href: '/',
     title: 'Your projects and the sessions recorded in them.',
   },
-  // The registry lists the village observations section in the nav, but this
-  // app has no page for it yet. A null route keeps it out of persistent chrome
-  // and the palette until the page ships, so no dead link is rendered.
-  village: null,
+  village: {
+    href: '/village',
+    title: 'Inspect saved collective observations and dated contribution evidence.',
+  },
   settings: {
     href: '/settings',
-    title: 'Manage recording, redaction, Village sign-in, and automatic publishing.',
+    title: 'Manage recording, redaction, online sign-in, and automatic publishing.',
   },
   analytics: {
     href: '/analytics',
@@ -77,10 +78,12 @@ const ROUTES: Record<LocalSectionId, SectionRoute | null> = {
 };
 
 /**
- * The glyph a nav section's header link leads with. Recorded here, beside the
- * route map, so the link carries it the moment its page ships.
+ * The glyph a nav section's sidebar item leads with. Recorded here, beside the
+ * route map, so the item carries it the moment its page ships.
  */
 const ICONS: Partial<Record<LocalSectionId, LucideIcon>> = {
+  home: House,
+  village: Globe,
   settings: Settings,
 };
 
@@ -106,7 +109,7 @@ export const NAV_SECTIONS: readonly NavSection[] = LOCAL_SECTIONS.filter((sectio
 
 /**
  * The sections reached by URL only. Their routes stay mounted; nothing in the
- * header or the palette links to them.
+ * sidebar or the palette links to them.
  */
 export const ROUTE_ONLY_SECTIONS: readonly NavSection[] = LOCAL_SECTIONS.filter((section) => !section.inNav);
 
@@ -122,14 +125,6 @@ function sectionMeetsCapability(section: NavSection, capabilities: ReadonlySet<s
 /** The nav sections to expose given the server's advertised capability set. */
 export function visibleNavSections(capabilities: ReadonlySet<string>): NavSection[] {
   return NAV_SECTIONS.filter((section) => sectionMeetsCapability(section, capabilities));
-}
-
-/**
- * The links the header carries beside its brand: the visible nav sections
- * other than the one that owns `/`, which the `peasant` brand link already is.
- */
-export function headerNavSections(capabilities: ReadonlySet<string>): NavSection[] {
-  return visibleNavSections(capabilities).filter((section) => section.href !== '/');
 }
 
 /**

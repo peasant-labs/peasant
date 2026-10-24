@@ -77,9 +77,10 @@ cases:
     check: floor
     floor: .share-page
   # A roomy screen scrolled down before the app stops: the pinned notice must be on screen.
-  - name: home-scrolled
-    path: /
-    body: main
+  # /analytics is long enough to scroll on a roomy screen in the mock store; home is not.
+  - name: analytics-scrolled
+    path: /analytics/
+    body: .gan-root
     width: 1440
     height: 700
     check: scrolled

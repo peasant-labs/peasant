@@ -1,0 +1,37 @@
+userId: aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa
+otherUserId: bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb
+collectiveId: 11111111-1111-4111-8111-111111111111
+otherCollectiveId: 22222222-2222-4222-8222-222222222222
+name: Visible shelf
+requiredNames:
+  - visible-nonmember-uuid-empty-shelf-tracked
+  - visible-nonmember-exact-name-case-insensitive
+  - visible-nonmember-canonical-full-base-url
+  - visible-nonmember-deprecated-full-base-url
+  - repeated-selectors-deduplicate-preference
+  - ambiguous-name-no-preference
+  - unknown-name-no-preference
+  - fuzzy-name-not-selected
+  - cross-village-no-credentials-forwarded
+  - wrong-base-path-no-credentials-forwarded
+  - unresolved-later-selector-tracks-none
+  - rotation-during-resolution-tracks-neither-account
+  - rotation-during-tracking-tracks-neither-account
+  - tracking-visibility-refused-no-preference
+  - dry-run-no-new-auth-detail-or-preference
+cases:
+  - {name: visible-nonmember-uuid-empty-shelf-tracked, refs: ['{id}'], wantTracked: true}
+  - {name: visible-nonmember-exact-name-case-insensitive, refs: [vIsIbLe ShElF], wantTracked: true}
+  - {name: visible-nonmember-canonical-full-base-url, basePath: /installation, refs: ['{base}/collectives/{id}?view=history'], wantTracked: true}
+  - {name: visible-nonmember-deprecated-full-base-url, basePath: /installation, refs: ['{base}/groups/{id}'], wantTracked: true}
+  - {name: repeated-selectors-deduplicate-preference, refs: ['{id}', Visible shelf, '{base}/groups/{id}'], wantTracked: true}
+  - {name: ambiguous-name-no-preference, refs: [Visible shelf], mode: ambiguous, errorContains: ambiguous}
+  - {name: unknown-name-no-preference, refs: [Unknown], mode: unknown, errorContains: No exact collective name}
+  - {name: fuzzy-name-not-selected, refs: [Visible], errorContains: No exact collective name}
+  - {name: cross-village-no-credentials-forwarded, refs: ['{foreign}/collectives/{id}'], errorContains: different peasant online, zeroAuth: true}
+  - {name: wrong-base-path-no-credentials-forwarded, basePath: /installation, refs: ['{origin}/elsewhere/collectives/{id}'], errorContains: base path, zeroAuth: true}
+  - {name: unresolved-later-selector-tracks-none, refs: ['{id}', Unknown], mode: unknown, errorContains: No exact collective name}
+  - {name: rotation-during-resolution-tracks-neither-account, refs: ['{id}'], rotateDetail: 1, errorContains: changed}
+  - {name: rotation-during-tracking-tracks-neither-account, refs: ['{id}'], rotateDetail: 2, errorContains: changed}
+  - {name: tracking-visibility-refused-no-preference, refs: ['{id}'], mode: tracking-refused, errorContains: record explicit collective selection}
+  - {name: dry-run-no-new-auth-detail-or-preference, refs: [Visible shelf], dryRun: true, zeroAuth: true}

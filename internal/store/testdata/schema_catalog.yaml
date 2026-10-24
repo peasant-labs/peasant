@@ -3,6 +3,19 @@
 # comparison. Tables exclude sqlite_% internals; the FTS5 shadow tables are
 # listed because they are real schema objects in this catalog.
 tables:
+  - collective_observation_scopes
+  - collective_attempt_sources
+  - remote_contribution_attempts
+  - local_contribution_receipts
+  - local_operation_diagnostics
+  - transcript_collective_observations
+  - transcript_collective_evidence
+  - collective_observation_versions
+  - collective_relevance_observations
+  - collective_tracking_preferences
+  - collective_source_installs
+  - collective_domain_observations
+  - collective_fetch_reports
   - session_source_unavailability
   - annotation_classes
   - annotation_families
@@ -92,6 +105,12 @@ tables:
   - type_origins
   - value_domain_kinds
 indexes:
+  - idx_collective_observation_versions_current
+  - idx_transcript_collective_evidence_current
+  - idx_local_contribution_receipts_order
+  - idx_local_contribution_receipts_collective
+  - idx_local_operation_diagnostics_order
+  - idx_local_operation_diagnostics_collective
   - idx_ann_annotator
   - idx_ann_content_hash
   - idx_ann_created_at

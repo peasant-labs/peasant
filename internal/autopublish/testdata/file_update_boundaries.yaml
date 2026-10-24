@@ -1,0 +1,17 @@
+requiredNames:
+  - two-independent-edits-retain-exact-rule-identities
+  - validation-refusal-preserves-exact-file-bytes
+cases:
+  - name: two-independent-edits-retain-exact-rule-identities
+    rules:
+      - &first {id: first-editor, kind: remote, match: github.com/acme/first, events: [], collectives: []}
+      - &second {id: second-editor, kind: remote, match: github.com/acme/second, events: [], collectives: []}
+    expectedIDs: [first-editor, second-editor]
+    # The ACTUAL production acquisition refusal is the contention gate. No
+    # goroutine-start signal is treated as proof that a lock was attempted.
+    contentionError: 'deadline exceeded while waiting for the exclusive lock'
+  - name: validation-refusal-preserves-exact-file-bytes
+    rules: [*first]
+    rejected: *first
+    expectedIDs: [first-editor]
+    refusalError: 'listed twice'

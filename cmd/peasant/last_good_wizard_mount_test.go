@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 )
 
 // TestPushCmd_LastGoodOnATTYDoesNotEnterTheWizard pins the production call site
@@ -41,6 +43,10 @@ func TestPushCmd_LastGoodOnATTYDoesNotEnterTheWizard(t *testing.T) {
 	captured := &capturedPublish{parts: map[string]string{}}
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 			_, _ = w.Write([]byte(`{}`))
 			return

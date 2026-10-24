@@ -16,11 +16,14 @@ export class DiscoveryRequestError extends Error {
   readonly status: number;
   readonly code?: DiscoveryErrorCode;
   readonly path: string;
+  /** The server's explanation alone, without the request line, for display. */
+  readonly detail: string;
 
   constructor(path: string, status: number, message: string, code?: DiscoveryErrorCode) {
     super(`GET ${path} failed (${status}): ${message}`);
     this.name = 'DiscoveryRequestError';
     this.path = path;
+    this.detail = message;
     this.status = status;
     this.code = code;
   }

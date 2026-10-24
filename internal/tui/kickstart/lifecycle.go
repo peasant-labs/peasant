@@ -122,7 +122,7 @@ func canonicalNextStep(kind NextStepKind) (nextStepDetails, bool) {
 		}, true
 	case NextStepVillageLogin:
 		return nextStepDetails{
-			title:   "connect to a village later",
+			title:   "connect to peasant online later",
 			command: "peasant village login",
 			detail:  "connects this machine without publishing a transcript",
 		}, true

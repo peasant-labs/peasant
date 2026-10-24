@@ -18,8 +18,13 @@ import {
 import { useRedactionPipeline, type RedactionScanTarget } from '@/lib/share/redactionScan';
 import { DEFAULT_REDACTION_LEVEL } from '@/lib/share/redactions';
 import { guardReviewMatches } from '@/lib/share/reviewMatches';
+import { classifyScanFailure, REINDEX_DID_NOT_REPAIR, reindexFailureLine, reindexRetryable, type ReindexFailureCode } from '@/lib/share/scanFailure';
+import { checkingStage, type CheckingStep } from '@/lib/share/checkingStage';
+import { stepWithReason, unreadableNote } from '@/lib/share/publishFailure';
+import { reindexSession, SessionReindexError, unreadableAfterReindex, type UnreadableLine } from '@/lib/api/ingest';
 import { fetchSettings } from '@/lib/api/settings';
 import { AutomaticPublishingError, enableAutomaticPublishing } from './automaticPublishing';
+import { onlineCollectivesHref } from '@/lib/village/links';
 import {
   accessItems,
   accessSummary,
@@ -45,16 +50,8 @@ import {
 /** How often the popup asks whether the browser sign-in finished. */
 const SIGN_IN_POLL_MS = 2000;
 
-/** The village the reader signs in to, when the server does not name one. */
-function defaultVillageUrl(): string {
-  return process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://village.peasantlabs.org';
-}
-
-/** Where village lists the collectives a reader can create or join. */
-const VILLAGE_COLLECTIVES_PATH = '/groups';
-
 /** The recovery when village no longer holds the transcript a receipt names. */
-const TRANSCRIPT_MISSING = 'village no longer holds this transcript: run peasant village push --force for this session';
+const TRANSCRIPT_MISSING = 'peasant online no longer holds this transcript: run peasant village push --force for this session';
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -77,8 +74,10 @@ type CollectivesRead =
   | { status: 'ready'; collectives: LocalVillageCollective[] }
   | { status: 'error'; message: string };
 
-/** A step before the push that stopped; retry runs it again. */
-type Blocked = { stoppedAt: string; retry?: () => void };
+/** A step before the push that stopped; retry runs it again. `detail` is the whole reason, for details only. */
+type Blocked = { stoppedAt: string; detail?: string; retry?: () => void };
+/** The one-session re-index that heals a stale local index. */
+type Reindex = { status: 'idle' | 'running' } | { status: 'done'; notes: string[]; unreadable: UnreadableLine[] } | { status: 'failed'; code: ReindexFailureCode; message: string };
 type AutomaticPreference = { status: 'loading' } | { status: 'ready'; offer: boolean } | { status: 'error'; message: string };
 
 export interface TranscriptPublishOptions {
@@ -95,6 +94,8 @@ export interface TranscriptPublishOptions {
   openOnArrival: boolean;
   /** Called when the popup closes, so the route can drop its open request. */
   onArrivalHandled: () => void;
+  /** Called when a re-index from the popup finished, so the page reads the session again. */
+  onReindexed?: () => void;
 }
 
 export interface TranscriptPublish {
@@ -112,7 +113,7 @@ export interface TranscriptPublish {
  */
 export function useTranscriptPublish(options: TranscriptPublishOptions): TranscriptPublish {
   const router = useRouter();
-  const { sessionId, title, turns, loaded, moreItems, openOnArrival, onArrivalHandled } = options;
+  const { sessionId, title, turns, loaded, moreItems, openOnArrival, onArrivalHandled, onReindexed } = options;
   const { redactionCache, updateRedactionCache, publishing, settled, publish } = usePublishState();
 
   // ── the publication state ────────────────────────────────────────────────
@@ -152,7 +153,6 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // ── the popup ────────────────────────────────────────────────────────────
   const [open, setOpen] = useState(false);
   const [signIn, setSignIn] = useState<SignIn>('unknown');
-  const [villageUrl, setVillageUrl] = useState<string | undefined>(undefined);
   const [signInFailure, setSignInFailure] = useState<SignInFailure | null>(null);
   // A sign-in that completes inside the popup changes what the publication read
   // reports (a signed-out computer reports every session unpublished).
@@ -173,7 +173,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   const [automaticPreference, setAutomaticPreference] = useState<AutomaticPreference>({ status: 'loading' });
   const [automaticNonce, setAutomaticNonce] = useState(0);
   const [automaticChecked, setAutomaticChecked] = useState(false);
-  const [automaticFailure, setAutomaticFailure] = useState<string | null>(null);
+  const [automaticFailure, setAutomaticFailure] = useState<Blocked | null>(null);
   const automaticRuleIds = useRef(new Map<string, string>());
 
   const openPopup = useCallback(() => {
@@ -242,7 +242,6 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     fetchVillageAuth()
       .then((auth) => {
         if (!live) return;
-        setVillageUrl(auth.villageUrl || undefined);
         setSignIn(auth.authenticated ? 'signed-in' : 'signed-out');
       })
       .catch((error: unknown) => {
@@ -278,7 +277,6 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
         const auth = await fetchVillageAuth();
         if (!live) return;
         if (auth.authenticated) {
-          setVillageUrl(auth.villageUrl || undefined);
           setSignIn('signed-in');
           return;
         }
@@ -360,11 +358,77 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   const scanResult = scan.sessionRedactions.get(sessionId);
   const adaptation = guardReviewMatches(() => scanResult ? reviewMatches(sessionId, scanResult) : []);
   const reviewError = scan.scanError ?? adaptation.error;
+  const failure = reviewError != null ? classifyScanFailure(reviewError) : null;
+
+  // A stale local index is healed on request: the scan failed because the
+  // session's stored evidence is one the strict publication reader refuses, or
+  // its capture is not verified yet, so the popup's re-scan re-indexes this one
+  // session, then scans again. A failed scan stays cached until that explicit
+  // re-scan. It reads and writes the local index only; nothing leaves the
+  // machine, and no redaction rule is relaxed. The re-index answers within its
+  // bound, so it never spins on a run that outlived the server.
+  const [reindex, setReindex] = useState<Reindex>({ status: 'idle' });
+  const reindexRun = useRef<AbortController | null>(null);
+  const runScan = scan.runScan;
+  useEffect(() => {
+    if (open) return;
+    reindexRun.current?.abort();
+    reindexRun.current = null;
+    setReindex({ status: 'idle' });
+  }, [open]);
+  const healing = reindex.status === 'running';
+  const rescan = useCallback(() => {
+    if (failure?.kind !== 'needs-reindex') {
+      runScan(true);
+      return;
+    }
+    if (reindexRun.current) return;
+    const controller = new AbortController();
+    reindexRun.current = controller;
+    setReindex({ status: 'running' });
+    reindexSession(sessionId, { signal: controller.signal })
+      .then(({ notes, unreadable }) => {
+        if (controller.signal.aborted) return;
+        setReindex({ status: 'done', notes, unreadable });
+        onReindexed?.();
+        runScan(true);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setReindex({ status: 'failed', code: error instanceof SessionReindexError ? error.code : 'other', message: messageOf(error) });
+      })
+      .finally(() => { if (reindexRun.current === controller) reindexRun.current = null; });
+  }, [failure?.kind, onReindexed, runScan, sessionId]);
+
   const scanClean = scan.phase === 'ready' && reviewError == null && scanResult !== undefined;
-  const scanProp = reviewError != null
-    ? { failure: `the scan failed, so publish is off. ${reviewError}` }
+  // A failed scan shows one short line, and its whole reason behind details,
+  // never the transport status or JSON envelope. A stale index offers the one
+  // action that fixes it: re-index this session, here. A re-index that did not
+  // finish says what stopped it and offers to run again when that can help;
+  // one that ran while the scan still refuses says so, with the run's notes.
+  // A re-index that could not read a recording line leaves the copy before
+  // it: said once, never a reason to block the publish. The re-index may have
+  // run here or from the transcript page's not-indexed state.
+  const unreadable = unreadableNote(reindex.status === 'done' ? reindex.unreadable : unreadableAfterReindex(sessionId));
+  const failureShown: { line: string; detail: string; action?: { label: string; onSelect: () => void } } | null = failure == null
+    ? null
+    : failure.kind === 'needs-reindex' && reindex.status === 'failed'
+      ? {
+        line: reindexFailureLine(reindex.code),
+        detail: `${reindex.message}\n\n${failure.message}`,
+        action: reindexRetryable(reindex.code) ? { label: 're-index again', onSelect: rescan } : undefined,
+      }
+      : failure.kind === 'needs-reindex' && reindex.status === 'done'
+        ? { line: REINDEX_DID_NOT_REPAIR, detail: [failure.message, ...reindex.notes].join('\n\n') }
+        : failure.kind === 'needs-reindex'
+          ? { line: failure.line, detail: failure.message, action: { label: 're-index this session', onSelect: rescan } }
+          : { line: failure.line, detail: failure.message };
+  const scanProp = healing
+    ? undefined
+    : failureShown != null
+    ? { failure: failureShown.line, failureDetail: failureShown.detail, failureAction: failureShown.action }
     : scanResult
-      ? { matches: adaptation.matches, total: scanResult.length, matchCount: scan.sessionMatchCounts.get(sessionId) }
+      ? { matches: adaptation.matches, total: scanResult.length, matchCount: scan.sessionMatchCounts.get(sessionId), note: unreadable }
       : undefined;
 
   // ── who can read it ──────────────────────────────────────────────────────
@@ -383,26 +447,35 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // guessed them would publish as a first publish, or update a list it cannot
   // show.
   const blocked: Blocked | null = automaticFailure !== null
-    ? { stoppedAt: automaticFailure }
+    ? automaticFailure
     : signInFailure != null
     ? {
-      stoppedAt: signInFailure.step === 'check'
-        ? `checking this computer’s village sign-in: ${oneLine(signInFailure.message)}`
-        : `starting the github sign-in: ${oneLine(signInFailure.message)}`,
+      stoppedAt: stepWithReason(signInFailure.step === 'check' ? 'checking whether this computer is signed in' : 'starting the github sign-in', signInFailure.message),
+      detail: signInFailure.message,
       retry: signInFailure.step === 'start' ? connect : () => { setSignInFailure(null); setSignIn('unknown'); },
     }
     : read.status === 'error'
       ? {
-        stoppedAt: read.transcriptMissing ? `reading whether this is published: ${TRANSCRIPT_MISSING}` : `reading whether this is published: ${oneLine(read.message)}`,
+        stoppedAt: read.transcriptMissing ? `reading whether this is published: ${TRANSCRIPT_MISSING}` : stepWithReason('reading whether this is published', read.message),
+        detail: read.message,
         retry: read.transcriptMissing ? undefined : reread,
       }
       : read.status === 'ready' && publication === null
         ? { stoppedAt: 'reading this session: it is not recorded on this computer yet; run peasant ingest, then retry', retry: reread }
         : read.status === 'ready' && publication?.state === 'published' && !read.audienceKnown
-        ? { stoppedAt: 'reading who can read it on village', retry: reread }
-        : collectivesRead.status === 'error'
-          ? { stoppedAt: `reading your collectives on village: ${oneLine(collectivesRead.message)}`, retry: () => setCollectivesNonce((nonce) => nonce + 1) }
-          : null;
+        ? { stoppedAt: 'reading who can read it online', retry: reread }
+        : null;
+
+  // Collectives that could not be read are said inside "who can read it", with
+  // their own retry, not as a stopped publish: nothing was attempted yet.
+  // Publishing stays off until they load.
+  const accessFailure = collectivesRead.status === 'error'
+    ? {
+      line: `${stepWithReason('your collectives can’t load', collectivesRead.message)}.`,
+      detail: collectivesRead.message,
+      onRetry: () => setCollectivesNonce((nonce) => nonce + 1),
+    }
+    : undefined;
 
   // Publish only from a clean scan of the content now on the page, signed in,
   // with what village holds known. The automatic-setup preference is NOT a
@@ -410,7 +483,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // manual publish.
   // An update can be sent before the collectives list arrives: its draft is
   // "no change" until the reader makes one.
-  const canPublish = scanClean && signIn === 'signed-in' && blocked === null && read.status === 'ready'
+  const canPublish = scanClean && signIn === 'signed-in' && blocked === null && read.status === 'ready' && accessFailure === undefined
     && (draft !== null || publishedNow === 'update');
   const publishGuard = useRef({ ready: false, check: scan.isReviewReady });
   publishGuard.current = { ready: open && canPublish && publishingTo === undefined && !submitting, check: scan.isReviewReady };
@@ -476,12 +549,12 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       setDraft((current) => (current ? { add: current.add, remove: current.remove.filter((id) => !removed.has(id)) } : current));
     } catch (error) {
       if (error instanceof AutomaticPublishingError) {
-        setAutomaticFailure(oneLine(error.message, 700));
+        setAutomaticFailure({ stoppedAt: `${stepWithReason(error.step, error.cause)}. ${error.remedy}`, detail: error.message });
         reread();
       } else if (error instanceof PublishingRequestError && error.status === 401) {
         setSignIn('signed-out');
       } else {
-        setOutcome({ kind: 'stopped', stoppedAt: `sending it to village: ${oneLine(messageOf(error))}` });
+        setOutcome({ kind: 'stopped', stoppedAt: stepWithReason('sending it to peasant online', messageOf(error)), detail: messageOf(error) });
       }
     } finally {
       setSubmitting(false);
@@ -498,14 +571,38 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     if (blocked) return 'stopped';
     if (signIn === 'waiting') return 'waiting-github';
     if (signIn === 'signed-out') return 'connect';
-    if (signIn === 'unknown' || read.status === 'loading' || scan.phase === 'scanning') return 'checking';
+    if (signIn === 'unknown' || read.status === 'loading' || scan.phase === 'scanning' || healing) return 'checking';
     if (reviewError != null) return 'scan-failed';
     if (outcome?.kind === 'stopped') return 'stopped';
     if (collectivesRead.status === 'ready' && collectivesRead.collectives.length === 0 && access.length === 0) return 'no-collective';
     return 'ready';
   })();
+  // While the check runs, the popup names the step and, after a while, what
+  // is slow: the check runs on this computer and publish waits for it.
+  const checkingStep: CheckingStep | null = dialogState !== 'checking'
+    ? null
+    : healing
+      ? 'reindexing'
+      : scan.phase === 'scanning'
+        ? 'scanning'
+        : scanResult === undefined && reviewError == null
+          ? 'preparing'
+          : 'reading';
+  const [stepClock, setStepClock] = useState<{ step: CheckingStep | null; startedAt: number; now: number }>({ step: null, startedAt: 0, now: 0 });
+  useEffect(() => {
+    if (checkingStep === null) return;
+    const startedAt = Date.now();
+    setStepClock({ step: checkingStep, startedAt, now: startedAt });
+    const timer = window.setInterval(() => setStepClock((clock) => ({ ...clock, now: Date.now() })), 1000);
+    return () => window.clearInterval(timer);
+  }, [checkingStep]);
+  // A step's first render, before its clock starts, has run for no time yet.
+  const stepElapsedMs = stepClock.step === checkingStep ? stepClock.now - stepClock.startedAt : 0;
+  const stage = checkingStep === null ? undefined : checkingStage(checkingStep, { turns: turns.length, elapsedMs: stepElapsedMs });
+  const checking = stage && checkingStep === 'scanning' && unreadable && !stage.note ? { ...stage, note: unreadable.line } : stage;
+
   const stopped = dialogState === 'stopped'
-    ? (blocked ?? (outcome?.kind === 'stopped' ? { stoppedAt: outcome.stoppedAt, retry: /push --force/.test(outcome.stoppedAt) ? undefined : () => { void runPublish(); } } : null))
+    ? (blocked ?? (outcome?.kind === 'stopped' ? { stoppedAt: outcome.stoppedAt, detail: outcome.detail, retry: /push --force/.test(outcome.stoppedAt) ? undefined : () => { void runPublish(); } } : null))
     : null;
 
   const menuItems = publication?.autoPublish || automaticFailure
@@ -545,7 +642,6 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       ? {
         checked: automaticChecked,
         onChange: setAutomaticChecked,
-        hint: 'selected collectives · overlapping rules still apply · change them in settings',
       }
       : automaticPreference.status === 'error'
         ? {
@@ -553,7 +649,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
           onChange: () => {},
           hint: (
             <>
-              <span role="alert">automatic publishing is unavailable: {oneLine(automaticPreference.message)}</span>{' '}
+              <span role="alert" title={automaticPreference.message}>{stepWithReason('automatic publishing is unavailable', automaticPreference.message)}</span>{' '}
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAutomaticNonce((nonce) => nonce + 1)}>retry</button>
             </>
           ),
@@ -568,7 +664,9 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       mode={mode}
       state={dialogState}
       scan={scanProp}
-      onRescan={() => scan.runScan(true)}
+      checking={checking}
+      primaryLabel={checkingStep !== null && checkingStep !== 'reading' ? 'scanning…' : undefined}
+      onRescan={rescan}
       changes={mode === 'update' ? { summary: changesSummary(newTurns) } : undefined}
       access={access}
       onRemove={(id) => setDraft((current) => removeFromDraft(current ?? NO_ACCESS_CHANGE, id, readers))}
@@ -588,8 +686,10 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       accessSummary={mode === 'update' ? accessSummary(activeDraft, names) : undefined}
       onPublish={() => { void runPublish(); }}
       onConnect={connect}
-      joinHref={`${villageUrl ?? defaultVillageUrl()}${VILLAGE_COLLECTIVES_PATH}`}
+      joinHref={onlineCollectivesHref()}
       stoppedAt={stopped?.stoppedAt}
+      stoppedDetail={stopped?.detail}
+      accessFailure={accessFailure}
       onRecover={blocked?.retry ? recover : undefined}
       onRetry={blocked === null ? stopped?.retry : undefined}
       done={outcome && outcome.kind !== 'stopped' ? outcome.done : undefined}

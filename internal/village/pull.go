@@ -55,7 +55,7 @@ var ErrPullNotFound = errors.New("village pull transcript not found (404): not p
 // advertised pull window is MISSING (village too old) or this CLI's pull-contract
 // version falls OUTSIDE the advertised window. Callers classify with errors.Is;
 // The pull pipeline maps it to PullStatus "contract-error".
-var ErrPullContractIncompatible = errors.New("village pull contract incompatible: the village's pull window is absent or excludes this CLI's pull-contract version")
+var ErrPullContractIncompatible = errors.New("village pull contract incompatible: peasant online's pull window is absent or excludes this CLI's pull-contract version")
 
 // --- Pull-window negotiation (stricter than push) ---
 //
@@ -72,11 +72,11 @@ var ErrPullContractIncompatible = errors.New("village pull contract incompatible
 // Wraps ErrPullContractIncompatible so callers can classify with errors.Is.
 func villageTooOldForPullError(villageURL string) error {
 	return fmt.Errorf(
-		"peasant pull aborted: the village does not advertise a pull contract\n"+
+		"peasant pull aborted: peasant online does not advertise a pull contract\n"+
 			"  what: GET /api/v1/schema/version returned no pull window (pullContractVersion/minPullContractVersion absent)\n"+
-			"  why:  this village predates the transcript pull surface\n"+
-			"  where: pull-contract preflight (village %s)\n"+
-			"  fix:  the pull surface requires an updated village; retry once the village has been upgraded (no CLI change is needed)\n"+
+			"  why:  this peasant online server predates the transcript pull surface\n"+
+			"  where: pull-contract preflight (peasant online %s)\n"+
+			"  fix:  the pull surface requires an updated peasant online server; retry once peasant online has been upgraded (no CLI change is needed)\n"+
 			"  (%w)",
 		villageURL, ErrPullContractIncompatible)
 }
@@ -87,8 +87,8 @@ func villageTooOldForPullError(villageURL string) error {
 // ErrPullContractIncompatible so callers can classify with errors.Is.
 func pullContractError(cli, min, current schema.PushContractVersion) error {
 	return fmt.Errorf(
-		"peasant pull aborted: this CLI's pull-contract v%s is incompatible with the village's pull window [v%s, v%s]\n"+
-			"  what: the village serves pull envelopes only within [v%s, v%s] and this CLI is outside it\n"+
+		"peasant pull aborted: this CLI's pull-contract v%s is incompatible with peasant online's pull window [v%s, v%s]\n"+
+			"  what: peasant online serves pull envelopes only within [v%s, v%s] and this CLI is outside it\n"+
 			"  why:  the pull-envelope shapes (PullTranscriptInfo/PullListResponse/PullAnnotation) differ across the gap\n"+
 			"  where: pull-contract preflight\n"+
 			"  fix:  pin/upgrade the peasant CLI to a release whose pull-contract is within [v%s, v%s], then re-run the pull\n"+
@@ -119,8 +119,8 @@ func (c *VillageClient) NegotiatePull(ctx context.Context) error {
 			"peasant pull aborted: pull-contract preflight failed\n"+
 				"  what: GET /api/v1/schema/version could not be reached or decoded\n"+
 				"  why:  %v\n"+
-				"  where: pull-contract preflight (village %s)\n"+
-				"  fix:  verify the village URL and your network/credentials, then re-run the pull",
+				"  where: pull-contract preflight (peasant online %s)\n"+
+				"  fix:  verify the peasant online URL and your network/credentials, then re-run the pull",
 			err, c.baseURL)
 	}
 	if resp == nil {
@@ -372,20 +372,20 @@ func pullStatusError(op, path string, resp *http.Response) error {
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
 		return fmt.Errorf(
-			"%s: village returned 401 Unauthorized\n"+
+			"%s: peasant online returned 401 Unauthorized\n"+
 				"  what: the pull request to %s was rejected as unauthenticated\n"+
-				"  why:  your credentials are missing, expired, or invalid for this village\n"+
+				"  why:  your credentials are missing, expired, or invalid for this peasant online server\n"+
 				"  fix:  re-authenticate with `peasant village login`, then re-run the pull",
 			op, path)
 	case http.StatusNotFound:
 		return fmt.Errorf(
-			"%s: village returned 404 Not Found\n"+
+			"%s: peasant online returned 404 Not Found\n"+
 				"  what: %s is not pullable for your account\n"+
 				"  why:  the transcript does not exist, or is not owned by or group-shared with you (public transcripts are not pullable)\n"+
 				"  fix:  verify the transcript ID/URL, or ask the owner to share it with a group you belong to\n"+
 				"  (%w)",
 			op, path, ErrPullNotFound)
 	default:
-		return fmt.Errorf("%s: village returned %d for %s: %s", op, resp.StatusCode, path, string(body))
+		return fmt.Errorf("%s: peasant online returned %d for %s: %s", op, resp.StatusCode, path, string(body))
 	}
 }

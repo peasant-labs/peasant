@@ -12,11 +12,11 @@ import {
 } from '@/test/strictYaml';
 import { LayoutShell } from './LayoutShell';
 import { OFFLINE_ANNOUNCEMENTS, startCommandFor } from './LocalOfflineNotice';
-import { loadShellHeaderManifest } from '../../scripts/visual/shell-header-manifest.mjs';
+import { loadShellChromeManifest } from '../../scripts/visual/shell-chrome-manifest.mjs';
 import YAML from 'yaml';
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'dark', toggle: vi.fn() }) }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/', useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'dark', toggle: vi.fn(), setTheme: vi.fn() }) }));
 // The tour stays in the tree but is not mounted: a mount of its provider would render this marker.
 vi.mock('@/components/tour/TourProvider', () => ({
   TourProvider: ({ children }: { children: ReactNode }) => <div data-testid="tour-provider">{children}</div>,
@@ -164,6 +164,8 @@ beforeEach(() => {
     const url = new URL(String(input), 'http://localhost');
     if (url.pathname === '/api/v1/health') return healthResponse(init?.signal);
     if (url.pathname === '/api/v1/config/capabilities') return Response.json({ uiCapabilities: [] });
+    // The sidebar reads the sign-in for its account row.
+    if (url.pathname === '/api/v1/sync/auth') return Response.json({ authenticated: false });
     throw new Error(`unexpected test request ${url.pathname}`);
   }));
 });
@@ -199,14 +201,15 @@ const liveRegion = () => {
 function expectShown() {
   const region = notice();
   expect(region, 'the offline notice must show').not.toBeNull();
-  // Under the fixed header: absolute at the top of the page by default, pinned (fixed) only
-  // through the notice-pinned variant on a screen with room for it.
-  const header = document.querySelector('header');
-  expect(header?.className).toContain('fixed');
-  expect(header?.contains(region)).toBe(false);
+  // At the top of the page column beside the sidebar, in the page flow: pinned (sticky) only
+  // through the notice-pinned variant on a screen with room for it, never fixed.
+  const sidebar = document.querySelector('.asb');
+  expect(sidebar).not.toBeNull();
+  expect(sidebar?.contains(region)).toBe(false);
   const wrapper = region!.parentElement!;
-  expect(wrapper.classList.contains('absolute')).toBe(true);
-  expect(wrapper.classList.contains('top-[var(--nav-h)]')).toBe(true);
+  expect(wrapper.closest('.asb-main')).not.toBeNull();
+  expect(wrapper.nextElementSibling?.tagName).toBe('MAIN');
+  expect(wrapper.classList.contains('absolute')).toBe(false);
   expect(wrapper.classList.contains('fixed')).toBe(false);
   expect(wrapper.classList.contains(NOTICE_PINNED_CLASS)).toBe(true);
   // It names this computer, never the internet, and offers the way back.
@@ -289,7 +292,7 @@ describe('LocalOfflineNotice', () => {
   });
 
   it('announces exactly what the shell manifest says', () => {
-    expect(OFFLINE_ANNOUNCEMENTS).toEqual(loadShellHeaderManifest().announcements);
+    expect(OFFLINE_ANNOUNCEMENTS).toEqual(loadShellChromeManifest().announcements);
   });
 
   it.each(fixture.startCommands.map((row) => [row.port || '(none)', row] as const))(

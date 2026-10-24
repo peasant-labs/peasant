@@ -15,6 +15,16 @@ test layer to its entry point.
 
 ## Test gate
 
+The Linux container-pool gate may have UID 0. Its command uses the image's
+`setpriv` to remove `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` from bounding,
+inheritable and ambient sets, with `no_new_privs`, before `make check` starts.
+This only reduces the gate child process's privileges; it changes no runner user,
+image, service or global directory. Non-root runners execute the same gate directly.
+Permission fixtures still require a real `os.Open` permission denial on the
+search-only ancestor before exercising production code. A root invocation that
+retains DAC bypass capabilities fails that assertion rather than skipping or
+claiming permission evidence. Test selection, race policy and budgets are unchanged.
+
 `make check` runs the Go suite through `cmd/testgate`. The gate exists to move
 the suite's expensive non-race work out of the race pass **without dropping it**,
 and to prove that every test still runs exactly once across the passes.
@@ -853,7 +863,7 @@ The harness publishes seven contact sheets under the commit-derived directory
 | `guided-dark.png` | `1800x3420` | The six guided sections in the dark theme: auto-ingest, publication, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
 | `guided-light.png` | `1800x3420` | The same guided sections and terminal sizes in the light theme. |
 | `selection.png` | `1800x6750` | The mounted selection view, including search, project/branch/session previews, and origin filtering. |
-| `push.png` | `1800x6000` | The mounted publication wizard: start, selection, transcript preview, consent, and receipt. |
+| `push.png` | `1800x7840` | The mounted publication wizard: start, selection, transcript preview, consent, receipt, and the keyboard help card. |
 | `ingest-progress.png` | `1800x1200` | Local import progress after the guided configuration is saved. |
 | `ingest-completion.png` | `1800x3420` | Local import completion with multiple actionable warnings at the top and bottom of the scrollable result, plus a no-warning control. Every state includes both themes and both terminal sizes. |
 | `pull-progress.png` | `1800x3600` | The bulk collective-pull progress bar: running, canceling, and canceled. Every state includes both themes and both terminal sizes. |

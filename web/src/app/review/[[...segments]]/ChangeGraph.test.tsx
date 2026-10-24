@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
 import { ChangeGraph } from './ChangeGraph';
-import type { ExplainerState } from '@/components/Explainer';
 import type { ReviewListPayload } from '@peasant-labs/schema';
 import {
   ALPHA_HASH,
@@ -19,20 +18,8 @@ afterEach(() => {
   routerPush.mockClear();
 });
 
-/** The explainer state now lives in the page title (ReviewPageClient); the
- *  graph only receives it as a prop. `open` controls whether the on-demand
- *  "What am I looking at?" content box renders. */
-function makeExplainer(open = false): ExplainerState {
-  return { id: 'changes', open, hydrated: true, show: () => {}, hide: () => {} };
-}
-
-function renderGraph(
-  payload: ReviewListPayload = REVIEW_LIST_PAYLOAD,
-  explainer: ExplainerState = makeExplainer(),
-) {
-  return render(
-    <ChangeGraph projectHash={ALPHA_HASH} projectName="alpha-project" payload={payload} explainer={explainer} />,
-  );
+function renderGraph(payload: ReviewListPayload = REVIEW_LIST_PAYLOAD) {
+  return render(<ChangeGraph projectHash={ALPHA_HASH} projectName="alpha-project" payload={payload} />);
 }
 
 // -- CommitGraph dots (lane 0 commits + tip rows) -----------------------------------
@@ -64,24 +51,11 @@ describe('ChangeGraph — CommitGraph dots', () => {
     expect(screen.getByText('1h ago')).toBeInTheDocument();
   });
 
-  it('keeps the dot + freshness vocabulary in the on-demand explainer', () => {
-    // Collapsed explainer (the default): the vocabulary is not shown.
+  it('teaches no vocabulary in the app: how to read the graph lives in the docs', () => {
     renderGraph();
     expect(screen.queryByText(/worked on in the last 3 days/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/paused — no work for 3 to 14 days/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/untouched for over 2 weeks/)).not.toBeInTheDocument();
-
-    cleanup();
-
-    // Opened: vocabulary is available on demand inside the explainer box.
-    renderGraph(REVIEW_LIST_PAYLOAD, makeExplainer(true));
-    const box = screen.getByRole('region', { name: 'Explanation' });
-    expect(within(box).getByText(/filled/)).toBeInTheDocument();
-    expect(within(box).getByText(/hollow/)).toBeInTheDocument();
-    expect(within(box).getByText(/worked on in the last 3 days/)).toBeInTheDocument();
-    expect(within(box).getByText(/paused — no work for 3 to 14/)).toBeInTheDocument();
-    expect(within(box).getByText(/untouched for over 2/)).toBeInTheDocument();
-    expect(within(box).getByText('develop')).toBeInTheDocument();
+    expect(screen.queryByText(/hollow means none was captured/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Explanation' })).not.toBeInTheDocument();
   });
 
   it('keeps every gutter stroke orthogonal — no curved SVG primitives in the lanes', () => {

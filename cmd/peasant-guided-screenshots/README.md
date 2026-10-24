@@ -53,8 +53,8 @@ local and gitignored.
 - all six guided sections in dark and light themes at `80x24` and `120x40`;
 - the default and retained global-search selection states at both sizes;
 - project, branch, and scrubbed transcript preview states in both themes at both sizes;
-- the start, selection, consent, and receipt screens of the push wizard, in both themes at both
-  sizes, over a synthetic candidate inventory that carries every redaction state and one session the
+- the start, selection, consent, receipt, and keyboard help screens of the push wizard, in both
+  themes at both sizes, over a synthetic candidate inventory that carries every redaction state and one session the
   branch-aware selection withheld;
 - local ingest progress and completion, including multiple nonfatal warnings, scrolled remediation
   and next steps, and a no-warning control, in both themes and both sizes;

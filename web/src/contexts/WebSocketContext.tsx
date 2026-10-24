@@ -104,6 +104,13 @@ interface WebSocketContextValue {
   wsSubscribe: (channels: SubscriptionMessage[]) => void;
   /** Unsubscribe from WS channels on the server. */
   wsUnsubscribe: (channels: SubscriptionMessage[]) => void;
+  /**
+   * Ask the server for a fresh snapshot of channels this page already holds.
+   * An event-driven channel (a session's detail) is sent once on subscribe, so
+   * after a change the page made itself (a re-index) it reads the new state
+   * by subscribing again; the server keeps one subscription per channel.
+   */
+  wsRefresh: (channels: SubscriptionMessage[]) => void;
   /** Send an arbitrary client message. */
   sendMessage: (msg: ClientMessage) => void;
   /**
@@ -337,6 +344,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [sendRaw]);
 
+  const wsRefresh = useCallback((subs: SubscriptionMessage[]) => {
+    const held = subs.filter((sub) => subsRef.current.has(subscriptionKey(sub)));
+    if (held.length > 0) {
+      sendRaw({ type: 'subscribe', channels: held });
+    }
+  }, [sendRaw]);
+
   // Context value changes ONLY when connected/error change (infrequent).
   // Channel data lives in the ChannelStore ref and is accessed via
   // useSyncExternalStore — it never triggers context re-renders.
@@ -347,10 +361,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       store: storeRef.current,
       wsSubscribe,
       wsUnsubscribe,
+      wsRefresh,
       sendMessage: sendRaw,
       reconnect,
     }),
-    [connected, error, wsSubscribe, wsUnsubscribe, sendRaw, reconnect],
+    [connected, error, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, reconnect],
   );
 
   return (
@@ -453,6 +468,11 @@ export function useChannel<T = unknown>(
     [primaryKey],
   );
   const channelError = useSyncExternalStore(channelSubscribe, getErrorSnapshot, getErrorSnapshot);
+  const refresh = useCallback(
+    () => ctx.wsRefresh(subsArray),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [channelsKey, ctx.wsRefresh],
+  );
 
   return {
     /** Latest data for the primary channel, or undefined if none received yet. */
@@ -460,6 +480,8 @@ export function useChannel<T = unknown>(
     connected: ctx.connected,
     error: channelError?.message ?? ctx.error,
     errorCode: channelError?.code,
+    /** Read this channel again from the server, keeping the current data until the new snapshot lands. */
+    refresh,
   };
 }
 

@@ -81,8 +81,9 @@ const die = async (code, what) => {
   process.exit(code)
 }
 
-/* ── theme: default is dark; click .theme-btn once to reach light, then verify [data-theme] ── */
-if (theme === 'light') {
+/* ── theme: the page opens on the system scheme until a theme is picked; click .theme-btn once
+   when it is not the requested one, then verify [data-theme] ── */
+if (await page.evaluate(() => document.documentElement.getAttribute('data-theme')) !== theme) {
   await page.evaluate(() => document.querySelector('.theme-btn')?.click())
   await pause(500)
 }

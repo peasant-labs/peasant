@@ -153,7 +153,7 @@ async function goToSubmit(user: ReturnType<typeof userEvent.setup>) {
     return action;
   });
   await user.click(continueRedaction);
-  await user.click(await screen.findByRole('button', { name: 'Submit' }));
+  await user.click(await screen.findByRole('button', { name: 'publish' }));
 }
 
 async function expectPushedIds(fetchMock: ReturnType<typeof installFetch>, expected: string[]) {

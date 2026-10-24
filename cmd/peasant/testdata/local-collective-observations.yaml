@@ -1,0 +1,65 @@
+userId: aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa
+otherUserId: bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb
+observedAt: 2026-10-16T12:00:00Z
+collectives:
+  - {id: 11111111-1111-4111-8111-111111111111, name: Alpha}
+  - {id: 22222222-2222-4222-8222-222222222222, name: Beta}
+  - {id: 33333333-3333-4333-8333-333333333333, name: Twin}
+  - {id: 44444444-4444-4444-8444-444444444444, name: Twin}
+transcripts:
+  - {id: aaaaaaaa-0000-4000-8000-000000000001, owner: Alice, collectives: [11111111-1111-4111-8111-111111111111]}
+  - {id: aaaaaaaa-0000-4000-8000-000000000002, owner: Bob, collectives: [22222222-2222-4222-8222-222222222222]}
+  - {id: aaaaaaaa-0000-4000-8000-000000000003, owner: Alice, legacy: true}
+  - {id: aaaaaaaa-0000-4000-8000-000000000004, owner: Alice, collectives: [11111111-1111-4111-8111-111111111111], invalidated: true}
+  - {id: aaaaaaaa-0000-4000-8000-000000000005, owner: Alice, collectives: [11111111-1111-4111-8111-111111111111], otherBase: true}
+requiredNames:
+  - union-not-per-row-evidence
+  - collective-user-intersection-offline
+  - known-negative-no-current-match
+  - legacy-manifest-unknown
+  - same-host-other-base-path-not-matched
+  - local-filter-needs-scope-no-network
+  - unfiltered-accountless-inventory
+  - local-user-regression
+  - exact-saved-name-offline
+  - stale-disclosed-set-retains-old-time
+  - other-principal-does-not-see-old-observations
+  - local-table-shows-scope-and-date
+  - ambiguous-saved-name-refused-offline
+  - unknown-saved-name-refused-offline
+  - cross-village-url-refused-offline
+  - other-principal-during-provenance-no-private-output
+  - same-account-generation-during-provenance-no-private-output
+cases:
+  - name: union-not-per-row-evidence
+    refs: [11111111-1111-4111-8111-111111111111, 22222222-2222-4222-8222-222222222222]
+    ids: [aaaaaaaa-0000-4000-8000-000000000001, aaaaaaaa-0000-4000-8000-000000000002]
+    disclosures:
+      aaaaaaaa-0000-4000-8000-000000000001: [11111111-1111-4111-8111-111111111111]
+      aaaaaaaa-0000-4000-8000-000000000002: [22222222-2222-4222-8222-222222222222]
+  - name: collective-user-intersection-offline
+    refs: [11111111-1111-4111-8111-111111111111, 22222222-2222-4222-8222-222222222222]
+    owner: alice
+    ids: [aaaaaaaa-0000-4000-8000-000000000001]
+    disclosures:
+      aaaaaaaa-0000-4000-8000-000000000001: [11111111-1111-4111-8111-111111111111]
+  - {name: known-negative-no-current-match, refs: [11111111-1111-4111-8111-111111111111], ids: [aaaaaaaa-0000-4000-8000-000000000001]}
+  - {name: legacy-manifest-unknown, refs: [11111111-1111-4111-8111-111111111111], ids: [aaaaaaaa-0000-4000-8000-000000000001]}
+  - {name: same-host-other-base-path-not-matched, refs: [11111111-1111-4111-8111-111111111111], ids: [aaaaaaaa-0000-4000-8000-000000000001]}
+  - {name: local-filter-needs-scope-no-network, refs: [11111111-1111-4111-8111-111111111111], signedOut: true, errorContains: unfiltered --local}
+  - name: unfiltered-accountless-inventory
+    signedOut: true
+    ids: [aaaaaaaa-0000-4000-8000-000000000001, aaaaaaaa-0000-4000-8000-000000000002, aaaaaaaa-0000-4000-8000-000000000003, aaaaaaaa-0000-4000-8000-000000000004, aaaaaaaa-0000-4000-8000-000000000005]
+  - name: local-user-regression
+    signedOut: true
+    owner: ALICE
+    ids: [aaaaaaaa-0000-4000-8000-000000000001, aaaaaaaa-0000-4000-8000-000000000003, aaaaaaaa-0000-4000-8000-000000000004, aaaaaaaa-0000-4000-8000-000000000005]
+  - {name: exact-saved-name-offline, refs: [aLpHa], ids: [aaaaaaaa-0000-4000-8000-000000000001]}
+  - {name: stale-disclosed-set-retains-old-time, refs: [Alpha], stale: true, ids: [aaaaaaaa-0000-4000-8000-000000000001]}
+  - {name: other-principal-does-not-see-old-observations, refs: [11111111-1111-4111-8111-111111111111], otherAccount: true, ids: []}
+  - {name: local-table-shows-scope-and-date, refs: [Alpha], table: true, ids: [aaaaaaaa-0000-4000-8000-000000000001]}
+  - {name: ambiguous-saved-name-refused-offline, refs: [Twin], errorContains: ambiguous}
+  - {name: unknown-saved-name-refused-offline, refs: [not-a-known-collective], errorContains: No exact collective name matched}
+  - {name: cross-village-url-refused-offline, refs: ['https://another.example/collectives/11111111-1111-4111-8111-111111111111'], errorContains: different peasant online}
+  - {name: other-principal-during-provenance-no-private-output, refs: [Alpha], generationChange: other-principal, errorContains: changed}
+  - {name: same-account-generation-during-provenance-no-private-output, refs: [Alpha], generationChange: same-account, table: true, errorContains: changed}

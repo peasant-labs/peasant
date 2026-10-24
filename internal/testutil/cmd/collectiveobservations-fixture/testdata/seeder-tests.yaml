@@ -1,0 +1,12 @@
+requiredNames: [real-store-seed-and-independent-categories, selected-change-conflicts-only-attempts, separate-account-scope, missing-ownership-refused, dated-association-known-negative, canonical-pull-content-hash]
+cases:
+  - {name: real-store-seed-and-independent-categories, mode: diagnostic}
+  - {name: selected-change-conflicts-only-attempts, mode: terminal}
+  - {name: separate-account-scope, mode: account}
+  - {name: missing-ownership-refused, mode: ownership}
+  - {name: dated-association-known-negative, mode: association-invalidated}
+  - {name: canonical-pull-content-hash, mode: export}
+kinds: [remote-attempts, receipts, operation-diagnostics]
+# Count is the explicit paging contract: five rows at limit two require three pages.
+seededEvidenceTotal: 5
+pageLimit: 2

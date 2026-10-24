@@ -1,4 +1,5 @@
 requiredNames:
+  - v68-collective-observations
   - v01-initial-schema
   - v02-session-entries
   - v03-ingest-log

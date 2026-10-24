@@ -5,9 +5,9 @@ version: 3
 harnesses:
   claude-code:
     adapter_version: 3
-    indexer_version: 19
+    indexer_version: 20
     index_version: 1
-    native_versions: {adapter_version: 3, indexer_version: 20, index_version: 2}
+    native_versions: {adapter_version: 3, indexer_version: 21, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no

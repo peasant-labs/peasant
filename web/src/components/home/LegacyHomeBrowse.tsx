@@ -5,12 +5,13 @@ import { useChannel } from '@/contexts/WebSocketContext';
 import type { SessionsPayload } from '@/types/messages';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { DiscoveryErrorCode, discoveryErrorCode } from '@/lib/api/errors';
-import { ProjectPicker, PickerExplainer, rowsFromSummaries, rowsFromSessions } from '@/components/picker/ProjectPicker';
+import { ProjectPicker, rowsFromSummaries, rowsFromSessions } from '@/components/picker/ProjectPicker';
 import { ProjectListState, SelectionRecoveryPanel, projectListState } from '@/components/picker/SelectionRecoveryPanel';
-import { ExplainerToggle, useExplainer } from '@/components/Explainer';
+import { IngestTeach } from '@/components/IngestTeach';
+import { DocsLink } from '@/components/DocsLink';
 import { cachedProjectSummaries, fetchProjectSummaries, type DecodedProjectSummariesPayload } from '@/lib/api/map';
 import { formatRelative } from '@/app/review/[[...segments]]/format';
-import { Button, DataState, FeedbackPanel, StatGrid, TeachingEmptyState, type TileSpec } from '@/lib/ft-ui';
+import { Button, DataState, FeedbackPanel, StatGrid, type TileSpec } from '@/lib/ft-ui';
 import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronUp, ChevronDown } from 'lucide-react';
 import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
@@ -27,7 +28,7 @@ function SelectionNotice({ notice }: { notice: { hiddenProjects: number; hiddenS
     <button type="button" onClick={() => setOpen(value => !value)} aria-expanded={open} className="inline-flex items-center gap-2 border border-rule px-3 py-1.5 font-mono text-sm text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer">
       <EyeOff size={14} aria-hidden /><span className="tabular-nums">{parts.join(' and ')} hidden by a saved selection</span>{open ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
     </button>
-    {open && <div className="flex flex-col gap-1 border border-rule bg-surface-hover px-4 py-3 text-sm text-ink-2"><p>A saved project selection is limiting what’s shown here. The data stays ingested and indexed — it is only hidden from this list.</p><p className="text-sm text-ink-3">Run <code className="font-mono">peasant kickstart</code> to review or widen the selection.</p></div>}
+    {open && <div className="flex flex-col gap-1 border border-rule bg-surface-hover px-4 py-3 text-sm text-ink-2"><p>a saved project selection is limiting what’s shown here. the data stays ingested and indexed; it is only hidden from this list.</p><p className="text-sm text-ink-3"><DocsLink topic="selection" variant="inline">change the selection</DocsLink></p></div>}
   </div>;
 }
 
@@ -35,7 +36,6 @@ function SelectionNotice({ notice }: { notice: { hiddenProjects: number; hiddenS
 export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped' | 'flat' }) {
   const { data, connected, error, errorCode } = useChannel<SessionsPayload>(CHANNELS);
   const titles = useSessionTitles();
-  const explainer = useExplainer('home');
   const sessions = useMemo(() => data?.sessions ?? [], [data]);
   const [summaries, setSummaries] = useState<DecodedProjectSummariesPayload | null>(() => cachedProjectSummaries());
   const [settled, setSettled] = useState(false);
@@ -82,17 +82,16 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
       <Button variant="secondary" size="sm" onClick={() => setRevision(value => value + 1)}>retry project discovery</Button>
     </div>}
     {recovery && <SelectionRecoveryPanel {...recovery} />}
-    {!blocked && <DataState loading={view === 'projects' ? !settled && data === undefined : data === undefined} status={rows.length === 0 && !connected && summaries === null ? 'disconnected' : 'live'} empty={view === 'projects' && settled && failure === null && rows.length === 0} emptyState={<TeachingEmptyState title="no ai work recorded yet" body="scan this computer for your ai coding conversations." command="peasant ingest" />} skeletonRows={4}>
+    {!blocked && <DataState loading={view === 'projects' ? !settled && data === undefined : data === undefined} status={rows.length === 0 && !connected && summaries === null ? 'disconnected' : 'live'} empty={view === 'projects' && settled && failure === null && rows.length === 0} emptyState={<IngestTeach />} skeletonRows={4}>
       {view === 'projects' && <>
         {summaries?.selection.active && (summaries.selection.hiddenProjects > 0 || summaries.selection.hiddenSessions > 0) && <SelectionNotice notice={summaries.selection} />}
-        <div className="flex items-start gap-2"><h3 className="font-[family-name:var(--font-display)] text-base font-semibold lowercase text-ink">projects</h3><ExplainerToggle explainer={explainer} /></div>
-        <PickerExplainer explainer={explainer} destination="sessions" />
+        <h3 className="font-[family-name:var(--font-display)] text-base font-semibold lowercase text-ink">projects</h3>
         {rows.length > 0 && <StatGrid tiles={tiles} />}
         {failure != null && rows.length > 0 && <p className="text-sm text-ink-3">Per-project stats couldn’t load, so coverage and unmerged-branch counts show “—”. Session counts and last-work are still accurate.</p>}
         <ProjectPicker rows={rows} destination="sessions" statsPending={!settled} />
       </>}
       {view === 'grouped' && <GroupedSessionsSection variant="sessions" invalidationKey={data} titles={titles} heading="all sessions" />}
-      {view === 'flat' && <AllSessions sessions={sessions} titles={titles} title="every session" subtitle="every ingested session across projects, filterable and paged." />}
+      {view === 'flat' && <AllSessions sessions={sessions} titles={titles} title="every session" />}
     </DataState>}
   </div>;
 }

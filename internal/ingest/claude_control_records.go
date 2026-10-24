@@ -131,14 +131,19 @@ func stripClaudeControlEnvelope(payload map[string]json.RawMessage) map[string]j
 }
 
 // claudeControlRetainedPayload encodes the stripped payload, replacing it with
-// an identity object once it exceeds the cap. rawBytes records the stripped
-// payload size that tripped the cap.
+// an identity object once it exceeds the cap, or when the payload is not
+// evidence every reader of Extra accepts. The source bytes are re-encoded
+// verbatim, so a value Claude Code wrote with a lone UTF-16 surrogate escape (a
+// streamed output cut mid-character), a duplicate key or invalid UTF-8 would
+// otherwise be stored as an Extra the strict evidence scan refuses, and that
+// one record would fail every complete-content read of the session, the share
+// scan among them. rawBytes records the stripped payload size.
 func claudeControlRetainedPayload(kind string, payload map[string]json.RawMessage) *string {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
 	}
-	if len(encoded) > claudeControlPayloadLimit {
+	if len(encoded) > claudeControlPayloadLimit || ScanRawEvidenceDocument(encoded, "extra") != nil {
 		encoded, err = claudeControlIdentity(kind, payload, len(encoded))
 		if err != nil {
 			return nil

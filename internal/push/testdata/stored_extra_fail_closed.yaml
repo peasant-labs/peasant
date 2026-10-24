@@ -1,0 +1,33 @@
+# Entry Extra documents as a store can hold them, and whether the share scan
+# (RedactEntries) accepts them. A build before the control-payload fix stored
+# a Claude Code control record's payload verbatim, so a lone UTF-16 surrogate
+# escape, a duplicate key or invalid UTF-8 reached Extra. The read side stays
+# strictly fail-closed: every one of those is refused, never repaired or
+# skipped. The clean twin and the identity object the fixed build stores pass.
+# INVALIDBYTE stands for the byte 0xFF, which YAML text cannot carry.
+required_names:
+  - lone-surrogate-refused
+  - duplicate-key-refused
+  - invalid-utf8-refused
+  - trailing-value-refused
+  - surrogate-pair-accepted
+  - identity-object-accepted
+cases:
+  - name: lone-surrogate-refused
+    extra: '{"attachment":{"type":"hook_success","stdout":"build ok \ud83d"}}'
+    accepted: false
+  - name: duplicate-key-refused
+    extra: '{"attachment":{"type":"hook_success","stdout":"first","stdout":"second"}}'
+    accepted: false
+  - name: invalid-utf8-refused
+    extra: '{"attachment":{"type":"hook_success","stdout":"build ok INVALIDBYTE"}}'
+    accepted: false
+  - name: trailing-value-refused
+    extra: '{"attachment":{"type":"hook_success"}} {}'
+    accepted: false
+  - name: surrogate-pair-accepted
+    extra: '{"attachment":{"type":"hook_success","stdout":"build ok 😀"}}'
+    accepted: true
+  - name: identity-object-accepted
+    extra: '{"attachmentType":"hook_success","kind":"attachment","rawBytes":64}'
+    accepted: true

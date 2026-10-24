@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"net/http"
@@ -9,7 +10,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -405,34 +408,88 @@ func TestPushCmd_AStalledLookupDoesNotFailThePush(t *testing.T) {
 // makes the lookup safe in front of a hook, and it distinguishes placement
 // rather than bounding.
 //
-// The budget here is the same size as the lookup's own bound, so a lookup
-// running on the upload's clock — the shape this had first, and then narrowed —
-// would spend the whole of it on the stall and leave the upload to fail with a
-// deadline the lookup caused. Ahead of that clock, the stall costs its own
-// second and the upload still gets its full budget.
+// Observe the actual HTTP lookup completion and production deadline factory,
+// rather than requiring all unrelated local preparation to fit in one second.
+// Then deliberately exhaust local preparation's context at that same boundary
+// and require an honest local-budget diagnosis, not arbitrary error tolerance.
 func TestPushCmd_AStalledLookupCannotSpendTheUploadBudget(t *testing.T) {
 	t.Parallel()
+	f := loadPushGateBoundary(t, "lookup-finishes-before-upload-budget-starts")
+	budget, err := time.ParseDuration(f.UploadBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
 	dir := t.TempDir()
-	stalled := make(chan struct{})
+	var lookupAccepted, lookupFinished, clockStarted atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-stalled
+		if !strings.HasSuffix(r.URL.Path, "/prompt-requests") {
+			t.Errorf("unexpected budget-boundary HTTP path %s", r.URL.Path)
+			w.WriteHeader(400)
+			return
+		}
+		lookupAccepted.Store(true)
+		<-r.Context().Done()
 	}))
-	t.Cleanup(func() {
-		close(stalled)
-		server.Close()
-	})
+	t.Cleanup(server.Close)
 	writeTestCredentialsFor(t, dir, server.URL)
 	repo := gitRepositoryWithRemote(t, dir, "git@github.com:peasant-labs/village.git")
-
-	stdout, _, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--timeout", "1s", "--repository", repo})
-	if err != nil {
-		t.Fatalf("the stall belongs to the lookup, so the upload must keep its whole budget: %v\nstdout=%s", err, stdout)
+	args := []string{"--dry-run", "--timeout", f.UploadBudget, "--repository", repo}
+	seedClosedStoreForForecast(t, dir, args)
+	cmd := buildPushCommand(pushCommandDependencies{
+		newVillageClient: func(base, key string, client *http.Client) *village.VillageClient {
+			copy := *client
+			next := copy.Transport
+			if next == nil {
+				next = http.DefaultTransport
+			}
+			copy.Transport = pushGateRoundTrip(func(r *http.Request) (*http.Response, error) {
+				if clockStarted.Load() {
+					t.Error("upload clock started before the actual lookup request")
+				}
+				if _, bounded := r.Context().Deadline(); !bounded {
+					t.Error("lookup lost its own bounded context")
+				}
+				response, err := next.RoundTrip(r)
+				lookupFinished.Store(true)
+				return response, err
+			})
+			return village.NewVillageClient(base, key, &copy)
+		},
+		uploadTimeout: func(parent context.Context, requested time.Duration) (context.Context, context.CancelFunc) {
+			if !lookupAccepted.Load() || !lookupFinished.Load() {
+				t.Error("upload deadline created before actual stalled lookup completed")
+			}
+			if clockStarted.Swap(true) {
+				t.Error("upload deadline created more than once")
+			}
+			if requested != budget {
+				t.Errorf("upload budget=%s want=%s", requested, budget)
+			}
+			before := time.Now()
+			fresh, finish := context.WithTimeout(parent, requested)
+			deadline, present := fresh.Deadline()
+			if !present || deadline.Before(before.Add(requested)) {
+				t.Errorf("upload clock did not receive its fresh budget at creation: %v", deadline)
+			}
+			finish()
+			// Deterministic local exhaustion; no database/open/scope performance
+			// assumption and no change to the normal production timeout default.
+			return context.WithDeadline(parent, before.Add(-time.Nanosecond))
+		},
+	})
+	result := executePushGateCommand(ctx, cmd, dir, args)
+	if !clockStarted.Load() || result.err == nil {
+		t.Fatalf("expected observed boundary and local budget failure: %+v", result)
 	}
-	if !strings.Contains(stdout, "Dry run — no uploads will be made") {
-		t.Errorf("the push must still reach its own dry run; stdout:\n%s", stdout)
+	for _, wanted := range f.ErrorContains {
+		if !strings.Contains(result.err.Error(), wanted) {
+			t.Errorf("local budget diagnosis lost %q: %+v", wanted, result)
+		}
 	}
-	if strings.Contains(stdout, "waiting: ") {
-		t.Errorf("a stalled lookup must print nothing; stdout:\n%s", stdout)
+	if strings.Contains(result.stdout, "waiting: ") {
+		t.Errorf("stalled lookup printed a waiting request: %+v", result)
 	}
 }
 

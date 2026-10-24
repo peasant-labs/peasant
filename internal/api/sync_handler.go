@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -48,12 +50,19 @@ type syncHandler struct {
 	// changing the offered redaction policy. Nil uses the configured engine.
 	detectReview func(string) []redact.Match
 
+	// sessionIngestTimeout bounds one session re-index. Zero uses
+	// defaultSessionIngestTimeout; only tests set it.
+	sessionIngestTimeout time.Duration
+
 	// Ingest state (protected by mu).
 	mu             sync.Mutex
 	ingestStatus   string // "idle", "running", "done", "error"
 	ingestProgress *ingest.ProgressState
 	ingestResult   *ingest.PipelineResult
 	ingestError    error
+	// sessionIngest is set while a one-session re-index runs, so it and the
+	// whole-machine ingest never run at once in this process.
+	sessionIngest bool
 }
 
 // configDir resolves the config directory this handler reads and writes under,
@@ -875,7 +884,8 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	// A publish from the local web is for collectives: a first publication
 	// opens private with no license, and the collective steps decide who can
 	// read it. An update keeps the audience and license it has.
-	pipeline, err := push.NewSharePipeline(h.store, client, creds, &pushCfg, redactor, req.SessionIDs)
+	observations := collectiveobservations.New(collectiveobservations.Dependencies{Store: h.store, ConfigHome: h.configHome, NewIdentityReader: func(auth.Credentials) collectiveobservations.IdentityReader { return client }})
+	pipeline, err := push.NewSharePipeline(h.store, client, creds, &pushCfg, redactor, req.SessionIDs, push.WithObservations(observations, time.Now))
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "create push pipeline: "+err.Error())
 		return
@@ -1101,7 +1111,7 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.mu.Lock()
-	if h.ingestStatus == "running" {
+	if h.ingestStatus == "running" || h.sessionIngest {
 		h.mu.Unlock()
 		http.Error(w, `{"error":"ingest already running"}`, http.StatusConflict)
 		return
@@ -1119,84 +1129,158 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
 }
 
+// --------------------------------------------------------------------------
+// POST /api/v1/sync/ingest/session?session_id=X — re-index one session
+// --------------------------------------------------------------------------
+
+// defaultSessionIngestTimeout bounds one session re-index. One session takes
+// seconds; a run that has not finished by then is stopped and reported.
+const defaultSessionIngestTimeout = 2 * time.Minute
+
+// handleSyncIngestSession re-reads one recorded session into the local index
+// and answers when it is done. The publish popup runs it when the scan refused
+// the session's stored index, then scans again. It reads and writes the local
+// index only, and it relaxes no reader: the scan that follows runs every check
+// it ran before. It answers within its timeout, so the caller never waits on a
+// run that outlived the server.
+func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("session_id")
+	id, err := ingest.NewSessionID(raw)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "re-indexing a session needs a valid session_id; nothing was changed", "session_id_invalid")
+		return
+	}
+	if h.store == nil || h.currentConfig() == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "the local index is not available, so this session cannot be re-indexed; restart peasant and retry", "store_unavailable")
+		return
+	}
+	row, err := h.store.SessionByID(r.Context(), id.String())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("reading this session from the local index: %v; nothing was changed; retry", err), "session_read_failed")
+		return
+	}
+	if row == nil {
+		writeAPIError(w, http.StatusNotFound, "this session is not recorded on this computer, so there is nothing to re-index; run peasant ingest, then retry", "session_not_recorded")
+		return
+	}
+	harness := ingest.Harness(row.ModelHarness)
+	if _, ok := ingest.DefaultAdapterRegistry[harness]; !ok {
+		writeAPIError(w, http.StatusUnprocessableEntity, fmt.Sprintf("this session was recorded by %q, which this version cannot read again; nothing was changed; update peasant and retry", row.ModelHarness), "session_harness_unknown")
+		return
+	}
+
+	h.mu.Lock()
+	if h.ingestStatus == "running" || h.sessionIngest {
+		h.mu.Unlock()
+		writeAPIError(w, http.StatusConflict, "another index update is running on this computer; retry when it finishes", "ingest_running")
+		return
+	}
+	h.sessionIngest = true
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		h.sessionIngest = false
+		h.mu.Unlock()
+	}()
+
+	timeout := h.sessionIngestTimeout
+	if timeout <= 0 {
+		timeout = defaultSessionIngestTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	pipeline, closeStore, err := h.newIngestPipeline(ingest.NewProgressState(), &ingestSessionScope{id: id, harness: harness})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "session_ingest_failed")
+		return
+	}
+	defer closeStore()
+	started := time.Now()
+	result, err := pipeline.Run(ctx)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		writeAPIError(w, http.StatusGatewayTimeout, fmt.Sprintf("re-indexing this session took longer than %s and was stopped; the previous index was kept; retry, or run peasant harvest --session %s", timeout, id), "session_ingest_timeout")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("re-indexing this session: %v; the previous index was kept", err), "session_ingest_failed")
+		return
+	}
+	if failure := sessionIngestFailure(result, id); failure != "" {
+		writeAPIError(w, http.StatusUnprocessableEntity, failure, "session_ingest_refused")
+		return
+	}
+	// The run reports what it could not read as diagnostics and carries on:
+	// a recording it cannot capture again leaves the stored copy to be
+	// re-indexed instead. The notes say so; the scan that follows decides.
+	// Only this session's diagnostics are notes: the run also reports on the
+	// stored sessions it was scoped away from.
+	// A recording line the run could not parse is named on its own, so the
+	// popup can say the copy being published stops before it.
+	notes := make([]string, 0, len(result.Diagnostics))
+	unreadable := make([]sessionIngestUnreadable, 0)
+	for _, diagnostic := range result.Diagnostics {
+		if strings.Contains(diagnostic.Location, id.String()) || strings.Contains(diagnostic.Message, id.String()) {
+			notes = append(notes, diagnostic.Message)
+			if line, ok := ingest.MalformedJSONLRecordLine(diagnostic.Message); ok {
+				unreadable = append(unreadable, sessionIngestUnreadable{Line: line, Reason: diagnostic.Message})
+			}
+		}
+	}
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+	_ = json.NewEncoder(w).Encode(sessionIngestResponse{Status: "done", Duration: time.Since(started).Round(time.Millisecond).String(), Notes: notes, Unreadable: unreadable})
+}
+
+// sessionIngestResponse is a finished one-session re-index.
+type sessionIngestResponse struct {
+	Status   string   `json:"status"`
+	Duration string   `json:"duration"`
+	Notes    []string `json:"notes"`
+	// Unreadable names the recording lines the run could not read; the copy
+	// being published stops before the first of them.
+	Unreadable []sessionIngestUnreadable `json:"unreadable"`
+}
+
+// sessionIngestUnreadable is one recording line a re-index could not read.
+type sessionIngestUnreadable struct {
+	Line   int    `json:"line"`
+	Reason string `json:"reason"`
+}
+
+// sessionIngestFailure is why a scoped run did not re-index the session, or
+// empty when it did. A session the run never reached is a failure too: its
+// recording is no longer where the source reads.
+func sessionIngestFailure(result *ingest.PipelineResult, id ingest.SessionID) string {
+	reached := false
+	for _, session := range result.Sessions {
+		if session.SessionID != id {
+			continue
+		}
+		reached = true
+		if session.Error != nil {
+			return fmt.Sprintf("re-indexing this session: %v", session.Error)
+		}
+	}
+	for _, entry := range result.IndexLog {
+		if entry.SessionID == id && entry.ErrorMessage != nil && *entry.ErrorMessage != "" {
+			return fmt.Sprintf("indexing this session: %s", *entry.ErrorMessage)
+		}
+	}
+	if !reached {
+		return "this session's recording was not found where its source is read, so it cannot be re-indexed; the previous index was kept"
+	}
+	return ""
+}
+
 // runIngestPipeline constructs and runs the full ingest pipeline, mirroring
 // the pattern from buildFTUEIngestRunner in cmd/peasant/cmd_kickstart.go.
 func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
-	cfg := h.currentConfig()
-	fs := &ingest.OSFileSystem{}
-	git := &ingest.ExecGitResolver{}
-
-	// Build source configs from the loaded config.
-	sources := buildWebSourceConfigs(cfg)
-
-	outputPath := cfg.Output.BasePath
-	if outputPath == "" {
-		outputPath = string(h.dataDir())
-	}
-	resolvedOutput, err := ingest.NewResolvedPath(outputPath)
+	pipeline, closeStore, err := h.newIngestPipeline(progState, nil)
 	if err != nil {
-		h.setIngestError(fmt.Errorf("resolve output path: %w", err))
+		h.setIngestError(err)
 		return
 	}
-
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
-
-	pipelineCfg := ingest.PipelineConfig{
-		Sources:            sources,
-		OutputDir:          resolvedOutput,
-		StalenessThreshold: staleness,
-		Progress:           progState,
-	}
-
-	// Open DB and wire analytics stages.
-	dataDir := string(h.dataDir())
-	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-		h.setIngestError(fmt.Errorf("create data directory: %w", err))
-		return
-	}
-	db, err := store.Open(string(h.dbPath()))
-	if err != nil {
-		h.setIngestError(fmt.Errorf("open analytics store: %w", err))
-		return
-	}
-	defer db.Close()
-
-	pipelineOpts := []ingest.PipelineOption{
-		ingest.WithStore(db),
-		ingest.WithMetricsStore(db),
-	}
-
-	// Refuse an import under a level this version cannot apply, rather than
-	// storing transcripts the user believes were anonymised at import time. No
-	// supported level redacts while ingest writes: that is the deferred redaction
-	// model, and redaction happens on the way out.
-	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
-		h.setIngestError(&config.UnsupportedRedactionLevelError{
-			Level:     cfg.Redaction.Level,
-			Source:    "the loaded configuration",
-			Operation: "the web ingest",
-			Step:      "before any transcript was read or written",
-			Impact:    "Nothing was imported and nothing already imported was changed.",
-		})
-		return
-	}
-
-	pipelineOpts = append(pipelineOpts,
-		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
-		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
-		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
-		ingest.WithLogger(db),
-		ingest.WithIndexLogger(db),
-	)
-
-	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)
-	if err != nil {
-		h.setIngestError(fmt.Errorf("create pipeline: %w", err))
-		return
-	}
+	defer closeStore()
 
 	result, err := pipeline.Run(context.Background())
 	if err != nil {
@@ -1208,6 +1292,109 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	h.ingestStatus = "done"
 	h.ingestResult = result
 	h.mu.Unlock()
+}
+
+// ingestSessionScope narrows an ingest run to one recorded session.
+type ingestSessionScope struct {
+	id      ingest.SessionID
+	harness ingest.Harness
+}
+
+// newIngestPipeline builds the ingest pipeline the web routes run, and the
+// release of the store it opened. A nil scope runs every configured source; a
+// session scope reads that session's harness source only and processes that
+// session only, re-reading its recording even when the index looks current.
+func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *ingestSessionScope) (*ingest.Pipeline, func(), error) {
+	cfg := h.currentConfig()
+	if cfg == nil {
+		return nil, nil, fmt.Errorf("config not available")
+	}
+	fs := &ingest.OSFileSystem{}
+	git := &ingest.ExecGitResolver{}
+
+	// Build source configs from the loaded config.
+	sources := buildWebSourceConfigs(cfg)
+	if scope != nil {
+		source, ok := sources[scope.harness]
+		if !ok {
+			return nil, nil, fmt.Errorf("the %s source is not enabled in config.yaml, so this session's recording cannot be read again; nothing was changed; enable sources.%s and retry", scope.harness, scope.harness)
+		}
+		sources = map[defaults.Harness]ingest.SourceConfig{scope.harness: source}
+	}
+
+	outputPath := cfg.Output.BasePath
+	if outputPath == "" {
+		outputPath = string(h.dataDir())
+	}
+	resolvedOutput, err := ingest.NewResolvedPath(outputPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve output path: %w", err)
+	}
+
+	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
+	if staleness == 0 {
+		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
+	}
+
+	pipelineCfg := ingest.PipelineConfig{
+		Sources:            sources,
+		OutputDir:          resolvedOutput,
+		StalenessThreshold: staleness,
+		Write:              cfg.Write,
+		Progress:           progState,
+	}
+	if scope != nil {
+		// The same scope as `peasant harvest --session <id> --force`.
+		pipelineCfg.AllowedSessionIDs = map[ingest.SessionID]bool{scope.id: true}
+		pipelineCfg.Harness = &scope.harness
+		pipelineCfg.Force = true
+	}
+
+	// Refuse an import under a level this version cannot apply, rather than
+	// storing transcripts the user believes were anonymised at import time. No
+	// supported level redacts while ingest writes: that is the deferred redaction
+	// model, and redaction happens on the way out.
+	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
+		return nil, nil, &config.UnsupportedRedactionLevelError{
+			Level:     cfg.Redaction.Level,
+			Source:    "the loaded configuration",
+			Operation: "the web ingest",
+			Step:      "before any transcript was read or written",
+			Impact:    "Nothing was imported and nothing already imported was changed.",
+		}
+	}
+
+	// Open DB and wire analytics stages.
+	dataDir := string(h.dataDir())
+	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
+		return nil, nil, fmt.Errorf("create data directory: %w", err)
+	}
+	// The same store a CLI harvest writes through, so this run indexes at the
+	// managed revision and can re-index what a harvest stored.
+	storeOptions, err := store.ManagedGenerationOptions(string(resolvedOutput))
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open analytics store: %w", err)
+	}
+
+	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,
+		ingest.WithStore(db),
+		ingest.WithMetricsStore(db),
+		ingest.WithSalt(db.InstallationSalt()),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
+		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
+		ingest.WithLogger(db),
+		ingest.WithIndexLogger(db),
+	)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("create pipeline: %w", err)
+	}
+	return pipeline, func() { _ = db.Close() }, nil
 }
 
 // setIngestError records a pipeline error under the mutex.

@@ -152,6 +152,13 @@ func TestCallbackServer_Success(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
+	// The exchange server is on 127.0.0.1, so the page also names the test
+	// server the login went to.
+	assertLoginPage(t, resp,
+		`logged in as <strong class="pg-value">octocat</strong>`,
+		"linked to peasant online",
+		"test server · 127.0.0.1:",
+	)
 
 	result := <-resultCh
 	if result.Err != nil {
@@ -199,11 +206,67 @@ func TestCallbackServer_InvalidState(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
+	assertLoginPage(t, resp, "the login could not be verified", "not logged in")
 
 	result := <-resultCh
 	if result.Err == nil {
 		t.Fatal("expected error for invalid state")
 	}
+}
+
+// TestCallbackServer_SuccessPageEscapesHandle proves the handle the exchange
+// returns is shown as text: markup in it is escaped, never parsed.
+func TestCallbackServer_SuccessPageEscapesHandle(t *testing.T) {
+	const state, code = "escape-state", "escape-code"
+	village := mockExchangeServer(t, code, state, exchangeCodeResponse{
+		APIKey: "k", KeyID: "kid", UserID: "uid", Username: `<img src=x onerror=alert(1)>`,
+	})
+	defer village.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	resultCh := make(chan LoginResult, 1)
+	srv := newCallbackServer(ln, state, village.URL, resultCh)
+	go func() {
+		_ = srv.serve()
+	}()
+	defer srv.shutdown()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/callback?code=%s&state=%s", port, code, state))
+	if err != nil {
+		t.Fatalf("GET callback: %v", err)
+	}
+	defer resp.Body.Close()
+	body := assertLoginPage(t, resp, `<strong class="pg-value">&lt;img src=x onerror=alert(1)&gt;</strong>`)
+	if strings.Contains(body, "<img") {
+		t.Fatalf("success page carries the handle's markup unescaped:\n%s", body)
+	}
+	if result := <-resultCh; result.Err != nil {
+		t.Fatalf("result error: %v", result.Err)
+	}
+}
+
+// assertLoginPage reads a login page response and asserts it is HTML carrying
+// every wanted fragment. It returns the body.
+func assertLoginPage(t *testing.T, resp *http.Response, want ...string) string {
+	t.Helper()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", ct)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read login page: %v", err)
+	}
+	body := string(raw)
+	for _, fragment := range want {
+		if !strings.Contains(body, fragment) {
+			t.Errorf("login page is missing %q:\n%s", fragment, body)
+		}
+	}
+	return body
 }
 
 func TestCallbackServer_MissingCode(t *testing.T) {

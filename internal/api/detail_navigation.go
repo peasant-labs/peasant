@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
@@ -106,7 +107,36 @@ func (p *StoreDataProvider) DetailReadPayload(ctx context.Context, id string) (*
 	if err != nil {
 		return nil, err
 	}
+	row, err := p.store.SessionByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: detail read totals for session %s: %w", id, err)
+	}
+	withStoredTotals(detail, row)
 	return DecorateDetailReadPayload(ctx, detail, p.ResolveStoredTargets)
+}
+
+// withStoredTotals fills the token and duration totals a detail built from a
+// managed generation leaves at zero, from the session's stored row: the totals
+// home and the session lists show. A total the detail already carries (Pi's
+// per-turn mirrors) stays. This is the local read only. The publication path
+// builds its detail from the same snapshot without it, so a published
+// transcript's bytes and content hash do not move.
+func withStoredTotals(detail *schema.SessionDetailPayload, row *store.SessionRow) {
+	if detail == nil || row == nil {
+		return
+	}
+	if detail.TotalTokens == 0 {
+		detail.TotalTokens = row.TokensTotal
+	}
+	if detail.TokensIn == 0 {
+		detail.TokensIn = row.InputTokens
+	}
+	if detail.TokensOut == 0 {
+		detail.TokensOut = row.OutputTokens
+	}
+	if detail.DurationMins == 0 {
+		detail.DurationMins = row.DurationMinutes
+	}
 }
 
 // DecorateDetailReadPayload augments one validated durable detail payload with

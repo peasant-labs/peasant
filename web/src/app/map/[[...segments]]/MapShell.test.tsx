@@ -204,7 +204,7 @@ describe('MapShell — one map without lenses', () => {
   ws.errorCode = 'selection_visibility';
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
     expect(await screen.findByTestId('map-canvas')).toBeInTheDocument();
-    expect(screen.getByText(/Live conversation updates are unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/live updates stopped/)).toBeInTheDocument();
   });
 
   it('shows the shimmer (never a blank screen) while the graph loads', async () => {
@@ -271,7 +271,7 @@ describe('MapShell — one map without lenses', () => {
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
     const node = await screen.findByTestId('map-canvas');
     expect(
-      screen.getByText(/Structure parsing is not yet available for this project’s languages/),
+      screen.getByText(/peasant can’t read this project’s languages yet/),
     ).toBeInTheDocument();
     // One view, no lens fallback: nothing to draw as edges, nodes still render.
     expect(node).toHaveAttribute('data-structure-edges', '0');
@@ -281,7 +281,7 @@ describe('MapShell — one map without lenses', () => {
   it('shows an error line when the graph call fails', async () => {
     stubFetch({ graph: 'error', review: 'error' });
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
-    expect(await screen.findByText('Could not load the map graph.')).toBeInTheDocument();
+    expect(await screen.findByText('couldn’t load the map.')).toBeInTheDocument();
   });
 
   // -- One map view -------------------------------------------------------------
@@ -384,10 +384,8 @@ describe('MapShell — one map without lenses', () => {
       `/projects/${PROJECT_HASH}/sess-new?turn=12&origin=Map`,
     );
 
-    // The clarifying sub-line under the recent-work eyebrow.
-    expect(
-      screen.getAllByText(/latest recorded conversations; hover one to light up what it shaped\./)[0],
-    ).toBeInTheDocument();
+    // No explainer sentence sits under the recent-work heading.
+    expect(screen.queryByText(/hover one to light up/)).not.toBeInTheDocument();
 
     // Each row carries a "touched" line — the first-two-segment modules of
     // its editedFiles — so the rail says WHAT a session shaped and WHERE.
@@ -553,7 +551,7 @@ describe('MapShell — one map without lenses', () => {
 
     // Interleaved commits — the unrecorded one is marked plainly.
     expect(screen.getAllByText('manual hotfix')[0]).toBeInTheDocument();
-    expect(screen.getAllByText('no AI conversation captured')[0]).toBeInTheDocument();
+    expect(screen.getAllByText('no ai conversation captured')[0]).toBeInTheDocument();
 
     // Footnotes: retry loops /"files re-edited"/ files / cost-when-known.
     expect(screen.getAllByText("times the AI retried")[0]).toBeInTheDocument();
@@ -667,7 +665,7 @@ describe('MapShell — one map without lenses', () => {
 
     await user.click(screen.getByTestId('canvas-select-node'));
     expect(
-      (await screen.findAllByText('No recorded conversations touch this code.'))[0],
+      (await screen.findAllByText('no recorded conversations touch this code.'))[0],
     ).toBeInTheDocument();
   });
 
@@ -728,12 +726,11 @@ describe('MapShell — one map without lenses', () => {
     }
   });
 
-  it('shows the ledger line only with showLedger (the /map/{project} header strip)', async () => {
+  it('keeps the way back on /map/{project} and carries no ledger sentence', async () => {
     window.history.replaceState({}, '', `/map/${PROJECT_HASH}?grain=file&scale=1.4&panX=12&panY=0`);
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} showLedger />);
-    expect(
-      await screen.findByText(/AI conversations?, on your machine\. Nothing has left it\./),
-    ).toBeInTheDocument();
+    await screen.findAllByRole('link', { name: 'Open the conversation sess-new' });
+    expect(screen.queryByText(/Nothing has left it/)).not.toBeInTheDocument();
     const canonicalMapLocation = `${window.location.pathname}${window.location.search}`;
     expect((await screen.findAllByRole('link', { name: 'Open the conversation sess-new' }))[0])
       .toHaveAttribute(

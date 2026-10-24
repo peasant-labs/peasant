@@ -149,7 +149,7 @@ const selectionRemoteLessPathSuffix = "projects/notes"
 // consent prompt that opens the wizard, the selection tree over a project row,
 // the same tree over a session row (where the pane draws that session's
 // transcript as the push will publish it), the page that states what leaves the
-// machine, and the receipt.
+// machine, the receipt, and the keyboard help card.
 type pushState string
 
 const (
@@ -161,11 +161,15 @@ const (
 	pushStateConsent        pushState = "consent"
 	pushStateReceipt        pushState = "receipt"
 	pushStateNeedsIngest    pushState = "needs-ingest"
+	// pushStateHelp is the keyboard help card opened with ? from the selection
+	// page. It replaces the whole screen and sits on the overlay fill.
+	pushStateHelp pushState = "help"
 )
 
 func (s pushState) valid() bool {
 	switch s {
-	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt, pushStateNeedsIngest:
+	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt, pushStateNeedsIngest,
+		pushStateHelp:
 		return true
 	default:
 		return false
@@ -549,6 +553,7 @@ func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture
 	}
 	for _, key := range []pushState{
 		pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt, pushStateNeedsIngest,
+		pushStateHelp,
 	} {
 		if stateRows[key].Key == "" {
 			return fmt.Errorf("screenshot fixture omits push state %q", key)
@@ -655,7 +660,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetGuidedDark:   {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3980},
 		sheetGuidedLight:  {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
 		sheetSelection:    {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
-		sheetPush:         {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
+		sheetPush:         {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7840},
 		sheetIngest:       {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
 		sheetCompletion:   {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
 		sheetPullProgress: {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},

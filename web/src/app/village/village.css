@@ -1,0 +1,33 @@
+/* The online page sits in fairtrade's page frame (.asb-page, the outer
+   .village-frame), which holds it to the screen's height so the observations
+   view below the title and tools fills the rest and scrolls inside itself.
+   The view's own padding is dropped here: the frame already insets it. */
+.village-frame {
+  height: calc(100dvh - var(--app-header-height));
+  min-height: 0;
+}
+.village-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  flex: 1;
+  min-height: 0;
+}
+.village-page-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.village-page > .vobs {
+  --vobs-height: 100%;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
+.village-page-filter {
+  display: grid;
+  gap: var(--sp-3);
+  margin-block: var(--sp-3);
+  max-width: var(--measure-prose);
+}

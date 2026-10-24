@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
@@ -122,7 +124,7 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 		}
 		creds, err := auth.LoadCredentialsFrom(configDirOverride(cmd))
 		if err != nil || creds == nil || !creds.IsValid() {
-			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("authenticate kickstart publication: valid Village credentials were not available after consent; imported sessions remain local; run 'peasant village login' and retry kickstart")
+			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("authenticate kickstart publication: valid peasant online credentials were not available after consent; imported sessions remain local; run 'peasant village login' and retry kickstart")
 		}
 		options, err := generationStoreOptionsReadOnly(cfg.Output.BasePath)
 		if err != nil {
@@ -152,7 +154,8 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 			runCfg.Selection = selection
 		}
 		client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
-		pipeline, pipelineErr := push.NewPipeline(db, client, creds, cfg, &ingest.OSFileSystem{}, runCfg, redactor, io.Discard)
+		observations := collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: configDirOverride(cmd), NewIdentityReader: func(auth.Credentials) collectiveobservations.IdentityReader { return client }})
+		pipeline, pipelineErr := push.NewPipeline(db, client, creds, cfg, &ingest.OSFileSystem{}, runCfg, redactor, io.Discard, push.WithObservations(observations, time.Now))
 		if pipelineErr != nil {
 			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("create kickstart publication pipeline: %w", pipelineErr)
 		}
@@ -167,7 +170,7 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 		}
 		creds, err := deps.loadCredentials(configDirOverride(cmd))
 		if err != nil || creds == nil || !creds.IsValid() {
-			return nil, retrySessions(ftue.StageReceipt, ids), fmt.Errorf("read kickstart receipts: valid Village credentials are unavailable; do not infer remote state; run 'peasant village login' and retry receipt verification")
+			return nil, retrySessions(ftue.StageReceipt, ids), fmt.Errorf("read kickstart receipts: valid peasant online credentials are unavailable; do not infer remote state; run 'peasant village login' and retry receipt verification")
 		}
 		db, err := deps.openReceiptStore(string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd))))
 		if err != nil {

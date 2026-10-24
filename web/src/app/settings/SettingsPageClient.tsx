@@ -1,27 +1,53 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Lock } from 'lucide-react';
+import { useEnter } from '@/lib/motion/enter';
+import Link from 'next/link';
+import { ExternalLink, EyeOff, Folder, Lock, Plug, Send, SlidersHorizontal, UserRound, type LucideIcon } from 'lucide-react';
 import { LocalSettingKind, isHarness, type AutoPublishRule, type LocalSetting, type LocalSettingsResponse, type SyncAuthResponse } from '@peasant-labs/schema';
-import { Button, Chip, CommandBlock, FeedbackPanel, ProviderName, SettingGroup, SettingRow, StatsStrip } from '@/lib/ft-ui';
+import { Button, FeedbackPanel, ProviderName, SettingGroup, SettingRow, SettingsLayout } from '@/lib/ft-ui';
 import { fetchSettings, fetchVillageAuth, fetchVillageCollectives, updateSetting } from '@/lib/api/settings';
 import {
-  NOT_IN_PEASANT_CONFIG,
   RETIRED_KEYS,
   SETTINGS_GROUPS,
+  SETTINGS_SECTIONS,
   describeValue,
   groupOf,
   optionLabel,
   shownValue,
   sourceHarnesses,
-  tagOf,
+  settingsSection,
+  settingsSectionHref,
   type SettingsGroupId,
+  type SettingsSection,
+  type SettingsSectionId,
 } from '@/lib/settings/catalog';
 import { ReadOnlyRow, SettingKeyRow } from '@/components/settings/SettingKeyRow';
+import { DocsLink } from '@/components/DocsLink';
 import { VillageAccountRow } from '@/components/settings/VillageAccountRow';
 import { CustomPatterns } from '@/components/settings/CustomPatterns';
 import { AutoPublishRules, type CollectiveNames } from '@/components/settings/AutoPublishRules';
+import { RedactionCategories } from '@/components/settings/RedactionCategories';
+import { onlineCollectivesHref } from '@/lib/village/links';
 import './settings.css';
+
+/** The glyph each settings section leads with in the section bar. */
+const SECTION_ICONS: Readonly<Record<SettingsSectionId, LucideIcon>> = {
+  account: UserRound,
+  'automatic-publishing': Send,
+  redaction: EyeOff,
+  projects: Folder,
+  sources: Plug,
+  advanced: SlidersHorizontal,
+};
+
+/** The section bar's entries: one route per section, in the catalog's order. */
+const NAV_SECTIONS = SETTINGS_SECTIONS.map((entry) => ({
+  id: entry.id,
+  label: entry.label,
+  href: settingsSectionHref(entry.id),
+  icon: SECTION_ICONS[entry.id],
+}));
 
 type Load = { state: 'loading' } | { state: 'failed'; error: string } | { state: 'ready'; data: LocalSettingsResponse };
 
@@ -66,7 +92,9 @@ interface GroupBody {
 }
 
 /**
- * /settings: every peasant setting and the auto-publish rules, in groups.
+ * /settings: every peasant setting and the auto-publish rules, in sections.
+ * `section` picks the one the page shows (`/settings?section=<id>`); the
+ * section links switch between them without reading the settings again.
  *
  * A control applies when it changes: one PATCH per change, pending then
  * settled; a refused change puts the value back and shows the server's
@@ -74,7 +102,8 @@ interface GroupBody {
  * what may change, what `peasant config` covers, and which repositories a rule
  * covers all come from the API.
  */
-export default function SettingsPageClient() {
+export default function SettingsPageClient({ section: sectionId }: { section?: string | null } = {}) {
+  const section = settingsSection(sectionId);
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [auth, setAuth] = useState<SyncAuthResponse | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -140,37 +169,32 @@ export default function SettingsPageClient() {
     await Promise.all([readAuth(), readSettings()]);
   }, [readAuth, readSettings]);
 
+  // A section switch keeps the page: its body fades and rises into place instead.
+  const sectionBody = useRef<HTMLDivElement>(null);
+  useEnter(sectionBody, section.id);
+
   const settings = load.state === 'ready' ? load.data.settings : null;
   const byKey = useMemo(() => new Map((settings ?? []).map((setting) => [setting.key, setting])), [settings]);
 
   if (load.state !== 'ready') {
     return (
-      <div className="iu-page stg-page">
-        <PageHead />
-        {load.state === 'loading' ? (
-          <FeedbackPanel variant="loading" title="reading your settings" />
-        ) : (
-          <FeedbackPanel variant="error" title="the settings could not be read">
-            <span className="stg-load-error">{load.error}</span>
-            <Button variant="secondary" size="sm" onClick={() => { setLoad({ state: 'loading' }); void readSettings(); }}>try again</Button>
-          </FeedbackPanel>
-        )}
-      </div>
+      <SettingsFrame section={section}>
+        <div ref={sectionBody} className="stg-body">
+          <PageHead section={section} />
+          {load.state === 'loading' ? (
+            <FeedbackPanel variant="loading" title="reading your settings" />
+          ) : (
+            <FeedbackPanel variant="error" title="the settings could not be read">
+              <span className="stg-load-error">{load.error}</span>
+              <Button variant="secondary" size="sm" onClick={() => { setLoad({ state: 'loading' }); void readSettings(); }}>try again</Button>
+            </FeedbackPanel>
+          )}
+        </div>
+      </SettingsFrame>
     );
   }
 
   const rules = load.data.autoPublish;
-  const publishing = rules.filter((rule) => rule.events.length > 0).length;
-  const level = byKey.get('redaction.level');
-  const summary = [
-    auth?.authenticated
-      ? { label: 'connected as', value: `@${auth.username ?? ''}`, order: 'label-first' as const }
-      : { label: 'village', value: authError ? 'unavailable' : auth ? 'not connected' : 'reading', order: 'label-first' as const },
-    publishing > 0
-      ? { label: 'auto-publish on for', value: `${publishing} ${publishing === 1 ? 'rule' : 'rules'}`, order: 'label-first' as const }
-      : { label: 'auto-publish', value: 'off', order: 'label-first' as const },
-    ...(level ? [{ label: 'redaction', value: describeValue(level), order: 'label-first' as const }] : []),
-  ];
 
   // Each group takes the keys it places; a key it does not place, and any key
   // this page has no place for, still renders as a plain row in its group.
@@ -185,20 +209,34 @@ export default function SettingsPageClient() {
     return setting ? <SettingKeyRow key={key} setting={setting} onSaved={onSaved} {...props} /> : null;
   };
   const bodies: Record<SettingsGroupId, () => GroupBody> = {
-    village: () => ({
-      rows: [
-        <VillageAccountRow key="account" auth={auth} readError={authError} onRetry={() => { void readAuth(); }} connected={take('village.connected')} onLoggedOut={onLoggedOut} />,
-        row('push.sharePreference'),
-        row('push.autoPublishIntent'),
-      ],
-    }),
+    village: () => {
+      // The sign-in row stands for village.connected, so the key is placed here.
+      take('village.connected');
+      return {
+        rows: [
+          <VillageAccountRow key="account" auth={auth} readError={authError} onRetry={() => { void readAuth(); }} onLoggedOut={onLoggedOut} />,
+          auth?.authenticated ? (
+            <div key="collectives" className="srow">
+              <span className="srow-text-col">
+                <span className="srow-label">your collectives</span>
+                <span className="srow-help">who you publish to. you join and manage them in your dashboard.</span>
+              </span>
+              <a className="btn btn-secondary btn-sm" href={onlineCollectivesHref()} target="_blank" rel="noreferrer">
+                <ExternalLink aria-hidden="true" />dashboard
+              </a>
+            </div>
+          ) : null,
+          row('push.sharePreference'),
+          row('push.autoPublishIntent'),
+        ],
+      };
+    },
     'auto-publish': () => ({
       count: rules.length,
       noun: ['rule', 'rules'],
       description: (
         <span className="stg-description">
           these folders and repositories publish redacted on their own. you agree once, here.
-          <Chip size="sm" className="srow-tag">{NOT_IN_PEASANT_CONFIG}</Chip>
         </span>
       ),
       rows: [<AutoPublishRules key="rules" rules={rules} onRulesChange={onRulesChange} collectives={collectives} collectivesError={collectivesError} signedIn={auth?.authenticated === true} />],
@@ -225,19 +263,22 @@ export default function SettingsPageClient() {
               keys={['selection.mode', ...(harnesses ? ['selection.harnesses'] : [])]}
               label="record sessions from"
               value={optionLabel('selection.mode', String(shownValue(mode)))}
-              help={`${selectionSummary(mode, harnesses)}the page shows the selection; peasant kickstart changes it.`}
-              tag={tagOf(mode)}
-              action={<CommandBlock command="peasant kickstart" label="peasant kickstart, which edits the selection" className="stg-command" />}
+              help={selectionSummary(mode, harnesses).trim()}
+              action={<DocsLink topic="selection">change the selection</DocsLink>}
             />
           ) : null,
+          // Part of the selection, so it changes with it, not here: the switch
+          // shows the value and stays still.
           branches ? (
-            <ReadOnlyRow
+            <SettingRow
               key="branches"
-              keys={['selection.autoIngestNewBranches']}
+              data-setting-keys="selection.autoIngestNewBranches"
               label="include new branches automatically"
-              value={describeValue(branches)}
               help="only in projects you selected in full. part of the selection."
-              tag={tagOf(branches)}
+              control="switch"
+              value={shownValue(branches) === true}
+              disabled
+              onCommit={() => {}}
             />
           ) : null,
           // daemon.projectMode holds opt-in or opt-out; the switch reads on as opt-out.
@@ -246,36 +287,30 @@ export default function SettingsPageClient() {
               key="project-mode"
               data-setting-keys="daemon.projectMode"
               label="track new projects automatically"
-              help={`saved as daemon.projectMode: ${String(shownValue(projectMode))}.`}
               control="switch"
               value={shownValue(projectMode) === 'opt-out'}
-              tag={tagOf(projectMode)}
               onCommit={async (next) => { onSaved(await updateSetting(projectMode.key, next ? 'opt-out' : 'opt-in')); }}
             />
           ) : projectMode ? <SettingKeyRow key="project-mode" setting={projectMode} onSaved={onSaved} /> : null,
         ],
-        notes: <p className="stg-note">this only filters lists and search. recorded sessions stay until you run peasant prune.</p>,
+        notes: <p className="stg-note">this only filters lists and search; recorded sessions stay. <DocsLink topic="prune" variant="inline">remove recorded sessions</DocsLink></p>,
       };
     },
     sources: () => {
       const harnesses = sourceHarnesses(settings ?? []);
-      const enabled = harnesses.filter((harness) => shownValue(byKey.get(`sources.${harness}.enabled`)!) === true).length;
       return {
         count: harnesses.length,
         noun: ['source', 'sources'],
-        description: `where peasant reads sessions from. ${enabled} of ${harnesses.length} on.`,
         rows: harnesses.map((harness) => (
           <div key={harness} className="stg-source">
-            {row(`sources.${harness}.enabled`, { label: isHarness(harness) ? <ProviderName harness={harness} /> : harness, help: `reads ${harness} sessions.` })}
-            {/* the pair is one source: its tag sits on the switch */}
-            {row(`sources.${harness}.paths`, { label: `${harness} folders`, help: 'separate folders with commas. empty uses the default.', hideTag: true })}
+            {row(`sources.${harness}.enabled`, { label: isHarness(harness) ? <ProviderName harness={harness} /> : harness, help: '' })}
+            {row(`sources.${harness}.paths`, { label: `${harness} folders`, help: 'separate folders with commas. empty uses the default.' })}
           </div>
         )),
       };
     },
     'fields-sent': () => ({
       noun: ['field', 'fields'],
-      description: 'what peasant sends with each transcript, beside the transcript itself.',
       rows: ['push.fields.gitRemote', 'push.fields.projectName', 'push.fields.projectPath', 'push.fields.gitBranch', 'push.fields.hostSlug'].map((key) => row(key)),
       notes: <p className="stg-note">a salted project hash is always sent.</p>,
     }),
@@ -287,7 +322,6 @@ export default function SettingsPageClient() {
       const concurrency = byKey.get('push.concurrency');
       const hidden = [visibility, license].filter((setting): setting is LocalSetting => setting !== undefined);
       return {
-        description: 'theme, email, village address, uploads, import folder, sample data.',
         rows: [
           row('display.theme'),
           row('user.email'),
@@ -296,7 +330,7 @@ export default function SettingsPageClient() {
           row('push.sources'),
           row('push.concurrency', concurrency ? { help: `empty uses half your cpu cores: ${describeValue(concurrency)} on this computer.` } : {}),
           row('output.stalenessThresholdSec'),
-          basePath ? <ReadOnlyRow key="base-path" keys={[basePath.key]} label="import folder" value={describeValue(basePath)} help={basePath.description} tag={tagOf(basePath)} /> : null,
+          basePath ? <ReadOnlyRow key="base-path" keys={[basePath.key]} label="import folder" value={describeValue(basePath)} help={basePath.description} /> : null,
           mock.length > 0 ? (
             <ReadOnlyRow
               key="mock"
@@ -304,7 +338,6 @@ export default function SettingsPageClient() {
               label="sample data, for development"
               value={describeValue(mock[0])}
               help={mock[0].description}
-              tag={tagOf(mock[0])}
             />
           ) : null,
           ...hidden.map((setting) => (
@@ -324,21 +357,20 @@ export default function SettingsPageClient() {
       const version = take('version');
       const retired = RETIRED_KEYS.map(take).filter((setting): setting is LocalSetting => setting !== undefined);
       return {
-        description: 'where these settings are saved. an edit to a file shows here the next time the page loads.',
         rows: [
           <ReadOnlyRow
             key="config"
             keys={version ? [version.key] : []}
             label="settings"
             value={<code className="stg-code">config.yaml</code>}
-            help={`in peasant's config folder: ~/.config/peasant, unless XDG_CONFIG_HOME or --config says otherwise.${version ? ` format version ${describeValue(version)}.` : ''}`}
+            help={<>in peasant&apos;s config folder.{version ? ` format version ${describeValue(version)}.` : ''} <DocsLink topic="settingsFiles" variant="inline">where it lives</DocsLink></>}
           />,
           <ReadOnlyRow
             key="hooks"
             keys={[]}
             label="auto-publish rules"
             value={<code className="stg-code">hooks.yaml</code>}
-            help="in the same config folder. peasant village auto and this page write it."
+            help="in the same config folder. this page writes it."
           />,
           retired.length > 0 ? (
             <ReadOnlyRow
@@ -358,45 +390,85 @@ export default function SettingsPageClient() {
     },
   };
 
+  const single = section.groups.length === 1;
   return (
-    <div className="iu-page stg-page">
-      <PageHead />
-      <StatsStrip items={summary} label="settings summary" />
-      <div className="stg-groups">
-        {SETTINGS_GROUPS.map((group) => {
-          const body = bodies[group.id]();
-          const rows = body.rows.filter((node) => node !== null && node !== undefined);
-          // A key this page does not place renders in its group, after the rows the group places.
-          const unplaced = (settings ?? []).filter((setting) => !consumed.has(setting.key) && groupOf(setting.key) === group.id);
-          unplaced.forEach((setting) => consumed.add(setting.key));
-          return (
-            <SettingGroup
-              key={group.id}
-              data-group={group.id}
-              label={group.label}
-              defaultOpen={group.open}
-              count={(body.count ?? rows.length) + unplaced.length}
-              noun={body.noun}
-              description={body.description}
-            >
-              {rows}
-              {unplaced.map((setting) => <SettingKeyRow key={setting.key} setting={setting} onSaved={onSaved} />)}
-              {body.notes}
-            </SettingGroup>
-          );
-        })}
+    <SettingsFrame section={section}>
+      <div ref={sectionBody} className="stg-body">
+        <PageHead section={section} />
+        {section.id === 'redaction' && <RedactionCategories />}
+        <div className="stg-groups">
+          {section.groups.map((id) => {
+            const group = SETTINGS_GROUPS.find((candidate) => candidate.id === id)!;
+            const body = bodies[group.id]();
+            const rows = body.rows.filter((node) => node !== null && node !== undefined);
+            // A key this page does not place renders in its group, after the rows the group places.
+            const unplaced = (settings ?? []).filter((setting) => !consumed.has(setting.key) && groupOf(setting.key) === group.id);
+            unplaced.forEach((setting) => consumed.add(setting.key));
+            const content = (
+              <>
+                {rows}
+                {unplaced.map((setting) => <SettingKeyRow key={setting.key} setting={setting} onSaved={onSaved} />)}
+                {body.notes}
+              </>
+            );
+            // A section that shows one group is that group: the page title names it.
+            if (single) {
+              return (
+                <div key={group.id} className="srow-group stg-panel" data-group={group.id}>
+                  {body.description && <p className="srow-group-description">{body.description}</p>}
+                  <div className="srow-rows">{content}</div>
+                </div>
+              );
+            }
+            return (
+              <SettingGroup
+                key={group.id}
+                data-group={group.id}
+                label={group.label}
+                defaultOpen
+                count={(body.count ?? rows.length) + unplaced.length}
+                noun={body.noun}
+                description={body.description}
+              >
+                {content}
+              </SettingGroup>
+            );
+          })}
+        </div>
       </div>
+    </SettingsFrame>
+  );
+}
+
+function NextLink({ href, ...rest }: { href: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return <Link href={href} {...rest} />;
+}
+
+/**
+ * The settings page, as fairtrade's demo and the online app lay it out: the
+ * page's one title, settings, on the page edge, then fairtrade's in-page
+ * section bar beside the section on a wide body, above it on a narrow one,
+ * with the section's name heading its column. The app sidebar keeps its own
+ * nav with the settings gear current; the bar is the one way between the
+ * sections.
+ */
+function SettingsFrame({ section, children }: { section: SettingsSection; children: ReactNode }) {
+  return (
+    <div className="asb-page stg-page" data-settings-section={section.id}>
+      <header className="iu-page-head">
+        <h1 className="iu-page-title page-title">settings</h1>
+      </header>
+      <SettingsLayout sections={NAV_SECTIONS} currentId={section.id} LinkComponent={NextLink} label="settings sections">
+        {children}
+      </SettingsLayout>
     </div>
   );
 }
 
-function PageHead() {
+function PageHead({ section }: { section: SettingsSection }) {
   return (
-    <header className="iu-page-head">
-      <h1 className="iu-page-title">settings</h1>
-      <p className="iu-page-sub">
-        changes save right away, to config.yaml. anything tagged <Chip size="sm" className="srow-tag">{NOT_IN_PEASANT_CONFIG}</Chip> can be changed here, not in peasant config.
-      </p>
+    <header className="stg-head">
+      <h2 className="stg-title">{section.label}</h2>
     </header>
   );
 }

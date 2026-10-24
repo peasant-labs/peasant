@@ -1,2 +1,2 @@
-[1;38;2;192;127;100mtool Bash go build ./... failed[m
-[38;2;192;127;100m│[m internal/ingest/pipeline.go:41:2: undefined: renameAtomic
+[1;38;2;208;143;116mtool Bash go build ./... failed[m
+[38;2;208;143;116m│[m internal/ingest/pipeline.go:41:2: undefined: renameAtomic

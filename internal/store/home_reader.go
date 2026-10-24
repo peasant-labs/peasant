@@ -28,14 +28,14 @@ func (s *Store) HomeIdentityCohort(ctx context.Context) ([]HomeCandidate, error)
 	rows := make([]HomeCandidate, 0)
 	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id,s.model_harness,s.project_hash,
 COALESCE(p.canonical_cwd,p.project_hash,''),s.start_ms,s.git_branch,s.parent_id,
-COALESCE(h.git_remote,''),`+sqlRecordedDirectory+`,m.session_id IS NOT NULL
+COALESCE(h.git_remote,''),`+sqlRecordedDirectory+`,m.session_id IS NOT NULL,COALESCE(s.git_worktree,'')
 FROM sessions s LEFT JOIN session_metrics m ON m.session_id=s.session_id
 LEFT JOIN projects p ON p.project_hash=s.project_hash
 LEFT JOIN host_slugs h ON h.opaque_id=s.opaque_host_id`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		row := SessionRow{SessionID: stmt.ColumnText(0), ModelHarness: stmt.ColumnText(1), ProjectHash: stmt.ColumnText(2), ProjectName: stmt.ColumnText(3), StartMs: stmt.ColumnInt64(4), GitWorktree: stmt.ColumnText(8)}
+		row := SessionRow{SessionID: stmt.ColumnText(0), ModelHarness: stmt.ColumnText(1), ProjectHash: stmt.ColumnText(2), ProjectName: stmt.ColumnText(3), StartMs: stmt.ColumnInt64(4), GitWorktree: stmt.ColumnText(8), RecordedWorktree: stmt.ColumnText(10)}
 		branch, parent, remote := stmt.ColumnText(5), stmt.ColumnText(6), stmt.ColumnText(7)
 		row.GitBranch, row.ParentID, row.CanonicalRemote = &branch, &parent, &remote
 		rows = append(rows, HomeCandidate{Identity: row, Pushable: stmt.ColumnBool(9)})

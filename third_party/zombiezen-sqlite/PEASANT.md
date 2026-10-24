@@ -49,6 +49,24 @@ contention through its busy handler. Successful actual Close must also release
 its own registrations. This avoids allocator timing, retries, sleeps, and an
 in-process panic preventing useful assertion diagnostics.
 
+### Concurrent statement test cleanup
+
+The shared-cache lock tests use two real connections and a held table read lock.
+They verify both insertion after transaction release and cancellation while the
+lock remains held. Interrupt configuration precedes worker execution; the worker
+reports errors and completion unconditionally and finalizes its own statement.
+Cleanup cancels, releases the other transaction, and joins the worker before
+closing its connection. Closing a connection does not join an external Step.
+
+The tests observe the worker parked in `waitForUnlockNotify` with
+`sync.Mutex.Lock` using `runtime.Stack`, rather than assuming a scheduling delay.
+This private stack-shape coupling supplies synchronization only; actual SQLite
+results and worker completion are asserted separately. Revisit it on driver or
+Go runtime upgrades. The operation context is bounded to ten seconds, with a
+separate five-second cleanup join. If joining fails, the test fails and does not
+free the still-owned connection; that failure can retain the connection until
+test-process exit. Temporary files can remain after process termination.
+
 ### Test promotion rationale
 
 1. Subject: a retired connection cannot delete a newer owner's callbacks.

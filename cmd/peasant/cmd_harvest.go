@@ -608,7 +608,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 			}
 			skipped = fmt.Sprintf("%d saved copies were damaged or stale and skipped: %s.", len(ids), strings.Join(ids, ", "))
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Rebuilt %d sessions from peasant-sync/. %s A rebuild restores transcripts and metadata only. It does not restore annotations, Village publication records, session origin attribution, or a session's readiness to be shared: a rebuilt session cannot be shared until the next harvest reads it from its source. Metrics are computed again.\n", result.Summary.RebuiltFromFiles, skipped)
+		fmt.Fprintf(cmd.OutOrStdout(), "Rebuilt %d sessions from peasant-sync/. %s A rebuild restores transcripts and metadata only. It does not restore annotations, peasant online publication records, session origin attribution, or a session's readiness to be shared: a rebuilt session cannot be shared until the next harvest reads it from its source. Metrics are computed again.\n", result.Summary.RebuiltFromFiles, skipped)
 	}
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.

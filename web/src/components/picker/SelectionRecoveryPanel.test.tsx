@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import { DOCS } from '@/lib/docs';
 import {
   ProjectListState,
   SelectionRecoveryPanel,
@@ -32,7 +33,7 @@ describe('SelectionRecoveryPanel', () => {
 
   afterEach(() => cleanup());
 
-  it('shows the accepted counts-only recovery copy and copies the kickstart command', async () => {
+  it('shows the accepted counts-only recovery copy and links to the docs to change the selection', async () => {
     const fixture = projectViewerStateFixture('all hidden by saved selection');
     expect(fixture.expectedState).toBe(ProjectListState.SelectionRecovery);
     render(<SelectionRecoveryPanel {...fixture.summary.selection} />);
@@ -44,22 +45,25 @@ describe('SelectionRecoveryPanel', () => {
       );
     expect(
       within(panel).getByRole('heading', {
-        name: 'Your saved selection hides all projects.',
+        name: 'your saved selection hides all projects.',
       }),
     ).toBeVisible();
-    expect(exactVisibleText('Peasant hides 2 projects and 5 sessions.')).toBeVisible();
+    expect(exactVisibleText('peasant hides 2 projects and 5 sessions.')).toBeVisible();
     expect(within(panel).getByText('2 projects')).toBeVisible();
     expect(within(panel).getByText('5 sessions')).toBeVisible();
-    expect(within(panel).getByText('The data stays ingested and indexed.')).toBeVisible();
-    expect(within(panel).getByText('The web viewer does not list it.')).toBeVisible();
-    expect(within(panel).getByText('It is not available for a future push.')).toBeVisible();
-    expect(within(panel).getByText('Peasant did not delete data.')).toBeVisible();
-    expect(exactVisibleText('To change the selection, run peasant kickstart.')).toBeVisible();
+    expect(within(panel).getByText('the data stays ingested and indexed.')).toBeVisible();
+    expect(within(panel).getByText('the web viewer does not list it.')).toBeVisible();
+    expect(within(panel).getByText('it is not available for a future push.')).toBeVisible();
+    expect(within(panel).getByText('peasant did not delete data.')).toBeVisible();
     for (const identity of fixture.forbiddenIdentities) {
       expect(panel.textContent).not.toContain(identity);
     }
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'copy command to clipboard' }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('peasant kickstart'));
+    // How to change the selection lives in the docs; the panel teaches no command.
+    const docs = within(panel).getByRole('link', { name: /^change the selection/ });
+    expect(docs).toHaveAttribute('href', DOCS.selection);
+    expect(docs).toHaveAttribute('target', '_blank');
+    expect(panel.textContent).not.toContain('peasant kickstart');
+    expect(within(panel).queryByRole('button', { name: 'copy command to clipboard' })).toBeNull();
   });
 });

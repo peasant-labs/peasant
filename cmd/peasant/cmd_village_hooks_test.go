@@ -513,7 +513,7 @@ func TestVillageHooks_GitExecutionFixtures(t *testing.T) {
 			}
 			if testCase.ExpectWarning {
 				for _, want := range []string{
-					"village upload did not complete",
+					"peasant online upload did not complete",
 					repo,
 					testCase.Event.String(),
 					testCase.Event.Impact(),
@@ -523,7 +523,7 @@ func TestVillageHooks_GitExecutionFixtures(t *testing.T) {
 						t.Errorf("the warning must name %q; got:\n%s", want, gitOutput)
 					}
 				}
-			} else if strings.Contains(gitOutput, "village upload did not complete") {
+			} else if strings.Contains(gitOutput, "peasant online upload did not complete") {
 				t.Errorf("a successful upload must not warn; got:\n%s", gitOutput)
 			}
 		})

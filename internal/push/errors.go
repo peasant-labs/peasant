@@ -19,7 +19,7 @@ var (
 	// modelless request that would 400. The root cause is an ingest gap.
 	// The message follows C-actionable-errors (what / why / cause / how-to-fix).
 	ErrNoModel = errors.New(
-		"no model recorded in the session metadata; the village requires a model and " +
+		"no model recorded in the session metadata; peasant online requires a model and " +
 			"would reject the upload with HTTP 400, so peasant skips it client-side before " +
 			"uploading — this is a known ingest gap (the model was not captured at ingest time), " +
 			"re-ingest the session after model metadata is available, or exclude it " +
@@ -34,16 +34,16 @@ var (
 	// C-actionable-errors (what / why / cause / how-to-fix).
 	ErrInvalidPublishBody = errors.New(
 		"the session's publish body failed client-side schema validation against the " +
-			"publish contract the village enforces (the model object and its harness + model " +
+			"publish contract peasant online enforces (the model object and its harness + model " +
 			"fields are required); peasant rejects it before upload to avoid a doomed round-trip " +
-			"that the village would answer with HTTP 422 — re-ingest the session so model.harness " +
+			"that peasant online would answer with HTTP 422 — re-ingest the session so model.harness " +
 			"and model.model are captured, or exclude it from your push selection")
 	// ErrMetadataMissing marks a session without a verified database capture.
 	// One cause is not discoverable from the path and has a specific repair, so
 	// it is diagnosed separately: see redactionPlaceholder.
 	ErrMetadataMissing = errors.New("database publication metadata needs ingest")
 	// ErrVillageRejected marks an upload the village answered with a non-2xx status.
-	ErrVillageRejected = errors.New("village rejected upload")
+	ErrVillageRejected = errors.New("peasant online rejected upload")
 	// ErrNetwork marks a transport-level failure reaching the village.
 	ErrNetwork = errors.New("network failure")
 )

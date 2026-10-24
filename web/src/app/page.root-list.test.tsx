@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DOCS } from '@/lib/docs';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -9,6 +10,7 @@ import type { DecodedProjectSummariesPayload } from '@/lib/api/map';
 import { ALPHA_HASH, BETA_HASH, makeSession } from '@/app/review/[[...segments]]/test-fixtures';
 import { formatMinutes } from '@/lib/home/rootStats';
 import { formatRelative } from '@/app/review/[[...segments]]/format';
+import { choiceRows } from '@/test/homeMenus';
 import {
   parseStrictYAML,
   requireExactFields,
@@ -49,7 +51,7 @@ const FILTER_LABELS = {
   all: 'all',
   notPublished: 'not published',
   published: 'published',
-  auto: 'auto',
+  auto: 'auto-publish on',
 } as const;
 type CountKey = keyof typeof FILTER_LABELS;
 const FILTER_KEYS: Record<string, CountKey> = {
@@ -104,7 +106,7 @@ const REQUIRED_NAMES = [
   'published-counts',
   'auto-counts',
   'outside-selection-hidden',
-  'load-more',
+  'next-page',
   'pending-collectives-cannot-read',
   'parent-visible-child-grouped',
   'recursive-family-and-refresh',
@@ -303,13 +305,10 @@ function summaries(): DecodedProjectSummariesPayload {
   } as DecodedProjectSummariesPayload;
 }
 
-function filterButtons(list: HTMLElement) {
-  return within(within(list).getByRole('group', { name: 'filter by publish state' })).getAllByRole('button');
-}
-
-function filterButton(list: HTMLElement, key: CountKey): HTMLElement {
+/** The publish-state rows of the filters menu: the menu sits beside the list, not in it. */
+function filterButton(key: CountKey): HTMLElement {
   const label = FILTER_LABELS[key];
-  const button = filterButtons(list).find((candidate) => candidate.textContent?.trim() === label);
+  const button = choiceRows('status').find((candidate) => candidate.textContent?.trim() === label);
   if (!button) throw new Error(`no ${label} filter option`);
   return button;
 }
@@ -322,17 +321,38 @@ function rowsOnScreen(list: HTMLElement): string[] {
   return [...list.querySelectorAll('tbody [data-session-id]')].map((node) => node.getAttribute('data-session-id') ?? '');
 }
 
-/** Presses load more until it is gone; returns the rows on screen after each step. */
-async function loadAll(list: HTMLElement): Promise<number[]> {
-  const pages = [rowsOnScreen(list).length];
-  for (let press = 0; press < 100; press++) {
-    const more = within(list).queryByRole('button', { name: 'load more' });
-    if (!more) break;
-    fireEvent.click(more);
-    await waitFor(() => expect(within(list).queryByRole('button', { name: 'load more' })?.hasAttribute('disabled') ?? false).toBe(false));
-    pages.push(rowsOnScreen(list).length);
+/** Waits until the list has no read in flight and shows a page of rows. */
+async function settled(list: HTMLElement): Promise<void> {
+  await waitFor(() => {
+    expect(list).not.toHaveAttribute('aria-busy');
+    expect(list.querySelector('[aria-label="Loading your sessions"]')).toBeNull();
+  });
+}
+
+/**
+ * Walks the pager from the first page to the last, pressing `next page`
+ * while it is enabled; returns the rows on each page and every row in order.
+ */
+async function readPages(list: HTMLElement): Promise<{ pages: number[]; rows: string[] }> {
+  await settled(list);
+  const first = within(list).queryByRole('button', { name: 'page 1' });
+  if (first && first.getAttribute('aria-current') !== 'page') {
+    fireEvent.click(first);
+    await waitFor(() => expect(first).toHaveAttribute('aria-current', 'page'));
   }
-  return pages;
+  const pages = [rowsOnScreen(list).length];
+  const rows = [...rowsOnScreen(list)];
+  for (let press = 0; press < 100; press++) {
+    const next = within(list).queryByRole('button', { name: 'next page' });
+    if (!next || next.hasAttribute('disabled')) break;
+    const before = rowsOnScreen(list).join();
+    fireEvent.click(next);
+    await waitFor(() => expect(rowsOnScreen(list).join()).not.toBe(before));
+    await settled(list);
+    pages.push(rowsOnScreen(list).length);
+    rows.push(...rowsOnScreen(list));
+  }
+  return { pages, rows };
 }
 
 function stateLabel(list: HTMLElement, id: string): string {
@@ -409,11 +429,11 @@ describe('root page publish filters', () => {
       };
 
       for (const key of Object.keys(FILTER_LABELS) as CountKey[]) {
-         expect(filterButton(list, key)).toHaveTextContent(FILTER_LABELS[key]);
-         expect(filterButton(list, key).textContent).not.toMatch(/\d/);
+         expect(filterButton(key)).toHaveTextContent(FILTER_LABELS[key]);
+         expect(filterButton(key).textContent).not.toMatch(/\d/);
       }
 
-       fireEvent.click(filterButton(list, FILTER_KEYS[testCase.filter]));
+       fireEvent.click(filterButton(FILTER_KEYS[testCase.filter]));
        await waitFor(() => expect(list.querySelector('[aria-label="Loading your sessions"]')).toBeNull());
        await waitFor(() => expect(rowsOnScreen(list).length).toBe(Math.min(testCase.expectedRows.length, 25)));
       assertSessionsStat();
@@ -425,14 +445,17 @@ describe('root page publish filters', () => {
           expect(within(group as HTMLElement).getByRole('button')).toHaveAttribute('aria-expanded', 'false');
         }
       }
-       const pages = await loadAll(list);
+       const { pages, rows: everyRow } = await readPages(list);
       assertSessionsStat();
       expect(pages).toEqual(testCase.expectedPages ?? [testCase.expectedRows.length]);
-      expect(rowsOnScreen(list)).toEqual(testCase.expectedRows);
+      expect(everyRow).toEqual(testCase.expectedRows);
+      // The steps act on the last page, where the walk stopped.
+      const lastPage = testCase.expectedRows.slice(testCase.expectedRows.length - pages.at(-1)!);
+      expect(rowsOnScreen(list)).toEqual(lastPage);
 
       const errors = vi.spyOn(console, 'error');
       for (const step of testCase.steps ?? []) {
-        if (step.filter) fireEvent.click(filterButton(list, FILTER_KEYS[step.filter]));
+        if (step.filter) fireEvent.click(filterButton(FILTER_KEYS[step.filter]));
         if (step.expand) {
           const group = list.querySelector(`[data-session-group="${step.expand}"]`) as HTMLElement;
           fireEvent.click(within(group).getAllByRole('button')[0]);
@@ -454,13 +477,14 @@ describe('root page publish filters', () => {
             expect(toggle).toHaveAttribute('aria-expanded', String(step.children.some((id) => specs.find((spec) => spec.id === id)?.parentSessionId === group.getAttribute('data-session-group'))));
           }
         }
-        expect(rowsOnScreen(list)).toEqual(testCase.expectedRows);
+        expect(rowsOnScreen(list)).toEqual(lastPage);
         assertSessionsStat();
         expect(list.querySelectorAll('[data-session-group]')).toHaveLength(new Set([...list.querySelectorAll('[data-session-group]')].map((node) => node.getAttribute('data-session-group'))).size);
         for (const child of children) {
           const spec = specs.find((row) => row.id === child.getAttribute('data-session-group-child'))!;
           expect(child).not.toHaveAttribute('data-session-id');
-          expect(child.querySelector('.pub-state')).toBeNull();
+          // The state has its own column; only the phone summary repeats it in the title cell.
+          expect([...child.querySelectorAll('.pub-state')].filter((state) => !state.closest('.home-session-phone'))).toEqual([]);
           const link = within(child as HTMLElement).getByRole('link');
           expect(link).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
           expect(link.textContent?.trim()).not.toBe('');
@@ -472,7 +496,7 @@ describe('root page publish filters', () => {
           expect(cells).toHaveLength(6);
           const served = syncRow(spec, specs.indexOf(spec));
           expect(cells[1].textContent).toContain(PROJECTS[spec.project].name);
-          expect(cells[1].querySelector('a')?.getAttribute('href')).toContain(PROJECTS[spec.project].hash);
+          expect(cells[1].querySelector('a')).toBeNull();
           expect(cells[2].textContent?.trim()).toBe(served.turnCount.toLocaleString('en-US'));
           expect(cells[3].textContent?.trim()).toBe(formatMinutes(served.durationMs / 60_000));
           const started = Date.parse(served.startTime);
@@ -498,9 +522,9 @@ describe('root page publish filters', () => {
         }
       }
       if (searchSpec) {
-        fireEvent.change(screen.getByRole('searchbox', { name: 'search transcripts' }), { target: { value: 'child' } });
+        fireEvent.change(screen.getByRole('searchbox', { name: 'search your sessions' }), { target: { value: 'child' } });
         const match = await screen.findByText('child search match');
-        await waitFor(() => expect(match.closest('[data-grouped-sessions-section]')?.querySelector('.pub-state-text')?.textContent).toBe('published, up to date'));
+        await waitFor(() => expect(match.closest('[data-grouped-sessions-section]')?.querySelector('.pub-state-text')?.textContent).toBe('published'));
         fireEvent.click(screen.getByRole('button', { name: 'clear search' }));
         list = await screen.findByRole('region', { name: 'sessions' });
       }
@@ -511,13 +535,13 @@ describe('root page publish filters', () => {
 
        // Filter membership stays server-owned; totals are intentionally omitted.
       for (const key of Object.keys(FILTER_LABELS) as CountKey[]) {
-         const button = filterButton(list, key);
-         const alreadySelected = button.getAttribute('aria-pressed') === 'true';
+         const button = filterButton(key);
+         const alreadySelected = button.getAttribute('aria-checked') === 'true';
          fireEvent.click(button);
-         expect(button).toHaveAttribute('aria-pressed', 'true');
+         expect(button).toHaveAttribute('aria-checked', 'true');
          if (!alreadySelected) await waitFor(() => expect(rowsOnScreen(list).length).toBe(Math.min(testCase.expectedCounts[key], 25)));
-         await loadAll(list);
-         expect(rowsOnScreen(list).length, `${key} rows`).toBe(testCase.expectedCounts[key]);
+         const { rows: listed } = await readPages(list);
+         expect(listed.length, `${key} rows`).toBe(testCase.expectedCounts[key]);
         assertSessionsStat();
       }
 
@@ -536,14 +560,15 @@ describe('root page list reads', () => {
     { id: 's-pub', project: 'beta', syncStatus: 'synced', state: 'published', audience: 2 },
   ];
 
-  it('links each row to its transcript and to its project changes', async () => {
+  it('links each row to its transcript only; the project is plain text', async () => {
     serve(SPECS);
     render(<HomePage />);
     const list = await screen.findByRole('region', { name: 'sessions' });
     await screen.findByRole('link', { name: 's-pub' });
     const row = list.querySelector('[data-session-id="s-pub"]')!.closest('tr')!;
     expect(within(row).getByRole('link', { name: 's-pub' })).toHaveAttribute('href', `/projects/${BETA_HASH}/s-pub`);
-    expect(within(row).getByRole('link', { name: 'changes in beta-project' })).toHaveAttribute('href', `/review/${BETA_HASH}`);
+    expect(within(row).getAllByRole('link')).toHaveLength(1);
+    expect(within(row).getByText('beta-project')).toBeInTheDocument();
   });
 
   it('ignores session broadcasts and refreshes the loaded list on focus', async () => {
@@ -578,7 +603,7 @@ describe('root page list reads', () => {
     await waitFor(() =>
       expect(requests.some((url) => url.pathname === '/api/v1/publications' && url.searchParams.get('include') === 'audience')).toBe(true),
     );
-    expect(stateLabel(list, 's-pub')).toBe('published, up to date');
+    expect(stateLabel(list, 's-pub')).toBe('published');
   });
 
   it('fails closed with the selection guidance when the publications read cannot apply the saved selection', async () => {
@@ -633,13 +658,13 @@ describe('root page list reads', () => {
     const requests = serve(SPECS, { search });
     render(<HomePage />);
     await screen.findByRole('region', { name: 'sessions' });
-    fireEvent.change(screen.getByRole('searchbox', { name: 'search transcripts' }), { target: { value: 'flakes' } });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'search your sessions' }), { target: { value: 'flakes' } });
 
     const results = await screen.findByText('search results');
     const section = results.closest('[data-grouped-sessions-section]') as HTMLElement;
     expect(await within(section).findByText('the ingest test flakes on CI')).toBeInTheDocument();
     expect(within(section).getByText('you:', { exact: false })).toBeInTheDocument();
-    expect(section.querySelector('.pub-state-text')?.textContent).toBe('published, up to date');
+    expect(section.querySelector('.pub-state-text')?.textContent).toBe('published');
     expect(screen.queryByRole('region', { name: 'sessions' })).not.toBeInTheDocument();
     const searched = requests.find((url) => url.pathname === '/api/v1/search');
     expect(searched?.searchParams.get('q')).toBe('flakes');
@@ -658,7 +683,7 @@ const tipCases = tipRoot.cases.map((row) => requireRecord(row, 'root automatic p
 requireUniqueNames(tipCases, 'root automatic publishing tip cases');
 if (tipCases.map((row) => row.name).sort().join() !== requiredTipNames.sort().join()) throw new Error('automatic publishing tip cases differ from the required names');
 for (const row of tipCases) {
-  requireExactRequiredFields(row, ['name', 'session', 'copy', 'command', 'dismiss'], 'root automatic publishing tip case');
+  requireExactRequiredFields(row, ['name', 'session', 'copy', 'docs', 'dismiss'], 'root automatic publishing tip case');
   const spec = requireRecord(row.session, 'automatic publishing tip session') as unknown as SessionSpec;
   it(String(row.name), async () => {
     const requests = serve([spec]);
@@ -666,8 +691,11 @@ for (const row of tipCases) {
     const list = await screen.findByRole('region', { name: 'sessions' });
     const tip = screen.getByRole('complementary', { name: 'auto-publish tip' });
     expect(tip.textContent?.replace(/\s+/g, ' ').trim()).toBe(row.copy);
-    expect(tip.querySelector('code')).toHaveTextContent(String(row.command));
-    expect(tip.querySelector('[data-brand="claude"]')).not.toBeNull();
+    // How to set it up lives in the docs: the tip links there and teaches no command.
+    const docs = within(tip).getByRole('link', { name: new RegExp(`^${String(row.docs)}`) });
+    expect(docs).toHaveAttribute('href', DOCS.autoPublish);
+    expect(docs).toHaveAttribute('target', '_blank');
+    expect(tip.querySelector('code')).toBeNull();
     const exit = await within(list).findByRole('link', { name: spec.id });
     expect(exit).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
     fireEvent.click(within(tip).getByRole('button', { name: String(row.dismiss) }));

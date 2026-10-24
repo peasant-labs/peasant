@@ -83,7 +83,8 @@ type Panel struct {
 
 // NewPanel builds a Panel over theme t. The default background is the Canvas
 // token (the page background) and the default alignment is left. Use
-// [Panel.WithBackground] for a raised panel on the Surface token.
+// [Panel.WithBackground] for an inset well on the Surface2 token or an overlay
+// card on the SurfaceElev token.
 func NewPanel(t theme.Theme) Panel {
 	return Panel{theme: t, background: t.Palette.Canvas, align: PanelAlignLeft}
 }
@@ -116,9 +117,9 @@ func (p Panel) Align() PanelAlign { return p.align }
 // directly instead.
 //
 // A role that ALREADY names its own background is returned unchanged. Selected
-// is Ink on AmberFill, a deliberate full-cell highlight, and Surface is a
-// raised panel; repainting either with the panel background would erase the
-// very thing the role exists to draw.
+// is Ink on AmberFill, a deliberate full-cell highlight, and Inset and Overlay
+// set a region apart; repainting any of them with the panel background would
+// erase the very thing the role exists to draw.
 func (p Panel) Style(base lipgloss.Style) lipgloss.Style {
 	if !isUnsetColor(base.GetBackground()) {
 		return base

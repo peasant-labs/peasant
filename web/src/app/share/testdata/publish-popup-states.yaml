@@ -122,7 +122,7 @@ cases:
     push: published
     steps: []
     expect:
-      bar: { state: published, text: 'published, 2 collectives, up to date', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: update }
       popup: null
 
   - name: new-turns
@@ -133,7 +133,7 @@ cases:
     push: published
     steps: []
     expect:
-      bar: { state: new-turns, text: 'published, 2 collectives, 6 new turns', action: update }
+      bar: { state: new-turns, text: needs update, action: update }
       popup: null
 
   - name: auto-publish-on
@@ -169,7 +169,7 @@ cases:
       bar: { state: not-published, text: not published, action: publish }
       popup:
         heading: publish “{title}”
-        texts: [connect this computer to village once to publish., continue with GitHub, nothing leaves your machine until you publish.]
+        texts: [connect this computer to peasant online once to publish., continue with GitHub, nothing leaves your machine until you publish.]
         primary: null
       request: null
 
@@ -199,8 +199,8 @@ cases:
       bar: { state: not-published, text: not published, action: publish }
       popup:
         heading: publish “{title}”
-        texts: [what leaves your machine, checking for sensitive content, who can read it]
-        primary: { label: publish to 2 collectives, enabled: false }
+        texts: [what leaves your machine, ' turns…', who can read it]
+        primary: { label: scanning…, enabled: false }
       request: null
 
   - name: scan-failed
@@ -229,8 +229,8 @@ cases:
       bar: { state: not-published, text: not published, action: publish }
       popup:
         heading: publish “{title}”
-        texts: [you are not in a collective yet., create or join one on village]
-        link: { text: create or join one on village, href: 'https://village.peasantlabs.org/groups' }
+        texts: [you are not in a collective yet., create or join one on peasant online]
+        link: { text: create or join one on peasant online, href: 'https://village.peasantlabs.org/collectives' }
         primary: { label: publish, enabled: false }
       request: null
 
@@ -272,7 +272,7 @@ cases:
     push: published
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published, 2 collectives, up to date', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: update }
       popup:
         heading: published to Acme Platform and Acme Company
         texts: [village.peasantlabs.org/transcripts/, 'pull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.']
@@ -287,7 +287,7 @@ cases:
     push: approval
     steps: [open, add ML Reading Group, publish]
     expect:
-      bar: { state: published, text: 'published, 2 collectives, up to date', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: update }
       popup:
         heading: published to Acme Platform and Acme Company
         texts: [ML Reading Group shows it once its owner approves.]
@@ -302,10 +302,10 @@ cases:
     push: stopped:Acme Company
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published, 1 collective, up to date', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: update }
       popup:
         heading: publish “{title}”
-        texts: ['stopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript: village answered 502']
+        texts: ['stopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript.']
         primary: { label: retry, enabled: true }
       request: { add: [Acme Platform, Acme Company], remove: [] }
 
@@ -317,7 +317,7 @@ cases:
     push: published
     steps: [open, add ML Reading Group]
     expect:
-      bar: { state: new-turns, text: 'published, 2 collectives, 6 new turns', action: update }
+      bar: { state: new-turns, text: needs update, action: update }
       popup:
         heading: update “{title}”
         texts: [what changed, 6 new turns since you published, ML Reading Group, 'adding, waits for approval', removing a collective takes the transcript back from it., adds ML Reading Group · removes nothing, nothing leaves your machine until you update.]
@@ -332,7 +332,7 @@ cases:
     push: published
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published, 1 collective, up to date', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: update }
       popup:
         heading: published to Acme Platform
         texts: [village.peasantlabs.org/transcripts/]
@@ -362,7 +362,7 @@ cases:
     push: published
     steps: [open, connect]
     expect:
-      bar: { state: new-turns, text: 'published, 1 collective, 6 new turns', action: update }
+      bar: { state: new-turns, text: needs update, action: update }
       popup:
         heading: update “{title}”
         texts: [6 new turns since you published, Acme Platform, leave access as it is]
@@ -377,7 +377,7 @@ cases:
     push: published
     steps: [open]
     expect:
-      bar: { state: published, text: 'published, 2 collectives, up to date', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: update }
       popup:
         heading: update “{title}”
         texts: [no new turns since you published, Acme Platform, Acme Company]
@@ -392,7 +392,7 @@ cases:
     push: published
     steps: [open, add Acme Company, publish]
     expect:
-      bar: { state: published, text: 'published, 2 collectives, up to date', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: update }
       popup:
         heading: published to Acme Platform and Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -407,7 +407,7 @@ cases:
     push: published
     steps: [open, remove Acme Platform, publish]
     expect:
-      bar: { state: published, text: 'published, 1 collective, up to date', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: update }
       popup:
         heading: published to Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -422,7 +422,7 @@ cases:
     push: published
     steps: [open, remove Acme Platform, publish]
     expect:
-      bar: { state: published, text: 'published, 1 collective, up to date', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: update }
       popup:
         heading: published to Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -437,7 +437,7 @@ cases:
     push: stopped-once:Acme Company
     steps: [open, publish, remove Acme Platform, retry]
     expect:
-      bar: { state: published, text: 'published, 1 collective, up to date', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: update }
       popup:
         heading: published to Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -452,7 +452,7 @@ cases:
     push: stopped:Acme Company
     steps: [open, publish, rescan]
     expect:
-      bar: { state: published, text: 'published, 1 collective, up to date', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: update }
       popup:
         heading: publish “{title}”
         texts: ['the scan failed, so publish is off.']
@@ -467,10 +467,10 @@ cases:
     push: skipped:Acme Company
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published, 1 collective, up to date', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: update }
       popup:
         heading: publish “{title}”
-        texts: ['Village did not share the transcript with this collective']
+        texts: ['stopped while sharing it with']
         primary: { label: retry, enabled: true }
       request: { add: [Acme Platform, Acme Company], remove: [] }
 
@@ -500,7 +500,7 @@ cases:
       bar: { state: not-published, text: not published, action: publish }
       popup:
         heading: publish “{title}”
-        texts: ['sending the content: sending the content failed: village answered 502']
+        texts: ['stopped while sending the content: sending the content failed.']
         primary: { label: retry, enabled: true }
       request: { add: [Acme Platform, Acme Company], remove: [] }
 
@@ -515,8 +515,8 @@ cases:
       bar: { state: not-published, text: not published, action: publish }
       popup:
         heading: publish “{title}”
-        texts: ['reading your collectives on village: The Village collectives could not be listed']
-        primary: { label: retry, enabled: true }
+        texts: ['your collectives can’t load: can’t reach peasant online right now.']
+        primary: { label: publish, enabled: false }
       request: null
 
   - name: audience-unknown
@@ -527,10 +527,10 @@ cases:
     push: published
     steps: [open]
     expect:
-      bar: { state: new-turns, text: 'published, 6 new turns', action: update }
+      bar: { state: new-turns, text: needs update, action: update }
       popup:
         heading: update “{title}”
-        texts: [reading who can read it on village]
+        texts: [reading who can read it online]
         primary: { label: retry, enabled: true }
       request: null
 
@@ -545,7 +545,7 @@ cases:
       bar: { state: not-published, text: not published, action: publish }
       popup:
         heading: publish “{title}”
-        texts: [connect this computer to village once to publish.]
+        texts: [connect this computer to peasant online once to publish.]
         primary: null
       request: { add: [Acme Platform, Acme Company], remove: [] }
 
@@ -560,7 +560,7 @@ cases:
       bar: { state: not-published, text: not published, action: publish }
       popup:
         heading: publish “{title}”
-        texts: ['starting the github sign-in: github sign-in could not be started: connection refused']
+        texts: ['stopped while starting the github sign-in: can’t reach peasant online right now.']
         primary: { label: retry, enabled: true }
       request: null
 
@@ -602,7 +602,7 @@ cases:
     push: published
     steps: [arrive]
     expect:
-      bar: { alert: 'village no longer holds this transcript: run peasant village push --force for this session', retry: false }
+      bar: { alert: 'peasant online no longer holds this transcript: run peasant village push --force for this session', retry: false }
       popup:
         heading: publish “{title}”
         texts: ['run peasant village push --force for this session']
@@ -617,7 +617,7 @@ cases:
     push: published
     steps: [open, remove Acme Platform, publish]
     expect:
-      bar: { state: published, text: 'published, 0 collectives, up to date', action: update }
+      bar: { state: published, text: published, action: update }
       popup:
         heading: updated, no collective can read it
         texts: [village.peasantlabs.org/transcripts/]
@@ -632,7 +632,7 @@ cases:
     push: approval
     steps: [open, remove Acme Platform, remove Acme Company, add ML Reading Group, publish]
     expect:
-      bar: { state: published, text: 'published, 0 collectives, up to date', action: update }
+      bar: { state: published, text: published, action: update }
       popup:
         heading: submitted to ML Reading Group
         texts: [ML Reading Group shows it once its owner approves.]

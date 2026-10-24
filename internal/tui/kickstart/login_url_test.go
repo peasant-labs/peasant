@@ -61,7 +61,7 @@ func TestProgram_ConnectingSpinnerShowsReportedLoginURL(t *testing.T) {
 	if !strings.Contains(view, wantURL) {
 		t.Fatalf("connecting spinner view does not contain the reported login URL %q:\n%s", wantURL, view)
 	}
-	if !strings.Contains(view, "connecting to village") {
+	if !strings.Contains(view, "connecting to peasant online") {
 		t.Fatalf("connecting spinner view lost its label once a URL was shown:\n%s", view)
 	}
 	if !strings.Contains(view, "ctrl+c to quit") {

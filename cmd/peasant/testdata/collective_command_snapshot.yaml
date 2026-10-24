@@ -1,0 +1,36 @@
+requiredNames:
+  - track-account-switch
+  - track-credential-renewal
+  - track-account-aba
+  - untrack-account-switch
+  - untrack-credential-renewal
+  - untrack-account-aba
+  - filtered-history-account-switch
+  - filtered-history-credential-renewal
+  - filtered-history-account-aba
+  - track-stable-name
+  - track-stable-url
+  - untrack-stable-offline
+  - filtered-history-stable-offline
+  - history-stable-unfiltered
+  - unfiltered-history-account-switch
+  - unfiltered-history-credential-renewal
+  - unfiltered-history-account-aba
+cases:
+  - {name: track-account-switch, action: track, rotation: switch, reference: name}
+  - {name: track-credential-renewal, action: track, rotation: renewal, reference: name}
+  - {name: track-account-aba, action: track, rotation: aba, reference: name}
+  - {name: untrack-account-switch, action: untrack, rotation: switch, reference: name}
+  - {name: untrack-credential-renewal, action: untrack, rotation: renewal, reference: name}
+  - {name: untrack-account-aba, action: untrack, rotation: aba, reference: name}
+  - {name: filtered-history-account-switch, action: history, rotation: switch, reference: name}
+  - {name: filtered-history-credential-renewal, action: history, rotation: renewal, reference: name}
+  - {name: filtered-history-account-aba, action: history, rotation: aba, reference: name}
+  - {name: track-stable-name, action: track, rotation: none, reference: name}
+  - {name: track-stable-url, action: track, rotation: none, reference: url}
+  - {name: untrack-stable-offline, action: untrack, rotation: none, reference: name}
+  - {name: filtered-history-stable-offline, action: history, rotation: none, reference: name}
+  - {name: history-stable-unfiltered, action: history, rotation: none, reference: none}
+  - {name: unfiltered-history-account-switch, action: history, rotation: switch, reference: none}
+  - {name: unfiltered-history-credential-renewal, action: history, rotation: renewal, reference: none}
+  - {name: unfiltered-history-account-aba, action: history, rotation: aba, reference: none}

@@ -1,0 +1,21 @@
+requiredNames: [catalog-newer-failure, catalog-newer-inflight, history-newer-failure-empty, history-newer-inflight-empty, catalog-after-history-issued, history-after-catalog-issued, target-after-unrelated-target, broad-after-target-issued, target-after-broad-issued, pair-after-unrelated-pair, pair-after-history-issued, history-after-pair-issued, association-newer-failure, association-newer-inflight, association-invalidated-older, association-other-transcript, catalog-fence-reopened-store, history-fence-reopened-store, association-fence-reopened-store]
+cases:
+  - {name: catalog-newer-failure, subject: catalog, newer: catalog, fail: true, blocked: true}
+  - {name: catalog-newer-inflight, subject: catalog, newer: catalog, blocked: true}
+  - {name: history-newer-failure-empty, subject: history, newer: history, fail: true, blocked: true}
+  - {name: history-newer-inflight-empty, subject: history, newer: history, blocked: true}
+  - {name: catalog-after-history-issued, subject: catalog, newer: history}
+  - {name: history-after-catalog-issued, subject: history, newer: catalog}
+  - {name: target-after-unrelated-target, subject: target, newer: other-target}
+  - {name: broad-after-target-issued, subject: catalog, newer: target, blocked: true}
+  - {name: target-after-broad-issued, subject: target, newer: catalog, blocked: true}
+  - {name: pair-after-unrelated-pair, subject: pair, newer: other-pair}
+  - {name: pair-after-history-issued, subject: pair, newer: history, blocked: true}
+  - {name: history-after-pair-issued, subject: history, newer: pair, blocked: true}
+  - {name: association-newer-failure, subject: association, newer: association, fail: true, blocked: true}
+  - {name: association-newer-inflight, subject: association, newer: association, blocked: true}
+  - {name: association-invalidated-older, subject: association, newer: association, invalidated: true, blocked: true}
+  - {name: association-other-transcript, subject: association, newer: other-transcript}
+  - {name: catalog-fence-reopened-store, subject: catalog, newer: catalog, fail: true, reopen: true, blocked: true}
+  - {name: history-fence-reopened-store, subject: history, newer: history, fail: true, reopen: true, blocked: true}
+  - {name: association-fence-reopened-store, subject: association, newer: association, fail: true, reopen: true, blocked: true}

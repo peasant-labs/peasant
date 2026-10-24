@@ -56,7 +56,7 @@ const ONLY = (process.env.PEASANT_PUBLISH_STATES_ONLY || '').split(',').map((nam
 const PROJECT = 'fortuna'
 const SESSION = 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'
 /** Bytes only this change introduces, located in the binary and the served chunk. */
-const FEATURE_BYTES = ['reading your collectives on village', 'redaction review could not classify the scan while preparing publication', 'confirming automatic publishing consent']
+const FEATURE_BYTES = ['reading your collectives online', 'redaction review could not classify the scan while preparing publication', 'confirming automatic publishing consent']
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const DESKTOP = { width: 1440, height: 1080, deviceScaleFactor: 1 }
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }

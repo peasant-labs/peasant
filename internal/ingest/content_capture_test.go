@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -46,20 +47,23 @@ func (a *captureFixtureAdapter) MaterializeTranscript(ctx context.Context, s ing
 }
 
 type captureFixture struct {
-	Child          bool           `yaml:"child"`
-	Unknown        bool           `yaml:"unknown"`
-	Text           string         `yaml:"text"`
-	Contains       bool           `yaml:"contains"`
-	ToolOutput     bool           `yaml:"tool_output"`
-	Omitted        bool           `yaml:"omitted"`
-	ProjectionPart string         `yaml:"projection_part"`
-	SecondTail     bool           `yaml:"second_tail"`
-	Origin         string         `yaml:"origin"`
-	Name           string         `yaml:"name"`
-	Harness        ingest.Harness `yaml:"harness"`
-	Source         string         `yaml:"source"`
-	Reject         bool           `yaml:"reject"`
-	WantError      bool           `yaml:"want_error"`
+	Child          bool   `yaml:"child"`
+	Unknown        bool   `yaml:"unknown"`
+	Text           string `yaml:"text"`
+	Contains       bool   `yaml:"contains"`
+	ToolOutput     bool   `yaml:"tool_output"`
+	Omitted        bool   `yaml:"omitted"`
+	ProjectionPart string `yaml:"projection_part"`
+	SecondTail     bool   `yaml:"second_tail"`
+	// InvalidUTF8 replaces each INVALIDBYTE marker in the source with the byte
+	// 0xFF, which YAML text cannot carry.
+	InvalidUTF8 bool           `yaml:"invalid_utf8"`
+	Origin      string         `yaml:"origin"`
+	Name        string         `yaml:"name"`
+	Harness     ingest.Harness `yaml:"harness"`
+	Source      string         `yaml:"source"`
+	Reject      bool           `yaml:"reject"`
+	WantError   bool           `yaml:"want_error"`
 	// Control marks a record that carries harness state rather than readable
 	// conversation text, so the shared tail search does not apply to it and the
 	// shape assertions below do.
@@ -83,6 +87,9 @@ func captureFixtureSource(t *testing.T, fixture captureFixture, fs *testutil.Mem
 	t.Helper()
 	encoded, _ := json.Marshal(text)
 	data := []byte(strings.ReplaceAll(fixture.Source, "TEXT", string(encoded)))
+	if fixture.InvalidUTF8 {
+		data = bytes.ReplaceAll(data, []byte("INVALIDBYTE"), []byte{0xff})
+	}
 	if fixture.Origin != "" {
 		data = managedProjectionWithPartText(t, testutil.TestSessionUUID, text)
 		if fixture.ProjectionPart != "" {
@@ -545,6 +552,11 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 				t.Fatalf("capture preview = %v, want longer than the %d-byte preview bound", entry.ContentPreview, defaults.ContentPreviewLimit)
 			}
 			assertControlExtra(t, fixture, entry)
+			// Every reader of Extra (the share scan, export, publication) runs the
+			// strict evidence decode; a stored control payload must pass it.
+			if _, err := ingest.RetainedUnknownOf(*entry); err != nil {
+				t.Fatalf("the stored control payload is refused by the strict Extra reader: %v", err)
+			}
 		})
 	}
 }

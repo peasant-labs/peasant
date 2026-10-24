@@ -78,6 +78,9 @@ const (
 	RouteAutoPublishInstall Route = "/api/v1/settings/auto-publish/{id}/install"
 	RouteSyncIngest         Route = "/api/v1/sync/ingest"
 	RouteSyncIngestStatus   Route = "/api/v1/sync/ingest/status"
+	// RouteSyncIngestSession re-indexes one recorded session (?session_id=)
+	// and answers when it is done.
+	RouteSyncIngestSession Route = "/api/v1/sync/ingest/session"
 
 	// Map / Review surfaces. Path params use Go 1.22 ServeMux
 	// {wildcard} syntax; commit/path/file/branch arrive as query params.

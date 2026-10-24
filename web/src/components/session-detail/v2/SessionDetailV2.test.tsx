@@ -72,6 +72,7 @@ vi.mock(import('@peasant-labs/fairtrade/ui'), async (importOriginal) => {
         data-initial-kind={props.initialPosition?.kind ?? 'none'}
         data-initial-turn={props.initialPosition?.kind === 'turn' ? props.initialPosition.turnIndex : -1}
         data-initial-request-key={props.initialPosition?.requestKey ?? 'none'}
+        data-right-rail-open={String(props.rightRailOpen)}
       >
         {/* The trail is host-owned policy (root → project → session), so expose
             it for assertion; the package would render it in its hero. */}
@@ -264,17 +265,17 @@ function crumbs(): [string, string | null][] {
 }
 
 describe('SessionDetailV2 — breadcrumb trail', () => {
-  it('walks projects → this project\'s sessions → this session', () => {
+  it('walks sessions → this project\'s sessions → this session', () => {
     currentSearchParams = new URLSearchParams();
     renderChangeScope();
 
     const trail = crumbs();
     expect(trail.map(([label]) => label)).toEqual([
-      'projects',
+      'sessions',
       'alpha-project',
       'sess-123',
     ]);
-    // The root returns to the project list; the project crumb returns to THAT
+    // The root returns to Home's sessions; the project crumb returns to THAT
     // project's session list — never to the capability-gated map.
     expect(trail[0][1]).toBe('/');
     expect(trail[1][1]).toBe(`/sessions/${PROJECT_HASH}`);
@@ -397,22 +398,24 @@ describe('SessionDetailV2 — the "showing every step" prelude is gone', () => {
     expect(within(headerActions).getByRole('status')).toHaveTextContent('copied as markdown');
   });
 
-  it('keeps the session details and the copy link in the more menu', () => {
+  it('keeps only the copy actions in the more menu and always shows the session figures', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     const { container } = render(<TestSessionDetail sessionId="sess-12345678" />);
     const headerActions = screen.getByTestId('package-header-actions');
     const host = container.querySelector('[data-tour="transcript-view"]');
-    expect(host).toHaveClass('txn-metrics-collapsed');
+    // No class hides the figures under the title, and no menu item toggles them.
+    expect(host?.className).not.toMatch(/metrics/);
 
     fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
-    expect(within(headerActions).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['show details', 'copy as markdown', 'copy link']);
-    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'show details' }));
-    expect(host).not.toHaveClass('txn-metrics-collapsed');
-
-    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
+    expect(within(headerActions).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['copy as markdown', 'copy link']);
     fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'copy link' }));
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/projects/${PROJECT_HASH}/sess-12345678`);
+  });
+
+  it('opens with the filters rail folded', () => {
+    render(<TestSessionDetail sessionId="sess-12345678" />);
+    expect(screen.getByTestId('package-session-detail')).toHaveAttribute('data-right-rail-open', 'false');
   });
 
   it('does not render the "prompts & replies only" toggle, the "showing every step" sentence, or the steps waterfall anywhere', () => {

@@ -520,6 +520,8 @@ func renderPushCapture(fixture pushFixture, capture pushCaptureFixture) (string,
 	case pushStateReceipt:
 		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyEnter})
 		current = sendPushMessage(current, tea.KeyPressMsg{Code: tea.KeyEnter})
+	case pushStateHelp:
+		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: '?', Text: "?"})
 	default:
 		return "", fmt.Errorf("render push capture %q: unknown push state %q", capture.Name, capture.State)
 	}

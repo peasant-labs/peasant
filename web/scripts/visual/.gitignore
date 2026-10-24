@@ -32,7 +32,7 @@
 !strike-smoke-fixture.mjs
 !search-share-visual.mjs
 !grouped-list-visual.mjs
-!shell-header-manifest.mjs
+!shell-chrome-manifest.mjs
 !served-build.mjs
 !root-page-visual.mjs
 !home-pages-visual.mjs
@@ -40,7 +40,7 @@
 !testdata/
 !testdata/transcript-input.yaml
 !testdata/search-share.yaml
-!testdata/shell-header.yaml
+!testdata/shell-chrome.yaml
 !testdata/shell-offline-cases.yaml
 !testdata/root-page.yaml
 # baseline/ holds the committed golden references (not ephemeral captures) so the

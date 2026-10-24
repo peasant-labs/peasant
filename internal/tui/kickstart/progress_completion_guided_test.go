@@ -38,7 +38,7 @@ const (
 	expectedCompletionPreambleLines  = 1
 	expectedPreambleMutationRows     = 4
 
-	acceptedCompletionPreambleLine = "these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
+	acceptedCompletionPreambleLine = "these useful next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart runs none of them."
 )
 
 type progressFocusProbe string

@@ -342,6 +342,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV65,
 		migrationV66,
 		migrationV67,
+		migrationV68,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -403,5 +404,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V65: local Claude structural identity proof
 		nil,                        // V66: ALTER TABLE ADD COLUMN sessions.thinking_level + thinking_level_raw + thinking_level_history (no FKs)
 		nil,                        // V67: latest-attempt pointer columns (additive, no backfill)
+		nil,                        // V68: scoped collective observations (additive, no backfill)
 	},
 }

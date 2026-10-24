@@ -18,7 +18,7 @@ import (
 // testable without driving the real network/browser login.
 func loginURLPrinter(out io.Writer) func(string) {
 	return func(loginURL string) {
-		fmt.Fprintf(out, "Log in to the village at:\n  %s\n", loginURL)
+		fmt.Fprintf(out, "Log in to peasant online at:\n  %s\n", loginURL)
 	}
 }
 
@@ -26,7 +26,7 @@ func BuildLoginCommand() *cobra.Command {
 	var local bool
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Log in to the Peasant village via GitHub",
+		Short: "Log in to peasant online via GitHub",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath := resolveConfigPath(cmd)
 			configDir := configDirOverride(cmd)
@@ -60,7 +60,7 @@ func BuildLoginCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&local, "local", false, "Log in to the local development village (https://localhost:8443)")
+	cmd.Flags().BoolVar(&local, "local", false, "Log in to a local development server of peasant online (https://localhost:8443)")
 	_ = cmd.Flags().MarkHidden("local")
 	return cmd
 }

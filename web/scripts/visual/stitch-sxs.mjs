@@ -103,6 +103,10 @@ const SURFACE_SETS = {
     ['gmp-change-detail', null],
   ],
   smoke: SMOKE_SURFACE_SET,
+  village: [
+    ['village-desktop', null],
+    ['village-mobile', null],
+  ],
 }
 const SURFACE_SET = process.env.SURFACE_SET || 'transcript'
 const SURFACES = SURFACE_SETS[SURFACE_SET]
@@ -113,7 +117,7 @@ if (!SURFACES) {
 // Output subdir, PER SURFACE_SET by default, so smoke-SxS composites never land in the same folder
 // as the transcript/changes composites and get confused for them (or silently overwritten).
 // Override with SXS_OUT_SUBDIR for a custom location.
-const DEFAULT_OUT_SUBDIR = { smoke: 'sxs-smoke' }[SURFACE_SET] || 'sxs'
+const DEFAULT_OUT_SUBDIR = { smoke: 'sxs-smoke', village: 'sxs-village' }[SURFACE_SET] || 'sxs'
 const OUT_SUBDIR = process.env.SXS_OUT_SUBDIR || DEFAULT_OUT_SUBDIR
 
 // Per-pane captions, PARAMETERIZED per SURFACE_SET (and per-surface for `changes`). The

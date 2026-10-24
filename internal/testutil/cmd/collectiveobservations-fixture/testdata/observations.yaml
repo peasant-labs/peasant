@@ -1,0 +1,17 @@
+requiredNames: [alice, bob]
+accounts:
+  - {name: alice, userId: '11111111-1111-4111-8111-111111111111', username: AliceFixture}
+  - {name: bob, userId: '11111111-1111-4111-8111-222222222222', username: BobFixture}
+collectiveId: '33333333-3333-4333-8333-333333333333'
+transcriptId: '22222222-2222-4222-8222-222222222222'
+observedAt: '2026-10-15T12:00:00Z'
+oldName: 'Saved Collective With Preserved User Case'
+associationJSON: '[{"id":"33333333-3333-4333-8333-333333333333","name":"Saved Collective With Preserved User Case","description":null,"linked_github_org":null,"shared_at":"2026-10-15T12:00:00Z"}]'
+historySourceJSON: '[{"source":"contribution-discovery","outcome":"disclosed","complete":true,"observedAt":"2026-10-15T12:00:00Z"},{"source":"submissions","outcome":"disclosed","complete":true,"observedAt":"2026-10-15T12:00:00Z"},{"source":"attempts","outcome":"disclosed","complete":true,"observedAt":"2026-10-15T12:00:00Z"}]'
+newName: 'New Catalog Name With Long Mixed Case Metadata For Offline Review'
+sourceJSON: '[{"source":"membership","outcome":"disclosed","complete":true,"observedAt":"2026-10-15T12:00:00Z"},{"source":"contribution-discovery","outcome":"disclosed","complete":true,"observedAt":"2026-10-15T12:00:00Z"},{"source":"organization","outcome":"disclosed","complete":true,"observedAt":"2026-10-15T12:00:00Z"},{"source":"explicit","outcome":"disclosed","complete":true,"observedAt":"2026-10-15T12:00:00Z"}]'
+attemptsJSON: '[{"event_num":1,"status":"rejected","recorded_at":"2026-10-10T10:00:00Z","decided_at":"2026-10-10T11:00:00Z","decided_by_actor":"moderator"},{"event_num":2,"status":"retracted","recorded_at":"2026-10-11T10:00:00Z","decided_at":"2026-10-11T11:00:00Z","decided_by_actor":"owner"},{"event_num":3,"status":"revoked","recorded_at":"2026-10-12T10:00:00Z","decided_at":"2026-10-12T11:00:00Z","decided_by_actor":"collective"},{"event_num":4,"status":"rejected","recorded_at":"2026-10-13T10:00:00Z","decided_at":"2026-10-13T11:00:00Z","decided_by_actor":"moderator"},{"event_num":5,"status":"pending","recorded_at":"2026-10-14T10:00:00Z","decided_at":null,"decided_by_actor":""}]'
+receiptIds: [fixture-receipt-a, fixture-receipt-b, fixture-receipt-c, fixture-receipt-d, fixture-receipt-e]
+diagnosticIds: ['44444444-4444-4444-8444-111111111111', '44444444-4444-4444-8444-222222222222', '44444444-4444-4444-8444-333333333333', '44444444-4444-4444-8444-444444444444', '44444444-4444-4444-8444-555555555555']
+issueJSON: '{"code":"remote","operation":"share","message":"Share result is uncertain after a remote timeout","retry":"Fetch available owner history before explicitly retrying"}'
+terminalJSON: '{"event_num":5,"status":"approved","recorded_at":"2026-10-14T10:00:00Z","decided_at":"2026-10-16T12:00:00Z","decided_by_actor":"moderator"}'

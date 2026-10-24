@@ -78,17 +78,22 @@ try {
     await page.getByRole('link', { name: 'session root-0', exact: true }).waitFor();
     assert.equal(reads.length, 1);
     assert.equal(reads[0].searchParams.get('maxItems'), '25');
-    await page.getByRole('combobox', { name: 'project', exact: true }).waitFor();
-    assert.equal(await page.getByRole('option', { name: 'unseen-project', exact: true }).count(), 1, 'Project metadata must include off-page projects');
+    // The project choices live in the filters menu.
+    await page.getByRole('button', { name: /^filters/ }).click();
+    await page.getByRole('menuitemradio', { name: 'unseen-project', exact: true }).waitFor();
+    assert.equal(await page.getByRole('menuitemradio', { name: 'unseen-project', exact: true }).count(), 1, 'Project metadata must include off-page projects');
+    await page.keyboard.press('Escape');
     assert.deepEqual(forbidden, []);
     assert.ok(!subscriptions.some(frame => /"(?:sessions|quality|trends)"/.test(frame)), `Eager subscription: ${subscriptions}`);
     assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
     assert.equal(await page.locator('[data-root-session-list] [data-session-id]').count(), 25);
-    await page.getByRole('button', { name: 'load more', exact: true }).click();
-    await page.getByRole('link', { name: 'session root-25', exact: true }).waitFor();
     await page.locator('[data-session-group="root-0"] button').click();
     await page.getByRole('link', { name: 'session child-0', exact: true }).waitFor();
     assert.equal(reads.at(-1).searchParams.has('publication'), false);
+    // The pager reads the next server page on request and shows one page at a time.
+    await page.getByRole('button', { name: 'next page', exact: true }).click();
+    await page.getByRole('link', { name: 'session root-25', exact: true }).waitFor();
+    assert.equal(await page.getByRole('link', { name: 'session root-0', exact: true }).count(), 0, 'One page at a time');
     const before = reads.length;
     fail = true;
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -98,14 +103,16 @@ try {
     fail = false;
     await page.getByRole('button', { name: 'retry the session list' }).click();
     await page.getByRole('button', { name: 'retry the session list' }).waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'page 1', exact: true }).click();
+    await page.getByRole('link', { name: 'session child-0', exact: true }).waitFor();
     await page.evaluate(() => window.scrollTo(0, 0));
     const servedChunk = await page.request.get(`${origin}/${relative(join(repo, 'web/out'), chunk)}`);
     assert.equal(servedChunk.status(), 200);
     assert.equal(createHash('sha256').update(await servedChunk.body()).digest('hex'), createHash('sha256').update(readFileSync(chunk)).digest('hex'));
-    assert.equal(await page.getByRole('link', { name: 'Peasant home', exact: true }).count(), 1, 'Persistent product chrome must be mounted');
+    assert.equal(await page.locator('.asb').count(), 1, 'Persistent product chrome must be mounted');
     const file = join(out, `home-${theme}-${viewport.name}.png`);
     await page.screenshot({ path: file, fullPage: false });
-    evidence.push({ theme, viewport, file, pages: reads.map(url => url.search), chunk, binarySha256: createHash('sha256').update(bytes).digest('hex'), fontFamily: await page.getByRole('heading', { name: 'your sessions', exact: true }).evaluate(node => getComputedStyle(node).fontFamily) });
+    evidence.push({ theme, viewport, file, pages: reads.map(url => url.search), chunk, binarySha256: createHash('sha256').update(bytes).digest('hex'), fontFamily: await page.getByRole('heading', { name: 'sessions', exact: true }).evaluate(node => getComputedStyle(node).fontFamily) });
     await page.close();
   }
   writeFileSync(join(out, 'evidence.json'), JSON.stringify(evidence, null, 2));

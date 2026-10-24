@@ -19,8 +19,8 @@
  * filter (all, not published, published, auto), the collapsed and expanded
  * child family, a search, the selection
  * notice, the selection recovery panel, and the empty install. Every filter's
- * membership is checked against the rows it lists, with `load more` pressed until
- * the list is complete.
+ * membership is checked against the rows it lists, walking every page of the
+ * table.
  *
  * Usage: CHROME_PATH=/path/to/chrome node scripts/visual/root-page-visual.mjs
  *        PLAYWRIGHT_MODULE may name an installed Playwright ESM entry when
@@ -56,7 +56,7 @@ const FILTERS = [
   { id: 'all', label: 'all' },
   { id: 'not-published', label: 'not published' },
   { id: 'published', label: 'published' },
-  { id: 'auto', label: 'auto' },
+  { id: 'auto', label: 'auto-publish on' },
 ]
 // Bytes only this change introduces: the list marker and the strip's accessible
 // name live in the app chunk, the strip and publish-state classes in fairtrade's.
@@ -64,7 +64,7 @@ const FEATURE_GROUPS = [
   { label: 'root page', signatures: ['data-root-session-list', 'data-home-bounded'] },
   { label: 'recursive session family', signatures: ['data-session-group-child', 'session-group-rows:', 'var(--sp-5) + var(--sp-4)'] },
   { label: 'parent-attached session disclosure', signatures: ['data-session-family'] },
-  { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', 'tick the auto-publish box the next time you publish'] },
+  { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', 'your sessions can publish on their own'] },
   { label: 'fairtrade publish state', signatures: ['pub-state-text'] },
 ]
 const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
@@ -272,13 +272,16 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
     const full = await gate.measure(file)
     const viewport = page.viewportSize()
     if (full.bytes < 16 * 1024 || full.w !== viewport.width || full.h < viewport.height) fail(`${label}: incomplete full-frame capture`)
-    const layoutWidth = await page.$eval('header', (element) => {
-      const limit = Number.parseFloat(getComputedStyle(element).maxWidth)
-      return Math.min(window.innerWidth, Number.isFinite(limit) ? limit : window.innerWidth)
+    // The shell's chrome: the sidebar column on a wide screen, its top bar across a phone.
+    const chrome = await page.evaluate(() => {
+      const visible = (element) => !!element && getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().height > 0
+      const bar = document.querySelector('.asb-bar')
+      const panel = document.querySelector('.asb-panel')
+      const shown = visible(bar) ? bar : visible(panel) ? panel : null
+      const box = shown?.getBoundingClientRect()
+      return box ? { which: shown === bar ? 'bar' : 'panel', x: box.x, width: box.width, height: box.height, innerWidth: window.innerWidth } : null
     })
-    const header = await page.$('header')
-    const headerBox = header ? await header.boundingBox() : null
-    if (!headerBox || headerBox.height <= 0 || Math.abs(headerBox.width - layoutWidth) > 1) fail(`${label}: shell header missing or incomplete: box=${JSON.stringify(headerBox)} layoutWidth=${layoutWidth} viewport=${JSON.stringify(viewport)}`)
+    if (!chrome || chrome.height <= 0 || chrome.x < 0 || (chrome.which === 'bar' && Math.abs(chrome.width - chrome.innerWidth) > 1)) fail(`${label}: shell sidebar missing or incomplete: ${JSON.stringify(chrome)} viewport=${JSON.stringify(viewport)}`)
     const panel = await page.$(contentSelector)
     const panelBox = panel ? await panel.boundingBox() : null
      if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > full.w + 1 || panelBox.y + panelBox.height > full.h + 1) fail(`${label}: mounted recovery panel is not contained in the full shell/body capture (${contentSelector})`)
@@ -294,7 +297,7 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
 async function probeStyles(page, where) {
   const probe = await page.evaluate(() => {
     const h1 = document.querySelector('main h1, h1')
-    const option = document.querySelector('.bs-seg-opt')
+    const option = document.querySelector('.choice-menu-trigger')
     const table = document.querySelector('[data-root-session-list] table')
     const title = document.querySelector('[data-root-session-list] [data-session-id] a')
     const root = document.documentElement
@@ -309,46 +312,61 @@ async function probeStyles(page, where) {
       titleSize: title ? getComputedStyle(title).fontSize : '',
       pageOverflow: root.scrollWidth - root.clientWidth,
       pathname: location.pathname,
-      shell: !!document.querySelector('header a[aria-label="Peasant home"]')
-        && !!document.querySelector('header a[href="/settings/"]')
-        && !!document.querySelector('header button[aria-keyshortcuts]')
-        && !!document.querySelector('header button[aria-label^="Switch to"]')
-        && !document.querySelector('header [aria-current="page"]'),
+      shell: !!document.querySelector('.asb a.asb-brand[href="/"]')
+        && !!document.querySelector('.asb a[href="/settings"], .asb a[href="/settings/"]')
+        && !!document.querySelector('.asb button[title^="search"]')
+        && !!document.querySelector('.asb button[title^="switch to "]')
+        && document.querySelector('.asb-panel [aria-current="page"]')?.getAttribute('href') === '/',
     }
   })
   if (!/atkinson\s*hyperlegible/i.test(probe.bodyFont) || /mono/i.test(probe.bodyFont.split(',')[0])) fail(`${where}: body font is ${probe.bodyFont}`)
-  if (!/atkinson\s*hyperlegible\s*mono/i.test(probe.h1Font) || probe.h1Size !== '28px' || probe.h1Text !== 'your sessions') fail(`${where}: title probe ${JSON.stringify(probe)}`)
-  if (probe.optionRadius !== '0px') fail(`${where}: filter option radius is ${probe.optionRadius}`)
+  // The title is fairtrade's hero size on a wide screen and its xl size on a phone.
+  const titleSize = (await page.evaluate(() => window.innerWidth)) < 768 ? '28px' : '40px'
+  if (!/atkinson\s*hyperlegible\s*mono/i.test(probe.h1Font) || probe.h1Size !== titleSize || probe.h1Text !== 'sessions') fail(`${where}: title probe ${JSON.stringify(probe)}`)
+  if (probe.optionRadius !== '0px') fail(`${where}: filters trigger radius is ${probe.optionRadius}`)
   if (!probe.tablePresent || probe.titleSize !== '16px') fail(`${where}: session table probe ${JSON.stringify(probe)}`)
   if (probe.pageOverflow > 0) fail(`${where}: the page scrolls sideways by ${probe.pageOverflow}px`)
   if (!probe.shell || probe.pathname !== '/') fail(`${where}: the home route or persistent product shell is missing ${JSON.stringify(probe)}`)
   return probe
 }
 
+/** Picks a publish-state filter from the filters menu, the way a person does. */
 async function pressFilter(page, label) {
-  const pressed = await page.evaluate((wanted) => {
-    const options = [...document.querySelectorAll('[data-root-session-list] .bs-seg-opt')]
-    const option = options.find((candidate) => candidate.textContent.trim().replace(/\s+[\d,]+$/, '') === wanted)
-    option?.click()
-    return option ? option.textContent.trim() : null
-  }, label)
-  if (!pressed) fail(`the ${label} filter option never mounted`)
+  const trigger = page.getByRole('button', { name: /^filters/ })
+  if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click()
+  const option = page.getByRole('menuitemradio', { name: label, exact: true })
+  if (!await option.count()) fail(`the ${label} filter option never mounted`)
+  await option.click()
+  await page.keyboard.press('Escape')
   await pause(150)
-  return pressed
+  return label
 }
 
-/** Presses load more until the list is complete and returns the rows listed. */
+/** Switches Home to one of its views from the browse-by menu. */
+async function browseBy(page, view) {
+  await page.getByRole('button', { name: /^browse by:/ }).click()
+  await page.getByRole('menuitemradio', { name: view, exact: true }).click()
+}
+
+/** Walks the pager from the first page to the last and returns how many rows it listed. */
 async function listedRows(page) {
-  for (let i = 0; i < 100; i++) {
-    const more = await page.evaluate(() => {
-      const button = [...document.querySelectorAll('[data-root-session-list] button')].find((candidate) => candidate.textContent.trim() === 'load more')
-      button?.click()
-      return !!button
-    })
-    if (!more) break
-    await pause(100)
+  const list = page.locator('[data-root-session-list]')
+  const idle = () => page.waitForFunction(() => !document.querySelector('[data-root-session-list]')?.hasAttribute('aria-busy'))
+  const first = list.getByRole('button', { name: 'page 1', exact: true })
+  if (await first.count() && await first.getAttribute('aria-current') !== 'page') {
+    await first.click()
+    await pause(150)
   }
-  return page.evaluate(() => document.querySelectorAll('[data-root-session-list] tbody [data-session-id]').length)
+  let listed = 0
+  for (let i = 0; i < 100; i++) {
+    await idle()
+    await pause(100)
+    listed += await list.locator('tbody [data-session-id]').count()
+    const next = list.getByRole('button', { name: 'next page', exact: true })
+    if (!await next.count() || await next.isDisabled()) break
+    await next.click()
+  }
+  return listed
 }
 
 async function resetList(page) {
@@ -528,7 +546,7 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
   try {
     await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the session list never mounted`))
     if (process.env.PEASANT_HOME_VISUAL_MUTATION === 'font') await page.evaluate(() => { document.body.style.fontFamily = 'Arial' })
-    if (process.env.PEASANT_HOME_VISUAL_MUTATION === 'navigation') await page.getByRole('link', { name: 'Peasant home', exact: true }).evaluate(node => node.remove())
+    if (process.env.PEASANT_HOME_VISUAL_MUTATION === 'navigation') await page.locator('.asb a.asb-brand').evaluate(node => node.remove())
     const tip = await page.evaluate(() => {
       const aside = document.querySelector('aside[aria-label="auto-publish tip"]')
       const text = aside?.querySelector('p')
@@ -537,9 +555,9 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       const range = document.createRange()
       range.selectNodeContents(text)
       const lines = [...range.getClientRects()]
-      return { copy: text.textContent, brand: !!aside.querySelector('[data-brand="claude"]'), dismiss: !!aside.querySelector('button[aria-label="dismiss auto-publish tip"]'), font: getComputedStyle(text).fontFamily, size: getComputedStyle(text).fontSize, left: box.left, right: box.right, width: innerWidth, textRight: Math.max(...lines.map((line) => line.right)), textLeft: Math.min(...lines.map((line) => line.left)) }
+      return { copy: text.textContent, docs: aside.querySelector('a[data-docs-topic="autoPublish"][target="_blank"]')?.getAttribute('href') ?? null, dismiss: !!aside.querySelector('button[aria-label="dismiss auto-publish tip"]'), font: getComputedStyle(text).fontFamily, size: getComputedStyle(text).fontSize, left: box.left, right: box.right, width: innerWidth, textRight: Math.max(...lines.map((line) => line.right)), textLeft: Math.min(...lines.map((line) => line.left)) }
     })
-    if (!tip || !tip.copy.includes('tick the auto-publish box the next time you publish') || !tip.copy.includes('/peasant auto') || !tip.brand || !tip.dismiss) fail(`${where}: the actual automatic publishing tip or its exit is missing`)
+    if (!tip || !tip.copy.includes('your sessions can publish on their own') || !tip.docs || tip.copy.includes('/peasant auto') || !tip.dismiss) fail(`${where}: the actual automatic publishing tip, its docs link or its exit is missing`)
     if (tip.left < 0 || tip.right > tip.width + 1 || tip.textRight > tip.right + 1 || tip.textLeft < tip.left - 1) fail(`${where}: the mounted tip overflows its phone or desktop bounds ${JSON.stringify(tip)}`)
     if (!/atkinson/i.test(tip.font) || parseFloat(tip.size) < 16) fail(`${where}: the tip body violates the canonical font or 16px floor ${JSON.stringify(tip)}`)
     const probe = await probeStyles(page, where)
@@ -578,7 +596,8 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       href: node.querySelector('a')?.getAttribute('href'),
       title: node.querySelector('a')?.textContent?.trim(),
       fontSize: getComputedStyle(node.querySelector('a')).fontSize,
-      publishChrome: !!node.querySelector('.pub-state'),
+      // The state has its own column; only the phone summary repeats it in the title cell.
+      publishChrome: [...node.querySelectorAll('.pub-state')].some((state) => !state.closest('.home-session-phone')),
     }))
     const childSync = answers.sync.find((row) => row.id === CONTEXT.childSessionId)
     if (familyProbe.topLevel || familyProbe.publishChrome || !familyProbe.title || familyProbe.fontSize !== '16px'
@@ -642,8 +661,9 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     await resetList(page)
     await assertMissingParentOmitted(page, `${where}/missing-parent-detail/return-home`)
 
-    // A search replaces the list with the grouped search results.
-    await page.locator('input[type="search"]').fill(FIXTURE.searchQuery)
+    // A search replaces the list with the grouped search results. (By role: a hidden copy of the
+    // page can sit in the streamed HTML until the browser swaps it in.)
+    await page.getByRole('searchbox', { name: 'search your sessions' }).fill(FIXTURE.searchQuery)
     await page.waitForSelector('[data-grouped-sessions-section]', { state: 'visible', timeout: 15000 }).catch(() => fail(`${where}: search results never mounted`))
     await pause(300)
     await shoot(page, gate, join(OUT, theme, viewport.id, 'search.png'), `${where}/search`)
@@ -660,23 +680,26 @@ async function runSelection(browser, gate, theme, viewport, answers, summaryBase
   let page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { ...summaryBase, selection: FIXTURE.selectionNotice } })
   try {
     await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the list never mounted under a selection notice`))
-    await page.getByRole('button', { name: 'browse by project', exact: true }).click()
+    await browseBy(page, 'project')
     await page.getByRole('status').filter({ hasText: 'hidden by a saved selection' }).waitFor({ state: 'visible' })
     const notice = await page.evaluate(() => [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent.trim()).find((text) => text.includes('hidden by a saved selection')) ?? '')
     const { hiddenProjects, hiddenSessions } = FIXTURE.selectionNotice
     if (notice !== `${hiddenProjects} projects and ${hiddenSessions} sessions hidden by a saved selection`) fail(`${where}: selection notice reads ${JSON.stringify(notice)}`)
+    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-notice.png'), `${where}/selection-notice`)
+    // The session list is the other view of the same menu.
+    await browseBy(page, 'sessions')
+    await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the list never came back from the project view`))
     await listedRows(page)
     await assertMissingParentOmitted(page, `${where}/selection-notice`)
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-notice.png'), `${where}/selection-notice`)
   } finally {
     await page.close()
   }
 
   page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { projects: [], selection: FIXTURE.selectionRecovery } })
   try {
-    await page.getByRole('button', { name: 'browse by project', exact: true }).click()
+    await browseBy(page, 'project')
     await page.waitForSelector('[role="status"][aria-label="project selection recovery"]', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the recovery panel never mounted`))
-    const leaked = await page.locator('[data-root-session-list] [data-session-id], [data-browse-view="projects"] a').count()
+    const leaked = await page.locator('[data-root-session-list] [data-session-id], [data-browse-view="projects"] a:not([data-docs-topic])').count()
     if (leaked) fail(`${where}: selection recovery leaked session/project identities`)
     await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-recovery.png'), `${where}/selection-recovery`, { contentSelector: '[role="status"][aria-label="project selection recovery"]' })
   } finally {
@@ -690,11 +713,11 @@ async function runEmpty(browser, gate, theme, viewport) {
   const diagnostics = []
   const page = await openPage(browser, EMPTY_ORIGIN, theme, viewport, { diagnostics })
   try {
-    await page.getByRole('button', { name: 'browse by project', exact: true }).click()
+    await browseBy(page, 'project')
     await page.waitForFunction(() => document.body.textContent.includes('no ai work recorded yet'), undefined, { timeout: 20000 }).catch(() => fail(`${where}: the empty install never showed its teaching state`))
-    // The teaching state is short: capture the shell and the state, not the
-    // blank page below it.
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'empty.png'), `${where}/empty`)
+    // The empty state is short: keep the full shell capture and hold the
+    // pixel gate to the mounted state, not the blank page below it.
+    await shoot(page, gate, join(OUT, theme, viewport.id, 'empty.png'), `${where}/empty`, { contentSelector: '.home-page' })
   } finally {
     await page.close()
   }

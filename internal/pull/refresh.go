@@ -30,8 +30,8 @@ func (p *Pipeline) RefreshOwnAnnotations(ctx context.Context, opts RefreshOption
 	if !p.creds.IsLoggedIn() {
 		return &RefreshResult{Status: PullStatusNotLoggedIn}, fmt.Errorf(
 			"peasant village annotations sync: not logged in\n" +
-				"  what: no valid village credentials are present\n" +
-				"  why:  refreshing annotations contacts the village and requires authentication\n" +
+				"  what: no valid peasant online credentials are present\n" +
+				"  why:  refreshing annotations contacts peasant online and requires authentication\n" +
 				"  fix:  run `peasant village login`, then re-run the sync")
 	}
 	host := p.villageHost()

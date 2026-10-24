@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -614,6 +615,9 @@ func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 	var refusedUploads atomic.Int64
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/auth/me":
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/schema/version":
 			preflightReached.Store(true)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/annotations/manifest":

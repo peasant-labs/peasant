@@ -297,7 +297,7 @@ func runPublicationsCase(t *testing.T, c publicationsCase) {
 		if alias == "inside" {
 			project = insideProject
 		}
-		if err := world.db.RecordPublicationAttempt(t.Context(), store.PublicationAttemptDiagnostic{VillageOrigin: world.village.URL(), OwnerUserID: "user-1", SessionID: publishingSessions[alias], ProjectHash: project, AttemptedAt: 1800000000000, Stage: store.PublicationAttemptStagePublish, Message: "Village rejected the request"}); err != nil {
+		if err := world.db.RecordPublicationAttempt(t.Context(), store.PublicationAttemptDiagnostic{VillageOrigin: world.village.URL(), OwnerUserID: testutil.VillageFixtureAccountID.String(), SessionID: publishingSessions[alias], ProjectHash: project, AttemptedAt: 1800000000000, Stage: store.PublicationAttemptStagePublish, Message: "Village rejected the request"}); err != nil {
 			t.Fatal(err)
 		}
 	}

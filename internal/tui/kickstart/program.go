@@ -68,7 +68,7 @@ func (p Phase) String() string {
 // the program never reaches for auth or the network itself; a test supplies a fake.
 //
 // onURL, when the runner calls it, reports the exact login URL BEFORE the
-// runner blocks on the OAuth callback — the "connecting to village" spinner
+// runner blocks on the OAuth callback — the "connecting to peasant online" spinner
 // renders it so the user always has a manual fallback even when the browser
 // never opens or opens the wrong profile. The runner may call onURL zero or
 // one times; a nil onURL must never be called.
@@ -172,15 +172,15 @@ type progressTickMsg struct {
 const progressPollInterval = time.Second / 24
 
 const (
-	oauthPrompt      = "connect to a village now?"
+	oauthPrompt      = "connect to peasant online now?"
 	visibilityPrompt = "log in now to choose a default sharing visibility?"
-	connectingLabel  = "connecting to village"
+	connectingLabel  = "connecting to peasant online"
 )
 
 // errLoginCanceled is the note shown after the user cancels an in-flight login
 // with esc. It is informational, not a failure: local setup can still continue.
 var errLoginCanceled = errors.New(
-	"village connection canceled. you can connect later with `peasant village login`.")
+	"peasant online connection canceled. you can connect later with `peasant village login`.")
 
 // villageConnectionState is shared by every Program value Bubble Tea produces.
 // Registry visibility closes over this pointer, so authentication can reveal a
@@ -393,7 +393,7 @@ func (p Program) updateOAuth(msg tea.Msg) (Program, tea.Cmd) {
 		}
 		p = p.clearLogin()
 		if m.err != nil {
-			p.loginErr = loginActionableError(m.err, "the initial village connection step")
+			p.loginErr = loginActionableError(m.err, "the initial peasant online connection step")
 			p.connection.Set(false)
 			return p, nil
 		}
@@ -509,7 +509,7 @@ func (p Program) staleLoginURL(m loginURLMsg) bool {
 	return !p.authInFlt || m.epoch != p.loginEpoch
 }
 
-// interruptLogin lets the user escape the "connecting to village" spinner. ctrl+c
+// interruptLogin lets the user escape the "connecting to peasant online" spinner. ctrl+c
 // (or q) cancels the attempt and quits kickstart; esc cancels the attempt and
 // returns to the prompt so the user can continue locally. Any other key is
 // ignored while the login runs.
@@ -544,7 +544,7 @@ func (p Program) enterFlow() (Program, tea.Cmd) {
 				"guided settings unavailable.\n"+
 					"what: kickstart could not enter its retained settings flow.\n"+
 					"why: %v\n"+
-					"where: kickstart Program after the initial village connection choice.\n"+
+					"where: kickstart Program after the initial peasant online connection choice.\n"+
 					"when: before transcript scanning or final consent.\n"+
 					"means: the draft remains buffered and no setting or transcript was published.\n"+
 					"fix: exit without saving, rerun kickstart, and report the missing guided section.",
@@ -721,7 +721,7 @@ func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 				"sharing guidance unavailable after login.\n"+
 					"what: kickstart authenticated but could not open the sharing visibility choice.\n"+
 					"why: %v\n"+
-					"where: kickstart Program while restoring the guided flow after village login.\n"+
+					"where: kickstart Program while restoring the guided flow after peasant online login.\n"+
 					"when: after authentication succeeded and before final consent.\n"+
 					"means: the draft remains buffered and no configuration or transcript was published.\n"+
 					"fix: exit without saving, rerun kickstart, and report the missing sharing section.",
@@ -1061,7 +1061,7 @@ func (p Program) View() string {
 // are shown as a bulleted list above the confirm in the centered dialog, and
 // wrapped to the terminal width rather than hard-wrapped in the source.
 var villageContextBullets = []string{
-	"a village is a shared commons for agent transcripts.",
+	"peasant online is a shared commons for agent transcripts.",
 	"local mode keeps all data on this machine.",
 	"connecting sends nothing until a later explicit publish.",
 	"publishing is separate. it is explicit and opt-in.",
@@ -1129,7 +1129,7 @@ func appendBullets(panel *kit.Panel, style lipgloss.Style, facts []string, width
 	}
 }
 
-// viewConnecting renders the "connecting to village" spinner with the keys that
+// viewConnecting renders the "connecting to peasant online" spinner with the keys that
 // escape it. The login runner can block (an interactive device flow, a slow
 // network), so the surface must always advertise a way out: esc cancels and
 // returns to the prompt, ctrl+c quits kickstart.
@@ -1194,8 +1194,8 @@ func joinDialog(panel, control string) string {
 // flagged the top-left anchoring as strange), with the explanatory context above
 // the yes/no confirm, over a fully themed background. The heading names the
 // topic once ("before you connect"); the confirm below it asks the actual
-// yes/no question ("connect to a village now?"), so the phrase "connect to a
-// village" is not repeated back to back.
+// yes/no question ("connect to peasant online now?"), so the phrase "connect to
+// peasant online" is not repeated back to back.
 func (p Program) viewOAuth() string {
 	styles := p.deps.Theme.Styles()
 	width := wrapPromptWidth(p.width)
@@ -1375,7 +1375,7 @@ func (p Program) doneContent() string {
 			lines = append(lines, styles.Danger.Render(line))
 		}
 	} else {
-		preamble := "these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
+		preamble := "these useful next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart runs none of them."
 		if p.width > 0 {
 			preamble = ansi.Wrap(preamble, p.width, "")
 		}
@@ -1414,13 +1414,13 @@ func displayDuration(duration time.Duration) string {
 
 func loginActionableError(err error, where string) error {
 	return fmt.Errorf(
-		"village login failed.\n"+
+		"peasant online login failed.\n"+
 			"what: kickstart could not authenticate this machine.\n"+
 			"why: %v.\n"+
 			"where: %s.\n"+
 			"when: before the sharing choice and final consent.\n"+
 			"means: the draft remains buffered, local data stays on this machine, and nothing was published.\n"+
-			"fix: check the village endpoint and browser login, retry here, or continue locally.",
+			"fix: check the peasant online endpoint and browser login, retry here, or continue locally.",
 		err, where)
 }
 

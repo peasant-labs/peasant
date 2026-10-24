@@ -24,6 +24,7 @@ Actual per-capture producer stamps are separate evidence.
 | Pi | 2 → 3 | 17 → 18 | The thinking-level back-fill advances both targets so settled sessions re-extract and re-index with their recorded thinking-level history. |
 | Codex | 1 → 2 | 17 → 18 | The thinking-level back-fill advances both targets so settled sessions re-extract and re-index with their recorded thinking-level history. |
 | OpenCode | 2 → 3 | 17 → 18 | The thinking-level back-fill advances both targets so settled sessions re-extract and re-index with their recorded thinking-level history. |
+| Claude Code | unchanged at 3 | 19 → 20 | A control record's payload is retained only when it passes the strict evidence scan every reader of Extra runs; a payload with a lone UTF-16 surrogate escape, a duplicate key or invalid UTF-8 is stored as its identity object instead, as an oversized one already was. Settled sessions re-index so a stored payload the share scan refused is rewritten. |
 
 Claude Code, Cursor and Strike changes in the retained-unknown bump are in
 capture/indexing, not adapter metadata extraction, so their adapter revision did
@@ -43,6 +44,7 @@ baseline.
 | OpenCode | 2 → 3 | 17 → 18 | 2 (unchanged) | Current row normalization retains unknown rows and blocks before projection; native indexing carries them through selected main/earlier evidence. |
 | Codex | 2 → 3 | 18 → 20 | 2 (unchanged) | The thinking-level back-fill advances the adapter; the indexer also advances to recover inherited-pair Codex results and to admit and retain native delivery discriminators. |
 | OpenCode | 3 → 4 | 18 → 19 | 2 (unchanged) | The thinking-level back-fill advances both targets so native sessions re-extract and re-index with their recorded thinking-level history. |
+| Claude Code | unchanged at 3 | 20 → 21 | 2 (unchanged) | The control-record payload retention change above applies to the managed producer too, so settled managed sessions re-index. |
 
 OpenCode's private managed-projection version 3 and prior-evidence version 2 are
 not indexformat versions and do not change the representation targets above.

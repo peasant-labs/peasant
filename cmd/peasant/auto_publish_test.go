@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/autopublish/autopublishtest"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -30,6 +31,79 @@ import (
 // are published after the first, in order. Each transcript on the Village
 // double has its session's ID.
 const autoPublishSessionID = "abcd1234-abcd-4bcd-8bcd-abcdef123456"
+
+// This reuses the required two-target consent fixture, but observes the actual
+// mounted CLI's new saved evidence exit rather than only Village's audience.
+func assertRuleActionRecordedEvidence(t *testing.T, w *autoPublishWorld, selected autopublishtest.Case) {
+	t.Helper()
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(w.dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service := collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: w.dir})
+	history, err := service.History(t.Context(), schema.LocalContributionHistoryQuery{Kind: schema.LocalContributionEvidenceReceipts, Page: 1, Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := false
+	submitted := map[schema.VillageUUID]bool{}
+	for _, receipt := range history.Receipts {
+		if receipt.TranscriptID.String() != autoPublishSessionID {
+			t.Fatalf("receipt escaped the consented recorded session: %+v", receipt)
+		}
+		switch receipt.Operation {
+		case schema.CollectiveOperationPublish:
+			if published || receipt.Outcome != schema.LocalConfirmedContributionPublished ||
+				receipt.CollectiveID != nil || receipt.SourceReceiptID == nil {
+				t.Fatalf("incorrect publication receipt: %+v", receipt)
+			}
+			published = true
+		case schema.CollectiveOperationShare:
+			if receipt.CollectiveID == nil || receipt.Outcome != schema.LocalConfirmedContributionSubmitted || submitted[*receipt.CollectiveID] {
+				t.Fatalf("incorrect or repeated target receipt: %+v", receipt)
+			}
+			submitted[*receipt.CollectiveID] = true
+		default:
+			t.Fatalf("unexpected successful operation: %+v", receipt)
+		}
+	}
+	if !published {
+		t.Fatal("mounted rule publication did not record content success")
+	}
+	for alias := range selected.Expect.Audience {
+		id := w.fixture.Collectives[alias].ID
+		if !submitted[id] {
+			t.Fatalf("mounted rule action omitted confirmed target %s", alias)
+		}
+		delete(submitted, id)
+	}
+	if len(submitted) != 0 {
+		t.Fatalf("rule recorded unconsented targets: %v", submitted)
+	}
+	attempts, err := service.History(t.Context(), schema.LocalContributionHistoryQuery{Kind: schema.LocalContributionEvidenceRemoteAttempts, Page: 1, Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := map[schema.VillageUUID]schema.VillageShareStatus{}
+	for alias, status := range selected.Expect.Audience {
+		expected[w.fixture.Collectives[alias].ID] = status
+	}
+	for _, row := range attempts.RemoteAttempts {
+		status, present := expected[row.CollectiveID]
+		if !present || row.TranscriptID.String() != autoPublishSessionID ||
+			row.Attempt.EventNum != 1 || row.Attempt.Status != status {
+			t.Fatalf("mounted rule attempt is not the actual authoritative target: %+v", row)
+		}
+		if err := row.Attempt.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		delete(expected, row.CollectiveID)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("mounted rule action omitted authoritative attempts: %v", expected)
+	}
+}
 
 var autoPublishExtraIDs = map[autopublishtest.SessionRole]string{
 	"clone":             "abcd1234-abcd-4bcd-8bcd-abcdef120000",
@@ -406,6 +480,9 @@ func TestAutoPublishPush(t *testing.T) {
 				output.WriteString(stdout + stderr)
 			}
 			assertErrorContains(t, err, c.Expect.ErrorContains, output.String())
+			if c.Name == "covered-push-publishes-private-and-shares" {
+				assertRuleActionRecordedEvidence(t, w, c)
+			}
 			for _, part := range c.Expect.OutputContains {
 				if !strings.Contains(output.String(), part) {
 					t.Errorf("the output does not say %q:\n%s", part, output.String())

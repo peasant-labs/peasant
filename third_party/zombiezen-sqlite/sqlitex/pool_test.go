@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -140,94 +142,144 @@ func TestPoolAfterClose(t *testing.T) {
 }
 
 func TestSharedCacheLock(t *testing.T) {
-	dir, err := os.MkdirTemp("", "sqlite-test-")
+	c0, ctx, _, done, result := startSharedCacheInsert(t)
+	if err := sqlitex.Execute(c0, "COMMIT;", nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+		if err := <-result; err != nil {
+			t.Fatalf("insert after releasing read transaction: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("insert did not finish after releasing read transaction:", ctx.Err())
+	}
+	if err := sqlitex.Execute(c0, "SELECT c FROM t ORDER BY c;", &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if got := stmt.ColumnInt(0); got != 1 {
+				return fmt.Errorf("inserted c = %d, want 1", got)
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	count, err := sqlitex.ResultInt(c0.Prep("SELECT count(*) FROM t;"))
+	if err != nil || count != 1 {
+		t.Fatalf("inserted row count = %d, %v; want 1, nil", count, err)
+	}
+}
+
+func TestSharedCacheLockCancel(t *testing.T) {
+	c0, ctx, cancel, done, result := startSharedCacheInsert(t)
+	cancel()
+	if c0.AutocommitEnabled() {
+		t.Fatal("read transaction was not held when canceling the insert")
+	}
+	select {
+	case <-done:
+		if err := <-result; sqlite.ErrCode(err) != sqlite.ResultInterrupt {
+			t.Fatalf("insert canceled while read transaction held: %v; want SQLITE_INTERRUPT", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled insert did not join while read transaction held:", ctx.Err())
+	}
+	if err := sqlitex.Execute(c0, "ROLLBACK;", nil); err != nil {
+		t.Fatal(err)
+	}
+	count, err := sqlitex.ResultInt(c0.Prep("SELECT count(*) FROM t;"))
+	if err != nil || count != 0 {
+		t.Fatalf("rows after canceled insert = %d, %v; want 0, nil", count, err)
+	}
+}
+
+// startSharedCacheInsert returns only after Step is waiting for c0's actual
+// shared-cache table lock. SQLite exposes no callback for unlock-notify wait
+// registration. Observe the worker's parked stack rather than guessing a delay
+// or adding a production hook. This also avoids canceling before registration.
+func startSharedCacheInsert(t *testing.T) (*sqlite.Conn, context.Context, context.CancelFunc, <-chan struct{}, <-chan error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	t.Cleanup(cancel)
+	dbFile := filepath.Join(t.TempDir(), "shared.db")
+	flags := sqlite.OpenReadWrite | sqlite.OpenCreate | sqlite.OpenURI | sqlite.OpenSharedCache
+	c0, err := sqlite.OpenConn(dbFile, flags)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
-
-	dbFile := filepath.Join(dir, "awal.db")
-
-	c0, err := sqlite.OpenConn(dbFile, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
+	t.Cleanup(func() {
 		if err := c0.Close(); err != nil {
 			t.Error(err)
 		}
-	}()
-	// TODO(someday): CI fails without this old behavior.
-	c0.SetBusyTimeout(10 * time.Second)
-
-	err = sqlitex.ExecScript(c0, `
-		DROP TABLE IF EXISTS t;
-		CREATE TABLE t (c, content BLOB);
-		DROP TABLE IF EXISTS t2;
-		CREATE TABLE t2 (c);
-		INSERT INTO t2 (c) VALUES ('hello');
-		`)
+	})
+	if err := sqlitex.Execute(c0, "CREATE TABLE t (c);", nil); err != nil {
+		t.Fatal(err)
+	}
+	c1, err := sqlite.OpenConn(dbFile, flags)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	c1, err := sqlite.OpenConn(dbFile, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
+	var done chan struct{}
+	t.Cleanup(func() {
+		cancel()
+		// Always release the dependency before joining, including Fatal/panic
+		// paths. Close only after Step and its statement finalization return.
+		if !c0.AutocommitEnabled() {
+			if err := sqlitex.Execute(c0, "ROLLBACK;", nil); err != nil {
+				t.Error("release read transaction during cleanup:", err)
+			}
+		}
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				// Never free a live connection, even on a broken-driver path.
+				t.Error("insert worker did not join after cancel and rollback; leaving its connection open")
+				return
+			}
+		}
 		if err := c1.Close(); err != nil {
 			t.Error(err)
 		}
-	}()
-	// TODO(someday): CI fails without this old behavior.
-	c1.SetBusyTimeout(10 * time.Second)
-
-	c0Lock := func() {
-		if _, err := c0.Prep("BEGIN;").Step(); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := c0.Prep("INSERT INTO t (c, content) VALUES (0, 'hi');").Step(); err != nil {
-			t.Fatal(err)
-		}
+	})
+	c1.SetInterrupt(ctx.Done())
+	if err := sqlitex.Execute(c0, "BEGIN;", nil); err != nil {
+		t.Fatal(err)
 	}
-	c0Unlock := func() {
-		if err := sqlitex.Execute(c0, "COMMIT;", nil); err != nil {
-			t.Fatal(err)
-		}
+	if err := sqlitex.Execute(c0, "SELECT c FROM t;", nil); err != nil {
+		t.Fatal(err)
 	}
-
-	c0Lock()
-
-	stmt := c1.Prep("INSERT INTO t (c) VALUES (1);")
-
-	done := make(chan struct{})
+	stmt, _, err := c1.PrepareTransient("INSERT INTO t VALUES (1);")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done = make(chan struct{})
+	result := make(chan error, 1)
 	go func() {
-		if _, err := stmt.Step(); err != nil {
-			t.Error(err)
-			return
-		}
-		close(done)
+		defer close(done)
+		_, err := stmt.Step()
+		result <- errors.Join(err, stmt.Finalize())
 	}()
-
-	time.Sleep(10 * time.Millisecond)
-	select {
-	case <-done:
-		t.Error("insert done while transaction was held")
-	default:
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	stack := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(stack, true)
+		for _, goroutine := range strings.Split(string(stack[:n]), "\n\n") {
+			if strings.Contains(goroutine, "sqlitex_test.startSharedCacheInsert.func") &&
+				strings.Contains(goroutine, "sqlite.waitForUnlockNotify(") &&
+				strings.Contains(goroutine, "[sync.Mutex.Lock]") {
+				return c0, ctx, cancel, done, result
+			}
+		}
+		select {
+		case <-done:
+			t.Fatal("insert finished while read transaction held:", <-result)
+		case <-ctx.Done():
+			t.Fatal("insert did not park waiting for shared-cache unlock:", ctx.Err())
+		case <-ticker.C:
+		}
 	}
-
-	c0Unlock()
-
-	// End the initial transaction, allowing the goroutine to complete
-	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Error("second connection insert not completing")
-	}
-
-	// TODO: It is possible for stmt.Reset to return SQLITE_LOCKED.
-	//       Work out why and find a way to test it.
 }
 
 func TestPoolPutMatch(t *testing.T) {

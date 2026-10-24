@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -122,7 +123,8 @@ func TestSaveCredentials_Permissions(t *testing.T) {
 	}
 
 	perm := info.Mode().Perm()
-	if perm != defaults.PrivateFilePerm {
+	// Windows writable-file mode bits do not describe its ACL permissions.
+	if runtime.GOOS != "windows" && perm != defaults.PrivateFilePerm {
 		t.Errorf("file perm = %o, want %o", perm, defaults.PrivateFilePerm)
 	}
 }
@@ -200,7 +202,9 @@ func TestCredentialsFrom_RoundTripIsolatedFromDefaultStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat custom credentials: %v", err)
 	}
-	if info.Mode().Perm() != defaults.PrivateFilePerm {
+	// Keep the POSIX privacy assertion without treating Windows' synthetic 0666
+	// mode as an ACL verdict; all round-trip and profile isolation checks apply.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != defaults.PrivateFilePerm {
 		t.Errorf("custom credential permissions = %o, want %o", info.Mode().Perm(), defaults.PrivateFilePerm)
 	}
 

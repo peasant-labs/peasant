@@ -303,7 +303,17 @@ jobs:
           TESTGATE_OUT="$RUNNER_TEMP/testgate/$(date -u +%Y%m%dT%H%M%SZ)"
           echo "TESTGATE_DIR=$TESTGATE_OUT" >> "$GITHUB_ENV"
           export TESTGATE_OUT
-          make check RACE=${{ env.RACE }}
+          # Root in the container pool otherwise bypasses the DAC permissions
+          # that filesystem tests must exercise. Drop only those bypass powers
+          # irreversibly for this command and its children, not the runner.
+          if [ "$(id -u)" -eq 0 ]; then
+            setpriv --bounding-set=-dac_override,-dac_read_search \
+              --inh-caps=-dac_override,-dac_read_search \
+              --ambient-caps=-dac_override,-dac_read_search --no-new-privs \
+              make check RACE=${{ env.RACE }}
+          else
+            make check RACE=${{ env.RACE }}
+          fi
           end=$(date +%s)
           {
             echo "### amd64 pool gate — phase wall"
@@ -608,9 +618,7 @@ jobs:
       # Satisfy the `//go:embed all:web/out` directive for `go build ./...`. The
       # committed web/out/.gitkeep placeholder already satisfies the embed on a
       # fresh checkout; `make web-stub` (idempotent + non-destructive)
-      # is the single shared source for the stub and additionally writes a real
-      # index.html stub when one is absent. Belt-and-suspenders in case `make
-      # clean` ever runs first.
+      # recreates it. Belt-and-suspenders in case `make clean` ever runs first.
       - name: Stub web/out embed
         run: make web-stub
 
@@ -779,6 +787,9 @@ jobs:
       # internal/proc is the console-window helper and is green here in full.
       - name: Run focused tests
         run: go test ./internal/defaults/... ./internal/config/... ./internal/proc/...
+
+      - name: Run credential commit guards
+        run: go test ./internal/auth/ -run 'TestCredential|TestNormalizeVillageURL|TestLogout|TestCancelledLogout|TestAlreadyCancelledLogout'
 
       # The Windows-specific behaviour this branch adds is named explicitly
       # instead of running these packages whole. internal/ingest has pre-existing

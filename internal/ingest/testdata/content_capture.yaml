@@ -43,6 +43,10 @@ required_names:
   - strike-orphan-tool-output
   - claude-missing-text
   - claude-summary-full-text
+  - claude-control-attachment-lone-surrogate
+  - claude-control-attachment-duplicate-key
+  - claude-control-attachment-invalid-utf8
+  - claude-control-attachment-surrogate-pair
   - claude-result-full-text
   - claude-error-full-text
   - claude-control-permission-mode
@@ -374,6 +378,56 @@ cases:
       attachmentType: hook_success
     want_extra_absent: [attachment, hookData, uuid]
     want_raw_bytes_min: 8192
+  - name: claude-control-attachment-lone-surrogate
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok \ud83d"},"uuid":"at-surrogate"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, stdout, uuid]
+  - name: claude-control-attachment-duplicate-key
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"first","stdout":"second"},"uuid":"at-duplicate"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, stdout, uuid]
+  - name: claude-control-attachment-invalid-utf8
+    harness: claude-code
+    control: true
+    invalid_utf8: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok INVALIDBYTE"},"uuid":"at-invalid"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, stdout, uuid]
+  # The clean twin of the three above: a complete surrogate pair is valid
+  # evidence, so the payload is retained whole.
+  - name: claude-control-attachment-surrogate-pair
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok \ud83d\ude00"},"uuid":"at-pair"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"hook_success","stdout":"build ok \ud83d\ude00"}'
+    want_extra_absent: [kind, rawBytes, uuid]
   - name: claude-control-bridge-session
     harness: claude-code
     control: true

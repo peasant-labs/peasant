@@ -1,33 +1,29 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { useHomeSessions } from '@/hooks/useHomeSessions';
 import { SkeletonList } from '@/lib/skeleton';
-import type { LocalSyncProjectOption } from '@/lib/api/home';
-import { discoveryErrorMessage } from '@/lib/selectionGuidance';
+import { IngestTeach } from '@/components/IngestTeach';
 import Link from 'next/link';
 import {
   DataTable,
-  ProviderIcon,
+  ProviderName,
   PublishStateLabel,
-  Segmented,
-  Select,
   SessionGroupDisclosure,
   Button,
+  Pagination,
   type DataTableColumn,
 } from '@/lib/ft-ui';
 import { usePublicationAudience } from '@/hooks/useRootSessions';
 import {
-  PUBLISH_FILTERS,
-  PUBLISH_FILTER_LABELS,
-  isPublishFilter,
   rowPublishState,
   type PublishFilter,
   type RootSessionRow,
 } from '@/lib/home/publishState';
 import { formatMinutes } from '@/lib/home/rootStats';
-import { parseProjectHash, reviewHref, transcriptHref } from '@/lib/navigation/projectRoutes';
+import { parseProjectHash, transcriptHref } from '@/lib/navigation/projectRoutes';
 import { displayProject } from '@/lib/quality/utils';
+import { cleanSessionTitle } from '@peasant-labs/fairtrade/ui';
 import { formatRelative } from '@/app/review/[[...segments]]/format';
 
 const tokenFormat = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
@@ -45,9 +41,11 @@ function rowTitle(
   titles: ReadonlyMap<string, string>,
   previews: ReadonlyMap<string, string>,
 ): { text: string; untitled: boolean } {
-  const generated = titles.get(id);
+  const title = titles.get(id);
+  const generated = title ? cleanSessionTitle(title) : '';
   if (generated) return { text: generated, untitled: false };
-  const preview = previews.get(id)?.replace(/\s+/g, ' ').trim();
+  const prompt = previews.get(id);
+  const preview = prompt ? cleanSessionTitle(prompt) : '';
   if (preview) {
     const cut = preview.length > PREVIEW_TITLE_LIMIT ? `${preview.slice(0, PREVIEW_TITLE_LIMIT - 1).trimEnd()}…` : preview;
     return { text: `“${cut}”`, untitled: true };
@@ -74,11 +72,11 @@ export interface RootSessionListProps {
   /** sessionId -> first prompt, for sessions without a generated title. */
   previews: ReadonlyMap<string, string>;
   home: ReturnType<typeof useHomeSessions>;
+  /** The publish-state filter the page set; it picks the empty copy. */
   filter: PublishFilter;
-  onFilter: (filter: PublishFilter) => void;
+  /** What the list is scoped to (filter, project); a new scope starts on the first page. */
+  scope: string;
   loading?: boolean;
-  project: LocalSyncProjectOption | null;
-  onProject: (hash: string) => void;
 }
 
 interface SessionChildrenGroupProps {
@@ -114,13 +112,64 @@ function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent =
 
 /**
  * The root page's session list: one row per session with its publish state,
- * the server-owned publish-state filters over the same rows, and
- * `load more`. Home owns server filters and pages; page lengths never stand
- * in for global totals or the complete project catalog.
+ * paged. Each page of the table is one page the server sent: the server pages
+ * by an opaque continuation and sends no total, so the pager numbers the pages
+ * read so far, plus the next one while the server says more follow. Only a
+ * press on the pager reads a page, and the table stays on the page it shows
+ * until the next one has arrived. Page lengths never stand in for global
+ * totals or the complete project catalog, so the footer counts the rows on
+ * screen, not the library. A new scope (filter, project) starts on the first page.
  */
-export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, onFilter, loading, project, onProject }: RootSessionListProps) {
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, scope, loading }: RootSessionListProps) {
   const expandedGroups = home.expanded;
-  const visible = rows;
+  const root = home.groups.get('');
+  const serverPages = root?.pages;
+  // A page can come back short or empty and still have more after it, so the
+  // pager follows `next`, never a count.
+  const hasMore = (serverPages?.at(-1)?.next ?? '') !== '';
+  const reading = root?.loading ?? false;
+  // A session one page repeats from an earlier page stays on the earlier one.
+  const pageRows = useMemo(() => {
+    const seen = new Set<string>();
+    return (serverPages ?? []).map((served) => served.items.filter((row) => {
+      if (seen.has(row.sync.id)) return false;
+      seen.add(row.sync.id);
+      return true;
+    }));
+  }, [serverPages]);
+  const pageCount = Math.max(1, pageRows.length) + (hasMore && pageRows.length > 0 ? 1 : 0);
+  // `page` is the page shown; `wanted` is a page asked for while it is being
+  // read, shown once it arrives. A new scope starts over on the first page.
+  const [paging, setPaging] = useState<{ scope: string; page: number; wanted: number | null }>({ scope, page: 1, wanted: null });
+  if (paging.scope !== scope) setPaging({ scope, page: 1, wanted: null });
+  const { page, wanted } = paging;
+  // The asked-for page shows in the same render its rows arrive in.
+  const shown = wanted !== null && pageRows.length >= wanted ? wanted : page;
+  const current = Math.min(Math.max(1, shown), Math.max(1, pageRows.length));
+  const visible = pageRows[current - 1] ?? [];
+  const start = pageRows.slice(0, current - 1).reduce((sum, items) => sum + items.length, 0);
+  useEffect(() => {
+    if (wanted === null) return;
+    if (pageRows.length >= wanted) setPaging((state) => ({ ...state, page: wanted, wanted: null }));
+    else if (!reading && !hasMore) setPaging((state) => ({ ...state, wanted: null }));
+  }, [wanted, pageRows.length, reading, hasMore]);
+  const choose = (next: number) => {
+    if (next <= pageRows.length) {
+      setPaging((state) => ({ ...state, page: next, wanted: null }));
+    } else if (hasMore) {
+      setPaging((state) => ({ ...state, wanted: next }));
+      home.more();
+    }
+  };
+  // A new page starts at the table's top.
+  const top = useRef<HTMLElement>(null);
+  const turned = useRef(current);
+  useEffect(() => {
+    if (turned.current === current) return;
+    turned.current = current;
+    const box = top.current?.getBoundingClientRect();
+    if (box && box.top < 0) top.current?.scrollIntoView({ block: 'start' });
+  }, [current]);
 
   // Depth-first: each expanded child becomes its own row immediately after its
   // parent. Folded groups materialize nothing, so a deep chain stays bounded.
@@ -145,6 +194,19 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
   const audience = usePublicationAudience(publishedOnScreen, rows);
   const childCounts = useMemo(() => new Map([...home.groups.values()].flatMap(group => group.pages.flatMap(page => page.items)).map(row => [row.sync.id, row.childCount])), [home.groups]);
 
+  const whenOf = (row: ListRow) => {
+    const started = Date.parse(row.sync.startTime);
+    return Number.isNaN(started) ? null : formatRelative(started);
+  };
+  const stateOf = (row: ListRow) => {
+    const state = rowPublishState(row);
+    const published = state === 'published' || state === 'new-turns';
+    // No approved collective is not an audience to count: "published, 0
+    // collectives" read as hidden. The label then names the state alone, as
+    // the transcript's publish bar does.
+    return <PublishStateLabel state={state} collectives={published ? (audience.get(row.id) || undefined) : undefined} className="whitespace-nowrap" />;
+  };
+
   const columns = useMemo<DataTableColumn<ListRow>[]>(
     () => [
       {
@@ -154,7 +216,6 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
           const children = childGroups.get(row.id);
           const hash = parseProjectHash(row.sync.projectHash);
           const title = rowTitle(row.id, titles, previews);
-          const harness = row.sync.harness.replace(/-/g, ' ');
           const childCount = childCounts.get(row.id) ?? 0;
           const group = childCount ? (
             <>
@@ -168,44 +229,51 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
               </div>
             </>
           ) : null;
+          const when = whenOf(row);
+          const meta = (
+            // The agent's mark leads the line, so a child row's mark sits under its parent's chevron.
+            <span className="home-session-meta">
+              <ProviderName harness={row.sync.harness} className="home-session-agent" />,{' '}
+              <span className="tabular-nums">{tokenFormat.format(row.sync.totalTokens).toLowerCase()}</span> tokens
+              {title.untitled ? ', untitled' : ''}
+            </span>
+          );
+          // A phone shows the session column only, so the other columns' facts
+          // follow the title there, above the subagents disclosure.
+          const phone = (
+            <span className="home-session-phone">
+              <span className="home-session-phone-facts">
+                {displayProject(row.sync.projectName)}, <span className="tabular-nums">{row.sync.turnCount.toLocaleString('en-US')}</span> turns,{' '}
+                <span className="tabular-nums">{formatMinutes(Number(row.sync.durationMs) / 60_000)}</span>{when ? `, ${when}` : ''}
+              </span>
+              {stateOf(row)}
+            </span>
+          );
+          const link = hash ? (
+            <Link href={transcriptHref(hash, row.id)} className="home-session-title focus-mono">
+              {title.text}
+            </Link>
+          ) : (
+            <span className="home-session-title">{title.text}</span>
+          );
           if (row.kind === 'child') {
             return (
-              <div className="flex min-w-0 flex-col" style={{ paddingLeft: `calc(${row.depth} * (var(--sp-5) + var(--sp-4)))` }}>
-                <span id={`session-group-rows:${row.id}`} data-session-group-child={row.id} className="inline-flex min-w-0 items-start gap-2">
-                  <ProviderIcon harness={row.sync.harness} accent className="mt-1 shrink-0" />
-                  {hash ? (
-                    <Link
-                      href={transcriptHref(hash, row.id)}
-                      className="font-[family-name:var(--font-body)] text-base text-ink underline decoration-dotted decoration-[color:var(--ink-4)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--amber)] focus-mono"
-                    >
-                      {title.text}
-                    </Link>
-                  ) : <span className="font-[family-name:var(--font-body)] text-base text-ink [overflow-wrap:anywhere]">{title.text}</span>}
+              <div className="home-session-cell" style={{ paddingLeft: `calc(${row.depth} * (var(--sp-5) + var(--sp-4)))` }}>
+                <span id={`session-group-rows:${row.id}`} data-session-group-child={row.id} className="home-session">
+                  {link}
+                  {meta}
+                  {phone}
                 </span>
                 {group}
               </div>
             );
           }
           return (
-            <div className="flex min-w-0 flex-col" data-session-family={row.id}>
-              <span className="inline-flex min-w-0 items-start gap-2" data-session-id={row.id}>
-                <ProviderIcon harness={row.sync.harness} accent className="mt-1 shrink-0" />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  {hash ? (
-                    <Link
-                      href={transcriptHref(hash, row.id)}
-                      className="font-[family-name:var(--font-body)] text-base text-ink underline decoration-dotted decoration-[color:var(--ink-4)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--amber)] focus-mono"
-                    >
-                      {title.text}
-                    </Link>
-                  ) : (
-                    <span className="font-[family-name:var(--font-body)] text-base text-ink [overflow-wrap:anywhere]">{title.text}</span>
-                  )}
-                  <span className="font-mono text-sm text-ink-3">
-                    {title.untitled ? 'untitled · ' : ''}
-                    {harness} · <span className="tabular-nums">{tokenFormat.format(row.sync.totalTokens)}</span> tokens
-                  </span>
-                </span>
+            <div className="home-session-cell" data-session-family={row.id}>
+              <span className="home-session" data-session-id={row.id}>
+                {link}
+                {meta}
+                {phone}
               </span>
               {group}
             </div>
@@ -215,110 +283,63 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
       {
         key: 'project',
         label: 'project',
-        width: '11rem',
         render: (_, row) => {
-          const hash = parseProjectHash(row.sync.projectHash);
           const name = displayProject(row.sync.projectName);
-          return (
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="[overflow-wrap:anywhere]">{name}</span>
-              {hash && (
-                <Link
-                  href={reviewHref(hash)}
-                  aria-label={`changes in ${name}`}
-                  className="w-fit font-mono text-sm text-ink-3 underline decoration-dotted underline-offset-[3px] hover:text-ink focus-mono"
-                >
-                  changes
-                </Link>
-              )}
-            </span>
-          );
+          return <span className="home-project">{name}</span>;
         },
       },
-      { key: 'turns', label: 'turns', align: 'right', width: '4.5rem', render: (_, row) => row.sync.turnCount.toLocaleString('en-US') },
+      { key: 'turns', label: 'turns', align: 'right', render: (_, row) => row.sync.turnCount.toLocaleString('en-US') },
       {
         key: 'duration',
         label: 'duration',
         align: 'right',
-        width: '6rem',
         render: (_, row) => formatMinutes(Number(row.sync.durationMs) / 60_000),
       },
       {
         key: 'when',
         label: 'when',
-        width: '6.5rem',
         render: (_, row) => {
-          const started = Date.parse(row.sync.startTime);
-          return Number.isNaN(started) ? '—' : <span className="whitespace-nowrap">{formatRelative(started)}</span>;
+          const when = whenOf(row);
+          return when === null ? '—' : <span className="whitespace-nowrap">{when}</span>;
         },
       },
       {
         key: 'state',
-        label: 'publish state',
-        width: '22rem',
-        render: (_, row) => {
-          const state = rowPublishState(row);
-          const published = state === 'published' || state === 'new-turns';
-          return (
-            <PublishStateLabel
-              state={state}
-              collectives={published ? audience.get(row.id) : undefined}
-              className="whitespace-nowrap"
-            />
-          );
-        },
+        label: 'status',
+        render: (_, row) => stateOf(row),
       },
     ],
     [titles, previews, audience, childGroups, expandedGroups, home, childCounts],
   );
 
-  const choose = (next: string) => {
-    if (!isPublishFilter(next)) return;
-    onFilter(next);
-  };
-
+  const end = start + visible.length;
   return (
-    <section aria-label="sessions" className="mx-0 flex w-full max-w-none flex-col gap-4 px-0" data-root-session-list="true">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Segmented
-          label="filter by publish state"
-          value={filter}
-          onChange={choose}
-          className="max-w-full flex-wrap [&_.bs-seg-opt]:flex-none [&_.bs-seg-opt]:whitespace-nowrap"
-          options={PUBLISH_FILTERS.map((option) => ({
-            value: option,
-            label: (
-              <>
-                {PUBLISH_FILTER_LABELS[option]}{' '}
-              </>
-            ),
-          }))}
-        />
-        <Select aria-label="project" value={project?.projectHash ?? ''} onFocus={() => { void home.loadProjects(); }} onChange={event => onProject(event.target.value)} options={[
-          { value: '', label: 'all projects' },
-          ...(project && !home.projects?.some(option => option.projectHash === project.projectHash) ? [{ value: project.projectHash, label: project.projectName }] : []),
-          ...(home.projects ?? []).map(option => ({ value: option.projectHash, label: option.projectName })),
-        ]} />
-      </div>
-      {home.projectsLoading && <p role="status" className="m-0 text-base text-ink-2">loading project choices…</p>}
-      {home.projectError != null && <div className="flex items-center gap-2" role="status"><span>{discoveryErrorMessage(home.projectError)}</span><Button variant="secondary" size="sm" onClick={() => { void home.loadProjects(); }}>retry project choices</Button></div>}
-
-      {loading ? <SkeletonList rows={6} label="Loading your sessions" /> : rows.length === 0 ? (
-        <p className="border-y border-rule py-6 text-base text-ink-2">{EMPTY_FILTER_COPY[filter]}</p>
+    <section ref={top} aria-label="sessions" aria-busy={reading || undefined} className="home-list" data-root-session-list="true">
+      {loading ? <SkeletonList rows={6} label="Loading your sessions" /> : visible.length === 0 && filter === 'all' && !hasMore && rows.length === 0 ? (
+        // Nothing recorded at all: say so, and link to the docs that teach recording.
+        <IngestTeach />
+      ) : visible.length === 0 ? (
+        <p className="home-empty">{current > 1 ? 'no sessions on this page.' : EMPTY_FILTER_COPY[filter]}</p>
       ) : (
         <DataTable<ListRow>
           caption="sessions on this computer"
           // Below the table's natural width the wrapper scrolls sideways
-          // instead of crushing every column into a sliver.
-          className="[&_.tbl]:min-w-[68rem]"
+          // instead of crushing every column into a sliver; a phone shows the
+          // session column alone, its cell carrying the rest (home.css).
+          className="home-table"
           columns={columns}
           rows={renderRows}
           rowKey={(row) => row.id}
         />
       )}
 
-      {(home.groups.get('')?.pages.at(-1)?.next ?? '') !== '' && (
-        <Button variant="secondary" size="sm" disabled={home.groups.get('')?.loading} onClick={() => home.more()}>load more</Button>
+      {!loading && (visible.length > 0 || pageCount > 1) && (
+        <div className="home-pager">
+          <span className="home-pager-range tabular-nums" role="status">
+            {wanted !== null && reading ? `reading page ${wanted}…` : visible.length > 0 ? `showing ${(start + 1).toLocaleString('en-US')}–${end.toLocaleString('en-US')}` : ''}
+          </span>
+          {pageCount > 1 && <Pagination page={current} total={pageCount} onChange={choose} label="session pages" />}
+        </div>
       )}
     </section>
   );

@@ -211,6 +211,10 @@ func TestPushCmd_Profile(t *testing.T) {
 			if c.PublishStatus != 0 {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
+					if r.URL.Path == "/api/v1/auth/me" {
+						_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+						return
+					}
 					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/annotations") {
 						if c.AnnotationStatus != 0 {
 							w.WriteHeader(c.AnnotationStatus)

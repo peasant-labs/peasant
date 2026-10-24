@@ -1,0 +1,4 @@
+requiredNames: [source-reads-bounded-four]
+cases:
+  # The active-request count IS the contract, not deletion protection.
+  - {name: source-reads-bounded-four, limit: 4, requests: 8, contentionMs: 100}

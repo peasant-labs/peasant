@@ -51,7 +51,7 @@ cases:
     result: { status: held, steps: [{ step: content, outcome: skipped, reason: ingest has not finished }] }
     expected: { kind: stopped, text: ingest has not finished }
   - name: missing-session-result
-    expected: { kind: stopped, text: reading village’s answer }
+    expected: { kind: stopped, text: reading the answer from peasant online }
   - name: missing-transcript-link
     result: { status: new, steps: [{ step: content, outcome: succeeded }] }
     expected: { kind: stopped, text: reading the transcript’s link }
@@ -69,7 +69,7 @@ cases:
     expected: { kind: stopped, text: sharing it with Company }
   - name: server-content-failure
     result: { status: error, error: village could not accept this content, steps: [{ step: content, outcome: failed, reason: village answered 502 }] }
-    expected: { kind: stopped, text: 'sending the content: village answered 502' }
+    expected: { kind: stopped, text: 'sending the content' }
   - name: private-after-final-removal
     audience: [{ collectiveId: a, name: Platform, status: approved }]
     result: { status: skipped, transcriptUrl: 'https://village.example/transcripts/test', steps: [{ step: content, outcome: skipped }, { step: remove_collective, collectiveId: a, outcome: succeeded }] }

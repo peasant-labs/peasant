@@ -67,8 +67,16 @@ func (t Theme) Color(pair ColorPair) color.Color {
 type Styles struct {
 	// Base is the default page/background text style: Ink on Canvas.
 	Base lipgloss.Style
-	// Surface is text on a raised panel: Ink on Surface.
+	// Surface is text on a panel: Ink on Surface. Fairtrade gives panels the
+	// page's own ground (Surface equals Canvas), so this role does not set a
+	// region apart; use Inset or Overlay for that.
 	Surface lipgloss.Style
+	// Inset is text in an inset well or a set-off band, such as a guide's
+	// intro or its derived example: Ink on Surface2.
+	Inset lipgloss.Style
+	// Overlay is text on an overlay card, such as the keybinding help: Ink on
+	// SurfaceElev.
+	Overlay lipgloss.Style
 	// SurfaceHover is text on a hovered/highlighted row: Ink on SurfaceHover.
 	SurfaceHover lipgloss.Style
 	// Header is a section title: bold InkStrong.
@@ -105,6 +113,8 @@ func (t Theme) Styles() Styles {
 	return Styles{
 		Base:         lipgloss.NewStyle().Foreground(p.Ink.For(m)).Background(p.Canvas.For(m)),
 		Surface:      lipgloss.NewStyle().Foreground(p.Ink.For(m)).Background(p.Surface.For(m)),
+		Inset:        lipgloss.NewStyle().Foreground(p.Ink.For(m)).Background(p.Surface2.For(m)),
+		Overlay:      lipgloss.NewStyle().Foreground(p.Ink.For(m)).Background(p.SurfaceElev.For(m)),
 		SurfaceHover: lipgloss.NewStyle().Foreground(p.Ink.For(m)).Background(p.SurfaceHover.For(m)),
 		Header:       lipgloss.NewStyle().Foreground(p.InkStrong.For(m)).Bold(true),
 		Muted:        lipgloss.NewStyle().Foreground(p.Ink3.For(m)),

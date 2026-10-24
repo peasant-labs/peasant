@@ -1,0 +1,15 @@
+requiredNames: [binary-local-deadline-preserves-domain-effects, binary-remote-504-is-not-local-deadline, binary-invalid-deadline-refuses-startup]
+timeout: 2s
+maxDeadlineMilliseconds: 5000
+cases:
+  - {name: binary-local-deadline-preserves-domain-effects, scenario: partial-504, status: 504, historyState: cancelled, issueCode: deadline, stalled: true}
+  - {name: binary-remote-504-is-not-local-deadline, scenario: remote-history-504, status: 502, historyState: failed, issueCode: remote, stalled: false}
+  - {name: binary-invalid-deadline-refuses-startup, scenario: complete, invalidTimeout: invalid-duration}
+requiredRemotePaths:
+  /api/v1/auth/me: 1
+  /api/v1/auth/orgs: 1
+  /api/v1/collectives: 1
+  '/api/v1/collectives/{collective}': 1
+  /api/v1/users/me/collectives/contributions: 1
+  '/api/v1/users/me/collectives/{collective}/submissions': 1
+  '/api/v1/users/me/collectives/{collective}/transcripts/{transcript}/events': 1

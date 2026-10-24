@@ -64,20 +64,18 @@ web:
 		exit 1; \
 	fi
 
-# web-stub writes a minimal placeholder into web/out so the
-# `//go:embed all:web/out` directive compiles when the real Next.js dashboard
-# has not been built. Compile-only checks use this target; artifact-producing
-# workflows run `make web` and explicitly reject the stub.
+# web-stub makes the `//go:embed all:web/out` directive compile when the real
+# Next.js app has not been built. Compile-only checks use this target;
+# artifact-producing workflows run `make web` and explicitly reject the stub.
 #
-# It is idempotent and NON-destructive: it writes web/out/index.html only when
-# absent (a real `make web` output or a prior stub is left untouched). It also
-# (re)creates the TRACKED placeholder web/out/.gitkeep so the //go:embed
-# all:web/out invariant holds and the working tree stays clean even if a prior
-# `next build` deleted it.
+# It only (re)creates the TRACKED placeholder web/out/.gitkeep, so the embed
+# holds and the working tree stays clean even if a prior `next build` deleted
+# it. A real `make web` output is left untouched. A binary built on the
+# placeholder alone serves internal/htmlpage's not-bundled notice in place of
+# the local app, styled from the fairtrade palette.
 web-stub:
 	@mkdir -p web/out
 	@touch web/out/.gitkeep
-	@[ -s web/out/index.html ] || printf '<!doctype html><meta charset="utf-8"><title>peasant</title><p>The peasant web dashboard is not bundled in this build. Run a full `make build` (or use the release binaries) for the dashboard.</p>\n' > web/out/index.html
 
 fmt:
 	@formatted=$$(go fmt ./...); \

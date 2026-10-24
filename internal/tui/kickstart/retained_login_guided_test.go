@@ -292,7 +292,7 @@ func beginRetainedVisibilityLogin(t *testing.T, program kickstart.Program) (kick
 		loginResult = message
 	}
 	if loginResult == nil || spinnerTicks != 1 || program.Phase() != kickstart.PhaseVisibility ||
-		!strings.Contains(stripRender(program.View()), "connecting to village") {
+		!strings.Contains(stripRender(program.View()), "connecting to peasant online") {
 		t.Fatalf("visibility login did not remain mounted while its result was withheld; result=%T ticks=%d phase=%s view:\n%s",
 			loginResult, spinnerTicks, program.Phase(), stripRender(program.View()))
 	}
@@ -446,7 +446,7 @@ func TestVisibilityLoginRetainsMountedSelectionStateAndAsyncDelivery(t *testing.
 					var loginResult tea.Msg
 					program, loginResult = beginRetainedVisibilityLogin(t, program)
 					program = runFlowInitOnce(t, program, initialFlowCommand)
-					if program.Phase() != kickstart.PhaseVisibility || !strings.Contains(stripRender(program.View()), "connecting to village") {
+					if program.Phase() != kickstart.PhaseVisibility || !strings.Contains(stripRender(program.View()), "connecting to peasant online") {
 						t.Fatalf("tree delivery interrupted visibility auth; phase=%s view:\n%s", program.Phase(), stripRender(program.View()))
 					}
 					program = finishRetainedVisibilityLogin(t, program, loginResult)

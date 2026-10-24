@@ -27,6 +27,27 @@ func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 	if got, want := strings.TrimSpace(string(out)), "fake-peasant sentinel"; got != want {
 		t.Fatalf("wrapper output = %q, want %q", got, want)
 	}
+
+	// Real installed hooks invoke `peasant` through PATH, not the returned
+	// wrapper filename. Keep a controlled older executable behind that directory
+	// so this proves the hook cannot silently run a different installed build.
+	fallback := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fallback, "peasant"), []byte("#!/bin/sh\necho wrong-installed-peasant\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook := exec.Command(shell, "-c", "exec peasant sentinel")
+	hook.Env = append(os.Environ(), "PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+fallback)
+	out, err = hook.CombinedOutput()
+	if err != nil {
+		t.Fatalf("resolve injected command through the installed-hook PATH: %v\n%s", err, out)
+	}
+	if got, want := strings.TrimSpace(string(out)), "fake-peasant sentinel"; got != want {
+		t.Fatalf("installed hook ran another executable: got %q, want %q", got, want)
+	}
 }
 
 func TestPeasantBinWrapperQuotesInjectedCommand(t *testing.T) {

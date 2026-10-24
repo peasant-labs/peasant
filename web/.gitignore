@@ -52,3 +52,7 @@ next-env.d.ts
 # This repository is pnpm-only. Ignore npm lockfiles so a second dependency
 # graph cannot be mistaken for supported build input.
 package-lock.json
+
+# Persistent inode and immutable ownership record for the focused binary journey.
+/.collective-observations-owner/
+/.collective-observations-owner.gate

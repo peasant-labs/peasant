@@ -27,7 +27,7 @@ import (
 const (
 	expectedMountedJourneyRows          = 1
 	expectedMountedPreambleMutationRows = 4
-	mountedAcceptedPreambleLine         = "these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
+	mountedAcceptedPreambleLine         = "these useful next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart runs none of them."
 )
 
 type mountedJourneyFixture struct {
@@ -187,7 +187,7 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 				program := mounted.Program()
 				program.SetSize(row.TerminalWidth, row.TerminalHeight)
 				connectView := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
-				choiceAt := strings.Index(connectView, "connect to a village now?")
+				choiceAt := strings.Index(connectView, "connect to peasant online now?")
 				for _, want := range row.ConnectCopy {
 					at := strings.Index(connectView, strings.ToLower(want))
 					if at < 0 || at >= choiceAt {

@@ -9,13 +9,16 @@ interface SourceToken {
 }
 
 interface GeometryFixture {
+  chromeVariable: string;
+  chromeValue: string;
+  chromeNarrow: string;
+  chromeNarrowValue: string;
   variable: string;
   value: string;
   bodyVariable: string;
   bodyFloor: string;
   noticePinnedVariant: string;
   noticePinnedClass: string;
-  headerRow: SourceToken;
   noticeHeight: SourceToken;
   consumers: SourceToken[];
   forbidden: string[];
@@ -36,16 +39,20 @@ const fixture = YAML.parse(
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 /** Every place that clears the top chrome; a consumer row deleted from the fixture fails here. */
-const REQUIRED_CONSUMERS = ['src/app/layout.tsx', 'src/components/session-detail/v2/SessionDetailV2.tsx'];
+const REQUIRED_CONSUMERS = ['src/components/session-detail/v2/SessionDetailV2.tsx'];
 
 describe('app shell geometry', () => {
-  it('declares where content starts once: the header row plus the offline notice', () => {
+  it('declares where content starts once: the chrome plus the offline notice', () => {
     const globals = source('src/app/globals.css');
+    // The chrome: declared once, overridden once, below the sidebar's breakpoint, to the top bar.
+    expect(globals).toContain(`${fixture.chromeVariable}: ${fixture.chromeValue};`);
+    expect(globals.split(`${fixture.chromeVariable}:`)).toHaveLength(3);
+    expect(globals).toContain(`${fixture.chromeNarrow}\n  :root { ${fixture.chromeVariable}: ${fixture.chromeNarrowValue}; }\n}`);
     expect(globals).toContain(`${fixture.variable}: ${fixture.value};`);
     expect(globals.split(`${fixture.variable}:`)).toHaveLength(2);
     // The full-height body is derived from it, once, with its floor, and the share page fills it.
     expect(globals.split(`${fixture.bodyVariable}:`)).toHaveLength(2);
-    expect(globals).toContain(`min(${fixture.bodyFloor}, calc(100dvh - var(--nav-h)))`);
+    expect(globals).toContain(`min(${fixture.bodyFloor}, calc(100dvh - var(${fixture.chromeVariable})))`);
     expect(globals).toContain(`height: var(${fixture.bodyVariable});`);
   });
 
@@ -59,20 +66,18 @@ describe('app shell geometry', () => {
     expect(notice).toContain(`'${fixture.noticePinnedClass}'`);
   });
 
-  it('keeps <main> out of the tab order at rest', () => {
+  it('keeps <main> out of the tab order at rest, with no top padding to clear', () => {
     const main = /<main\s[^>]*className=[^>]*>/.exec(source(fixture.restingMain.path));
     expect(main, `${fixture.restingMain.path} must render <main>`).not.toBeNull();
     expect(main![0], '<main> must carry no tabIndex at rest').not.toMatch(/tabIndex/i);
+    expect(main![0], 'nothing fixed sits over <main>, so it pads no top').not.toMatch(/\bpt-|padding-top/);
   });
 
-  it('keeps the header row at --nav-h, and lets only the notice move where content starts', () => {
-    const header = source(fixture.headerRow.path);
-    expect(header).toContain(fixture.headerRow.token);
-    expect(header).not.toContain(`var(${fixture.variable})`);
+  it('lets only the notice move where content starts', () => {
     expect(source(fixture.noticeHeight.path)).toContain(fixture.noticeHeight.token);
   });
 
-  it('clears the header and notice with the same height in the main offset and the transcript bound', () => {
+  it('bounds the transcript by the same height the chrome and notice leave', () => {
     const paths = fixture.consumers.map((consumer) => consumer.path);
     expect(REQUIRED_CONSUMERS.filter((path) => !paths.includes(path))).toEqual([]);
     for (const consumer of fixture.consumers) {

@@ -30,6 +30,7 @@ var (
 // fixture re-export (a package var), so a "https://"+host expression is no longer
 // a constant expression.
 var testVillageURL = "https://" + testutil.TestVillageHost
+var testServedHash = schema.ComputeTranscriptHash([]byte(testBlobContent))
 
 const (
 	testPullsRoot   = "/data/village-pulls"
@@ -55,7 +56,7 @@ func happyMeta() *schema.PullTranscriptInfo {
 		ProjectName:     testutil.TestProjectName,
 		Visibility:      schema.VisibilityGroup,
 		License:         schema.LicenseCCBYSA,
-		ContentHash:     testutil.TestContentHash,
+		ContentHash:     testServedHash,
 		ContractVersion: defaults.PublishSchemaVersion,
 		PublishedAt:     1000,
 		UpdatedAt:       2000,
@@ -95,7 +96,7 @@ func happyReader() *testutil.StubVillageReader {
 	return &testutil.StubVillageReader{
 		Meta:        happyMeta(),
 		ContentBody: []byte(testBlobContent),
-		ContentETag: quotedETag(testutil.TestContentHash),
+		ContentETag: quotedETag(testServedHash),
 		Annotations: []schema.PullAnnotation{foreignAnnotation(testutil.TestContentHash2)},
 	}
 }
@@ -116,7 +117,7 @@ func TestPullTranscript_HappyPath(t *testing.T) {
 	fs := testutil.NewMemFS()
 	reader := happyReader()
 	st := &testutil.StubPullStore{}
-	p := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot)
+	p := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot)
 
 	res, err := p.PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err != nil {
@@ -133,8 +134,8 @@ func TestPullTranscript_HappyPath(t *testing.T) {
 	if res.AnnotationCount != 1 {
 		t.Errorf("AnnotationCount = %d, want 1", res.AnnotationCount)
 	}
-	if res.ServedBlobHash != testutil.TestContentHash {
-		t.Errorf("ServedBlobHash = %q, want %q", res.ServedBlobHash, testutil.TestContentHash)
+	if res.ServedBlobHash != testServedHash {
+		t.Errorf("ServedBlobHash = %q, want %q", res.ServedBlobHash, testServedHash)
 	}
 	if res.License != schema.LicenseCCBYSA {
 		t.Errorf("License = %q, want %q (result must carry the served license)", res.License, schema.LicenseCCBYSA)
@@ -174,8 +175,8 @@ func TestPullTranscript_HappyPath(t *testing.T) {
 	if snap.LocalID != testutil.TestSessionUUID {
 		t.Errorf("snapshot LocalID = %q, want %q", snap.LocalID, testutil.TestSessionUUID)
 	}
-	if snap.ContentHash != testutil.TestContentHash {
-		t.Errorf("snapshot ContentHash = %q, want %q", snap.ContentHash, testutil.TestContentHash)
+	if snap.ContentHash != testServedHash {
+		t.Errorf("snapshot ContentHash = %q, want %q", snap.ContentHash, testServedHash)
 	}
 	if snap.ContractVersion != defaults.PublishSchemaVersion {
 		t.Errorf("snapshot ContractVersion = %q, want %q", snap.ContractVersion, defaults.PublishSchemaVersion)
@@ -196,8 +197,8 @@ func TestPullTranscript_HappyPath(t *testing.T) {
 	if m.VillageURL != testVillageURL {
 		t.Errorf("manifest villageURL = %q, want %q", m.VillageURL, testVillageURL)
 	}
-	if m.ServedBlobHash != testutil.TestContentHash {
-		t.Errorf("manifest servedBlobHash = %q, want %q", m.ServedBlobHash, testutil.TestContentHash)
+	if m.ServedBlobHash != testServedHash {
+		t.Errorf("manifest servedBlobHash = %q, want %q", m.ServedBlobHash, testServedHash)
 	}
 	if m.OwnerUserID != testutil.TestPullAuthorUserID {
 		t.Errorf("manifest ownerUserId = %q", m.OwnerUserID)
@@ -227,8 +228,8 @@ func TestPullTranscript_HappyPath(t *testing.T) {
 	if tr.VillageHost != testutil.TestVillageHost || tr.TranscriptID != testutil.TestTranscriptID {
 		t.Errorf("commit transcript identity = %+v", tr)
 	}
-	if tr.ContentHash != testutil.TestContentHash {
-		t.Errorf("commit ContentHash = %q, want %q", tr.ContentHash, testutil.TestContentHash)
+	if tr.ContentHash != testServedHash {
+		t.Errorf("commit ContentHash = %q, want %q", tr.ContentHash, testServedHash)
 	}
 	if tr.PullDir != wantDir {
 		t.Errorf("commit PullDir = %q, want %q", tr.PullDir, wantDir)
@@ -266,7 +267,7 @@ func TestPullTranscript_InvalidAssociationAnnotationStopsBeforeLocalMutation(t *
 		AuthorUsername: testutil.TestAuthorUsername,
 	}}
 	store := &testutil.StubPullStore{}
-	pipeline := pull.NewPipeline(reader, fs, store, testutil.NewFixedClock(), testCreds(), testPullsRoot)
+	pipeline := newPipeline(reader, fs, store, testutil.NewFixedClock(), testCreds(), testPullsRoot)
 
 	result, err := pipeline.PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
@@ -296,7 +297,7 @@ func TestPullTranscript_ByURL(t *testing.T) {
 
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
-	p := pull.NewPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot)
+	p := newPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot)
 
 	res, err := p.PullTranscript(context.Background(), ref, pull.PullOptions{})
 	if err != nil {
@@ -320,7 +321,7 @@ func TestPullTranscript_UpToDate_HashMatch(t *testing.T) {
 	ref := newRef(t)
 
 	// First pull lands files + a manifest recording the served-blob hash.
-	p := pull.NewPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot)
+	p := newPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot)
 	if _, err := p.PullTranscript(context.Background(), ref, pull.PullOptions{}); err != nil {
 		t.Fatalf("first pull: %v", err)
 	}
@@ -328,7 +329,7 @@ func TestPullTranscript_UpToDate_HashMatch(t *testing.T) {
 	// Second pull: server reports the SAME content hash ⇒ up-to-date via the
 	// manifest-hash DIFF, no DOWNLOAD, no new CommitPull.
 	reader2 := happyReader()
-	p2 := pull.NewPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot)
+	p2 := newPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot)
 	res, err := p2.PullTranscript(context.Background(), ref, pull.PullOptions{})
 	if err != nil {
 		t.Fatalf("second pull: %v", err)
@@ -355,7 +356,7 @@ func TestPullTranscript_UpToDate_Via304(t *testing.T) {
 	ref := newRef(t)
 
 	// First pull lands a manifest with the served-blob hash.
-	if _, err := pull.NewPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
+	if _, err := newPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{}); err != nil {
 		t.Fatalf("first pull: %v", err)
 	}
@@ -368,7 +369,7 @@ func TestPullTranscript_UpToDate_Via304(t *testing.T) {
 		Meta:       metaNoHash,
 		ContentErr: village.ErrNotModified,
 	}
-	res, err := pull.NewPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot).
+	res, err := newPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{})
 	if err != nil {
 		t.Fatalf("second pull: %v", err)
@@ -382,8 +383,8 @@ func TestPullTranscript_UpToDate_Via304(t *testing.T) {
 	// The pipeline must have echoed the stored VERBATIM (quoted) ETag as
 	// If-None-Match — not the raw hash. This is the transport-token half of the
 	// servedETag/servedBlobHash split.
-	if reader2.LastIfNoneMatch != quotedETag(testutil.TestContentHash) {
-		t.Errorf("If-None-Match = %q, want quoted %q", reader2.LastIfNoneMatch, quotedETag(testutil.TestContentHash))
+	if reader2.LastIfNoneMatch != quotedETag(testServedHash) {
+		t.Errorf("If-None-Match = %q, want quoted %q", reader2.LastIfNoneMatch, quotedETag(testServedHash))
 	}
 }
 
@@ -397,15 +398,15 @@ func TestPullTranscript_ETagHashSplit(t *testing.T) {
 	st := &testutil.StubPullStore{}
 	ref := newRef(t)
 
-	res, err := pull.NewPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{})
 	if err != nil {
 		t.Fatalf("PullTranscript: %v", err)
 	}
 
 	// Result carries the RAW hash, never the quoted ETag.
-	if res.ServedBlobHash != testutil.TestContentHash {
-		t.Errorf("result ServedBlobHash = %q, want RAW %q", res.ServedBlobHash, testutil.TestContentHash)
+	if res.ServedBlobHash != testServedHash {
+		t.Errorf("result ServedBlobHash = %q, want RAW %q", res.ServedBlobHash, testServedHash)
 	}
 
 	wantDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, testutil.TestTranscriptUUID)
@@ -418,22 +419,22 @@ func TestPullTranscript_ETagHashSplit(t *testing.T) {
 		t.Fatalf("decode manifest: %v", err)
 	}
 	// servedBlobHash = RAW; servedETag = verbatim QUOTED.
-	if m.ServedBlobHash != testutil.TestContentHash {
-		t.Errorf("manifest servedBlobHash = %q, want RAW %q", m.ServedBlobHash, testutil.TestContentHash)
+	if m.ServedBlobHash != testServedHash {
+		t.Errorf("manifest servedBlobHash = %q, want RAW %q", m.ServedBlobHash, testServedHash)
 	}
 	if strings.Contains(m.ServedBlobHash, `"`) {
 		t.Errorf("manifest servedBlobHash %q must not carry quote chars", m.ServedBlobHash)
 	}
-	if m.ServedETag != quotedETag(testutil.TestContentHash) {
-		t.Errorf("manifest servedETag = %q, want verbatim quoted %q", m.ServedETag, quotedETag(testutil.TestContentHash))
+	if m.ServedETag != quotedETag(testServedHash) {
+		t.Errorf("manifest servedETag = %q, want verbatim quoted %q", m.ServedETag, quotedETag(testServedHash))
 	}
 
 	// DB row content_hash is RAW (the consistent identity key downstream compares).
 	if len(st.Commits) != 1 {
 		t.Fatalf("CommitPull calls = %d, want 1", len(st.Commits))
 	}
-	if st.Commits[0].Transcript.ContentHash != testutil.TestContentHash {
-		t.Errorf("commit ContentHash = %q, want RAW %q", st.Commits[0].Transcript.ContentHash, testutil.TestContentHash)
+	if st.Commits[0].Transcript.ContentHash != testServedHash {
+		t.Errorf("commit ContentHash = %q, want RAW %q", st.Commits[0].Transcript.ContentHash, testServedHash)
 	}
 }
 
@@ -445,7 +446,7 @@ func TestPullTranscript_DryRun_WouldPull(t *testing.T) {
 	st := &testutil.StubPullStore{}
 	reader := happyReader()
 
-	res, err := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("dry-run pull: %v", err)
@@ -495,7 +496,7 @@ func TestPullTranscript_DryRun_UpToDate(t *testing.T) {
 	ref := newRef(t)
 
 	// First REAL pull lands the manifest (raw stored hash).
-	if _, err := pull.NewPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
+	if _, err := newPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{}); err != nil {
 		t.Fatalf("first pull: %v", err)
 	}
@@ -503,7 +504,7 @@ func TestPullTranscript_DryRun_UpToDate(t *testing.T) {
 	// Dry-run re-pull: metadata fast-path DIFF (raw stored == raw server) ⇒
 	// up-to-date, marked dry-run, and STILL no mutation beyond the first pull.
 	reader2 := happyReader()
-	res, err := pull.NewPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot).
+	res, err := newPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("dry-run pull: %v", err)
@@ -534,14 +535,14 @@ func TestPullTranscript_Force_BypassesDiff(t *testing.T) {
 	clock := testutil.NewFixedClock()
 	ref := newRef(t)
 
-	if _, err := pull.NewPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
+	if _, err := newPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{}); err != nil {
 		t.Fatalf("first pull: %v", err)
 	}
 
 	// --force: even though the hash matches, re-download + re-commit.
 	reader2 := happyReader()
-	res, err := pull.NewPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot).
+	res, err := newPipeline(reader2, fs, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{Force: true})
 	if err != nil {
 		t.Fatalf("force pull: %v", err)
@@ -567,7 +568,7 @@ func TestPullTranscript_NotLoggedIn(t *testing.T) {
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	reader := happyReader()
-	p := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), pull.Credentials{}, testPullsRoot)
+	p := newPipeline(reader, fs, st, testutil.NewFixedClock(), pull.Credentials{}, testPullsRoot)
 
 	res, err := p.PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
@@ -595,7 +596,7 @@ func TestPullTranscript_NotFound(t *testing.T) {
 	reader := happyReader()
 	reader.MetaErr = village.ErrPullNotFound // 404 from FETCH-META
 
-	res, err := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
 		t.Fatal("expected not-found error")
@@ -615,7 +616,7 @@ func TestPullTranscript_ContractError(t *testing.T) {
 	reader := happyReader()
 	reader.NegotiateErr = village.ErrPullContractIncompatible
 
-	res, err := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
 		t.Fatal("expected contract error")
@@ -640,7 +641,7 @@ func TestPullTranscript_PreWriteFailure_ZeroMutation(t *testing.T) {
 	reader := happyReader()
 	reader.AnnotationsErr = errors.New("annotation fetch boom") // fails in FETCH-ANNOTATIONS (pre-WRITE)
 
-	res, err := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
 		t.Fatal("expected error")
@@ -659,15 +660,15 @@ func TestPullTranscript_PreWriteFailure_ZeroMutation(t *testing.T) {
 	}
 }
 
-// --- DB-TX failure ⇒ compensating dir removal ---
+// --- DB-TX failure retains complete files for projection repair ---
 
-func TestPullTranscript_DBTxFailure_CompensatingRemoval(t *testing.T) {
+func TestPullTranscript_DBTxFailure_RetainsPublishedFiles(t *testing.T) {
 	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{CommitErr: errors.New("db commit boom")}
 	reader := happyReader()
 
-	res, err := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
 		t.Fatal("expected DB-TX error")
@@ -675,38 +676,32 @@ func TestPullTranscript_DBTxFailure_CompensatingRemoval(t *testing.T) {
 	if res.Status != pull.PullStatusError {
 		t.Errorf("Status = %q, want error", res.Status)
 	}
-	// Compensation: the renamed pull dir must be removed (pre-pull state restored).
+	// Published files remain the source of truth while the index needs repair.
 	wantDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, testutil.TestTranscriptUUID)
-	for path := range fs.Files {
-		if strings.HasPrefix(path, wantDir) {
-			t.Errorf("compensation failed: file %q still under pull dir after DB-TX failure", path)
-		}
+	if _, err := fs.ReadFile(filepath.Join(wantDir, pull.TranscriptFilename)); err != nil {
+		t.Fatalf("complete content was lost: %v", err)
 	}
-	if !strings.Contains(err.Error(), "rolled back") {
-		t.Errorf("error should note the rollback; got: %v", err)
+	if !strings.Contains(err.Error(), "retained") || strings.Contains(err.Error(), "rolled back") {
+		t.Errorf("error must report retained content, not rollback; got: %v", err)
 	}
 }
 
-// --- DB-TX failure AND compensation failure ⇒ actionable orphan error ---
+// --- Index failure must never destroy published content ---
 
-func TestPullTranscript_CompensationFailure_NamesOrphan(t *testing.T) {
+func TestPullTranscript_IndexFailure_NeverDeletesPublishedContent(t *testing.T) {
 	t.Parallel()
 	mem := testutil.NewMemFS()
 	wantDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, testutil.TestTranscriptUUID)
 
-	// FailingFS: the compensating RemoveAll(pullDir) fails. The pipeline also
-	// clears the (absent) pull dir BEFORE the rename — that first matching call is
-	// harmless and must succeed, so skip the first match and fail only the LATER
-	// compensating RemoveAll of the same path.
+	// Any attempt to delete the published directory would fail this dependency.
 	fs := testutil.NewFailingFS(mem)
 	fs.RemoveAllErr = errors.New("removeall boom")
 	fs.RemoveAllOnPaths = map[string]bool{wantDir: true}
-	fs.RemoveAllSkipFirstN = 1
 
 	st := &testutil.StubPullStore{CommitErr: errors.New("db commit boom")}
 	reader := happyReader()
 
-	res, err := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
 		t.Fatal("expected compensation-failure error")
@@ -714,22 +709,19 @@ func TestPullTranscript_CompensationFailure_NamesOrphan(t *testing.T) {
 	if res.Status != pull.PullStatusError {
 		t.Errorf("Status = %q, want error", res.Status)
 	}
-	// Actionable error: names the orphan dir + instructs --force repair.
-	if !strings.Contains(err.Error(), wantDir) {
-		t.Errorf("error must name the orphan dir %q; got: %v", wantDir, err)
-	}
+	// Actionable error instructs normal repair without destroying content.
 	if !strings.Contains(err.Error(), "--force") {
 		t.Errorf("error must instruct --force repair; got: %v", err)
 	}
-	// The pipeline DID attempt the compensating RemoveAll of the pull dir.
+	// The pipeline must NOT attempt compensating removal of published content.
 	saw := false
 	for _, p := range fs.RemoveAllCalls {
 		if p == wantDir {
 			saw = true
 		}
 	}
-	if !saw {
-		t.Errorf("pipeline did not attempt compensating RemoveAll(%q)", wantDir)
+	if saw {
+		t.Errorf("pipeline attempted destructive compensating RemoveAll(%q)", wantDir)
 	}
 }
 
@@ -758,7 +750,7 @@ func TestPullTranscript_StageFilesFailure_ZeroMutation(t *testing.T) {
 	fs.WriteFileErr = errors.New("stage writefile boom")
 	st := &testutil.StubPullStore{}
 
-	res, err := pull.NewPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
 		t.Fatal("expected stageFiles error")
@@ -783,7 +775,7 @@ func TestPullTranscript_StageMkdirFailure_ZeroMutation(t *testing.T) {
 	fs.MkdirAllErr = errors.New("stage mkdir boom")
 	st := &testutil.StubPullStore{}
 
-	res, err := pull.NewPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err == nil {
 		t.Fatal("expected stage mkdir error")
@@ -799,9 +791,9 @@ func TestPullTranscript_StageMkdirFailure_ZeroMutation(t *testing.T) {
 	}
 }
 
-// TestPullTranscript_StaleTempClearFailure: the pre-staging RemoveAll(tmpDir)
-// clear of a crashed prior run's temp dir fails ⇒ actionable error, no commit.
-func TestPullTranscript_StaleTempClearFailure(t *testing.T) {
+// The previous deterministic temp namespace cannot prove operation ownership.
+// New pulls must neither delete it nor reuse it.
+func TestPullTranscript_LegacyStagingIsNotOwnedOrDeleted(t *testing.T) {
 	t.Parallel()
 	mem := testutil.NewMemFS()
 	tmpDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, defaults.TempDirPrefix+testutil.TestTranscriptUUID)
@@ -810,35 +802,23 @@ func TestPullTranscript_StaleTempClearFailure(t *testing.T) {
 	fs.RemoveAllOnPaths = map[string]bool{tmpDir: true} // fail ONLY the stale-temp clear
 	st := &testutil.StubPullStore{}
 
-	res, err := pull.NewPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
-	if err == nil {
-		t.Fatal("expected stale-temp clear error")
-	}
-	if res.Status != pull.PullStatusError {
-		t.Errorf("Status = %q, want error", res.Status)
-	}
-	if !strings.Contains(err.Error(), "stale temp dir") {
-		t.Errorf("error should name the stale temp dir; got: %v", err)
-	}
-	pullDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, testutil.TestTranscriptUUID)
-	assertZeroPullState(t, mem, pullDir, tmpDir)
-	if len(st.Commits) != 0 {
-		t.Errorf("stale-temp clear failure must not commit")
+	if err != nil || res.Status != pull.PullStatusPulled {
+		t.Fatalf("unowned legacy staging must not be touched: result=%+v error=%v", res, err)
 	}
 }
 
-// TestPullTranscript_PreRenameClearFailure: on a re-pull, clearing the existing
-// pull dir BEFORE the publish move fails ⇒ error names the pull dir + tmp cleaned.
-func TestPullTranscript_PreRenameClearFailure(t *testing.T) {
+// Journal publication failure cannot destroy the previously published files.
+func TestPullTranscript_JournalRenameFailure_RetainsPrevious(t *testing.T) {
 	t.Parallel()
 	mem := testutil.NewMemFS()
 	clock := testutil.NewFixedClock()
 	ref := newRef(t)
 	st := &testutil.StubPullStore{}
 
-	// First REAL pull creates an existing pull dir to clear on the re-pull.
-	if _, err := pull.NewPipeline(happyReader(), mem, st, clock, testCreds(), testPullsRoot).
+	// First pull creates the previous complete copy.
+	if _, err := newPipeline(happyReader(), mem, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{}); err != nil {
 		t.Fatalf("first pull: %v", err)
 	}
@@ -846,22 +826,23 @@ func TestPullTranscript_PreRenameClearFailure(t *testing.T) {
 	pullDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, testutil.TestTranscriptUUID)
 	tmpDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, defaults.TempDirPrefix+testutil.TestTranscriptUUID)
 
-	// Re-pull --force (skip DIFF) so we reach the WRITE stage; fail ONLY the
-	// pre-rename RemoveAll(pullDir).
+	// Re-pull --force reaches the filesystem publication stage.
 	fs := testutil.NewFailingFS(mem)
-	fs.RemoveAllErr = errors.New("clear pull dir boom")
-	fs.RemoveAllOnPaths = map[string]bool{pullDir: true}
+	fs.RenameErr = errors.New("publish rename boom")
 
-	res, err := pull.NewPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
+	res, err := newPipeline(happyReader(), fs, st, clock, testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), ref, pull.PullOptions{Force: true})
 	if err == nil {
-		t.Fatal("expected pre-rename clear error")
+		t.Fatal("expected journal rename error")
 	}
 	if res.Status != pull.PullStatusError {
 		t.Errorf("Status = %q, want error", res.Status)
 	}
-	if !strings.Contains(err.Error(), "before rename") {
-		t.Errorf("error should name the pre-rename clear; got: %v", err)
+	if !strings.Contains(err.Error(), "rename") {
+		t.Errorf("error should name the failed rename; got: %v", err)
+	}
+	if _, err := mem.ReadFile(filepath.Join(pullDir, pull.TranscriptFilename)); err != nil {
+		t.Fatalf("previous complete content must remain: %v", err)
 	}
 	// The temp dir staged for this re-pull must be cleaned up.
 	for path := range mem.Files {
@@ -872,35 +853,6 @@ func TestPullTranscript_PreRenameClearFailure(t *testing.T) {
 	// No NEW commit beyond the first pull.
 	if len(st.Commits) != 1 {
 		t.Errorf("CommitPull calls = %d, want 1 (re-pull aborted before DB-TX)", len(st.Commits))
-	}
-}
-
-// TestPullTranscript_RenameDirFailure_Cleanup: a CopyFile error inside renameDir
-// (the publish move) ⇒ RemoveAll(tmpDir)+RemoveAll(pullDir) cleanup + actionable
-// "atomic rename" error, zero mutation, no commit.
-func TestPullTranscript_RenameDirFailure_Cleanup(t *testing.T) {
-	t.Parallel()
-	mem := testutil.NewMemFS()
-	fs := testutil.NewFailingFS(mem)
-	fs.CopyFileErr = errors.New("rename copyfile boom")
-	st := &testutil.StubPullStore{}
-
-	res, err := pull.NewPipeline(happyReader(), fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
-		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
-	if err == nil {
-		t.Fatal("expected renameDir error")
-	}
-	if res.Status != pull.PullStatusError {
-		t.Errorf("Status = %q, want error", res.Status)
-	}
-	if !strings.Contains(err.Error(), "rename") {
-		t.Errorf("error should name the rename failure; got: %v", err)
-	}
-	pullDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, testutil.TestTranscriptUUID)
-	tmpDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, defaults.TempDirPrefix+testutil.TestTranscriptUUID)
-	assertZeroPullState(t, mem, pullDir, tmpDir)
-	if len(st.Commits) != 0 {
-		t.Errorf("renameDir failure must not commit")
 	}
 }
 
@@ -919,7 +871,7 @@ func TestPullTranscript_NoServerHash_LocalRecompute(t *testing.T) {
 		Annotations: nil,
 	}
 
-	res, err := pull.NewPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res, err := newPipeline(reader, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err != nil {
 		t.Fatalf("PullTranscript: %v", err)
@@ -947,7 +899,7 @@ func TestPullTranscript_NoServerHash_LocalRecompute(t *testing.T) {
 		ContentETag: "",
 		Annotations: nil,
 	}
-	res2, err := pull.NewPipeline(reader2, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
+	res2, err := newPipeline(reader2, fs, st, testutil.NewFixedClock(), testCreds(), testPullsRoot).
 		PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 	if err != nil {
 		t.Fatalf("second PullTranscript: %v", err)

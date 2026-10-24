@@ -271,10 +271,10 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 			th := guidedPresentationTheme(t, row.Theme)
 			innerWidth := row.Width - 2
 			fittedIntro := fixture.Intro + strings.Repeat(" ", innerWidth-ansi.StringWidth(fixture.Intro))
-			surfaceRun := strings.TrimSuffix(th.Styles().Surface.Render(fittedIntro), "\x1b[m")
+			insetRun := strings.TrimSuffix(th.Styles().Inset.Render(fittedIntro), "\x1b[m")
 			rawIntro := strings.Split(view, "\n")[introAt]
-			if !strings.Contains(rawIntro, surfaceRun) {
-				t.Errorf("mounted section %q surface background does not reach the final inner cell", row.Section)
+			if !strings.Contains(rawIntro, insetRun) {
+				t.Errorf("mounted section %q inset background does not reach the final inner cell", row.Section)
 			}
 			if len(section.Guide.Hints) > 0 {
 				// A hint renders as one hard-clipped line (settings/flow.go
@@ -291,10 +291,10 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 				if hintAt < 0 {
 					t.Fatalf("mounted section %q does not show its first muted hint (probe %q)", row.Section, hintProbe)
 				}
-				probe := th.Styles().Surface.Render("x")
-				surfacePrefix := probe[:strings.Index(probe, "x")]
-				if strings.Contains(strings.Split(view, "\n")[hintAt], surfacePrefix) {
-					t.Errorf("mounted section %q promoted its transparent muted hint to a surface row", row.Section)
+				probe := th.Styles().Inset.Render("x")
+				insetPrefix := probe[:strings.Index(probe, "x")]
+				if strings.Contains(strings.Split(view, "\n")[hintAt], insetPrefix) {
+					t.Errorf("mounted section %q promoted its transparent muted hint to an inset row", row.Section)
 				}
 			}
 		})

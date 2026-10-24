@@ -1,10 +1,10 @@
 # Viewport widths the mounted shell gate (scripts/visual/shell-nav-gate.mjs)
-# drives the local header through. The header is one row of fairtrade's --nav-h
-# (56px) at every width, so no row carries its own height: at each width the
-# gate asserts the shell-header.yaml manifest, that every header item (brand,
-# search, theme; settings once its page ships) is visible, inside the row and
-# reachable by a pointer, that nothing overflows sideways, and that <main>
-# clears the header (and the offline notice while it shows). `reflow` is the
+# drives the local chrome through: fairtrade's sidebar, a column at 768px and
+# up and a top bar of --nav-h (56px) with a drawer below that. At each width
+# the gate asserts the shell-chrome.yaml manifest, that every sidebar item is
+# visible, inside the sidebar and reachable by a pointer (in the drawer, opened,
+# on a narrow screen), that nothing overflows sideways, and that <main> starts
+# under the chrome (and the offline notice while it shows). `reflow` is the
 # WCAG 1.4.10 reflow width. The gate requires every name below.
 cases:
   - name: desktop

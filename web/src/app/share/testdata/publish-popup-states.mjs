@@ -24,6 +24,9 @@ const ACTIONS = ['publish', 'update', 'manage']
 
 /** The village the fixture's transcripts live on. */
 export const FIXTURE_VILLAGE = 'https://village.peasantlabs.org'
+/** The village API base the sign-in answer names, as the server does: the
+    API host, which is not a page a reader can open. */
+const FIXTURE_VILLAGE_API = 'https://api.village.peasantlabs.org'
 /** The transcript a fixture publish creates. */
 export const FIXTURE_TRANSCRIPT_ID = '3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a'
 export const FIXTURE_TRANSCRIPT_URL = `${FIXTURE_VILLAGE}/transcripts/${FIXTURE_TRANSCRIPT_ID}`
@@ -397,7 +400,7 @@ export function createPublishWorld(fixture, entry, { sessionId, turns }) {
       case 'GET /api/v1/settings':
         return { status: 200, json: { settings: [{ key: 'push.autoPublishIntent', kind: 'boolean', value: null, effective: false, editable: true, inPeasantConfig: true, description: 'offer automatic publishing' }], autoPublish: [] } }
       case 'GET /api/v1/sync/auth':
-        return { status: 200, json: signedIn ? { authenticated: true, username: 'alice-dev', villageUrl: FIXTURE_VILLAGE, villageConfigured: true } : { authenticated: false } }
+        return { status: 200, json: signedIn ? { authenticated: true, username: 'alice-dev', villageUrl: FIXTURE_VILLAGE_API, villageConfigured: true } : { authenticated: false } }
       case 'POST /api/v1/sync/login':
         if (entry.signIn === 'login-failed') return refuse(502, 'github sign-in could not be started: connection refused')
         if (entry.signIn === 'signed-out' || entry.signIn === 'already-authenticated') signedIn = true

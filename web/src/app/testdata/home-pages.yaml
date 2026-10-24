@@ -1,5 +1,5 @@
 requiredNames:
-  - first-page-and-explicit-more
+  - first-page-and-next-page
   - loaded-refresh-keeps-content-on-failure
   - stale-filter-response
   - lazy-children-and-child-more
@@ -37,7 +37,7 @@ visual:
     - { projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90, projectName: fixture-project }
     - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: unseen-project }
 cases:
-  - name: first-page-and-explicit-more
+  - name: first-page-and-next-page
     roots: 60
     children: 0
   - name: loaded-refresh-keeps-content-on-failure

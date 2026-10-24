@@ -111,9 +111,9 @@ describe('PushStep transparency panel', () => {
       sessions: [{ sessionId: 'sess-1', status: 'new' }],
     });
     render(<PushHarness />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Submit' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'publish' }));
 
-    expect(await screen.findByRole('link', { name: /open village/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /^dashboard/ })).toHaveAttribute(
       'href',
       'https://configured.example.test',
     );

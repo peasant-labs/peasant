@@ -116,12 +116,30 @@ export interface RedactionPreview {
   matchCount: number;
 }
 
+/**
+ * A scan that has not answered by then is stopped and reported as a failed
+ * scan, so publish stays off with a reason instead of waiting on a server that
+ * went away. A long session scans in seconds; this bound is far above that.
+ */
+export const REDACTION_SCAN_TIMEOUT_MS = 180_000;
+
 export async function fetchRedactionScan(
   sessionId: string,
   level: RedactionLevel,
 ): Promise<RedactionPreview> {
   const params = new URLSearchParams({ session_id: sessionId, level });
-  const resp = await fetch(`${getApiBaseUrl()}/api/v1/sync/redactions?${params.toString()}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REDACTION_SCAN_TIMEOUT_MS);
+  let resp: Response;
+  try {
+    resp = await fetch(`${getApiBaseUrl()}/api/v1/sync/redactions?${params.toString()}`, { signal: controller.signal });
+  } catch {
+    throw new Error(controller.signal.aborted
+      ? `the scan took longer than ${REDACTION_SCAN_TIMEOUT_MS / 60_000} minutes and was stopped; re-scan to try again`
+      : 'the peasant app on this computer stopped answering during the scan; re-scan to try again');
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
     throw new Error(`redaction scan failed (${resp.status}): ${body}`);

@@ -1,15 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/pull"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/village"
+	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +29,7 @@ func requireVillageCredentials(cmd *cobra.Command) (*auth.Credentials, error) {
 		return nil, fmt.Errorf("not logged in — run 'peasant village login' first")
 	}
 	if creds.VillageURL == "" {
-		return nil, fmt.Errorf("village URL is not set — run 'peasant village login' to re-link your account")
+		return nil, fmt.Errorf("peasant online URL is not set — run 'peasant village login' to re-link your account")
 	}
 	return creds, nil
 }
@@ -45,17 +47,29 @@ func newVillageClientFromCreds(creds *auth.Credentials) *village.VillageClient {
 // command inside the pipeline op), the opened *store.Store (PullStore), the
 // system clock, the requester credentials mapped to pull.Credentials, and the
 // resolved village-pulls root honoring --data-dir. The caller owns db's lifetime.
-func villagePullPipeline(cmd *cobra.Command, creds *auth.Credentials, db *store.Store) *pull.Pipeline {
+func villagePullPipeline(cmd *cobra.Command, creds *auth.Credentials, db *store.Store, options ...pull.PipelineOption) *pull.Pipeline {
 	client := newVillageClientFromCreds(creds)
 	pullsRoot := string(defaults.ResolveVillagePullsDirPathWith(dataDirOverride(cmd)))
 	return pull.NewPipeline(
 		client,
-		&ingest.OSFileSystem{},
+		pull.NewFileSystem(pullsRoot),
 		db,
 		pull.SystemClock{},
 		pull.Credentials{UserID: creds.UserID, VillageURL: creds.VillageURL},
 		pullsRoot,
+		options...,
 	)
+}
+
+type pullActionAssociations struct {
+	service  *collectiveobservations.Service
+	original auth.CredentialSnapshot
+}
+
+var _ pull.AssociationObserver = (*pullActionAssociations)(nil)
+
+func (a *pullActionAssociations) ObserveAssociations(ctx context.Context, id schema.TranscriptID) (schema.PullAssociationMetadataResult, error) {
+	return a.service.ObserveAssociationsFor(ctx, a.original, id)
 }
 
 // buildVillageTranscriptsPullCommand constructs `village transcripts pull
@@ -78,25 +92,36 @@ func buildVillageTranscriptsPullCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "pull [<uuid|url>] [--collective <ref>]...",
-		Short: "Pull one transcript, or a collective's transcripts, from the village (login required)",
+		Short: "Pull one transcript, or a collective's transcripts, from peasant online (login required)",
 		Long: `Pull one transcript (and the annotations authored on it), or every transcript an
-accessible collective holds, from the Peasant village into the local
+accessible collective holds, from peasant online into the local
 village-pulls/ namespace and the pulled-transcripts index. Pulled data is foreign
 and one-way: it never enters ingest, analytics, or your annotate-push candidate
 set.
 
 Choose exactly one selection. A transcript reference is its UUID or a pasted
-village web URL. --collective names a collective the caller belongs to, by its
-name, its UUID, or its /groups/<uuid> page URL. It is repeatable, and several
+peasant online web URL. --collective names a server-visible collective by its exact
+name, UUID, or selected peasant online's /collectives/<uuid> or legacy /groups/<uuid>
+page URL. Full installation base paths must match. It is repeatable, and several
 values pull the union, each transcript once. A collective holds the transcripts
 offered to it and approved, so a transcript the caller owns but never shared with
 a listed collective is not part of the selection. --user keeps only the
-transcripts one village account contributed: combine it with --collective for a
+transcripts one peasant online account contributed: combine it with --collective for a
 single collective, or pass it alone to span every collective the caller can pull
 from.
 
+An explicit live collective selection is recorded as a local tracking preference
+after all references resolve and its required listing succeeds, even when empty.
+It does not join, publish, or grant access. Bare --user keeps existing membership
+discovery. Dry runs do not add tracking or new metadata auth/detail requests.
+
 --dry-run reports what WOULD be pulled (and why / why-not) without writing
-anything.`,
+anything. After successful content, optional viewer-disclosed collective metadata
+is refreshed separately, including when the content is already current. A
+metadata failure warns on stderr without changing successful content's exit code;
+--json retains the content envelope and adds associationMetadata with its true
+observation state and date. Content authorization and negotiation still must
+succeed. Dry runs do not refresh metadata.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past argument validation, every failure here is a RUNTIME error
@@ -120,7 +145,7 @@ anything.`,
 				return fmt.Errorf("choose one selection: a transcript reference, or --collective/--user, not both")
 			}
 			if len(args) == 0 && !filters {
-				return fmt.Errorf("nothing to pull: pass a transcript UUID or a village web URL, or one or more --collective values, or --user")
+				return fmt.Errorf("nothing to pull: pass a transcript UUID or a peasant online web URL, or one or more --collective values, or --user")
 			}
 
 			var ref pull.TranscriptRef
@@ -136,21 +161,36 @@ anything.`,
 			if err != nil {
 				return err
 			}
+			var original auth.CredentialSnapshot
+			if !dryRun {
+				original, err = auth.CaptureCredentials(cmd.Context(), configDirOverride(cmd))
+				if err != nil {
+					return err
+				}
+				captured := original.Credentials()
+				creds = &captured
+			}
 
 			db, cleanup, err := openDB(cmd)
 			if err != nil {
 				return err
 			}
 			defer cleanup()
+			options := []pull.PipelineOption{}
+			var observations *collectiveobservations.Service
+			if !dryRun {
+				observations = collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: configDirOverride(cmd)})
+				options = append(options, pull.WithAssociationObserver(&pullActionAssociations{service: observations, original: original}))
+			}
 
 			if len(collectiveRefs) > 0 || user != "" {
 				return runVillageTranscriptsPullCollectives(cmd, db, newVillageClientFromCreds(creds),
-					villagePullPipeline(cmd, creds, db),
+					villagePullPipeline(cmd, creds, db, options...),
 					collectiveRefs,
-					collectivePullFlags{Force: force, DryRun: dryRun, JSON: jsonOutput, Level: level, User: user})
+					collectivePullFlags{Force: force, DryRun: dryRun, JSON: jsonOutput, Level: level, User: user, Original: &original, Observations: observations})
 			}
 
-			pipeline := villagePullPipeline(cmd, creds, db)
+			pipeline := villagePullPipeline(cmd, creds, db, options...)
 
 			if dryRun && !jsonOutput && level != outputQuiet {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Dry run — no transcript will be written\n\n")
@@ -160,6 +200,7 @@ anything.`,
 				Force:  force,
 				DryRun: dryRun,
 			})
+			printPullMetadataWarning(cmd, result)
 
 			if jsonOutput {
 				if jErr := printPullJSON(cmd, ref, result, pullErr); jErr != nil {
@@ -181,28 +222,29 @@ anything.`,
 	cmd.Flags().BoolVar(&force, "force", false, "Re-download and rewrite even when the local copy matches the served blob")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would be pulled without writing anything")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show extra pull detail (village host, pull directory, served-blob hash)")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show extra pull detail (peasant online host, pull directory, served-blob hash)")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary; print only errors and a final result line")
 	cmd.Flags().StringArrayVar(&collectiveRefs, "collective", nil,
 		"Pull every transcript a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values pull the union, each transcript once")
 	cmd.Flags().StringVar(&user, "user", "",
-		"Keep only the transcripts contributed by this village account. Combine with --collective for one collective; alone, it spans every collective you can pull from")
+		"Keep only the transcripts contributed by this peasant online account. Combine with --collective for one collective; alone, it spans every collective you can pull from")
 
 	return cmd
 }
 
 // jsonPullResult is the JSON-safe output for `village transcripts pull --json`.
 type jsonPullResult struct {
-	TranscriptID    string `json:"transcriptId"`
-	FromURL         bool   `json:"fromUrl"`
-	Status          string `json:"status"`
-	DryRun          bool   `json:"dryRun,omitempty"`
-	VillageHost     string `json:"villageHost,omitempty"`
-	PullDir         string `json:"pullDir,omitempty"`
-	ServedBlobHash  string `json:"servedBlobHash,omitempty"`
-	License         string `json:"license,omitempty"`
-	AnnotationCount int    `json:"annotationCount"`
-	Error           string `json:"error,omitempty"`
+	TranscriptID        string                                `json:"transcriptId"`
+	FromURL             bool                                  `json:"fromUrl"`
+	Status              string                                `json:"status"`
+	DryRun              bool                                  `json:"dryRun,omitempty"`
+	VillageHost         string                                `json:"villageHost,omitempty"`
+	PullDir             string                                `json:"pullDir,omitempty"`
+	ServedBlobHash      string                                `json:"servedBlobHash,omitempty"`
+	License             string                                `json:"license,omitempty"`
+	AnnotationCount     int                                   `json:"annotationCount"`
+	Error               string                                `json:"error,omitempty"`
+	AssociationMetadata *schema.PullAssociationMetadataResult `json:"associationMetadata,omitempty"`
 }
 
 // printPullJSON writes the pull result as JSON. The status is the typed
@@ -232,6 +274,7 @@ func buildJSONPullResult(ref pull.TranscriptRef, result *pull.PullResult, pullEr
 		out.ServedBlobHash = result.ServedBlobHash
 		out.License = string(result.License)
 		out.AnnotationCount = result.AnnotationCount
+		out.AssociationMetadata = result.AssociationMetadata
 	} else {
 		out.Status = pull.PullStatusError.String()
 	}
@@ -239,6 +282,14 @@ func buildJSONPullResult(ref pull.TranscriptRef, result *pull.PullResult, pullEr
 		out.Error = pullErr.Error()
 	}
 	return out
+}
+
+func printPullMetadataWarning(cmd *cobra.Command, result *pull.PullResult) {
+	if result == nil || result.AssociationMetadata == nil || result.AssociationMetadata.Warning == nil {
+		return
+	}
+	issue := result.AssociationMetadata.Warning
+	fmt.Fprintf(cmd.ErrOrStderr(), "warning: transcript %s content succeeded, but association metadata was not refreshed: %s\n  retry: %s\n", result.Ref.ID, issue.Message, issue.Retry)
 }
 
 // printPullSummary writes the human-readable pull summary to stdout, routed by

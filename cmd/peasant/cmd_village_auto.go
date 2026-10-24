@@ -31,7 +31,7 @@ func BuildVillageAutoCommand() *cobra.Command {
 		Short: "Publish this repository's sessions on every git push, to the collectives you published to last",
 		Long: `Turn on auto-publish for one repository, in one step.
 
-auto reads the collectives you published to last from the village: the
+auto reads the collectives you published to last from peasant online: the
 collectives that can read, or wait to read, the transcript this computer
 published last for your account. It saves an auto-publish rule for this
 repository in hooks.yaml in the config directory: a rule for its origin remote,
@@ -92,7 +92,7 @@ func runVillageAuto(cmd *cobra.Command, dir string) error {
 	}
 	creds, err := auth.LoadCredentialsFrom(configDirOverride(cmd))
 	if err != nil || creds == nil || !creds.IsValid() || creds.VillageURL == "" {
-		return fmt.Errorf("village auto: this computer is not signed in to the village, so the collectives you published to last cannot be read; nothing was changed; run 'peasant village login', then retry")
+		return fmt.Errorf("village auto: this computer is not signed in to peasant online, so the collectives you published to last cannot be read; nothing was changed; run 'peasant village login', then retry")
 	}
 	git := &ingest.ExecGitResolver{}
 	repo, err := autopublish.Resolve(ctx, git, dir, true)
@@ -217,11 +217,11 @@ func lastPublishedCollectives(ctx context.Context, db *store.Store, client *vill
 		return nil, fmt.Errorf("village auto: %w; nothing was changed", err)
 	}
 	if latest == nil {
-		return nil, fmt.Errorf("village auto: you have not published a session to a collective from this computer yet, so there are no collectives to publish to; nothing was changed; publish a session and share it with a collective on the village, then retry")
+		return nil, fmt.Errorf("village auto: you have not published a session to a collective from this computer yet, so there are no collectives to publish to; nothing was changed; publish a session and share it with a collective on peasant online, then retry")
 	}
 	shares, err := client.TranscriptShares(ctx, latest.Receipt.TranscriptID)
 	if err != nil {
-		return nil, fmt.Errorf("village auto: the collectives of the transcript you published last could not be read from the village: %v; nothing was changed; check the connection and your sign-in, then retry", err)
+		return nil, fmt.Errorf("village auto: the collectives of the transcript you published last could not be read from peasant online: %v; nothing was changed; check the connection and your sign-in, then retry", err)
 	}
 	var collectives []village.TranscriptShare
 	for _, share := range shares {
@@ -234,7 +234,7 @@ func lastPublishedCollectives(ctx context.Context, db *store.Store, client *vill
 		return strings.Compare(a.Name, b.Name)
 	})
 	if len(collectives) == 0 {
-		return nil, fmt.Errorf("village auto: the transcript you published last (%s) is shared with no collective, so there are no collectives to publish to; nothing was changed; share it with a collective on the village, then retry", latest.Receipt.TranscriptURL)
+		return nil, fmt.Errorf("village auto: the transcript you published last (%s) is shared with no collective, so there are no collectives to publish to; nothing was changed; share it with a collective on peasant online, then retry", latest.Receipt.TranscriptURL)
 	}
 	return collectives, nil
 }

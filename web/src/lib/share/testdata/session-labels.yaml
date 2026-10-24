@@ -1,0 +1,39 @@
+# How a publish wizard row names a session. The list sends a first prompt cut
+# to 40 characters with no mark, so a prompt that long drops its last word (it
+# may itself be cut) and ends with an ellipsis; a shorter or finished one stays.
+# The id shows its leading 8 characters; the day is lowercase.
+# requiredNames pins the cases.
+requiredNames:
+  - cut-prompt-ends-at-a-word
+  - short-prompt-stays
+  - finished-sentence-stays
+  - no-prompt-uses-the-short-id
+  - short-id-is-the-leading-characters
+  - day-is-lowercase
+cases:
+  - name: cut-prompt-ends-at-a-word
+    preview: 'Benchmark the transfer handler and tell '
+    id: 1a7d9e20-4c3b-4f6a-8e21-6b5c4d3e2f01
+    title: Benchmark the transfer handler and…
+  - name: short-prompt-stays
+    preview: fix the flaky ingest test
+    id: 1a7d9e20-4c3b-4f6a-8e21-6b5c4d3e2f01
+    title: Fix the flaky ingest test
+  - name: finished-sentence-stays
+    preview: 'Why does login fail on the second try?  '
+    id: 1a7d9e20-4c3b-4f6a-8e21-6b5c4d3e2f01
+    title: Why does login fail on the second try?
+  - name: no-prompt-uses-the-short-id
+    preview: ''
+    id: 1a7d9e20-4c3b-4f6a-8e21-6b5c4d3e2f01
+    title: 1a7d9e20…
+  - name: short-id-is-the-leading-characters
+    preview: ''
+    id: 0f3c2a10-6b1e-4c5a-9d0e-1a2b3c4d5e01
+    title: 0f3c2a10…
+  - name: day-is-lowercase
+    preview: fix it
+    id: ses_7f3a9c2d1e0bA1b2C3d4E5f6G7
+    title: Fix it
+    startTime: '2026-10-22T15:00:00Z'
+    day: oct 22

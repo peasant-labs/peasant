@@ -71,8 +71,8 @@ func (c ContractNegotiation) String() string {
 // upgrading the CLI — never the village.
 func UpgradeCLIError(cli, min schema.PushContractVersion) error {
 	return fmt.Errorf(
-		"peasant push aborted: this CLI's push-contract v%s is older than the village's minimum accepted v%s\n"+
-			"  what: the village (our managed upstream) no longer accepts pushes from this CLI version\n"+
+		"peasant push aborted: this CLI's push-contract v%s is older than peasant online's minimum accepted v%s\n"+
+			"  what: peasant online (our managed upstream) no longer accepts pushes from this CLI version\n"+
 			"  why:  the accepted window starts at v%s and this CLI is below it\n"+
 			"  fix:  upgrade the peasant CLI to >= v%s, then re-run `peasant push`",
 		cli, min, min, min)
@@ -83,8 +83,8 @@ func UpgradeCLIError(cli, min schema.PushContractVersion) error {
 // and downgrade-emit succeeds. It never instructs upgrading the village.
 func DowngradeEmitWarning(cli, current schema.PushContractVersion) string {
 	return fmt.Sprintf(
-		"notice: this CLI's push-contract v%s is ahead of the village's current v%s; "+
-			"emitting v%s for compatibility (a village update is rolling out — no action needed)\n",
+		"notice: this CLI's push-contract v%s is ahead of peasant online's current v%s; "+
+			"emitting v%s for compatibility (a peasant online update is rolling out — no action needed)\n",
 		cli, current, current)
 }
 
@@ -93,10 +93,10 @@ func DowngradeEmitWarning(cli, current schema.PushContractVersion) string {
 // version gap). It instructs PINNING the CLI — never modifying the village.
 func CannotDowngradeError(cli, current schema.PushContractVersion) error {
 	return fmt.Errorf(
-		"peasant push aborted: this CLI's push-contract v%s cannot be downgraded to the village's current v%s\n"+
+		"peasant push aborted: this CLI's push-contract v%s cannot be downgraded to peasant online's current v%s\n"+
 			"  what: the version gap is a breaking (major) change this CLI cannot serialize backward\n"+
-			"  why:  emitting v%s would drop or reshape fields the older village requires\n"+
-			"  fix:  pin the peasant CLI to a release whose push-contract is <= v%s until the village update finishes",
+			"  why:  emitting v%s would drop or reshape fields the older peasant online server requires\n"+
+			"  fix:  pin the peasant CLI to a release whose push-contract is <= v%s until the peasant online update finishes",
 		cli, current, current, current)
 }
 

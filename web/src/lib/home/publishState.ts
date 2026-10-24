@@ -26,7 +26,7 @@ export const PUBLISH_FILTER_LABELS: Readonly<Record<PublishFilter, string>> = {
   all: 'all',
   'not-published': 'not published',
   published: 'published',
-  auto: 'auto',
+  auto: 'auto-publish on',
 };
 
 export function isPublishFilter(value: string): value is PublishFilter {

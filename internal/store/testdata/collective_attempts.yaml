@@ -1,0 +1,87 @@
+requiredNames:
+  - attempt-pending-approved
+  - attempt-late-pending-after-terminal
+  - attempt-terminal-exact-replay
+  - attempt-terminal-conflict-atomic
+  - attempt-approved-withdrawal-new-ordinal
+  - complete-empty-does-not-purge-history
+  - older-overlapping-source-refused
+  - disjoint-source-does-not-starve
+  - account-switch-back-discards-source
+  - same-host-other-principal
+  - same-host-different-base-path
+checks:
+  - name: attempt-status-check-exact-schema-membership
+    column: status
+  - name: attempt-actor-check-exact-schema-membership
+    column: decided_by_actor
+cases:
+  - name: attempt-pending-approved
+    before: [&pending {eventnum: 1, status: pending, recordedat: '2026-01-01T00:00:00.000000001Z', decidedat: null, decidedbyactor: ''}]
+    incoming: [&approved {eventnum: 1, status: approved, recordedat: '2026-01-01T00:00:00.000000001Z', decidedat: '2026-01-02T00:00:00.000000002Z', decidedbyactor: moderator}]
+    expected: [*approved]
+    wantChanged: true
+    wantGeneration: 2
+  - name: attempt-late-pending-after-terminal
+    before: [*approved]
+    incoming: [*pending]
+    expected: [*approved]
+    wantGeneration: 1
+  - name: attempt-terminal-exact-replay
+    before: [*approved]
+    incoming: [*approved]
+    expected: [*approved]
+    wantGeneration: 1
+  - name: attempt-terminal-conflict-atomic
+    before: [*approved]
+    incoming:
+      - &retracted {eventnum: 2, status: retracted, recordedat: '2026-01-03T00:00:00Z', decidedat: '2026-01-03T00:00:00Z', decidedbyactor: owner}
+      - {eventnum: 1, status: rejected, recordedat: '2026-01-01T00:00:00.000000001Z', decidedat: '2026-01-02T00:00:00.000000002Z', decidedbyactor: moderator}
+    expected: [*approved]
+    absentOrdinals: [2]
+    wantError: contract
+    wantGeneration: 1
+  - name: attempt-approved-withdrawal-new-ordinal
+    before: [*approved]
+    incoming: [*approved, *retracted]
+    expected: [*approved, *retracted]
+    wantChanged: true
+    wantGeneration: 2
+  - name: complete-empty-does-not-purge-history
+    before: [*approved]
+    incoming: []
+    expected: [*approved]
+    wantGeneration: 1
+  - name: older-overlapping-source-refused
+    mode: newer-overlap
+    before: [*pending]
+    incoming: [*pending]
+    newer: [*approved]
+    expected: [*approved]
+    wantError: superseded
+    wantGeneration: 2
+  - name: disjoint-source-does-not-starve
+    mode: newer-disjoint
+    before: [*pending]
+    incoming: [*approved]
+    newer: [*pending]
+    expected: [*approved]
+    wantChanged: true
+    wantGeneration: 3
+  - name: account-switch-back-discards-source
+    mode: switch-back
+    before: [*pending]
+    incoming: [*approved]
+    expected: [*pending]
+    wantError: credentials
+    wantGeneration: 1
+  - name: same-host-other-principal
+    mode: other-principal
+    before: [*approved]
+    incoming: []
+    expected: []
+  - name: same-host-different-base-path
+    mode: other-base-path
+    before: [*approved]
+    incoming: []
+    expected: []

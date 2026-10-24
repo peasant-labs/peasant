@@ -11,7 +11,7 @@
 # both modes, so a future edit that reads the wrong Palette field or forgets
 # to thread Mode through is caught structurally rather than only by
 # eyeballing a screenshot.
-expectedCaseCount: 17
+expectedCaseCount: 21
 cases:
   - name: base-foreground-uses-ink
     stylesField: Base
@@ -29,6 +29,22 @@ cases:
     stylesField: Surface
     property: background
     paletteField: Surface
+  - name: inset-foreground-uses-ink
+    stylesField: Inset
+    property: foreground
+    paletteField: Ink
+  - name: inset-background-uses-surface-2
+    stylesField: Inset
+    property: background
+    paletteField: Surface2
+  - name: overlay-foreground-uses-ink
+    stylesField: Overlay
+    property: foreground
+    paletteField: Ink
+  - name: overlay-background-uses-surface-elev
+    stylesField: Overlay
+    property: background
+    paletteField: SurfaceElev
   - name: surface-hover-foreground-uses-ink
     stylesField: SurfaceHover
     property: foreground

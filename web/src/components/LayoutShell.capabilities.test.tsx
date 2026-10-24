@@ -2,27 +2,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, act, within } from '@testing-library/react';
 import { capabilitiesResponse, UI_CAPABILITY_CASES, type CapabilityCase } from '@/test/fixtures/uiCapabilities';
 import {
-  headerFailures,
-  loadShellHeaderManifest,
+  chromeFailures,
+  loadShellChromeManifest,
   paletteFailures,
   shippedItems,
-} from '../../scripts/visual/shell-header-manifest.mjs';
+} from '../../scripts/visual/shell-chrome-manifest.mjs';
 import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
 
 // ---------------------------------------------------------------------------
 // Only HTTP is mocked. The ServerCapabilitiesProvider under test is REAL; the
-// real TopNavbar and CommandPalette read it. next/navigation and useTheme are
+// real sidebar and CommandPalette read it. next/navigation and useTheme are
 // framework/browser shims (not HTTP), mocked as in the sibling suites.
 // ---------------------------------------------------------------------------
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push }),
 }));
-vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle: vi.fn() }) }));
+vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle: vi.fn(), setTheme: vi.fn() }) }));
 
 // ---------------------------------------------------------------------------
 // MockWebSocket — LayoutShell mounts the real WebSocketProvider, which opens a
@@ -44,7 +45,7 @@ class MockWebSocket {
   }
 }
 
-const manifest = loadShellHeaderManifest();
+const manifest = loadShellChromeManifest();
 const shipped = shippedItems(manifest);
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -73,13 +74,14 @@ function mockHttp(row: CapabilityCase): void {
     const url = new URL(String(input), 'http://localhost');
     if (url.pathname === '/api/v1/config/capabilities') return capabilitiesResponse(row);
     if (url.pathname === '/api/v1/health') return Response.json({ status: 'ok' });
+    if (url.pathname === '/api/v1/sync/auth') return Response.json({ authenticated: false });
     throw new Error(`unexpected test request ${url.pathname}`);
   });
 }
 
 describe('LayoutShell — the code map stays route-only whatever the server advertises', () => {
   it.each(UI_CAPABILITY_CASES.map((row) => [row.name, row] as const))(
-    'keeps the code map out of the header and the palette: %s',
+    'keeps the code map out of the sidebar and the palette: %s',
     async (_name, row) => {
       mockHttp(row);
       render(
@@ -92,7 +94,7 @@ describe('LayoutShell — the code map stays route-only whatever the server adve
         await new Promise((r) => setTimeout(r, 0));
       });
 
-      expect(headerFailures(manifest, { theme: 'light', shipped })).toEqual([]);
+      expect(chromeFailures(manifest, { theme: 'light', shipped })).toEqual([]);
       expect(screen.queryByRole('link', { name: 'code map' })).not.toBeInTheDocument();
 
       await act(async () => {

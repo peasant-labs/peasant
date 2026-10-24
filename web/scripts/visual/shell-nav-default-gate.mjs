@@ -1,6 +1,6 @@
 /* Local shell offline gate on the mounted production app.
 
-   See README.md §4c for the header, provenance, offline, keyboard, geometry and lifecycle
+   See README.md §4c for the sidebar, provenance, offline, keyboard, geometry and lifecycle
    checks, their fixture cases, and the test promotion rationale. This script owns its server
    because it exercises stopping and restarting the app. Captures are review evidence only.
 
@@ -27,7 +27,7 @@ import { applyDeterminism } from './determinism.mjs'
 import { SHELL_DEFAULT_PROJECT, SHELL_DEFAULT_SESSION, SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import { assertServedBuild, shellProvenanceMarkers } from './served-build.mjs'
-import { chromeClearance, headerFailures, loadNoticePinnedQuery, loadShellHeaderManifest, shippedItems, WEB_ROOT } from './shell-header-manifest.mjs'
+import { chromeClearance, chromeFailures, loadNoticePinnedQuery, loadShellChromeManifest, shippedItems, WEB_ROOT } from './shell-chrome-manifest.mjs'
 
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
 
@@ -45,7 +45,7 @@ const RETRY = `${NOTICE} .cx-offline-retry`
 const LIVE = 'p[role="status"].sr-only'
 const EXPECTED_COMMAND = PORT === 8690 ? 'peasant web start' : `peasant web start --port ${PORT}`
 const TRANSCRIPT_PATH = `/projects/${SHELL_DEFAULT_PROJECT}/${SHELL_DEFAULT_SESSION}/`
-/** The floor a full-height page keeps below the header while the notice shows, as the geometry fixture records it. */
+/** The floor a full-height page keeps below the chrome while the notice shows, as the geometry fixture records it. */
 const BODY_FLOOR_REM = (() => {
   const geometry = YAML.parse(readFileSync(join(WEB_ROOT, 'src', 'components', 'testdata', 'app-shell-geometry.yaml'), 'utf8'))
   const match = /^(\d+(?:\.\d+)?)rem$/.exec(String(geometry?.bodyFloor ?? ''))
@@ -53,7 +53,7 @@ const BODY_FLOOR_REM = (() => {
   return Number(match[1])
 })()
 const CASES_FIXTURE = join(HERE, 'testdata', 'shell-offline-cases.yaml')
-const REQUIRED_CASES = ['home', 'transcript', 'home-mobile', 'home-short', 'transcript-short', 'share-mobile', 'home-scrolled', 'analytics-keep-place', 'analytics-end-keeps-place']
+const REQUIRED_CASES = ['home', 'transcript', 'home-mobile', 'home-short', 'transcript-short', 'share-mobile', 'analytics-scrolled', 'analytics-keep-place', 'analytics-end-keeps-place']
 const CHECKS = ['plain', 'retry-reach', 'floor', 'scrolled', 'keep-place', 'keep-place-end']
 const RECOVERIES = ['pointer', 'keyboard']
 
@@ -105,7 +105,7 @@ if (!existsSync(BIN)) {
 }
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
-const manifest = loadShellHeaderManifest()
+const manifest = loadShellChromeManifest()
 const PINNED_QUERY = loadNoticePinnedQuery()
 const shipped = shippedItems(manifest)
 const ANNOUNCE = manifest.announcements
@@ -173,7 +173,7 @@ process.on('exit', () => {
 
 // ── page probes ──────────────────────────────────────────────────────────────────────────────────
 // What the notice says and offers. Its position and the page's clearance come from
-// chromeClearance, the same probe the header gate and the component contract share.
+// chromeClearance, the same probe the chrome gate and the component contract share.
 const noticeState = async (page) => ({
   ...await page.evaluate(({ notice, retry, live }) => {
     const section = document.querySelector(notice)
@@ -204,9 +204,9 @@ const waitFor = async (page, predicate, timeoutMs, what) => {
   throw new Error(`${what} did not happen within ${timeoutMs}ms; last state ${JSON.stringify(last)}`)
 }
 
-const assertHeaderHolds = async (page, theme, where) => {
-  const failures = [...await page.evaluate(headerFailures, manifest, { theme, shipped }), ...(await page.evaluate(chromeClearance, PINNED_QUERY)).failures]
-  if (failures.length) throw new Error(`the ${theme} header at ${where} breaks the shell manifest: ${JSON.stringify(failures)}`)
+const assertChromeHolds = async (page, theme, where) => {
+  const failures = [...await page.evaluate(chromeFailures, manifest, { theme, shipped }), ...(await page.evaluate(chromeClearance, PINNED_QUERY)).failures]
+  if (failures.length) throw new Error(`the ${theme} sidebar at ${where} breaks the shell manifest: ${JSON.stringify(failures)}`)
 }
 
 const pressRetry = (page) => page.evaluate((selector) => {
@@ -215,7 +215,7 @@ const pressRetry = (page) => page.evaluate((selector) => {
   return !!button
 }, RETRY)
 
-// Scroll `try again` into view and prove a pointer at its centre reaches it (the fixed header must
+// Scroll `try again` into view and prove a pointer at its centre reaches it (the phone's top bar must
 // not cover it). The scroll is instant, so a smooth-scrolling root cannot leave the measurement
 // mid-animation.
 const assertRetryReachable = async (page) => {
@@ -230,7 +230,8 @@ const assertRetryReachable = async (page) => {
     const retry = document.querySelector(selector)
     if (!retry) return { ok: false, reason: 'no try again button', scrollY: window.scrollY }
     const rect = retry.getBoundingClientRect()
-    const header = document.querySelector('header')?.getBoundingClientRect()
+    const bar = document.querySelector('.asb-bar')
+    const header = bar && getComputedStyle(bar).display !== 'none' ? bar.getBoundingClientRect() : null
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
     const inView = rect.top >= 0 && rect.bottom <= window.innerHeight
     const belowHeader = !header || rect.top >= header.bottom - 0.5
@@ -244,7 +245,7 @@ const assertRetryReachable = async (page) => {
 }
 
 // Scroll the document to its bottom and prove the full-height page keeps its floor, fully in view
-// below the header.
+// below the chrome (the phone's top bar; nothing on a wide screen).
 const assertFloorKept = async (page, selector) => {
   await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }))
   await pause(150)
@@ -252,7 +253,8 @@ const assertFloorKept = async (page, selector) => {
     const el = document.querySelector(sel)
     if (!el) return { ok: false, reason: `${sel} did not mount` }
     const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
-    const header = document.querySelector('header').getBoundingClientRect()
+    const bar = document.querySelector('.asb-bar')
+    const header = bar && getComputedStyle(bar).display !== 'none' ? bar.getBoundingClientRect() : { height: 0, bottom: 0 }
     const floor = Math.min(floorRem * rem, window.innerHeight - header.height)
     const rect = el.getBoundingClientRect()
     // The case must be one where the floor binds (the page would be shorter without it), and the
@@ -276,15 +278,23 @@ const scrollDown = (page, end = false) => page.evaluate((end) => {
   return window.scrollY
 }, end)
 
-// Sample every frame whether the notice shows, its height, and the scroll position, so the notice's
-// own effect is read at the frame it appears or goes — apart from the page's own connection states,
-// which change in other frames (or, on the return, change the layout without moving the scroll).
+// Sample every frame whether the notice shows, its height, the scroll position, and where the
+// content the reader was looking at sits on screen (the element at the centre of the screen when
+// sampling starts), so the notice's own effect is read at the frame it appears or goes — apart
+// from the page's own connection states, which change in other frames (or, on the return, change
+// the layout without moving the scroll).
 const startFrameSampler = (page) => page.evaluate((notice) => {
   if (window.__offlineGateFrames) cancelAnimationFrame(window.__offlineGateFrames.handle)
   const samples = []
+  const watched = document.elementFromPoint(window.innerWidth * 0.6, window.innerHeight / 2)
   const tick = () => {
     const shown = !!document.querySelector(notice)
-    samples.push({ shown, height: Number.parseFloat(document.documentElement.style.getPropertyValue('--app-notice-height')) || 0, scrollY: window.scrollY })
+    samples.push({
+      shown,
+      height: Number.parseFloat(document.documentElement.style.getPropertyValue('--app-notice-height')) || 0,
+      scrollY: window.scrollY,
+      watchedTop: watched && watched.isConnected ? watched.getBoundingClientRect().top : null,
+    })
     window.__offlineGateFrames.handle = requestAnimationFrame(tick)
   }
   window.__offlineGateFrames = { samples, handle: 0 }
@@ -330,7 +340,7 @@ const drivePage = async (theme, spec, seen) => {
   const response = await page.goto(ORIGIN + spec.path, { waitUntil: 'networkidle0' })
   if (!response || response.status() >= 400) throw new Error(`the app answered HTTP ${response ? response.status() : 0} for ${spec.path}`)
   await page.waitForSelector(spec.body, { visible: true, timeout: 15000 })
-  await assertHeaderHolds(page, theme, `${spec.path} ${where}, connected`)
+  await assertChromeHolds(page, theme, `${spec.path} ${where}, connected`)
   await pause(PAST_GRACE_MS)
   const connected = await noticeState(page)
   if (connected.shown || connected.noticeHeight || connected.live !== '') throw new Error(`the ${where} page shows or announces the offline notice while the app is running: ${JSON.stringify(connected)}`)
@@ -347,9 +357,9 @@ const drivePage = async (theme, spec, seen) => {
     await startFrameSampler(page)
   }
 
-  // stopped: the notice under the header, saying the right thing, the page clearing it
+  // stopped: the notice at the top of the page, saying the right thing, the page under it
   await stopServer()
-  await waitFor(page, (s) => s.shown && s.noticeHeight !== '' && s.clearance.failures.length === 0, OFFLINE_WITHIN_MS, `the ${where} offline notice (placed under the header, <main> clearing both)`)
+  await waitFor(page, (s) => s.shown && s.noticeHeight !== '' && s.clearance.failures.length === 0, OFFLINE_WITHIN_MS, `the ${where} offline notice (placed at the top of the page, <main> under it)`)
   // The live region is written by a passive effect after the notice paints; give it that render.
   const state = await waitFor(page, (s) => s.live !== '', 2000, `the ${where} live region announcing the stop`)
   const failures = []
@@ -364,17 +374,22 @@ const drivePage = async (theme, spec, seen) => {
   if (spec.check === 'retry-reach' && state.clearance.notice + state.clearance.header <= spec.height) failures.push(`the short-screen case does not exercise a notice taller than the viewport (${state.clearance.header}+${state.clearance.notice}px in ${spec.height}px)`)
   if (spec.check === 'scrolled') {
     const top = state.clearance.noticeTop
-    if (!state.clearance.pinnedViewport || !state.clearance.noticeFixed) failures.push(`the notice is not pinned on the roomy ${spec.width}×${spec.height} screen`)
-    if (top === null || top < state.clearance.header - 1 || top + state.clearance.notice > spec.height + 1) failures.push(`on a page scrolled to ${Math.round(state.scrollY)}px the notice sits at ${top}px, not on screen under the ${state.clearance.header}px header`)
+    if (!state.clearance.pinnedViewport || !state.clearance.noticePinned) failures.push(`the notice is not pinned on the roomy ${spec.width}×${spec.height} screen`)
+    if (top === null || top < state.clearance.header - 1 || top + state.clearance.notice > spec.height + 1) failures.push(`on a page scrolled to ${Math.round(state.scrollY)}px the notice sits at ${top}px, not on screen under the ${state.clearance.header}px chrome`)
     if (state.scrollY < 100) failures.push(`the page is no longer scrolled (${state.scrollY}px), so the case proves nothing`)
   }
   let appeared = null
   if (keepsPlace) {
-    if (state.clearance.noticeFixed) failures.push(`the notice is pinned on the ${spec.width}×${spec.height} screen, so the case does not exercise a notice in the page flow`)
+    if (state.clearance.noticePinned) failures.push(`the notice is pinned on the ${spec.width}×${spec.height} screen, so the case does not exercise a notice in the page flow`)
     appeared = await frameTransition(page, true)
     if (!appeared) failures.push('no frame caught the notice appearing')
-    else if (spec.check === 'keep-place' && Math.abs(appeared.after.scrollY - appeared.before.scrollY - appeared.after.height) > 1) {
-      failures.push(`in the frame the ${appeared.after.height}px notice appeared the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px, so the reader lost their place`)
+    // The notice sits in the page flow above the page, so the page moves down by its height; the
+    // browser's scroll anchoring scrolls by the same amount (and by whatever else the page inserted
+    // above the reader in that frame), so the content in view stays where it was.
+    else if (spec.check === 'keep-place' && (appeared.before.watchedTop === null || appeared.after.watchedTop === null)) {
+      failures.push('the content in view at the centre of the screen left the page, so the case cannot show whether the reader kept their place')
+    } else if (spec.check === 'keep-place' && Math.abs(appeared.after.watchedTop - appeared.before.watchedTop) > 1) {
+      failures.push(`in the frame the ${appeared.after.height}px notice appeared the content in view moved ${Math.round(appeared.before.watchedTop)} → ${Math.round(appeared.after.watchedTop)}px on screen (the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px), so the reader lost their place`)
     }
   }
   if (failures.length) throw new Error(`the ${where} page with the server stopped: ${failures.join('; ')}. State: ${JSON.stringify(state)}`)
@@ -383,7 +398,7 @@ const drivePage = async (theme, spec, seen) => {
     await pause(150)
     referenceTop = await page.$eval(spec.reference, (element) => element.getBoundingClientRect().top)
   }
-  await assertHeaderHolds(page, theme, `${spec.path} ${where}, stopped`)
+  await assertChromeHolds(page, theme, `${spec.path} ${where}, stopped`)
 
   let note = ''
   switch (spec.check) {
@@ -396,7 +411,7 @@ const drivePage = async (theme, spec, seen) => {
     }
     case 'floor': {
       const floor = await assertFloorKept(page, spec.floor)
-      if (!floor.ok) throw new Error(`on the ${where} screen the full-height page ${spec.floor} does not keep its floor in view below the header: ${floor.reason}`)
+      if (!floor.ok) throw new Error(`on the ${where} screen the full-height page ${spec.floor} does not keep its floor in view below the chrome: ${floor.reason}`)
       note = `, ${spec.floor} keeps ${Math.round(floor.height)}px (floor ${Math.round(floor.floor)}px) after scrolling ${Math.round(floor.scrollY)}px`
       captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
       break
@@ -407,14 +422,14 @@ const drivePage = async (theme, spec, seen) => {
       break
     case 'keep-place':
     case 'keep-place-end':
-      note = `, the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px in the frame the ${appeared.after.height}px notice appeared`
+      note = `, the content in view held at ${Math.round(appeared.after.watchedTop ?? 0)}px while the page scrolled ${Math.round(appeared.before.scrollY)} → ${Math.round(appeared.after.scrollY)}px in the frame the ${appeared.after.height}px notice appeared`
       captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
       break
     default:
       captured.push(await capture(page, gate, theme, spec.name))
   }
   const c = state.clearance
-  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px header (${c.noticeFixed ? 'pinned' : 'in the page flow'}), <main> clears ${c.mainPaddingTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
+  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px chrome (${c.noticePinned ? 'pinned' : 'in the page flow'}), <main> starts at ${c.mainTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
 
   // still down: a failed `try again` is announced, with the time of the check
   if (!await pressRetry(page)) throw new Error(`the ${where} notice has no \`try again\` to press`)
@@ -437,7 +452,7 @@ const drivePage = async (theme, spec, seen) => {
   } else {
     pressed = await pressRetry(page)
   }
-  await waitFor(page, (s) => !s.shown && s.noticeHeight === '' && s.clearance.failures.length === 0, RECOVER_WITHIN_MS, `the ${where} notice clearing after the restart (with <main> back under the header)`)
+  await waitFor(page, (s) => !s.shown && s.noticeHeight === '' && s.clearance.failures.length === 0, RECOVER_WITHIN_MS, `the ${where} notice clearing after the restart (with <main> back under the chrome)`)
   const back = await waitFor(page, (s) => s.live === ANNOUNCE.back, 2000, `the ${where} live region announcing the return`)
   if (keepsPlace) {
     const went = await frameTransition(page, false)
@@ -462,8 +477,8 @@ const drivePage = async (theme, spec, seen) => {
     if (tabbed.active === 'main' || tabbed.tabindex !== null) throw new Error(`on ${where} Tab after the focus move left <main> focused or focusable (focus ${tabbed.active}, tabindex ${JSON.stringify(tabbed.tabindex)})`)
     keyNote = `; keyboard recovery put focus on <main> without scrolling, and Tab moved on to ${tabbed.active} with <main> no longer focusable`
   }
-  await assertHeaderHolds(page, theme, `${spec.path} ${where}, back`)
-  console.log(`OK still+back ${where}: failed try again announced "${still.live}"; ${pressed ? (keyboard ? 'try again pressed with Enter; ' : 'try again pressed; ') : 'already reconnected; '}notice gone, page back under the header, live region "${back.live}"${keyNote}`)
+  await assertChromeHolds(page, theme, `${spec.path} ${where}, back`)
+  console.log(`OK still+back ${where}: failed try again announced "${still.live}"; ${pressed ? (keyboard ? 'try again pressed with Enter; ' : 'try again pressed; ') : 'already reconnected; '}notice gone, page back under the chrome, live region "${back.live}"${keyNote}`)
 
   if (diagnostics.length) throw new Error(`page errors appeared on ${where}: ${JSON.stringify(diagnostics.slice(0, 4))}`)
   await page.close()
@@ -486,10 +501,10 @@ try {
   console.error(
     `ERROR [shell-nav-default-gate.mjs] local shell offline gate failed.\n` +
     `  What failed: ${e.message}\n` +
-    `  Why: when the peasant app on this computer stops, every page must say so under the header — this computer, not the internet — with the start command and try again, reachable on any screen and on a scrolled page, keep the reader's place and full-height pages readable, announce the stop, a failed retry and the return, clear when the app is back, and hand keyboard focus back to the page.\n` +
+    `  Why: when the peasant app on this computer stops, every page must say so at the top of the page — this computer, not the internet — with the start command and try again, reachable on any screen and on a scrolled page, keep the reader's place and full-height pages readable, announce the stop, a failed retry and the return, clear when the app is back, and hand keyboard focus back to the page.\n` +
     `  Where: shell-nav-default-gate.mjs driving ${BIN} on ${ORIGIN} (server log: ${serverLog}).\n` +
     `  Means: a user whose local app stopped may see no notice, a notice that reads as an internet outage, a notice covering the page or out of reach, a crushed transcript, silence for a screen reader, or a notice that never clears.\n` +
-    `  Fix: make build so ./peasant embeds this checkout's web/out, free port ${PORT}, then fix the reported notice, header or page geometry.`,
+    `  Fix: make build so ./peasant embeds this checkout's web/out, free port ${PORT}, then fix the reported notice, sidebar or page geometry.`,
   )
   process.exitCode = 1
 } finally {
@@ -499,7 +514,7 @@ try {
 }
 
 if (!process.exitCode) {
-  console.log(`\nOK [shell-nav-default-gate.mjs] offline notice verified on ${ORIGIN}: shows under the header when the app stops (pinned where the screen has room, in the page flow elsewhere), names this computer, offers "${EXPECTED_COMMAND}" and try again (reachable at 320×256), keeps the transcript and /share at their floor on short screens, stays on screen on a scrolled page, keeps a scrolled reader's place where it scrolls, announces the stop, a failed try again and the return, clears when the app is back, and returns keyboard focus to the page, in ${SMOKE_THEMES.join(' + ')} across ${PAGES.map((p) => `${p.name} ${p.width}×${p.height}`).join(', ')}.`)
+  console.log(`\nOK [shell-nav-default-gate.mjs] offline notice verified on ${ORIGIN}: shows at the top of the page when the app stops (pinned where the screen has room, in the page flow elsewhere), names this computer, offers "${EXPECTED_COMMAND}" and try again (reachable at 320×256), keeps the transcript and /share at their floor on short screens, stays on screen on a scrolled page, keeps a scrolled reader's place where it scrolls, announces the stop, a failed try again and the return, clears when the app is back, and returns keyboard focus to the page, in ${SMOKE_THEMES.join(' + ')} across ${PAGES.map((p) => `${p.name} ${p.width}×${p.height}`).join(', ')}.`)
   console.log('Offline frames:')
   for (const file of captured) console.log(`  ${file}`)
 }

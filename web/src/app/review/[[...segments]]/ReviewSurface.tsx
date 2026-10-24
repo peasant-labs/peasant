@@ -13,6 +13,7 @@ import {
 import type { ReviewListPayload } from '@peasant-labs/schema';
 import { mapHref, returnLocation as makeReturnLocation, type ProjectHash, type ReturnLocation } from '@/lib/navigation/projectRoutes';
 import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { resolveTimelineNavigation } from './timelineNavigation';
 
@@ -143,7 +144,7 @@ export function ReviewSurface({
     return <ReviewState label="resolving project…" />;
   }
   if (requestedIdentity && (identity.state.phase === 'missing' || identity.state.phase === 'error')) {
-    return <ReviewError label={identity.state.message} onRetry={identity.retry} />;
+    return <ProjectIdentityProblem state={identity.state} onRetry={identity.retry} />;
   }
 
   // ── detail view ─────────────────────────────────────────────────────────────
@@ -212,7 +213,7 @@ export function ReviewSurface({
   }
 
   // ── list view ──────────────────────────────────────────────────────────────
-  if (!effectiveHash || !effectiveProject) return <ReviewState label="pick a project from Home to see its changes." />;
+  if (!effectiveHash || !effectiveProject) return <ReviewState label="pick a project from home to see its changes." />;
   if (reviewState.phase === 'error') {
     return (
       <ReviewError

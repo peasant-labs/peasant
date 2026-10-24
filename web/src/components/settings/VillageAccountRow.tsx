@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { CircleX, Loader } from 'lucide-react';
-import type { LocalSetting, SyncAuthResponse } from '@peasant-labs/schema';
-import { Button, Chip } from '@/lib/ft-ui';
+import type { SyncAuthResponse } from '@peasant-labs/schema';
+import { Button } from '@/lib/ft-ui';
 import { logOutOfVillage } from '@/lib/api/settings';
-import { tagOf } from '@/lib/settings/catalog';
+import { DocsLink } from '@/components/DocsLink';
+import { defaultOnlineUrl } from '@/lib/village/links';
 
 function hostOf(url: string | undefined): string | undefined {
   if (!url) return undefined;
@@ -21,20 +22,20 @@ function hostOf(url: string | undefined): string | undefined {
  * calls POST /api/v1/sync/logout, which removes the stored credential; the key
  * stays valid on Village until `peasant village logout` revokes it there.
  */
-export function VillageAccountRow({ auth, readError, onRetry, connected, onLoggedOut }: {
+export function VillageAccountRow({ auth, readError, onRetry, onLoggedOut }: {
   /** null while the sign-in is being read. */
   auth: SyncAuthResponse | null;
   readError?: string | null;
   onRetry?: () => void;
-  /** The village.connected key, for its tag. */
-  connected: LocalSetting | undefined;
   onLoggedOut: () => void | Promise<void>;
 }) {
   const [status, setStatus] = useState<'idle' | 'pending' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
-  const tag = connected ? tagOf(connected) : undefined;
   const signedIn = auth?.authenticated === true;
+  // The server is named only when it is not peasant online itself: a quiet
+  // second detail for a self-hosted or test server, never the default's host.
   const host = hostOf(auth?.villageUrl);
+  const otherServer = host !== undefined && host !== hostOf(defaultOnlineUrl()) ? host : undefined;
 
   const logOut = async () => {
     setStatus('pending');
@@ -50,23 +51,20 @@ export function VillageAccountRow({ auth, readError, onRetry, connected, onLogge
   };
 
   const label = auth === null
-    ? 'village sign-in'
+    ? 'sign-in'
     : signedIn
       ? <>connected as <strong className="stg-strong">@{auth.username}</strong></>
       : 'not connected';
   const help = auth === null
     ? readError ? 'the sign-in could not be read.' : 'reading the sign-in on this computer.'
     : signedIn
-      ? `signed in with github${host ? ` on ${host}` : ''}. log out removes the key from this computer; peasant village logout also revokes it on village.`
-      : 'sign in with peasant village login, or from the publish popup.';
+      ? <>signed in to peasant online with github. log out removes the key from this computer only. <DocsLink topic="signIn" variant="inline">revoke it everywhere</DocsLink>{otherServer && <span className="stg-muted stg-server"> server: {otherServer}</span>}</>
+      : <>sign in from the publish popup. <DocsLink topic="signIn" variant="inline">other ways to sign in</DocsLink></>;
 
   return (
     <div className={`srow srow-${status}`} data-status={status} data-setting-keys="village.connected">
       <span className="srow-text-col">
-        <span className="srow-label-line">
-          <span className="srow-label">{label}</span>
-          {tag && <Chip size="sm" className="srow-tag">{tag}</Chip>}
-        </span>
+        <span className="srow-label">{label}</span>
         <span className="srow-help">{help}</span>
         {readError && <span className="srow-error" role="alert">{readError}</span>}
         {status === 'failed' && <span className="srow-error" role="alert">{error}</span>}

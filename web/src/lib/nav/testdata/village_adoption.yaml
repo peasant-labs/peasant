@@ -1,0 +1,13 @@
+# The routes the local app wires for fairtrade's LOCAL_APP_SECTIONS, by id.
+# navRoutes: the sections the sidebar and the palette link to, in registry order.
+# routeOnly: [id, label, href] of the sections reached by URL only, in registry
+#   order. The online page (id village) is one of them: the local app reaches
+#   online through its collectives link, and /village still mounts its page.
+navRoutes:
+  - [home, /]
+  - [settings, /settings]
+routeOnly:
+  - [village, online, /village]
+  - [analytics, analytics, /analytics]
+  - [changes, changes, /review]
+  - [map, code map, /map]

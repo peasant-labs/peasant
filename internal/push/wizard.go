@@ -157,7 +157,7 @@ func (p wizardPage) String() string {
 // Page chrome the frame title carries. The wizard keeps all chrome
 // lower-case, like every other kit surface.
 const (
-	wizardTitle          = "push to village"
+	wizardTitle          = "push to peasant online"
 	wizardCancelledText  = "push cancelled."
 	unknownProjectLabel  = "(unknown project)"
 	projectNodePrefix    = "project:"
@@ -222,9 +222,9 @@ func NewPushWizard(th theme.Theme, sessions []PushWizardSession, turns Published
 // the user reads the size of the action before answering it.
 func startPrompt(count int) string {
 	if count == 1 {
-		return "push 1 session to the village?"
+		return "push 1 session to peasant online?"
 	}
-	return fmt.Sprintf("push %d sessions to the village?", count)
+	return fmt.Sprintf("push %d sessions to peasant online?", count)
 }
 
 func publishableSessionCount(sessions []PushWizardSession) int {
@@ -719,7 +719,7 @@ func (m PushWizardModel) startBody(width, height int) string {
 	panel.SetSize(width, height)
 	panel.Wrapped(styles.Base, fmt.Sprintf("%d session(s) are ready to push.", publishableSessionCount(m.sessions)))
 	panel.Blank()
-	panel.Wrapped(styles.Muted, "the village keeps what you publish. you choose the sessions on the next page.")
+	panel.Wrapped(styles.Muted, "peasant online keeps what you publish. you choose the sessions on the next page.")
 	panel.Blank()
 	panel.Rendered(m.confirm.View())
 	return panel.View()
@@ -836,7 +836,7 @@ func (m PushWizardModel) noticePanel(width int) kit.Panel {
 	// it is the one action that answers the question the counts provoked: look at
 	// the transcript the push will send.
 	panel.Wrapped(styles.Base, fmt.Sprintf(
-		"peasant redacts these %d session(s) before it publishes them to the village.", len(selected)))
+		"peasant redacts these %d session(s) before it publishes them to peasant online.", len(selected)))
 	panel.Blank()
 	panel.Wrapped(styles.Muted,
 		"the preview on the selection page shows each transcript as it will be published. go back with esc to review one.")
@@ -926,7 +926,7 @@ func (m PushWizardModel) receiptBody(width, height int) string {
 	// maintainer read on a real store. The lines below name the action, name the
 	// sessions the action skips, and say outright that the machine keeps
 	// everything.
-	panel.Wrapped(styles.Header, fmt.Sprintf("push %d session(s) to the village.", len(selected)))
+	panel.Wrapped(styles.Header, fmt.Sprintf("push %d session(s) to peasant online.", len(selected)))
 	if skipped := len(m.sessions) - len(selected); skipped > 0 {
 		panel.Wrapped(styles.Muted, fmt.Sprintf("%d session(s) are not selected and are not pushed.", skipped))
 	}
@@ -1015,10 +1015,10 @@ func (l helpLayer) View() string {
 			widest = len(r.text)
 		}
 	}
-	panel := kit.NewPanel(l.th).WithBackground(l.th.Palette.Surface)
+	panel := kit.NewPanel(l.th).WithBackground(l.th.Palette.SurfaceElev)
 	panel.SetSize(widest+helpPanelMargin, 0)
 	for _, r := range rows {
-		style := styles.Surface
+		style := styles.Overlay
 		if r.header {
 			style = styles.Header
 		}

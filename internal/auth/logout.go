@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
@@ -18,18 +19,19 @@ func Logout(ctx context.Context) error {
 // LogoutFrom revokes and clears credentials only from the config directory
 // selected by xdgConfigHomeOverride.
 func LogoutFrom(ctx context.Context, xdgConfigHomeOverride string) error {
-	creds, err := LoadCredentialsFrom(xdgConfigHomeOverride)
+	// Local sign-out still completes when remote revocation is cancelled. The
+	// credential lock has its own bounded wait; network work uses caller ctx.
+	snapshot, err := CaptureCredentials(context.WithoutCancel(ctx), xdgConfigHomeOverride)
 	if err != nil {
 		return fmt.Errorf("load credentials: %w", err)
 	}
-	if creds == nil {
-		return fmt.Errorf("not logged in")
-	}
-
-	revokeErr := revokeRemoteKey(ctx, creds)
+	creds := snapshot.Credentials()
+	revokeErr := revokeRemoteKey(ctx, &creds)
 
 	// Always clear local credentials, even if remote revocation failed.
-	if err := ClearCredentialsFrom(xdgConfigHomeOverride); err != nil {
+	clearCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := snapshot.WithCurrent(clearCtx, func() error { return clearCredentialsDirectoryLocked(snapshot.configHome) }); err != nil {
 		return fmt.Errorf("clear credentials: %w", err)
 	}
 

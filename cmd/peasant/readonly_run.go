@@ -53,19 +53,7 @@ func contentIndexFormats() []store.OpenOption {
 // it here is what lets a capable store activate and read a managed generation
 // instead of refusing format 2.
 func generationStoreOptions(ownedRoot string) ([]store.OpenOption, error) {
-	options := contentIndexFormats()
-	if ownedRoot == "" {
-		return options, nil
-	}
-	artifacts, err := store.NewOSGenerationArtifactStore(ownedRoot)
-	if err != nil {
-		return nil, fmt.Errorf("open managed generation store: %w", err)
-	}
-	locker, err := store.NewFileSessionLocker(ownedRoot)
-	if err != nil {
-		return nil, fmt.Errorf("open managed generation lock: %w", err)
-	}
-	return append(options, store.WithGenerationArtifacts(artifacts, locker)), nil
+	return store.ManagedGenerationOptions(ownedRoot)
 }
 
 // generationStoreOptionsReadOnly wires the managed-generation reader for a

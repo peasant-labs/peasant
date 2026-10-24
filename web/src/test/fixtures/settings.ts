@@ -77,24 +77,26 @@ export function loadAuthRecoveryCases(): SettingsAuthRecoveryCase[] {
   return cases as unknown as SettingsAuthRecoveryCase[];
 }
 
-export interface SettingsGroupFixture {
+export interface SettingsSectionFixture {
   name: string;
-  open: boolean;
+  id: string;
+  groups: string[];
 }
 
-export function loadSettingsGroups(): SettingsGroupFixture[] {
-  const path = 'src/app/testdata/settings-groups.yaml';
+export function loadSettingsSections(): SettingsSectionFixture[] {
+  const path = 'src/app/testdata/settings-sections.yaml';
   const root = requireRecord(read(path), path);
-  requireExactRequiredFields(root, ['requiredNames', 'groups'], path);
-  if (!Array.isArray(root.groups)) throw new Error(`${path}.groups must be a list`);
-  const groups = root.groups.map((value, index) => {
-    const group = requireRecord(value, `${path}.groups[${index}]`);
-    requireExactRequiredFields(group, ['name', 'open'], `${path}.groups[${index}]`);
-    if (typeof group.open !== 'boolean') throw new Error(`${path}.groups[${index}].open must be true or false`);
-    return group;
+  requireExactRequiredFields(root, ['requiredNames', 'sections'], path);
+  if (!Array.isArray(root.sections)) throw new Error(`${path}.sections must be a list`);
+  const sections = root.sections.map((value, index) => {
+    const section = requireRecord(value, `${path}.sections[${index}]`);
+    requireExactRequiredFields(section, ['name', 'id', 'groups'], `${path}.sections[${index}]`);
+    if (typeof section.id !== 'string') throw new Error(`${path}.sections[${index}].id must be a string`);
+    if (!Array.isArray(section.groups) || section.groups.some((group) => typeof group !== 'string')) throw new Error(`${path}.sections[${index}].groups must be a list of group ids`);
+    return section;
   });
-  requireNames(root, groups, path);
-  return groups as unknown as SettingsGroupFixture[];
+  requireNames(root, sections, path);
+  return sections as unknown as SettingsSectionFixture[];
 }
 
 export interface SettingWriteCase {

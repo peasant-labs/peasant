@@ -396,7 +396,7 @@ jobs:
       # defeated by a POSIX directory fsync, and the detached `web start` spawn
       # and its PID file are Windows-only code paths. Starting the dashboard
       # exercises those and proves the published binary embeds the real web app
-      # rather than the stub the `web-stub` target writes.
+      # rather than the not-bundled notice a stub build serves.
       - name: Start the dashboard, probe it, and stop it
         working-directory: ${{ env.SMOKE_DIR }}
         run: |

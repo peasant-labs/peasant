@@ -1,0 +1,17 @@
+requiredNames:
+  - lookup-finishes-before-upload-budget-starts
+  - cancelled-terminal-receipt-remains-unapplied
+cases:
+  - name: lookup-finishes-before-upload-budget-starts
+    uploadBudget: 1s
+    errorContains:
+      - 'ran out of its 1s budget'
+      - 'budget expired during local work'
+      - 'before the upload'
+      - 'nothing was sent'
+  - name: cancelled-terminal-receipt-remains-unapplied
+    sessionID: cccc3333-cccc-4ccc-8ccc-cccccccccccc
+    # Exactly three accepted requests are the contract: one per explicit invocation.
+    attempts: [first-explicit-invocation, second-explicit-invocation, third-explicit-invocation]
+    errorContains: ['context canceled']
+    stdoutContains: ['pushed 0 session(s), 1 error(s)']

@@ -1,0 +1,10 @@
+requiredNames: [exact-served-artifact, stale-html-refused, missing-body-refused, wrong-asset-refused, absent-published-export-refused, modified-installed-package-refused, declared-command-shim-recorded, unexpected-extra-module-refused]
+cases:
+  - {name: exact-served-artifact, mode: exact}
+  - {name: stale-html-refused, mode: stale}
+  - {name: missing-body-refused, mode: body}
+  - {name: wrong-asset-refused, mode: asset}
+  - {name: absent-published-export-refused, mode: package}
+  - {name: modified-installed-package-refused, mode: bytes}
+  - {name: declared-command-shim-recorded, mode: manager-bin}
+  - {name: unexpected-extra-module-refused, mode: extra-module}

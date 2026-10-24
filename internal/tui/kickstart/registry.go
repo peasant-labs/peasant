@@ -189,7 +189,7 @@ func BuildRegistry(opts Options) settings.Registry {
 			Fields: []settings.Field{
 				settings.WithDescription(
 					settings.Radio(FieldLicense, "default license attached to pushed transcripts", licenseAccessor(), licenseOptions()...),
-					"choose the license peasant attaches when you push a transcript to a village."),
+					"choose the license peasant attaches when you push a transcript to peasant online."),
 			},
 		},
 		{

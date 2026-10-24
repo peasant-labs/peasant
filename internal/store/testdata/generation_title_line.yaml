@@ -1,0 +1,24 @@
+# The title a generation stores for its list rows: the first non-empty line of
+# its title turn, marked with an ellipsis when the turn goes on mid-sentence.
+requiredNames:
+  - one line stays as written
+  - leading blank lines are skipped
+  - a line cut mid-sentence gets an ellipsis
+  - a line ending a sentence stays as written
+  - a question stays as written
+  - a trailing colon becomes the ellipsis
+  - trailing blank lines do not count as more text
+  - a long line is cut at a word
+  - a long line without a nearby space is cut at the cap
+  - an empty turn has no title
+cases:
+  - {name: one line stays as written, text: 'Tighten the forecast tests', want: 'Tighten the forecast tests'}
+  - {name: leading blank lines are skipped, text: "\n\n  Trace the slow query  ", want: 'Trace the slow query'}
+  - {name: a line cut mid-sentence gets an ellipsis, text: "Add a rolling-window forecast so the dashboard can smooth noisy\ndaily totals.", want: 'Add a rolling-window forecast so the dashboard can smooth noisy…'}
+  - {name: a line ending a sentence stays as written, text: "Benchmark the transfer handler.\nThen tell me where the time goes.", want: 'Benchmark the transfer handler.'}
+  - {name: a question stays as written, text: "Why does the import fail?\nHere is the log", want: 'Why does the import fail?'}
+  - {name: a trailing colon becomes the ellipsis, text: "The staging job fails to authenticate. Here is the env I used:\nTOKEN_URL=https://example.test", want: 'The staging job fails to authenticate. Here is the env I used…'}
+  - {name: trailing blank lines do not count as more text, text: "Profile the forecast\n\n   \n", want: 'Profile the forecast'}
+  - {name: a long line is cut at a word, text: 'Investigate why the onboarding flow drops users between the email confirmation step and the first project', want: 'Investigate why the onboarding flow drops users between the email confirmation…'}
+  - {name: a long line without a nearby space is cut at the cap, text: 'Open https://example.test/a-very-long-path-segment-that-runs-well-past-the-title-cap-with-no-break', want: 'Open https://example.test/a-very-long-path-segment-that-runs-well-past-the-titl…'}
+  - {name: an empty turn has no title, text: "  \n \n", want: ''}

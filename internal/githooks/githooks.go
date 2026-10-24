@@ -68,7 +68,7 @@ func (e Event) Validate() error {
 	return fmt.Errorf(
 		"githooks: unsupported hook event %q\n"+
 			"What went wrong: %q is not an event Peasant manages.\n"+
-			"Why: Peasant deliberately manages only the two client-side events that map to a village upload.\n"+
+			"Why: Peasant deliberately manages only the two client-side events that map to a peasant online upload.\n"+
 			"Where: githooks.Event.Validate.\n"+
 			"When: while validating a hook lifecycle request, before any file was inspected or written.\n"+
 			"Impact: no hook was planned, installed, or removed.\n"+

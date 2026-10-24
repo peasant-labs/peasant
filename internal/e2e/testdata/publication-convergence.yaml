@@ -24,5 +24,5 @@ cases:
       - "local applied state remains non-current"
       - "retry this session"
     diagnosticContains:
-      - "Village accepted the publication"
+      - "Peasant online accepted the publication"
       - "publication cursor was not advanced"

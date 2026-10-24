@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, FileCode, FolderOpen, RotateCw, X } from 'lucide-react';
-import { TranscriptOutcomeChip as OutcomeChip, formatRelative, summarizePrompt } from '@peasant-labs/fairtrade/ui';
+import { TranscriptOutcomeChip as OutcomeChip, cleanSessionTitle, formatRelative, summarizePrompt } from '@peasant-labs/fairtrade/ui';
 import { ProviderName, RailSection, Skeleton } from '@/lib/ft-ui';
 import { Skeleton as SkeletonBox } from '@/lib/skeleton';
 import type { DecodedMapNodeDetailPayload, DecodedTaskSummary } from '@/lib/api/map';
@@ -104,8 +104,8 @@ function TaskRow({
           Grid `minmax(0, 1fr)` middle column (fairtrade's .gmp-task-row). */}
       <span className="flex min-w-0 items-center gap-1.5">
         <OutcomeChip outcome={task.outcome} />
-        <span className="min-w-0 flex-1 truncate text-[13px] text-ink" title={task.title}>
-          {task.title || `turn ${task.entryIndex}`}
+        <span className="min-w-0 flex-1 truncate text-[length:var(--fs-label)] text-ink" title={task.title}>
+          {cleanSessionTitle(task.title ?? '') || `turn ${task.entryIndex}`}
         </span>
         {task.retryLoop && (
           <RotateCw size={12} aria-label="Retry loop recorded" className="shrink-0 text-ink-3" />
@@ -113,19 +113,19 @@ function TaskRow({
       </span>
       <span className="mt-0.5 flex min-w-0 items-baseline justify-between gap-2">
         <span
-          className="min-w-0 truncate font-mono text-[11px] text-ink-3"
+          className="min-w-0 truncate font-mono text-[length:var(--fs-label)] text-ink-3"
           title={modules.join(' · ')}
         >
           {modules.join(' · ')}
         </span>
-        <span className="shrink-0 font-mono tabular-nums text-[11px] text-ink-4">
+        <span className="shrink-0 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-4">
           {relTime(task.startMs, nowMs)}
         </span>
       </span>
       {showLabels && task.labels.length > 0 && (
         <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
           {task.labels.map((label) => (
-            <span key={label} className="border border-rule px-1 py-px text-[10px] text-ink-3">
+            <span key={label} className="border border-rule px-1 py-px text-[length:var(--fs-label)] text-ink-3">
               {label}
             </span>
           ))}
@@ -190,44 +190,38 @@ export function ProjectRail({
       {/* Identity: ft-ui section header "Project" (CSS renders mono-lowercase) + project name + session count. */}
       <RailSection title="Project" icon={FolderOpen}>
         <p className="text-sm font-medium text-ink">{displayProject(projectName)}</p>
-        <p className="mt-0.5 font-mono tabular-nums text-xs text-ink-3">
+        <p className="mt-0.5 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-3">
           {sessions.length} session{sessions.length !== 1 ? 's' : ''}
         </p>
       </RailSection>
 
       <RailSection title="AI-built files">
         {coverage ? (
-          <p className="text-[13px] text-ink-2">
+          <p className="text-[length:var(--fs-label)] text-ink-2">
             <span className="font-mono tabular-nums text-ink">{coverage.recorded}</span> of{' '}
             <span className="font-mono tabular-nums text-ink">{coverage.total}</span> files have a
-            saved AI conversation behind them
+            saved ai conversation behind them
           </p>
         ) : coverageLoading ? (
           <SkeletonBox className="h-4 w-40" />
         ) : (
           // Loaded, but no structure to measure (e.g. no git repo / unparsed
           // languages); say so plainly instead of a dash that could mean either.
-          <p className="text-[13px] text-ink-4">No structure recorded yet.</p>
+          <p className="text-[length:var(--fs-label)] text-ink-4">no structure recorded yet.</p>
         )}
       </RailSection>
 
       <RailSection title="Recent AI conversations">
-        {/* Clarifying sub-line: say what this list is and that hovering reveals
-            what each conversation shaped on the canvas. */}
-        <p className="mb-2 text-[11px] leading-snug text-ink-3">
-          latest recorded conversations; hover one to light up what it
-          shaped.
-        </p>
         {recentTasks?.some((task) => task.outcome) && (
           <OutcomeHeuristicHelp className="mb-2" />
         )}
         {recentTasksError ? (
-          <p className="text-[13px] text-danger">{recentTasksError}</p>
+          <p className="text-[length:var(--fs-label)] text-danger">{recentTasksError}</p>
         ) : recentTasksLoading || recentTasks === null ? (
           // Loading: explicit shimmer lines, never a dash that also means "none".
           <Skeleton avatar={false} lines={3} label="Loading recent work" />
         ) : recentTasks.length === 0 ? (
-          <p className="text-[13px] text-ink-4">No recorded tasks yet.</p>
+          <p className="text-[length:var(--fs-label)] text-ink-4">no recorded tasks yet.</p>
         ) : (
           <ul className="flex flex-col">
             {recentTasks.slice(0, RECENT_TASKS_LIMIT).map((t) => (
@@ -291,7 +285,7 @@ function AllConversations({
   return (
     <RailSection title="All conversations">
       {sessions.length === 0 ? (
-        <p className="text-[13px] text-ink-4">No conversations recorded for this project.</p>
+        <p className="text-[length:var(--fs-label)] text-ink-4">no conversations recorded for this project.</p>
       ) : (
         <>
           {sessions.length > FILTER_THRESHOLD && (
@@ -304,11 +298,11 @@ function AllConversations({
               }}
               aria-label="Filter conversations"
               placeholder="Filter conversations…"
-              className="mb-2 w-full border border-rule bg-surface px-2 py-1 text-[12px] text-ink placeholder:text-ink-4 focus-mono"
+              className="mb-2 w-full border border-rule bg-surface px-2 py-1 text-[length:var(--fs-label)] text-ink placeholder:text-ink-4 focus-mono"
             />
           )}
           {filtered.length === 0 ? (
-            <p className="text-[13px] text-ink-4">No conversations match.</p>
+            <p className="text-[length:var(--fs-label)] text-ink-4">no conversations match.</p>
           ) : (
             <ul className="flex flex-col">
               {shown.map((s) => (
@@ -318,10 +312,10 @@ function AllConversations({
                     aria-label={`Open the conversation ${s.id}`}
                     className="block px-1 py-1.5 -mx-1 hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
                   >
-                    <span className="block truncate text-[13px] text-ink">
+                    <span className="block truncate text-[length:var(--fs-label)] text-ink">
                       {summarizePrompt(s.preview) || s.id.slice(0, 8)}
                     </span>
-                    <span className="mt-0.5 flex items-center gap-2 font-mono tabular-nums text-[11px] text-ink-4">
+                    <span className="mt-0.5 flex items-center gap-2 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-4">
                       <span>{formatRelative(s.startTime, nowMs)}</span>
                       <span>
                         {s.turnCount} request{s.turnCount !== 1 ? 's' : ''}
@@ -336,9 +330,9 @@ function AllConversations({
             <button
               type="button"
               onClick={() => setExpanded(true)}
-              className="mt-1.5 border border-rule bg-surface px-2 py-1 text-[12px] text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
+              className="mt-1.5 border border-rule bg-surface px-2 py-1 text-[length:var(--fs-label)] text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
             >
-              Show all {filtered.length}
+              show all {filtered.length}
             </button>
           )}
         </>
@@ -386,7 +380,7 @@ function CloseButton({ onClose, label }: { onClose: () => void; label: string })
     <button
       type="button"
       aria-label={label}
-      className="flex h-6 w-6 items-center justify-center border border-rule text-ink-3 hover:bg-surface-hover focus-mono cursor-pointer"
+      className="flex h-6 w-6 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center border border-rule text-ink-3 hover:bg-surface-hover focus-mono cursor-pointer"
       onClick={onClose}
     >
       <X size={12} aria-hidden />
@@ -417,7 +411,7 @@ function ConnectionList({
               className="-mx-1 flex w-full px-1 py-1 text-left hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
               onClick={() => onSelectNode(id)}
             >
-              <span className="min-w-0 truncate font-mono text-xs text-ink-2" title={id}>
+              <span className="min-w-0 truncate font-mono text-[length:var(--fs-label)] text-ink-2" title={id}>
                 {id}
               </span>
             </button>
@@ -431,7 +425,7 @@ function ConnectionList({
 /** Quiet font-mono footnote row, never styled as a verdict. */
 function FootnoteRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between text-[12px]">
+    <div className="flex items-center justify-between text-[length:var(--fs-label)]">
       <span className="text-ink-3">{label}</span>
       <span className="font-mono tabular-nums text-ink-2">{value}</span>
     </div>
@@ -484,11 +478,11 @@ export function NodeRail({
             {/* The leaf name (was the panel title) stays prominent in the section body. */}
             <p className="text-sm font-medium text-ink mb-0.5">{nodeLeaf(nodeId)}</p>
             {/* Full path: rs-sec-body already sets overflow-wrap:anywhere for long paths. */}
-            <p className="font-mono text-xs text-ink-2" title={detail ? detail.path : nodeId}>
+            <p className="font-mono text-[length:var(--fs-label)] text-ink-2" title={detail ? detail.path : nodeId}>
               {detail ? detail.path : nodeId}
             </p>
             {detail?.language && (
-              <p className="mt-1 text-[12px] text-ink-3">{detail.language}</p>
+              <p className="mt-1 text-[length:var(--fs-label)] text-ink-3">{detail.language}</p>
             )}
           </div>
           {/* Close button lives in the BODY (not a section meta slot) so it
@@ -496,7 +490,7 @@ export function NodeRail({
           <CloseButton onClose={onClose} label="Clear node selection" />
         </div>
         {detail && (
-          <p className="mt-1.5 font-mono tabular-nums text-[12px] text-ink-3">
+          <p className="mt-1.5 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-3">
             {detail.kind}{detail.loc > 0 ? ` · ${detail.loc.toLocaleString()} lines` : ''}
           </p>
         )}
@@ -504,7 +498,7 @@ export function NodeRail({
 
       {error && (
         <RailSection>
-          <p className="text-[13px] text-danger">{error}</p>
+          <p className="text-[length:var(--fs-label)] text-danger">{error}</p>
         </RailSection>
       )}
 
@@ -522,7 +516,7 @@ export function NodeRail({
               grain), so module/file/activity-only nodes simply omit it. */}
           {(detail.dependsOn.length > 0 || detail.usedBy.length > 0) && (
             <RailSection title="What this area connects to">
-              <p className="mb-2 text-[11px] leading-snug text-ink-3">
+              <p className="mb-2 text-[length:var(--fs-label)] leading-snug text-ink-3">
                 Drawn from the code&rsquo;s imports: what this area builds on, and what builds on it.
               </p>
               {detail.dependsOn.length > 0 && (
@@ -538,20 +532,20 @@ export function NodeRail({
 
           <RailSection title="AI-built files">
             {detail.sessionCount === 0 ? (
-              <p className="text-[13px] text-ink-3">No recorded conversations touch this code.</p>
+              <p className="text-[length:var(--fs-label)] text-ink-3">no recorded conversations touch this code.</p>
             ) : (
               <>
-                <p className="text-[13px] text-ink-2">
+                <p className="text-[length:var(--fs-label)] text-ink-2">
                   <span className="font-mono tabular-nums text-ink">{detail.recordedFiles}</span> of{' '}
                   <span className="font-mono tabular-nums text-ink">{detail.totalFiles}</span> files
                   have a saved conversation behind them
                 </p>
-                <p className="mt-1 font-mono tabular-nums text-[12px] text-ink-3">
+                <p className="mt-1 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-3">
                   {detail.sessionCount} conversation{detail.sessionCount !== 1 ? 's' : ''} &middot;{' '}
                   {detail.taskCount} request{detail.taskCount !== 1 ? 's' : ''}
                 </p>
                 {detail.lastTouchMs !== undefined && (
-                  <p className="mt-0.5 font-mono tabular-nums text-[12px] text-ink-4">
+                  <p className="mt-0.5 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-4">
                     last: {relTime(detail.lastTouchMs, nowMs)}
                   </p>
                 )}
@@ -562,7 +556,7 @@ export function NodeRail({
           <RailSection title="Conversations that built this">
             {hasShapedOutcome && <OutcomeHeuristicHelp className="mb-2" />}
             {shapedRows.length === 0 ? (
-              <p className="text-[13px] text-ink-4">No recorded conversations or updates.</p>
+              <p className="text-[length:var(--fs-label)] text-ink-4">no recorded conversations or updates.</p>
             ) : (
               <ul className="flex flex-col">
                 {shapedRows.map((row) => (
@@ -582,19 +576,19 @@ export function NodeRail({
                         {/* min-w-0 on the row itself: see the matching note on
                             TaskRow above; same overflow-past-the-rail bug. */}
                         <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="shrink-0 font-mono text-[11px] text-ink-3">
+                          <span className="shrink-0 font-mono text-[length:var(--fs-label)] text-ink-3">
                             {row.commit.hash.slice(0, 7)}
                           </span>
                           <span
-                            className="min-w-0 flex-1 truncate text-[13px] text-ink-2"
+                            className="min-w-0 flex-1 truncate text-[length:var(--fs-label)] text-ink-2"
                             title={row.commit.subject}
                           >
                             {row.commit.subject}
                           </span>
                         </span>
-                        <span className="mt-0.5 flex items-center gap-2 text-[11px]">
+                        <span className="mt-0.5 flex items-center gap-2 text-[length:var(--fs-label)]">
                           {row.commit.sessionIds.length === 0 && (
-                            <span className="text-ink-4">no AI conversation captured</span>
+                            <span className="text-ink-4">no ai conversation captured</span>
                           )}
                           <span className="font-mono tabular-nums text-ink-4">
                             {relTime(row.commit.timeMs, nowMs)}
@@ -655,7 +649,7 @@ export function NodeRail({
           flight or failed. An observation about the work, not the code. */}
       {coupling.length > 0 && (
         <RailSection title="Usually changed alongside">
-          <p className="mb-2 text-[11px] leading-snug text-ink-3">
+          <p className="mb-2 text-[length:var(--fs-label)] leading-snug text-ink-3">
             These areas tend to change in the same conversations.
           </p>
           <ul className="flex flex-col">
@@ -667,10 +661,10 @@ export function NodeRail({
                   className="-mx-1 flex w-full items-baseline justify-between gap-2 px-1 py-1.5 text-left hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
                   onClick={() => onSelectNode(c.id)}
                 >
-                  <span className="min-w-0 truncate font-mono text-xs text-ink-2" title={c.id}>
+                  <span className="min-w-0 truncate font-mono text-[length:var(--fs-label)] text-ink-2" title={c.id}>
                     {c.id}
                   </span>
-                  <span className="shrink-0 font-mono tabular-nums text-[11px] text-ink-4">
+                  <span className="shrink-0 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-4">
                     {c.taskCount} shared task{c.taskCount !== 1 ? 's' : ''}
                   </span>
                 </button>
@@ -683,7 +677,7 @@ export function NodeRail({
       {detail && (
         <>
           <RailSection title="Effort totals">
-            <p className="mb-2 text-[11px] leading-snug text-ink-3">
+            <p className="mb-2 text-[length:var(--fs-label)] leading-snug text-ink-3">
               Across every recorded conversation that touched this area.
             </p>
             <div className="flex flex-col gap-1">
@@ -701,7 +695,7 @@ export function NodeRail({
               <Link
                 href={contributeSessionsHref(contributeIds)}
                 aria-label={`Contribute the ${contributeIds.length} sessions behind this node`}
-                className="inline-flex items-center gap-1.5 text-[13px] text-ink underline underline-offset-2 hover:text-ink-2 transition-colors focus-mono cursor-pointer"
+                className="inline-flex items-center gap-1.5 text-[length:var(--fs-label)] text-ink underline underline-offset-2 hover:text-ink-2 transition-colors focus-mono cursor-pointer"
               >
                 Contribute these sessions
                 <ArrowRight size={12} aria-hidden />

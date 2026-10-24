@@ -159,7 +159,7 @@ describe('mounted Share chooser wire decoding', () => {
     render(<PublishProvider><ShareWizardClient /></PublishProvider>);
 
     expect(await screen.findByText(/could not read the grouped sessions response/)).toBeInTheDocument();
-    expect(screen.getByText('Retry')).toBeInTheDocument();
+    expect(screen.getByText('retry')).toBeInTheDocument();
     // No guessed rows or counts: the chooser body never mounted.
     expect(document.querySelector('[aria-label="choose sessions to contribute"]')).toBeNull();
     expect(document.querySelector('.gms-tally')).toBeNull();

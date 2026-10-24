@@ -708,7 +708,7 @@ func (p VisibilityPolicy) Disclosure() string {
 	}
 	return fmt.Sprintf(
 		"warning: %s visibility is not yet implemented in this version.\n"+
-			"Why: the current village publish contract cannot apply the configured %s visibility.\n"+
+			"Why: the current peasant online publish contract cannot apply the configured %s visibility.\n"+
 			"Means: your sessions are downgraded safely to %s visibility instead; nothing is over-shared.\n"+
 			"Fix: nothing to do - your configuration is already correct and takes effect automatically "+
 			"once a version implements it; installing the update is the only step.",
@@ -767,7 +767,7 @@ func VisibilityChangeRefusal(requested Visibility) error {
 	if requested == "" || slices.Contains(ImplementedVisibilities, requested) {
 		return nil
 	}
-	return fmt.Errorf("%s visibility cannot be applied by this version: it would publish and change transcripts as %s instead, taking access away from the collectives a transcript is shared with; an update already keeps the visibility and collective shares a transcript has on the village, so leave the visibility unchanged to keep them, or ask for one of %s",
+	return fmt.Errorf("%s visibility cannot be applied by this version: it would publish and change transcripts as %s instead, taking access away from the collectives a transcript is shared with; an update already keeps the visibility and collective shares a transcript has on peasant online, so leave the visibility unchanged to keep them, or ask for one of %s",
 		requested, FallbackVisibility, ImplementedVisibilityMenu())
 }
 

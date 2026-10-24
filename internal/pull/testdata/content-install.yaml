@@ -1,0 +1,149 @@
+requiredNames:
+  - metadata-write-fails
+  - index-project-fails
+  - replacement-before-switch
+  - replacement-after-switch-before-index
+  - restart-abandoned-staging
+  - forced-repull-repair
+  - backup-rename-completed-before-interruption
+  - journal-published-before-interruption
+  - index-committed-before-interruption
+  - backup-cleanup-interrupted
+  - journal-cleanup-interrupted
+  - same-hash-new-policy
+  - same-etag-new-name
+  - downloaded-same-hash-new-metadata
+  - metadata-only-write-fails
+  - replacement-before-backup
+  - forced-repull-damaged-previous
+  - metadata-before-atomic-replace
+  - metadata-after-atomic-replace
+  - metadata-backup-copy-interrupted
+  - metadata-backup-published-before-interruption
+  - metadata-journal-cleanup-interrupted
+  - staged-blob-sync-fails
+  - staged-metadata-sync-fails
+  - staged-manifest-sync-fails
+  - journal-file-sync-fails
+  - journal-directory-sync-fails
+  - publication-directory-sync-fails
+  - staging-directory-sync-fails
+  - transcript-write-fails
+  - manifest-write-fails
+  - journal-write-fails
+  - metadata-backup-file-sync-fails
+  - metadata-backup-directory-sync-fails
+  - metadata-publication-directory-sync-fails
+  - metadata-moved-stage-directory-sync-fails
+  - replacement-new-annotation-index-recovery
+replacementAnnotations:
+  - hash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    id: replacement-annotation
+    authorUserId: foreign-replacement-author
+    authorUsername: replacement-author
+barrierOrder: [ancestor, stagedBlob, stagedMetadata, stagedManifest, journalFile, journalDirectory, publicationDirectory]
+cases:
+  - name: metadata-write-fails
+    operation: write
+    target: metadata
+  - name: index-project-fails
+    operation: index
+    target: index
+    recoveryOnly: true
+  - name: replacement-before-switch
+    operation: rename
+    target: publish
+  - name: replacement-after-switch-before-index
+    operation: rename
+    target: publish
+    after: true
+    recoveryOnly: true
+  - name: restart-abandoned-staging
+    operation: rename
+    target: journal
+  - name: forced-repull-repair
+    operation: index
+    target: index
+    forceRecovery: true
+  - name: backup-rename-completed-before-interruption
+    operation: rename
+    target: backup
+    after: true
+    absentAfterFault: true
+  - name: journal-published-before-interruption
+    operation: rename
+    target: journal
+    after: true
+  - name: index-committed-before-interruption
+    operation: index
+    target: index
+    after: true
+    recoveryOnly: true
+  - name: backup-cleanup-interrupted
+    operation: removeAll
+    target: backup
+  - name: journal-cleanup-interrupted
+    operation: remove
+    target: journal
+  - name: same-hash-new-policy
+    mode: hash
+    operation: index
+    target: index
+  - name: same-etag-new-name
+    mode: etag
+    operation: index
+    target: index
+  - name: downloaded-same-hash-new-metadata
+    mode: download
+    operation: index
+    target: index
+  - name: metadata-only-write-fails
+    mode: hash
+    operation: write
+    target: metadata
+  - name: replacement-before-backup
+    operation: rename
+    target: backup
+  - name: forced-repull-damaged-previous
+    operation: index
+    target: index
+    corruptPrevious: true
+    forceRecovery: true
+  - name: metadata-before-atomic-replace
+    mode: hash
+    operation: rename
+    target: metadataPublish
+  - name: metadata-after-atomic-replace
+    mode: hash
+    operation: rename
+    target: metadataPublish
+    after: true
+  - name: metadata-backup-copy-interrupted
+    mode: hash
+    operation: copy
+    target: metadataBackupTemp
+    after: true
+  - name: metadata-backup-published-before-interruption
+    mode: hash
+    operation: rename
+    target: metadataBackup
+    after: true
+  - name: metadata-journal-cleanup-interrupted
+    mode: hash
+    operation: remove
+    target: journal
+  - {name: staged-blob-sync-fails, operation: sync, target: stagedBlob}
+  - {name: staged-metadata-sync-fails, operation: sync, target: stagedMetadata}
+  - {name: staged-manifest-sync-fails, operation: sync, target: stagedManifest}
+  - {name: journal-file-sync-fails, operation: sync, target: journalFile}
+  - {name: journal-directory-sync-fails, operation: sync, target: journalDirectory}
+  - {name: publication-directory-sync-fails, operation: sync, target: publicationDirectory, recoveryOnly: true}
+  - {name: staging-directory-sync-fails, operation: sync, target: stageDirectory}
+  - {name: transcript-write-fails, operation: write, target: transcript}
+  - {name: manifest-write-fails, operation: write, target: manifest}
+  - {name: journal-write-fails, operation: write, target: journalWrite}
+  - {name: metadata-backup-file-sync-fails, mode: hash, operation: sync, target: metadataBackupTemp}
+  - {name: metadata-backup-directory-sync-fails, mode: hash, operation: sync, target: metadataBackupDirectory}
+  - {name: metadata-publication-directory-sync-fails, mode: hash, operation: sync, target: publicationDirectory, recoveryOnly: true}
+  - {name: metadata-moved-stage-directory-sync-fails, mode: hash, operation: sync, target: metadataMovedStage, recoveryOnly: true}
+  - {name: replacement-new-annotation-index-recovery, operation: index, target: index, recoveryOnly: true}

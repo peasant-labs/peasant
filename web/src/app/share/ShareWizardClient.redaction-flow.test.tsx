@@ -186,19 +186,19 @@ describe('ShareWizardClient redaction flow', () => {
       act(() => { rescan(); staleContinue(); });
       expect(screen.getByText('Scanning your work for sensitive content')).toBeInTheDocument();
       expect(realContinue()).toBeDisabled();
-      expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'publish' })).not.toBeInTheDocument();
       await act(async () => gate.resolve());
       expect(await screen.findByRole('alert')).toHaveTextContent('is not recognized');
       act(() => staleContinue());
       expect(realContinue()).toBeDisabled();
-      expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'publish' })).not.toBeInTheDocument();
       response = boundaryResponse();
       scanGate = undefined;
       mock.mockReturnValue(boundaryDomain('none').map((item) => ({ ...item, minimumLevel: 'standard' })));
       await user.click(screen.getByRole('button', { name: 'Re-scan' }));
       await waitFor(() => expect(realContinue()).toBeEnabled());
       await user.click(realContinue());
-      expect(await screen.findByRole('button', { name: 'Submit' })).toBeEnabled();
+      expect(await screen.findByRole('button', { name: 'publish' })).toBeEnabled();
       expect(screen.queryByRole('region', { name: 'redaction review' })).not.toBeInTheDocument();
       // Review is local: even a valid Continue does not consent to a push.
       expect(pushes).toEqual([]);
@@ -227,8 +227,8 @@ describe('ShareWizardClient redaction flow', () => {
         await screen.findByText('Scanning your work for sensitive content'),
       ).toBeInTheDocument();
 
-      const rail = screen.getByRole('navigation', { name: 'Contribute progress' });
-      await user.click(within(rail).getByRole('button', { name: /submit/i }));
+      const rail = screen.getByRole('navigation', { name: 'publish progress' });
+      await user.click(within(rail).getByRole('button', { name: /publish/i }));
       await user.click(screen.getByRole('button', { name: /back/i }));
 
       expect(
@@ -247,7 +247,7 @@ describe('ShareWizardClient redaction flow', () => {
         within(review).getByText(REDACTION_STEP_MATCH.redactedReplacement),
       ).toBeInTheDocument();
 
-      await user.click(within(rail).getByRole('button', { name: /submit/i }));
+      await user.click(within(rail).getByRole('button', { name: /publish/i }));
       await user.click(screen.getByRole('button', { name: /back/i }));
 
       review = await screen.findByRole('region', { name: 'redaction review' });
@@ -282,8 +282,8 @@ describe('ShareWizardClient redaction flow', () => {
     expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled();
     expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
 
-    const rail = screen.getByRole('navigation', { name: 'Contribute progress' });
-    await user.click(within(rail).getByRole('button', { name: /submit/i }));
+    const rail = screen.getByRole('navigation', { name: 'publish progress' });
+    await user.click(within(rail).getByRole('button', { name: /publish/i }));
     await user.click(screen.getByRole('button', { name: /back/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(REDACTION_STEP_SCAN_FAILURE);

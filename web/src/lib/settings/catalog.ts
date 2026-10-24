@@ -1,7 +1,8 @@
 import { LocalSettingKind, type LocalSetting } from '@peasant-labs/schema';
 
 /**
- * The settings page's groups, in page order, and which start open.
+ * The settings page's groups. A group is the set of keys one block of rows
+ * shows; a section (below) is the page that shows one or more groups.
  *
  * The server owns the keys, their kinds, their menus, and which ones may be
  * changed (GET /api/v1/settings). This module owns only where each key sits on
@@ -10,17 +11,52 @@ import { LocalSettingKind, type LocalSetting } from '@peasant-labs/schema';
  * it, so a new key gets a group on purpose.
  */
 export const SETTINGS_GROUPS = [
-  { id: 'village', label: 'village', open: true },
-  { id: 'auto-publish', label: 'auto-publish', open: true },
-  { id: 'redaction', label: 'redaction', open: true },
-  { id: 'projects', label: 'projects', open: true },
-  { id: 'sources', label: 'sources', open: false },
-  { id: 'fields-sent', label: 'fields sent', open: false },
-  { id: 'advanced', label: 'advanced', open: false },
-  { id: 'files', label: 'files', open: false },
+  { id: 'village', label: 'account' },
+  { id: 'auto-publish', label: 'automatic publishing' },
+  { id: 'redaction', label: 'redaction' },
+  { id: 'projects', label: 'projects' },
+  { id: 'sources', label: 'sources' },
+  { id: 'fields-sent', label: 'fields sent' },
+  { id: 'advanced', label: 'other settings' },
+  { id: 'files', label: 'files' },
 ] as const;
 
 export type SettingsGroupId = (typeof SETTINGS_GROUPS)[number]['id'];
+
+/**
+ * The settings sections, in navigation order: each is one view of the page,
+ * reached at `/settings?section=<id>`, with its title, one line on what it
+ * holds, and the groups it shows. Every group sits in exactly one section.
+ */
+export const SETTINGS_SECTIONS = [
+  { id: 'account', label: 'account', groups: ['village'] },
+  { id: 'automatic-publishing', label: 'automatic publishing', groups: ['auto-publish'] },
+  { id: 'redaction', label: 'redaction', groups: ['redaction'] },
+  { id: 'projects', label: 'projects', groups: ['projects'] },
+  { id: 'sources', label: 'sources', groups: ['sources'] },
+  { id: 'advanced', label: 'advanced', groups: ['fields-sent', 'advanced', 'files'] },
+] as const satisfies readonly { id: string; label: string; groups: readonly SettingsGroupId[] }[];
+
+export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]['id'];
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+/** The section a link or a bare `/settings` opens on. */
+export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = 'account';
+
+/** The section with this id; an unknown or missing id opens the default. */
+export function settingsSection(id: string | null | undefined): SettingsSection {
+  return SETTINGS_SECTIONS.find((section) => section.id === id) ?? SETTINGS_SECTIONS.find((section) => section.id === DEFAULT_SETTINGS_SECTION)!;
+}
+
+/** The section that shows a group. */
+export function sectionOfGroup(group: SettingsGroupId): SettingsSection {
+  return SETTINGS_SECTIONS.find((section) => (section.groups as readonly string[]).includes(group))!;
+}
+
+/** The link to a section. */
+export function settingsSectionHref(id: SettingsSectionId): string {
+  return `/settings?section=${id}`;
+}
 
 /** The group a key the page does not place renders in. */
 export const FALLBACK_GROUP: SettingsGroupId = 'advanced';
@@ -140,7 +176,7 @@ export const KEY_COPY: Readonly<Record<string, KeyCopy>> = {
   'push.fields.hostSlug': { label: 'host slug' },
   'display.theme': { label: 'terminal theme', help: 'the colors peasant uses in the terminal.' },
   'user.email': { label: 'your email', help: 'empty uses your git email.' },
-  'village.url': { label: 'village address', help: 'where peasant publishes. empty uses the default.' },
+  'village.url': { label: 'peasant online address', help: 'where peasant publishes. empty uses the default.' },
   'push.method': {
     label: 'what peasant village push sends',
     options: { all: 'all sessions', 'by-source': 'by source' },
@@ -204,13 +240,6 @@ export function overridden(setting: LocalSetting): boolean {
   return JSON.stringify(setting.value) !== JSON.stringify(setting.effective);
 }
 
-/** The tag on a key that `peasant config` cannot change. */
-export const NOT_IN_PEASANT_CONFIG = 'not in peasant config';
-
-/** The tag a key's row carries, read from the server's `inPeasantConfig`. */
-export function tagOf(setting: LocalSetting): string | undefined {
-  return setting.inPeasantConfig ? undefined : NOT_IN_PEASANT_CONFIG;
-}
 
 /** A source harness's keys: `sources.<harness>.enabled` and `.paths`. */
 export function sourceHarnesses(settings: readonly LocalSetting[]): string[] {

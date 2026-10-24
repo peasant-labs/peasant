@@ -102,7 +102,7 @@
     "sqlitex/exec.go": "aa754c86aa9bd9cf673b12f74a9fb666c891645edfb89be36febb9b1b3c40d7b",
     "sqlitex/exec_test.go": "7fcd68a091001de2a9e893f3d50c2dc9f6b53fd94336064837f768d8ee9b46d5",
     "sqlitex/pool.go": "c073039346c7df84935c05789e198057e743084a5b7b3b4b32defa9d0b181ad3",
-    "sqlitex/pool_test.go": "c1d1bb53a01bfa54375dcb47fd702b7e1c8ba3d8494840c0c3bac0188dece467",
+    "sqlitex/pool_test.go": "1cf60a521d7f0a192a72cb2b0b08066a530f2c5650c4ef386ed38aa3b1ddca9f",
     "sqlitex/query.go": "0aec3e5b932ac58e147f209b5c91dbde6004ae1e352268299ffd547cdb2aa801",
     "sqlitex/query_test.go": "03256839faf5944378811b7ad58bf436dad8547af0f26fff56ae0734e7d05c50",
     "sqlitex/rand_id.go": "cdb111da8ba951a67d00d49c3ed51c15b10bd1daf615fce12db2d1d4d7d2abd0",
@@ -117,7 +117,7 @@
     "go.work": "UPSTREAM.go.work.txt",
     "go.work.sum": "UPSTREAM.go.work.sum.txt"
   },
-  "patch_sha256": "f52d3795b560fa3c2bc8a359318ee7ae0b1d3eafaf891e2a93c9348a77dd5424",
+  "patch_sha256": "6af897dfc46621273f3dfae74a1942746572b1cd3c456fc27e54d41b8493a8ed",
   "native_pointer_lines": {
     "blob.go": [
       "blobPtr := *(*uintptr)(unsafe.Pointer(blobPtrPtr))"

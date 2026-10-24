@@ -66,6 +66,7 @@ slots:
   - {name: v65-claude-identity-proof, slot: 65, needle: "ADD COLUMN identity_records_json TEXT"}
   - {name: v66-session-thinking-level, slot: 66, needle: "ADD COLUMN thinking_level_raw TEXT"}
   - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
+  - {name: v68-collective-observations, slot: 68, needle: "CREATE TABLE collective_observation_scopes"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -138,6 +139,10 @@ func TestKickstartManagedPublicationStage(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
 				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/auth/me" {
+					_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+					return
+				}
 				if r.Method == http.MethodPatch {
 					var request schema.OwnerTranscriptUpdateRequest
 					if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Visibility == nil {
@@ -232,12 +237,13 @@ func TestKickstartManagedPublicationStage(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
+			var confirmedTranscript schema.TranscriptID
 			for index, session := range fixture.Sessions {
 				input, err := db.LoadPublicationInput(t.Context(), ingest.SessionID(session.SessionID))
 				if err != nil {
 					t.Fatal(err)
 				}
-				record, err := db.Publication(t.Context(), server.URL, "user-00001", input.ReceiptProjectHash, session.SessionID)
+				record, err := db.Publication(t.Context(), server.URL, testutil.VillageFixtureAccountID.String(), input.ReceiptProjectHash, session.SessionID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -248,11 +254,20 @@ func TestKickstartManagedPublicationStage(t *testing.T) {
 					if record.Receipt.Applied.License == nil || *record.Receipt.Applied.License != row.License {
 						t.Fatalf("incorrect saved license: %+v", record.Receipt.Applied)
 					}
+					confirmedTranscript = record.Receipt.TranscriptID
 				} else if record != nil {
 					t.Fatalf("false publication receipt for %s: %+v", session.SessionID, record)
 				}
 			}
 			if row.WantUpload {
+				service := collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: root})
+				history, err := service.History(t.Context(), schema.LocalContributionHistoryQuery{Kind: schema.LocalContributionEvidenceReceipts, Page: 1, Limit: 1})
+				if err != nil || history.Total != 1 || len(history.Receipts) != 1 {
+					t.Fatalf("retained kickstart stage omitted the confirmed publication evidence: %+v %v", history, err)
+				}
+				if receipt := history.Receipts[0]; receipt.TranscriptID != confirmedTranscript || receipt.Operation != schema.CollectiveOperationPublish || receipt.Outcome != schema.LocalConfirmedContributionPublished || receipt.CollectiveID != nil {
+					t.Fatalf("retained kickstart stage invented a contribution: %+v", receipt)
+				}
 				if len(effects) != 1 {
 					t.Fatalf("publication effects=%+v", effects)
 				}

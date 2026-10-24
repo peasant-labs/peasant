@@ -3,9 +3,8 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight, CircleCheck, CircleX, Loader, MoreHorizontal, Plus } from 'lucide-react';
 import type { LocalSetting } from '@peasant-labs/schema';
-import { Button, Chip, Input, Menu, Select } from '@/lib/ft-ui';
+import { Button, Input, Menu, Select } from '@/lib/ft-ui';
 import { updateSetting } from '@/lib/api/settings';
-import { tagOf } from '@/lib/settings/catalog';
 import type { OnSettingSaved } from './SettingKeyRow';
 
 /** One entry of redaction.custom_patterns, as config.yaml holds it. */
@@ -82,15 +81,10 @@ export function CustomPatterns({ setting, onSaved }: { setting: LocalSetting; on
     disabled: busy,
   });
 
-  const tag = tagOf(setting);
-
   return (
     <div className="stg-block" data-setting-keys={setting.key}>
       <div className="stg-block-head">
-        <span className="srow-label-line">
-          <span className="srow-label">your own patterns</span>
-          {tag && <Chip size="sm" className="srow-tag">{tag}</Chip>}
-        </span>
+        <span className="srow-label">your own patterns</span>
         {setting.editable && editing === null && (
           <Button variant="secondary" size="sm" icon={Plus} disabled={busy} onClick={() => { if (busy) return; setStatus({ state: 'idle' }); setEditing({ index: null, draft: EMPTY }); }}>add a pattern</Button>
         )}

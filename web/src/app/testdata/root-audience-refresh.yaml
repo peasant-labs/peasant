@@ -6,11 +6,11 @@ cases:
     initialCount: 2
     initialStatus: 200
     nextCount: 1
-    expectedBefore: published, 2 collectives, up to date
-    expectedAfter: published, 1 collective, up to date
+    expectedBefore: published to 2 collectives
+    expectedAfter: published to 1 collective
   - name: a-root-refresh-retries-a-failed-audience-read-for-the-same-session
     initialCount: 2
     initialStatus: 502
     nextCount: 1
-    expectedBefore: published, up to date
-    expectedAfter: published, 1 collective, up to date
+    expectedBefore: published
+    expectedAfter: published to 1 collective

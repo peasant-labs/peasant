@@ -69,7 +69,7 @@ export async function assertServedBuild({ origin, markers, bin, webRoot = WEB_RO
   const markerChunks = Object.fromEntries(markers.map((marker) => [marker, bodies.filter(([, body]) => body.includes(marker)).map(([chunk]) => chunk)]))
   const missing = markers.filter((marker) => markerChunks[marker].length === 0)
   if (missing.length) {
-    throw new Error(`the bundle served at ${origin} lacks ${JSON.stringify(missing)}: a stale build, or the text changed in the manifest (testdata/shell-header.yaml announcements) without the page`)
+    throw new Error(`the bundle served at ${origin} lacks ${JSON.stringify(missing)}: a stale build, or the text changed in the manifest (testdata/shell-chrome.yaml announcements) without the page`)
   }
   return { chunks: servedChunks, markerChunks, binChecked: !!bin }
 }

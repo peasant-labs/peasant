@@ -298,18 +298,18 @@ func TestGuideRenderOrderAndExactSemanticStyles(t *testing.T) {
 			}
 
 			styles := th.Styles()
-			surface := th.Color(th.Palette.Surface)
+			inset := th.Color(th.Palette.Surface2)
 			canvas := th.Color(th.Palette.Canvas)
 			rawLines := strings.Split(body, "\n")
 			wantLines := []string{
 				kit.FitLine(styles.Header.Background(canvas), document.Heading, row.Width),
-				kit.FitLine(styles.Surface, document.Intro, row.Width),
+				kit.FitLine(styles.Inset, document.Intro, row.Width),
 				styles.Muted.Render(clip("• "+document.Hint, row.Width)),
-				kit.FitLine(styles.Header.Background(surface), "CREDENTIAL", row.Width),
-				kit.FitLine(styles.DiffDel.Background(surface), "- before: sk-example", row.Width),
-				kit.FitLine(styles.DiffAdd.Background(surface), "+ after: <CREDENTIAL>", row.Width),
-				kit.FitLine(styles.Surface, "", row.Width),
-				kit.FitLine(styles.Surface, "derived by the production boundary", row.Width),
+				kit.FitLine(styles.Header.Background(inset), "CREDENTIAL", row.Width),
+				kit.FitLine(styles.DiffDel.Background(inset), "- before: sk-example", row.Width),
+				kit.FitLine(styles.DiffAdd.Background(inset), "+ after: <CREDENTIAL>", row.Width),
+				kit.FitLine(styles.Inset, "", row.Width),
+				kit.FitLine(styles.Inset, "derived by the production boundary", row.Width),
 			}
 			for _, line := range strings.Split(ansi.Wrap(document.Description, row.Width, ""), "\n") {
 				wantLines = append(wantLines, styles.Muted.Render(line))
@@ -337,9 +337,9 @@ func TestGuideRenderOracleRejectsGlyphOnlyStyleSwapAndOrderMutations(t *testing.
 	row := document.RenderCases[0]
 	_, th, body := renderGuideFixtureBody(t, document, row)
 	styles := th.Styles()
-	surface := th.Color(th.Palette.Surface)
-	before := kit.FitLine(styles.DiffDel.Background(surface), "- before: sk-example", row.Width)
-	after := kit.FitLine(styles.DiffAdd.Background(surface), "+ after: <CREDENTIAL>", row.Width)
+	inset := th.Color(th.Palette.Surface2)
+	before := kit.FitLine(styles.DiffDel.Background(inset), "- before: sk-example", row.Width)
+	after := kit.FitLine(styles.DiffAdd.Background(inset), "+ after: <CREDENTIAL>", row.Width)
 	if !containsExactGuideLine(strings.Split(body, "\n"), before) || !containsExactGuideLine(strings.Split(body, "\n"), after) {
 		t.Fatal("guide mutation oracle precondition failed on canonical diff rows")
 	}
@@ -349,7 +349,7 @@ func TestGuideRenderOracleRejectsGlyphOnlyStyleSwapAndOrderMutations(t *testing.
 		t.Fatal("guide oracle accepted a glyph-only before row without its deletion token")
 	}
 	styleSwap := strings.Replace(body, before,
-		kit.FitLine(styles.DiffAdd.Background(surface), "- before: sk-example", row.Width), 1)
+		kit.FitLine(styles.DiffAdd.Background(inset), "- before: sk-example", row.Width), 1)
 	if containsExactGuideLine(strings.Split(styleSwap, "\n"), before) {
 		t.Fatal("guide oracle accepted a before row rendered with the addition token")
 	}

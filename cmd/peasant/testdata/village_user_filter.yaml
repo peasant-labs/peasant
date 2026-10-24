@@ -160,7 +160,9 @@ cases:
     command: list-local
     user: alice
     collective: platform-team
-    errorContains: apply to the remote listing
+    # Signed-out filtering still refuses, now because no private saved scope is
+    # selected. Accountless unfiltered --user behavior above remains unchanged.
+    errorContains: local collective filtering needs a saved account scope
 
   - name: local explicit limit remains refused
     command: list-local

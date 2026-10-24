@@ -691,15 +691,15 @@ func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// behaviour it describes moves, or it holds the copy to the old behaviour
 	// while every test stays green.
 	for _, required := range []string{
-		"metadata",                                // what is redacted, still
-		"file paths and diagnostic locations",     // fields the configured level actually rewrites
-		"conversation content",                    // and what now is too
-		"known patterns",                          // the hedge, which must survive every rewording
-		"not a guarantee",                         // said outright rather than implied
-		"can differ from what you see locally",    // the consequence of redacting content
-		"deselect it",                             // the remedy that is one keystroke away here
-		"before it publishes them to the village", // what replaced the stored-copy counts
-		"go back with esc to review one",          // where the user sees the published text
+		"metadata",                                   // what is redacted, still
+		"file paths and diagnostic locations",        // fields the configured level actually rewrites
+		"conversation content",                       // and what now is too
+		"known patterns",                             // the hedge, which must survive every rewording
+		"not a guarantee",                            // said outright rather than implied
+		"can differ from what you see locally",       // the consequence of redacting content
+		"deselect it",                                // the remedy that is one keystroke away here
+		"before it publishes them to peasant online", // what replaced the stored-copy counts
+		"go back with esc to review one",             // where the user sees the published text
 	} {
 		if !strings.Contains(screen, required) {
 			t.Errorf("the consent screen must state %q so the user can see what leaves and what to do about it; got:\n%s",
@@ -757,7 +757,7 @@ func TestWizard_Receipt_CountsThePushAndNotADeletion(t *testing.T) {
 	}
 	screen := strings.Join(strings.Fields(ansi.Strip(m.viewString())), " ")
 	for _, want := range []string{
-		"push 2 session(s) to the village.",
+		"push 2 session(s) to peasant online.",
 		"1 session(s) are not selected and are not pushed.",
 		"nothing is removed from this machine.",
 		wizardReceiptDetails,
@@ -782,7 +782,7 @@ func TestWizard_Receipt_OmitsTheSkippedLineWhenNothingIsSkipped(t *testing.T) {
 	m = pressKey(m, keyEnter())
 	m = pressKey(m, keyEnter())
 	screen := strings.Join(strings.Fields(ansi.Strip(m.viewString())), " ")
-	if !strings.Contains(screen, "push 3 session(s) to the village.") {
+	if !strings.Contains(screen, "push 3 session(s) to peasant online.") {
 		t.Errorf("the receipt must count the whole push; got:\n%s", screen)
 	}
 	if strings.Contains(screen, "are not selected and are not pushed") {

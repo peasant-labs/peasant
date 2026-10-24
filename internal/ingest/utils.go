@@ -69,7 +69,7 @@ func isASCIIDriveLetter(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }
 
-// decodeProjectSlug is the shared core for greedy filesystem path decoding.
+// decodeProjectSlug is the shared core for filesystem path decoding.
 //
 // encoded must be a slug shape splitSlugRoot recognizes (unix, leading with
 // "-", or Windows, leading with a drive letter and "--"). segmentVariants
@@ -85,40 +85,66 @@ func decodeProjectSlug(encoded string, dirExists func(string) bool, segmentVaria
 	}
 	segments := strings.Split(s, "-")
 
-	path := root
-	i := 0
-	for i < len(segments) {
-		// Try single segment (all variants).
-		if found := firstExisting(path, segmentVariants(segments[i]), dirExists); found != "" {
-			path = found
-			i++
-			continue
-		}
-
-		// Try merging with subsequent segments (dash was a literal in the dir
-		// name, or an underscore/space encoded as dash by Cursor).
-		merged := segments[i]
-		foundMerge := false
-		for j := i + 1; j < len(segments); j++ {
-			merged += "-" + segments[j]
-			if found := firstExisting(path, segmentVariants(merged), dirExists); found != "" {
-				path = found
-				i = j + 1
-				foundMerge = true
-				break
-			}
-		}
-		if !foundMerge {
-			// Remaining segments don't match — likely a branch or worktree name
-			// appended to the slug. Return longest prefix matched so far.
-			break
-		}
-	}
-
+	path, consumed := decodeSlugSegments(root, segments, 0, dirExists, segmentVariants, map[slugState]slugDecode{})
 	if path == root {
 		return "", strings.Join(segments, "-")
 	}
-	return path, strings.Join(segments[i:], "-")
+	return path, strings.Join(segments[consumed:], "-")
+}
+
+type slugState struct {
+	path string
+	at   int
+}
+
+type slugDecode struct {
+	path     string
+	consumed int
+}
+
+// decodeSlugSegments finds the deepest directory segments[at:] resolve to
+// under path. A directory name is one segment or several joined by "-"
+// (a dash in the name, or an underscore or space Cursor wrote as one); the
+// shortest name that exists is tried first, and a choice that leads to a dead
+// end is undone for a longer one, so a sibling "-Users-x" cannot hide the
+// "-Users-x-project" the slug names. An empty segment is not a directory: it
+// comes from "--", a separator followed by a component that itself starts
+// with "-" ("/tmp/-Users-x" encodes as "-tmp--Users-x"), so it only ever
+// starts a longer name. When nothing resolves the rest, the deepest prefix
+// wins: trailing segments are often a branch or worktree name.
+func decodeSlugSegments(path string, segments []string, at int, dirExists func(string) bool, segmentVariants func(string) []string, seen map[slugState]slugDecode) (string, int) {
+	if at == len(segments) {
+		return path, at
+	}
+	state := slugState{path: path, at: at}
+	if done, ok := seen[state]; ok {
+		return done.path, done.consumed
+	}
+	best := slugDecode{path: path, consumed: at}
+	name := ""
+	for end := at; end < len(segments); end++ {
+		if end > at {
+			name += "-"
+		}
+		name += segments[end]
+		if name == "" {
+			continue
+		}
+		found := firstExisting(path, segmentVariants(name), dirExists)
+		if found == "" {
+			continue
+		}
+		deeper, consumed := decodeSlugSegments(found, segments, end+1, dirExists, segmentVariants, seen)
+		if consumed == len(segments) {
+			best = slugDecode{path: deeper, consumed: consumed}
+			break
+		}
+		if consumed > best.consumed {
+			best = slugDecode{path: deeper, consumed: consumed}
+		}
+	}
+	seen[state] = best
+	return best.path, best.consumed
 }
 
 // firstExisting returns filepath.Join(base, v) for the first v in variants

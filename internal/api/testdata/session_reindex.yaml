@@ -1,0 +1,89 @@
+# POST /api/v1/sync/ingest/session: the publish popup re-indexes the one
+# session whose stored index the scan refused, then scans again. Each case lays
+# out a Claude Code source holding the session and a neighbour, indexes it the
+# way `peasant harvest` does (through the managed-generation store, which the
+# route must write through too, or it refuses every session a harvest stored
+# as a newer producer), changes the recordings, then calls the route (and the
+# scan route when it answered done).
+#
+# The session is long and still being written: every turn carries a hook
+# attachment and a hook progress record, one hook output ends in a lone UTF-16
+# surrogate (a streamed output cut mid-character), and a live append can leave
+# a record half-written at the end of the file. The re-index reads the bytes up
+# to the last complete record and leaves the neighbour alone. A malformed
+# complete record still fails the capture closed: the run re-indexes the stored
+# copy instead and the route's notes name the record, so the scan that follows
+# decides and its details can say why; the malformed record is also named by
+# its line (unreadable_line). The notes are about this session only, never
+# about the stored sessions the run was scoped away from.
+required_names:
+  - live-session-reindexes-only-itself
+  - malformed-record-reindexes-stored-copy-and-names-it
+  - unrecorded-session-is-refused
+  - busy-index-is-refused
+  - overdue-run-is-stopped
+# One turn of the session. TURN is the turn number, TIME its timestamp.
+turn: |
+  {"sessionId":"SESSION_ID","type":"user","uuid":"SESSION_ID-user-TURN","timestamp":"TIME","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"step TURN: run the checks and send the report to ops@example.com"}}
+  {"sessionId":"SESSION_ID","type":"assistant","uuid":"SESSION_ID-assistant-TURN","timestamp":"TIME","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"Step TURN ran; the checks pass."}]}}
+  {"sessionId":"SESSION_ID","type":"attachment","attachment":{"type":"hook_success","stdout":"hook TURN ok"},"uuid":"SESSION_ID-hook-TURN","timestamp":"TIME"}
+  {"sessionId":"SESSION_ID","type":"progress","data":{"type":"hook_progress","hookEvent":"PostToolUse"},"uuid":"SESSION_ID-progress-TURN","timestamp":"TIME"}
+# A hook output cut mid-character, written once into the session.
+surrogate_record: |
+  {"sessionId":"SESSION_ID","type":"attachment","attachment":{"type":"hook_success","stdout":"build ok \ud83d"},"uuid":"SESSION_ID-hook-surrogate","timestamp":"2026-01-01T00:00:00Z"}
+# A record still being written when the run reads the file: no newline yet.
+partial_record: '{"sessionId":"SESSION_ID","type":"user","uuid":"SESSION_ID-user-partial","timestamp":"2026-01-02T00:00:00Z","message":{"role":"us'
+# A record a crash cut short, followed by later writes: complete, and malformed.
+malformed_record: |
+  {"sessionId":"SESSION_ID","type":"user","uuid":"SESSION_ID-user-cut","timestamp":"2026-01-02T00:00:00Z","message":{"role":"us
+cases:
+  - name: live-session-reindexes-only-itself
+    turns: 470
+    neighbour_turns: 3
+    append_turns: 3
+    append_partial: true
+    neighbour_append_turns: 2
+    status: 200
+    no_notes: true
+    user_turns_after: 473
+    neighbour_user_turns_after: 3
+    scan_status: 200
+  - name: malformed-record-reindexes-stored-copy-and-names-it
+    turns: 12
+    neighbour_turns: 3
+    append_turns: 1
+    append_malformed: true
+    status: 200
+    message: malformed complete JSON
+    # 12 turns of 4 records and the lone-surrogate hook record come first.
+    unreadable_line: 50
+    user_turns_after: 12
+    neighbour_user_turns_after: 3
+    scan_status: 200
+  - name: unrecorded-session-is-refused
+    turns: 12
+    neighbour_turns: 3
+    unrecorded: true
+    status: 404
+    code: session_not_recorded
+    user_turns_after: 12
+    neighbour_user_turns_after: 3
+  - name: busy-index-is-refused
+    turns: 12
+    neighbour_turns: 3
+    append_turns: 1
+    busy: true
+    status: 409
+    code: ingest_running
+    user_turns_after: 12
+    neighbour_user_turns_after: 3
+  - name: overdue-run-is-stopped
+    turns: 12
+    neighbour_turns: 3
+    append_turns: 1
+    timeout: 1ns
+    status: 504
+    code: session_ingest_timeout
+    message: the previous index was kept
+    user_turns_after: 12
+    neighbour_user_turns_after: 3

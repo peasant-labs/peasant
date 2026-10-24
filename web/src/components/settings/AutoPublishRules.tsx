@@ -14,6 +14,7 @@ import { Button, Checkbox, CopyIconButton, Input, Menu, Select, SettingRow } fro
 import { installAutoPublishRule, removeAutoPublishRule, saveAutoPublishRule } from '@/lib/api/settings';
 import { shellQuote } from '@/lib/settings/shell';
 import { StatusLine, type BlockStatus } from './CustomPatterns';
+import { DocsLink } from '@/components/DocsLink';
 
 /** The collectives this computer's Village account can see, by identifier. null: not signed in or not read. */
 export type CollectiveNames = ReadonlyMap<string, string> | null;
@@ -128,7 +129,7 @@ function hookSummary(rule: AutoPublishRule): string {
   const blocked = rule.repositories.filter((repository) => repository.hooks.some((hook) => hook.status === AutoPublishHookStatus.Blocked)).length;
   const parts = [`hook in ${installed} of ${total} ${total === 1 ? 'repository' : 'repositories'}`];
   if (blocked > 0) parts.push(`blocked in ${blocked}`);
-  return parts.join(' · ');
+  return parts.join(', ');
 }
 
 function hookWords(status: AutoPublishHookStatus): string {
@@ -217,7 +218,7 @@ function InstallPreview({ operations, rules, collectives }: {
       <ul className="stg-install-steps">
         {[...steps.entries()].map(([key, step]) => (
           <li key={key} className="stg-install-step">
-            {eventWords(step.event)} · publishes to {collectiveWords(step.to, collectives)}, private
+            {eventWords(step.event)}, publishes to {collectiveWords(step.to, collectives)}, private
           </li>
         ))}
       </ul>
@@ -470,7 +471,7 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
               <div key={rule.id} className="stg-rule" data-rule-id={rule.id}>
                 <SettingRow
                   label={rule.match}
-                  help={`${kindWords(rule.kind)} · ${rule.events.length === 0 ? 'paused, publishes nothing' : `publishes to ${collectiveWords(rule.collectives, collectives)} ${rule.events.map(eventWords).join(' and ')}`}`}
+                  help={`${kindWords(rule.kind)}, ${rule.events.length === 0 ? 'paused, publishes nothing' : `publishes to ${collectiveWords(rule.collectives, collectives)} ${rule.events.map(eventWords).join(' and ')}`}`}
                   control="switch"
                   value={rule.events.length > 0}
                   disabled={busy}
@@ -611,13 +612,13 @@ export function AutoPublishRules({ rules, onRulesChange, collectives, collective
           <fieldset className="stg-collectives" disabled={busy}>
             <legend className="label">publish to</legend>
             {!signedIn ? (
-              <p className="stg-note">sign in to village to pick collectives: run peasant village login, or sign in from the publish popup.</p>
+              <p className="stg-note">sign in to peasant online to pick collectives. <DocsLink topic="signIn" variant="inline">how to sign in</DocsLink></p>
             ) : collectivesError !== null ? (
-              <p className="stg-note" role="alert">the collectives could not be read from village: {collectivesError}</p>
+              <p className="stg-note" role="alert">the collectives could not be read from peasant online: {collectivesError}</p>
             ) : collectives === null ? (
-              <p className="stg-note">reading your collectives from village.</p>
+              <p className="stg-note">reading your collectives from peasant online.</p>
             ) : collectiveChoices.length === 0 ? (
-              <p className="stg-note">this account is in no collective yet. join or create one on village first.</p>
+              <p className="stg-note">this account is in no collective yet. join or create one online first.</p>
             ) : collectiveChoices.map(([id, name]) => (
               <Checkbox
                 key={id}

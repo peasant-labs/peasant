@@ -9,11 +9,12 @@ requiredNames:
   - historical-receipt-is-not-current-project
 sessions: [sess_a, sess_b, sess_child, sess_z]
 receipts:
-  - {session: sess_a, origin: 'https://village.example', owner: user-1, project: b, transcript: '11111111-1111-4111-8111-111111111111', updated: 1000}
-  - {session: sess_a, origin: 'https://village.example', owner: user-1, project: c, transcript: '22222222-2222-4222-8222-222222222222', updated: 2000}
-  - {session: sess_b, origin: 'https://village.example', owner: user-2, project: b, transcript: '33333333-3333-4333-8333-333333333333', updated: 2000}
-  - {session: sess_b, origin: 'https://other.example', owner: user-1, project: b, transcript: '44444444-4444-4444-8444-444444444444', updated: 2000}
-  - {session: sess_z, origin: 'https://village.example', owner: user-1, project: b, transcript: '55555555-5555-4555-8555-555555555555', updated: 2000, poison: true}
+  # Matches testutil.VillageFixtureAccountID used by the real credential helper.
+  - {session: sess_a, origin: 'https://village.example', owner: &selected_account '11111111-1111-4111-8111-111111111111', project: b, transcript: '11111111-1111-4111-8111-111111111111', updated: 1000}
+  - {session: sess_a, origin: 'https://village.example', owner: *selected_account, project: c, transcript: '22222222-2222-4222-8222-222222222222', updated: 2000}
+  - {session: sess_b, origin: 'https://village.example', owner: '11111111-1111-4111-8111-222222222222', project: b, transcript: '33333333-3333-4333-8333-333333333333', updated: 2000}
+  - {session: sess_b, origin: 'https://other.example', owner: *selected_account, project: b, transcript: '44444444-4444-4444-8444-444444444444', updated: 2000}
+  - {session: sess_z, origin: 'https://village.example', owner: *selected_account, project: b, transcript: '55555555-5555-4555-8555-555555555555', updated: 2000, poison: true}
 cases:
   - name: historical-project-receipt
     origin: https://village.example

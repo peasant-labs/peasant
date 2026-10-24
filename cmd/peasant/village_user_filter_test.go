@@ -108,6 +108,7 @@ func TestVillageUserFilterFixtures(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			server := testutil.NewCollectiveVillage(t, collectives...)
+			server.SetAuthenticatedUser(schema.VillageUUID(stubOwnerUserID), "owneruser")
 			for _, row := range fixture.World.Transcripts {
 				// Each contributor is a distinct village account, so the filter has
 				// more than one account to choose between.

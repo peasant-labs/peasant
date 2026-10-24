@@ -18,21 +18,25 @@
    ============================================ */
 
 :root {
-  /* Where page content starts: the fixed one-row header (fairtrade's --nav-h at
-     every width) plus the local offline notice, which sits under it at the top
-     of the page while it shows. The notice writes its own measured height to
-     --app-notice-height and clears it when it goes. */
-  --app-header-height: calc(var(--nav-h) + var(--app-notice-height, 0px));
+  /* The persistent chrome above page content: fairtrade's sidebar is a column
+     beside the page on a wide screen (nothing above it) and a top bar of
+     fairtrade's --nav-h on a narrow one (the sidebar's own 768px breakpoint,
+     overridden below). */
+  --app-chrome-height: 0px;
+  /* Where page content starts: the chrome plus the local offline notice, which
+     sits at the top of the page column while it shows. The notice writes its
+     own measured height to --app-notice-height and clears it when it goes. */
+  --app-header-height: calc(var(--app-chrome-height) + var(--app-notice-height, 0px));
   /* The height a full-height page (the transcript, /share) fills below that.
      While the notice shows on a small or zoomed screen the page keeps a floor
-     (24rem, or the whole screen under the header when that is less), so the
+     (24rem, or the whole screen under the chrome when that is less), so the
      document scrolls the notice away instead of crushing the page. Where the
      notice is pinned the floor does not bite: the smallest pinned screen
      (48rem wide, 40rem tall) leaves more than 24rem under a notice of about
      200px or less. */
   --app-body-height: max(
     calc(100dvh - var(--app-header-height)),
-    min(24rem, calc(100dvh - var(--nav-h)))
+    min(24rem, calc(100dvh - var(--app-chrome-height)))
   );
 
   /* ─── v2 semantic palette — app-supplementary tokens (dark default) ───── */
@@ -95,9 +99,15 @@
      nothing app-side overrides them anymore. */
 }
 
-/* Focused elements scroll clear of the header, and of the offline notice where
-   it is pinned (the notice-pinned variant). Elsewhere only the header is fixed,
-   which fairtrade's own scroll-padding-top (--nav-h) already clears. */
+/* Below fairtrade's sidebar breakpoint the sidebar is a top bar above the page. */
+@media (width < 768px) {
+  :root { --app-chrome-height: var(--nav-h); }
+}
+
+/* Focused elements scroll clear of the offline notice where it is pinned (the
+   notice-pinned variant, a wide screen with no chrome above the page).
+   Elsewhere only the phone's top bar stays on screen, which fairtrade's own
+   scroll-padding-top (--nav-h) already clears. */
 html {
   @variant notice-pinned {
     scroll-padding-top: var(--app-header-height);
@@ -343,11 +353,6 @@ body {
   background-size: 32px 32px;
 }
 
-/* Snap content width to the 32px grid so card edges hit grid lines on both sides. */
-.grid-snap {
-  max-width: calc(round(down, 100vw, 32px));
-  margin-inline: auto;
-}
 
 /* ============================================
    ANIMATIONS
@@ -389,18 +394,6 @@ body {
 .stagger-5 { animation-delay: 0.25s; }
 .stagger-6 { animation-delay: 0.3s; }
 
-/* The Explainer "?" box slides+fades in on open; height isn't animated (content
-   is variable) — a short translate/opacity reads as "appeared" without layout
-   thrash. Paired with prefers-reduced-motion below. */
-@keyframes explainer-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.animate-explainer-in {
-  animation: explainer-in 0.22s ease-out both;
-}
-
 /* Honor the OS "reduce motion" setting: freeze the shimmer to a static fill and
    drop the entrance translates/fades to instant. The skeletons stay visible
    (just not pulsing), so loading is still legible. */
@@ -410,8 +403,7 @@ body {
     background: var(--surface-2);
   }
   .animate-fade-up,
-  .animate-fade-in,
-  .animate-explainer-in {
+  .animate-fade-in {
     animation: none;
   }
 }
@@ -592,7 +584,7 @@ textarea::placeholder {
   text-transform: none;
   letter-spacing: 0.04em;
   font-weight: 500;
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--ink-3);
 }
 
@@ -706,6 +698,26 @@ textarea::placeholder {
 .share-hierarchy-check {
   position: relative;
 }
+/* On a phone or a touch screen every checkbox in the share chooser takes a
+   comfortable tap without moving the box the rail is drawn to: an invisible
+   square the size of the comfortable target, centred on the box, belongs to
+   the checkbox's label. */
+@media (max-width: 40rem), (pointer: coarse) {
+  .share-rail-rows .check,
+  .share-helper-contexts .check {
+    position: relative;
+  }
+  .share-rail-rows .check::before,
+  .share-helper-contexts .check::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--target-comfortable);
+    height: var(--target-comfortable);
+    transform: translate(-50%, -50%);
+  }
+}
 .share-hierarchy-check__mixed {
   position: absolute;
   left: 4px;
@@ -789,13 +801,18 @@ textarea::placeholder {
   }
 }
 
-/* Share owns the viewport below the header (and the offline notice while it
+/* Share owns the viewport below the chrome (and the offline notice while it
    shows). The page and wizard form one unbroken flex chain, so the body
    receives the actual remaining space after breadcrumbs, title, rail, and
    footer without guessed offsets. */
 .share-page {
   height: var(--app-body-height);
   min-height: 0;
+}
+/* The trail and the title keep their own height; only the wizard gives way. */
+.share-page > .crumb,
+.share-page > .page-title {
+  flex: none;
 }
 .share-wizard {
   display: flex;
@@ -823,6 +840,14 @@ textarea::placeholder {
   flex: 0 0 auto;
 }
 @media (max-width: 40rem) {
+  /* A phone scrolls the page, not a short box between the rail and the
+     footer. */
+  .share-page {
+    height: auto;
+  }
+  .share-wizard .swz-body {
+    overflow-y: visible;
+  }
   .share-wizard .swz-foot {
     grid-template-columns: minmax(0, 1fr) auto;
   }
@@ -835,24 +860,6 @@ textarea::placeholder {
   .share-footer-actions > * {
     flex: 1 1 auto;
   }
-}
-
-/* ============================================
-   SESSION METRICS DISCLOSURE
-   ============================================
-   The transcript composite's hero always renders its metrics strip
-   (`.txn-meta .metaitem` — duration · turns · tools · tokens · commits · files
-   · churn) and exposes no prop to collapse it. Those are reference figures you
-   consult occasionally, not identity you need on screen the whole time you are
-   reading a transcript, so SessionDetailV2 owns a `details` disclosure in the
-   hero's `headerActions` slot and stamps this class on its wrapper when closed.
-
-   Scoped to `.metaitem` on purpose: the sibling `.chip` elements in the same
-   row are outcome, harness and model — session IDENTITY, which stays visible.
-   Uses `display: none` rather than visibility/height so the row reflows and
-   leaves no gap. */
-.txn-metrics-collapsed .txn-meta .metaitem {
-  display: none;
 }
 
 /* ============================================
@@ -870,3 +877,104 @@ textarea::placeholder {
 .txn-hints-hidden .txn-hint {
   display: none;
 }
+
+/* Compact chrome retains every canonical nav action and its accessible name.
+   The breakpoint is Fairtrade's tablet boundary, not a second section registry. */
+.app-header-nav[aria-current="page"] {
+  color: var(--amber);
+  border-color: var(--rule-strong);
+}
+@media (width < 768px) {
+  .app-header-search-label,
+  .app-header-search-shortcut {
+    @apply sr-only;
+  }
+  .app-header {
+    padding-inline: var(--sp-2);
+    gap: var(--sp-1);
+  }
+  .app-header-brand {
+    font-size: var(--fs-body);
+  }
+  .app-header-controls {
+    gap: var(--sp-1);
+  }
+  .app-header-nav {
+    padding-inline: var(--sp-1);
+    gap: var(--sp-1);
+  }
+  .app-header-search,
+  .app-header-theme {
+    padding-inline: 0;
+    inline-size: var(--control-h-sm);
+    min-inline-size: var(--target-min);
+  }
+}
+
+/* ============================================
+   DOCS LINKS
+   ============================================
+   How-to lives in the docs; the app links to it (components/DocsLink.tsx).
+   The glyph marks a link that opens outside the app. Tokens only. */
+.docs-link { gap: var(--sp-2); text-decoration: none; }
+.docs-link .docs-link-glyph { width: var(--ic-sm); height: var(--ic-sm); flex: none; }
+.docs-link-inline {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  color: var(--ink-strong);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+.docs-link-inline .docs-link-glyph { width: var(--ic-sm); height: var(--ic-sm); flex: none; align-self: center; }
+@media (hover: hover) and (pointer: fine) {
+  .docs-link-inline:hover { color: var(--amber); text-decoration-style: solid; }
+}
+.docs-link-icon .lucide { width: var(--ic-md); height: var(--ic-md); }
+/* a finger gets a 44px target on an inline docs link without the link pushing its
+   line apart: the hit area grows above and below, as fairtrade's switch does */
+@media (pointer: coarse) {
+  .docs-link-inline { position: relative; }
+  .docs-link-inline::after {
+    content: '';
+    position: absolute;
+    inset: calc((var(--target-comfortable) - 1lh) / -2) 0;
+  }
+}
+
+/* ============================================
+   PAGE FRAME
+   ============================================ */
+/* Every local page is fairtrade's .asb-page frame, so content starts at one
+   left edge wherever the sidebar takes you, and every page title is
+   fairtrade's .iu-page-title at the hero size (the page's own size on a phone). */
+.page-title { font-size: var(--fs-hero); line-height: var(--lh-tight); }
+@media (max-width: 47.99rem) {
+  .page-title { font-size: var(--fs-xl); }
+}
+/* analytics: the frame holds only the title; the overview's own head follows
+   on the same left edge */
+.analytics-head { padding-bottom: 0; }
+
+/* The project picker (map, changes): a wide screen reads each project as a
+   row under column heads; a phone stacks the counts under the name, each with
+   its own small label in place of the heads. */
+.picker-head { display: none; }
+.picker-stat { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+@media (min-width: 48rem) {
+  .picker-head { display: grid; }
+  .picker-stat { display: block; text-align: right; }
+  .picker-phone-label { display: none; }
+}
+
+/* A project page whose project cannot be opened. */
+.project-problem-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.project-problem-details {
+  max-width: 64ch;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+}
+.project-problem-details summary { cursor: pointer; width: fit-content; }
+.project-problem-details p { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; }

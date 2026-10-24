@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -173,6 +175,10 @@ func TestPushCmd_TheCLIDoorGivesThePipelineARedactor(t *testing.T) {
 	captured := &capturedPublish{parts: map[string]string{}}
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 			_, _ = w.Write([]byte(`{}`))
 			return
@@ -199,6 +205,27 @@ func TestPushCmd_TheCLIDoorGivesThePipelineARedactor(t *testing.T) {
 		[]string{"--non-interactive", "--quiet", "--config=" + cfgPath})
 	if err != nil {
 		t.Fatalf("push: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	observations := collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: dir})
+	history, err := observations.History(t.Context(), schema.LocalContributionHistoryQuery{Kind: schema.LocalContributionEvidenceReceipts, Page: 1, Limit: 1})
+	if err != nil || history.Total != 1 || len(history.Receipts) != 1 {
+		t.Fatalf("mounted CLI did not record its actual confirmed effect: %+v %v", history, err)
+	}
+	input, err := db.LoadPublicationInput(t.Context(), ingest.SessionID(sessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), input.ReceiptProjectHash, sessionID)
+	if err != nil || terminal == nil {
+		t.Fatalf("authoritative receipt missing: %+v %v", terminal, err)
+	}
+	if observed := history.Receipts[0]; observed.Operation != schema.CollectiveOperationPublish || observed.TranscriptID != terminal.Receipt.TranscriptID || observed.Outcome != schema.LocalConfirmedContributionPublished || observed.CollectiveID != nil || observed.SourceReceiptID == nil || *observed.SourceReceiptID != string(terminal.Receipt.RequestOperationFingerprint) {
+		t.Fatalf("mounted CLI publication evidence is not its actual upload: %+v", observed)
 	}
 
 	parts := captured.snapshot()

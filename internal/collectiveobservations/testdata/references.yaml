@@ -1,0 +1,13 @@
+requiredNames: [reference-uuid, reference-saved-name, reference-old-name-alias, reference-ambiguous-name, reference-other-village-url, reference-other-base-path, reference-canonical-url, reference-legacy-url, reference-offline-signed-out, track-online-refusal-no-preference, untrack-offline-idempotent]
+cases:
+  - {name: reference-uuid, reference: '33333333-3333-4333-8333-333333333333', wantID: '33333333-3333-4333-8333-333333333333'}
+  - {name: reference-saved-name, reference: saved, wantID: '33333333-3333-4333-8333-333333333333'}
+  - {name: reference-old-name-alias, reference: Old, rename: true, wantID: '33333333-3333-4333-8333-333333333333'}
+  - {name: reference-ambiguous-name, reference: Saved, ambiguous: true, wantError: true}
+  - {name: reference-other-village-url, reference: 'https://elsewhere.invalid/installation/collectives/33333333-3333-4333-8333-333333333333', wantError: true}
+  - {name: reference-other-base-path, reference: '{base}/elsewhere/collectives/33333333-3333-4333-8333-333333333333', wantError: true}
+  - {name: reference-canonical-url, reference: '{base}/installation/collectives/33333333-3333-4333-8333-333333333333?view=history', wantID: '33333333-3333-4333-8333-333333333333'}
+  - {name: reference-legacy-url, reference: '{base}/installation/groups/33333333-3333-4333-8333-333333333333', wantID: '33333333-3333-4333-8333-333333333333'}
+  - {name: reference-offline-signed-out, reference: Saved, signout: true, wantError: true}
+  - {name: track-online-refusal-no-preference, reference: Saved, refused: true, wantError: true}
+  - {name: untrack-offline-idempotent, reference: Saved, untrack: true, wantID: '33333333-3333-4333-8333-333333333333'}

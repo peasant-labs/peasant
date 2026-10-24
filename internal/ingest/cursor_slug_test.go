@@ -1,8 +1,12 @@
 package ingest
 
 import (
+	_ "embed"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDecodeCursorSlug(t *testing.T) {
@@ -158,73 +162,53 @@ func TestCursorSegmentVariants(t *testing.T) {
 	}
 }
 
-func TestDecodeCursorWorkspace(t *testing.T) {
-	tests := []struct {
-		name            string
-		root            string
-		workspace       string
-		dirs            map[string]bool
-		wantProjectDir  string
-		wantProjectName string
-	}{
-		{
-			name:      "full match: project name from filepath.Base",
-			root:      slugTestPath("root"),
-			workspace: "Users-foo-Desktop-myrepo",
-			dirs: map[string]bool{
-				slugTestPath("Users"):                             true,
-				slugTestPath("Users", "foo"):                      true,
-				slugTestPath("Users", "foo", "Desktop"):           true,
-				slugTestPath("Users", "foo", "Desktop", "myrepo"): true,
-			},
-			wantProjectDir:  slugTestPath("Users", "foo", "Desktop", "myrepo"),
-			wantProjectName: "myrepo",
-		},
-		{
-			name:      "partial match: unmatched suffix is project name",
-			root:      slugTestPath("root"),
-			workspace: "Users-foo-Desktop-peasant",
-			dirs: map[string]bool{
-				slugTestPath("Users"):                   true,
-				slugTestPath("Users", "foo"):            true,
-				slugTestPath("Users", "foo", "Desktop"): true,
-			},
-			wantProjectDir:  slugTestPath("Users", "foo", "Desktop"),
-			wantProjectName: "peasant",
-		},
-		{
-			name:            "no match: fallback to joined root path",
-			root:            slugTestPath("root"),
-			workspace:       "unknown-workspace",
-			dirs:            map[string]bool{},
-			wantProjectDir:  filepath.Join(slugTestPath("root"), "unknown-workspace"),
-			wantProjectName: "unknown-workspace",
-		},
-		{
-			name:      "underscore dir: name from filepath.Base",
-			root:      slugTestPath("root"),
-			workspace: "Users-foo-my-project",
-			dirs: map[string]bool{
-				slugTestPath("Users"):                      true,
-				slugTestPath("Users", "foo"):               true,
-				slugTestPath("Users", "foo", "my_project"): true,
-			},
-			wantProjectDir:  slugTestPath("Users", "foo", "my_project"),
-			wantProjectName: "my_project",
-		},
-	}
+//go:embed testdata/cursor_workspace_decode.yaml
+var cursorWorkspaceDecodeYAML []byte
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			adapter := &CursorAdapter{
-				fs: &stubStatFS{dirs: tt.dirs},
+// TestDecodeCursorWorkspace resolves each fixture workspace against its
+// simulated directory tree. A path component that starts with "-" must decode,
+// and a decode that stops outside a git work tree must never name a parent
+// folder as the project.
+func TestDecodeCursorWorkspace(t *testing.T) {
+	var fixture struct {
+		Required []string `yaml:"requiredNames"`
+		Cases    []struct {
+			Name        string   `yaml:"name"`
+			Workspace   string   `yaml:"workspace"`
+			Dirs        []string `yaml:"dirs"`
+			ProjectDir  string   `yaml:"projectDir"`
+			ProjectName string   `yaml:"projectName"`
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(cursorWorkspaceDecodeYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool, len(fixture.Cases))
+	for _, c := range fixture.Cases {
+		present[c.Name] = true
+	}
+	for _, name := range fixture.Required {
+		if !present[name] {
+			t.Fatalf("missing required Cursor workspace decode case %s", name)
+		}
+	}
+	root := slugTestPath("root")
+	path := func(p string) string {
+		if rest, ok := strings.CutPrefix(p, "<root>/"); ok {
+			return filepath.Join(root, rest)
+		}
+		return slugTestPath(strings.Split(strings.TrimPrefix(p, "/"), "/")...)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			dirs := make(map[string]bool, len(c.Dirs))
+			for _, dir := range c.Dirs {
+				dirs[path(dir)] = true
 			}
-			gotDir, gotName := adapter.decodeCursorWorkspace(tt.root, tt.workspace)
-			if gotDir != tt.wantProjectDir {
-				t.Errorf("projectDir: got %q, want %q", gotDir, tt.wantProjectDir)
-			}
-			if gotName != tt.wantProjectName {
-				t.Errorf("projectName: got %q, want %q", gotName, tt.wantProjectName)
+			adapter := &CursorAdapter{fs: &stubStatFS{dirs: dirs}}
+			gotDir, gotName := adapter.decodeCursorWorkspace(root, c.Workspace)
+			if gotDir != path(c.ProjectDir) || gotName != c.ProjectName {
+				t.Fatalf("decodeCursorWorkspace(%q) = (%q, %q), want (%q, %q)", c.Workspace, gotDir, gotName, path(c.ProjectDir), c.ProjectName)
 			}
 		})
 	}

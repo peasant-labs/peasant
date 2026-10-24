@@ -18,7 +18,7 @@ import (
 
 // hooksLongDescription is shared by the group and its subcommands so the timing
 // and safety promises are stated identically wherever a user meets them.
-var hooksLongDescription = `Manage the opt-in Git hooks that upload a repository's recorded sessions to the village.
+var hooksLongDescription = `Manage the opt-in Git hooks that upload a repository's recorded sessions to peasant online.
 
 A managed hook runs '` + githooks.CommandLine(githooks.Binding{}) + ` --repository <resolved-repository>'
 for the repository git is acting on, and nothing else. Explicit path overrides
@@ -29,7 +29,7 @@ public-visibility confirmation on your behalf. Hooks honor the configured
 push.visibility on a session's first publication: Peasant publishes content and,
 when needed, follows it with an owner visibility update to converge the
 configured private or public state. An update of a session this machine has
-already published to the village account keeps the visibility and license
+already published to the peasant online account keeps the visibility and license
 it has there, including a share with collectives. If visibility convergence or local receipt
 persistence fails, no terminal local receipt is recorded, so the next
 repository-scoped run retries that session.
@@ -39,12 +39,12 @@ instead: the push publishes collectives-only, private with no license, an
 update keeps the audience the transcript has, and each bound transcript is
 shared with its rule's collectives, never with the public. Every managed hook
 applies the rules, so saving a rule changes what an installed hook publishes.
---timeout caps the WHOLE upload, so a village that accepts a connection and then
+--timeout caps the WHOLE upload, so a peasant online server that accepts a connection and then
 stops answering cannot hold git up: the per-request client timeout does not bound
 a push, which issues several requests in sequence. Giving up is a warning, not a
 failure, and the next commit or push tries again; to finish a large first upload,
 run 'peasant village push --repository <repo>' once by hand without the budget.
-The upload is synchronous: it needs network access and a valid village login, and
+The upload is synchronous: it needs network access and a valid peasant online login, and
 it adds its own latency to the git command.
 
 The scope is a project identity, not a path. When the repository has an origin
@@ -102,7 +102,7 @@ Peasant never sets, unsets, or changes core.hooksPath at any scope.`
 func BuildVillageHooksCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hooks",
-		Short: "Install, inspect, and remove the repository's village upload hooks",
+		Short: "Install, inspect, and remove the repository's peasant online upload hooks",
 		Long:  hooksLongDescription,
 	}
 	cmd.AddCommand(buildVillageHooksInstallCommand())
@@ -119,7 +119,7 @@ func buildVillageHooksInstallCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "install --event post-commit [--event pre-push] [--dir <repo>]",
-		Short: "Install a village upload hook for the named git events",
+		Short: "Install a peasant online upload hook for the named git events",
 		Long: hooksLongDescription + `
 
 At least one --event is required: a hook is never installed from a defaulted or
@@ -150,7 +150,7 @@ leaves an accurate, acted-upon result for the other.`,
 	addHookEventFlag(cmd, &rawEvents, "Git event to manage; repeat for more than one (post-commit, pre-push)")
 	cmd.Flags().DurationVar(&budget, "timeout", 0, fmt.Sprintf(
 		"Overall time budget the installed hook gives the whole upload before giving up with a warning (default %s). "+
-			"Raise it if your village is far away or your first push is large; the hook is best effort either way, and the "+
+			"Raise it if peasant online is far away or your first push is large; the hook is best effort either way, and the "+
 			"next commit or push retries. Choose it here rather than editing the generated file: an edited hook is no longer "+
 			"one Peasant can rewrite or remove.", githooks.DefaultUploadBudget))
 	return cmd
@@ -160,7 +160,7 @@ func buildVillageHooksStatusCommand() *cobra.Command {
 	var dir string
 	cmd := &cobra.Command{
 		Use:   "status [--dir <repo>]",
-		Short: "Report the village upload hook state of a repository",
+		Short: "Report the peasant online upload hook state of a repository",
 		Long: hooksLongDescription + `
 
 status reads only. It reports, for each event, the path git would really run,
@@ -191,7 +191,7 @@ func buildVillageHooksUninstallCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "uninstall [--event post-commit] [--event pre-push] [--dir <repo>]",
-		Short: "Remove the village upload hooks Peasant installed",
+		Short: "Remove the peasant online upload hooks Peasant installed",
 		Long: hooksLongDescription + `
 
 With no --event, uninstall considers both events. It deletes only an intact

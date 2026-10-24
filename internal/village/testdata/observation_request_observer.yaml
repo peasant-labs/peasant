@@ -1,0 +1,10 @@
+requiredNames: [observation-http-success, observation-http-network-failure, observation-invalid-local-url, observation-relative-local-url, observation-unsupported-local-url, observation-cancelled-before-io, observation-malformed-remote-body, observation-redirect-attempt-not-forwarded]
+cases:
+  - {name: observation-http-success, mode: success, wantCalls: 1, wantRequests: 1, wantError: false}
+  - {name: observation-http-network-failure, mode: network-failure, wantCalls: 1, wantRequests: 1, wantError: true}
+  - {name: observation-invalid-local-url, mode: invalid-url, wantCalls: 0, wantRequests: 0, wantError: true}
+  - {name: observation-relative-local-url, mode: relative-url, wantCalls: 0, wantRequests: 0, wantError: true}
+  - {name: observation-unsupported-local-url, mode: unsupported-url, wantCalls: 0, wantRequests: 0, wantError: true}
+  - {name: observation-cancelled-before-io, mode: cancelled, wantCalls: 0, wantRequests: 0, wantError: true}
+  - {name: observation-malformed-remote-body, mode: malformed, wantCalls: 1, wantRequests: 1, wantError: true}
+  - {name: observation-redirect-attempt-not-forwarded, mode: redirect, wantCalls: 1, wantRequests: 1, wantError: true}

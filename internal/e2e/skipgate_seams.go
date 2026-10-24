@@ -179,7 +179,9 @@ func writePeasantBinWrapper(dir, command string) (string, error) {
 	if len(argv) == 0 {
 		return "", fmt.Errorf("PEASANT_BIN is empty after trimming whitespace")
 	}
-	path := filepath.Join(dir, "peasant-bin-wrapper")
+	// Hook substrates put this directory first on PATH; the injected command
+	// must therefore retain the executable name the real generated hook uses.
+	path := filepath.Join(dir, "peasant")
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("exec")

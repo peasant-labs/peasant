@@ -2,6 +2,14 @@
 # owns `/` exactly. `section` names a registry id this app routes. The test
 # requires every name below.
 cases:
+  - name: village-direct-active
+    section: village
+    pathname: /village/
+    active: true
+  - name: village-not-lookalike
+    section: village
+    pathname: /village-other
+    active: false
   - name: home-on-root
     section: home
     pathname: /

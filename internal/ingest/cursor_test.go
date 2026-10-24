@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
 
 const testCursorProjectsRoot = "/home/test/.cursor/projects"
@@ -861,5 +863,57 @@ func TestCursorAdapter_ExtractMetadata_NoUsageField(t *testing.T) {
 	}
 	if len(meta.Diagnostics.Warnings) != 0 {
 		t.Errorf("Diagnostics.Warnings = %v, want none", meta.Diagnostics.Warnings)
+	}
+}
+
+// TestCursorAdapterWorkspaceProject runs the workspace decode fixture through
+// the real adapter: discovery over a projects root, then metadata extraction
+// with no git remote to rename the project. A session must never be filed
+// under a parent folder of a path the decoder could not finish.
+func TestCursorAdapterWorkspaceProject(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Name        string   `yaml:"name"`
+			Workspace   string   `yaml:"workspace"`
+			Dirs        []string `yaml:"dirs"`
+			ProjectDir  string   `yaml:"projectDir"`
+			ProjectName string   `yaml:"projectName"`
+		} `yaml:"cases"`
+		Required []string `yaml:"requiredNames"`
+	}
+	data, err := os.ReadFile(filepath.Join("testdata", "cursor_workspace_decode.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	const base = testCursorProjectsRoot
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			mfs := testutil.NewMemFS()
+			for _, dir := range c.Dirs {
+				if err := mfs.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setupCursorRootFS(t, mfs, base, c.Workspace, testutil.TestSessionUUID, sampleCursorJSONL())
+			adapter := ingest.NewCursorAdapter(mfs, testutil.NoGitResolver(), salt.Salt{})
+			sessions, err := adapter.Discover(context.Background(), ingest.SourceConfig{Paths: []ingest.ResolvedPath{ingest.ResolvedPath(base)}, Enabled: true})
+			if err != nil || len(sessions) != 1 {
+				t.Fatalf("Discover = %d sessions, %v", len(sessions), err)
+			}
+			wantDir := strings.Replace(c.ProjectDir, "<root>", base, 1)
+			if sessions[0].CWD != wantDir || sessions[0].ProjectName != c.ProjectName {
+				t.Fatalf("discovered (%q, %q), want (%q, %q)", sessions[0].CWD, sessions[0].ProjectName, wantDir, c.ProjectName)
+			}
+			meta, err := adapter.ExtractMetadata(context.Background(), sessions[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.Project.FilePath != wantDir || meta.Project.Name != c.ProjectName {
+				t.Fatalf("project (%q, %q), want (%q, %q)", meta.Project.FilePath, meta.Project.Name, wantDir, c.ProjectName)
+			}
+		})
 	}
 }

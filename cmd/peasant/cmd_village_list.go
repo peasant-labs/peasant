@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/pull"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
@@ -20,13 +26,20 @@ import (
 // is a possible FOLLOWUP.
 const villageListDefaultLimit = 50
 
-// buildVillageTranscriptsListCommand constructs `village transcripts list`
-// (L2). DEFAULT (no --local) lists the REMOTE pullable transcripts (own +
-// group-shared) and REQUIRES login — it contacts the village (NegotiatePull is
-// called exactly once before the listing GET). With --local it lists the LOCAL
-// pulled inventory from the V34 tables OFFLINE (no network, no credentials).
-// Output conventions mirror push: the table goes to stdout, --json is parseable.
-func buildVillageTranscriptsListCommand() *cobra.Command {
+// villageListDependencies keeps provenance I/O replaceable without replacing the
+// command, account-scoped service, Store reads or generation guard.
+type villageListDependencies struct {
+	NewProvenanceReader func(string) func(string) ([]byte, error)
+}
+
+// buildVillageTranscriptsListCommand constructs the production local/remote
+// transcript listing. Local collective disclosures use a saved account scope;
+// the unfiltered inventory needs no credentials. Both local forms stay offline.
+func buildVillageTranscriptsListCommand(options ...villageListDependencies) *cobra.Command {
+	dependencies := villageListDependencies{NewProvenanceReader: func(root string) func(string) ([]byte, error) { return pull.NewFileSystem(root).ReadFile }}
+	if len(options) > 0 && options[0].NewProvenanceReader != nil {
+		dependencies = options[0]
+	}
 	var (
 		local          bool
 		jsonOutput     bool
@@ -38,27 +51,30 @@ func buildVillageTranscriptsListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List pullable (remote, login required) or already-pulled (--local, offline) transcripts",
-		Long: `List transcripts you can pull from the village (the default — own and
+		Long: `List transcripts you can pull from peasant online (the default — own and
 group-shared transcripts; requires login), or the transcripts you have ALREADY
 pulled locally (--local; reads only local data and works offline).
 
 --collective narrows the remote listing to one or more collectives you belong
 to, named by a collective name, its UUID, or its /groups/<uuid> page URL, and
 pages to the end so the listing matches what a pull would take. --user keeps only
-the transcripts one village account contributed: combine it with --collective for
+the transcripts one peasant online account contributed: combine it with --collective for
 a single collective, or pass it alone to span every collective you can pull from.
-With --local, --user filters already-pulled transcripts by their stored owner
-username, without login or network access. --limit sets the remote page size;
---collective and --limit apply to the remote listing only.`,
+With --local, --user filters stored owner usernames without credentials or network.
+--collective instead selects saved per-row viewer disclosures in the selected
+account scope, still offline. Collective values are ORed, then --user intersects.
+Missing or invalidated disclosures never match; stale disclosures keep their
+original date. Signed-out collective filtering explains how to use accountless
+inventory instead. --limit sets the remote page size only.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
 			if local {
-				if len(collectiveRefs) > 0 || cmd.Flags().Changed("limit") {
-					return fmt.Errorf("--collective and --limit apply to the remote listing; --local reads only the local inventory")
+				if cmd.Flags().Changed("limit") {
+					return fmt.Errorf("--limit values apply to the remote listing; --local reads the saved inventory")
 				}
-				return runVillageTranscriptsListLocal(cmd, jsonOutput, user)
+				return runVillageTranscriptsListLocal(cmd, jsonOutput, user, collectiveRefs, dependencies)
 			}
 			return runVillageTranscriptsListRemote(cmd, jsonOutput, collectiveRefs, user, limit)
 		},
@@ -76,8 +92,8 @@ username, without login or network access. --limit sets the remote page size;
 }
 
 // runVillageTranscriptsListLocal renders the offline pulled-transcripts
-// inventory. NO credentials are loaded — this is a purely-local read.
-func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool, owner string) error {
+// inventory, selecting a saved account only for private collective disclosures.
+func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool, owner string, collectiveRefs []string, dependencies villageListDependencies) error {
 	db, cleanup, err := openDB(cmd)
 	if err != nil {
 		return err
@@ -98,8 +114,11 @@ func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool, owner s
 		rows = selected
 	}
 
+	if len(collectiveRefs) > 0 {
+		return renderLocalCollectiveObservations(cmd, db, rows, collectiveRefs, jsonOutput, dependencies)
+	}
 	if jsonOutput {
-		return printLocalListJSON(cmd, rows)
+		return printLocalListJSON(cmd, rows, nil)
 	}
 	printLocalListTable(cmd, rows)
 	return nil
@@ -208,37 +227,171 @@ func listPullableTranscripts(ctx context.Context, client *village.VillageClient,
 
 // jsonLocalListRow is the JSON-safe local inventory row.
 type jsonLocalListRow struct {
-	TranscriptID    string `json:"transcriptId"`
-	VillageHost     string `json:"villageHost"`
-	Owner           string `json:"owner"`
-	Title           string `json:"title,omitempty"`
-	Harness         string `json:"harness,omitempty"`
-	LocalSessionID  string `json:"localSessionId,omitempty"`
-	License         string `json:"license,omitempty"`
-	AnnotationCount int    `json:"annotationCount"`
-	LastPulledAt    int64  `json:"lastPulledAt"`
+	TranscriptID          string                          `json:"transcriptId"`
+	VillageHost           string                          `json:"villageHost"`
+	Owner                 string                          `json:"owner"`
+	Title                 string                          `json:"title,omitempty"`
+	Harness               string                          `json:"harness,omitempty"`
+	LocalSessionID        string                          `json:"localSessionId,omitempty"`
+	License               string                          `json:"license,omitempty"`
+	AnnotationCount       int                             `json:"annotationCount"`
+	LastPulledAt          int64                           `json:"lastPulledAt"`
+	CollectiveObservation *jsonLocalCollectiveObservation `json:"collectiveObservation,omitempty"`
+}
+
+// This CLI composition uses canonical scope, disclosure and metadata components;
+// it adds no wire enums or account-private fields to the content inventory.
+type jsonLocalCollectiveObservation struct {
+	Scope       schema.CollectiveObservationScope    `json:"scope"`
+	Metadata    schema.PullAssociationMetadataResult `json:"metadata"`
+	Collectives []schema.VillageTranscriptCollective `json:"collectives"`
 }
 
 // printLocalListJSON writes the local inventory as JSON.
-func printLocalListJSON(cmd *cobra.Command, rows []store.PulledTranscriptRow) error {
+func printLocalListJSON(cmd *cobra.Command, rows []store.PulledTranscriptRow, observations map[schema.TranscriptID]*jsonLocalCollectiveObservation) error {
 	out := make([]jsonLocalListRow, 0, len(rows))
 	for i := range rows {
 		r := &rows[i]
 		out = append(out, jsonLocalListRow{
-			TranscriptID:    r.TranscriptID.String(),
-			VillageHost:     r.VillageHost,
-			Owner:           r.OwnerUsername,
-			Title:           r.Title,
-			Harness:         r.Harness.String(),
-			LocalSessionID:  r.LocalSessionID,
-			License:         string(r.License),
-			AnnotationCount: r.AnnotationCount,
-			LastPulledAt:    r.LastPulledAt,
+			TranscriptID:          r.TranscriptID.String(),
+			VillageHost:           r.VillageHost,
+			Owner:                 r.OwnerUsername,
+			Title:                 r.Title,
+			Harness:               r.Harness.String(),
+			LocalSessionID:        r.LocalSessionID,
+			License:               string(r.License),
+			AnnotationCount:       r.AnnotationCount,
+			LastPulledAt:          r.LastPulledAt,
+			CollectiveObservation: observations[r.TranscriptID],
 		})
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+func renderLocalCollectiveObservations(cmd *cobra.Command, db *store.Store, rows []store.PulledTranscriptRow, refs []string, jsonOutput bool, dependencies villageListDependencies) error {
+	ctx := cmd.Context()
+	service := collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: configDirOverride(cmd)})
+	snapshot, err := service.SelectedCredentials(ctx)
+	if err != nil {
+		return fmt.Errorf("local collective filtering needs a saved account scope: %w; unfiltered --local and --local --user remain available without login or network", err)
+	}
+	scope, err := service.SelectedScope(ctx)
+	if err != nil {
+		return err
+	}
+	wanted := map[schema.VillageUUID]bool{}
+	for _, ref := range refs {
+		id, err := service.ResolveReference(ctx, ref, false)
+		if err != nil {
+			return err
+		}
+		wanted[id] = true
+	}
+	ids := make([]schema.TranscriptID, 0, len(rows))
+	seen := map[schema.TranscriptID]bool{}
+	for _, row := range rows {
+		if !seen[row.TranscriptID] {
+			ids = append(ids, row.TranscriptID)
+			seen[row.TranscriptID] = true
+		}
+	}
+	evidence := map[schema.TranscriptID]store.TranscriptCollectiveObservation{}
+	for offset := 0; offset < len(ids); offset += schema.MaxCollectiveFetchItems {
+		end := offset + schema.MaxCollectiveFetchItems
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch, err := service.Associations(ctx, ids[offset:end])
+		if err != nil {
+			return err
+		}
+		for id, row := range batch {
+			evidence[id] = row
+		}
+	}
+	selected := make([]store.PulledTranscriptRow, 0, len(rows))
+	views := map[schema.TranscriptID]*jsonLocalCollectiveObservation{}
+	readProvenance := dependencies.NewProvenanceReader(string(defaults.ResolveVillagePullsDirPathWith(dataDirOverride(cmd))))
+	for _, row := range rows {
+		association := evidence[row.TranscriptID]
+		if association.Metadata == nil || association.Metadata.State == schema.PullAssociationMetadataInvalidated {
+			continue
+		}
+		match := false
+		for _, collective := range association.Collectives {
+			if wanted[collective.ID] {
+				match = true
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		// A UUID alone cannot attach this account's private disclosure to another
+		// Village's content row. Compare existing canonical manifest provenance.
+		data, err := readProvenance(filepath.Join(row.PullDir, pull.ManifestFilename))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read pulled provenance for local collective filtering: %w; re-pull explicitly to repair this inventory row", err)
+		}
+		var manifest pull.PullManifest
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return err
+		}
+		if manifest.VillageURL == "" {
+			continue
+		}
+		base, err := auth.NormalizeVillageURL(manifest.VillageURL)
+		if err != nil {
+			return err
+		}
+		if base != scope.VillageURL {
+			continue
+		}
+		if manifest.TranscriptID != row.TranscriptID {
+			return fmt.Errorf("pulled manifest differs from the local inventory identity; re-pull explicitly before filtering private observations")
+		}
+		selected = append(selected, row)
+		views[row.TranscriptID] = &jsonLocalCollectiveObservation{Scope: scope, Metadata: *association.Metadata, Collectives: association.Collectives}
+	}
+	// All operations above are offline reads. A changed generation discards the
+	// entire view before any private row reaches stdout. Keep the guard through
+	// emission too, so a credential change cannot interleave with private output.
+	return snapshot.WithCurrent(ctx, func() error {
+		if jsonOutput {
+			return printLocalListJSON(cmd, selected, views)
+		}
+		printLocalCollectiveListTable(cmd, selected, views)
+		return nil
+	})
+}
+
+func printLocalCollectiveListTable(cmd *cobra.Command, rows []store.PulledTranscriptRow, views map[schema.TranscriptID]*jsonLocalCollectiveObservation) {
+	if len(rows) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "No pulled transcripts match the saved collective observations; unfiltered --local still lists content.")
+		return
+	}
+	first := views[rows[0].TranscriptID]
+	fmt.Fprintf(cmd.OutOrStdout(), "saved collective observations: account %s at %s (offline; not a current permission check)\n", first.Scope.UserID, first.Scope.VillageURL)
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "TRANSCRIPT\tOWNER\tCOLLECTIVES\tMETADATA\tOBSERVED")
+	for _, row := range rows {
+		view := views[row.TranscriptID]
+		names := make([]string, 0, len(view.Collectives))
+		for _, collective := range view.Collectives {
+			names = append(names, collective.Name)
+		}
+		at := "-"
+		if view.Metadata.ObservedAt != nil {
+			at = view.Metadata.ObservedAt.Format(time.RFC3339)
+		}
+		fmt.Fprintf(w, "%s\t@%s\t%s\t%s\t%s\n", row.TranscriptID, row.OwnerUsername, strings.Join(names, ", "), view.Metadata.State, at)
+	}
+	_ = w.Flush()
 }
 
 // printLocalListTable writes the local inventory as a human-readable table.
@@ -262,7 +415,7 @@ func printLocalListTable(cmd *cobra.Command, rows []store.PulledTranscriptRow) {
 func printRemoteListTable(cmd *cobra.Command, resp *schema.PullListResponse) {
 	w := cmd.OutOrStdout()
 	if resp == nil || len(resp.Transcripts) == 0 {
-		fmt.Fprintln(w, "No pullable transcripts available on the village.")
+		fmt.Fprintln(w, "No pullable transcripts available on peasant online.")
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

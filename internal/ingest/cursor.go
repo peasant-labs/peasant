@@ -367,7 +367,7 @@ func parseCursorTranscriptMetadata(data []byte, meta *UnifiedMetadata) (int64, i
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "missing_model",
 			Location:    fmt.Sprintf("session %s", meta.SessionID),
-			Message:     "Cursor transcript omitted message.model; peasant will hold this session from village push because the village requires a recorded model.",
+			Message:     "Cursor transcript omitted message.model; peasant will hold this session from village push because peasant online requires a recorded model.",
 			Remediation: "Keep the transcript ingested for local analysis, but do not publish it until Cursor records model metadata or the source transcript is corrected.",
 		})
 	}
@@ -474,6 +474,15 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 // Returns (projectDir, projectName):
 //   - projectDir: the matched filesystem path (or the raw workspace path as fallback)
 //   - projectName: repo/directory name for use when git resolution fails
+//
+// A partial decode names a project only when the matched directory is inside a
+// git work tree: the unmatched tail is then a branch or worktree suffix of
+// that repository (workspace "Users-foo-myrepo-feature-branch"). Outside a
+// work tree the matched prefix is just a parent folder of a directory that is
+// gone or could not be decoded, and attributing the session to it would be a
+// guess (a session under "/tmp/claude-501/-Users-x/proj" became a project
+// named "claude-501"), so the workspace stands for itself, as when nothing
+// matched.
 func (a *CursorAdapter) decodeCursorWorkspace(root, workspace string) (projectDir, projectName string) {
 	encoded := "-" + workspace
 	matched, unmatched := DecodeCursorSlug(encoded, a.dirExists)
@@ -481,11 +490,27 @@ func (a *CursorAdapter) decodeCursorWorkspace(root, workspace string) (projectDi
 		return filepath.Join(root, workspace), workspace
 	}
 	if unmatched != "" {
-		// Partial decode: unmatched trailing segments are the project name
-		// (e.g. workspace "Users-foo-Desktop-peasant" → matched "/Users/foo/Desktop", unmatched "peasant")
-		return matched, unmatched
+		if !a.insideGitWorkTree(matched) {
+			return filepath.Join(root, workspace), workspace
+		}
+		return matched, filepath.Base(matched)
 	}
 	return matched, filepath.Base(matched)
+}
+
+// insideGitWorkTree reports whether dir or one of its ancestors holds a .git
+// entry (a directory, or the file a linked worktree carries).
+func (a *CursorAdapter) insideGitWorkTree(dir string) bool {
+	for {
+		if _, err := a.fs.Stat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 // cursorSegmentVariants returns the candidate directory names to try for a given

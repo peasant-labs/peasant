@@ -1,0 +1,105 @@
+observedAt: 2026-10-15T10:00:00Z
+content:
+  - id: aaaaaaaa-bbbb-cccc-dddd-000000000000
+    blob: '{"contractVersion":"0.1.1","kind":"session_detail","sessionDetail":{"id":"foreign-recorded-session","harness":"claude-code","turns":[]}}'
+    ownerUserId: user-owner-001
+    ownerUsername: alice
+    title: pull title for aaaaaaaa-bbbb-cccc-dddd-000000000000
+    harness: claude-code
+    visibility: group
+    license: ''
+    localSessionId: foreign-recorded-session
+    projectName: ''
+    annotationHashes: []
+  - id: aaaaaaaa-bbbb-cccc-dddd-000000000001
+    blob: '{"contractVersion":"0.1.1","kind":"session_detail","sessionDetail":{"id":"aaaaaaaa-bbbb-cccc-dddd-000000000001","harness":"claude-code","turns":[]}}'
+    ownerUserId: user-owner-001
+    ownerUsername: alice
+    title: pull title for aaaaaaaa-bbbb-cccc-dddd-000000000001
+    harness: claude-code
+    visibility: group
+    license: ''
+    localSessionId: ''
+    projectName: ''
+    annotationHashes: []
+expectedInstallations:
+  single: [aaaaaaaa-bbbb-cccc-dddd-000000000000]
+  bulk: [aaaaaaaa-bbbb-cccc-dddd-000000000000, aaaaaaaa-bbbb-cccc-dddd-000000000001]
+  partial: [aaaaaaaa-bbbb-cccc-dddd-000000000000]
+  none: []
+annotationSets:
+  foreign:
+    - transcriptId: aaaaaaaa-bbbb-cccc-dddd-000000000000
+      hash: 0f26afee3ffd991630fb4eed9c2185149450d026ea9f35bb8d8f2d371fa17589
+      hashInputJSON: '{"contentHash":"","targetKind":"session","sessionId":"foreign-recorded-session","typeId":"review:context","value":"Foreign HUMAN note: keep exact Case.","isPrimary":true,"annotatorName":"Dr. Rivera"}'
+      payloadJSON: '{"id":"foreign-human-review","targetKind":"session","targetSessionId":"foreign-recorded-session","isPrimary":true,"annotatorKind":"human","annotatorName":"Dr. Rivera","typeId":"review:context","typeName":"Context review","value":"Foreign HUMAN note: keep exact Case.","contentHash":"0f26afee3ffd991630fb4eed9c2185149450d026ea9f35bb8d8f2d371fa17589","createdAt":1792068000000,"authorUserId":"cccccccc-3333-4333-8333-cccccccccccc","authorUsername":"RiveraCase"}'
+      authorUserId: cccccccc-3333-4333-8333-cccccccccccc
+      authorUsername: RiveraCase
+      localSessionId: foreign-recorded-session
+      retractedAt: null
+    - transcriptId: aaaaaaaa-bbbb-cccc-dddd-000000000000
+      hash: 144ddb88150fa9aefbeeb064cd6653a8a2de6fc35b21dfbb46410b2fb95216d3
+      hashInputJSON: '{"contentHash":"","targetKind":"session","sessionId":"foreign-recorded-session","typeId":"review:context","value":"Model review retained under its human author.","isPrimary":false,"reason":"Review generated for the recorded session.","annotatorName":"Claude Sonnet","provenance":{"method":"llm_judge","function":"review","version":"1","details":{"model":"claude-sonnet-4","provider":"anthropic"}}}'
+      payloadJSON: '{"id":"foreign-agent-review","targetKind":"session","targetSessionId":"foreign-recorded-session","isPrimary":false,"annotatorKind":"agent","annotatorName":"Claude Sonnet","typeId":"review:context","typeName":"Context review","value":"Model review retained under its human author.","reason":"Review generated for the recorded session.","provenance":{"method":"llm_judge","function":"review","version":"1","details":{"model":"claude-sonnet-4","provider":"anthropic"}},"contentHash":"144ddb88150fa9aefbeeb064cd6653a8a2de6fc35b21dfbb46410b2fb95216d3","createdAt":1792068001000,"authorUserId":"cccccccc-3333-4333-8333-cccccccccccc","authorUsername":"RiveraCase"}'
+      authorUserId: cccccccc-3333-4333-8333-cccccccccccc
+      authorUsername: RiveraCase
+      localSessionId: foreign-recorded-session
+      retractedAt: null
+requiredNames:
+  - single-new-content-observed
+  - single-hash-current-metadata-independent
+  - single-etag-current-metadata-independent
+  - single-downloaded-current-metadata-independent
+  - single-timeout-retains-old-source-time
+  - single-timeout-no-source-is-unknown
+  - single-dedicated-forbidden-invalidates
+  - single-dedicated-not-found-invalidates
+  - required-content-forbidden-stays-failure
+  - required-content-not-found-stays-failure
+  - required-negotiation-stays-failure
+  - single-dry-run-zero-observation
+  - original-account-change-after-content-discards-source
+  - bulk-skip-gate-observes-each-current-row
+  - bulk-optional-warning-does-not-change-content-totals
+  - bulk-continues-required-failure-and-warns-correct-row
+  - hash-current-optional-timeout-preserves-content
+  - etag-current-optional-timeout-preserves-content
+  - downloaded-current-optional-timeout-preserves-content
+  - bulk-skip-optional-failure-preserves-content
+  - empty-annotations-optional-failure-is-valid
+  - populated-fresh-optional-failure-preserves-annotations
+  - populated-fresh-prior-optional-failure-preserves-annotations
+  - populated-hash-optional-failure-preserves-annotations
+  - populated-etag-optional-failure-preserves-annotations
+  - populated-download-optional-failure-preserves-annotations
+  - populated-bulk-skip-failure-preserves-annotations
+  - populated-bulk-required-partial-preserves-success-annotations
+cases:
+  - {name: single-new-content-observed, mode: install, wantState: observed, wantStatus: pulled, wantMetadataCalls: 1}
+  - {name: single-hash-current-metadata-independent, mode: hash, preinstall: true, wantState: observed, wantStatus: up-to-date, wantMetadataCalls: 1}
+  - {name: single-etag-current-metadata-independent, mode: etag, preinstall: true, wantState: observed, wantStatus: up-to-date, wantMetadataCalls: 1}
+  - {name: single-downloaded-current-metadata-independent, mode: download, preinstall: true, wantState: observed, wantStatus: up-to-date, wantMetadataCalls: 1}
+  - {name: single-timeout-retains-old-source-time, mode: install, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: pulled, wantMetadataCalls: 1, wantWarning: true}
+  - {name: single-timeout-no-source-is-unknown, mode: install, metadataFailure: cancel, wantState: unknown, wantStatus: pulled, wantMetadataCalls: 1, wantWarning: true}
+  - {name: single-dedicated-forbidden-invalidates, mode: install, prior: true, metadataFailure: forbidden, wantState: invalidated, wantStatus: pulled, wantMetadataCalls: 1}
+  - {name: single-dedicated-not-found-invalidates, mode: install, prior: true, metadataFailure: missing, wantState: invalidated, wantStatus: pulled, wantMetadataCalls: 1}
+  - {name: required-content-forbidden-stays-failure, installation: none, mode: content-forbidden, wantError: true, wantMetadataCalls: 0}
+  - {name: required-content-not-found-stays-failure, installation: none, mode: content-missing, wantError: true, wantMetadataCalls: 0}
+  - {name: required-negotiation-stays-failure, installation: none, mode: negotiation-error, wantError: true, wantMetadataCalls: 0}
+  - {name: single-dry-run-zero-observation, installation: none, mode: install, dryRun: true, wantStatus: pulled, wantMetadataCalls: 0}
+  - {name: original-account-change-after-content-discards-source, mode: switch, wantState: unknown, wantStatus: pulled, wantMetadataCalls: 0, wantWarning: true}
+  - {name: bulk-skip-gate-observes-each-current-row, installation: bulk, mode: hash, bulk: true, preinstall: true, wantState: observed, wantStatus: up-to-date, wantMetadataCalls: 2}
+  - {name: bulk-optional-warning-does-not-change-content-totals, installation: bulk, mode: install, bulk: true, metadataFailure: remote, wantState: unknown, wantStatus: pulled, wantMetadataCalls: 2, wantWarning: true}
+  - {name: bulk-continues-required-failure-and-warns-correct-row, installation: partial, mode: partial-content-error, bulk: true, metadataFailure: remote, wantState: unknown, wantStatus: pulled, wantMetadataCalls: 1, wantWarning: true, wantError: true}
+  - {name: hash-current-optional-timeout-preserves-content, mode: hash, preinstall: true, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 1, wantWarning: true}
+  - {name: etag-current-optional-timeout-preserves-content, mode: etag, preinstall: true, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 1, wantWarning: true}
+  - {name: downloaded-current-optional-timeout-preserves-content, mode: download, preinstall: true, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 1, wantWarning: true}
+  - {name: bulk-skip-optional-failure-preserves-content, installation: bulk, mode: hash, bulk: true, preinstall: true, prior: true, metadataFailure: remote, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 2, wantWarning: true}
+  - {name: empty-annotations-optional-failure-is-valid, mode: install, metadataFailure: cancel, wantState: unknown, wantStatus: pulled, wantMetadataCalls: 1, wantWarning: true}
+  - {name: populated-fresh-optional-failure-preserves-annotations, annotationSet: foreign, mode: install, metadataFailure: cancel, wantState: unknown, wantStatus: pulled, wantMetadataCalls: 1, wantWarning: true}
+  - {name: populated-fresh-prior-optional-failure-preserves-annotations, annotationSet: foreign, mode: install, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: pulled, wantMetadataCalls: 1, wantWarning: true}
+  - {name: populated-hash-optional-failure-preserves-annotations, annotationSet: foreign, mode: hash, preinstall: true, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 1, wantWarning: true}
+  - {name: populated-etag-optional-failure-preserves-annotations, annotationSet: foreign, mode: etag, preinstall: true, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 1, wantWarning: true}
+  - {name: populated-download-optional-failure-preserves-annotations, annotationSet: foreign, mode: download, preinstall: true, prior: true, metadataFailure: cancel, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 1, wantWarning: true}
+  - {name: populated-bulk-skip-failure-preserves-annotations, annotationSet: foreign, installation: bulk, mode: hash, bulk: true, preinstall: true, prior: true, metadataFailure: remote, wantState: stale, wantStatus: up-to-date, wantMetadataCalls: 2, wantWarning: true}
+  - {name: populated-bulk-required-partial-preserves-success-annotations, annotationSet: foreign, installation: partial, mode: partial-content-error, bulk: true, metadataFailure: remote, wantState: unknown, wantStatus: pulled, wantMetadataCalls: 1, wantWarning: true, wantError: true}

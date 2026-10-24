@@ -34,6 +34,14 @@ type CollectiveSharer interface {
 	LatestShareStatus(context.Context, schema.TranscriptID, schema.VillageUUID) (schema.VillageShareStatus, error)
 }
 
+// collectiveActionBatch preserves the final server's all-target transaction.
+// The scoped action adapter returns one truthful step per requested target.
+// Its boolean identifies a missing transcript from the actual mutation, not
+// from reason text or a later history lookup; it never enters the wire result.
+type collectiveActionBatch interface {
+	shareCollectives(context.Context, schema.TranscriptID, []schema.VillageUUID) ([]schema.SyncPushStepResult, bool)
+}
+
 // SharePublishVillage is everything a publish from the local web asks Village
 // besides the upload: the collective steps and the waiting pull requests.
 type SharePublishVillage interface {
@@ -67,13 +75,13 @@ const sharePromptRequestTimeout = 3 * time.Second
 // collectives, and the collective steps that follow decide who can read the
 // transcript. An update keeps the audience and the license the transcript
 // already has.
-func NewSharePipeline(pipelineStore PipelineStore, transport Transport, creds *auth.Credentials, cfg *config.Config, redactor ingest.TextRedactor, sessionIDs []string) (*Pipeline, error) {
+func NewSharePipeline(pipelineStore PipelineStore, transport Transport, creds *auth.Credentials, cfg *config.Config, redactor ingest.TextRedactor, sessionIDs []string, options ...PipelineOption) (*Pipeline, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("build the publish pipeline for the local web: no configuration was loaded; nothing was published; start Peasant with its configuration and retry")
 	}
 	shareCfg, runCfg := CollectiveAudience(cfg, PipelineConfig{FilterSessionIDs: sessionIDs})
 	return NewPipeline(pipelineStore, transport, creds, shareCfg, &ingest.OSFileSystem{},
-		runCfg, redactor, io.Discard)
+		runCfg, redactor, io.Discard, options...)
 }
 
 // CollectiveAudience narrows a publish to one whose audience is collectives:
@@ -113,16 +121,24 @@ type SharePublishResult struct {
 // Run publishes the named sessions and then changes who can read each one.
 //
 // Every named session gets one result. Its steps are listed in the order they
-// ran: the content first, then each collective it is taken back from, then each
-// collective it is shared with. Taking access away runs whenever Village holds
-// the transcript, so it never waits on an unrelated failure; sharing runs only
-// after every earlier step of the session succeeded or was skipped, so a
-// failure never widens access. A step that did not run after a failure is
-// not_attempted, and the session's error says what Village kept.
+// ran: the content first, then each collective it is taken back from, then the
+// requested addition set. Taking access away runs whenever Village holds the
+// transcript, so it never waits on an unrelated failure. The scoped adapter
+// sends additions in one final-authority Village transaction, only after content
+// and removal steps succeeded or were skipped. Steps that did not run are
+// not_attempted; a failed addition batch reports each target without claiming
+// that an earlier upload was rolled back.
 //
 // The error is returned only when the pipeline failed before it considered any
 // session; nothing was sent then.
 func (s SharePublish) Run(ctx context.Context, sessionIDs []string, changes CollectiveChanges) (SharePublishResult, error) {
+	// A share of unchanged content still needs the original action account;
+	// there may be no upload candidates for Pipeline.Run to authenticate.
+	if s.Pipeline.observations != nil && !changes.empty() && !s.Pipeline.runCfg.DryRun {
+		if err := s.Pipeline.observations.capture(ctx, s.Creds); err != nil {
+			return SharePublishResult{}, err
+		}
+	}
 	pushed, runErr := s.Pipeline.Run(ctx)
 	if runErr != nil && pushed == nil {
 		return SharePublishResult{}, runErr
@@ -135,7 +151,7 @@ func (s SharePublish) Run(ctx context.Context, sessionIDs []string, changes Coll
 
 	response := schema.SyncPushResponse{Sessions: make([]schema.SyncPushSessionResult, 0, len(sessionIDs))}
 	for _, id := range sessionIDs {
-		result := runSessionSteps(ctx, s.Village, contents[id], changes, "Publish again to retry.")
+		result := runSessionSteps(ctx, s.Pipeline.CollectiveSharer(s.Village), contents[id], changes, "Publish again to retry.")
 		if row, ok := rows[id]; ok && row.CanonicalRemote != nil {
 			result.WaitingPullRequests = village.WaitingPromptRequestsFor(requests, village.GitHubRepositoryFullName(*row.CanonicalRemote))
 		}
@@ -152,7 +168,7 @@ func (s SharePublish) Run(ctx context.Context, sessionIDs []string, changes Coll
 		response.Sessions = append(response.Sessions, result)
 	}
 	if err := response.Validate(); err != nil {
-		return SharePublishResult{Pushed: pushed}, fmt.Errorf("the publish ran, but its result breaks the Local API contract, so it is not reported as success: %w; open the transcripts on Village to see what they hold", err)
+		return SharePublishResult{Pushed: pushed}, fmt.Errorf("the publish ran, but its result breaks the Local API contract, so it is not reported as success: %w; open the transcripts on peasant online to see what they hold", err)
 	}
 	return SharePublishResult{Response: response, Pushed: pushed}, nil
 }
@@ -249,6 +265,11 @@ func (s RuleShare) undecided(ctx context.Context, transcript schema.TranscriptID
 		if err != nil {
 			return nil, nil, err
 		}
+		if observed, ok := s.Village.(*observedSharer); ok && latest != "" {
+			if err := observed.observePair(ctx, transcript, id); err != nil {
+				return nil, nil, err
+			}
+		}
 		reason := ""
 		switch latest {
 		case "":
@@ -257,9 +278,9 @@ func (s RuleShare) undecided(ctx context.Context, transcript schema.TranscriptID
 		case schema.VillageShareStatusApproved, schema.VillageShareStatusPending:
 			reason = "the collective already holds this transcript or its share waits for approval"
 		case schema.VillageShareStatusRejected:
-			reason = "the collective's owner rejected this transcript, and a rule does not submit it again; share it again on Village if you want to"
+			reason = "the collective's owner rejected this transcript, and a rule does not submit it again; share it again on peasant online if you want to"
 		default:
-			reason = "this transcript was taken back from the collective, and a rule does not share it again; share it again on Village if you want to"
+			reason = "this transcript was taken back from the collective, and a rule does not share it again; share it again on peasant online if you want to"
 		}
 		skipped = append(skipped, schema.SyncPushStepResult{Step: schema.SyncPushStepAddCollective, CollectiveID: &collective, Outcome: schema.SyncPushStepSkipped, Reason: reason})
 	}
@@ -306,7 +327,7 @@ func contentOutcomes(ctx context.Context, sessions SharePublishStore, creds *aut
 	}
 	storedRows, err := sessions.SessionsByIDs(ctx, sessionIDs)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read the published sessions after the push: %w; the push ran, so open the transcripts on Village to see what they hold", err)
+		return nil, nil, fmt.Errorf("read the published sessions after the push: %w; the push ran, so open the transcripts on peasant online to see what they hold", err)
 	}
 	rows := make(map[string]store.SessionRow, len(storedRows))
 	for _, row := range storedRows {
@@ -314,7 +335,7 @@ func contentOutcomes(ctx context.Context, sessions SharePublishStore, creds *aut
 	}
 	heldRows, err := sessions.SessionsWithoutMetrics(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read the held sessions after the push: %w; the push ran, so open the transcripts on Village to see what they hold", err)
+		return nil, nil, fmt.Errorf("read the held sessions after the push: %w; the push ran, so open the transcripts on peasant online to see what they hold", err)
 	}
 	held := make(map[string]bool, len(heldRows))
 	for _, row := range heldRows {
@@ -322,7 +343,7 @@ func contentOutcomes(ctx context.Context, sessions SharePublishStore, creds *aut
 	}
 	receipts, err := sessions.SessionPublications(ctx, creds.VillageURL, creds.UserID, sessionIDs)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read the publication receipts after the push: %w; the push ran, so open the transcripts on Village to see what they hold", err)
+		return nil, nil, fmt.Errorf("read the publication receipts after the push: %w; the push ran, so open the transcripts on peasant online to see what they hold", err)
 	}
 
 	outcomes := make(map[string]contentOutcome, len(sessionIDs))
@@ -346,12 +367,12 @@ func contentOutcomes(ctx context.Context, sessions SharePublishStore, creds *aut
 				if outcome.transcript == nil {
 					outcome.status = schema.SyncPushSessionError
 					content.Outcome = schema.SyncPushStepFailed
-					content.Reason = "Village accepted the content, but no receipt on this computer names its transcript, so its link and its collectives cannot be reached; publish again to record the receipt"
+					content.Reason = "Peasant online accepted the content, but no receipt on this computer names its transcript, so its link and its collectives cannot be reached; publish again to record the receipt"
 				}
 			case PushStatusSkipped:
 				outcome.status = schema.SyncPushSessionSkipped
 				content.Outcome = schema.SyncPushStepSkipped
-				content.Reason = "Village already holds this content; nothing was sent"
+				content.Reason = "Peasant online already holds this content; nothing was sent"
 			case PushStatusHeld:
 				outcome.status = schema.SyncPushSessionHeld
 				content.Outcome = schema.SyncPushStepSkipped
@@ -430,6 +451,7 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 	steps := []schema.SyncPushStepResult{content}
 	// stopped is the index of the first failed step, or -1 while none failed.
 	stopped := -1
+	mutationMissingTranscript := false
 	if content.Outcome == schema.SyncPushStepFailed {
 		stopped = 0
 	}
@@ -437,17 +459,23 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 	for _, id := range changes.Remove {
 		collective := id
 		step := schema.SyncPushStepResult{Step: schema.SyncPushStepRemoveCollective, CollectiveID: &collective}
+		missingTranscript := false
 		switch {
 		case outcome.runStopped:
 			step.Outcome = schema.SyncPushStepNotAttempted
 		case outcome.transcript == nil:
 			step.Outcome = schema.SyncPushStepSkipped
-			step.Reason = "Village holds no transcript of this session, so no collective can read it"
+			step.Reason = "Peasant online holds no transcript of this session, so no collective can read it"
 		default:
 			var refusal *village.StatusError
-			if err := sharer.UnshareTranscript(ctx, outcome.transcript.Receipt.TranscriptID, collective); errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
+			var observation *confirmedWithdrawalObservationError
+			if err := sharer.UnshareTranscript(ctx, outcome.transcript.Receipt.TranscriptID, collective); errors.As(err, &observation) {
 				step.Outcome = schema.SyncPushStepFailed
-				step.Reason = missingTranscriptReason
+				step.Reason = observation.Error()
+			} else if errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound {
+				step.Outcome = schema.SyncPushStepFailed
+				step.Reason = missingTranscriptFailureReason(err)
+				missingTranscript = true
 			} else if err != nil {
 				step.Outcome = schema.SyncPushStepFailed
 				step.Reason = "taking the transcript back failed: " + err.Error()
@@ -456,36 +484,52 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 			}
 		}
 		steps = append(steps, step)
+		mutationMissingTranscript = mutationMissingTranscript || missingTranscript
 		if step.Outcome == schema.SyncPushStepFailed && stopped < 0 {
 			stopped = len(steps) - 1
 		}
 	}
 
-	for _, id := range changes.Add {
-		collective := id
-		step := schema.SyncPushStepResult{Step: schema.SyncPushStepAddCollective, CollectiveID: &collective}
-		switch {
-		case stopped >= 0 || outcome.runStopped:
-			step.Outcome = schema.SyncPushStepNotAttempted
-		case outcome.status == schema.SyncPushSessionHeld:
-			step.Outcome = schema.SyncPushStepSkipped
-			step.Reason = "the session is held, so it was not shared; publish it again after ingest completes"
-		case outcome.transcript == nil:
-			step.Outcome = schema.SyncPushStepSkipped
-			step.Reason = "Village holds no transcript of this session, so there is nothing to share"
-		default:
-			step = shareWithCollective(ctx, sharer, outcome.transcript.Receipt.TranscriptID, step)
+	batch, useBatch := sharer.(collectiveActionBatch)
+	contentAllowsShare := !outcome.runStopped && outcome.status != schema.SyncPushSessionHeld && outcome.transcript != nil
+	if useBatch && stopped < 0 && contentAllowsShare {
+		batchSteps, missingTranscript := batch.shareCollectives(ctx, outcome.transcript.Receipt.TranscriptID, changes.Add)
+		mutationMissingTranscript = mutationMissingTranscript || missingTranscript
+		for _, step := range batchSteps {
+			steps = append(steps, step)
+			if step.Outcome == schema.SyncPushStepFailed && stopped < 0 {
+				stopped = len(steps) - 1
+			}
 		}
-		steps = append(steps, step)
-		if step.Outcome == schema.SyncPushStepFailed && stopped < 0 {
-			stopped = len(steps) - 1
+	} else {
+		for _, id := range changes.Add {
+			collective := id
+			step := schema.SyncPushStepResult{Step: schema.SyncPushStepAddCollective, CollectiveID: &collective}
+			missingTranscript := false
+			switch {
+			case stopped >= 0 || outcome.runStopped:
+				step.Outcome = schema.SyncPushStepNotAttempted
+			case outcome.status == schema.SyncPushSessionHeld:
+				step.Outcome = schema.SyncPushStepSkipped
+				step.Reason = "the session is held, so it was not shared; publish it again after ingest completes"
+			case outcome.transcript == nil:
+				step.Outcome = schema.SyncPushStepSkipped
+				step.Reason = "Peasant online holds no transcript of this session, so there is nothing to share"
+			default:
+				step, missingTranscript = shareWithCollective(ctx, sharer, outcome.transcript.Receipt.TranscriptID, step)
+			}
+			steps = append(steps, step)
+			mutationMissingTranscript = mutationMissingTranscript || missingTranscript
+			if step.Outcome == schema.SyncPushStepFailed && stopped < 0 {
+				stopped = len(steps) - 1
+			}
 		}
 	}
 
 	result.Steps = steps
 	if stopped >= 0 {
 		result.Status = schema.SyncPushSessionError
-		result.Error = stoppedMessage(steps[stopped], outcome, steps, retry)
+		result.Error = stoppedMessage(steps[stopped], outcome, steps, retry, mutationMissingTranscript)
 	}
 	return result
 }
@@ -493,7 +537,16 @@ func runSessionSteps(ctx context.Context, sharer CollectiveSharer, outcome conte
 // missingTranscriptReason explains a share change Village refused because the
 // transcript this computer's receipt names is gone from Village, for example
 // deleted there. An unchanged session is not uploaded again on its own.
-const missingTranscriptReason = "Village no longer holds the transcript this computer's receipt names, for example because it was deleted on Village; run 'peasant village push --force' choosing only this session to publish it again, then change its collectives"
+const missingTranscriptReason = "Peasant online no longer holds the transcript this computer's receipt names, for example because it was deleted on peasant online; run 'peasant village push --force' choosing only this session to publish it again, then change its collectives"
+
+func missingTranscriptFailureReason(err error) string {
+	var persistence *actionDiagnosticPersistenceError
+	if errors.As(err, &persistence) {
+		// Render bounded corrective copy, not a raw server body or Store error.
+		return missingTranscriptReason + "; " + diagnosticPersistenceWarning
+	}
+	return missingTranscriptReason
+}
 
 // shareWithCollective offers the transcript to the step's collective and
 // reports what the collective did with it. Village's answer to a share does not
@@ -502,15 +555,22 @@ const missingTranscriptReason = "Village no longer holds the transcript this com
 // and a 409 does not say whether a live share already exists or another request
 // won a race. The latest event of the share history says which, so every
 // outcome is read back from it.
-func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcript schema.TranscriptID, step schema.SyncPushStepResult) schema.SyncPushStepResult {
+func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcript schema.TranscriptID, step schema.SyncPushStepResult) (schema.SyncPushStepResult, bool) {
 	collective := *step.CollectiveID
 	err := sharer.ShareTranscript(ctx, transcript, collective)
+	var refusal *village.StatusError
+	missingTranscript := errors.As(err, &refusal) && refusal.StatusCode == http.StatusNotFound
+	return readShareResult(ctx, sharer, transcript, step, err), missingTranscript
+}
+
+func readShareResult(ctx context.Context, sharer CollectiveSharer, transcript schema.TranscriptID, step schema.SyncPushStepResult, err error) schema.SyncPushStepResult {
+	collective := *step.CollectiveID
 	var refusal *village.StatusError
 	refused := errors.As(err, &refusal)
 	duplicate := refused && refusal.StatusCode == http.StatusConflict
 	if refused && refusal.StatusCode == http.StatusNotFound {
 		step.Outcome = schema.SyncPushStepFailed
-		step.Reason = missingTranscriptReason
+		step.Reason = missingTranscriptFailureReason(err)
 		return step
 	}
 	if err != nil && !duplicate {
@@ -521,7 +581,7 @@ func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcrip
 	status, err := sharer.LatestShareStatus(ctx, transcript, collective)
 	if err != nil {
 		step.Outcome = schema.SyncPushStepFailed
-		step.Reason = "Village answered the share, but reading back whether the collective accepted it failed: " + err.Error() + "; open the transcript on Village to see who can read it, and publish again to retry"
+		step.Reason = "Peasant online answered the share, but reading back whether the collective accepted it failed: " + err.Error() + "; open the transcript on peasant online to see who can read it, and publish again to retry"
 		return step
 	}
 	switch {
@@ -533,20 +593,20 @@ func shareWithCollective(ctx context.Context, sharer CollectiveSharer, transcrip
 		step.Reason = "the collective already holds this transcript for its owner's approval"
 	case duplicate:
 		step.Outcome = schema.SyncPushStepFailed
-		step.Reason = "Village refused the share, so this collective cannot read the transcript: " + refusal.Message
+		step.Reason = "Peasant online refused the share, so this collective cannot read the transcript: " + refusal.Message
 	case status == schema.VillageShareStatusApproved:
 		step.Outcome = schema.SyncPushStepSucceeded
 	case status == schema.VillageShareStatusPending:
 		step.Outcome = schema.SyncPushStepPendingApproval
 	default:
 		step.Outcome = schema.SyncPushStepSkipped
-		step.Reason = "Village did not share the transcript with this collective: it shares only with a collective you are a member of that accepts your contributions"
+		step.Reason = "Peasant online did not share the transcript with this collective: it shares only with a collective you are a member of that accepts your contributions"
 	}
 	return step
 }
 
 // stoppedMessage says where a session's steps stopped and what Village kept.
-func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, steps []schema.SyncPushStepResult, retry string) string {
+func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, steps []schema.SyncPushStepResult, retry string, missingTranscript bool) string {
 	var b strings.Builder
 	switch stopped.Step {
 	case schema.SyncPushStepContent:
@@ -557,7 +617,7 @@ func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, s
 		fmt.Fprintf(&b, "stopped at sharing with collective %s: ", *stopped.CollectiveID)
 	}
 	b.WriteString(stopped.Reason)
-	if stopped.Reason == missingTranscriptReason {
+	if missingTranscript {
 		// The receipt names a transcript Village no longer holds, so what the
 		// receipt says Village kept is not true, and the reason names the
 		// recovery.
@@ -579,9 +639,9 @@ func stoppedMessage(stopped schema.SyncPushStepResult, outcome contentOutcome, s
 	// What Village kept is said from this computer's receipt. Without one,
 	// Village may still hold content it accepted just before the stop.
 	if outcome.transcript == nil {
-		b.WriteString(". Village kept no transcript of this session that this computer has a receipt for; if Village accepted the content before the stop, publishing again records it")
+		b.WriteString(". Peasant online kept no transcript of this session that this computer has a receipt for; if peasant online accepted the content before the stop, publishing again records it")
 	} else {
-		fmt.Fprintf(&b, ". Village kept the transcript at %s", outcome.transcript.Receipt.TranscriptURL)
+		fmt.Fprintf(&b, ". Peasant online kept the transcript at %s", outcome.transcript.Receipt.TranscriptURL)
 		if stopped.Step == schema.SyncPushStepContent {
 			b.WriteString(" with the content it had before")
 			if len(applied) == 0 {

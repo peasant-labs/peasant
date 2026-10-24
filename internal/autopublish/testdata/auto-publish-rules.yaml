@@ -313,7 +313,7 @@ cases:
     driver: validate
     rules:
       - {id: acme, kind: folder, match: /home/dev/work, events: [pre-push], collectives: [not-a-uuid]}
-    expect: {invalid: not a Village collective identifier}
+    expect: {invalid: not a peasant online collective identifier}
 
   - name: identifier-must-fit-a-url-path
     driver: validate
@@ -614,7 +614,7 @@ cases:
       - {id: acme, kind: remote, match: github.com/acme/tools, events: [pre-push], collectives: [platform]}
     config: {visibility: private}
     flags: [--force, --verbose]
-    expect: {visibilityIntent: private, public: true, publishes: 1, audience: {}, outputContains: [is public on Village, never publicly, make the transcript private on Village]}
+    expect: {visibilityIntent: private, public: true, publishes: 1, audience: {}, outputContains: [is public on peasant online, never publicly, make the transcript private on peasant online]}
 
   - name: public-hold-is-released-when-made-private
     driver: push
@@ -839,7 +839,7 @@ cases:
       public: false
       publishes: 1
       audience: {}
-      outputContains: ["could not be read from Village", "retry when Village answers"]
+      outputContains: ["could not be read from peasant online", "retry when peasant online answers"]
 
   - name: unreadable-share-history-stops-the-share
     driver: push

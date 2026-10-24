@@ -50,6 +50,7 @@ import {
   Select as FtSelect,
   SessionGroupDisclosure as FtSessionGroupDisclosure,
   Sparkline as FtSparkline,
+  Pagination as FtPagination,
   StatsStrip as FtStatsStrip,
   Popover as FtPopover,
   ProviderIcon as FtProviderIcon,
@@ -82,6 +83,7 @@ import {
   // the settings page parts
   SettingRow,
   SettingGroup,
+  SettingsLayout as FtSettingsLayout,
   SETTING_ROW_STATES,
   CopyIconButton,
   CommandBlock,
@@ -90,6 +92,10 @@ import {
   PublishDialog as FtPublishDialog,
   PUBLISH_STATES as FT_PUBLISH_STATES,
   PUBLISH_DIALOG_STATES as FT_PUBLISH_DIALOG_STATES,
+  // the shared app sidebar
+  AppSidebar as FtAppSidebar,
+  AppSidebarLayout as FtAppSidebarLayout,
+  APP_SIDEBAR_APPS as FT_APP_SIDEBAR_APPS,
 } from '@peasant-labs/fairtrade/ui';
 
 /**
@@ -762,6 +768,43 @@ export interface SparklineProps {
 }
 export const Sparkline = FtSparkline as unknown as ComponentType<SparklineProps>;
 
+/** Numbered pagination: prev and next around the page numbers, the current one marked. */
+export interface PaginationProps {
+  /** The current page, 1-based. */
+  page: number;
+  /** How many pages there are. */
+  total: number;
+  onChange: (page: number) => void;
+  siblingCount?: number;
+  label?: string;
+}
+export const Pagination = FtPagination as unknown as ComponentType<PaginationProps>;
+
+/** One entry of a settings page's in-page section bar: a route, an anchor, or a button. */
+export interface SettingsNavSection {
+  id: string;
+  label: string;
+  href?: string;
+  icon?: ComponentType<{ className?: string }>;
+}
+
+/**
+ * A settings page body: the section bar beside the sections on a wide column,
+ * above them on a narrow one. The page keeps the app sidebar's nav.
+ */
+export interface SettingsLayoutProps {
+  sections: SettingsNavSection[];
+  currentId?: string;
+  onSelect?: (id: string) => void;
+  spy?: boolean;
+  label?: string;
+  LinkComponent?: ComponentType<AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }>;
+  className?: string;
+  bodyClassName?: string;
+  children?: ReactNode;
+}
+export const SettingsLayout = FtSettingsLayout as unknown as ComponentType<SettingsLayoutProps>;
+
 /** One option of a segmented control; the label may carry a tabular count. */
 export interface SegmentedOption {
   value: string;
@@ -870,3 +913,88 @@ export const PUBLISH_STATES = FT_PUBLISH_STATES;
 export const PUBLISH_DIALOG_STATES = FT_PUBLISH_DIALOG_STATES;
 export const PublishBar = FtPublishBar;
 export const PublishDialog = FtPublishDialog as unknown as ComponentType<PublishDialogProps>;
+
+// ---------------------------------------------------------------------------
+// The shared app sidebar, and the layout that places it beside the page.
+// ---------------------------------------------------------------------------
+
+/** One entry of the sidebar's app switcher: online, local, docs, community. */
+export interface AppSidebarApp {
+  id: string;
+  label: string;
+  href?: string;
+  target?: string;
+  rel?: string;
+  /** A short note after the label, e.g. 'soon'; with no href the entry shows as text. */
+  tag?: string;
+}
+
+/** The app's search, which the sidebar places after its nav groups. */
+export interface AppSidebarSearch {
+  onOpen: () => void;
+  label?: string;
+  /** The key hint beside the label, e.g. '⌘K'. */
+  shortcut?: string;
+  /** The same keys for aria-keyshortcuts, e.g. 'Meta+K'. */
+  keyShortcuts?: string;
+}
+
+/** One nav row: a link with `href`, a button with only `onSelect`. */
+export interface AppSidebarItem {
+  id: string;
+  /** Rendered as given, never lowercased. */
+  label: string;
+  href?: string;
+  onSelect?: (id: string) => void;
+  icon?: ComponentType<{ 'aria-hidden'?: boolean | 'true' | 'false' }>;
+  swatch?: string;
+  /** The item leaves this app: a trailing marker and a spoken suffix. */
+  external?: boolean;
+  title?: string;
+  depth?: 0 | 1;
+  target?: string;
+  rel?: string;
+}
+
+export interface AppSidebarGroup {
+  id: string;
+  /** A visible label, shown while the sidebar is expanded. */
+  label?: string;
+  /** The nav landmark's name; defaults to the label, then the id. */
+  ariaLabel?: string;
+  items: AppSidebarItem[];
+}
+
+export interface AppSidebarProps {
+  app: string;
+  apps?: readonly AppSidebarApp[];
+  groups: readonly AppSidebarGroup[];
+  currentId?: string;
+  homeHref?: string;
+  brand?: string;
+  search?: AppSidebarSearch;
+  /** The current theme; with onThemeChange the footer leads with the theme toggle. */
+  theme?: 'light' | 'dark';
+  onThemeChange?: (next: 'light' | 'dark') => void;
+  account?: { handle: string; href?: string };
+  accountSlot?: ReactNode;
+  /** A router link; receives href, className, aria-current, title, target, rel, onClick and children. */
+  LinkComponent?: ComponentType<{ href: string } & AnchorHTMLAttributes<HTMLAnchorElement>>;
+  storageKey?: string | null;
+  defaultCollapsed?: boolean;
+  defaultWidth?: number;
+  minWidth?: number;
+  maxWidth?: number;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  label?: string;
+  className?: string;
+}
+export const AppSidebar = FtAppSidebar as unknown as ComponentType<AppSidebarProps>;
+
+export interface AppSidebarLayoutProps {
+  sidebar: ReactNode;
+  children: ReactNode;
+  className?: string;
+}
+export const AppSidebarLayout = FtAppSidebarLayout as unknown as ComponentType<AppSidebarLayoutProps>;
+export const APP_SIDEBAR_APPS = FT_APP_SIDEBAR_APPS as unknown as readonly AppSidebarApp[];

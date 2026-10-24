@@ -221,6 +221,10 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			handler.handleSyncRedactions(scan, httptest.NewRequest("GET", "/api/v1/sync/redactions?session_id="+id+"&level=standard", nil))
 			captured := &syncCapturedPublish{parts: map[string]string{}}
 			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/auth/me" {
+					_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 					_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: schema.AllContentCapabilities})

@@ -324,7 +324,7 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 			"redact transcript entries for publication: marshalling %d stored entr(ies) failed: %w. "+
 				"This ran in internal/push.RedactEntries, after the entries were read from the local store and before "+
 				"anything was uploaded, so nothing was published and nothing local was changed. Publishing the entries "+
-				"unredacted is not an option here: they carry the recorded transcript text, and the village does not "+
+				"unredacted is not an option here: they carry the recorded transcript text, and peasant online does not "+
 				"scan the metadata part for secrets. Re-run the push; if it recurs, run 'peasant harvest --json' to "+
 				"check whether this session's indexed entries are readable",
 			len(entries), err)
@@ -451,7 +451,7 @@ func redactJSONDocumentWithInputCap(redactor redact.JSONRedactor, document []byt
 			"redact the %s for publication: it could not be decoded for redaction: %w. This ran in "+
 				"internal/push.redactJSONDocument, after the document was assembled and before anything was uploaded, so "+
 				"nothing was published and nothing local changed. Publishing it unredacted is not an option: it carries "+
-				"the session's own recorded text, and the village does not scan this part for secrets. Retry the push; if "+
+				"the session's own recorded text, and peasant online does not scan this part for secrets. Retry the push; if "+
 				"it recurs the document is malformed and the session should be re-ingested",
 			what, err)
 	}
@@ -593,7 +593,7 @@ func marshalBuiltTranscriptContentWithPolicy(content schema.TranscriptContent, r
 			"redact the transcript content for publication: the redacted document is no longer a transcript envelope "+
 				"(kind %q, cause: %w). This ran in internal/push.marshalTranscriptContent, between redaction and "+
 				"upload, so nothing was published. It means a redaction rule reshaped the document rather than rewriting "+
-				"values inside it, and the village would otherwise have stored that as this session's transcript. Report "+
+				"values inside it, and peasant online would otherwise have stored that as this session's transcript. Report "+
 				"this with the session id printed above; retrying will fail the same way until the rule is corrected",
 			check.Kind, cause)
 	}

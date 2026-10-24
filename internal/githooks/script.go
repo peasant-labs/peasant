@@ -733,7 +733,7 @@ peasant_hook_quote() {
 # so itself. Asserting 'nothing reached the village' there contradicted peasant's
 # own output three lines earlier.
 peasant_hook_warn() {
-	printf 'peasant: village upload did not complete\n' >&2
+	printf 'peasant: peasant online upload did not complete\n' >&2
 	printf '  what  : %s\n' "$1" >&2
 	printf '  why   : %s\n' "$2" >&2
 	printf '  where : repository %s, hook %s\n' "$peasant_hook_repository" "$peasant_hook_file" >&2
@@ -760,13 +760,13 @@ if [ ! -d "$peasant_hook_repository" ]; then
 		peasant_hook_warn \
 			"the repository this hook was installed for is not at $peasant_hook_repository any more" \
 			"it was moved or renamed; this hook pins its upload to that old path, and git resolves this worktree as $peasant_hook_root_now" \
-			'nothing reached the village: the upload was not attempted, because the repository it names is not there' \
+			'nothing reached peasant online: the upload was not attempted, because the repository it names is not there' \
 			"refresh this hook against where the repository is now: $peasant_hook_command_prefix village hooks install --event $peasant_hook_event --dir $peasant_hook_root_now_q"
 	else
 		peasant_hook_warn \
 			"the repository this hook was installed for is not at $peasant_hook_repository any more" \
 			'it was moved or renamed, and git could not name the worktree this hook is running in either' \
-			'nothing reached the village: the upload was not attempted, because the repository it names is not there' \
+			'nothing reached peasant online: the upload was not attempted, because the repository it names is not there' \
 			"cd into the repository and refresh this hook there: $peasant_hook_command_prefix village hooks install --event $peasant_hook_event --dir ."
 	fi
 	exit 0
@@ -776,7 +776,7 @@ if ! command -v peasant >/dev/null 2>&1; then
 	peasant_hook_warn \
 		'the peasant command was not found' \
 		'git ran this hook with a PATH that does not contain the peasant binary' \
-		'nothing reached the village, because the upload never started' \
+		'nothing reached peasant online, because the upload never started' \
 		"install peasant or put it on the PATH git uses, then retry with: $peasant_hook_recovery"
 	exit 0
 fi
@@ -789,13 +789,13 @@ if [ "$peasant_hook_status" -ne 0 ]; then
 	# finished is on the village and is recorded as published" there describes an
 	# upload that never started.
 	if [ "$peasant_hook_status" -eq {{NOTHING_ATTEMPTED}} ]; then
-		peasant_hook_meaning='nothing reached the village: the upload never started, so nothing was published and nothing was recorded as published'
+		peasant_hook_meaning='nothing reached peasant online: the upload never started, so nothing was published and nothing was recorded as published'
 	else
-		peasant_hook_meaning='whatever the upload finished before it stopped is on the village and is recorded as published; the peasant output above says what did and did not get through'
+		peasant_hook_meaning='whatever the upload finished before it stopped is on peasant online and is recorded as published; the peasant output above says what did and did not get through'
 	fi
 	peasant_hook_warn \
-		"the village upload command exited $peasant_hook_status" \
-		'the upload failed, most often an expired village login, no network, or a rejected payload' \
+		"the peasant online upload command exited $peasant_hook_status" \
+		'the upload failed, most often an expired peasant online login, no network, or a rejected payload' \
 		"$peasant_hook_meaning" \
 		"retry by hand with this exact bound command - it runs without this hook's quiet output and without its time budget, so it prints the full result and is not cut off (add --verbose for per-session detail, and run peasant village login first if the login expired): $peasant_hook_recovery"
 fi
@@ -821,9 +821,9 @@ peasant_hook_previous_status=$?
 {{STDIN_NOTE}}(
 	if command -v peasant >/dev/null 2>&1; then
 		{{SCOPED_COMMAND}} </dev/null \
-			|| printf 'peasant: village upload failed for %s ({{EVENT}}); {{IMPACT}}; retry by hand with: %s\n' {{ROOT_Q}} {{RECOVERY_Q}} >&2
+			|| printf 'peasant: peasant online upload failed for %s ({{EVENT}}); {{IMPACT}}; retry by hand with: %s\n' {{ROOT_Q}} {{RECOVERY_Q}} >&2
 	else
-		printf 'peasant: the peasant command is not on PATH, village upload skipped for %s ({{EVENT}})\n' {{ROOT_Q}} >&2
+		printf 'peasant: the peasant command is not on PATH, peasant online upload skipped for %s ({{EVENT}})\n' {{ROOT_Q}} >&2
 	fi
 ) || true
 # Restore the status your commands left, in a subshell: a bare 'exit' here would

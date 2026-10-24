@@ -147,10 +147,10 @@ func (p autoPublishPlan) updateHold(db *store.Store, creds *auth.Credentials, cl
 		}
 		visibility, err := client.TranscriptVisibility(ctx, record.Receipt.TranscriptID)
 		if err != nil {
-			return fmt.Sprintf("who can read its transcript %s could not be read from Village (%v), and an auto-publish rule publishes only to collectives, so it was not updated; retry when Village answers", record.Receipt.TranscriptURL, err)
+			return fmt.Sprintf("who can read its transcript %s could not be read from peasant online (%v), and an auto-publish rule publishes only to collectives, so it was not updated; retry when peasant online answers", record.Receipt.TranscriptURL, err)
 		}
 		if visibility == schema.VillageTranscriptVisibilityPublic {
-			return fmt.Sprintf("its transcript %s is public on Village, and an auto-publish rule publishes only to collectives, never publicly; make the transcript private on Village, and the next push updates it and shares it with the rule's collectives", record.Receipt.TranscriptURL)
+			return fmt.Sprintf("its transcript %s is public on peasant online, and an auto-publish rule publishes only to collectives, never publicly; make the transcript private on peasant online, and the next push updates it and shares it with the rule's collectives", record.Receipt.TranscriptURL)
 		}
 		return ""
 	}

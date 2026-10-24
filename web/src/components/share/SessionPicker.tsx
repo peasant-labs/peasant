@@ -5,18 +5,13 @@ import { Button, Checkbox } from '@/lib/ft-ui';
 import type { ShareSession, ShareHierarchySession, ShareHelperContext, ShareHelperGroup } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
 import { decodeProjectPath, displayProject } from '@/lib/quality/utils';
-import { summarizePrompt } from '@peasant-labs/fairtrade/ui';
+import { sessionDay, sessionPreviewTitle, shortSessionId } from '@/lib/share/sessionLabel';
 import { HelperGroupTree, type HelperMembersPage } from '@/components/share/HelperGroupTree';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 /**
  * Secondary metadata for one session row, shown in the item's `meta` slot.
@@ -26,7 +21,7 @@ function formatDate(iso: string): string {
  * one was computed — so a clean, newly-discovered session reads as `id · date`.
  */
 function sessionMeta(s: ShareSession): string {
-  const parts = [`${s.id.slice(5, 13)}…`, formatDate(s.startTime)];
+  const parts = [shortSessionId(s.id), sessionDay(s.startTime)].filter(Boolean);
   if (s.outcome) parts.push(s.outcome);
   if (s.shareStatus !== 'new') parts.push(s.shareStatus);
   return parts.join(' · ');
@@ -89,7 +84,7 @@ const SessionRow = memo(function SessionRow({ session, checked, disabled, setRow
   const rowRef = useCallback((element: HTMLDivElement | null) => setRowElement(`s:${session.id}`, element), [session.id, setRowElement]);
   return <div ref={rowRef} className="flex items-center gap-3 px-4 py-3">
     <Checkbox checked={checked} disabled={disabled} onChange={(nextChecked) => onToggle(session.id, nextChecked)} aria-label={`select session ${session.id}`} />
-    <div className="min-w-0"><div>{summarizePrompt(session.preview) || `${session.id.slice(5, 13)}…`}</div><div className="font-mono text-xs text-ink-3">{sessionMeta(session)} · {session.totalTokens.toLocaleString()} tokens</div></div>
+    <div className="min-w-0"><div>{sessionPreviewTitle(session.preview, session.id)}</div><div className="font-mono text-xs text-ink-3 tabular-nums">{sessionMeta(session)} · {session.totalTokens.toLocaleString()} tokens</div></div>
   </div>;
 });
 
@@ -387,9 +382,10 @@ export function SessionPicker({
   return (
     <div className="flex flex-col gap-4">
       <div className="border border-rule bg-surface" aria-label="choose sessions to contribute">
-        <div className="share-choose-toolbar px-4 py-3 border-b border-rule flex flex-wrap items-center justify-between gap-3">
-          <div className="gms-tally min-w-0 font-mono text-sm tabular-nums">{selectedCount} selected · {selectedTokensLabel} tokens</div>
-          <Button size="sm" variant="ghost" pressed={selectedCount === selectableIds.size && selectableIds.size > 0} onClick={() => handleChange(selectedCount === selectableIds.size ? new Set() : new Set(selectableIds))}>
+        <div className="share-choose-toolbar px-4 py-3 border-b border-rule flex items-center justify-between gap-3">
+          {/* A phone keeps the count and the action on one row: the token total waits for a wider screen. */}
+          <div className="gms-tally min-w-0 truncate font-mono text-sm tabular-nums">{selectedCount} selected<span className="max-[40rem]:hidden"> · {selectedTokensLabel} tokens</span></div>
+          <Button className="shrink-0" size="sm" variant="ghost" pressed={selectedCount === selectableIds.size && selectableIds.size > 0} onClick={() => handleChange(selectedCount === selectableIds.size ? new Set() : new Set(selectableIds))}>
             {selectedCount === selectableIds.size && selectableIds.size > 0 ? 'deselect all' : 'select all'}
           </Button>
         </div>

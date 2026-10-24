@@ -28,7 +28,7 @@ import (
 const (
 	// stubOwnerUserID is the village user the seeded creds authenticate as; the
 	// listed transcripts are owned by this user so the sync path scans them.
-	stubOwnerUserID = "user-1"
+	stubOwnerUserID = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 	// stubForeignAuthorID authors a FOREIGN annotation (different from the
 	// requester) — it must LAND on sync. stubOwnerUserID authors an OWN annotation
 	// that must be EXCLUDED.
@@ -87,6 +87,10 @@ func (s villageStub) start(t *testing.T, id schema.TranscriptID) *httptest.Serve
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/api/v1/auth/me":
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: schema.VillageUUID(stubOwnerUserID), GithubUsername: "owneruser"})
+		case r.URL.Path == "/api/v1/transcripts/"+id.String()+"/collectives":
+			_ = json.NewEncoder(w).Encode(schema.VillageTranscriptCollectivesResponse{Collectives: []schema.VillageTranscriptCollective{}})
 		case r.URL.Path == "/api/v1/schema/version":
 			if s.contractTooOld {
 				// Omit the pull window entirely ⇒ NegotiatePull aborts with a

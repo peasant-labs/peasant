@@ -66,9 +66,9 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/contexts/WebSocketContext', () => ({
   useChannel: (sub: { id?: string; topic?: string }) => {
-    if (sub?.id) return { data: sub.id === SESSION_ID ? sessionDetail : undefined, connected: true, error: null };
+    if (sub?.id) return { data: sub.id === SESSION_ID ? sessionDetail : undefined, connected: true, error: null, refresh: () => undefined };
     // The quality channel names the session's generated title.
-    return { data: { sessions: [QUALITY_SESSION] }, connected: true, error: null };
+    return { data: { sessions: [QUALITY_SESSION] }, connected: true, error: null, refresh: () => undefined };
   },
 }));
 vi.mock('@/lib/api/map', () => ({
@@ -202,6 +202,131 @@ describe('mounted category review boundary', () => {
   }
 });
 
+const scanFailures = parseDocument(readFileSync(resolve(process.cwd(), 'src/lib/share/testdata/scan-failures.yaml'), 'utf8')).toJS() as { cases: { name: string; detail: string }[] };
+
+describe('stale local index', () => {
+  const stale = scanFailures.cases.find((row) => row.name === 'stale-local-index')!;
+  const envelope = JSON.parse(stale.detail.replace(/^redaction scan failed \(\d+\):\s*/, '')) as { error: string };
+  const ready = fixture.cases.find((row) => row.name === 'ready-to-publish')!;
+
+  /** A world whose scan refuses the stored index until the re-index answers `heals`. */
+  function staleWorld(reindexAnswers: { status: number; json: unknown }[], heals: (answer: number) => boolean) {
+    const world = createPublishWorld(fixture, ready, { sessionId: SESSION_ID, turns: detail.turns ?? [] });
+    const respond = world.respond;
+    const reindexRequests: string[] = [];
+    let healed = false;
+    world.respond = (request) => {
+      if (request.url.includes('/sync/ingest/session')) {
+        reindexRequests.push(`${request.method} ${new URL(request.url, 'http://local').searchParams.get('session_id')}`);
+        const answer = reindexAnswers[Math.min(reindexRequests.length, reindexAnswers.length) - 1];
+        healed = heals(reindexRequests.length);
+        return answer;
+      }
+      // The popup never runs the whole-machine ingest.
+      if (request.url.includes('/sync/ingest')) return null;
+      if (request.url.includes('/sync/redactions') && !healed) return { status: 404, json: envelope };
+      return respond(request);
+    };
+    return { world, reindexRequests };
+  }
+
+  it('re-indexes this one session when asked, names the step and what is slow, scans again and publishes', async () => {
+    const { world, reindexRequests } = staleWorld([{ status: 200, json: { status: 'done', duration: '220ms', notes: [] } }], () => true);
+    let release!: () => void;
+    const held = new Promise<void>((settle) => { release = settle; });
+    installWorld(world, { hold: (url) => (url.includes('/sync/ingest/session') ? held : undefined) });
+    render(<Page />);
+    const user = userEvent.setup();
+    await runStep('open', user);
+    await waitFor(() => expect(dialog()).toHaveTextContent('this session needs a quick re-index on this computer before it can be published.'), WAIT);
+    // A failed scan stays cached: nothing re-indexes until the one action asks.
+    expect(reindexRequests).toEqual([]);
+    await user.click(within(dialog()).getByRole('button', { name: 're-index this session' }));
+    await waitFor(() => expect(reindexRequests).toEqual([`POST ${SESSION_ID}`]), WAIT);
+    // While it runs, the popup names the step and publish reads scanning….
+    await waitFor(() => expect(latestDialogProps.checking).toEqual({ stage: 'updating this session’s index…' }), WAIT);
+    expect(latestDialogProps.state).toBe('checking');
+    expect(dialog()).toHaveTextContent('updating this session’s index…');
+    expect(primaryButton()).toHaveTextContent('scanning…');
+    expect(primaryButton()).toBeDisabled();
+    // Ten seconds on one step: it says what is slow and that publish waits.
+    const realNow = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 12_000);
+    await waitFor(() => expect(latestDialogProps.checking?.note).toMatch(/^taking longer than usual \(1[23]s\): peasant is reading this session’s recording again, on this computer\. publish waits for it\.$/), WAIT);
+    expect(dialog()).toHaveTextContent('publish waits for it.');
+    clock.mockRestore();
+    release();
+    await waitFor(() => expect(primaryButton()).toBeEnabled(), { timeout: 6000 });
+    expect(latestDialogProps.checking).toBeUndefined();
+    expect(primaryButton()).not.toHaveTextContent('scanning…');
+    expect(dialog().textContent).not.toContain('retain unknown source evidence');
+    expect(dialog().textContent).not.toContain('{"error"');
+    await runStep('publish', user);
+    await waitFor(() => expect(world.pushRequests).toHaveLength(1), WAIT);
+    expect(reindexRequests).toHaveLength(1);
+  }, 15000);
+
+  it('says once that the copy stops before a line the re-index could not read, and still publishes', async () => {
+    const reason = 'capture transcript source: capture JSONL record 50: malformed complete JSON; prior stored snapshot was retained';
+    const { world, reindexRequests } = staleWorld([{ status: 200, json: { status: 'done', duration: '220ms', notes: [reason], unreadable: [{ line: 50, reason }] } }], () => true);
+    installWorld(world);
+    render(<Page />);
+    const user = userEvent.setup();
+    await runStep('open', user);
+    await user.click(await within(dialog()).findByRole('button', { name: 're-index this session' }, WAIT));
+    await waitFor(() => expect(primaryButton()).toBeEnabled(), { timeout: 6000 });
+    expect(reindexRequests).toHaveLength(1);
+    expect(latestDialogProps.scan?.note).toEqual({
+      line: '1 line in this session couldn’t be read, so the copy being published stops before it.',
+      detail: `line 50 of the recording: ${reason}`,
+    });
+    expect(dialog()).toHaveTextContent('1 line in this session couldn’t be read, so the copy being published stops before it.');
+    await runStep('publish', user);
+    await waitFor(() => expect(world.pushRequests).toHaveLength(1), WAIT);
+  }, 15000);
+
+  it('says in one line what stopped the re-index, keeps the reason in details, and offers to run it again', async () => {
+    const busy = 'another index update is running on this computer; retry when it finishes';
+    const { world, reindexRequests } = staleWorld([
+      { status: 409, json: { error: busy, code: 'ingest_running' } },
+      { status: 200, json: { status: 'done', duration: '220ms', notes: [] } },
+    ], (answer) => answer >= 2);
+    installWorld(world);
+    render(<Page />);
+    const user = userEvent.setup();
+    await runStep('open', user);
+    await user.click(await within(dialog()).findByRole('button', { name: 're-index this session' }, WAIT));
+    await waitFor(() => expect(latestDialogProps.scan?.failure).toBe('the re-index did not finish, so publish is off. another index update is running on this computer; try again when it finishes.'), WAIT);
+    expect(latestDialogProps.state).toBe('scan-failed');
+    expect(latestDialogProps.scan?.failureDetail).toBe(`${busy}\n\n${envelope.error}`);
+    expect(latestDialogProps.checking).toBeUndefined();
+    expect(dialog().textContent).toContain('another index update is running on this computer; try again when it finishes.');
+    expect(latestDialogProps.scan?.failureAction?.label).toBe('re-index again');
+    expect(dialog().textContent).not.toContain('{"error"');
+    expect(primaryButton()).toBeDisabled();
+    await user.click(within(dialog()).getByRole('button', { name: 're-index again' }));
+    await waitFor(() => expect(reindexRequests).toHaveLength(2), WAIT);
+    await waitFor(() => expect(primaryButton()).toBeEnabled(), { timeout: 6000 });
+  }, 15000);
+
+  it('says the repair did not take when the scan still refuses the re-indexed session, with the run notes, and never retries on its own', async () => {
+    const note = 'capture JSONL record 9: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest';
+    const { world, reindexRequests } = staleWorld([{ status: 200, json: { status: 'done', duration: '220ms', notes: [note] } }], () => false);
+    installWorld(world);
+    render(<Page />);
+    const user = userEvent.setup();
+    await runStep('open', user);
+    await user.click(await within(dialog()).findByRole('button', { name: 're-index this session' }, WAIT));
+    await waitFor(() => expect(latestDialogProps.scan?.failure).toBe('the re-index ran, but the scan still refuses this session, so publish is off. details say why.'), { timeout: 6000 });
+    expect(latestDialogProps.scan?.failureAction).toBeUndefined();
+    expect(latestDialogProps.state).toBe('scan-failed');
+    expect(latestDialogProps.scan?.failureDetail).toBe(`${envelope.error}\n\n${note}`);
+    expect(primaryButton()).toBeDisabled();
+    await new Promise((settle) => setTimeout(settle, 200));
+    expect(reindexRequests).toHaveLength(1);
+  }, 15000);
+});
+
 describe('stopped publication retry', () => {
   it('guards a real stopped-write callback during re-scan, after refusal, and recovers', async () => {
     const entry = fixture.cases.find((row) => row.name === 'partial-publish-removes-reader')!;
@@ -247,7 +372,7 @@ describe('stopped publication retry', () => {
 
 const recoveryFixture = parseDocument(readFileSync(resolve(process.cwd(), 'src/app/share/testdata/publish-review-recovery.yaml'), 'utf8')).toJS() as {
   requiredNames: string[];
-  cases: { name: string; route: string; method: string }[];
+  cases: { name: string; route: string; method: string; retry?: string; inline?: boolean }[];
 };
 describe('prerequisite recovery through the actual popup action', () => {
   it('retains every required recovery', () => {
@@ -276,11 +401,17 @@ describe('prerequisite recovery through the actual popup action', () => {
       const user = userEvent.setup();
       for (const step of entry.steps) await runStep(step, user);
       const retry = await waitFor(() => {
-        const button = within(dialog()).getByRole('button', { name: 'retry' });
+        const button = within(dialog()).getByRole('button', { name: recovery.retry ?? 'retry' });
         expect(button).toBeEnabled();
         return button;
       }, WAIT);
-      expect(latestDialogProps.onRecover).toBeTypeOf('function');
+      if (recovery.inline) {
+        expect(latestDialogProps.accessFailure?.onRetry).toBeTypeOf('function');
+        expect(latestDialogProps.state).not.toBe('stopped');
+        expect(primaryButton()).toBeDisabled();
+      } else {
+        expect(latestDialogProps.onRecover).toBeTypeOf('function');
+      }
       expect(latestDialogProps.onRetry).toBeUndefined();
       const operation = `${recovery.method} ${recovery.route}`;
       const before = operations.filter((value) => value === operation).length;
@@ -519,7 +650,7 @@ describe('the app-level scan cache under the transcript page', () => {
 
     const view = render(<Page />);
     await runStep('open', user);
-    expect(await within(dialog()).findByText('checking for sensitive content', {}, WAIT)).toBeInTheDocument();
+    expect(await within(dialog()).findByText('scanning 12 turns…', {}, WAIT)).toBeInTheDocument();
     await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
 
     // Leave the transcript (the provider stays, as the app shell does) and come back.
@@ -527,7 +658,7 @@ describe('the app-level scan cache under the transcript page', () => {
     expect(screen.queryByRole('group', { name: 'publish' })).not.toBeInTheDocument();
     view.rerender(<Page />);
     await runStep('open', user);
-    expect(await within(dialog()).findByText('checking for sensitive content', {}, WAIT)).toBeInTheDocument();
+    expect(await within(dialog()).findByText('scanning 12 turns…', {}, WAIT)).toBeInTheDocument();
     expect(world.scanRequests).toBe(1);
 
     await act(async () => { releaseScan(); });

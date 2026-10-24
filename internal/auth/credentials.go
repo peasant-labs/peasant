@@ -1,6 +1,9 @@
 package auth
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,12 +76,29 @@ func SaveCredentials(creds *Credentials) error {
 // selected by xdgConfigHomeOverride. An empty override preserves the environment
 // based behavior of SaveCredentials.
 func SaveCredentialsFrom(creds *Credentials, xdgConfigHomeOverride string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), credentialLockTimeout)
+	defer cancel()
+	return withCredentialLock(ctx, xdgConfigHomeOverride, func() error {
+		return saveCredentialsLocked(creds, xdgConfigHomeOverride)
+	})
+}
+
+func saveCredentialsLocked(creds *Credentials, xdgConfigHomeOverride string) error {
 	dir := resolveConfigDirWith(xdgConfigHomeOverride)
 	if err := os.MkdirAll(dir, defaults.PrivateDirPerm); err != nil {
 		return fmt.Errorf("save credentials: create private config directory %q: %w; no credential file was changed; fix directory ownership or permissions and retry", dir, err)
 	}
 
-	data, err := json.MarshalIndent(creds, "", "  ")
+	// Every save rotates durable generation, including a switch away and back
+	// to identical credentials. It is not account identity or an API token.
+	var generation [32]byte
+	if _, err := rand.Read(generation[:]); err != nil {
+		return fmt.Errorf("save credentials: generate local credential revision: %w; previous credentials remain unchanged; retry after restoring system randomness", err)
+	}
+	data, err := json.MarshalIndent(struct {
+		*Credentials
+		Generation string `json:"_generation"`
+	}{creds, hex.EncodeToString(generation[:])}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("save credentials: marshal credentials for %q: %w; no credential file was changed; correct the unsupported credential value and retry", credentialsPathWith(xdgConfigHomeOverride), err)
 	}
@@ -123,10 +143,22 @@ func ClearCredentials() error {
 // ClearCredentialsFrom removes credentials only from the config directory
 // selected by xdgConfigHomeOverride. Returns nil if the file does not exist.
 func ClearCredentialsFrom(xdgConfigHomeOverride string) error {
-	path := credentialsPathWith(xdgConfigHomeOverride)
+	ctx, cancel := context.WithTimeout(context.Background(), credentialLockTimeout)
+	defer cancel()
+	return withCredentialLock(ctx, xdgConfigHomeOverride, func() error {
+		return clearCredentialsLocked(xdgConfigHomeOverride)
+	})
+}
+
+func clearCredentialsLocked(xdgConfigHomeOverride string) error {
+	return clearCredentialsDirectoryLocked(resolveConfigDirWith(xdgConfigHomeOverride))
+}
+
+func clearCredentialsDirectoryLocked(dir string) error {
+	path := filepath.Join(dir, defaults.CredentialsFile.String())
 	err := os.Remove(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("clear credentials at %q: %w; the selected credential file remains in place; fix file permissions and retry", path, err)
 	}
-	return nil
+	return syncSavedCredentialsDir(dir, path)
 }

@@ -359,6 +359,8 @@ func newAudienceVillage(t *testing.T) *audienceVillage {
 	v.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.URL.Path == "/api/v1/auth/me":
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
 		case strings.Contains(r.URL.Path, "/transcripts/publish"):
 			v.publish(t, w, r)
 		case r.Method == http.MethodPatch:
@@ -516,7 +518,7 @@ func (v *audienceVillage) expect(t *testing.T, label string, want audienceExpect
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := doors.db.Publication(t.Context(), v.server.URL, "user-00001", hash, audienceSessionID)
+	record, err := doors.db.Publication(t.Context(), v.server.URL, testutil.VillageFixtureAccountID.String(), hash, audienceSessionID)
 	if err != nil || record == nil {
 		t.Fatalf("%s: no local receipt: %v", label, err)
 	}

@@ -58,7 +58,7 @@ func (r Rule) Validate() error {
 	}
 	for _, collective := range r.Collectives {
 		if !village.IsCollectiveID(collective) {
-			return fmt.Errorf("auto-publish rule %q: collective %q is not a Village collective identifier; use the lowercase UUID Village shows for the collective", r.ID, collective)
+			return fmt.Errorf("auto-publish rule %q: collective %q is not a peasant online collective identifier; use the lowercase UUID peasant online shows for the collective", r.ID, collective)
 		}
 	}
 	return nil

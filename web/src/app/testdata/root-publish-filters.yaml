@@ -2,16 +2,17 @@
 #
 # Each case supplies the canonical sync/publication stimulus for the mocked
 # GET /api/v1/sync/sessions?view=home projection, presses `filter`, and checks
-# the rows in order after explicit `load more`. expectedCounts describes this
-# complete fixture population for membership assertions; no UI total is shown.
+# the rows in order across the pages of the table, read with `next page`.
+# expectedCounts describes this complete fixture population for membership
+# assertions; no UI total is shown.
 #
 # sessions: the sync list, newest first. `count` > 1 expands one entry into that
 #   many sessions named `<id>-00`, `<id>-01`, ... A session with
 #   `publication: false` gets no publication row, and one with
 #   `outsideSelection: true` is marked outside the saved selection: the list
 #   shows neither, and neither may appear anywhere on the page.
-# expectedPages: the rows on screen after the first render and after each press
-#   of `load more`. Omitted, the whole list fits on the first page.
+# expectedPages: the rows on each page of the table, first to last. Omitted,
+#   the whole list fits on the first page.
 # expectedLabels: the publish state each named row shows.
 requiredNames:
   - pending-root-read-omits-session-stat
@@ -21,7 +22,7 @@ requiredNames:
   - published-counts
   - auto-counts
   - outside-selection-hidden
-  - load-more
+  - next-page
   - pending-collectives-cannot-read
   - parent-visible-child-grouped
   - recursive-family-and-refresh
@@ -74,8 +75,8 @@ cases:
     expectedRows: [s-new, s-pub, s-turns, s-auto]
     expectedLabels:
       s-new: not published
-      s-pub: published, 2 collectives, up to date
-      s-turns: published, 1 collective, new turns
+      s-pub: published to 2 collectives
+      s-turns: needs update
       s-auto: auto-publish on
 
   - name: not-published-counts
@@ -97,7 +98,7 @@ cases:
     expectedCounts: { all: 3, notPublished: 1, published: 2, auto: 1 }
     expectedRows: [s-a, s-c]
     expectedLabels:
-      s-c: published, 0 collectives, new turns
+      s-c: needs update
 
   - name: auto-counts
     sessions:
@@ -119,13 +120,13 @@ cases:
     expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
     expectedRows: [s-seen]
 
-  - name: load-more
+  - name: next-page
     sessions:
       - { id: bulk, count: 30, project: alpha, syncStatus: new, state: unpublished }
       - { id: s-last, project: beta, syncStatus: synced, state: published }
     filter: all
     expectedCounts: { all: 31, notPublished: 30, published: 1, auto: 0 }
-    expectedPages: [25, 31]
+    expectedPages: [25, 6]
     expectedRows: [bulk-00, bulk-01, bulk-02, bulk-03, bulk-04, bulk-05, bulk-06, bulk-07, bulk-08, bulk-09, bulk-10, bulk-11, bulk-12, bulk-13, bulk-14, bulk-15, bulk-16, bulk-17, bulk-18, bulk-19, bulk-20, bulk-21, bulk-22, bulk-23, bulk-24, bulk-25, bulk-26, bulk-27, bulk-28, bulk-29, s-last]
 
   - name: pending-collectives-cannot-read
@@ -136,8 +137,8 @@ cases:
     expectedCounts: { all: 2, notPublished: 0, published: 2, auto: 0 }
     expectedRows: [s-approved, s-pending]
     expectedLabels:
-      s-approved: published, 1 collective, up to date
-      s-pending: published, 0 collectives, up to date
+      s-approved: published to 1 collective
+      s-pending: published
 
   - name: parent-visible-child-grouped
     sessions:
@@ -154,7 +155,7 @@ cases:
       - { expand: root, children: [child, child-two] }
     childLabels: { child: Delegate Task, child-two: 'Lint Run' }
     expectedLabels:
-      child: 'published, 1 collective, up to date'
+      child: 'published to 1 collective'
       child-two: 'not published'
 
   - name: recursive-family-and-refresh
@@ -247,7 +248,7 @@ cases:
     filter: all
     expectedCounts: { all: 26, notPublished: 25, published: 1, auto: 0 }
     expectedRows: [bulk-00, bulk-01, bulk-02, bulk-03, bulk-04, bulk-05, bulk-06, bulk-07, bulk-08, bulk-09, bulk-10, bulk-11, bulk-12, bulk-13, bulk-14, bulk-15, bulk-16, bulk-17, bulk-18, bulk-19, bulk-20, bulk-21, bulk-22, bulk-23, bulk-24, last-parent]
-    expectedPages: [25, 26]
+    expectedPages: [25, 1]
     expectedGroups: []
     steps:
       - { expand: last-parent, children: [last-child] }

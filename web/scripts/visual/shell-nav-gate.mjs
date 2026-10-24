@@ -1,21 +1,24 @@
-/* Local shell header gate (the connected arm).
+/* Local shell chrome gate (the connected arm).
 
-   Drives a running peasant app through the local shell in both themes and holds the mounted header
-   to testdata/shell-header.yaml, the required-name manifest the component tests read too
-   (shell-header-manifest.mjs):
+   Drives a running peasant app through the local shell in both themes and holds the mounted
+   sidebar (fairtrade's AppSidebar) to testdata/shell-chrome.yaml, the required-name manifest the
+   component tests read too (shell-chrome-manifest.mjs):
 
-     1. home `/`: every `show` item is present (settings only once its page ships, so the header
-        never carries a dead link), every `hide` item is gone (connection pill, share button, section
-        nav), and nothing outside the page body (<main>) links to a route-only section; the header is ONE row of
-        fairtrade's --nav-h with every item visible, inside the row and reachable by a pointer; the
-        theme button carries the label for the mode it switches to; <main> clears the fixed header;
-     2. the command palette, opened the way the header's search button opens it, offers none of the
+     1. home `/`: every `show` item is present (settings only once its page ships, so the sidebar
+        never carries a dead link), every `hide` item is gone (connection pill, share link, section
+        nav, the retired header row), and nothing outside the page body (<main>) links to a
+        route-only section; on a wide screen the sidebar is a full-height column with every item
+        visible inside it and reachable by a pointer; on a narrow one it is a top bar of
+        fairtrade's --nav-h whose drawer, opened, holds every item the same way; the theme item is
+        named for the mode it switches to; <main> starts under the chrome with no padding of its own;
+     2. the command palette, opened the way the sidebar's search item opens it, offers none of the
         forbidden commands (per-project changes/map jumps) and every required one, and no "go to"
         command for a route-only section;
-     3. every route-only section still resolves by URL: /analytics, and /review and /map under a mock
-        project, each mounting its body non-blank under the SAME quiet header;
-     4. the responsive widths in src/test/testdata/shell_responsive.yaml: the same header and
-        geometry checks at every width, down to the 320px reflow width;
+     3. every route-only section still resolves by URL: /village, /analytics, and /review and /map under a mock
+        project, each mounting its body non-blank beside the SAME sidebar;
+     4. the responsive widths in src/test/testdata/shell_responsive.yaml: the same chrome and
+        geometry checks at every width, down to the 320px reflow width, the drawer opened below
+        768px;
      5. keyboard after a click: <main> carries no tabindex at rest (chromeClearance, on every page
         above), a click on plain text mid-page on /analytics then Tab moves to the next control
         without jumping the page back up, and a click inside /share's session list (.swz-body) then
@@ -23,7 +26,7 @@
 
    chromeClearance takes the notice-pinned media query from src/components/testdata/
    app-shell-geometry.yaml (the one declaration globals.css makes) and also checks the root's
-   scroll-padding-top against the fixed header.
+   scroll-padding-top against what stays on screen.
 
    Before any capture it checks source/dependency/config/public freshness and proves the server serves THIS checkout's build (served-build.mjs: the served
    page references exactly web/out's chunks, and they carry the shell's markers; with PEASANT_BIN
@@ -67,13 +70,13 @@ import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import { assertServedBuild, shellProvenanceMarkers } from './served-build.mjs'
 import {
   chromeClearance,
-  headerFailures,
-  headerGeometryFailures,
+  chromeFailures,
+  chromeGeometryFailures,
   loadNoticePinnedQuery,
-  loadShellHeaderManifest,
+  loadShellChromeManifest,
   paletteFailures,
   shippedItems,
-} from './shell-header-manifest.mjs'
+} from './shell-chrome-manifest.mjs'
 
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
 
@@ -112,7 +115,7 @@ const loadResponsiveCases = () => {
     what,
     why: 'the shell gate must drive a complete, known set of widths',
     where: RESPONSIVE_FIXTURE_PATH,
-    means: 'responsive header coverage cannot run, so the gate stops before launching a browser',
+    means: 'responsive chrome coverage cannot run, so the gate stops before launching a browser',
     fix,
   })
   let fixture
@@ -140,13 +143,13 @@ const loadResponsiveCases = () => {
   return fixture.cases
 }
 
-const manifest = loadShellHeaderManifest()
+const manifest = loadShellChromeManifest()
 const shipped = shippedItems(manifest)
 const PINNED_QUERY = loadNoticePinnedQuery()
 const RESPONSIVE_CASES = loadResponsiveCases()
 
 if (!CHROME) {
-  console.error('ERROR [shell-nav-gate.mjs] CHROME_PATH is unset. Set it to your Chrome/Chromium binary before running the shell header gate.')
+  console.error('ERROR [shell-nav-gate.mjs] CHROME_PATH is unset. Set it to your Chrome/Chromium binary before running the shell chrome gate.')
   process.exit(1)
 }
 
@@ -156,10 +159,13 @@ const consoleLocationUrl = (m) => {
   return loc?.url || ''
 }
 // The mock data provider cannot serve the grouped sessions route the home page asks for (it answers
-// 500 on develop too); that one request is a mock-store limitation, not a shell failure.
+// 500 on develop too); that one request is a mock-store limitation, not a shell failure. The online
+// page's saved observations answer 401 while this computer is not signed in, and the page shows its
+// signed-out state; the gate's server is never signed in.
 const isKnownBenignConsoleMessage = (text, locationUrl) =>
   /favicon/i.test(`${text} ${locationUrl}`) ||
-  (/\/api\/v1\/sessions\?view=grouped/.test(locationUrl) && /status of 500/.test(text))
+  (/\/api\/v1\/sessions\?view=grouped/.test(locationUrl) && /status of 500/.test(text)) ||
+  (/\/api\/v1\/village\/collective-observations$/.test(locationUrl) && /status of 401/.test(text))
 const formatConsoleDiagnostic = (m) => {
   const loc = typeof m.location === 'function' ? m.location() : null
   const where = loc?.url ? ` at ${loc.url}:${loc.lineNumber ?? 0}:${loc.columnNumber ?? 0}` : ''
@@ -184,28 +190,45 @@ const goto = async (page, path) => {
     throw new Error(`could not load ${ORIGIN + path}: ${e.message}`)
   })
   if (!response || response.status() >= 400) throw new Error(`the app answered HTTP ${response ? response.status() : 0} for ${ORIGIN + path}`)
-  await page.waitForSelector('header', { visible: true, timeout: 15000 })
+  await page.waitForSelector('.asb', { timeout: 15000 })
 }
 
-// Polls until the header, its geometry and the chrome clearance hold on the current page, then
-// returns the last state. Throws with every failure when they never do.
-const assertHeader = async (page, theme, where, timeoutMs = 10000) => {
+// Polls until the sidebar, its geometry and the chrome clearance hold on the current page, then
+// returns the last state. Throws with every failure when they never do. Below 768px it then opens
+// the drawer, holds the items inside it to the same rules, and closes it again.
+const assertChrome = async (page, theme, where, timeoutMs = 10000) => {
   const start = Date.now()
   let last = null
   while (Date.now() - start < timeoutMs) {
     // The manifest's checks are self-contained, so puppeteer runs the very functions the
     // component tests run.
-    const manifestFailures = await page.evaluate(headerFailures, manifest, { theme, shipped })
-    const geometry = await page.evaluate(headerGeometryFailures, manifest, { shipped })
+    const manifestFailures = await page.evaluate(chromeFailures, manifest, { theme, shipped })
+    const geometry = await page.evaluate(chromeGeometryFailures, manifest, { shipped })
     const clearance = await page.evaluate(chromeClearance, PINNED_QUERY)
     const themeFailures = await page.evaluate((attrs, t) => attrs
       .filter((attr) => document.documentElement.getAttribute(attr) !== t)
       .map((attr) => `${attr}=${document.documentElement.getAttribute(attr)}, expected ${t}`), THEME_ATTRIBUTES, theme)
     last = { failures: [...manifestFailures, ...geometry, ...clearance.failures, ...themeFailures], clearance }
-    if (last.failures.length === 0) return last
+    if (last.failures.length === 0) break
     await pause(150)
   }
-  throw new Error(`the ${theme} header at ${where} does not hold the shell manifest: ${JSON.stringify(last)}`)
+  if (last.failures.length) throw new Error(`the ${theme} sidebar at ${where} does not hold the shell manifest: ${JSON.stringify(last)}`)
+  const narrow = await page.evaluate(() => !window.matchMedia('(min-width: 768px)').matches)
+  if (!narrow) return last
+  await page.click('.asb-bar .asb-menu')
+  await page.waitForSelector('.asb[data-drawer-open="true"] .asb-panel', { visible: true, timeout: 5000 })
+  // The drawer opens with motion, and even under reduced motion its items take a frame to show
+  // after the panel does, so its geometry is polled until it holds, like the column's above.
+  const opened = Date.now()
+  let drawer = await page.evaluate(chromeGeometryFailures, manifest, { shipped })
+  while (drawer.length && Date.now() - opened < timeoutMs) {
+    await pause(150)
+    drawer = await page.evaluate(chromeGeometryFailures, manifest, { shipped })
+  }
+  await page.keyboard.press('Escape')
+  await page.waitForSelector('.asb[data-drawer-open="false"]', { timeout: 5000 })
+  if (drawer.length) throw new Error(`the ${theme} drawer at ${where} does not hold the shell manifest: ${JSON.stringify(drawer)}`)
+  return last
 }
 
 const assertBodyReady = async (page, selector, where, timeoutMs = 15000) => {
@@ -242,7 +265,7 @@ const capture = async (page, gate, theme, id) => {
   return file
 }
 
-// Opens the palette the way the header's search button does, waits until its commands have
+// Opens the palette the way the sidebar's search item does, waits until its commands have
 // rendered, and holds them to the manifest's palette rules.
 const assertPalette = async (page, theme) => {
   await page.evaluate(() => window.dispatchEvent(new Event('peasant:open-command-palette')))
@@ -272,15 +295,15 @@ const driveTheme = async (browser, theme) => {
 
   await goto(page, '/')
   await assertBodyReady(page, 'main', 'home')
-  const home = await assertHeader(page, theme, '/')
-  console.log(`OK peasant-app ${theme} home header chrome=${home.clearance.chrome}px main-offset=${home.clearance.mainPaddingTop}px`)
+  const home = await assertChrome(page, theme, '/')
+  console.log(`OK peasant-app ${theme} home chrome=${home.clearance.chrome}px main-top=${home.clearance.mainTop}px`)
   files.push(await capture(page, gate, theme, 'shell-home'))
   await assertPalette(page, theme)
 
   // The narrowest width, in this theme too, as review evidence (the responsive arm asserts every width).
   await page.setViewport(MOBILE_VIEWPORT)
   await goto(page, '/')
-  await assertHeader(page, theme, '/ at 390px')
+  await assertChrome(page, theme, '/ at 390px')
   files.push(await capture(page, gate, theme, 'shell-home-mobile'))
   await page.setViewport(VIEWPORT)
 
@@ -292,7 +315,7 @@ const driveTheme = async (browser, theme) => {
     const strip = (path) => path.replace(/\/+$/, '')
     if (strip(landed) !== strip(url)) throw new Error(`the route-only page ${url} redirected to ${landed}; it must resolve in place`)
     await assertBodyReady(page, route.mount, url)
-    await assertHeader(page, theme, url)
+    await assertChrome(page, theme, url)
     files.push(await capture(page, gate, theme, `shell-route-${path.slice(1)}`))
   }
 
@@ -309,8 +332,8 @@ const assertResponsive = async (browser) => {
     await page.setViewport({ width, height: RESPONSIVE_HEIGHT, deviceScaleFactor: 1 })
     await goto(page, '/')
     const theme = await page.evaluate(() => document.documentElement.getAttribute('data-theme'))
-    const state = await assertHeader(page, theme, `/ at ${width}px`)
-    console.log(`OK peasant-app responsive case=${name} width=${width} header=${state.clearance.header}px one row, every item reachable`)
+    const state = await assertChrome(page, theme, `/ at ${width}px`)
+    console.log(`OK peasant-app responsive case=${name} width=${width} top-bar=${state.clearance.header}px, every item reachable`)
   }
   if (diagnostics.length) throw new Error(`client diagnostics appeared across the responsive widths: ${JSON.stringify(diagnostics.slice(0, 4))}`)
   await page.close()
@@ -323,12 +346,13 @@ const assertResponsive = async (browser) => {
 const plainPoint = (page, scope) => page.evaluate((sel) => {
   const box = sel ? document.querySelector(sel)?.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
   if (!box) return null
-  const header = document.querySelector('header')?.getBoundingClientRect()
-  const top = Math.max(box.top, header ? header.bottom : 0) + 8
+  const bar = document.querySelector('.asb-bar')
+  const barBox = bar && getComputedStyle(bar).display !== 'none' ? bar.getBoundingClientRect() : null
+  const top = Math.max(box.top, barBox ? barBox.bottom : 0) + 8
   for (let y = top + (box.bottom - top) / 2; y > top; y -= 24) {
     for (let x = box.left + 16; x < box.right - 16; x += 40) {
       const hit = document.elementFromPoint(x, y)
-      if (!hit || hit === document.body || hit.closest('header')) continue
+      if (!hit || hit === document.body || hit.closest('.asb')) continue
       // Not a control, and no focusable ancestor but <main> (a focusable <main> is exactly what this
       // check must catch, so <main> alone does not disqualify the point).
       if (hit.closest('a, button, input, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="option"]')) continue
@@ -433,18 +457,18 @@ try {
   await assertResponsive(browser)
 } catch (e) {
   console.error(
-    `ERROR [shell-nav-gate.mjs] local shell header gate failed.\n` +
+    `ERROR [shell-nav-gate.mjs] local shell chrome gate failed.\n` +
     `  What failed: ${e.message}\n` +
-    `  Why: the local header must match testdata/shell-header.yaml on every page and width, the palette must offer no route-only jump, every route-only section must still resolve, and a click must never steer Tab or keyboard scrolling to <main>.\n` +
+    `  Why: the local sidebar must match testdata/shell-chrome.yaml on every page and width, the palette must offer no route-only jump, every route-only section must still resolve, and a click must never steer Tab or keyboard scrolling to <main>.\n` +
     `  Where: shell-nav-gate.mjs while driving ${ORIGIN}.\n` +
-    `  Means: users may see a removed control, a dead or hidden-section link, a clipped header, or a route that stopped resolving.\n` +
-    `  Fix: serve a fresh build at PEASANT_REAL_ORIGIN (make build, then peasant web start with the mock store), then fix the reported header, palette or route.`,
+    `  Means: users may see a removed control, a dead or hidden-section link, a clipped sidebar, or a route that stopped resolving.\n` +
+    `  Fix: serve a fresh build at PEASANT_REAL_ORIGIN (make build, then peasant web start with the mock store), then fix the reported sidebar, palette or route.`,
   )
   try { await browser.close() } catch {}
   process.exit(1)
 }
 await browser.close()
-console.log(`\nOK [shell-nav-gate.mjs] local shell header verified at ${ORIGIN} (${served.mode} mode, provenance checked): manifest holds on home and ${Object.keys(manifest.routes).join(', ')} in ${SMOKE_THEMES.join(' + ')}, palette clean, one-row header at ${RESPONSIVE_CASES.map(({ width }) => width).join(', ')}px.`)
+console.log(`\nOK [shell-nav-gate.mjs] local shell chrome verified at ${ORIGIN} (${served.mode} mode, provenance checked): manifest holds on home and ${Object.keys(manifest.routes).join(', ')} in ${SMOKE_THEMES.join(' + ')}, palette clean, sidebar and drawer at ${RESPONSIVE_CASES.map(({ width }) => width).join(', ')}px.`)
 if (captured.length) {
   console.log('Shell frames:')
   for (const file of captured) console.log(`  ${file}`)

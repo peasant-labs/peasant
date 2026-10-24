@@ -235,10 +235,10 @@
 .stg-readonly-control { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; max-width: 100%; }
 
 @media (max-width: 767px) {
-  /* below md a row stacks: its control takes its own line, and a long value wraps inside it
-     instead of scrolling the page sideways */
-  .stg-page .srow-control { flex: 1 1 100%; min-width: 0; justify-content: flex-start; }
-  .stg-page .srow-text { min-width: 0; }
+  /* below md a read-only value and its command do not fit beside the label: they take their
+     own line under it (fairtrade stacks a text value and its edit itself), and a long value
+     wraps inside it instead of scrolling the page sideways */
+  .stg-page .stg-readonly > .srow-control { grid-column: 1 / -1; justify-self: start; justify-content: flex-start; }
   .stg-readonly-value { max-width: 100%; }
   .stg-command { max-width: 100%; min-width: 0; }
   .stg-readonly-control > .srow-status { display: none; }
@@ -255,7 +255,39 @@
   .stg-add { padding-inline: var(--sp-3); }
 }
 
-/* the in-use demo pads a page from its view at phone width; this app's main has no padding of its own */
-@media (width <= 480px) {
-  .stg-page { padding-inline: var(--sp-3); }
+
+/* ── sections: one view per section, linked from fairtrade's in-page section
+   bar (SettingsLayout), beside the section on a wide body, above it on a narrow one ── */
+.stg-body { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.stg-head { gap: var(--sp-3); }
+/* the section's name heads its column, under the page's one title */
+.stg-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  line-height: var(--lh-body);
+  color: var(--ink-strong);
+  text-transform: lowercase;
+}
+.stg-panel { max-width: 55rem; }
+.stg-groups { max-width: 55rem; }
+
+/* the redaction categories: what is hidden, and the label each prints */
+.stg-cats { display: flex; flex-direction: column; gap: var(--sp-4); max-width: 55rem; }
+.stg-cats-title { margin: 0; font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 700; line-height: var(--lh-body); color: var(--ink-strong); text-transform: lowercase; }
+.stg-cats-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
+.stg-cat { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-4); border: var(--bd-strong); background: var(--surface); }
+.stg-cat-icon { display: inline-grid; place-items: center; width: var(--target-comfortable); height: var(--target-comfortable); background: var(--surface-2); color: var(--ink-2); }
+.stg-cat-icon .lucide { width: var(--ic-md); height: var(--ic-md); }
+.stg-cat-name { font-family: var(--font-mono); font-size: var(--fs-md); font-weight: 700; color: var(--ink-strong); }
+.stg-cat-covers { font-family: var(--font-body); font-size: var(--fs-body); line-height: var(--lh-body); color: var(--ink-2); }
+.stg-cat-label { margin-top: auto; font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-3); }
+.stg-cat-label code { font-family: var(--font-mono); color: var(--ink-strong); }
+.stg-cats-scope { margin: 0; max-width: var(--measure-prose); color: var(--ink-3); font-size: var(--fs-body); line-height: var(--lh-body); }
+
+/* a non-default server's address, after the sign-in line */
+.stg-server { display: block; margin-top: var(--sp-1); }
+
+@media (max-width: 47.99rem) {
 }

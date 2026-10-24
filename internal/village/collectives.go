@@ -25,7 +25,7 @@ var canonicalUUID = regexp.MustCompile(CollectiveIDPattern)
 func IsCollectiveID(id schema.VillageUUID) bool { return canonicalUUID.MatchString(string(id)) }
 
 // collectivesEndpoint lists the collectives the signed-in user belongs to.
-const collectivesEndpoint = "/api/v1/groups"
+const collectivesEndpoint = "/api/v1/collectives"
 
 // collectiveResponseLimit bounds how much of one collective or share answer is
 // read. The answers are small rows; the limit keeps a misbehaving server from
@@ -63,24 +63,24 @@ type StatusError struct {
 }
 
 func (e *StatusError) Error() string {
-	return fmt.Sprintf("%s: Village answered %d for %s: %s", e.Operation, e.StatusCode, e.Path, e.Message)
+	return fmt.Sprintf("%s: peasant online answered %d for %s: %s", e.Operation, e.StatusCode, e.Path, e.Message)
 }
 
 // ListCollectives returns the collectives the signed-in user belongs to, with
-// their role in each (GET /api/v1/groups).
-func (c *VillageClient) ListCollectives(ctx context.Context) ([]schema.VillageUserGroup, error) {
-	var collectives []schema.VillageUserGroup
+// their role in each (GET /api/v1/collectives).
+func (c *VillageClient) ListCollectives(ctx context.Context) ([]schema.VillageUserCollective, error) {
+	var collectives []schema.VillageUserCollective
 	if err := c.readCollectiveJSON(ctx, "list collectives", collectivesEndpoint, &collectives); err != nil {
 		return nil, err
 	}
 	if collectives == nil {
-		collectives = []schema.VillageUserGroup{}
+		collectives = []schema.VillageUserCollective{}
 	}
 	return collectives, nil
 }
 
 // ListCollectiveRepositories returns the GitHub repositories linked to one
-// collective (GET /api/v1/groups/{id}/repositories). Village shows a member
+// collective (GET /api/v1/collectives/{id}/repositories). Village shows a member
 // only the rows of accounts their own GitHub account controls.
 func (c *VillageClient) ListCollectiveRepositories(ctx context.Context, id schema.VillageUUID) ([]schema.VillageLinkedRepository, error) {
 	var response schema.VillageLinkedRepositoriesResponse
@@ -119,14 +119,14 @@ func (c *VillageClient) TranscriptShares(ctx context.Context, id schema.Transcri
 	approved := make(map[schema.VillageUUID]bool, len(response.EnrichedShares))
 	for _, share := range response.EnrichedShares {
 		if share.Status != schema.VillageShareStatusApproved {
-			return nil, fmt.Errorf("%s: Village listed collective %q with status %q among the approved shares; the access cannot be reported; update Peasant or check the Village version", operation, share.GroupID, share.Status)
+			return nil, fmt.Errorf("%s: peasant online listed collective %q with status %q among the approved shares; the access cannot be reported; update Peasant or check the peasant online version", operation, share.GroupID, share.Status)
 		}
 		approved[share.GroupID] = true
 	}
 	shares := make([]TranscriptShare, 0, len(response.Shares))
 	for _, row := range response.Shares {
 		if row.GroupID == "" {
-			return nil, fmt.Errorf("%s: Village listed a share with no collective; the access cannot be reported; check the Village version", operation)
+			return nil, fmt.Errorf("%s: peasant online listed a share with no collective; the access cannot be reported; check the peasant online version", operation)
 		}
 		status := schema.VillageShareStatusApproved
 		if !approved[row.GroupID] {
@@ -160,7 +160,7 @@ func (c *VillageClient) LatestShareStatus(ctx context.Context, id schema.Transcr
 	var latest *schema.VillageShareEvent
 	for i := range events {
 		if !isShareStatus(events[i].Status) {
-			return "", fmt.Errorf("%s: Village returned status %q, which is outside the closed set, so the access cannot be reported; update Peasant or check the Village version", operation, events[i].Status)
+			return "", fmt.Errorf("%s: peasant online returned status %q, which is outside the closed set, so the access cannot be reported; update Peasant or check the peasant online version", operation, events[i].Status)
 		}
 		if latest == nil || events[i].EventNum > latest.EventNum {
 			latest = &events[i]
@@ -190,7 +190,7 @@ func (c *VillageClient) TranscriptVisibility(ctx context.Context, id schema.Tran
 	case schema.VillageTranscriptVisibilityPrivate, schema.VillageTranscriptVisibilityShared, schema.VillageTranscriptVisibilityPublic:
 		return visibility, nil
 	default:
-		return "", fmt.Errorf("%s: Village returned visibility %q, which is outside the closed set, so the access cannot be reported; update Peasant or check the Village version", operation, visibility)
+		return "", fmt.Errorf("%s: peasant online returned visibility %q, which is outside the closed set, so the access cannot be reported; update Peasant or check the peasant online version", operation, visibility)
 	}
 }
 
@@ -202,11 +202,26 @@ func (c *VillageClient) TranscriptVisibility(ctx context.Context, id schema.Tran
 // share of the transcript, and also when another request shared it at the same
 // moment.
 func (c *VillageClient) ShareTranscript(ctx context.Context, id schema.TranscriptID, collective schema.VillageUUID) error {
-	body, err := json.Marshal(schema.VillageShareTranscriptRequest{GroupIDs: []schema.VillageUUID{collective}})
-	if err != nil {
-		return fmt.Errorf("share transcript %s with collective %s: encode request: %w", id, collective, err)
+	return c.ShareTranscriptCollectives(ctx, id, []schema.VillageUUID{collective})
+}
+
+// ShareTranscriptCollectives sends the caller's complete requested target set
+// in one mutation. Village must validate all targets under its transaction;
+// splitting this request into one call per target would lose that atomicity.
+func (c *VillageClient) ShareTranscriptCollectives(ctx context.Context, id schema.TranscriptID, collectives []schema.VillageUUID) error {
+	if len(collectives) == 0 {
+		return fmt.Errorf("share transcript %s: no collective targets were requested; no mutation was sent; explicitly choose at least one collective", id)
 	}
-	return c.changeShare(ctx, http.MethodPost, "share transcript "+id.String()+" with collective "+collective.String(), transcriptSharePath(id), body)
+	for _, collective := range collectives {
+		if !IsCollectiveID(collective) {
+			return fmt.Errorf("share transcript %s: a requested collective identifier is malformed; no mutation was sent; choose canonical collective UUIDs", id)
+		}
+	}
+	body, err := json.Marshal(schema.VillageShareTranscriptRequest{GroupIDs: collectives})
+	if err != nil {
+		return fmt.Errorf("share transcript %s with requested collectives: encode request: %w", id, err)
+	}
+	return c.changeShare(ctx, http.MethodPost, fmt.Sprintf("share transcript %s with requested collectives %v", id, collectives), transcriptSharePath(id), body)
 }
 
 // UnshareTranscript takes one owned transcript back from one collective
@@ -226,18 +241,21 @@ func (c *VillageClient) readCollectiveJSON(ctx context.Context, operation, path 
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s: reach Village: %w", operation, err)
+		return fmt.Errorf("%s: reach peasant online: %w", operation, err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, collectiveResponseLimit))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, collectiveResponseLimit+1))
 	if err != nil {
-		return fmt.Errorf("%s: read Village's answer: %w", operation, err)
+		return fmt.Errorf("%s: read peasant online's answer: %w", operation, err)
+	}
+	if len(raw) > collectiveResponseLimit {
+		return fmt.Errorf("%s: peasant online's answer exceeds the complete-response byte limit; no partial metadata is usable; narrow the source or upgrade peasant online and retry", operation)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return &StatusError{Operation: operation, Path: path, StatusCode: resp.StatusCode, Message: villageErrorText(raw)}
 	}
 	if err := json.Unmarshal(raw, into); err != nil {
-		return fmt.Errorf("%s: decode Village's answer: %w", operation, err)
+		return fmt.Errorf("%s: decode peasant online's answer: %w", operation, err)
 	}
 	return nil
 }
@@ -257,7 +275,7 @@ func (c *VillageClient) changeShare(ctx context.Context, method, operation, path
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s: reach Village: %w", operation, err)
+		return fmt.Errorf("%s: reach peasant online: %w", operation, err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, collectiveResponseLimit))

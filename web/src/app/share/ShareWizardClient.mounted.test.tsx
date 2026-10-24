@@ -142,10 +142,10 @@ describe('mounted Share production boundary', () => {
     });
     expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
     await user.click(continueRedaction);
-    expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded to village.') === true)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded to peasant online.') === true)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'publish' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/sync/push'), expect.objectContaining({ body: JSON.stringify({ sessionIds: ['sess-new', 'sess-updated', 'sess-repo-main', 'sess-repo-feature'], redactionLevel: 'standard' }) })));
-    expect(await screen.findByRole('link', { name: /open village/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /^dashboard/ })).toHaveAttribute(
       'href',
       'https://village.peasantlabs.org',
     );
@@ -163,6 +163,6 @@ describe('mounted Share production boundary', () => {
     installFetch(items);
     render(<PublishProvider><ShareWizardClient /></PublishProvider>);
     expect(await screen.findByText(/discovery|metadata|duplicate|locationLabel/i)).toBeInTheDocument();
-    expect(screen.getByText('Retry')).toBeInTheDocument();
+    expect(screen.getByText('retry')).toBeInTheDocument();
   });
 });

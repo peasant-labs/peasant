@@ -184,6 +184,10 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			var publications atomic.Int32
 			village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/auth/me" {
+					_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+					return
+				}
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 					json.NewEncoder(w).Encode(schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilitySessionGraphProvenanceV1}})
 					return
@@ -256,7 +260,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 				t.Fatalf("CLI publish: %v %s %s uploads=%d", err, out, stderr, publications.Load())
 			}
 			first := captured.snapshot()
-			firstReceipt, err := db.Publication(t.Context(), village.URL, "user-00001", originalHash, id)
+			firstReceipt, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), originalHash, id)
 			if err != nil || firstReceipt == nil || !firstReceipt.Receipt.Created {
 				t.Fatalf("first receipt missing: %+v %v", firstReceipt, err)
 			}
@@ -280,7 +284,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 				t.Fatalf("Share repeat: %d %s uploads=%d", resp.StatusCode, raw, publications.Load())
 			}
 			second := captured.snapshot()
-			secondReceipt, err := db.Publication(t.Context(), village.URL, "user-00001", originalHash, id)
+			secondReceipt, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), originalHash, id)
 			if err != nil || !reflect.DeepEqual(secondReceipt, firstReceipt) {
 				t.Fatalf("unchanged Share publication changed the authoritative receipt: first=%+v second=%+v err=%v", firstReceipt, secondReceipt, err)
 			}

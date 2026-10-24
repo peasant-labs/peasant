@@ -1,0 +1,63 @@
+transcriptId: 22222222-2222-4222-8222-222222222222
+observedAt: 2026-01-10T00:00:00Z
+requiredNames:
+  - optional-assoc-observed-per-row-not-selector
+  - optional-assoc-empty-complete-set
+  - optional-assoc-known-negative-invalidated
+  - optional-assoc-no-prior-unknown
+  - optional-assoc-timeout-prior-stale
+  - optional-assoc-rename-retains-dated-details
+  - association-equivalent-poll-no-payload-log
+cases:
+  - name: optional-assoc-observed-per-row-not-selector
+    before: &alpha [{id: '33333333-3333-4333-8333-333333333333', name: Alpha, description: 'dated description', linkedgithuborg: null, sharedat: '2026-01-01T00:00:00Z'}]
+    after: *alpha
+    wantState: observed
+    wantNames: [Alpha]
+    retainedNames: [Alpha]
+    wantVersions: 1
+  - name: optional-assoc-empty-complete-set
+    before: *alpha
+    after: []
+    wantState: observed
+    wantNames: []
+    retainedNames: [Alpha]
+    wantVersions: 1
+  - name: optional-assoc-known-negative-invalidated
+    before: *alpha
+    status: 404
+    wantState: invalidated
+    wantNames: []
+    retainedNames: [Alpha]
+    wantVersions: 1
+  - name: optional-assoc-no-prior-unknown
+    skipBefore: true
+    status: 503
+    wantError: true
+    wantState: unknown
+    wantNames: []
+    retainedNames: []
+    wantVersions: 0
+  - name: optional-assoc-timeout-prior-stale
+    before: *alpha
+    cancelRead: true
+    wantError: true
+    wantState: stale
+    wantNames: [Alpha]
+    retainedNames: [Alpha]
+    wantVersions: 1
+  - name: optional-assoc-rename-retains-dated-details
+    before: *alpha
+    after: [{id: '33333333-3333-4333-8333-333333333333', name: Beta, description: 'new description', linkedgithuborg: null, sharedat: '2026-01-01T00:00:00Z'}]
+    wantState: observed
+    wantNames: [Beta]
+    retainedNames: [Alpha,Beta]
+    wantVersions: 2
+  - name: association-equivalent-poll-no-payload-log
+    # Count itself is the contract: equivalent validation creates no payload version.
+    before: *alpha
+    after: *alpha
+    wantState: observed
+    wantNames: [Alpha]
+    retainedNames: [Alpha]
+    wantVersions: 1

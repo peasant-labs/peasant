@@ -1,6 +1,8 @@
 requiredNames: [collectives-read-failed, audience-unknown, login-start-failed, publication-read-failed]
 cases:
-  - { name: collectives-read-failed, route: /api/v1/village/collectives, method: GET }
+  # Collectives that cannot load are said inside "who can read it" with their
+  # own retry; nothing stopped, so the stopped recovery is not involved.
+  - { name: collectives-read-failed, route: /api/v1/village/collectives, method: GET, retry: retry loading your collectives, inline: true }
   - { name: audience-unknown, route: /api/v1/publications, method: GET }
   - { name: login-start-failed, route: /api/v1/sync/login, method: POST }
   - { name: publication-read-failed, route: /api/v1/publications, method: GET }

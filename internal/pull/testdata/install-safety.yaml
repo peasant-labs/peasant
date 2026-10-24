@@ -1,0 +1,66 @@
+requiredNames:
+  - damaged-metadata-normal-then-force
+  - damaged-blob-normal-then-force
+  - pending-stage-symlink
+  - pending-blob-symlink
+  - pending-metadata-symlink
+  - pending-manifest-symlink
+  - pending-owner-symlink
+  - pending-owner-wrong
+  - pending-owner-missing
+  - pending-journal-corrupt
+  - pending-journal-identity
+  - pending-journal-digest
+  - pending-journal-projection
+  - abandoned-correct-marker
+  - abandoned-wrong-marker
+  - abandoned-unmarked
+  - recovery-root-symlink
+  - first-pull-ancestor-sync-fails
+  - pending-stage-swap-after-validation
+  - pending-component-swap-after-validation
+  - pending-stage-swap-at-publication
+  - pending-staged-blob-checksum-mismatch
+  - pending-staged-manifest-identity
+  - pending-staged-metadata-identity
+  - pending-annotation-projection-mismatch
+  - force-refuses-corrupt-journal
+  - force-refuses-staged-digest-mismatch
+  - force-refuses-projection-mismatch
+  - force-refuses-wrong-stage-owner
+  - force-refuses-stage-symlink
+  - pending-journal-unsupported-version
+  - force-refuses-unsupported-journal-version
+cases:
+  - {name: damaged-metadata-normal-then-force, kind: force, target: metadata.json}
+  - {name: damaged-blob-normal-then-force, kind: force, target: transcript.jsonl}
+  - {name: pending-stage-symlink, kind: pending, target: stage-link}
+  - {name: pending-blob-symlink, kind: pending, target: transcript.jsonl}
+  - {name: pending-metadata-symlink, kind: pending, target: metadata.json}
+  - {name: pending-manifest-symlink, kind: pending, target: pull-manifest.json}
+  - {name: pending-owner-symlink, kind: pending, target: .pull-stage-owner}
+  - {name: pending-owner-wrong, kind: pending, target: owner-wrong}
+  - {name: pending-owner-missing, kind: pending, target: owner-missing}
+  - {name: pending-journal-corrupt, kind: pending, target: corrupt}
+  - {name: pending-journal-identity, kind: pending, target: identity}
+  - {name: pending-journal-digest, kind: pending, target: digest}
+  - {name: pending-journal-projection, kind: pending, target: projection}
+  - {name: abandoned-correct-marker, kind: cleanup, target: correct}
+  - {name: abandoned-wrong-marker, kind: cleanup, target: wrong}
+  - {name: abandoned-unmarked, kind: cleanup, target: missing}
+  - {name: recovery-root-symlink, kind: root, target: root-link}
+  - {name: first-pull-ancestor-sync-fails, kind: ancestor, target: ancestor}
+  - {name: pending-stage-swap-after-validation, kind: swap, target: stage-swap}
+  - {name: pending-component-swap-after-validation, kind: swap, target: transcript.jsonl}
+  - {name: pending-stage-swap-at-publication, kind: rename-swap, target: stage-swap}
+  - {name: pending-staged-blob-checksum-mismatch, kind: pending, target: blob-corrupt}
+  - {name: pending-staged-manifest-identity, kind: pending, target: manifest-identity}
+  - {name: pending-staged-metadata-identity, kind: pending, target: metadata-identity}
+  - {name: pending-annotation-projection-mismatch, kind: pending, target: annotation-projection}
+  - {name: force-refuses-corrupt-journal, kind: pending, target: corrupt, force: true}
+  - {name: force-refuses-staged-digest-mismatch, kind: pending, target: digest, force: true}
+  - {name: force-refuses-projection-mismatch, kind: pending, target: projection, force: true}
+  - {name: force-refuses-wrong-stage-owner, kind: pending, target: owner-wrong, force: true}
+  - {name: force-refuses-stage-symlink, kind: pending, target: stage-link, force: true}
+  - {name: pending-journal-unsupported-version, kind: pending, target: version}
+  - {name: force-refuses-unsupported-journal-version, kind: pending, target: version, force: true}

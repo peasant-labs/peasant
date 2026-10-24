@@ -74,10 +74,16 @@ func TestWebHarvestCanonicalRegistry(t *testing.T) {
 	if handler.ingestError != nil {
 		t.Fatalf("web ingest: %s", handler.ingestError)
 	}
-	if handler.ingestResult == nil || handler.ingestResult.Summary.Indexed != 1 || !maps.Equal(handler.ingestResult.Summary.HarvesterVersions, ingest.HarvesterVersionRegistry) {
+	// The web ingest writes through the managed-generation store a harvest
+	// writes through, so it reports the same managed targets.
+	if handler.ingestResult == nil || handler.ingestResult.Summary.Indexed != 1 || !maps.Equal(handler.ingestResult.Summary.HarvesterVersions, ingest.GenerationTargets(ingest.HarvesterVersionRegistry)) {
 		t.Fatalf("populated web ingest result = %+v", handler.ingestResult)
 	}
-	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
+	storeOptions, err := store.ManagedGenerationOptions(cfg.Output.BasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithSkipMigrations())...)
 	if err != nil {
 		t.Fatal(err)
 	}

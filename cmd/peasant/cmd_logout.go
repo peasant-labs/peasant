@@ -10,7 +10,7 @@ import (
 func BuildLogoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
-		Short: "Log out from the Peasant village",
+		Short: "Log out from peasant online",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := auth.LogoutFrom(cmd.Context(), configDirOverride(cmd)); err != nil {
 				return err

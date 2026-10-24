@@ -9,7 +9,7 @@ rows:
       - local mode keeps all data on this machine
       - connecting sends nothing until a later explicit publish
     wantContains:
-      - connect to a village
+      - connect to peasant online
       - local mode keeps all data on this machine
       - connecting sends nothing until a later explicit publish
       - publishing is separate. it is explicit and opt-in.

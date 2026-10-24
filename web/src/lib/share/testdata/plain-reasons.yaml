@@ -1,0 +1,48 @@
+# The reason a publish popup line may show for a message the server or the
+# network gave. An unreachable online service reads one plain phrase; transport
+# text (web address, host and port, Go request error, HTTP status, JSON, the
+# online service's internal name) ends the reason at the clause that carries
+# it, and the whole message goes to details; anything else stays on one line. reason is empty when the line keeps
+# only its step. requiredNames pins the cases.
+requiredNames:
+  - collectives-connection-refused
+  - fetch-failed-in-the-browser
+  - status-and-envelope
+  - internal-service-name
+  - plain-server-reason
+  - multi-line-reason
+  - remedy-command
+  - technical-tail
+  - local-api-contract
+  - empty
+cases:
+  - name: collectives-connection-refused
+    message: 'The Village collectives could not be listed because Village could not be read: list collectives: reach peasant online: Get "http://127.0.0.1:3001/api/v1/collectives": dial tcp 127.0.0.1:3001: connect: connection refused'
+    reason: can’t reach peasant online right now
+  - name: fetch-failed-in-the-browser
+    message: Failed to fetch
+    reason: can’t reach peasant online right now
+  - name: status-and-envelope
+    message: 'collectives failed (500): {"error":"internal"}'
+    reason: ''
+  - name: internal-service-name
+    message: the village account for this computer is not linked
+    reason: ''
+  - name: plain-server-reason
+    message: this collective only takes sessions from its own repositories
+    reason: this collective only takes sessions from its own repositories
+  - name: multi-line-reason
+    message: "this collective only takes sessions from its own repositories.\nwhat: the repository is not listed"
+    reason: this collective only takes sessions from its own repositories
+  - name: remedy-command
+    message: 'peasant online no longer holds this transcript: run peasant village push --force for this session'
+    reason: 'peasant online no longer holds this transcript: run peasant village push --force for this session'
+  - name: technical-tail
+    message: 'sharing with this collective failed, so it cannot read the transcript: village answered 502'
+    reason: sharing with this collective failed, so it cannot read the transcript
+  - name: local-api-contract
+    message: "peasant's answer to /api/v1/settings/auto-publish/ab9bc5be breaks the Local API contract, so it is not shown: Invalid input"
+    reason: ''
+  - name: empty
+    message: ''
+    reason: ''

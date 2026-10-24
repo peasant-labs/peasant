@@ -3,17 +3,18 @@ package autopublish_test
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -317,57 +318,163 @@ func git(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// Concurrent edits must preserve the whole rule set; each edit holds the file
-// lock through its read, callback and atomic write.
-func TestConcurrentUpdatesRetainEveryRule(t *testing.T) {
-	t.Parallel()
-	fixture := autopublishtest.Load(t)
-	path := filepath.Join(t.TempDir(), "hooks.yaml")
-	start := make(chan struct{})
-	errors := make(chan error, len(fixture.Cases))
-	want := map[string]bool{}
-	var group sync.WaitGroup
-	for _, c := range fixture.Cases {
-		if c.Driver != autopublishtest.DriverMatcher {
-			continue
-		}
-		if len(c.Rules) == 0 {
-			continue
-		}
-		rule := c.Rules[0]
-		rule.ID = c.Name
-		want[rule.ID] = true
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			<-start
-			errors <- autopublish.Update(path, func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
-				runtime.Gosched()
-				return append(rules, rule), nil
-			})
-		}()
+//go:embed testdata/file_update_boundaries.yaml
+var fileUpdateBoundariesYAML []byte
+
+type fileUpdateBoundary struct {
+	Name            string             `yaml:"name"`
+	Rules           []autopublish.Rule `yaml:"rules"`
+	Rejected        autopublish.Rule   `yaml:"rejected"`
+	ExpectedIDs     []string           `yaml:"expectedIDs"`
+	ContentionError string             `yaml:"contentionError"`
+	RefusalError    string             `yaml:"refusalError"`
+}
+
+func loadFileUpdateBoundary(t *testing.T, name string) fileUpdateBoundary {
+	t.Helper()
+	var f struct {
+		RequiredNames []string             `yaml:"requiredNames"`
+		Cases         []fileUpdateBoundary `yaml:"cases"`
 	}
-	close(start)
-	group.Wait()
-	close(errors)
-	for err := range errors {
-		if err != nil {
-			t.Fatal(err)
+	if err := testutil.DecodeNamedFixtureYAML(fileUpdateBoundariesYAML, &f); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.Cases {
+		if c.Name == name {
+			return c
 		}
 	}
-	got, err := autopublish.Load(path)
+	t.Fatalf("required file-update fixture %q is missing", name)
+	return fileUpdateBoundary{}
+}
+
+func assertExactRuleIDs(t *testing.T, path string, expected []string) {
+	t.Helper()
+	rules, err := autopublish.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rule := range got {
+	want := map[string]bool{}
+	for _, id := range expected {
+		if want[id] {
+			t.Fatalf("duplicate expected rule identity %q", id)
+		}
+		want[id] = true
+	}
+	for _, rule := range rules {
 		if !want[rule.ID] {
-			t.Errorf("unexpected rule %q", rule.ID)
+			t.Fatalf("unexpected or duplicate saved rule %q; expected=%v", rule.ID, expected)
 		}
 		delete(want, rule.ID)
 	}
-	if len(want) > 0 {
-		t.Fatalf("concurrent edits lost rules: %v", want)
+	if len(want) != 0 {
+		t.Fatalf("concurrent edits lost exact rule identities: %v", want)
 	}
+}
+
+// Two independent editors, never one writer per unrelated matcher case. The
+// first actual callback holds its staged old view. A complete contended Update
+// provides a real lock-attempt/refusal gate; only then is the first released.
+// The refused editor explicitly retries after the first commit. This portable
+// proof needs no production lock hook, sleep, or goroutine-start assumption.
+func TestConcurrentUpdatesRetainEveryRule(t *testing.T) {
+	t.Parallel()
+	f := loadFileUpdateBoundary(t, "two-independent-edits-retain-exact-rule-identities")
+	if len(f.Rules) != 2 {
+		t.Fatal("the dedicated concurrency fixture must retain its declared two-editor contract")
+	}
+	path := filepath.Join(t.TempDir(), autopublish.FileName)
+	if err := autopublish.Update(path, func(rules []autopublish.Rule) ([]autopublish.Rule, error) { return rules, nil }); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	staged, release := make(chan struct{}), make(chan struct{})
+	done, result := make(chan struct{}), make(chan error, 1)
+	var once sync.Once
+	t.Cleanup(func() { cancel(); once.Do(func() { close(release) }); <-done })
+	go func() {
+		defer close(done)
+		result <- autopublish.Update(path, func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
+			close(staged)
+			select {
+			case <-release:
+				return append(rules, f.Rules[0]), nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		})
+	}()
+	select {
+	case <-staged:
+	case <-ctx.Done():
+		t.Fatal("first editor never staged its actual old view")
+	}
+	secondCalled := false
+	secondEdit := func(rules []autopublish.Rule) ([]autopublish.Rule, error) {
+		secondCalled = true
+		return append(rules, f.Rules[1]), nil
+	}
+	// Keep the production five-second lock deadline unchanged. A completed
+	// refused acquisition, not a timing guess, proves meaningful overlap.
+	secondErr := autopublish.Update(path, secondEdit)
+	calledDuringContention := secondCalled
+	afterContention, readErr := os.ReadFile(path)
+	once.Do(func() { close(release) })
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("first editor did not finish after its callback was released")
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if secondErr != nil {
+		if err := autopublish.Update(path, secondEdit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A no-lock mutant lets the second commit B before the first writes its
+	// staged A. The exact membership check then fails for lost B, not a count.
+	assertExactRuleIDs(t, path, f.ExpectedIDs)
+	if secondErr == nil || !strings.Contains(secondErr.Error(), f.ContentionError) {
+		t.Fatalf("contended edit did not observe real acquisition refusal: %v", secondErr)
+	}
+	if calledDuringContention {
+		t.Fatal("refused lock acquisition entered the edit callback")
+	}
+	if readErr != nil || !bytes.Equal(afterContention, before) {
+		t.Fatalf("contended refusal changed bytes before first commit: %q %v", afterContention, readErr)
+	}
+	// The second callback may run on the explicit retry, never on refusal.
+	if !secondCalled {
+		t.Fatal("second editor never completed its explicit retry")
+	}
+}
+
+func TestUpdateValidationRefusalRetainsExactBytes(t *testing.T) {
+	t.Parallel()
+	f := loadFileUpdateBoundary(t, "validation-refusal-preserves-exact-file-bytes")
+	path := filepath.Join(t.TempDir(), autopublish.FileName)
+	if err := autopublish.Update(path, func([]autopublish.Rule) ([]autopublish.Rule, error) { return f.Rules, nil }); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = autopublish.Update(path, func(rules []autopublish.Rule) ([]autopublish.Rule, error) { return append(rules, f.Rejected), nil })
+	if err == nil || !strings.Contains(err.Error(), f.RefusalError) {
+		t.Fatalf("expected actual validation refusal: %v", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil || !bytes.Equal(before, after) {
+		t.Fatalf("refused validation changed exact file bytes: %q %v", after, readErr)
+	}
+	assertExactRuleIDs(t, path, f.ExpectedIDs)
 }
 
 func TestUpdatePreservesAnUnreadableFile(t *testing.T) {

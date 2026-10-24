@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DOCS } from '@/lib/docs';
 import { StrictMode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { AutoPublishRule, LocalSettingsResponse, SyncAuthResponse } from '@peasant-labs/schema';
 import SettingsPageClient from './SettingsPageClient';
-import { SETTING_GROUP_OF } from '@/lib/settings/catalog';
+import { SETTING_GROUP_OF, SETTINGS_SECTIONS, groupOf, sectionOfGroup, settingsSection, type SettingsSectionId } from '@/lib/settings/catalog';
 import { SETTING_ROW_STATES } from '@/lib/ft-ui';
 import {
   loadInstallCases,
@@ -13,7 +14,7 @@ import {
   loadAuthRecoveryCases,
   loadServerKeyNames,
   loadSettingWrites,
-  loadSettingsGroups,
+  loadSettingsSections,
   loadSettingsResponse,
 } from '@/test/fixtures/settings';
 
@@ -96,10 +97,16 @@ function withRules(rules: AutoPublishRule[]): LocalSettingsResponse {
   return { ...loadSettingsResponse(), autoPublish: rules };
 }
 
-async function mountPage() {
-  render(<SettingsPageClient />);
-  await screen.findByRole('heading', { name: 'settings' });
-  await waitFor(() => expect(document.querySelector('details.srow-group')).not.toBeNull());
+/** Mounts one section of the page, the account section unless named, once its groups show. */
+async function mountPage(section: SettingsSectionId = 'account') {
+  render(<SettingsPageClient section={section} />);
+  await screen.findByRole('heading', { level: 2, name: settingsSection(section).label });
+  await waitFor(() => expect(document.querySelector('[data-group]')).not.toBeNull());
+}
+
+/** The section that shows a key's row. */
+function sectionOfKey(key: string): SettingsSectionId {
+  return sectionOfGroup(groupOf(key)).id;
 }
 
 function rowOf(key: string): HTMLElement {
@@ -138,7 +145,7 @@ describe('settings page groups', () => {
       }
       expect(await screen.findByRole('button', { name: 'retry sign-in' })).toBeVisible();
       expect(screen.getByRole('alert')).toHaveTextContent(testCase.error);
-      expect(document.querySelector('details.srow-group')).not.toBeNull();
+      expect(document.querySelector('[data-group]')).not.toBeNull();
       expect(screen.queryAllByText('@alice-dev')).toHaveLength(0);
       expect(screen.queryByRole('button', { name: 'log out' })).toBeNull();
       recovered = true;
@@ -150,14 +157,36 @@ describe('settings page groups', () => {
     });
   }
 
-  it('shows exactly the manifest groups, in order, open or collapsed as listed', async () => {
-    const groups = loadSettingsGroups();
-    await mountPage();
-    const mounted = Array.from(document.querySelectorAll<HTMLDetailsElement>('details.srow-group')).map((group) => ({
-      name: group.querySelector('.srow-summary-label')?.textContent,
-      open: group.open,
-    }));
-    expect(mounted).toEqual(groups.map(({ name, open }) => ({ name, open })));
+  it('links exactly the manifest sections, in order, and shows each one\'s groups in order', async () => {
+    const sections = loadSettingsSections();
+    expect(SETTINGS_SECTIONS.map(({ id, label, groups }) => ({ id, name: label, groups: [...groups] }))).toEqual(sections.map(({ id, name, groups }) => ({ id, name, groups })));
+    for (const section of sections) {
+      await mountPage(section.id as SettingsSectionId);
+      const nav = screen.getByRole('navigation', { name: 'settings sections' });
+      expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(sections.map(({ name }) => name));
+      expect(within(nav).getByRole('link', { name: section.name })).toHaveAttribute('aria-current', 'page');
+      expect(within(nav).getByRole('link', { name: section.name })).toHaveAttribute('href', `/settings?section=${section.id}`);
+      expect(Array.from(document.querySelectorAll<HTMLElement>('[data-group]')).map((group) => group.dataset.group)).toEqual(section.groups);
+      cleanup();
+    }
+  });
+
+  it('titles the page settings above the section bar, names the section in its column, and carries no save footnote', async () => {
+    await mountPage('redaction');
+    // One page title, as fairtrade's demo and the online app place it: on the
+    // page edge, before the section bar, with no breadcrumb.
+    const title = screen.getByRole('heading', { level: 1, name: 'settings' });
+    const bar = screen.getByRole('navigation', { name: 'settings sections' });
+    expect(title.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 2, name: 'redaction' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+    expect(document.body.textContent).not.toContain('changes save right away');
+  });
+
+  it('opens the default section for a missing or unknown section id', async () => {
+    render(<SettingsPageClient section="no-such-section" />);
+    expect(await screen.findByRole('heading', { level: 2, name: 'account' })).toBeInTheDocument();
   });
 
   it('shows every key the server serves in exactly one group, the one the page names for it', async () => {
@@ -170,35 +199,40 @@ describe('settings page groups', () => {
     const stale = Object.keys(SETTING_GROUP_OF).filter((key) => !serverKeys.includes(key));
     expect(stale, 'grouped keys the server no longer serves').toEqual([]);
 
-    await mountPage();
-    for (const key of serverKeys) {
-      const shown = document.querySelectorAll(`[data-setting-keys~="${key}"]`);
-      expect(shown, `${key} is shown once`).toHaveLength(1);
-      const group = shown[0].closest<HTMLElement>('details.srow-group');
-      expect(group?.dataset.group, `${key}'s group`).toBe(SETTING_GROUP_OF[key]);
+    // Across every section, each key shows once, in its own group.
+    const shownIn = new Map<string, (string | undefined)[]>();
+    for (const section of SETTINGS_SECTIONS) {
+      await mountPage(section.id);
+      for (const key of serverKeys) {
+        for (const node of document.querySelectorAll(`[data-setting-keys~="${key}"]`)) {
+          shownIn.set(key, [...(shownIn.get(key) ?? []), node.closest<HTMLElement>('[data-group]')?.dataset.group]);
+        }
+      }
+      cleanup();
     }
+    for (const key of serverKeys) expect(shownIn.get(key), `${key}'s group`).toEqual([SETTING_GROUP_OF[key]]);
   });
 
   it('still shows a key it has no group for, as a plain row in advanced', async () => {
     const settings = loadSettingsResponse();
     settings.settings.push({ key: 'kickstart.intent', kind: 'string', value: null, effective: 'review', editable: true, inPeasantConfig: false });
     mountServer({ settings });
-    await mountPage();
-    expect(rowOf('kickstart.intent').closest<HTMLElement>('details.srow-group')?.dataset.group).toBe('advanced');
+    await mountPage('advanced');
+    expect(rowOf('kickstart.intent').closest<HTMLElement>('[data-group]')?.dataset.group).toBe('advanced');
   });
 
-  it('tags a row "not in peasant config" exactly when the server says peasant config cannot change it', async () => {
+  it('carries no provenance or scope chip on any section, row or heading', async () => {
     const settings = loadSettingsResponse();
-    // The page reads the flag; it does not keep its own list.
-    const theme = settings.settings.find((setting) => setting.key === 'display.theme')!;
-    theme.inPeasantConfig = true;
+    // Half the keys are out of reach of peasant config; that is no reason for a badge.
+    expect(settings.settings.some((setting) => !setting.inPeasantConfig)).toBe(true);
     mountServer({ settings });
-    await mountPage();
-    for (const setting of settings.settings.filter((candidate) => candidate.editable)) {
-      // A source's folders row shares the tag its switch carries.
-      const holder = rowOf(setting.key).closest<HTMLElement>('.stg-source') ?? rowOf(setting.key);
-      const tagged = within(holder).queryAllByText('not in peasant config').length > 0;
-      expect(tagged, `${setting.key} tagged`).toBe(!setting.inPeasantConfig);
+    for (const section of SETTINGS_SECTIONS) {
+      await mountPage(section.id);
+      expect(document.querySelectorAll('.srow-tag, .chip').length, `${section.id} chips`).toBe(0);
+      for (const text of ['not in peasant config', 'online only', 'this computer only']) {
+        expect(document.body.textContent, `${section.id} reads ${text}`).not.toContain(text);
+      }
+      cleanup();
     }
   });
 });
@@ -213,9 +247,10 @@ describe('settings page writes', () => {
       const { status, body } = testCase.answer;
       serve('PATCH', '/api/v1/settings', () => answer(status, body));
     }
-    await mountPage();
+    await mountPage(sectionOfKey(testCase.key));
     const row = rowOf(testCase.key);
-    row.closest('details')!.open = true;
+    const group = row.closest('details');
+    if (group) group.open = true;
 
     if (testCase.input.toggle) fireEvent.click(within(row).getByRole('switch'));
     if (testCase.input.select !== undefined) fireEvent.change(within(row).getByRole('combobox'), { target: { value: testCase.input.select } });
@@ -271,15 +306,18 @@ describe('settings page village and projects', () => {
     expect(within(rowOf('village.connected')).getByText('@alice-dev')).toBeInTheDocument();
   });
 
-  it('shows the saved selection and points to peasant kickstart without a control that edits it', async () => {
-    await mountPage();
+  it('shows the saved selection and links to the docs to change it, without a control that edits it', async () => {
+    await mountPage('projects');
     const row = rowOf('selection.mode');
     expect(row).toBe(rowOf('selection.harnesses'));
-    expect(within(row).getByText('peasant kickstart')).toBeInTheDocument();
+    // How to change the selection lives in the docs; the row teaches no command.
+    expect(within(row).getByRole('link', { name: /^change the selection/ })).toHaveAttribute('href', DOCS.selection);
+    expect(row.textContent).not.toContain('peasant kickstart');
     expect(within(row).queryByRole('switch')).toBeNull();
     expect(within(row).queryByRole('combobox')).toBeNull();
     expect(within(row).queryByRole('button', { name: /^edit/ })).toBeNull();
-    expect(within(rowOf('selection.autoIngestNewBranches')).queryByRole('switch')).toBeNull();
+    // Part of the selection: its switch shows the value and cannot be moved here.
+    expect(within(rowOf('selection.autoIngestNewBranches')).getByRole('switch')).toBeDisabled();
   });
 });
 
@@ -301,7 +339,7 @@ describe('settings page custom patterns', () => {
         if (mutations().length === 1) return new Promise<Answer>((resolve) => { release = () => resolve(saved()); });
         return saved();
       });
-      await mountPage();
+      await mountPage('redaction');
       const block = rowOf('redaction.custom_patterns');
       const [first, second] = testCase.patterns;
       fireEvent.click(within(block).getByRole('button', { name: `more for ${first.id}` }));
@@ -338,7 +376,7 @@ describe('settings page custom patterns', () => {
       const value = (body as { value: unknown }).value;
       return answer(200, { key: 'redaction.custom_patterns', kind: 'structured', value, effective: value, editable: true, inPeasantConfig: false });
     });
-    await mountPage();
+    await mountPage('redaction');
     const block = rowOf('redaction.custom_patterns');
     fireEvent.click(within(block).getByRole('button', { name: 'add a pattern' }));
     fireEvent.change(within(block).getByLabelText('name'), { target: { value: 'acme-host' } });
@@ -370,7 +408,7 @@ describe('settings page load', () => {
     expect(await screen.findByText(/redaction.level is "maximum"/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole('button', { name: 'try again' }));
-    await waitFor(() => expect(document.querySelector('details.srow-group')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('[data-group]')).not.toBeNull());
   });
 });
 
@@ -382,7 +420,7 @@ describe('auto-publish install', () => {
       let release!: (reply: Answer) => void;
       serve('POST', `/api/v1/settings/auto-publish/${rule.id}/install`, () => new Promise<Answer>((resolve) => { release = resolve; }));
       serve('PUT', `/api/v1/settings/auto-publish/${rule.id}`, (body) => answer(200, { ...rule, ...(body as object), repositories: [] }));
-      await mountPage();
+      await mountPage('automatic-publishing');
       const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
       const item = group.querySelector<HTMLElement>(`[data-rule-id="${rule.id}"]`)!;
       const menu = within(item).getByRole('button', { name: `more for ${rule.match}` });
@@ -449,7 +487,7 @@ describe('auto-publish install', () => {
       const answers = testCase.answers[rule.id] ?? {};
       serve('POST', `/api/v1/settings/auto-publish/${rule.id}/install`, (body) => answers[(body as { path: string }).path]);
     }
-    await mountPage();
+    await mountPage('automatic-publishing');
     const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
     const installs = () => mutations().filter((call) => call.path.endsWith('/install'));
 
@@ -494,7 +532,7 @@ describe('auto-publish rules', () => {
       let release!: (reply: Answer) => void;
       serve('PUT', `/api/v1/settings/auto-publish/${first.id}`, () => new Promise<Answer>((resolve) => { release = resolve; }));
       serve('PUT', `/api/v1/settings/auto-publish/${second.id}`, (body) => answer(200, { ...second, ...(body as object), repositories: [] }));
-      await mountPage();
+      await mountPage('automatic-publishing');
       const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
       const ruleItem = (id: string) => group.querySelector<HTMLElement>(`[data-rule-id="${id}"]`)!;
       const firstToggle = within(ruleItem(first.id)).getByRole('switch');
@@ -538,7 +576,7 @@ describe('auto-publish rules', () => {
   it('names the collectives when signed in, and pauses a rule with one save and no install', async () => {
     mountServer({ settings: withRules([rule]), auth: { authenticated: true, username: 'alice-dev' } });
     serve('PUT', '/api/v1/settings/auto-publish/acme-work', (body) => answer(200, { ...rule, ...(body as object), repositories: [{ ...rule.repositories[0], hooks: [] }] }));
-    await mountPage();
+    await mountPage('automatic-publishing');
     const item = document.querySelector<HTMLElement>('[data-rule-id="acme-work"]')!;
     await within(item).findByText(/publishes to Acme Platform on git push/);
     fireEvent.click(within(item).getByRole('switch'));
@@ -552,7 +590,7 @@ describe('auto-publish rules', () => {
     const twoEvent: AutoPublishRule = { ...rule, events: ['pre-push', 'post-commit'], repositories: [] };
     mountServer({ settings: withRules([twoEvent]), auth: { authenticated: true, username: 'alice-dev' } });
     serve('PUT', '/api/v1/settings/auto-publish/acme-work', (body) => answer(200, { ...twoEvent, ...(body as object), repositories: [] }));
-    await mountPage();
+    await mountPage('automatic-publishing');
     const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
     fireEvent.click(within(group).getByRole('button', { name: 'more for ~/work/acme/**' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'edit' }));
@@ -575,7 +613,7 @@ describe('auto-publish rules', () => {
     const twoEvent: AutoPublishRule = { ...rule, events: ['pre-push', 'post-commit'], repositories: [] };
     mountServer({ settings: withRules([twoEvent]), auth: { authenticated: true, username: 'alice-dev' } });
     serve('PUT', '/api/v1/settings/auto-publish/acme-work', (body) => answer(200, { ...twoEvent, ...(body as object), repositories: [] }));
-    await mountPage();
+    await mountPage('automatic-publishing');
     const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
     fireEvent.click(within(group).getByRole('button', { name: 'more for ~/work/acme/**' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'edit' }));
@@ -593,7 +631,7 @@ describe('auto-publish rules', () => {
       ...(body as object),
       repositories: [{ path: '/home/alice/work/acme/api', label: 'github.com:acme/api', hooks: [{ event: 'pre-push', status: 'absent' }] }],
     }));
-    await mountPage();
+    await mountPage('automatic-publishing');
     const group = document.querySelector<HTMLElement>('[data-group="auto-publish"]')!;
     fireEvent.click(within(group).getByRole('button', { name: 'add a folder or repository' }));
     fireEvent.change(within(group).getByLabelText('folder'), { target: { value: '~/work/acme/**' } });
@@ -610,7 +648,7 @@ describe('auto-publish rules', () => {
   it('removes a rule and explains that retained hooks require another active binding', async () => {
     mountServer({ settings: withRules([rule]) });
     serve('DELETE', '/api/v1/settings/auto-publish/acme-work', () => answer(200, { id: 'acme-work', repositories: rule.repositories }));
-    await mountPage();
+    await mountPage('automatic-publishing');
     const item = document.querySelector<HTMLElement>('[data-rule-id="acme-work"]')!;
     fireEvent.click(within(item).getByRole('button', { name: 'more for ~/work/acme/**' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'remove' }));

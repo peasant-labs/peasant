@@ -376,10 +376,24 @@ round-trip shape-pin test.
 
 ## 8. Collective bulk pull (`--collective`)
 
+Explicit live pull references resolve through the shared account-scoped service:
+exact case-insensitive names, UUIDs, and canonical `/collectives/<uuid>` or legacy
+`/groups/<uuid>` URLs under the selected Village's full installation base path.
+The server may disclose a visible nonmember collective; local membership is not a
+second visibility policy. Ambiguous/unknown names and other installations fail
+without tracking or forwarding credentials. All references resolve before any
+tracking preference is written. After the required listing succeeds, each unique
+explicit selection is tracked under the original action account, including an
+empty eligible shelf. Tracking does not join, contribute, publish, or grant
+permission. Credential rotation during resolution/tracking prevents that original
+action from writing a preference under either principal. Dry runs retain their
+existing read-only selection path with no added auth/detail or preference writes;
+bare `--user` retains its existing membership discovery.
+
 `peasant village transcripts pull --collective <ref>...` pulls every
 transcript an accessible collective holds, and
 `peasant village transcripts list --collective <ref>... [--limit N]` lists
-what such a pull would take. Both contact the village and require login; both
+the existing membership-based remote selection. Both contact the village and require login; both
 narrow the pullable listing with the village's `collectives` filter (a
 comma-separated identifier list, the shape the village declares).
 
@@ -395,8 +409,9 @@ transcript approved in two listed collectives is pulled once).
 
 A collective holds the transcripts offered to it and approved, so a transcript
 the caller owns but never shared with a listed collective is not part of the
-selection. Only `approved` shares into a listed collective the caller is a
-member of count; `pending`/rejected, public, and preview shares never do (the
+selection. Required Village content/list authorization remains authoritative;
+resolving a visible collective is not a grant to pull its transcripts.
+Only eligible `approved` shares count; `pending`/rejected, public, and preview shares never do (the
 [auth matrices](auth.md#4-authorization-matrices--web-vs-pull) apply unchanged).
 
 ### Contributor filter (`--user`)
@@ -430,7 +445,24 @@ narrowed to one contributor, pages to the end
 (follows the pages, merges, and de-duplicates) so the listing matches what a
 pull would take, while the plain listing keeps its single-page behaviour.
 `--limit` sets the page size for the remote listing only (`--local` reads the
-local inventory and refuses `--collective`/`--limit`).
+local inventory and refuses `--limit`). `--local --collective` instead uses saved
+per-transcript viewer disclosures for the selected account and normalized Village
+installation, without network access. Multiple collectives are ORed, then
+`--user` intersects the result. Missing or invalidated disclosures never match;
+stale disclosures retain their original date. Unfiltered `--local` and
+`--local --user` remain accountless. Signed-out collective filtering explains
+those alternatives instead of selecting another account's observations.
+
+After independently authorized content succeeds, association metadata is
+refreshed through the dedicated viewer endpoint even for equal hashes, HTTP 304,
+downloaded unchanged bytes, and the bulk skip gate. Metadata is account-private,
+not content-manifest or inventory provenance. A transient metadata failure warns
+on stderr without failing successful content; its JSON result is stale with the
+prior date, or unknown without a fabricated date. A dedicated metadata 403/404 is
+a newly dated invalidation, not a timeout. Required content errors still fail,
+and bulk pulls continue and report any required failures. Dry runs do not observe
+or persist associations. JSON retains its existing envelopes and adds the nested
+`associationMetadata` result; warning text never goes to JSON stdout.
 
 A village which predates the filter is refused rather than over-pulled. The
 bulk pull negotiates the pull window once, before any download; a village that

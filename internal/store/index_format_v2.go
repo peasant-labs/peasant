@@ -380,15 +380,38 @@ func deriveGenerationTitle(generation indexformat.Generation) string {
 	return ""
 }
 
+// firstTitleLine is the first non-empty line of a turn, at most 80 code
+// points. A line over the cap is cut at a word where one is near the cap. A
+// cut line, or a line the turn goes on past without finishing a sentence, ends
+// in an ellipsis, so a list never shows a cut prompt as the whole request.
 func firstTitleLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			if runes := []rune(trimmed); len(runes) > 80 {
-				return string(runes[:77]) + "..."
-			}
-			return trimmed
+		if trimmed == "" {
+			continue
 		}
+		if runes := []rune(trimmed); len(runes) > 80 {
+			cut := string(runes[:79])
+			if space := strings.LastIndexByte(cut, ' '); space >= len(cut)-20 && space > 0 {
+				cut = cut[:space]
+			}
+			return strings.TrimRight(cut, " :;,.") + "…"
+		}
+		if continues(lines[index+1:]) && !strings.ContainsAny(trimmed[len(trimmed)-1:], ".?!") {
+			return strings.TrimRight(trimmed, ":;,") + "…"
+		}
+		return trimmed
 	}
 	return ""
+}
+
+// continues reports whether any of the remaining lines carries text.
+func continues(rest []string) bool {
+	for _, line := range rest {
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
+	}
+	return false
 }

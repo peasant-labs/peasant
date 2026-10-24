@@ -3,7 +3,7 @@
 #
 # `collectives` is the double's membership list. A collective with `member: false`
 # exists but is not one the caller belongs to, so the double omits it from
-# `GET /api/v1/groups` exactly as the village does.
+# `GET /api/v1/collectives` exactly as the village does.
 #
 # A case either resolves (`id`) or refuses (`errorContains`, plus `errorMentions`
 # when the message must also name something specific, such as a sibling collective

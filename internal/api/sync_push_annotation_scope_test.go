@@ -76,6 +76,8 @@ func TestHandleSyncPush_PublishesOnlyTheAnnotationsOfThePublishedSessions(t *tes
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.URL.Path == "/api/v1/auth/me":
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
 		case strings.Contains(r.URL.Path, "/transcripts/publish"):
 			captured := &syncCapturedPublish{parts: map[string]string{}}
 			captured.record(r)

@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useChannel } from '@/contexts/WebSocketContext';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
@@ -9,7 +8,7 @@ import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
 import { useSessionTitles } from '@/hooks/useSessionTitles';
 import { SkeletonList } from '@/lib/skeleton';
-import { TeachingEmptyState } from '@/lib/ft-ui';
+import { IngestTeach } from '@/components/IngestTeach';
 import { displayProject } from '@/lib/quality/utils';
 import { parseProjectHash } from '@/lib/navigation/projectRoutes';
 import type { SessionsPayload, SessionSummary } from '@/types/messages';
@@ -99,7 +98,7 @@ export function SessionsRouter() {
 
   if (!mounted || (!projectHash && !raw)) {
     return (
-      <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12">
+      <div className="asb-page">
         <SkeletonList rows={5} label="Loading sessions" />
       </div>
     );
@@ -107,30 +106,21 @@ export function SessionsRouter() {
 
   if (!projectHash) {
     return (
-      <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12">
+      <div className="asb-page">
         <p role="alert" className="text-base leading-relaxed text-danger">
-          This project link has a malformed identity, so no sessions were requested.
-          Taking you Home…
+          this project link is broken, so nothing was opened. taking you home…
         </p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
-      <Breadcrumbs items={[{ label: 'projects', href: '/' }, { label }]} />
+    <div className="asb-page animate-fade-up">
+      <Breadcrumbs items={[{ label: 'sessions', href: '/' }, { label }]} />
 
-      <div>
-        <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink">
-          {label}
-        </h1>
-        <p className="text-sm text-ink-3 mt-1">
-          every recorded session in this project.{' '}
-          <Link href="/" className="underline underline-offset-2 hover:text-ink focus-mono">
-            all projects
-          </Link>
-        </p>
-      </div>
+      <h1 className="iu-page-title iu-page-title-content page-title">
+        {label}
+      </h1>
 
       {error && (
         <p role="alert" className="text-base leading-relaxed text-danger">
@@ -157,13 +147,7 @@ export function SessionsRouter() {
           titles={sessionTitles}
           heading="sessions"
           onScopeUnavailable={handleScopeUnavailable}
-          emptyState={
-            <TeachingEmptyState
-              title="no sessions recorded for this project yet"
-              body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
-              command="peasant ingest"
-            />
-          }
+          emptyState={<IngestTeach headline="no sessions recorded for this project yet" />}
         />
       )}
 
@@ -176,14 +160,9 @@ export function SessionsRouter() {
             sessions={scoped}
             titles={sessionTitles}
             title="sessions"
-            subtitle="ingested session transcripts for this project."
           />
         ) : (
-          <TeachingEmptyState
-            title="no sessions recorded for this project yet"
-            body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
-            command="peasant ingest"
-          />
+          <IngestTeach headline="no sessions recorded for this project yet" />
         )
       )}
     </div>

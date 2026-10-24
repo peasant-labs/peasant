@@ -282,21 +282,33 @@ the server serves the newly built assets before you trust a screenshot or a comp
   `home` leads the nav instead. Do not rename or delete the label or the routes silently.
 - `/share` is the canonical publish route: one-session links open the transcript popup;
   multi-session and wizard-step links retain the wizard. It stays
-  outside the fairtrade section registry, and the local header does not link to it. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
-  `home | settings` in the nav, then `analytics | changes | code map` by route only.
+  outside the fairtrade section registry, and the local sidebar does not link to it. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
+  `home | settings` in the nav, then `online | analytics | changes | code map` by route only
+  (`online` is the label of the `village` id, whose route stays `/village`).
   `GRAPH_APP_SECTIONS` is its deprecated alias with the earlier three-entry value. Derive the nav
   and routes from the registry (`web/src/lib/nav/sections.ts`) and fail loudly on an unmapped id.
-  A nav section this app has no page for stays out of the header until its page ships, so the
-  header never carries a dead link. Nothing in the header or the command palette links to a
+  A nav section this app has no page for stays out of the sidebar until its page ships, so the
+  sidebar never carries a dead link. Nothing in the sidebar or the command palette links to a
   route-only section; its routes still resolve by URL. Do not add a `/push` alternate route.
-- The local header is one row: the `peasant` home link, search (⌘K), the nav sections other than
-  home, and an icon-only theme toggle. It carries no connection indicator. When the local app is
-  unreachable (`GET /api/v1/health` fails or the WebSocket stays down), fairtrade's
-  `LocalOfflineBanner` shows at the top of the page under the header, with the start command and
-  `try again`. Its copy says the app on this computer is not running and that the internet is
-  fine; never replace it with copy that reads as an internet outage. `web/scripts/visual/testdata/shell-header.yaml` is the
-  required-name manifest for the header, and the component tests and the mounted shell gates
-  read it.
+- The local chrome is fairtrade's `AppSidebar` (`web/src/components/LocalSidebar.tsx`), at
+  fairtrade's default width, in fairtrade's own order: the `peasant` home link (the wheat mark
+  alone; the name is its accessible name), the shortcuts (search on ⌘K, the docs opened in a new
+  tab, community marked soon, then a `collectives` link that opens online, the local app's one
+  link to online), the registry's nav sections, and the footer with the account row while this
+  computer is signed in, then the settings gear (fairtrade turns the registry's `settings` entry
+  into it) and the theme toggle. The switcher never lists online or local. A settings page keeps
+  that same nav, the gear current; its sections are fairtrade's in-page section bar
+  (`SettingsLayout`) in the page body, never sidebar groups. Every page that is not full-bleed
+  (a transcript, a map canvas) sits in fairtrade's `.asb-page` frame with one `.iu-page-title`
+  heading at the hero size.
+  Below 768px it is a top bar whose menu opens the same nav as a drawer. It carries no connection
+  indicator. When the local app is unreachable (`GET /api/v1/health` fails or the WebSocket stays
+  down), fairtrade's `LocalOfflineBanner` shows at the top of the page column, in the page flow
+  (pinned there where the screen has room), with the start command and `try again`. Its copy says
+  the app on this computer is not running and that the internet is fine; never replace it with copy
+  that reads as an internet outage. `web/scripts/visual/testdata/shell-chrome.yaml` is the
+  required-name manifest for the sidebar, and the component tests and the mounted shell gates read
+  it.
 - When you replace the share-bridge UI, keep these semantics: auto-scan of uncached selections;
   caching of success and of honest failure, keyed by `(level, session)`, across navigation;
   explicit re-scan; continuation disabled when any session failed; fail-closed behavior on a
@@ -311,6 +323,11 @@ the server serves the newly built assets before you trust a screenshot or a comp
 
 ## Documentation
 
+- How-to lives only in the docs (peasantlabs.org/docs). The local web app links to the page or
+  section that teaches a task (`web/src/lib/docs.ts`, rendered by `DocsLink`, opened in a new tab)
+  and does not restate commands or steps. What stays in the app: an error naming its recovery, the
+  offline notice's start command, consent and redaction review, and a repository-specific remedy
+  or uninstall command the docs cannot know.
 - Keep the user-visible behavior and the examples accurate. Do not document planned behavior as
   shipped.
 - Generate the CLI reference pages with `make docs-cli`. Do not hand-edit generated CLI pages.

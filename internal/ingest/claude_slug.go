@@ -11,9 +11,9 @@ package ingest
 // splitSlugRoot for how the two shapes are told apart.
 //
 // The encoding is ambiguous (dashes in directory names vs path separators), so
-// this uses a greedy filesystem-based decoder: starting from the slug's root,
-// it tries each segment and checks if a directory exists. If not, it merges
-// segments with dashes.
+// this uses a filesystem-based decoder: starting from the slug's root, it tries
+// each segment and checks if a directory exists. If not, it merges segments
+// with dashes, and it backs out of a choice that leads to a dead end.
 //
 // Claude often appends branch or worktree names to the encoded project path
 // (e.g., -home-user-dev-my-repo-feature-branch). When the trailing segments

@@ -1,0 +1,8 @@
+requiredNames: [domain-cas-independent-progress, older-domain-fetch-finishes-last, overlapping-targeted-source-preserved, attempt-terminal-confirmed-during-fetch, newer-failed-attempt-retains-complete-cas]
+catalogSources: [membership, contribution-discovery, organization, explicit]
+cases:
+  - {name: domain-cas-independent-progress, mode: independent, wantName: New, wantError: false}
+  - {name: older-domain-fetch-finishes-last, mode: catalog, wantName: New, wantError: true}
+  - {name: overlapping-targeted-source-preserved, mode: tracking, wantName: New, wantError: true}
+  - {name: attempt-terminal-confirmed-during-fetch, mode: attempt, wantError: true}
+  - {name: newer-failed-attempt-retains-complete-cas, mode: failed-then-complete, wantError: true}

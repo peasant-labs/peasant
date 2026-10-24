@@ -369,6 +369,29 @@ func WithGenerationArtifacts(artifacts GenerationArtifactStore, locker SessionLo
 	}
 }
 
+// ManagedGenerationOptions are the open options of a store that writes or
+// reads managed generations: the managed-generation (V2) index format, and the
+// owned-artifact file store and per-session lock rooted at the owned output
+// directory. An empty root registers the index format only. Every ingest
+// writer opens its store with them: one that does not indexes at the older
+// baseline revision and refuses each session a managed run stored, as a
+// newer producer.
+func ManagedGenerationOptions(ownedRoot string) ([]OpenOption, error) {
+	options := []OpenOption{WithIndexFormats(V2IndexFormat())}
+	if ownedRoot == "" {
+		return options, nil
+	}
+	artifacts, err := NewOSGenerationArtifactStore(ownedRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open managed generation store: %w", err)
+	}
+	locker, err := NewFileSessionLocker(ownedRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open managed generation lock: %w", err)
+	}
+	return append(options, WithGenerationArtifacts(artifacts, locker)), nil
+}
+
 // WithMigrationConsent supplies a callback that gates running the V33 harness
 // rename migration on a database that already contains session data. The
 // callback may prompt the user. If nil or omitted, the migration runs without

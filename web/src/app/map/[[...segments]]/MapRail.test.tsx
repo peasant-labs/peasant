@@ -145,7 +145,7 @@ describe('NodeRail commit-row session list', () => {
         expect(within(row).getByText(testCase.expectedFallbackText)).toBeInTheDocument();
         expect(within(row).queryByRole('list')).not.toBeInTheDocument();
       } else {
-        expect(within(row).queryByText('no AI conversation captured')).not.toBeInTheDocument();
+        expect(within(row).queryByText('no ai conversation captured')).not.toBeInTheDocument();
       }
 
       for (const expected of testCase.expectedRows) {

@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LOCAL_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
 import {
-  headerNavSections,
   isSectionActive,
   LOCAL_SECTIONS,
   NAV_SECTIONS,
@@ -25,10 +24,25 @@ const ACTIVE_CASES = (() => {
   const rows = root.cases.map((row, index) => requireRecord(row, `section active fixture.cases[${index}]`));
   rows.forEach((row, index) => requireExactRequiredFields(row, ['name', 'section', 'pathname', 'active'], `section active fixture.cases[${index}]`));
   requireUniqueNames(rows, 'section active fixture.cases');
-  const required = ['home-on-root', 'home-not-on-a-section-page', 'section-on-its-page-with-trailing-slash', 'section-below-its-page', 'section-not-on-a-lookalike-path'];
+  const required = ['home-on-root', 'home-not-on-a-section-page', 'section-on-its-page-with-trailing-slash', 'section-below-its-page', 'section-not-on-a-lookalike-path', 'village-direct-active', 'village-not-lookalike'];
   const missing = required.filter((name) => !rows.some((row) => row.name === name));
   if (missing.length) throw new Error(`section active fixture is missing required cases: ${missing.join(', ')}`);
   return rows as Array<{ name: string; section: string; pathname: string; active: boolean }>;
+})();
+
+const NAV_EXPECTATIONS = (() => {
+  const path = resolve(process.cwd(), 'src/lib/nav/testdata/village_adoption.yaml');
+  const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'village adoption fixture'), 'village adoption fixture');
+  requireExactRequiredFields(root, ['navRoutes', 'routeOnly'], 'village adoption fixture');
+  const tuples = (rows: unknown, size: number, field: string) => {
+    if (!Array.isArray(rows) || rows.some(row => !Array.isArray(row) || row.length !== size || row.some(cell => typeof cell !== 'string'))) throw new Error(`village adoption fixture.${field} requires named routes`);
+    return rows as string[][];
+  };
+  const navRoutes = tuples(root.navRoutes, 2, 'navRoutes') as [string, string][];
+  const routeOnly = tuples(root.routeOnly, 3, 'routeOnly') as [string, string, string][];
+  if (!navRoutes.some(([id, href]) => id === 'home' && href === '/')) throw new Error('required home route missing from adoption fixture');
+  if (!routeOnly.some(([id, label, href]) => id === 'village' && label === 'online' && href === '/village')) throw new Error('required route-only village page missing from adoption fixture');
+  return { navRoutes, routeOnly };
 })();
 
 afterEach(() => {
@@ -39,28 +53,18 @@ afterEach(() => {
 describe('local app sections', () => {
   it('follow the fairtrade registry: order, labels and nav membership', () => {
     const registry = LOCAL_APP_SECTIONS.map(({ id, label, inNav }) => ({ id, label, inNav: inNav !== false }));
-    // The registry lists every section fairtrade knows; this app renders only
-    // the pages it ships. `village` is a registry section with no page here, so
-    // it is deliberately absent until its page lands.
-    const routed = registry.filter(({ id }) => id !== 'village');
     expect(LOCAL_SECTIONS.map(({ id, label, inNav }) => ({ id, label, inNav }))).toEqual(
-      routed,
+      registry,
     );
   });
 
-  it('link the header to the shipped home and settings pages', () => {
-    expect(NAV_SECTIONS.map((section) => [section.id, section.href])).toEqual([['home', '/'], ['settings', '/settings']]);
-    expect(visibleNavSections(new Set(['code_map_navigation_v1'])).map((section) => section.id)).toEqual(['home', 'settings']);
-    // Home is the brand link; settings is the other canonical nav section.
-    expect(headerNavSections(new Set(['code_map_navigation_v1'])).map((section) => section.id)).toEqual(['settings']);
+  it('links every canonical navigation section to its mounted page', () => {
+    expect(NAV_SECTIONS.map((section) => [section.id, section.href])).toEqual(NAV_EXPECTATIONS.navRoutes);
+    expect(visibleNavSections(new Set(['code_map_navigation_v1'])).map((section) => section.id)).toEqual(NAV_EXPECTATIONS.navRoutes.map(([id]) => id));
   });
 
-  it('keep analytics, changes and the code map on their routes, by URL only', () => {
-    expect(ROUTE_ONLY_SECTIONS.map((section) => [section.id, section.label, section.href])).toEqual([
-      ['analytics', 'analytics', '/analytics'],
-      ['changes', 'changes', '/review'],
-      ['map', 'code map', '/map'],
-    ]);
+  it('keep online, analytics, changes and the code map on their routes, by URL only', () => {
+    expect(ROUTE_ONLY_SECTIONS.map((section) => [section.id, section.label, section.href])).toEqual(NAV_EXPECTATIONS.routeOnly);
   });
 
   it('fail loudly on a registry id this app does not map', async () => {

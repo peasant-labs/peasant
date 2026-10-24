@@ -210,6 +210,10 @@ func TestPushCmd_LastGoodPrintsConsentWarningAndUploads(t *testing.T) {
 	captured := &capturedPublish{parts: map[string]string{}}
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 			_, _ = w.Write([]byte(`{}`))
 			return

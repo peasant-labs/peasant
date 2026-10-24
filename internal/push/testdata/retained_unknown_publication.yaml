@@ -46,7 +46,7 @@ cases:
     expected: '{"type":"future","data":"{\"secret\":\"[CUSTOM]\"}"}'
     advertised: true
   - name: receiver_without_preservation_refuses
-    expectedReason: 'the target Village did not advertise the exact required capability tokens'
+    expectedReason: 'the target peasant online server did not advertise the exact required capability tokens'
     payload: '{"type":"future","number":9007199254740993}'
     expected: '{"type":"future","number":9007199254740993}'
     advertised: false

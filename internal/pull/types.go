@@ -101,7 +101,7 @@ func ParseTranscriptRef(raw string) (TranscriptRef, error) {
 			"invalid transcript reference: empty\n" +
 				"  what: no transcript UUID or URL was given\n" +
 				"  why:  `peasant village transcripts pull` needs a reference to pull\n" +
-				"  fix:  pass a transcript UUID (e.g. 99d59925-36bc-424c-a789-8be54d9702ba) or a pasted village web URL")
+				"  fix:  pass a transcript UUID (e.g. 99d59925-36bc-424c-a789-8be54d9702ba) or a pasted peasant online web URL")
 	}
 
 	// URL form: anything that parses with a scheme + host. The path must be the
@@ -227,6 +227,9 @@ type PullResult struct {
 	// after FETCH-META (pulled, up-to-date, dry-run); persisted to the V38
 	// pulled_transcripts.license_id column on a real pull.
 	License schema.License
+	// AssociationMetadata is independent account-scoped disclosure evidence. It
+	// never authorizes content and is not persisted into the content manifest.
+	AssociationMetadata *schema.PullAssociationMetadataResult
 }
 
 // RefreshOptions controls a RefreshOwnAnnotations run.

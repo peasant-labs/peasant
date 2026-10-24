@@ -2,9 +2,9 @@
 
 import { useState, type ReactNode } from 'react';
 import { LocalSettingKind, type LocalSetting } from '@peasant-labs/schema';
-import { Chip, SettingRow } from '@/lib/ft-ui';
+import { SettingRow } from '@/lib/ft-ui';
 import { updateSetting } from '@/lib/api/settings';
-import { copyOf, describeValue, optionLabel, overridden, shownValue, tagOf } from '@/lib/settings/catalog';
+import { copyOf, describeValue, optionLabel, overridden, shownValue } from '@/lib/settings/catalog';
 
 /** Called with the row the server saved, so the page shows what applies now. */
 export type OnSettingSaved = (saved: LocalSetting) => void;
@@ -18,8 +18,6 @@ interface SettingKeyRowProps {
   help?: ReactNode;
   /** Every key the row shows, when it shows more than its own. */
   keys?: readonly string[];
-  /** Leaves the tag off a row whose neighbour carries it for both. */
-  hideTag?: boolean;
 }
 
 /** The text a text control shows for a value. */
@@ -58,21 +56,17 @@ function wireValue(setting: LocalSetting, next: boolean | string): unknown {
 }
 
 /** A key the page may not change: its value, and how it changes instead. */
-export function ReadOnlyRow({ label, value, help, tag, keys, action }: {
+export function ReadOnlyRow({ label, value, help, keys, action }: {
   label: ReactNode;
   value: ReactNode;
   help?: ReactNode;
-  tag?: string;
   keys: readonly string[];
   action?: ReactNode;
 }) {
   return (
     <div className="srow stg-readonly" data-setting-keys={keys.join(' ')}>
       <span className="srow-text-col">
-        <span className="srow-label-line">
-          <span className="srow-label">{label}</span>
-          {tag && <Chip size="sm" className="srow-tag">{tag}</Chip>}
-        </span>
+        <span className="srow-label">{label}</span>
         {help && <span className="srow-help">{help}</span>}
       </span>
       <span className="srow-control stg-readonly-control">
@@ -90,7 +84,7 @@ export function ReadOnlyRow({ label, value, help, tag, keys, action }: {
  * field that saves on `save`. Each change is one PATCH. A refused change puts
  * the previous value back and shows the server's reason.
  */
-export function SettingKeyRow({ setting, onSaved, label, help, keys, hideTag = false }: SettingKeyRowProps) {
+export function SettingKeyRow({ setting, onSaved, label, help, keys }: SettingKeyRowProps) {
   // Remounts the row when a save lands on the value it already showed (a
   // cleared field whose default applies again), so the field shows it.
   const [resync, setResync] = useState(0);
@@ -107,7 +101,6 @@ export function SettingKeyRow({ setting, onSaved, label, help, keys, hideTag = f
         label={rowLabel}
         value={describeValue(setting)}
         help={help ?? setting.description ?? copy.help}
-        tag={hideTag ? undefined : tagOf(setting)}
       />
     );
   }
@@ -135,7 +128,6 @@ export function SettingKeyRow({ setting, onSaved, label, help, keys, hideTag = f
       options={options}
       // A menu with one entry is shown, not offered.
       disabled={control === 'select' && options.length <= 1}
-      tag={hideTag ? undefined : tagOf(setting)}
       onCommit={commit}
     />
   );

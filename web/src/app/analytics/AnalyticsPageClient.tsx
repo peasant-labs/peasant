@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { ProjectOverview } from '@peasant-labs/fairtrade/analytics';
 import { Disconnected, ConnectionStatus } from '@/components/ConnectionState';
+import { IngestTeach } from '@/components/IngestTeach';
 import { useChannel } from '@/contexts/WebSocketContext';
 import { adaptAnalytics } from '@/lib/adapters/analytics';
 import { adaptQualitySessions } from '@/lib/quality/types';
@@ -26,30 +27,39 @@ export function AnalyticsPageClient() {
   if (quality === undefined) {
     if (!connected || error) {
       return (
-        <div className="max-w-[1360px] mx-auto px-6 pt-6">
+        <div className="asb-page">
           <Disconnected />
         </div>
       );
     }
     return (
-      <div className="max-w-[1360px] mx-auto px-6 pt-6">
+      <div className="asb-page">
         <SkeletonList rows={5} label="Loading analytics" />
       </div>
     );
   }
 
+  // Nothing recorded yet: charts over zero sessions are empty frames, so the
+  // page says what is missing instead, like every other empty local page.
+  if (payload.sessions.length === 0) {
+    return (
+      <div className="asb-page animate-fade-up">
+        <h1 className="iu-page-title page-title">analytics</h1>
+        <IngestTeach />
+      </div>
+    );
+  }
+
+  // The page title is the app's, in the page frame every local page shares;
+  // the overview below it draws only its summary line, section toggles and
+  // charts, inset to the same left edge.
   return (
     <div className="animate-fade-up">
-      {(!connected || error) && (
-        <div className="mx-auto max-w-[1360px] px-6 pt-6">
-          <ConnectionStatus connected={connected} hasData />
-        </div>
-      )}
-      <ProjectOverview
-        payload={payload}
-        title="project overview"
-        contributorLimit={10}
-      />
+      <header className="asb-page analytics-head">
+        <h1 className="iu-page-title page-title">analytics</h1>
+        {(!connected || error) && <ConnectionStatus connected={connected} hasData />}
+      </header>
+      <ProjectOverview payload={payload} contributorLimit={10} />
     </div>
   );
 }

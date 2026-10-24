@@ -203,7 +203,7 @@ func installLatestAttemptAuthority(t *testing.T, db *store.Store, sid ingest.Ses
 		t.Fatalf("build the read authority's capture: %v", err)
 	}
 	outcome, err := db.ActivateGeneration(t.Context(), store.GenerationActivation{
-		Generation: authority, Blobs: blobs, IndexerVersion: 19, IndexedAtMs: 1, ContentCapture: capture,
+		Generation: authority, Blobs: blobs, IndexerVersion: ingest.HarvesterVersionRegistry[harness].IndexerVersion, IndexedAtMs: 1, ContentCapture: capture,
 	})
 	if err != nil {
 		t.Fatalf("install the read authority: %v", err)

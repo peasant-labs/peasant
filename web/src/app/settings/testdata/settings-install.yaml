@@ -102,11 +102,11 @@ cases:
       - acme-work -> /home/alice/work/acme/web
     preview:
       /home/alice/work/acme/api:
-        - on git push · publishes to Acme Platform, private
-        - on git push · publishes to Acme Labs, private
+        - on git push, publishes to Acme Platform, private
+        - on git push, publishes to Acme Labs, private
         - peasant village hooks uninstall --dir '/home/alice/work/acme/api' --event pre-push
       /home/alice/work/acme/web:
-        - on git push · publishes to Acme Platform, private
+        - on git push, publishes to Acme Platform, private
         - peasant village hooks uninstall --dir '/home/alice/work/acme/web' --event pre-push
     shows:
       /home/alice/work/acme/api: [hook installed]
@@ -153,8 +153,8 @@ cases:
       - acme-remote -> /home/alice/work/acme/api
     preview:
       /home/alice/work/acme/api:
-        - on git push · publishes to Acme Platform, private
-        - on each commit · publishes to Acme Labs, private
+        - on git push, publishes to Acme Platform, private
+        - on each commit, publishes to Acme Labs, private
         - peasant village hooks uninstall --dir '/home/alice/work/acme/api' --event pre-push
         - peasant village hooks uninstall --dir '/home/alice/work/acme/api' --event post-commit
     shows:
@@ -258,7 +258,7 @@ cases:
       - acme-work -> /home/alice/work/acme/api
     preview:
       /home/alice/work/acme/api:
-        - on git push · publishes to Acme Platform, private
+        - on git push, publishes to Acme Platform, private
         - peasant village hooks uninstall --dir '/home/alice/work/acme/api' --event pre-push
     shows:
       /home/alice/work/acme/api:

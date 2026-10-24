@@ -19,7 +19,7 @@ export function startCommandFor(port: string): string {
  * What the always-mounted live region says. `stopped` repeats the banner's own
  * headline; `stillStopped` is followed by the time of the failed check, so each
  * failed `try again` is read out. The shell manifest
- * (scripts/visual/testdata/shell-header.yaml) holds the same strings for the
+ * (scripts/visual/testdata/shell-chrome.yaml) holds the same strings for the
  * tests and the mounted gates.
  */
 export const OFFLINE_ANNOUNCEMENTS = {
@@ -29,12 +29,12 @@ export const OFFLINE_ANNOUNCEMENTS = {
 } as const;
 
 /**
- * Pinned under the header on a screen with room for it (the `notice-pinned`
- * variant, declared once in globals.css). On a smaller or zoomed screen it
- * scrolls with the page instead, so it can never cover the page or its own
- * `try again`.
+ * Pinned to the top of the page column on a screen with room for it (the
+ * `notice-pinned` variant, declared once in globals.css). On a smaller or
+ * zoomed screen it scrolls with the page instead, so it can never cover the
+ * page or its own `try again`.
  */
-const PINNED = 'notice-pinned:fixed';
+const PINNED = 'notice-pinned:sticky';
 
 /**
  * Moves focus to the page body. <main> is focusable only for this move: it
@@ -55,14 +55,16 @@ function clockTime(date: Date): string {
 }
 
 /**
- * The page-level notice for "the peasant app on this computer stopped", under
- * the fixed header. It renders nothing while the app is reachable.
+ * The page-level notice for "the peasant app on this computer stopped", at the
+ * top of the page column beside the sidebar. It renders nothing while the app
+ * is reachable.
  *
- * - On a screen with room it is pinned under the header, so a page scrolled
- *   down still shows it; elsewhere it sits at the top of the page and scrolls.
- *   While it shows it writes its height to `--app-notice-height`, so page
- *   content starts below it (`--app-header-height`) and full-height pages fill
- *   what is left (`--app-body-height`, which keeps a floor on short screens).
+ * - It sits in the page flow, above the page. On a screen with room it is
+ *   pinned there (sticky), so a page scrolled down still shows it; elsewhere it
+ *   scrolls away with the page. While it shows it writes its height to
+ *   `--app-notice-height`, so full-height pages fill what is left under it
+ *   (`--app-body-height`, which keeps a floor on short screens). The browser's
+ *   scroll anchoring keeps a reader's place when it appears or goes.
  * - An always-mounted live region announces the stop, each failed `try again`,
  *   and the return: a status region that mounts with its text is often not read
  *   out, and the banner cannot announce its own removal. It stands in until
@@ -75,32 +77,16 @@ export function LocalOfflineNotice() {
   const ref = useRef<HTMLDivElement>(null);
   const focusInside = useRef(false);
   const wasOffline = useRef(false);
-  // The notice height last published, and whether the notice was pinned then.
-  const published = useRef({ height: 0, pinned: false });
   const offlineNow = useRef(offline);
   offlineNow.current = offline;
   const [announcement, setAnnouncement] = useState('');
 
-  // Publish the notice's height. Where the notice scrolls with the page, a
-  // reader scrolled down keeps their place: <main>'s top padding grows by the
-  // notice (which the browser's scroll anchoring does not follow), so the page
-  // scrolls by the same amount, and back when the notice goes.
+  // Publish the notice's height for the full-height pages under it.
   useLayoutEffect(() => {
     const element = ref.current;
     if (!offline || !element) return;
     const root = document.documentElement;
-    // Instant, even where the page scrolls smoothly: keeping a place must not visibly move it.
-    const keepPlace = (y: number, delta: number, pinned: boolean) => {
-      if (delta !== 0 && !pinned && y > 0) window.scrollTo({ top: Math.max(0, y + delta), behavior: 'instant' });
-    };
-    const publish = () => {
-      const height = element.getBoundingClientRect().height;
-      const pinned = getComputedStyle(element).position === 'fixed';
-      const y = window.scrollY;
-      root.style.setProperty('--app-notice-height', `${height}px`);
-      keepPlace(y, height - published.current.height, pinned);
-      published.current = { height, pinned };
-    };
+    const publish = () => root.style.setProperty('--app-notice-height', `${element.getBoundingClientRect().height}px`);
     publish();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
     observer?.observe(element);
@@ -108,10 +94,7 @@ export function LocalOfflineNotice() {
     return () => {
       observer?.disconnect();
       window.removeEventListener('resize', publish);
-      const y = window.scrollY;
       root.style.removeProperty('--app-notice-height');
-      keepPlace(y, -published.current.height, published.current.pinned);
-      published.current = { height: 0, pinned: false };
     };
   }, [offline]);
 
@@ -169,7 +152,9 @@ export function LocalOfflineNotice() {
         {announcement}
       </p>
       {offline && (
-        <div ref={ref} className={`absolute inset-x-0 top-[var(--nav-h)] z-40 ${PINNED}`}>
+        // Static in the flow by default: `top` and `z-index` take effect only once pinned. (A
+        // `relative` here would lose to fairtrade's own unlayered `.relative` and never pin.)
+        <div ref={ref} className={`top-0 z-30 ${PINNED}`}>
           <LocalOfflineBanner
             onRetry={tryAgain}
             retrying={retrying}

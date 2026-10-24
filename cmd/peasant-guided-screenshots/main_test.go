@@ -53,7 +53,7 @@ func TestCaptureFixtureRejectsTrailingDocuments(t *testing.T) {
 // missing sheet even without a bare sheet-count guard: deleting the "push"
 // sheet block must fail decode with a message naming the missing sheet.
 func TestCaptureFixtureGuardsRequiredSheetDeletion(t *testing.T) {
-	old := []byte("  - name: push\n    kind: push\n    title: \"mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 7200}\n")
+	old := []byte("  - name: push\n    kind: push\n    title: \"mounted push wizard: start, selection, published-transcript preview, consent, receipt, and keyboard help in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 7840}\n")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("push-sheet mutation source occurs %d times, want exactly one", count)
 	}
@@ -183,7 +183,7 @@ func TestCaptureFixtureGuardsRequiredSelectionStateDeletion(t *testing.T) {
 // closed set of five required push states (see validatePushMatrix) still
 // catches a missing state even without a bare state-count guard.
 func TestCaptureFixtureGuardsRequiredPushStateDeletion(t *testing.T) {
-	old := []byte("  - key: receipt\n    wantContains: [\"to the village.\", \"nothing is removed from this machine.\", \"sessions in this push\"]\n")
+	old := []byte("  - key: receipt\n    wantContains: [\"to peasant online.\", \"nothing is removed from this machine.\", \"sessions in this push\"]\n")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("receipt state mutation source occurs %d times, want exactly one", count)
 	}

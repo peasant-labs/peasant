@@ -11,7 +11,7 @@ import {
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { CONNECTION } from '@/components/ConnectionState';
 import { Term } from '@/components/Term';
-import { Explainer, ExplainerToggle, useExplainer } from '@/components/Explainer';
+import { DocsLink } from '@/components/DocsLink';
 import { useChannel } from '@/contexts/WebSocketContext';
 import {
   TimeStrip,
@@ -27,6 +27,7 @@ import {
   type DecodedProjectTasksPayload,
 } from '@/lib/api/map';
 import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 import { mapHref, returnLocation, reviewHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import type { ReviewListPayload } from '@peasant-labs/schema';
 import { subscribe, type SessionsPayload } from '@/types/messages';
@@ -91,21 +92,22 @@ function CanvasShimmer({ note }: { note?: string }) {
   return (
     <div className="flex h-full flex-col">
       <SkeletonBox className="min-h-0 flex-1" />
-      {note && <p className="px-3 py-2 text-xs text-ink-3">{note}</p>}
+      {note && <p className="px-3 py-2 text-[length:var(--fs-label)] text-ink-3">{note}</p>}
     </div>
   );
 }
 
 /** One-line status note (plain and factual — the caption voice). */
 function StatusNote({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-ink-3">{children}</p>;
+  return <p className="font-mono text-[length:var(--fs-label)] text-ink-3">{children}</p>;
 }
 
 type FetchState = 'idle' | 'loading' | 'done' | 'error';
 /**
  * The map shell — search row, canvas + rail two-column, time strip. Used on
  * the /map/{project} route. The export name and the `projectName` prop are the
- * stable contract; `showLedger` adds the header ledger line on /map/{project}.
+ * stable contract; `showLedger` marks the /map/{project} page: it opens on the
+ * navigator and keeps the way back to where the reader came from.
  */
 export function MapShell({
   projectHash,
@@ -119,7 +121,6 @@ export function MapShell({
   const { data: sessionsData, connected, error: sessionsError } = useChannel<SessionsPayload>(SESSIONS_SUB);
   const navigate = useNavigate();
   const nowMs = useMemo(() => Date.now(), []);
-  const explainer = useExplainer('map');
 
   // -- Ambient data (sessions channel) --------------------------------------
   const sessions = useMemo(() => sessionsData?.sessions ?? [], [sessionsData]);
@@ -357,7 +358,7 @@ export function MapShell({
   if (graphState === 'error') {
     canvasBody = (
       <div className="flex h-full items-center justify-center px-5">
-        <p className="text-[13px] text-danger">Could not load the map graph.</p>
+        <p className="text-[length:var(--fs-label)] text-danger">couldn’t load the map.</p>
       </div>
     );
   } else if (!codeMapPayload) {
@@ -405,45 +406,20 @@ export function MapShell({
       aria-label={`Map of ${displayProject(projectName)}`}
       data-tour="project-map"
     >
-      {/* "What am I looking at?" — the toggle sits on its own line and the box
-          below spans the content column instead of collapsing inside a flex header. */}
-      <ExplainerToggle explainer={explainer} />
-      <Explainer explainer={explainer} title="What am I looking at?">
-        <p>
-          The whole codebase as boxes and lines. Each box is a{' '}
-          <Term k="node">code area</Term> (a folder or file); each line is a{' '}
-          <Term k="structureEdge">connection</Term>, meaning one area uses another.
-        </p>
-        <p>
-          Bright boxes were <Term k="coverage">built with AI on record</Term>;{' '}
-          <Term k="darkMatter">dim ones</Term> predate it. Red marks a{' '}
-          <Term k="violation">tangle</Term>. Click a box to see the conversations
-          that shaped it, or use the map&rsquo;s <span className="text-ink-2">detail</span>{' '}
-          control to open every area down to its folders.
-        </p>
-      </Explainer>
-
-      {showLedger && mySessions.length > 0 && (
-        <p className="text-sm text-ink-3">
-          <span className="font-mono tabular-nums">{mySessions.length.toLocaleString()}</span>{' '}
-          AI conversation{mySessions.length !== 1 ? 's' : ''}, on your machine. Nothing has left it.
-        </p>
-      )}
 
       {/* One-line state notes keep stale or degraded data unambiguous. */}
-      {sessionsError ? <StatusNote>Live conversation updates are unavailable. The code map remains available; retry the Peasant connection to refresh the conversation rail.</StatusNote> : null}
-      {!sessionsError && !sessionsData ? <StatusNote>{connected ? 'Waiting for live conversation updates. The code map is ready independently.' : CONNECTION.staleNote}</StatusNote> : null}
+      {sessionsError ? <StatusNote>live updates stopped. the map still works; reload the page to refresh the conversation list.</StatusNote> : null}
+      {!sessionsError && !sessionsData ? <StatusNote>{connected ? 'waiting for live updates. the map is ready.' : CONNECTION.staleNote}</StatusNote> : null}
       {!sessionsError && !connected && sessionsData && <StatusNote>{CONNECTION.staleNote}</StatusNote>}
       {graph && !graph.repoFound && (
         <StatusNote>
-          The project path didn&rsquo;t resolve to a git repository. The map is built from
-          recorded activity.
+          this folder isn&rsquo;t a git repository, so the map shows recorded work only.
         </StatusNote>
       )}
       {graph && graph.repoFound && graph.parsedLanguages.length === 0 && (
         <StatusNote>
-          Structure parsing is not yet available for this project&rsquo;s languages. The map
-          is built from recorded activity.
+          peasant can&rsquo;t read this project&rsquo;s languages yet, so the map shows recorded
+          work only.
         </StatusNote>
       )}
 
@@ -545,21 +521,19 @@ export function MapPageClient({ projectHash, projectName: requestedProjectName }
   const { state, retry } = useProjectIdentity(projectHash ?? requestedProjectName ?? null);
   if (state.phase === 'resolving') return <CanvasShimmer note="resolving project identity…" />;
   if (state.phase === 'missing' || state.phase === 'error') {
-    return <div role="alert" className="p-6"><p>{state.message}</p><button type="button" onClick={retry}>retry project resolution</button></div>;
+    return <ProjectIdentityProblem state={state} onRetry={retry} />;
   }
   const projectName = state.label;
   const cleanName = displayProject(projectName);
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
-      <Breadcrumbs items={[{ label: 'map', href: '/map' }, { label: cleanName }]} />
+    <div className="asb-page animate-fade-up">
+      <Breadcrumbs items={[{ label: 'home', href: '/' }, { label: 'map', href: '/map' }, { label: cleanName }]} />
 
-      <div>
-        <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink">
+      <div className="flex items-center gap-2">
+        <h1 className="iu-page-title iu-page-title-content page-title">
           {cleanName}
         </h1>
-        <p className="text-sm text-ink-3 mt-1">
-          Browse code areas first, then open the spatial map to inspect their relationships.
-        </p>
+        <DocsLink topic="codeMap" variant="icon">how to read the code map</DocsLink>
       </div>
 
       {/* Keyed by project: /map/A → /map/B stays in the same route segment,
