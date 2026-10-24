@@ -7,12 +7,54 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-23
+
 ### Changed
-- The local web's sidebar no longer shows "online" twice. The online page
-  leaves the section nav and the app switcher drops its online entry; the
-  collectives link is the local app's way to online. The online page stays at
-  `/village`, reached by its address like analytics, changes and the code map.
-- Re-pin Fairtrade to 0.0.34.
+- The local web finishes its redesign on Fairtrade 0.0.40. The sidebar puts
+  search, the docs, community (soon) and the collectives link that opens online
+  on top, the app's pages under them, and the account, a settings gear and the
+  theme toggle in its footer, at the same width as online. Online leaves the
+  section nav and the app switcher; the online page stays at `/village`,
+  reached by its address like analytics, changes and the code map.
+- Every local page sits in one page frame with one title size. Settings carry
+  one "settings" title above their section bar, and each section's name heads
+  its column. Nothing on the map, its rail or the project lists is smaller than
+  14px, and every control is 44px tall on a touch screen.
+- How-to lives in the docs: each task links to its docs section instead of
+  being taught in the app, and pages and settings drop their explainer
+  sentences and provenance chips.
+- Plainer copy: the link to the hosted app reads "dashboard", the account row
+  reads "signed in to peasant online with github" and names the server only
+  when it is not the default one, the CLI and terminal UI call the hosted app
+  "peasant online", and a publication reads "published to N collectives",
+  "needs update" or "published".
+- The publish popup re-indexes a session whose local index is stale, only when
+  asked and only that session, names each check step, and says in one line
+  what stopped a re-index, with the reason behind details.
+- Re-pin Fairtrade to 0.0.40.
+
+### Fixed
+- A project link that cannot be opened shows a designed "project not found" or
+  "couldn't open" page instead of the failed request, and `/review` lists the
+  projects instead of one line of text.
+- A recorded session with no indexed turns says so and offers a re-index, and
+  the page reads a session again after a re-index instead of keeping an empty
+  transcript.
+- A session's local detail carries its stored token and duration totals, so
+  the transcript header no longer shows "0 tokens".
+- Session titles on Home, in the session heading and in the map rail drop
+  Cursor's `<user_query>` wrapper, and the transcript shows Cursor prompts
+  without it.
+- Home's filters name projects by their short name, its status cell sits on
+  the row's baseline, and an empty analytics page shows the nothing-recorded
+  state instead of empty charts.
+- One Claude Code record with an unreadable payload (a lone surrogate escape,
+  a duplicate key or invalid UTF-8) no longer fails the share scan, export and
+  publication of the whole session: the payload is kept only when the strict
+  evidence reader accepts it. Claude Code sessions re-index once, on the first
+  harvest after upgrading.
+- A Cursor session whose project path has a component starting with "-" is
+  filed under its own project, not a parent folder.
 
 ## [0.11.0] - 2026-10-23
 
@@ -769,6 +811,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.11.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.1
 [0.11.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.0
 [0.10.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.10.0
 [0.9.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.9.0
