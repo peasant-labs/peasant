@@ -94,7 +94,11 @@ func TestTranscriptSharesReadsEachRowStatus(t *testing.T) {
 			_, _ = w.Write([]byte(`{"shares":[{"group_id":"` + approved.String() + `","group_name":"platform","shared_at":"2026-01-01T00:00:00Z"},{"group_id":"` + curated.String() + `","group_name":"review","shared_at":"2026-01-01T00:00:00Z"}],` +
 				`"enriched_shares":[{"transcript_id":"` + testTranscript.String() + `","group_id":"` + approved.String() + `","group_name":"platform","acceptance_mode":"open","status":"approved","shared_at":"2026-01-01T00:00:00Z"}]}`))
 		case "/api/v1/users/me/collectives/" + curated.String() + "/transcripts/" + testTranscript.String() + "/events":
-			_, _ = w.Write([]byte(`[{"event_num":1,"status":"rejected","recorded_at":"2026-01-01T00:00:00Z","decided_at":"2026-01-01T01:00:00Z","decided_by_actor":"moderator"},{"event_num":2,"status":"pending","recorded_at":"2026-01-02T00:00:00Z","decided_at":null,"decided_by_actor":""}]`))
+			// The older rejection predates decision-time capture, so its
+			// decided_at is honestly unknown. The later pending event is the
+			// newest attempt, and the whole history must decode without
+			// inventing a decision time for the rejection.
+			_, _ = w.Write([]byte(`[{"event_num":1,"status":"rejected","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":"moderator"},{"event_num":2,"status":"pending","recorded_at":"2026-01-02T00:00:00Z","decided_at":null,"decided_by_actor":""}]`))
 		default:
 			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
 		}

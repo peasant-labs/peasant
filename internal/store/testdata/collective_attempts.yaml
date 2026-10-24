@@ -1,5 +1,11 @@
 requiredNames:
   - attempt-pending-approved
+  - attempt-legacy-rejected-unknown-decision-inserted
+  - attempt-legacy-rejected-unknown-decision-then-pending
+  - attempt-legacy-rejected-unknown-decision-replay
+  - attempt-pending-to-rejected-unknown-decision-refused
+  - attempt-retracted-unknown-decision-refused
+  - attempt-revoked-unknown-decision-refused
   - attempt-late-pending-after-terminal
   - attempt-terminal-exact-replay
   - attempt-terminal-conflict-atomic
@@ -22,6 +28,44 @@ cases:
     expected: [*approved]
     wantChanged: true
     wantGeneration: 2
+  - name: attempt-legacy-rejected-unknown-decision-inserted
+    before: []
+    incoming: [&rejectedunknown {eventnum: 1, status: rejected, recordedat: '2026-01-01T00:00:00.000000001Z', decidedat: null, decidedbyactor: moderator}]
+    expected: [*rejectedunknown]
+    wantChanged: true
+    wantGeneration: 1
+  - name: attempt-legacy-rejected-unknown-decision-then-pending
+    before: []
+    incoming: [*rejectedunknown, &pendinglater {eventnum: 2, status: pending, recordedat: '2026-01-02T00:00:00Z', decidedat: null, decidedbyactor: ''}]
+    expected: [*rejectedunknown, *pendinglater]
+    wantChanged: true
+    wantGeneration: 1
+  - name: attempt-legacy-rejected-unknown-decision-replay
+    before: [*rejectedunknown]
+    incoming: [*rejectedunknown]
+    expected: [*rejectedunknown]
+    wantGeneration: 1
+  - name: attempt-pending-to-rejected-unknown-decision-refused
+    before: [*pending]
+    incoming:
+      - {eventnum: 1, status: rejected, recordedat: '2026-01-01T00:00:00.000000001Z', decidedat: null, decidedbyactor: moderator}
+    expected: [*pending]
+    wantError: contract
+    wantGeneration: 1
+  - name: attempt-retracted-unknown-decision-refused
+    before: []
+    incoming:
+      - {eventnum: 1, status: retracted, recordedat: '2026-01-03T00:00:00Z', decidedat: null, decidedbyactor: owner}
+    expected: []
+    wantError: contract
+    wantGeneration: 0
+  - name: attempt-revoked-unknown-decision-refused
+    before: []
+    incoming:
+      - {eventnum: 1, status: revoked, recordedat: '2026-01-03T00:00:00Z', decidedat: null, decidedbyactor: collective}
+    expected: []
+    wantError: contract
+    wantGeneration: 0
   - name: attempt-late-pending-after-terminal
     before: [*approved]
     incoming: [*pending]

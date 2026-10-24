@@ -125,7 +125,7 @@ func loadObservationReadFixtures(t *testing.T) []observationReadFixture {
 			t.Fatalf("required fixture %s missing", name)
 		}
 	}
-	const requiredSources = "complete-membership-input empty-membership-input null-membership-not-complete repeated-membership-refused unknown-membership-policy-refused permitted-detail-projection detail-wrong-identity-refused detail-unavailable-not-empty complete-own-attempts empty-own-attempts null-attempts-not-complete repeated-attempt-ordinal-refused malformed-attempt-actor-refused history-unavailable-not-empty complete-account-organizations empty-account-organizations null-organizations-not-complete repeated-organization-login-refused"
+	const requiredSources = "complete-membership-input empty-membership-input null-membership-not-complete repeated-membership-refused unknown-membership-policy-refused permitted-detail-projection detail-wrong-identity-refused detail-unavailable-not-empty complete-own-attempts complete-legacy-rejected-unknown-decision-history retracted-unknown-decision-refused revoked-unknown-decision-refused empty-own-attempts null-attempts-not-complete repeated-attempt-ordinal-refused malformed-attempt-actor-refused history-unavailable-not-empty complete-account-organizations empty-account-organizations null-organizations-not-complete repeated-organization-login-refused"
 	for _, name := range strings.Fields(requiredSources) {
 		if !names[name] {
 			t.Fatalf("required source fixture %s missing", name)
