@@ -132,7 +132,8 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 	// whole run instead of failing transcript by transcript. A village that
 	// predates the collectives filter advertises an older window here, which is
 	// what stops this CLI from over-pulling.
-	if err := client.NegotiatePull(ctx); err != nil {
+	envelope, err := client.NegotiatePull(ctx)
+	if err != nil {
 		if ctx.Err() != nil {
 			cmd.SilenceUsage = true
 			return collectivePullCancellationError(0, 0, names, flags.User, ctx.Err())
@@ -260,10 +261,11 @@ func runVillageTranscriptsPullCollectives(cmd *cobra.Command, db *store.Store, c
 		// the window was checked. Both spare a per-transcript request.
 		meta := row
 		result, pullErr := pipeline.PullTranscript(ctx, ref, pull.PullOptions{
-			Force:         flags.Force,
-			DryRun:        flags.DryRun,
-			Meta:          &meta,
-			SkipNegotiate: true,
+			Force:           flags.Force,
+			DryRun:          flags.DryRun,
+			Meta:            &meta,
+			SkipNegotiate:   true,
+			EnvelopeVersion: envelope,
 		})
 		printPullMetadataWarning(cmd, result)
 		if err := ctx.Err(); err != nil {

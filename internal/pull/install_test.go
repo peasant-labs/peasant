@@ -218,8 +218,7 @@ func loadReplacementAnnotations(t *testing.T) []schema.PullAnnotation {
 		}
 		a := foreignAnnotation(fixture.Hash)
 		a.ID = fixture.ID
-		a.AuthorUserID = fixture.AuthorUserID
-		a.AuthorUsername = fixture.AuthorUsername
+		a.Author = testutil.PublicProfile(fixture.AuthorUserID, fixture.AuthorUsername)
 		annotations = append(annotations, a)
 	}
 	return annotations

@@ -187,6 +187,11 @@ type PullOptions struct {
 	// schema-version preflight per transcript. The pull window cannot change
 	// mid-command, and the caller owns the single check.
 	SkipNegotiate bool
+	// EnvelopeVersion is the pull envelope version the caller's own NegotiatePull
+	// returned. A caller that sets SkipNegotiate passes it so the manifest
+	// records the envelope the transfer actually used; empty falls back to
+	// defaults.PullContractVersion.
+	EnvelopeVersion schema.PushContractVersion
 }
 
 // PullResult is the observable outcome of a PullTranscript run.
@@ -255,6 +260,6 @@ type RefreshResult struct {
 	Updated int
 	Skipped int
 	// Excluded is the number of own-authored annotations filtered out
-	// (AuthorUserID == creds.UserID) before the upsert.
+	// (an author profile that is the requester's own account) before the upsert.
 	Excluded int
 }

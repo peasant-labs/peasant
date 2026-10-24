@@ -119,7 +119,7 @@ func exportFixtures(f fixtures, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	metadata := schema.PullTranscriptInfo{TranscriptID: id, LocalID: id.String(), OwnerUserID: f.Accounts[0].UserID, OwnerUsername: f.Accounts[0].Username, Harness: detail.Harness, Visibility: schema.VisibilityGroup, License: schema.LicenseCCBYSA, ContentHash: schema.ComputeTranscriptHash(blob), ContractVersion: defaults.PublishSchemaVersion, PublishedAt: f.ObservedAt.UnixMilli(), UpdatedAt: f.ObservedAt.UnixMilli()}
+	metadata := schema.PullTranscriptInfo{TranscriptID: id, LocalID: id.String(), Owner: schema.NewVillagePublicProfile(schema.VillageUUID(f.Accounts[0].UserID), f.Accounts[0].Username, nil, nil), Harness: detail.Harness, Visibility: schema.VisibilityGroup, License: schema.LicenseCCBYSA, ContentHash: schema.ComputeTranscriptHash(blob), ContractVersion: defaults.PublishSchemaVersion, PublishedAt: f.ObservedAt.UnixMilli(), UpdatedAt: f.ObservedAt.UnixMilli()}
 	return json.NewEncoder(output).Encode(struct {
 		Fixtures           fixtures                     `json:"fixtures"`
 		Content            json.RawMessage              `json:"content"`

@@ -67,16 +67,18 @@ var (
 )
 
 const (
-	TestVillageHost2     = "other-village.example.com"
-	TestTranscriptUUID2  = "66666666-7777-8888-9999-aaaaaaaaaaaa"
-	TestContentHash      = "a3f5c9e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
-	TestContentHash2     = "b4e6dac2c3e5f7b9d1f3c5e7f9b1d3f5c7e9f1b3d5f7b9d1f3c5e7f9b1d3f5c7"
-	TestContentHash3     = "c5f7ecd3d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8"
-	TestOwnerUserID      = "user-owner-001"
+	TestVillageHost2    = "other-village.example.com"
+	TestTranscriptUUID2 = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+	TestContentHash     = "a3f5c9e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+	TestContentHash2    = "b4e6dac2c3e5f7b9d1f3c5e7f9b1d3f5c7e9f1b3d5f7b9d1f3c5e7f9b1d3f5c7"
+	TestContentHash3    = "c5f7ecd3d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8"
+	// The pull surface carries people as schema.VillagePublicOwner, whose
+	// profile id is a canonical Village UUID, so the test accounts are UUIDs.
+	TestOwnerUserID      = "0a000000-0000-4000-8000-000000000001"
 	TestOwnerUsername    = "alice"
-	TestAuthorUserID     = "user-author-002"
+	TestAuthorUserID     = "0a000000-0000-4000-8000-000000000002"
 	TestAuthorUsername   = "bob"
-	TestPullAuthorUserID = "user-self-003" // requester's own ID — used for own-author exclusion tests
+	TestPullAuthorUserID = "0a000000-0000-4000-8000-000000000003" // requester's own ID — used for own-author exclusion tests
 )
 
 // Typed village-pull fixtures. Pull-surface consumers key off schema.TranscriptID
@@ -1906,4 +1908,10 @@ func (s *StubGitRepository) CommitsInRange(_ context.Context, base, head string)
 		return nil, s.CommitsInRangeErr
 	}
 	return s.RangeHashes[base+".."+head], nil
+}
+
+// PublicProfile returns the pull surface's profile shape of a test account, as
+// the village shows a person whose profile the viewer may see.
+func PublicProfile(id, username string) schema.VillagePublicOwner {
+	return schema.NewVillagePublicProfile(schema.VillageUUID(id), username, nil, nil)
 }

@@ -96,7 +96,7 @@ func assertInstalledContent(t *testing.T, db *store.Store, final string, reader 
 	}
 	if manifest.TranscriptID != testutil.TestTranscriptID ||
 		manifest.ServedBlobHash != schema.ComputeTranscriptHash(bytes) ||
-		manifest.OwnerUserID != reader.Meta.OwnerUserID || manifest.LocalSessionID != reader.Meta.LocalID {
+		manifest.OwnerUserID != reader.Meta.Owner.ID.String() || manifest.LocalSessionID != reader.Meta.LocalID {
 		t.Fatalf("manifest identity/hash differs: %+v", manifest)
 	}
 	if manifest.VillageURL != testVillageURL || manifest.VillageHost != testutil.TestVillageHost ||
@@ -111,7 +111,7 @@ func assertInstalledContent(t *testing.T, db *store.Store, final string, reader 
 			t.Fatal("fixture must provide annotation hash")
 		}
 		expectedHashes[*a.ContentHash] = true
-		expectedProvenance = append(expectedProvenance, pull.ManifestAnnotation{ContentHash: *a.ContentHash, AuthorUserID: a.AuthorUserID, AuthorUsername: a.AuthorUsername})
+		expectedProvenance = append(expectedProvenance, pull.ManifestAnnotation{ContentHash: *a.ContentHash, AuthorUserID: a.Author.ID.String(), AuthorUsername: a.Author.Username})
 	}
 	if !reflect.DeepEqual(manifest.Annotations, expectedProvenance) {
 		t.Fatalf("annotation provenance differs: %+v", manifest.Annotations)
@@ -150,7 +150,7 @@ func assertInstalledContent(t *testing.T, db *store.Store, final string, reader 
 			t.Fatal(err)
 		}
 		actual, ok := projection[manifest.VillageHost+"|"+*a.ContentHash]
-		expected := store.PulledAnnotationRow{VillageHost: manifest.VillageHost, ContentHash: *a.ContentHash, TranscriptID: manifest.TranscriptID, LocalSessionID: manifest.LocalSessionID, AuthorUserID: a.AuthorUserID, AuthorUsername: a.AuthorUsername, Payload: string(payload), PulledAt: manifest.PulledAt}
+		expected := store.PulledAnnotationRow{VillageHost: manifest.VillageHost, ContentHash: *a.ContentHash, TranscriptID: manifest.TranscriptID, LocalSessionID: manifest.LocalSessionID, AuthorUserID: a.Author.ID.String(), AuthorUsername: a.Author.Username, Payload: string(payload), PulledAt: manifest.PulledAt}
 		if !ok || !reflect.DeepEqual(actual, expected) {
 			t.Fatalf("stored annotation payload/authorship differs for %s: actual=%+v expected=%+v", *a.ContentHash, actual, expected)
 		}
@@ -433,7 +433,7 @@ func TestContentInstallSafety(t *testing.T) {
 				if err := json.Unmarshal(data, &meta); err != nil {
 					t.Fatal(err)
 				}
-				meta.OwnerUserID = "wrong-owner"
+				meta.Owner = testutil.PublicProfile("0a000000-0000-4000-8000-0000000000ff", "wrong-owner")
 				data, err = json.Marshal(meta)
 				if err != nil {
 					t.Fatal(err)

@@ -49,8 +49,7 @@ func happyMeta() *schema.PullTranscriptInfo {
 	return &schema.PullTranscriptInfo{
 		TranscriptID:    testutil.TestTranscriptID,
 		LocalID:         testutil.TestSessionUUID,
-		OwnerUserID:     testutil.TestPullAuthorUserID, // requester owns it (refresh path)
-		OwnerUsername:   "self",
+		Owner:           testutil.PublicProfile(testutil.TestPullAuthorUserID, "self"), // requester owns it (refresh path)
 		Title:           "Fix the bug",
 		Harness:         schema.Harness(defaults.HarnessClaudeCode),
 		ProjectName:     testutil.TestProjectName,
@@ -76,8 +75,7 @@ func foreignAnnotation(hash string) schema.PullAnnotation {
 			Value:       "approve",
 			ContentHash: &h,
 		},
-		AuthorUserID:   testutil.TestAuthorUserID,
-		AuthorUsername: testutil.TestAuthorUsername,
+		Author: testutil.PublicProfile(testutil.TestAuthorUserID, testutil.TestAuthorUsername),
 	}
 }
 
@@ -263,8 +261,7 @@ func TestPullTranscript_InvalidAssociationAnnotationStopsBeforeLocalMutation(t *
 			ID:         "invalid-association-target",
 			TargetKind: schema.TargetAssociation,
 		},
-		AuthorUserID:   testutil.TestAuthorUserID,
-		AuthorUsername: testutil.TestAuthorUsername,
+		Author: testutil.PublicProfile(testutil.TestAuthorUserID, testutil.TestAuthorUsername),
 	}}
 	store := &testutil.StubPullStore{}
 	pipeline := newPipeline(reader, fs, store, testutil.NewFixedClock(), testCreds(), testPullsRoot)

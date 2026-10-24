@@ -26,7 +26,7 @@ import (
 // calls it EXACTLY ONCE per run, before the FETCH stages; the four GETs are pure
 // data calls that do NOT re-preflight the pull window.
 type VillageReader interface {
-	NegotiatePull(ctx context.Context) error
+	NegotiatePull(ctx context.Context) (schema.PushContractVersion, error)
 	ListPullableTranscripts(ctx context.Context, opts village.PullListOptions) (*schema.PullListResponse, error)
 	GetPullTranscript(ctx context.Context, id schema.TranscriptID) (*schema.PullTranscriptInfo, error)
 	GetPullTranscriptContent(ctx context.Context, id schema.TranscriptID, ifNoneMatch string) (io.ReadCloser, string, error)
@@ -209,10 +209,16 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 
 	// --- NEGOTIATE (once per command; a bulk caller sets SkipNegotiate after its
 	// own single NegotiatePull) ---
+	envelope := opts.EnvelopeVersion
 	if !opts.SkipNegotiate {
-		if err := p.reader.NegotiatePull(ctx); err != nil {
+		negotiated, err := p.reader.NegotiatePull(ctx)
+		if err != nil {
 			return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
 		}
+		envelope = negotiated
+	}
+	if envelope == "" {
+		envelope = defaults.PullContractVersion
 	}
 
 	pullDir := p.pullDir(host, ref.ID)
@@ -239,6 +245,7 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 		}
 		meta = fetched
 	}
+	meta = readerMeta(meta)
 
 	if !opts.DryRun {
 		if err := p.recoverInstall(ctx, host, ref.ID, opts.Force); err != nil {
@@ -265,7 +272,15 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 		storedHash = storedManifest.ServedBlobHash
 		storedETag = storedManifest.ServedETag
 	}
-	if !opts.Force &&
+	// A stored copy whose owner the village now shows differently (a person who
+	// became anonymous to this viewer, or one who became visible) is re-pulled in
+	// full instead of taking a metadata-only update: the manifest and the
+	// annotation provenance must be rewritten so they keep no identity the
+	// village no longer shows, and the install check requires the manifest owner
+	// to match the metadata owner.
+	ownerID, _ := publicPersonColumns(meta.Owner)
+	refresh := opts.Force || (hasStored && storedManifest.OwnerUserID != ownerID)
+	if !refresh &&
 		storedHash != "" && meta.ContentHash != "" &&
 		storedHash == meta.ContentHash {
 		if err := p.updateMetadata(ctx, host, ref.ID, meta, opts.DryRun); err != nil {
@@ -306,7 +321,7 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	// second DIFF path). The ETag is the transport token; the raw hash is for
 	// content identity only.
 	ifNoneMatch := ""
-	if !opts.Force {
+	if !refresh {
 		ifNoneMatch = storedETag
 	}
 	body, etag, err := p.reader.GetPullTranscriptContent(ctx, ref.ID, ifNoneMatch)
@@ -357,7 +372,7 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	// (no ETag, no metadata ContentHash) but we already hold a byte-identical copy
 	// with the same recomputed hash, this is still up-to-date — avoid a needless
 	// rewrite. Only applies when not forcing.
-	if !opts.Force && storedHash != "" && servedHash == storedHash {
+	if !refresh && storedHash != "" && servedHash == storedHash {
 		if err := p.updateMetadata(ctx, host, ref.ID, meta, false); err != nil {
 			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host, PullDir: pullDir}, err
 		}
@@ -379,22 +394,24 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	if err := validatePulledAnnotations(annotations); err != nil {
 		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, err
 	}
+	annotations = readerAnnotations(annotations)
 
 	now := p.clock.NowUnixMilli()
 
 	// Build the manifest + the metadata snapshot + the annotation provenance.
+	ownerID, ownerUsername := publicPersonColumns(meta.Owner)
 	manifest := PullManifest{
 		ManifestVersion:     PullManifestVersion,
 		VillageURL:          p.creds.VillageURL,
 		VillageHost:         host,
 		TranscriptID:        ref.ID,
 		LocalSessionID:      meta.LocalID,
-		OwnerUserID:         meta.OwnerUserID,
-		OwnerUsername:       meta.OwnerUsername,
+		OwnerUserID:         ownerID,
+		OwnerUsername:       ownerUsername,
 		ServedETag:          servedETag,
 		ServedBlobHash:      servedHash,
 		BlobContractVersion: meta.ContractVersion,
-		PullEnvelopeVersion: defaults.PullContractVersion,
+		PullEnvelopeVersion: envelope,
 		PulledAt:            now,
 		Annotations:         manifestAnnotations(annotations),
 	}
@@ -504,12 +521,13 @@ func (p *Pipeline) buildCommit(host, pullDir, servedHash string, now int64, meta
 	for i := range annotations {
 		rows = append(rows, p.annotationRow(host, now, meta, &annotations[i]))
 	}
+	ownerID, ownerUsername := publicPersonColumns(meta.Owner)
 	return store.PullCommit{
 		Transcript: store.PulledTranscriptRow{
 			VillageHost:     host,
 			TranscriptID:    meta.TranscriptID,
-			OwnerUserID:     meta.OwnerUserID,
-			OwnerUsername:   meta.OwnerUsername,
+			OwnerUserID:     ownerID,
+			OwnerUsername:   ownerUsername,
 			LocalSessionID:  meta.LocalID,
 			Title:           meta.Title,
 			Harness:         meta.Harness,
@@ -531,13 +549,14 @@ func (p *Pipeline) buildCommit(host, pullDir, servedHash string, now int64, meta
 // stored as the payload.
 func (p *Pipeline) annotationRow(host string, now int64, meta *schema.PullTranscriptInfo, a *schema.PullAnnotation) store.PulledAnnotationRow {
 	payload, _ := json.Marshal(a)
+	authorID, authorUsername := publicPersonColumns(a.Author)
 	return store.PulledAnnotationRow{
 		VillageHost:    host,
 		ContentHash:    annotationContentHash(a),
 		TranscriptID:   meta.TranscriptID,
 		LocalSessionID: meta.LocalID,
-		AuthorUserID:   a.AuthorUserID,
-		AuthorUsername: a.AuthorUsername,
+		AuthorUserID:   authorID,
+		AuthorUsername: authorUsername,
 		Payload:        string(payload),
 		PulledAt:       now,
 	}
@@ -566,10 +585,11 @@ func manifestAnnotations(annotations []schema.PullAnnotation) []ManifestAnnotati
 	out := make([]ManifestAnnotation, 0, len(annotations))
 	for i := range annotations {
 		a := &annotations[i]
+		authorID, authorUsername := publicPersonColumns(a.Author)
 		out = append(out, ManifestAnnotation{
 			ContentHash:    annotationContentHash(a),
-			AuthorUserID:   a.AuthorUserID,
-			AuthorUsername: a.AuthorUsername,
+			AuthorUserID:   authorID,
+			AuthorUsername: authorUsername,
 		})
 	}
 	return out

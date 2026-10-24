@@ -39,7 +39,7 @@ requiredNames:
 replacementAnnotations:
   - hash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
     id: replacement-annotation
-    authorUserId: foreign-replacement-author
+    authorUserId: 0a000000-0000-4000-8000-0000000000aa
     authorUsername: replacement-author
 barrierOrder: [ancestor, stagedBlob, stagedMetadata, stagedManifest, journalFile, journalDirectory, publicationDirectory]
 cases:
