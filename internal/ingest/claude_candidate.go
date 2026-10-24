@@ -124,9 +124,6 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {
 		return GenerationCandidate{}, err
 	}
-	if _, err := validateClaudeProducerRecords(ctx, in.Session, data); err != nil {
-		return GenerationCandidate{}, err
-	}
 
 	// The tolerant classification parse mirrors the retained harvest parse:
 	// completion-less, full-depth, full-content, retaining unknown evidence, so
@@ -136,7 +133,7 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	parse.fullContent = true
 	parse.fullDepth = true
 	parse.retainUnknown = true
-	entries, err := parse.parseJSONL(in.Session.SessionID, data)
+	entries, err := parse.parseClaudeRecords(ctx, in.Session.SessionID, data, nil, true)
 	if err != nil {
 		return GenerationCandidate{}, err
 	}

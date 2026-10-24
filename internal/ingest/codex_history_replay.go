@@ -981,26 +981,25 @@ func codexSegmentOwnership(segment codexDecodedSegment, ordinal int64) CodexOwne
 
 // replayRecord dispatches one valid decoded record.
 func (state *codexReplayState) replayRecord(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, mode CodexHistoryMode) (resultErr error) {
-	prepared, unknown, err := prepareCodexRecord(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
+	prepared, err := prepareCodexRecordParsed(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
 	if err != nil {
 		if refusal := codexItemPreparationRefusal(record); refusal != nil {
 			return refusal
 		}
 		return err
 	}
-	if prepared == nil {
-		return state.emitUnknown(threadID, segment, record, ownership, unknown)
+	if prepared.JSON == nil {
+		return state.emitUnknown(threadID, segment, record, ownership, prepared.Unknown)
 	}
 	defer func() {
 		if resultErr == nil {
-			resultErr = state.emitUnknown(threadID, segment, record, ownership, unknown)
+			resultErr = state.emitUnknown(threadID, segment, record, ownership, prepared.Unknown)
 		}
 	}()
-	var envelope codexHistoryEnvelope
-	if err := json.Unmarshal(prepared, &envelope); err != nil {
+	record.Payload, err = prepared.replayPayload()
+	if err != nil {
 		return err
 	}
-	record.Payload = envelope.Payload
 	var payload codexHistoryReplayPayload
 	if len(record.Payload) > 0 {
 		replayPayload := record.Payload

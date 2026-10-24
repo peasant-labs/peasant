@@ -46,6 +46,10 @@ type OpenCodeProvenanceRow struct {
 // running shell, no running or pending
 // tool part, no running compaction.
 func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope) (OpenCodeProvenanceMessage, bool, error) {
+	return decodeOpenCodeProvenanceRow(row, scope, nil)
+}
+
+func decodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope, traversal *openCodeCurrentTraversal) (OpenCodeProvenanceMessage, bool, error) {
 	msg := OpenCodeProvenanceMessage{
 		MessageID:        row.ID,
 		SessionID:        scope.SessionID,
@@ -90,7 +94,7 @@ func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 	if row.HasSeq && row.Seq > 0 {
 		position.Sequence = int(row.Seq)
 	}
-	prepared, unknown, err := prepareOpenCodeCurrent(row.Type, data, position)
+	prepared, unknown, err := prepareOpenCodeCurrentFieldsWithTraversal(row.Type, data, envelope, position, traversal)
 	if err != nil {
 		return OpenCodeProvenanceMessage{}, false, err
 	}
@@ -106,17 +110,17 @@ func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 	data = normalized
 	switch row.Type {
 	case "user":
-		return decodeOpenCodeProvenanceUser(row, msg, data)
+		return decodeOpenCodeProvenanceUser(row, msg, data, envelope)
 	case "shell":
 		return decodeOpenCodeProvenanceShell(row, msg, data, envelope)
 	case "assistant":
-		return decodeOpenCodeProvenanceAssistant(row, msg, data)
+		return decodeOpenCodeProvenanceAssistant(row, msg, data, envelope)
 	case "synthetic", "system", "skill":
-		return decodeOpenCodeProvenanceSystem(row, msg, data)
+		return decodeOpenCodeProvenanceSystem(row, msg, data, envelope)
 	case "compaction":
 		return decodeOpenCodeProvenanceCompaction(row, msg, data, envelope)
 	case "agent-switched", "model-switched":
-		return decodeOpenCodeProvenanceControl(row, msg, data)
+		return decodeOpenCodeProvenanceControl(row, msg, data, envelope)
 	default:
 		hasID := requireOpenCodeCurrentFields(data, "id") == nil
 		hasTime := requireOpenCodeCurrentFields(data, "time") == nil
@@ -143,12 +147,12 @@ func OpenCodeCurrentMessageRowForDecode(row OpenCodeProvenanceRow) OpenCodeCurre
 	}
 }
 
-func decodeOpenCodeProvenanceUser(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceUser(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
 	var value openCodeCurrentUser
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q user payload failed to decode: %v; verify the source row and retry", row.ID, err)
 	}
-	if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
+	if err := requireOpenCodeCurrentObjectFields(envelope, "text", "time"); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q user payload misses a required field: %v; verify the source row and retry", row.ID, err)
 	}
 	msg.Text = value.Text
@@ -204,12 +208,12 @@ func decodeOpenCodeProvenanceShell(row OpenCodeProvenanceRow, msg OpenCodeProven
 	return msg, value.Time.Completed > 0 || value.Output != "", nil
 }
 
-func decodeOpenCodeProvenanceAssistant(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceAssistant(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
 	var value openCodeCurrentAssistant
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q assistant payload failed to decode: %v; verify the source row and retry", row.ID, err)
 	}
-	if err := requireOpenCodeCurrentFields(data, "agent", "model", "content", "time"); err != nil {
+	if err := requireOpenCodeCurrentObjectFields(envelope, "agent", "model", "content", "time"); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q assistant payload misses a required field: %v; verify the source row and retry", row.ID, err)
 	}
 	if err := validateOpenCodeV2Error(value.Error); err != nil {
@@ -275,17 +279,15 @@ func (c *openCodeAssistantPartCollector) settled() bool {
 	return !c.running
 }
 
-func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
 	if row.Type == "synthetic" {
 		var value openCodeCurrentSynthetic
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q synthetic payload failed to decode: %v; verify the source row and retry", row.ID, err)
 		}
-		if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "text", "time"); err != nil {
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q synthetic payload misses a required field: %v; verify the source row and retry", row.ID, err)
 		}
-		var envelope map[string]json.RawMessage
-		_ = json.Unmarshal(data, &envelope)
 		if raw, present := envelope["sessionID"]; present && (bytes.Equal(raw, []byte("null")) || value.SessionID != row.SessionID) {
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q synthetic session disagrees with its row session; the row cannot be trusted; verify the source row and retry", row.ID)
 		}
@@ -297,7 +299,7 @@ func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, msg OpenCodeProve
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q skill payload failed to decode: %v; verify the source row and retry", row.ID, err)
 		}
-		if err := requireOpenCodeCurrentFields(data, "skill", "name", "text", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "skill", "name", "text", "time"); err != nil {
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q skill payload misses a required field: %v; verify the source row and retry", row.ID, err)
 		}
 		if value.Skill == "" || value.Name == "" {
@@ -310,7 +312,7 @@ func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, msg OpenCodeProve
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q system payload failed to decode: %v; verify the source row and retry", row.ID, err)
 	}
-	if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
+	if err := requireOpenCodeCurrentObjectFields(envelope, "text", "time"); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q system payload misses a required field: %v; verify the source row and retry", row.ID, err)
 	}
 	msg.SystemText = value.Text
@@ -355,13 +357,13 @@ func decodeOpenCodeProvenanceCompaction(row OpenCodeProvenanceRow, msg OpenCodeP
 	return msg, settled, nil
 }
 
-func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
 	if row.Type == "agent-switched" {
 		var value openCodeCurrentAgentSwitched
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q agent switch failed to decode: %v; verify the source row and retry", row.ID, err)
 		}
-		if err := requireOpenCodeCurrentFields(data, "agent", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "agent", "time"); err != nil {
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q agent switch misses a required field: %v; verify the source row and retry", row.ID, err)
 		}
 		msg.SystemText = value.Agent
@@ -371,7 +373,7 @@ func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, msg OpenCodeProv
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q model switch failed to decode: %v; verify the source row and retry", row.ID, err)
 	}
-	if err := requireOpenCodeCurrentFields(data, "model", "time"); err != nil {
+	if err := requireOpenCodeCurrentObjectFields(envelope, "model", "time"); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q model switch misses a required field: %v; verify the source row and retry", row.ID, err)
 	}
 	msg.SystemText = value.Model.ID

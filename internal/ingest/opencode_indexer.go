@@ -122,14 +122,9 @@ func (idx *OpenCodeIndexer) indexManagedProjection(session DiscoveredSession, da
 	if err != nil {
 		return nil, err
 	}
-	projection, err := decodeManagedOpenCodeProjection(data, expectedFormat, expectedVersion, session.SessionID)
+	_, messages, _, err := decodeManagedOpenCodeSemanticProjection(data, expectedFormat, expectedVersion, session.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while strictly decoding the Peasant-owned envelope: %w; no entry rows were stored; re-run harvest to regenerate the projection", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, err)
-	}
-	kind := managedOpenCodeProjectionKind(session.TranscriptOrigin)
-	messages, _, err := parseManagedOpenCodeSemanticMessages(projection, kind)
-	if err != nil {
-		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while decoding its normalized semantic corpus: %w; no partial entry rows were stored, so regenerate the managed artifact from a supported source and retry", kind, session.SessionID, err)
 	}
 	return idx.indexSemanticMessages(session.SessionID, messages)
 }
@@ -524,6 +519,12 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 	if err != nil {
 		return nil, err
 	}
+	return idx.indexRetainedSemanticMessages(sessionID, messages)
+}
+
+// indexRetainedSemanticMessages consumes the private corpus after opaque
+// retention. Strict capture already performed that step before its checks.
+func (idx *OpenCodeIndexer) indexRetainedSemanticMessages(sessionID SessionID, messages []openCodeSemanticMessage) ([]schema.SessionEntry, error) {
 	entries := make([]schema.SessionEntry, 0, len(messages))
 	messageIndexes := make(map[string]int, len(messages))
 	messageParents := make(map[int]string, len(messages))

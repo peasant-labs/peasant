@@ -9,10 +9,11 @@ import { parse } from 'yaml';
 import { acquireLifecycle, bounded, ownedGroups } from './lib/owned-lifecycle.mjs';
 import { assertExportedSurface, assertPublishedFiles, hash, inventory, verifyServed } from './lib/provenance.mjs';
 import { startVillageFixture } from './lib/village-fixture.mjs';
+import { selectionRecord } from './lib/selection.mjs';
 
 const web = fileURLToPath(new URL('../../', import.meta.url)), repo = resolve(web, '..');
 const require = createRequire(join(web, 'package.json'));
-let life, remote, app, cleaning, stopping = false;
+let life, remote, app, cleaning, stopping = false, manifest, saveManifest;
 async function cleanup() {
   if (cleaning) return cleaning;
   stopping = true;
@@ -77,6 +78,9 @@ async function publishedPackage(name, lock) {
 
 try {
   if (Number(process.versions.node.split('.')[0]) < 26) throw new Error('The built journey requires Node >=26 for the runner and browser worker; enter the repository Nix shell before running the documented command');
+  // Counterfactual evidence keeps its fixed dark-desktop project and ignores arguments; the
+  // normal catalog runs every project and case unless a local --grep narrows it.
+  const selection = selectionRecord({ counterfactual: process.env.OBSERVATIONS_MUTANTS === '1', args: process.argv.slice(2) });
   life = await acquireLifecycle(join(web, '.collective-observations-owner'));
   if (stopping) { await life.cleanup(); throw new Error('Journey cancelled during ownership acquisition'); }
   const ui = await import(pathToFileURL(require.resolve('@peasant-labs/fairtrade/ui')));
@@ -109,8 +113,8 @@ try {
   const config = parse(readFileSync(join(web, 'scripts/journey/testdata/collective-observations.yaml'), 'utf8'));
   let appURL = `http://127.0.0.1:${await freePort()}`;
   const mutationMode = process.env.OBSERVATIONS_MUTANTS === '1';
-  const manifest = { sourceCommit, sourceFiles, counterfactual: mutationMode, lockHash: hash(readFileSync(join(web, 'pnpm-lock.yaml'))), packages, binary, binaryHash: hash(readFileSync(binary)), webAssets: inventory(out), nodeExecutable: process.execPath, nodeVersion: process.version, fetchTimeout: env.PEASANT_COLLECTIVE_FETCH_TIMEOUT, served: [], appURL };
-  const saveManifest = () => writeFileSync(join(artifacts, 'build-manifest.json'), JSON.stringify(manifest, null, 2));
+  manifest = { sourceCommit, sourceFiles, counterfactual: mutationMode, ...selection, lockHash: hash(readFileSync(join(web, 'pnpm-lock.yaml'))), packages, binary, binaryHash: hash(readFileSync(binary)), webAssets: inventory(out), nodeExecutable: process.execPath, nodeVersion: process.version, fetchTimeout: env.PEASANT_COLLECTIVE_FETCH_TIMEOUT, served: [], appURL };
+  saveManifest = () => writeFileSync(join(artifacts, 'build-manifest.json'), JSON.stringify(manifest, null, 2));
   async function startApp() {
     app = launch(binary, ['web', 'start', '--foreground', '--no-browser', '--port', new URL(appURL).port], { env });
     await bounded((async () => { for (;;) {
@@ -170,9 +174,20 @@ try {
   const journeyEnv = { ...env, CHROME_PATH: chrome, OBSERVATIONS_APP_URL: appURL, OBSERVATIONS_REMOTE_URL: remote.origin, OBSERVATIONS_CONTROL_TOKEN: control.token, OBSERVATIONS_ARTIFACTS: artifacts };
   // Resolve the installed CLI before entering isolated HOME. A package-manager
   // launcher may otherwise try to read its user's Corepack cache from that HOME.
-  const selection = mutationMode ? ['--project', 'dark-desktop'] : [];
-  await bounded(launch(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', 'playwright.collective-observations.config.mjs', ...selection], { cwd: web, env: journeyEnv }).done, 300000, 'collective observations mounted suite');
+  const scope = selection.requestedSelection.counterfactual ? 'the counterfactual rejection cases (dark-desktop)' : selection.fullCatalogRequested ? 'the full mounted catalog' : `a filtered mounted catalog (--grep ${JSON.stringify(selection.requestedSelection.grep)})`;
+  console.log(`Running ${scope}.`);
+  await bounded(launch(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', 'playwright.collective-observations.config.mjs', ...selection.requestedSelection.forwardedArguments], { cwd: web, env: journeyEnv }).done, 300000, 'collective observations mounted suite');
+  // The suite finished without throwing, so the manifest may claim the run it actually made.
+  manifest.suiteResult = 'passed';
+  manifest.catalogComplete = selection.fullCatalogRequested;
+  saveManifest();
   writeFileSync(join(artifacts, 'fixture-requests.json'), JSON.stringify(remote.requests, null, 2));
-  console.log(mutationMode ? `Counterfactual rejection evidence in ${artifacts}; not positive UI proof.` : `Inspect retained full-shell evidence in ${artifacts}; generation alone is not visual acceptance.`);
-} catch (error) { console.error(error.message); process.exitCode = 1; }
+  console.log(selection.requestedSelection.counterfactual ? `Counterfactual rejection evidence in ${artifacts}; not positive UI proof.` : selection.fullCatalogRequested ? `Full catalog passed in ${artifacts}; inspect the retained full-shell evidence, generation alone is not visual acceptance.` : `Filtered catalog passed (--grep ${JSON.stringify(selection.requestedSelection.grep)}) in ${artifacts}; this is not a full-catalog run.`);
+} catch (error) {
+  if (manifest) {
+    manifest.suiteResult = 'failed'; manifest.catalogComplete = false;
+    try { saveManifest?.(); } catch (writeError) { console.error(writeError.message); }
+  }
+  console.error(error.message); process.exitCode = 1;
+}
 finally { try { await cleanup(); } catch (error) { console.error(error.message); process.exit(1); } }

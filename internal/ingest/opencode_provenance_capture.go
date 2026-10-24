@@ -157,8 +157,9 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 		for _, row := range page.Messages {
 			position := openCodeUnknownPosition(scope.SessionID, "current", row.ID.String(), int64(len(rows)), traversalPosition, "")
 			scope.UnknownPosition = position.Public
-			traversalPosition += openCodeCurrentTraversalSize([]byte(row.Data))
-			decoded, settled, err := DecodeOpenCodeProvenanceRow(OpenCodeProvenanceRow{
+			traversal := decodeOpenCodeCurrentTraversal([]byte(row.Data), true)
+			traversalPosition += traversal.size
+			decoded, settled, err := decodeOpenCodeProvenanceRow(OpenCodeProvenanceRow{
 				ID:          row.ID.String(),
 				SessionID:   row.SessionID.String(),
 				Type:        row.Type.String(),
@@ -167,7 +168,7 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 				Seq:         row.Seq.Value(),
 				HasSeq:      true,
 				Data:        row.Data,
-			}, scope)
+			}, scope, &traversal)
 			if err != nil {
 				if err == errOpenCodeSkipControlRow {
 					continue
@@ -436,13 +437,9 @@ func (idx *OpenCodeIndexer) loadOpenCodeHistoricalSemanticMessages(session Disco
 		if err != nil {
 			return nil, fmt.Errorf("read historical %s OpenCode session %q projection failed while opening the managed artifact; no candidate is eligible; restore the managed artifact and retry", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID)
 		}
-		projection, err := decodeManagedOpenCodeProjection(data, expectedFormat, expectedVersion, session.SessionID)
+		_, messages, _, err := decodeManagedOpenCodeSemanticProjection(data, expectedFormat, expectedVersion, session.SessionID)
 		if err != nil {
 			return nil, fmt.Errorf("read historical %s OpenCode session %q projection failed at strict envelope decode; no candidate is eligible; regenerate the managed artifact and retry", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID)
-		}
-		messages, _, err := parseManagedOpenCodeSemanticMessages(projection, managedOpenCodeProjectionKind(session.TranscriptOrigin))
-		if err != nil {
-			return nil, fmt.Errorf("read historical %s OpenCode session %q projection failed at semantic decode; no partial candidate is eligible; regenerate the managed artifact and retry", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID)
 		}
 		return messages, nil
 	case TranscriptOriginFile:

@@ -208,6 +208,31 @@ cases:
         recordedat: 2026-01-03T00:00:00Z
         decidedat: null
         decidedbyactor: ''
+  - name: complete-legacy-rejected-unknown-decision-history
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: '[{"event_num":1,"status":"rejected","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":"moderator"},{"event_num":2,"status":"pending","recorded_at":"2026-01-02T00:00:00Z","decided_at":null,"decided_by_actor":""}]'
+    wantEvents:
+      - eventnum: 1
+        status: rejected
+        recordedat: 2026-01-01T00:00:00Z
+        decidedat: null
+        decidedbyactor: moderator
+      - eventnum: 2
+        status: pending
+        recordedat: 2026-01-02T00:00:00Z
+        decidedat: null
+        decidedbyactor: ''
+  - name: retracted-unknown-decision-refused
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: '[{"event_num":1,"status":"retracted","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":"owner"}]'
+    invalid: true
+  - name: revoked-unknown-decision-refused
+    method: events
+    path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events
+    body: '[{"event_num":1,"status":"revoked","recorded_at":"2026-01-01T00:00:00Z","decided_at":null,"decided_by_actor":"collective"}]'
+    invalid: true
   - name: empty-own-attempts
     method: events
     path: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events

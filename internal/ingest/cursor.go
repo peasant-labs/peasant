@@ -685,7 +685,8 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			}
 			completion.recognized++
 		}
-		entry, ok := cursorLineEntry(sessionID, entryIndex, raw, line, decodeErr, idx.fullContent)
+		content := decodeCursorContent(line.content())
+		entry, ok := cursorDecodedLineEntry(sessionID, entryIndex, raw, line, content, decodeErr, idx.fullContent)
 		if !ok {
 			entryIndex++
 			continue
@@ -697,7 +698,7 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		entries = append(entries, entry)
 		entryIndex++
 		if idx.fullDepth {
-			childEntries := decomposeCursorContentBlocks(sessionID, &entryIndex, parentIndex, raw, idx.fullContent)
+			childEntries := decomposeCursorDecodedContent(sessionID, &entryIndex, parentIndex, line, content, idx.fullContent)
 			if entry.Role == RoleSystem {
 				for i := range childEntries {
 					childEntries[i].Role = RoleSystem
@@ -724,6 +725,23 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 }
 
 func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSONLLine, decodeErr error, fullContent bool) (schema.SessionEntry, bool) {
+	return cursorDecodedLineEntry(sessionID, index, raw, line, decodeCursorContent(line.content()), decodeErr, fullContent)
+}
+
+type cursorDecodedContent struct {
+	Blocks    []cursorContentBlock
+	PlainText string
+}
+
+func decodeCursorContent(raw json.RawMessage) cursorDecodedContent {
+	var content cursorDecodedContent
+	if json.Unmarshal(raw, &content.PlainText) != nil {
+		content.Blocks = parseCursorContentBlocks(raw)
+	}
+	return content
+}
+
+func cursorDecodedLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSONLLine, content cursorDecodedContent, decodeErr error, fullContent bool) (schema.SessionEntry, bool) {
 	if decodeErr != nil {
 		return schema.SessionEntry{}, false
 	}
@@ -756,13 +774,10 @@ func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSON
 		return entry, true
 	}
 
-	blocks := parseCursorContentBlocks(line.content())
-	plainText := extractCursorPlainText(line.content())
-	if fullContent {
-		var rawText string
-		if json.Unmarshal(line.content(), &rawText) == nil {
-			plainText = rawText
-		}
+	blocks := content.Blocks
+	plainText := content.PlainText
+	if !fullContent {
+		plainText = strings.TrimSpace(plainText)
 	}
 	var toolNames []string
 	var preview strings.Builder
@@ -853,7 +868,11 @@ func decomposeCursorContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 	if err := json.Unmarshal(raw, &line); err != nil {
 		return nil
 	}
-	blocks := parseCursorContentBlocks(line.content())
+	return decomposeCursorDecodedContent(sessionID, entryIndex, parentIndex, line, decodeCursorContent(line.content()), fullContent)
+}
+
+func decomposeCursorDecodedContent(sessionID SessionID, entryIndex *int, parentIndex int, line cursorJSONLLine, content cursorDecodedContent, fullContent bool) []schema.SessionEntry {
+	blocks := content.Blocks
 	if len(blocks) == 0 {
 		return nil
 	}

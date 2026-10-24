@@ -462,8 +462,9 @@ rowLoop:
 			if seq := row.Seq.Value(); seq > 0 {
 				position.Sequence = int(seq)
 			}
-			traversalPosition += openCodeCurrentTraversalSize([]byte(row.Data))
-			message, err := normalizeOpenCodeCurrentRowAt(row, &registry, position)
+			traversal := decodeOpenCodeCurrentTraversal([]byte(row.Data), true)
+			traversalPosition += traversal.size
+			message, err := normalizeOpenCodeCurrentRowWithTraversal(row, &registry, position, &traversal)
 			if errors.Is(err, errOpenCodeSkipControlRow) {
 				// Compatibility may omit future vocabulary, but the retained
 				// projection must never certify those missing rows as complete.
@@ -515,6 +516,10 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 }
 
 func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry, position UnknownSourcePosition) (openCodeLegacyProjectionMessage, error) {
+	return normalizeOpenCodeCurrentRowWithTraversal(row, registry, position, nil)
+}
+
+func normalizeOpenCodeCurrentRowWithTraversal(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry, position UnknownSourcePosition, traversal *openCodeCurrentTraversal) (openCodeLegacyProjectionMessage, error) {
 	message := openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Parts: []openCodeLegacyProjectionPart{}}
 	appendPart := func(id string, created int64, data any) error {
 		if id != "" {
@@ -582,7 +587,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 			return message, fmt.Errorf("upstream message type %q conflicts with SQLite row type %q", rowType, row.Type.String())
 		}
 	}
-	prepared, unknown, prepareErr := prepareOpenCodeCurrent(row.Type.String(), data, position)
+	prepared, unknown, prepareErr := prepareOpenCodeCurrentFieldsWithTraversal(row.Type.String(), data, envelope, position, traversal)
 	if prepareErr != nil {
 		return message, prepareErr
 	}
@@ -603,7 +608,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "text", "time"); err != nil {
 			return message, err
 		}
 		if err := messageData(RoleUser.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
@@ -652,7 +657,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "agent", "model", "content", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "agent", "model", "content", "time"); err != nil {
 			return message, err
 		}
 		if err := validateOpenCodeV2Error(value.Error); err != nil {
@@ -730,7 +735,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "text", "time"); err != nil {
 			return message, err
 		}
 		if raw, present := envelope["sessionID"]; present && (bytes.Equal(raw, []byte("null")) || value.SessionID != message.SessionID) {
@@ -744,7 +749,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "text", "time"); err != nil {
 			return message, err
 		}
 		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
@@ -755,7 +760,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "skill", "name", "text", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "skill", "name", "text", "time"); err != nil {
 			return message, err
 		}
 		if value.Skill == "" || value.Name == "" {
@@ -795,7 +800,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "agent", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "agent", "time"); err != nil {
 			return message, err
 		}
 		message.Control = "agent-switched"
@@ -814,7 +819,7 @@ func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *open
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "model", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(envelope, "model", "time"); err != nil {
 			return message, err
 		}
 		message.Control = "model-switched"
@@ -859,6 +864,12 @@ func requireOpenCodeCurrentFields(raw []byte, fields ...string) error {
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return err
 	}
+	return requireOpenCodeCurrentObjectFields(object, fields...)
+}
+
+// The caller has already decoded this exact object. Presence and explicit null
+// checks do not need another scan and copy of its potentially large payload.
+func requireOpenCodeCurrentObjectFields(object map[string]json.RawMessage, fields ...string) error {
 	for _, field := range fields {
 		value, ok := object[field]
 		if !ok {
