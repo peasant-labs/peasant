@@ -476,3 +476,56 @@ cases:
       {"type":"assistant","uuid":"ob1","parentUuid":"ob0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"tool_use","id":"toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"AskUserQuestion","input":{"questions":[]}}]}}
       {"type":"user","uuid":"ob2","parentUuid":"ob1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","content":"answer one"}]}}
     wantRefusal: true
+
+  - name: legacy-schema-eight-metadata
+    # A stored sidecar older than the current schema still indexes the verified
+    # capture; the builder re-gates the recorded context at the current schema.
+    metadataSchemaVersion: 8
+    transcript: |
+      {"type":"user","uuid":"s1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"legacy prompt"}}
+      {"type":"assistant","uuid":"s2","parentUuid":"s1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"legacy reply"}]}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s2:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "legacy prompt", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "legacy reply"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "legacy reply"}
+
+  - name: forked-prompt-continuation
+    # A real Claude fork stamps the forked prompt with the parent session id
+    # while the new session's own chain starts independently.
+    sourcePath: /projects/proj/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+    siblingReadCounts:
+      /projects/proj/22222222-2222-4222-8222-222222222222.jsonl: 1
+    siblings:
+      /projects/proj/22222222-2222-4222-8222-222222222222.jsonl: |
+        {"type":"user","uuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"parent prompt"}}
+        {"type":"assistant","uuid":"v2","parentUuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"assistant","content":"parent reply"}}
+    transcript: |
+      {"type":"user","uuid":"f1","parentUuid":"v2","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"forked prompt"}}
+      {"type":"progress","uuid":"r1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":""}}
+      {"type":"assistant","uuid":"a1","parentUuid":"r1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"fork reply"}]}}
+    completeness: complete
+    turnCount: 2
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:f1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:r1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:f1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "forked prompt"}
+      - {depth: 0, role: system, entryType: system, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "fork reply"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 2, toolCallIDFromIndex: -1, preview: "fork reply"}

@@ -23,3 +23,5 @@ requiredNames:
   - plain-prompt-text-array
   - plain-prompt-text-and-image-array
   - over-bound-answer-key-refusal
+  - legacy-schema-eight-metadata
+  - forked-prompt-continuation

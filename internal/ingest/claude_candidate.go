@@ -93,7 +93,20 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	}
 	data := in.CapturedTranscript
 
-	metadata, err := metadataForTranscriptExtraction(ctx, HarnessClaudeCode, data, in.RecordedMetadata)
+	// A managed candidate indexes the verified capture, not the stored
+	// sidecar's schema revision. A schema older than this build's current one
+	// is re-gated at the current version because the captured bytes supply the
+	// content hash and the candidate recomputes stats and relationships; the
+	// recorded sidecar supplies only the project, git and host context. The
+	// native refresh path remains the ordinary way such a sidecar is rebuilt,
+	// but it must not make an otherwise provable capture un-upgradable.
+	recorded := in.RecordedMetadata
+	if recorded.SchemaVersion < CurrentSchemaVersion {
+		revisioned := *recorded
+		revisioned.SchemaVersion = CurrentSchemaVersion
+		recorded = &revisioned
+	}
+	metadata, err := metadataForTranscriptExtraction(ctx, HarnessClaudeCode, data, recorded)
 	if err != nil {
 		return GenerationCandidate{}, err
 	}

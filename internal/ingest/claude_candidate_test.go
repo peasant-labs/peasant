@@ -63,6 +63,9 @@ type claudeProducerCase struct {
 	RecordedSessionID string `yaml:"recordedSessionId"`
 	// RecordedParent is the recorded parent identity, when the session has one.
 	RecordedParent string `yaml:"recordedParent"`
+	// MetadataSchemaVersion overrides the recorded sidecar revision (0 keeps
+	// the current one).
+	MetadataSchemaVersion int `yaml:"metadataSchemaVersion"`
 	// SourcePath defaults to /native/<session>.jsonl.
 	SourcePath string `yaml:"sourcePath"`
 	// SentinelLocator, when set, becomes the recorded source path and must not
@@ -155,6 +158,9 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 	}
 
 	metadata := makeReindexMeta(t, sessionID, sourcePath)
+	if row.MetadataSchemaVersion != 0 {
+		metadata.SchemaVersion = row.MetadataSchemaVersion
+	}
 	if row.RecordedParent != "" {
 		parent, err := ingest.NewSessionID(row.RecordedParent)
 		if err != nil {

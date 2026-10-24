@@ -223,6 +223,14 @@ func claudeIdentitySnapshotFrom(fs FileSystem) claudeIdentitySnapshotSource {
 			if claudeNamesSession(snapshot.Records, owner) {
 				return snapshot, true
 			}
+			if len(snapshot.Records) == 0 {
+				// The file exists but retains no session-id-bearing record: a
+				// rotated or truncated owner transcript that kept only summary
+				// and file-history records. The caller decides whether the file
+				// identity alone proves its case; a file that names a different
+				// session remains unavailable.
+				return snapshot, true
+			}
 		}
 		return ClaudeTranscriptEvidence{}, false
 	}
@@ -259,6 +267,22 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 			foreign = append(foreign, record)
 		}
 	}
+	// A real Claude fork can write the forked prompt under the parent's session
+	// id while its parentUuid names an existing record in the parent snapshot.
+	// The new session's own chain then starts independently, so no own record
+	// links back to that prompt. The forked prompt still continues the parent
+	// chain: its predecessor is proved by the snapshot itself. A record whose
+	// parent is absent from the snapshot (a disconnected copy) proves nothing.
+	continuedFromSnapshot := false
+	for _, record := range foreign {
+		if record.ParentUUID == "" {
+			continue
+		}
+		if _, ok := byUUID[record.ParentUUID]; ok {
+			continuedFromSnapshot = true
+			break
+		}
+	}
 	foreignUUIDs := make(map[string]bool, len(foreign))
 	for _, record := range records {
 		if record.SessionID == own.String() && record.ParentUUID != "" && foreignUUIDs[record.ParentUUID] {
@@ -274,7 +298,7 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 	if len(foreign) == 0 || len(byUUID) == 0 {
 		return false
 	}
-	if !restamped && !transition {
+	if !restamped && !transition && !continuedFromSnapshot {
 		return false
 	}
 	// Each foreign record is a copied coordinate or extends the proved chain.
@@ -298,11 +322,22 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 		if copied && !claudeSameCoordinate(prior, record) {
 			return false
 		}
-		chainLinked := record.ParentUUID != "" && linked[record.ParentUUID]
-		if !copied && !chainLinked {
-			return false
-		}
 		if record.UUID == "" {
+			// A copied mirror or control record can carry no coordinate of its
+			// own. It cannot extend the chain, but it must not invalidate a link
+			// the surrounding records prove.
+			continue
+		}
+		if record.Type == "system" && record.Subtype == "compact_boundary" {
+			// A compact boundary starts a new native segment with no parent.
+			// It is the harness's own continuation marker, so it is proof of a
+			// segment start rather than a disconnected record.
+			linked[record.UUID] = true
+			continue
+		}
+		chainLinked := record.ParentUUID != "" && linked[record.ParentUUID]
+		_, parentInSnapshot := byUUID[record.ParentUUID]
+		if !copied && !chainLinked && !(record.ParentUUID != "" && parentInSnapshot) {
 			return false
 		}
 		linked[record.UUID] = true
@@ -429,7 +464,13 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 		owner, ok := claudeRecordOwner(proof)
 		parentMatches := session.ParentUUID != nil && owner == *session.ParentUUID
 		identityMatches := session.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
-		ownerMatches := identityMatches && parentMatches
+		// A legacy root agent file records its owner in every record's sessionId
+		// but predates the recorded parent field. Derive the owner when the
+		// native owner source exists and names that owner; a rotated owner file
+		// that retains no session records is the same file identity. A bare
+		// matching sessionId with no owner source is not proof.
+		derivedOwner := session.ParentUUID == nil
+		ownerMatches := identityMatches && (parentMatches || derivedOwner)
 		layout, hasLayout := claudeLayoutParent(session.SourcePath)
 		legacyLayout := hasLayout && layout == owner && claudeLegacyAgentProof(proof, proof.NativeAgentID)
 		nativeProof := proof.NativeAgentValid || legacyLayout
@@ -450,6 +491,9 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 					return refuse()
 				}
 			}
+		}
+		if derivedOwner {
+			allowed[owner.String()] = true
 		}
 		target := schema.SessionID(owner)
 		relationships = append(relationships, schema.SessionRelationship{Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnown, TargetLocalID: &target, Evidence: schema.EvidenceNativeTyped})
@@ -517,18 +561,60 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 	if strings.HasPrefix(original.SessionID.String(), defaults.ClaudeSubagentPrefix) && claudeContradictorySidechain(proof) {
 		return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: explicit native sidechain evidence contradicts an agent artifact; keep the last-good capture and restore matching native input", original.SessionID)
 	}
+	var derivedAgentOwner *SessionID
 	if strings.HasPrefix(original.SessionID.String(), defaults.ClaudeSubagentPrefix) && proof.NativeAgentID != "" {
 		owner, ok := claudeRecordOwner(proof)
 		parentMatches := original.ParentUUID != nil && owner == *original.ParentUUID
 		identityMatches := original.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
-		ownerMatches := parentMatches && identityMatches
+		// A legacy root agent artifact stores its owner in every record's
+		// sessionId but has no recorded parent. Derive the owner when the
+		// recorded relationship is bound to these bytes, or when the native
+		// owner source still exists and names that owner.
+		derivedOwner := original.ParentUUID == nil
+		ownerMatches := identityMatches && (parentMatches || derivedOwner)
 		legacyProof := claudeLegacyAgentProof(proof, proof.NativeAgentID)
 		nativeProof := proof.NativeAgentValid || legacyProof
 		if !nativeProof || !ok || !ownerMatches {
 			return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
 		}
+		if derivedOwner {
+			recordedProof := false
+			if original.ContentHash != "" && original.ContentHash == contentHash {
+				for _, relationship := range original.Relationships {
+					if relationship.Kind != schema.SessionRelationshipStartedBy || relationship.TargetLocalID == nil || relationship.TargetLocalID.String() != owner.String() {
+						continue
+					}
+					if relationship.Evidence == schema.EvidenceNativeTyped || relationship.Evidence == schema.EvidenceRetainedLastGood {
+						recordedProof = true
+						break
+					}
+				}
+			}
+			if !recordedProof {
+				_, available := snapshot(claudeSourcePath(ResolvedPath(original.Source.FilePath), owner))
+				if !available {
+					return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
+				}
+			}
+			allowed[owner.String()] = true
+			id := owner
+			derivedAgentOwner = &id
+		}
 	}
 	relationships := append([]schema.SessionRelationship(nil), original.Relationships...)
+	if derivedAgentOwner != nil {
+		target := schema.SessionID(*derivedAgentOwner)
+		already := false
+		for _, relationship := range relationships {
+			if relationship.Kind == schema.SessionRelationshipStartedBy && relationship.TargetLocalID != nil && *relationship.TargetLocalID == target {
+				already = true
+				break
+			}
+		}
+		if !already {
+			relationships = append([]schema.SessionRelationship{{Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnown, TargetLocalID: &target, Evidence: schema.EvidenceNativeTyped}}, relationships...)
+		}
+	}
 	for _, relationship := range original.Relationships {
 		contextConflict := relationship.Kind == schema.SessionRelationshipContextFrom && relationship.TargetState == schema.RelationshipTargetConflictingCurrentNativeEvidence
 		if contextConflict && relationship.Evidence == schema.EvidenceConflict {
@@ -550,6 +636,25 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 		}
 		if relationship.Evidence != schema.EvidenceNativeTyped && relationship.Evidence != schema.EvidenceRetainedLastGood {
 			continue
+		}
+		// A forked prompt can start the new session's own chain independently,
+		// so no own record transitions from the copied foreign record. When the
+		// recorded relationship is bound to these exact captured bytes and the
+		// only foreign identity they name is the recorded target, the
+		// relationship itself proves the fork; no native source is reopened.
+		if original.ContentHash != "" && original.ContentHash == contentHash {
+			foreignOnly := true
+			for _, record := range proof.Records {
+				if record.SessionID == "" || record.SessionID == original.SessionID.String() || record.SessionID == relationship.TargetLocalID.String() {
+					continue
+				}
+				foreignOnly = false
+				break
+			}
+			if foreignOnly {
+				allowed[relationship.TargetLocalID.String()] = true
+				continue
+			}
 		}
 		ownUUIDs, foreignUUIDs := make(map[string]bool), make(map[string]bool)
 		for _, record := range proof.Records {
