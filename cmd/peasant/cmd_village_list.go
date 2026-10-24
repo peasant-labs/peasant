@@ -107,7 +107,8 @@ func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool, owner s
 	if owner != "" {
 		selected := make([]store.PulledTranscriptRow, 0, len(rows))
 		for _, row := range rows {
-			if strings.EqualFold(row.OwnerUsername, strings.TrimSpace(owner)) {
+			// An anonymous owner is stored with no username and never matches.
+			if row.OwnerUsername != "" && strings.EqualFold(row.OwnerUsername, strings.TrimSpace(owner)) {
 				selected = append(selected, row)
 			}
 		}
@@ -148,7 +149,7 @@ func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collec
 		}
 	}
 
-	if err := client.NegotiatePull(cmd.Context()); err != nil {
+	if _, err := client.NegotiatePull(cmd.Context()); err != nil {
 		return err
 	}
 
@@ -389,7 +390,7 @@ func printLocalCollectiveListTable(cmd *cobra.Command, rows []store.PulledTransc
 		if view.Metadata.ObservedAt != nil {
 			at = view.Metadata.ObservedAt.Format(time.RFC3339)
 		}
-		fmt.Fprintf(w, "%s\t@%s\t%s\t%s\t%s\n", row.TranscriptID, row.OwnerUsername, strings.Join(names, ", "), view.Metadata.State, at)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", row.TranscriptID, ownerLabel(row.OwnerUsername), strings.Join(names, ", "), view.Metadata.State, at)
 	}
 	_ = w.Flush()
 }
@@ -405,8 +406,8 @@ func printLocalListTable(cmd *cobra.Command, rows []store.PulledTranscriptRow) {
 	fmt.Fprintln(tw, "TRANSCRIPT\tOWNER\tHARNESS\tLICENSE\tANNOTATIONS\tPULLED")
 	for i := range rows {
 		r := &rows[i]
-		fmt.Fprintf(tw, "%s\t@%s\t%s\t%s\t%d\t%s\n",
-			r.TranscriptID, r.OwnerUsername, r.Harness, formatLicense(r.License), r.AnnotationCount, formatUnixMillis(r.LastPulledAt))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n",
+			r.TranscriptID, ownerLabel(r.OwnerUsername), r.Harness, formatLicense(r.License), r.AnnotationCount, formatUnixMillis(r.LastPulledAt))
 	}
 	_ = tw.Flush()
 }
@@ -422,8 +423,8 @@ func printRemoteListTable(cmd *cobra.Command, resp *schema.PullListResponse) {
 	fmt.Fprintln(tw, "TRANSCRIPT\tOWNER\tHARNESS\tVISIBILITY\tLICENSE\tANNOTATIONS\tTITLE")
 	for i := range resp.Transcripts {
 		t := &resp.Transcripts[i]
-		fmt.Fprintf(tw, "%s\t@%s\t%s\t%s\t%s\t%d\t%s\n",
-			t.TranscriptID, t.OwnerUsername, t.Harness, t.Visibility, formatLicense(t.License), t.AnnotationCount, t.Title)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+			t.TranscriptID, publicOwnerLabel(t.Owner), t.Harness, t.Visibility, formatLicense(t.License), t.AnnotationCount, t.Title)
 	}
 	_ = tw.Flush()
 	if resp.Total > len(resp.Transcripts) {

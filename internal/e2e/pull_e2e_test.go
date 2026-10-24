@@ -813,9 +813,9 @@ func assertPulledAssociationAnnotation(t *testing.T, dbPath, transcriptID, host 
 				t.Fatalf("pulled association annotation values = type=%q value=%q annotator=%q primary=%v, want type=%q value=%q annotator=%q primary=%v",
 					annotation.TypeID, annotation.Value, annotation.AnnotatorName, annotation.IsPrimary, fixture.Annotation.TypeID, fixture.Annotation.Value, fixture.Annotation.Annotator, fixture.Annotation.Primary)
 			}
-			if annotation.AuthorUserID != wantAuthorID || annotation.AuthorUsername != wantAuthorUsername || stmt.ColumnText(1) != wantAuthorID || stmt.ColumnText(2) != wantAuthorUsername {
+			if !annotation.Author.IsAccount(schema.VillageUUID(wantAuthorID)) || annotation.Author.Username != wantAuthorUsername || stmt.ColumnText(1) != wantAuthorID || stmt.ColumnText(2) != wantAuthorUsername {
 				t.Fatalf("pulled association annotation author = payload %s/@%s, row %s/@%s, want %s/@%s",
-					annotation.AuthorUserID, annotation.AuthorUsername, stmt.ColumnText(1), stmt.ColumnText(2), wantAuthorID, wantAuthorUsername)
+					annotation.Author.ID, annotation.Author.Username, stmt.ColumnText(1), stmt.ColumnText(2), wantAuthorID, wantAuthorUsername)
 			}
 			return nil
 		},

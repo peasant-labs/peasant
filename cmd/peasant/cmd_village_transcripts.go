@@ -314,9 +314,7 @@ func renderPulledContextJSON(cmd *cobra.Command, id schema.TranscriptID, row *st
 func printPulledProvenanceHeader(cmd *cobra.Command, id schema.TranscriptID, row *store.PulledTranscriptRow) {
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "pulled transcript %s\n", id)
-	if row.OwnerUsername != "" {
-		fmt.Fprintf(w, "  owner:   @%s\n", row.OwnerUsername)
-	}
+	fmt.Fprintf(w, "  owner:   %s\n", ownerLabel(row.OwnerUsername))
 	if row.VillageHost != "" {
 		fmt.Fprintf(w, "  village: %s\n", row.VillageHost)
 	}

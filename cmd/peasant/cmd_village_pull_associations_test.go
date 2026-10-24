@@ -166,7 +166,7 @@ func TestPullAssociationActionFixtures(t *testing.T) {
 			if published.ComputeContentHash() != fixture.Hash {
 				t.Fatal("served session annotation payload does not match its independently declared published checksum")
 			}
-			if annotation.AuthorUserID != fixture.AuthorUserID || annotation.AuthorUsername != fixture.AuthorUsername {
+			if !annotation.Author.IsAccount(schema.VillageUUID(fixture.AuthorUserID)) || annotation.Author.Username != fixture.AuthorUsername {
 				t.Fatal("annotation fixture author differs from independent projection expectation")
 			}
 		}
@@ -284,7 +284,7 @@ func TestPullAssociationActionFixtures(t *testing.T) {
 				omitAdvertisedHash := c.Mode == "etag" || c.Mode == "download"
 				if active.Load() && omitAdvertisedHash && isMetadata {
 					content := corpus.Content[0]
-					_ = json.NewEncoder(w).Encode(schema.PullTranscriptInfo{TranscriptID: ids[0], OwnerUserID: content.OwnerUserID, OwnerUsername: content.OwnerUsername, LocalID: content.LocalSessionID, Title: content.Title, Harness: content.Harness, Visibility: content.Visibility, AnnotationCount: len(wireAnnotations[content.ID])})
+					_ = json.NewEncoder(w).Encode(schema.PullTranscriptInfo{TranscriptID: ids[0], Owner: testutil.PublicProfile(content.OwnerUserID, content.OwnerUsername), LocalID: content.LocalSessionID, Title: content.Title, Harness: content.Harness, Visibility: content.Visibility, AnnotationCount: len(wireAnnotations[content.ID])})
 					return
 				}
 				if active.Load() && c.Mode == "switch" && strings.HasSuffix(path, "/annotations") {

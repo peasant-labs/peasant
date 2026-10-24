@@ -3,7 +3,8 @@
 #
 # The world below is seeded onto the collective village double before each case:
 # two member collectives, one transcript from each of three contributors across
-# them, and one contributor holding work in both collectives. Each case names one
+# them, one contributor holding work in both collectives, and one transcript
+# whose owner the village shows this viewer anonymously (no id, no username). Each case names one
 # behaviour, the production command it runs, and the observable outcome — the
 # rows selected, the total reported, and the listing reads the run made. The
 # expectations carry transcript IDs rather than counts, so a case cannot pass by
@@ -32,6 +33,9 @@ world:
     - id: aaaaaaaa-bbbb-cccc-dddd-000000000005
       owner: carol
       collectives: [platform-team]
+    - id: aaaaaaaa-bbbb-cccc-dddd-000000000006
+      anonymous: true
+      collectives: [platform-team]
 
 requiredNames:
   - user filter matches case insensitively
@@ -51,6 +55,10 @@ requiredNames:
   - user filter exclusive with a transcript reference
   - user filter narrows a collective pull to one contributor
   - user filter alone spans collectives on a pull
+  - user filter never matches an anonymous owner
+  - local user filter never matches an anonymous owner
+  - remote table prints anon for an anonymous owner
+  - local table prints anon for an anonymous owner
 
 cases:
   # A username is case-insensitive at the village, so the flag folds case the
@@ -143,6 +151,7 @@ cases:
       - aaaaaaaa-bbbb-cccc-dddd-000000000003
       - aaaaaaaa-bbbb-cccc-dddd-000000000004
       - aaaaaaaa-bbbb-cccc-dddd-000000000005
+      - aaaaaaaa-bbbb-cccc-dddd-000000000006
 
   - name: local user filter applies to table output
     command: list-local-table
@@ -195,3 +204,37 @@ cases:
     expect:
       - aaaaaaaa-bbbb-cccc-dddd-000000000001
       - aaaaaaaa-bbbb-cccc-dddd-000000000003
+
+  # An anonymous owner has no username, so no --user value selects it, not
+  # even the label the tables print for it.
+  - name: user filter never matches an anonymous owner
+    command: list
+    user: anon
+    expect: []
+    expectTotal: 0
+
+  - name: local user filter never matches an anonymous owner
+    command: list-local
+    user: anon
+    expect: []
+
+  # Tables print "anon" for an anonymous owner, never "@" with an empty name.
+  - name: remote table prints anon for an anonymous owner
+    command: list-table
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+      - aaaaaaaa-bbbb-cccc-dddd-000000000005
+      - aaaaaaaa-bbbb-cccc-dddd-000000000006
+
+  - name: local table prints anon for an anonymous owner
+    command: list-local-table
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+      - aaaaaaaa-bbbb-cccc-dddd-000000000005
+      - aaaaaaaa-bbbb-cccc-dddd-000000000006

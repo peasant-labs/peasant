@@ -2,7 +2,7 @@ observedAt: 2026-10-15T10:00:00Z
 content:
   - id: aaaaaaaa-bbbb-cccc-dddd-000000000000
     blob: '{"contractVersion":"0.1.1","kind":"session_detail","sessionDetail":{"id":"foreign-recorded-session","harness":"claude-code","turns":[]}}'
-    ownerUserId: user-owner-001
+    ownerUserId: 0a000000-0000-4000-8000-000000000001
     ownerUsername: alice
     title: pull title for aaaaaaaa-bbbb-cccc-dddd-000000000000
     harness: claude-code
@@ -13,7 +13,7 @@ content:
     annotationHashes: []
   - id: aaaaaaaa-bbbb-cccc-dddd-000000000001
     blob: '{"contractVersion":"0.1.1","kind":"session_detail","sessionDetail":{"id":"aaaaaaaa-bbbb-cccc-dddd-000000000001","harness":"claude-code","turns":[]}}'
-    ownerUserId: user-owner-001
+    ownerUserId: 0a000000-0000-4000-8000-000000000001
     ownerUsername: alice
     title: pull title for aaaaaaaa-bbbb-cccc-dddd-000000000001
     harness: claude-code
@@ -32,7 +32,7 @@ annotationSets:
     - transcriptId: aaaaaaaa-bbbb-cccc-dddd-000000000000
       hash: 0f26afee3ffd991630fb4eed9c2185149450d026ea9f35bb8d8f2d371fa17589
       hashInputJSON: '{"contentHash":"","targetKind":"session","sessionId":"foreign-recorded-session","typeId":"review:context","value":"Foreign HUMAN note: keep exact Case.","isPrimary":true,"annotatorName":"Dr. Rivera"}'
-      payloadJSON: '{"id":"foreign-human-review","targetKind":"session","targetSessionId":"foreign-recorded-session","isPrimary":true,"annotatorKind":"human","annotatorName":"Dr. Rivera","typeId":"review:context","typeName":"Context review","value":"Foreign HUMAN note: keep exact Case.","contentHash":"0f26afee3ffd991630fb4eed9c2185149450d026ea9f35bb8d8f2d371fa17589","createdAt":1792068000000,"authorUserId":"cccccccc-3333-4333-8333-cccccccccccc","authorUsername":"RiveraCase"}'
+      payloadJSON: '{"id":"foreign-human-review","targetKind":"session","targetSessionId":"foreign-recorded-session","isPrimary":true,"annotatorKind":"human","annotatorName":"Dr. Rivera","typeId":"review:context","typeName":"Context review","value":"Foreign HUMAN note: keep exact Case.","contentHash":"0f26afee3ffd991630fb4eed9c2185149450d026ea9f35bb8d8f2d371fa17589","createdAt":1792068000000,"author":{"kind":"profile","id":"cccccccc-3333-4333-8333-cccccccccccc","username":"RiveraCase","display_name":null,"avatar_url":null}}'
       authorUserId: cccccccc-3333-4333-8333-cccccccccccc
       authorUsername: RiveraCase
       localSessionId: foreign-recorded-session
@@ -40,7 +40,7 @@ annotationSets:
     - transcriptId: aaaaaaaa-bbbb-cccc-dddd-000000000000
       hash: 144ddb88150fa9aefbeeb064cd6653a8a2de6fc35b21dfbb46410b2fb95216d3
       hashInputJSON: '{"contentHash":"","targetKind":"session","sessionId":"foreign-recorded-session","typeId":"review:context","value":"Model review retained under its human author.","isPrimary":false,"reason":"Review generated for the recorded session.","annotatorName":"Claude Sonnet","provenance":{"method":"llm_judge","function":"review","version":"1","details":{"model":"claude-sonnet-4","provider":"anthropic"}}}'
-      payloadJSON: '{"id":"foreign-agent-review","targetKind":"session","targetSessionId":"foreign-recorded-session","isPrimary":false,"annotatorKind":"agent","annotatorName":"Claude Sonnet","typeId":"review:context","typeName":"Context review","value":"Model review retained under its human author.","reason":"Review generated for the recorded session.","provenance":{"method":"llm_judge","function":"review","version":"1","details":{"model":"claude-sonnet-4","provider":"anthropic"}},"contentHash":"144ddb88150fa9aefbeeb064cd6653a8a2de6fc35b21dfbb46410b2fb95216d3","createdAt":1792068001000,"authorUserId":"cccccccc-3333-4333-8333-cccccccccccc","authorUsername":"RiveraCase"}'
+      payloadJSON: '{"id":"foreign-agent-review","targetKind":"session","targetSessionId":"foreign-recorded-session","isPrimary":false,"annotatorKind":"agent","annotatorName":"Claude Sonnet","typeId":"review:context","typeName":"Context review","value":"Model review retained under its human author.","reason":"Review generated for the recorded session.","provenance":{"method":"llm_judge","function":"review","version":"1","details":{"model":"claude-sonnet-4","provider":"anthropic"}},"contentHash":"144ddb88150fa9aefbeeb064cd6653a8a2de6fc35b21dfbb46410b2fb95216d3","createdAt":1792068001000,"author":{"kind":"profile","id":"cccccccc-3333-4333-8333-cccccccccccc","username":"RiveraCase","display_name":null,"avatar_url":null}}'
       authorUserId: cccccccc-3333-4333-8333-cccccccccccc
       authorUsername: RiveraCase
       localSessionId: foreign-recorded-session

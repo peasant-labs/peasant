@@ -105,7 +105,8 @@ func resolveCollectiveRefs(ctx context.Context, client *village.VillageClient, v
 // filterByOwner keeps only the listed rows contributed by one village account,
 // compared case-insensitively because a username is case-insensitive at the
 // village. An empty owner keeps every row, so callers can pass the flag value
-// straight through.
+// straight through. A row whose owner the village shows anonymously never
+// matches: this CLI has no username for it and never infers one.
 func filterByOwner(rows []schema.PullTranscriptInfo, owner string) []schema.PullTranscriptInfo {
 	if owner == "" {
 		return rows
@@ -113,7 +114,7 @@ func filterByOwner(rows []schema.PullTranscriptInfo, owner string) []schema.Pull
 	wanted := strings.ToLower(strings.TrimSpace(owner))
 	kept := make([]schema.PullTranscriptInfo, 0, len(rows))
 	for i := range rows {
-		if strings.ToLower(rows[i].OwnerUsername) == wanted {
+		if rows[i].Owner.IsProfile() && strings.ToLower(rows[i].Owner.Username) == wanted {
 			kept = append(kept, rows[i])
 		}
 	}
