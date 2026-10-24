@@ -24,6 +24,9 @@ async function history(request, kind, page = 1, revision) {
   const response = await request.get(`${contributions}?${params}`); expect(response.ok(), await response.text()).toBe(true);
   return zLocalContributionHistoryResponse.parse(await response.json());
 }
+/** The page area the app mounted. While Next hydrates a route it keeps a hidden copy of the
+ * streamed page outside `main`; a CSS query must count only the mounted section, never that copy. */
+function mountedPage(page) { return page.locator('main'); }
 async function open(page, theme) {
   await page.goto('/village');
   const html = page.locator('html');
@@ -42,12 +45,12 @@ async function open(page, theme) {
   // page underneath, so a drawer left open would intercept its clicks.
   await expect(page.locator('.asb')).toHaveAttribute('data-drawer-open', 'false');
   await expect(page.getByRole('heading', { name: 'online observations', exact: true })).toBeVisible();
-  await expect(page.locator('.vobs')).toBeVisible();
+  await expect(mountedPage(page).locator('.vobs')).toBeVisible();
 }
 async function filterPanel(page) {
-  const disclosure = page.locator('.village-page-filter-tools');
+  const disclosure = mountedPage(page).locator('.village-page-filter-tools');
   if (await disclosure.getAttribute('open') === null) await disclosure.locator('summary').click();
-  return page.locator('form.village-page-filter');
+  return mountedPage(page).locator('form.village-page-filter');
 }
 async function captureShell(page, path) {
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -84,7 +87,7 @@ async function exercise(row, { page, request }, info) {
     }
     await expect(page.locator('.asb-panel a[href^="/village"]')).toHaveCount(0);
     await expect(page.locator('.asb-panel [aria-current="page"]')).toHaveCount(0);
-    await expect(page.locator('.vobs')).toContainText(exported.fixtures.OldName);
+    await expect(mountedPage(page).locator('.vobs')).toContainText(exported.fixtures.OldName);
     expect(await control(request, 'requests')).toEqual([]);
     return;
   }
@@ -98,11 +101,11 @@ async function exercise(row, { page, request }, info) {
     expect(result.status()).toBe(row.status);
     const report = zCollectiveFetchReport.parse(await result.json());
     expect(report.outcome).toBe('partial');
-    await expect(page.locator('.vobs-status')).toContainText('metadata fetch partial');
+    await expect(mountedPage(page).locator('.vobs-status')).toContainText('metadata fetch partial');
     expect(report.domains.find(d => d.domain === 'catalog').commit).toBe('updated');
     expect(report.domains.find(d => d.domain === 'history').lastCompletedAt).toBe(before.fetch.history.lastCompletedAt);
-    await expect(page.locator('.vobs')).toContainText(exported.fixtures.NewName);
-    await expect(page.locator('[data-domain="history"]')).toContainText(before.fetch.history.lastCompletedAt);
+    await expect(mountedPage(page).locator('.vobs')).toContainText(exported.fixtures.NewName);
+    await expect(mountedPage(page).locator('[data-domain="history"]')).toContainText(before.fetch.history.lastCompletedAt);
     expect((await saved(request)).fetch.history.lastCompletedAt).toBe(before.fetch.history.lastCompletedAt);
     await captureShell(page, join(root, `${theme}-${surface}-${row.scenario}.png`));
     return;
@@ -116,7 +119,7 @@ async function exercise(row, { page, request }, info) {
       const firstAnswer = page.waitForResponse(r => r.url().includes(contributions) && new URL(r.url()).searchParams.get('kind') === category.kind && new URL(r.url()).searchParams.get('limit') === '2');
       await filter.getByRole('button', { name: 'apply to this category' }).click();
       const first = zLocalContributionHistoryResponse.parse(await (await firstAnswer).json());
-      await page.locator('.village-page-filter-tools summary').click();
+      await mountedPage(page).locator('.village-page-filter-tools summary').click();
       const ids = [];
       for (let n = 1; n <= Math.ceil(first.total / 2); n++) {
         if (row.mode === 'isolation' && category.kind !== 'operation-diagnostics') await control(request, 'diagnostic');
@@ -127,7 +130,7 @@ async function exercise(row, { page, request }, info) {
         // The actual mounted pager performs the same selected-category read, not a dormant helper.
         if (n > 1) {
           const answer = page.waitForResponse(r => r.url().includes(contributions) && new URL(r.url()).searchParams.get('page') === String(n));
-          await page.locator('.vobs-pager:visible').getByRole('button', { name: `page ${n}`, exact: true }).click();
+          await mountedPage(page).locator('.vobs-pager:visible').getByRole('button', { name: `page ${n}`, exact: true }).click();
           const mounted = zLocalContributionHistoryResponse.parse(await (await answer).json());
           expect(mounted.traversalRevision).toBe(first.traversalRevision); expect(mounted.page).toBe(n);
         }
@@ -142,14 +145,14 @@ async function exercise(row, { page, request }, info) {
     await page.getByRole('tab', { name: 'history', exact: true }).click();
     await page.getByRole('tab', { name: 'remote attempts', exact: true }).click();
     await filterPanel(page);
-    await page.locator('#history-limit').fill('2');
+    await mountedPage(page).locator('#history-limit').fill('2');
     await page.getByRole('button', { name: 'apply to this category' }).click();
-    await expect(page.locator('.vobs-summary:visible')).toContainText(`${JSON.parse(exported.fixtures.AttemptsJSON).length} saved items`);
-    await page.locator('.village-page-filter-tools summary').click();
+    await expect(mountedPage(page).locator('.vobs-summary:visible')).toContainText(`${JSON.parse(exported.fixtures.AttemptsJSON).length} saved items`);
+    await mountedPage(page).locator('.village-page-filter-tools summary').click();
     const receiptBefore = await history(request, 'receipts');
     await control(request, 'terminal');
     const conflict = page.waitForResponse(r => r.url().includes(contributions) && r.status() === 409);
-    await page.locator('.vobs-pager:visible').getByRole('button', { name: 'page 2', exact: true }).click();
+    await mountedPage(page).locator('.vobs-pager:visible').getByRole('button', { name: 'page 2', exact: true }).click();
     await conflict;
     await page.getByRole('button', { name: 'restart this category' }).click();
     await expect(page.getByRole('button', { name: 'restart this category' })).toHaveCount(0);
@@ -201,21 +204,36 @@ async function exercise(row, { page, request }, info) {
     await rule.getByRole('button', { name: 'cancel', exact: true }).click();
     await expect(page.getByRole('form', { name: 'add a folder or repository', exact: true })).toHaveCount(0);
     if (row.mode === 'settings') return;
+    const [alice, bob] = ['alice', 'bob'].map(name => exported.fixtures.Accounts.find(account => account.Name === name));
+    expect(alice, 'the exported fixture names the previous account').toBeTruthy();
+    expect(bob, 'the exported fixture names the selected account').toBeTruthy();
     const before = await saved(request);
+    // The saved projection, not the page, says which account the server selected first.
+    expect(before.scope.userId).toBe(alice.UserID);
     // log out sits in the account section, the one settings opens on.
     await page.getByRole('link', { name: 'account', exact: true }).click();
     await page.getByRole('button', { name: 'log out', exact: true }).click();
     await expect.poll(async () => (await request.get(local)).status()).toBe(401);
     await control(request, 'account', { name: 'bob' });
     await open(page, theme);
-    await expect(page.locator('.vobs')).toContainText(exported.fixtures.Accounts[1].UserID);
-    await expect(page.locator('.vobs')).not.toContainText(before.scope.userId);
+    // The server selects the projection from the credential it saved, and the page names that
+    // account by its handle. Both must be the newly selected account, and the history shown
+    // must be its saved history: nothing of the logged-out account may remain.
+    const after = await saved(request);
+    expect(after.scope.userId).toBe(bob.UserID);
+    expect(after.scope.userId).not.toBe(before.scope.userId);
+    const observations = mountedPage(page).locator('.vobs');
+    await expect(observations).toContainText(`@${bob.Username}`);
+    await expect(observations).toContainText(exported.fixtures.OldName);
+    await expect(observations).not.toContainText(`@${alice.Username}`);
+    await expect(observations).not.toContainText(before.scope.userId);
+    await expect(observations).toContainText(after.fetch.history.lastCompletedAt);
     return;
   }
   if (row.mode === 'offline') {
     await control(request, 'scenario', { name: 'partial-502' });
     await page.getByRole('button', { name: 'fetch metadata', exact: true }).click();
-    await expect(page.locator('.vobs-status')).toContainText('partial');
+    await expect(mountedPage(page).locator('.vobs-status')).toContainText('partial');
     await expect(page.getByText("peasant isn't running on this computer.", { exact: false })).toHaveCount(0);
     await control(request, 'stop-app');
     await expect(page.getByText(/peasant.*isn't running on this computer/i).first()).toBeVisible({ timeout: 15000 });
@@ -236,7 +254,7 @@ async function exercise(row, { page, request }, info) {
   }
   if (row.mode === 'styles') {
     await page.evaluate(() => document.fonts.ready);
-    const styles = await page.locator('.vobs').evaluate(element => ({
+    const styles = await mountedPage(page).locator('.vobs').evaluate(element => ({
       font: getComputedStyle(element.querySelector('p')).fontFamily,
       size: Number.parseFloat(getComputedStyle(element.querySelector('p')).fontSize),
       radius: getComputedStyle(element.querySelector('button')).borderRadius,

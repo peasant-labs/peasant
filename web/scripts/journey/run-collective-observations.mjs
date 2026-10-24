@@ -75,8 +75,27 @@ async function publishedPackage(name, lock) {
   return { name, version, integrity, files };
 }
 
+/**
+ * The runner's one supported argument. The whole catalog is the default evidence run; a local
+ * investigation may narrow the mounted cases with Playwright's `--grep`. Any other argument is
+ * refused before the build, so an evidence command cannot silently change the projects, the
+ * ports, or the fixture the suite runs against.
+ */
+function selectionArgs(raw) {
+  const args = raw[0] === '--' ? raw.slice(1) : raw;
+  if (args.length === 0) return [];
+  const [flag, value] = args;
+  const inline = flag.startsWith('--grep=') ? flag.slice('--grep='.length) : undefined;
+  const pattern = flag === '--grep' && args.length === 2 ? value : inline !== undefined && args.length === 1 ? inline : '';
+  if (pattern.trim()) return ['--grep', pattern];
+  throw new Error(`journey:collective-observations got ${JSON.stringify(args)}; it runs the whole catalog by default and accepts only --grep <pattern> to narrow the mounted cases`);
+}
+
 try {
   if (Number(process.versions.node.split('.')[0]) < 26) throw new Error('The built journey requires Node >=26 for the runner and browser worker; enter the repository Nix shell before running the documented command');
+  // Counterfactual evidence keeps its fixed dark-desktop project and ignores arguments; the
+  // normal catalog runs every project and case unless a local --grep narrows it.
+  const selection = process.env.OBSERVATIONS_MUTANTS === '1' ? ['--project', 'dark-desktop'] : selectionArgs(process.argv.slice(2));
   life = await acquireLifecycle(join(web, '.collective-observations-owner'));
   if (stopping) { await life.cleanup(); throw new Error('Journey cancelled during ownership acquisition'); }
   const ui = await import(pathToFileURL(require.resolve('@peasant-labs/fairtrade/ui')));
@@ -170,7 +189,6 @@ try {
   const journeyEnv = { ...env, CHROME_PATH: chrome, OBSERVATIONS_APP_URL: appURL, OBSERVATIONS_REMOTE_URL: remote.origin, OBSERVATIONS_CONTROL_TOKEN: control.token, OBSERVATIONS_ARTIFACTS: artifacts };
   // Resolve the installed CLI before entering isolated HOME. A package-manager
   // launcher may otherwise try to read its user's Corepack cache from that HOME.
-  const selection = mutationMode ? ['--project', 'dark-desktop'] : [];
   await bounded(launch(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', 'playwright.collective-observations.config.mjs', ...selection], { cwd: web, env: journeyEnv }).done, 300000, 'collective observations mounted suite');
   writeFileSync(join(artifacts, 'fixture-requests.json'), JSON.stringify(remote.requests, null, 2));
   console.log(mutationMode ? `Counterfactual rejection evidence in ${artifacts}; not positive UI proof.` : `Inspect retained full-shell evidence in ${artifacts}; generation alone is not visual acceptance.`);
