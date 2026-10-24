@@ -3,8 +3,11 @@ cases:
   - name: typed-partial-report-discarded
     testName: web-catalog-updated-history-old-502
     asset: /app/village/
-    find: 's=await h(t,{method:"POST",signal:e});if(!l.rHE.safeParse(s.body)'
-    replace: 's=await h(t,{method:"POST",signal:e});if(!s.ok)throw Error("typed partial report discarded");if(!l.rHE.safeParse(s.body)'
+    # The request options and the response check are semantic; the minified identifiers around
+    # them (request helper, schema namespace) move with the compiler. The injected guard names
+    # the response local, so a rename fails the expected-error check instead of passing silently.
+    find: '{method:"POST",signal:e});if(!'
+    replace: '{method:"POST",signal:e});if(!s.ok)throw Error("typed partial report discarded");if(!'
     expectedError: metadata fetch partial
   - name: village-back-in-nav
     testName: village-route-only-from-home
@@ -16,6 +19,6 @@ cases:
   - name: village-body-missing
     testName: village-direct-link-mounts-body
     asset: /app/village/
-    find: '(0,a.jsxs)("div",{className:"village-page",children:'
-    replace: '(0,a.jsxs)("section",{className:"village-page",hidden:!0,children:'
+    find: '("div",{className:"village-page",children:['
+    replace: '("section",{className:"village-page",hidden:!0,children:['
     expectedError: online observations

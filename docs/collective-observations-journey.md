@@ -25,6 +25,17 @@ pnpm --dir web run journey:collective-observations
 pnpm --dir web run test:journey:mutations
 ```
 
+The journey runs the whole mounted catalog by default. A local investigation may
+narrow it with `--grep`, the one argument the runner forwards to Playwright:
+
+```sh
+pnpm --dir web run journey:collective-observations --grep '<name>|<name>'
+```
+
+The build manifest records `requestedSelection` and `fullCatalogRequested` before
+the suite runs, and adds `suiteResult` with `catalogComplete` only when it
+finishes. A filtered or counterfactual run never claims a completed catalog.
+
 The first test command needs no Next build and tests real disposable-child
 lifetimes plus provenance refusal boundaries. The fixture command builds the small
 Go seeder and validates remote payloads against the installed canonical schema.

@@ -14,7 +14,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:journey:support": "node --test scripts/journey/lifecycle.test.mjs scripts/journey/provenance.test.mjs",
+    "test:journey:support": "node --test scripts/journey/lifecycle.test.mjs scripts/journey/provenance.test.mjs scripts/journey/selection.test.mjs",
     "test:journey:fixture": "node scripts/journey/run-fixture-tests.mjs",
     "test:journey:api": "vitest run --config vitest.journey-api.config.mjs",
     "journey:collective-observations": "node scripts/journey/run-collective-observations.mjs",

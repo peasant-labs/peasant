@@ -38,7 +38,12 @@ async function open(page, theme) {
     await page.locator('.asb-panel').getByRole('button', { name: `switch to ${theme} mode`, exact: true }).click();
     // Changing the theme does not navigate, so the phone drawer that holds the toggle stays open
     // over the page. Close it through its own control; the theme is stored, so it is not reopened.
-    if (drawer) await page.locator('.asb-bar').getByRole('button', { name: 'close the menu', exact: true }).click();
+    if (drawer) {
+      await page.locator('.asb-bar').getByRole('button', { name: 'close the menu', exact: true }).click();
+      // The drawer leaves the screen before its panel stops being visible, so its off-screen
+      // controls are still visible to a computed-style read or a click. Wait for the exit itself.
+      await expect(page.locator('.asb-panel')).toBeHidden();
+    }
   }
   await expect(html).toHaveAttribute('data-theme', theme);
   // A closed drawer keeps its layout off screen behind the scrim. Every step below drives the
