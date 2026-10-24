@@ -417,7 +417,9 @@ cases:
         lines:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","isSidechain":false,"uuid":"main-chain-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
   - name: forked prompt continues the source chain
-    native_proof_only: true
+    # The retained proof needs the native parent snapshot; a transcript-only
+    # fork is the pair-recovery follow-up.
+    skip_retained: true
     capture_status: incomplete
     capture_failure: unknown_data_retained
     artifact: -workspace/22222222-2222-4222-8222-222222222222.jsonl
@@ -445,7 +447,9 @@ cases:
         lines:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc789","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
   - name: fork from an early message
-    native_proof_only: true
+    # The retained proof needs the native parent snapshot; a transcript-only
+    # fork is the pair-recovery follow-up.
+    skip_retained: true
     capture_status: incomplete
     capture_failure: unknown_data_retained
     artifact: -workspace/33333333-3333-4333-8333-333333333333.jsonl
@@ -464,7 +468,9 @@ cases:
           - '{"sessionId":"33333333-3333-4333-8333-333333333333","uuid":"new-root","type":"progress","message":{"role":"user","content":""}}'
           - '{"sessionId":"33333333-3333-4333-8333-333333333333","uuid":"new-1","parentUuid":"new-root","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
   - name: foreign compact boundary continues the source chain
-    native_proof_only: true
+    # The retained proof needs the native parent snapshot; a transcript-only
+    # fork is the pair-recovery follow-up.
+    skip_retained: true
     capture_status: incomplete
     capture_failure: unknown_data_retained
     artifact: -workspace/44444444-4444-4444-8444-444444444444.jsonl
