@@ -99,11 +99,11 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	// candidate recomputes stats and relationships; the recorded sidecar still
 	// supplies project, git, host, parent and redaction context. The native
 	// refresh path remains the ordinary way such a sidecar is rebuilt, but it
-	// must not make an otherwise provable capture un-upgradable. An absent or
+	// must not make an otherwise provable capture un-upgradable. A negative or
 	// future revision is not re-gated; the ordinary extraction boundary
 	// refuses it.
 	recorded := in.RecordedMetadata
-	if recorded.SchemaVersion > 0 && metadataNeedsNativeRefresh(recorded.SchemaVersion) {
+	if recorded.SchemaVersion >= 0 && metadataNeedsNativeRefresh(recorded.SchemaVersion) {
 		revisioned := *recorded
 		revisioned.SchemaVersion = CurrentSchemaVersion
 		recorded = &revisioned

@@ -58,15 +58,16 @@ type ClaudeTranscriptEvidence struct {
 	ModTimeUnixNano       int64
 	SizeBytes             int64
 	HasConversationRecord bool
-	// RecordCount is how many JSON objects the scanner parsed, including
-	// records that carry no session id. It is derived at mine time and never
-	// persisted.
-	RecordCount int `json:"-"`
-	Identity    *ClaudeTeammateIdentity
-	Spawns      []ClaudeTeammateIdentity
-	Title       string
-	Branch      string
-	CWD         string
+	// ControlRecordSeen marks a parsed record whose kind this build recognizes
+	// but which carries no session id, such as a summary or file-history
+	// record. It distinguishes a rotated owner transcript from an empty or
+	// junk file. It is derived at mine time and never persisted.
+	ControlRecordSeen bool `json:"-"`
+	Identity          *ClaudeTeammateIdentity
+	Spawns            []ClaudeTeammateIdentity
+	Title             string
+	Branch            string
+	CWD               string
 	// Origin is who drove the session, decided by the one rule at mine time from
 	// the evidence this record was read for. Every mined record carries a menu
 	// value: a root from its content, a subagent because it is a child.

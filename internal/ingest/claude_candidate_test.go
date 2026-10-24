@@ -73,9 +73,13 @@ type claudeProducerCase struct {
 	SentinelLocator string `yaml:"sentinelLocator"`
 	// RecordedContextFrom carries a recorded context_from proof naming it.
 	RecordedContextFrom string `yaml:"recordedContextFrom"`
+	// RecordedStartedBy carries a recorded started_by proof naming it.
+	RecordedStartedBy string `yaml:"recordedStartedBy"`
 	// RecordedContentHash binds the recorded relationship to the transcript
 	// bytes, as a stored artifact does.
 	RecordedContentHash bool `yaml:"recordedContentHash"`
+	// MetadataSchemaVersionOmitted writes an absent (0) sidecar revision.
+	MetadataSchemaVersionOmitted bool `yaml:"metadataSchemaVersionOmitted"`
 	// Relationship and Target assert the emitted generation provenance.
 	Relationship string `yaml:"relationship"`
 	Target       string `yaml:"target"`
@@ -167,7 +171,9 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 	if row.RecordedContentHash {
 		metadata.ContentHash = schema.ComputeTranscriptHash([]byte(row.Transcript))
 	}
-	if row.MetadataSchemaVersion != 0 {
+	if row.MetadataSchemaVersionOmitted {
+		metadata.SchemaVersion = 0
+	} else if row.MetadataSchemaVersion != 0 {
 		metadata.SchemaVersion = row.MetadataSchemaVersion
 	}
 	if row.RecordedParent != "" {
@@ -189,6 +195,19 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 			Evidence:      schema.EvidenceNativeTyped,
 			Anchor:        &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorGeneral},
 		}}
+	}
+
+	if row.RecordedStartedBy != "" {
+		owner, err := ingest.NewSessionID(row.RecordedStartedBy)
+		if err != nil {
+			t.Fatalf("recorded started_by %q: %v", row.RecordedStartedBy, err)
+		}
+		metadata.Relationships = append(metadata.Relationships, schema.SessionRelationship{
+			Kind:          schema.SessionRelationshipStartedBy,
+			TargetState:   schema.RelationshipTargetKnown,
+			TargetLocalID: &owner,
+			Evidence:      schema.EvidenceNativeTyped,
+		})
 	}
 
 	idx := ingest.NewClaudeIndexer(mfs,
@@ -262,8 +281,12 @@ func assertClaudeProducerRefusal(t *testing.T, row claudeProducerCase, err error
 func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candidate ingest.GenerationCandidate) {
 	t.Helper()
 	generation := candidate.Result.Generation
-	if generation.Metadata.SchemaVersion != ingest.CurrentSchemaVersion {
-		t.Fatalf("metadata schemaVersion = %d, want %d", generation.Metadata.SchemaVersion, ingest.CurrentSchemaVersion)
+	wantSchema := ingest.CurrentSchemaVersion
+	if !row.MetadataSchemaVersionOmitted && row.MetadataSchemaVersion >= 9 && row.MetadataSchemaVersion <= ingest.CurrentSchemaVersion {
+		wantSchema = row.MetadataSchemaVersion
+	}
+	if generation.Metadata.SchemaVersion != wantSchema {
+		t.Fatalf("metadata schemaVersion = %d, want %d", generation.Metadata.SchemaVersion, wantSchema)
 	}
 	if row.Relationship != "" {
 		if len(generation.Metadata.Relationships) != 1 {
@@ -280,6 +303,8 @@ func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candida
 		if target != row.Target {
 			t.Fatalf("relationship target = %q, want %q", target, row.Target)
 		}
+	} else if len(generation.Metadata.Relationships) != 0 {
+		t.Fatalf("relationships = %+v, want none", generation.Metadata.Relationships)
 	}
 	if got := string(generation.Completeness); got != row.Completeness {
 		t.Fatalf("completeness = %q, want %q", got, row.Completeness)

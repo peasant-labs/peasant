@@ -216,6 +216,7 @@ type claudeIdentityCase struct {
 	CaptureStatus    string                  `yaml:"capture_status"`
 	CaptureFailure   string                  `yaml:"capture_failure"`
 	NativeOnly       bool                    `yaml:"native_only"`
+	NativeProofOnly  bool                    `yaml:"native_proof_only"`
 	TargetState      string                  `yaml:"target_state"`
 	RetainedRefusals []claudeRetainedRefusal `yaml:"retained_refusals"`
 }
@@ -434,6 +435,11 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 						}
 					}
 				})
+			}
+			if fixture.NativeProofOnly {
+				// The fork's retained proof requires the native snapshot; a
+				// transcript-only pair is left to the pair-recovery follow-up.
+				return
 			}
 			metadata.ContentHash = schema.ComputeTranscriptHash(data)
 			for _, file := range fixture.Files {

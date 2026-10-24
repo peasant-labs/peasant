@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -28,7 +29,6 @@ func mineClaudeIdentity(data []byte, evidence *ClaudeTranscriptEvidence) {
 			evidence.NativeAgentValid = false
 			continue
 		}
-		evidence.RecordCount++
 		addClaudeIdentityRecord(value, evidence, spawnCalls)
 	}
 	complete := scanner.Err() == nil && len(scanner.Oversized()) == 0
@@ -40,17 +40,22 @@ func beginClaudeIdentity(data []byte, evidence *ClaudeTranscriptEvidence) {
 	digest := sha256.Sum256(data)
 	evidence.ContentDigest = hex.EncodeToString(digest[:])
 	evidence.NativeAgentValid = true
+	evidence.Records = nil
+	evidence.ControlRecordSeen = false
 }
 
 func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvidence, spawnCalls map[string]bool) {
 	var record ClaudeIdentityRecord
 	record.SessionID, _ = value["sessionId"].(string)
+	record.Type, _ = value["type"].(string)
 	if record.SessionID == "" {
+		if record.Type != "" && (slices.Contains(claudeStrictRecordKinds(), record.Type) || isClaudeControlRecordType(record.Type)) {
+			evidence.ControlRecordSeen = true
+		}
 		return
 	}
 	record.UUID, _ = value["uuid"].(string)
 	record.ParentUUID, _ = value["parentUuid"].(string)
-	record.Type, _ = value["type"].(string)
 	record.Subtype, _ = value["subtype"].(string)
 	record.AgentID, _ = value["agentId"].(string)
 	if raw, present := value["isSidechain"]; present {
@@ -203,7 +208,9 @@ func claudeLayoutParent(path ResolvedPath) (SessionID, bool) {
 // kernel has, so a caller that is not a *ClaudeAdapter (a candidate builder
 // carrying its own FileSystem) threads it explicitly instead of reimplementing
 // the kernel. A missing, malformed, or foreign-owned snapshot reports false and
-// the kernel refuses.
+// the kernel refuses. A file that exists and holds a recognized control record
+// but no session id reports true with empty Records; callers that need a named
+// owner treat that as a rotated file, never as a named owner.
 type claudeIdentitySnapshotSource func(path ResolvedPath) (ClaudeTranscriptEvidence, bool)
 
 // claudeIdentitySnapshotFrom builds the snapshot accessor over a FileSystem. It
@@ -224,11 +231,12 @@ func claudeIdentitySnapshotFrom(fs FileSystem) claudeIdentitySnapshotSource {
 			if claudeNamesSession(snapshot.Records, owner) {
 				return snapshot, true
 			}
-			if snapshot.RecordCount > 0 && len(snapshot.Records) == 0 {
-				// The file exists and holds parsed records, but none carry a
-				// session id: a rotated or truncated owner transcript that kept
-				// only summary and file-history records. A zero-byte or blank
-				// file proves nothing and stays unavailable.
+			if snapshot.ControlRecordSeen && len(snapshot.Records) == 0 {
+				// The file exists and holds a recognized control record, but no
+				// record carries a session id: a rotated or truncated owner
+				// transcript that kept only summary and file-history records. A
+				// zero-byte, blank, or junk file proves nothing and stays
+				// unavailable.
 				return snapshot, true
 			}
 		}
@@ -244,24 +252,6 @@ func (a *ClaudeAdapter) claudeIdentitySnapshot(path ResolvedPath) (ClaudeTranscr
 // Copied records must match structural coordinates; a chain may continue from
 // that snapshot's tail/boundary. Uncopied records, including local commands,
 // must connect to proved coordinates; their subtype alone proves no fork.
-// claudeForkBoundary reports the retained fork shape: the forked prompt keeps
-// the source session id and names a parent, while the new session's own chain
-// starts independently with a root record. The recorded relationship bound to
-// the captured bytes supplies the parent proof; this shape check keeps a
-// disconnected copied record from using that shortcut.
-func claudeForkBoundary(records []ClaudeIdentityRecord, own, source SessionID) bool {
-	foreignWithParent, ownRoot := false, false
-	for _, record := range records {
-		if record.SessionID == source.String() && record.ParentUUID != "" {
-			foreignWithParent = true
-		}
-		if record.SessionID == own.String() && record.ParentUUID == "" {
-			ownRoot = true
-		}
-	}
-	return foreignWithParent && ownRoot
-}
-
 func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, snapshot []ClaudeIdentityRecord) bool {
 	byUUID := make(map[string]ClaudeIdentityRecord, len(snapshot))
 	for _, record := range snapshot {
@@ -322,7 +312,9 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 	if !restamped && !transition && !continuedFromSnapshot {
 		return false
 	}
-	// Each foreign record is a copied coordinate or extends the proved chain.
+	// Each foreign record is a copied coordinate, extends the proved chain,
+	// proves a compact-boundary segment start, or anchors at a snapshot
+	// coordinate; an empty-uuid mirror is ignored.
 	linked := make(map[string]bool, len(byUUID)+len(foreign))
 	for i, record := range snapshot {
 		if i == len(snapshot)-1 || record.Type == "system" && record.Subtype == "compact_boundary" {
@@ -627,8 +619,11 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 		target := schema.SessionID(*derivedAgentOwner)
 		already := false
 		for _, relationship := range relationships {
-			if relationship.Kind != schema.SessionRelationshipStartedBy || relationship.TargetLocalID == nil {
+			if relationship.Kind != schema.SessionRelationshipStartedBy {
 				continue
+			}
+			if relationship.TargetLocalID == nil {
+				return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: the recorded started_by owner is unavailable; keep the last-good capture and restore matching native input", original.SessionID)
 			}
 			if *relationship.TargetLocalID == target {
 				already = true
@@ -661,25 +656,6 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 		}
 		if relationship.Evidence != schema.EvidenceNativeTyped && relationship.Evidence != schema.EvidenceRetainedLastGood {
 			continue
-		}
-		// A forked prompt can start the new session's own chain independently,
-		// so no own record transitions from the copied foreign record. When the
-		// recorded relationship is bound to these exact captured bytes and the
-		// only foreign identity they name is the recorded target, the
-		// relationship itself proves the fork; no native source is reopened.
-		if original.ContentHash != "" && original.ContentHash == contentHash {
-			foreignOnly := true
-			for _, record := range proof.Records {
-				if record.SessionID == "" || record.SessionID == original.SessionID.String() || record.SessionID == relationship.TargetLocalID.String() {
-					continue
-				}
-				foreignOnly = false
-				break
-			}
-			if foreignOnly && claudeForkBoundary(proof.Records, original.SessionID, *relationship.TargetLocalID) {
-				allowed[relationship.TargetLocalID.String()] = true
-				continue
-			}
 		}
 		ownUUIDs, foreignUUIDs := make(map[string]bool), make(map[string]bool)
 		for _, record := range proof.Records {
