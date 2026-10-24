@@ -1,4 +1,4 @@
-expected_village_ref: cd5e03663bb34d3e807021e5d5a6e1eeab1a153f
+expected_village_ref: ed055f322f97aa6888a96d810e1d89252d73cb3b
 e2e:
   required_triggers:
     - push
