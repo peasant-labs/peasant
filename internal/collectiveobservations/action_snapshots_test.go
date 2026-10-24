@@ -76,7 +76,7 @@ func TestActionAdaptersKeepOriginalSnapshot(t *testing.T) {
 					if c.RotateDuringDetail {
 						rotateDuringDetail()
 					}
-					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: collective, Name: "Original", AcceptanceMode: "open", DataAccess: "public"}}
+					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: "Original", AcceptanceMode: "open", DataAccess: "public"}}
 				case "/api/v1/transcripts/" + transcript.String() + "/collectives":
 					value = schema.VillageTranscriptCollectivesResponse{Collectives: []schema.VillageTranscriptCollective{}}
 				case "/api/v1/users/me/collectives/" + collective.String() + "/transcripts/" + transcript.String() + "/events":

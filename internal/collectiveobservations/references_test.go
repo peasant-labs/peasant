@@ -79,7 +79,7 @@ func TestReferencesAndTrackingUseSelectedScope(t *testing.T) {
 					w.WriteHeader(400)
 					return
 				}
-				_ = json.NewEncoder(w).Encode(schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: schema.VillageUUID(id), Name: name, AcceptanceMode: "open", DataAccess: "public"}})
+				_ = json.NewEncoder(w).Encode(schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: schema.VillageUUID(id), Name: name, AcceptanceMode: "open", DataAccess: "public"}})
 			}))
 			defer remote.Close()
 			creds.VillageURL = remote.URL + "/installation"

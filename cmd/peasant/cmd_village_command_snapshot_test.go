@@ -203,7 +203,7 @@ func TestVillageCommandWholeActionSnapshot(t *testing.T) {
 				case "/api/v1/collectives/search":
 					value = schema.VillageCollectiveSearchResponse{Collectives: []schema.VillageCollectiveSearchResult{{ID: commandSnapshotCollective, Name: "shared-name"}}}
 				case "/api/v1/collectives/" + commandSnapshotCollective.String():
-					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: commandSnapshotCollective, Name: "shared-name", AcceptanceMode: "open", DataAccess: "public"}}
+					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: commandSnapshotCollective, Name: "shared-name", AcceptanceMode: "open", DataAccess: "public"}}
 				default:
 					t.Errorf("unexpected request %s", r.URL)
 					w.WriteHeader(400)

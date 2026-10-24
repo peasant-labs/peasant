@@ -131,7 +131,7 @@ func TestVillageExplicitFetchKeepsPartialJSONAndNonzeroExit(t *testing.T) {
 				case "/api/v1/users/me/collectives/contributions":
 					value = schema.VillageContributedCollectivesResponse{Collectives: []schema.VillageContributedCollective{{ID: collective, Name: c.WantName, PendingCount: 1}}}
 				case "/api/v1/collectives/" + collective.String():
-					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: collective, Name: c.WantName, AcceptanceMode: "open", DataAccess: "public"}}
+					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: c.WantName, AcceptanceMode: "open", DataAccess: "public"}}
 				case "/api/v1/users/me/collectives/" + collective.String() + "/submissions":
 					w.WriteHeader(503)
 					_, _ = w.Write([]byte(`{"error":"fixture history unavailable"}`))

@@ -208,7 +208,7 @@ func TestMountedCollectiveObservationRoutes(t *testing.T) {
 					<-r.Context().Done()
 					return
 				case "/api/v1/collectives/33333333-3333-4333-8333-333333333333":
-					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: "33333333-3333-4333-8333-333333333333", Name: "Visible", AcceptanceMode: "open", DataAccess: "public"}}
+					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: "33333333-3333-4333-8333-333333333333", Name: "Visible", AcceptanceMode: "open", DataAccess: "public"}}
 				default:
 					t.Errorf("unexpected source %s", r.URL.Path)
 					w.WriteHeader(404)

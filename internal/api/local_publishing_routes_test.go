@@ -83,7 +83,7 @@ func TestSuggestCollectiveComparesRemoteLabels(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			label, _ := schema.RemoteLabel(c.Remote)
-			group := schema.VillageUserGroup{ID: "11111111-1111-4111-8111-111111111111"}
+			group := schema.VillageUserGroup{Creator: schema.AnonymousVillageOwner(), ID: "11111111-1111-4111-8111-111111111111"}
 			if c.Organization != "" {
 				organization := c.Organization
 				group.LinkedGithubOrg = &organization
@@ -91,7 +91,7 @@ func TestSuggestCollectiveComparesRemoteLabels(t *testing.T) {
 			repositories := make([]schema.VillageLinkedRepository, 0, len(c.Repositories))
 			for _, fullName := range c.Repositories {
 				owner, name, _ := strings.Cut(fullName, "/")
-				repositories = append(repositories, schema.VillageLinkedRepository{Owner: owner, Name: name})
+				repositories = append(repositories, schema.VillageLinkedRepository{LinkedBy: schema.AnonymousVillageOwner(), Owner: owner, Name: name})
 			}
 			got := suggestCollective(label, group, repositories)
 			if c.Expect.Reason == "" {

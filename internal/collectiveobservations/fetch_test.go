@@ -168,7 +168,7 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 				case "/api/v1/collectives":
 					rows := []schema.VillageUserGroup{}
 					if !current || !c.MembershipEmpty {
-						rows = append(rows, schema.VillageUserGroup{ID: collective, Name: name, Role: "member", AcceptanceMode: "open", DataAccess: "public", MemberSince: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+						rows = append(rows, schema.VillageUserGroup{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: name, Role: "member", AcceptanceMode: "open", DataAccess: "public", MemberSince: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
 					}
 					value = rows
 				case "/api/v1/users/me/collectives/contributions":
@@ -194,7 +194,7 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 				case "/api/v1/orgs/example":
 					value = schema.VillageOrganizationCollectivesResponse{Collectives: []schema.VillageOrganizationCollective{{ID: collective, Name: name}}}
 				case "/api/v1/collectives/" + collective:
-					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: collective, Name: name, AcceptanceMode: "open", DataAccess: "public"}}
+					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: name, AcceptanceMode: "open", DataAccess: "public"}}
 				case "/api/v1/users/me/collectives/" + collective + "/submissions":
 					value = []schema.VillageCollectiveSubmission{{TranscriptID: transcript, GroupID: collective, EventNum: 1, Status: "pending", RecordedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}
 				case "/api/v1/users/me/collectives/" + collective + "/transcripts/" + transcript + "/events":

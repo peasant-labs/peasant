@@ -92,11 +92,11 @@ func TestPullExplicitTrackingFixtures(t *testing.T) {
 						http.Error(w, "visibility withdrawn", http.StatusForbidden)
 						return
 					}
-					_ = json.NewEncoder(w).Encode(schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: f.CollectiveID, Name: f.Name, AcceptanceMode: schema.VillageGroupAcceptanceOpen, DataAccess: schema.VillageGroupDataAccessMembersOnly, CreatedAt: now, UpdatedAt: now}})
+					_ = json.NewEncoder(w).Encode(schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: f.CollectiveID, Name: f.Name, AcceptanceMode: schema.VillageGroupAcceptanceOpen, DataAccess: schema.VillageGroupDataAccessMembersOnly, CreatedAt: now, UpdatedAt: now}})
 				case "/api/v1/collectives":
 					rows := []schema.VillageUserGroup{}
 					if c.DryRun {
-						rows = append(rows, schema.VillageUserGroup{ID: f.CollectiveID, Name: f.Name})
+						rows = append(rows, schema.VillageUserGroup{Creator: schema.AnonymousVillageOwner(), ID: f.CollectiveID, Name: f.Name})
 					}
 					_ = json.NewEncoder(w).Encode(rows)
 				case "/api/v1/schema/version":

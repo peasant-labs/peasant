@@ -224,7 +224,7 @@ func TestActionObservationProductionPaths(t *testing.T) {
 					if strings.HasSuffix(r.URL.Path, f.SecondCollectiveID.String()) {
 						id = f.SecondCollectiveID
 					}
-					_ = json.NewEncoder(w).Encode(schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: id, Name: "fixture", AcceptanceMode: schema.VillageGroupAcceptanceCurated, DataAccess: schema.VillageGroupDataAccessMembersOnly}})
+					_ = json.NewEncoder(w).Encode(schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: id, Name: "fixture", AcceptanceMode: schema.VillageGroupAcceptanceCurated, DataAccess: schema.VillageGroupDataAccessMembersOnly}})
 					if c.RotateDuringTarget {
 						rotate()
 					}

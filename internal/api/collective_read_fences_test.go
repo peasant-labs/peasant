@@ -72,9 +72,9 @@ func TestMountedMetadataFetchLatestIssuedFence(t *testing.T) {
 						w.WriteHeader(503)
 						return
 					}
-					value = []schema.VillageUserGroup{{ID: collective, Name: "PriorGood", Role: "member", AcceptanceMode: "open", DataAccess: "public", MemberSince: at}}
+					value = []schema.VillageUserGroup{{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: "PriorGood", Role: "member", AcceptanceMode: "open", DataAccess: "public", MemberSince: at}}
 				case "/api/v1/collectives/" + collective.String():
-					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: collective, Name: "PriorGood", AcceptanceMode: "open", DataAccess: "public"}}
+					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: "PriorGood", AcceptanceMode: "open", DataAccess: "public"}}
 				case "/api/v1/auth/orgs":
 					value = []schema.VillageMetadataUserOrganization{}
 				case "/api/v1/users/me/collectives/contributions":

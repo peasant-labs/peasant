@@ -101,9 +101,9 @@ func TestMetadataHTTPReadsFenceObsoleteResponses(t *testing.T) {
 				case "/api/v1/auth/me":
 					value = schema.VillageUser{ID: schema.VillageUUID(creds.UserID)}
 				case "/api/v1/collectives":
-					value = []schema.VillageUserGroup{{ID: collective, Name: name, MemberSince: at, Role: "member", AcceptanceMode: "open", DataAccess: "public"}}
+					value = []schema.VillageUserGroup{{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: name, MemberSince: at, Role: "member", AcceptanceMode: "open", DataAccess: "public"}}
 				case "/api/v1/collectives/" + collective.String():
-					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: collective, Name: name, AcceptanceMode: "open", DataAccess: "public"}}
+					value = schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{Creator: schema.AnonymousVillageOwner(), ID: collective, Name: name, AcceptanceMode: "open", DataAccess: "public"}}
 				case "/api/v1/auth/orgs":
 					value = []schema.VillageMetadataUserOrganization{}
 				case "/api/v1/users/me/collectives/contributions":
