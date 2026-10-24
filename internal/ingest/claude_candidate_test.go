@@ -282,7 +282,7 @@ func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candida
 	t.Helper()
 	generation := candidate.Result.Generation
 	wantSchema := ingest.CurrentSchemaVersion
-	if !row.MetadataSchemaVersionOmitted && row.MetadataSchemaVersion >= 9 && row.MetadataSchemaVersion <= ingest.CurrentSchemaVersion {
+	if !row.MetadataSchemaVersionOmitted && ingest.MetadataSchemaVersionIsCurrent(row.MetadataSchemaVersion) {
 		wantSchema = row.MetadataSchemaVersion
 	}
 	if generation.Metadata.SchemaVersion != wantSchema {

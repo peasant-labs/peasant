@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -49,7 +48,7 @@ func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvi
 	record.SessionID, _ = value["sessionId"].(string)
 	record.Type, _ = value["type"].(string)
 	if record.SessionID == "" {
-		if record.Type != "" && (slices.Contains(claudeStrictRecordKinds(), record.Type) || isClaudeControlRecordType(record.Type)) {
+		if record.Type == "summary" || record.Type == "file-history-snapshot" || isClaudeControlRecordType(record.Type) {
 			evidence.ControlRecordSeen = true
 		}
 		return
@@ -250,8 +249,10 @@ func (a *ClaudeAdapter) claudeIdentitySnapshot(path ResolvedPath) (ClaudeTranscr
 
 // claudeHistoryLink proves a mixed artifact against a real source snapshot.
 // Copied records must match structural coordinates; a chain may continue from
-// that snapshot's tail/boundary. Uncopied records, including local commands,
-// must connect to proved coordinates; their subtype alone proves no fork.
+// that snapshot's tail/boundary. An uncopied record may also prove a segment
+// start at a compact boundary, or anchor at any coordinate the snapshot holds.
+// An empty-uuid mirror is ignored. Uncopied records otherwise must connect to
+// proved coordinates; their subtype alone proves no fork.
 func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, snapshot []ClaudeIdentityRecord) bool {
 	byUUID := make(map[string]ClaudeIdentityRecord, len(snapshot))
 	for _, record := range snapshot {
@@ -480,9 +481,9 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 		// A legacy root agent file records its owner in every record's sessionId
 		// but predates the recorded parent field. Derive the owner when the
 		// native owner source exists and names that owner; a rotated owner file
-		// that retains no session records is the same file identity. A bare
-		// matching sessionId with no owner source is not proof.
-		derivedOwner := session.ParentUUID == nil
+		// that retains no session records is the same file identity. The
+		// artifact must never name itself as its owner.
+		derivedOwner := session.ParentUUID == nil && owner.String() != session.SessionID.String()
 		ownerMatches := identityMatches && (parentMatches || derivedOwner)
 		layout, hasLayout := claudeLayoutParent(session.SourcePath)
 		legacyLayout := hasLayout && layout == owner && claudeLegacyAgentProof(proof, proof.NativeAgentID)
@@ -582,8 +583,9 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 		// A legacy root agent artifact stores its owner in every record's
 		// sessionId but has no recorded parent. Derive the owner when the
 		// recorded relationship is bound to these bytes, or when the native
-		// owner source still exists and names that owner.
-		derivedOwner := original.ParentUUID == nil
+		// owner source still exists and names that owner. The artifact must
+		// never name itself as its owner.
+		derivedOwner := original.ParentUUID == nil && owner.String() != original.SessionID.String()
 		ownerMatches := identityMatches && (parentMatches || derivedOwner)
 		legacyProof := claudeLegacyAgentProof(proof, proof.NativeAgentID)
 		nativeProof := proof.NativeAgentValid || legacyProof

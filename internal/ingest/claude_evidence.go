@@ -58,9 +58,9 @@ type ClaudeTranscriptEvidence struct {
 	ModTimeUnixNano       int64
 	SizeBytes             int64
 	HasConversationRecord bool
-	// ControlRecordSeen marks a parsed record whose kind this build recognizes
-	// but which carries no session id, such as a summary or file-history
-	// record. It distinguishes a rotated owner transcript from an empty or
+	// ControlRecordSeen marks a parsed record whose kind is a summary,
+	// file-history, or recognized control record but which carries no session
+	// id. It distinguishes a rotated owner transcript from an empty, blank, or
 	// junk file. It is derived at mine time and never persisted.
 	ControlRecordSeen bool `json:"-"`
 	Identity          *ClaudeTeammateIdentity
