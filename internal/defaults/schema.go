@@ -26,19 +26,27 @@ const PublishSchemaVersion schema.PushContractVersion = "0.1.1"
 // version until a breaking contract change introduces a back-compat window.
 const MinPushContractVersion schema.PushContractVersion = "0.1.0"
 
-// PullContractVersion is the CURRENT pull ENVELOPE contract version the village
-// advertises and the CLI negotiates against (the PullTranscriptInfo /
-// PullListResponse / PullAnnotation shapes + /api/v1/pull/* endpoint semantics +
-// ETag behaviour). It versions the ENVELOPE ONLY — never the stored blob, which
-// carries its own publish-time PushContractVersion. Distinct window from the push
-// contract because pull is where the village's migrate-on-read floor becomes
-// wire-visible. Typed as schema.PushContractVersion (the shared semver newtype)
-// so the version flows typed; the PullContractVersion NAME disambiguates the axis.
-const PullContractVersion schema.PushContractVersion = "0.2.0"
+// PullContractVersion is the NEWEST pull ENVELOPE contract version this CLI
+// reads (the PullTranscriptInfo / PullListResponse / PullAnnotation shapes +
+// /api/v1/pull/* endpoint semantics + ETag behaviour). It versions the ENVELOPE
+// ONLY — never the stored blob, which carries its own publish-time
+// PushContractVersion. Distinct window from the push contract because pull is
+// where the village's migrate-on-read floor becomes wire-visible. Typed as
+// schema.PushContractVersion (the shared semver newtype) so the version flows
+// typed; the PullContractVersion NAME disambiguates the axis.
+//
+// 0.3.0 replaced the owner and annotation-author account strings with a person
+// as the viewer may see them (a public profile, or anonymous).
+const PullContractVersion schema.PushContractVersion = "0.3.0"
 
-// MinPullContractVersion is the OLDEST pull envelope version the village still
-// supports on the pull surface (the pull-negotiation floor, advertised in
-// SchemaVersionResponse alongside PullContractVersion). The CLI treats an ABSENT
-// advertisement as "village too old for pull" (actionable error). Held equal to
-// the current version until a breaking pull-envelope change introduces a window.
-const MinPullContractVersion schema.PushContractVersion = "0.1.0"
+// MinPullContractVersion is the OLDEST pull envelope version this CLI still
+// reads. Together with PullContractVersion it is the CLI's pull window
+// [MinPullContractVersion, PullContractVersion]. A pull request carries no
+// version, so the village serves the one envelope it serves; NegotiatePull
+// accepts a village whose advertised window overlaps this one and records the
+// newest version both sides share as the envelope of the transfer.
+//
+// 0.2.0 is held so this CLI keeps pulling from a village that still serves the
+// account-string envelope. It is also the floor because a 0.1.0 village ignores
+// the collectives filter and would over-pull.
+const MinPullContractVersion schema.PushContractVersion = "0.2.0"

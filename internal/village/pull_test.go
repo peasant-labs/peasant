@@ -93,7 +93,7 @@ func TestListPullableTranscripts_OK(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(schema.PullListResponse{
 			Transcripts: []schema.PullTranscriptInfo{{
 				TranscriptID: mustTranscriptID(t),
-				OwnerUserID:  testutil.TestOwnerUserID,
+				Owner:        testutil.PublicProfile(testutil.TestOwnerUserID, testutil.TestOwnerUsername),
 			}},
 			Page: 2, Limit: 10, Total: 1,
 		})
@@ -141,11 +141,10 @@ func TestGetPullTranscript_OK(t *testing.T) {
 	srv := pullTestServer(t, "/api/v1/pull/transcripts/"+id.String(), func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(schema.PullTranscriptInfo{
-			TranscriptID:  id,
-			OwnerUserID:   testutil.TestOwnerUserID,
-			OwnerUsername: testutil.TestOwnerUsername,
-			ContentHash:   testutil.TestContentHash,
-			Visibility:    schema.VisibilityGroup,
+			TranscriptID: id,
+			Owner:        testutil.PublicProfile(testutil.TestOwnerUserID, testutil.TestOwnerUsername),
+			ContentHash:  testutil.TestContentHash,
+			Visibility:   schema.VisibilityGroup,
 		})
 	})
 	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
@@ -259,7 +258,7 @@ func TestGetPullTranscriptAnnotations_OK(t *testing.T) {
 	srv := pullTestServer(t, "/api/v1/pull/transcripts/"+id.String()+"/annotations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]schema.PullAnnotation{
-			{AuthorUserID: testutil.TestAuthorUserID, AuthorUsername: testutil.TestAuthorUsername},
+			{Author: testutil.PublicProfile(testutil.TestAuthorUserID, testutil.TestAuthorUsername)},
 		})
 	})
 	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
@@ -267,7 +266,7 @@ func TestGetPullTranscriptAnnotations_OK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPullTranscriptAnnotations: %v", err)
 	}
-	if len(anns) != 1 || anns[0].AuthorUserID != testutil.TestAuthorUserID {
+	if len(anns) != 1 || !anns[0].Author.IsAccount(testutil.TestAuthorUserID) {
 		t.Errorf("annotations: got %+v", anns)
 	}
 }
@@ -296,7 +295,7 @@ func TestGetPullTranscriptAnnotations_401(t *testing.T) {
 func TestNegotiatePull_CompatibleWindow_OK(t *testing.T) {
 	srv := negotiateTestServer(t, pullWindowJSON())
 	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
-	if err := client.NegotiatePull(context.Background()); err != nil {
+	if _, err := client.NegotiatePull(context.Background()); err != nil {
 		t.Fatalf("compatible window must negotiate cleanly; got: %v", err)
 	}
 }
@@ -308,7 +307,7 @@ func TestNegotiatePull_MissingWindow_AbortsActionably(t *testing.T) {
 	srv := negotiateTestServer(t, noPullWindowJSON)
 	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
 
-	err := client.NegotiatePull(context.Background())
+	_, err := client.NegotiatePull(context.Background())
 	if err == nil {
 		t.Fatal("missing pull window must abort the pull")
 	}
@@ -344,7 +343,7 @@ func TestNegotiatePull_IncompatibleWindow_ContractError(t *testing.T) {
 	srv := negotiateTestServer(t, incompatible)
 	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
 
-	err := client.NegotiatePull(context.Background())
+	_, err := client.NegotiatePull(context.Background())
 	if err == nil {
 		t.Fatal("incompatible pull window must abort the pull")
 	}
@@ -363,7 +362,7 @@ func TestNegotiatePull_IncompatibleWindow_ContractError(t *testing.T) {
 // consumes via a narrow interface). This pullReader mirrors that narrow interface
 // so a signature drift breaks the build here.
 type pullReader interface {
-	NegotiatePull(ctx context.Context) error
+	NegotiatePull(ctx context.Context) (schema.PushContractVersion, error)
 	ListPullableTranscripts(ctx context.Context, opts village.PullListOptions) (*schema.PullListResponse, error)
 	GetPullTranscript(ctx context.Context, id schema.TranscriptID) (*schema.PullTranscriptInfo, error)
 	GetPullTranscriptContent(ctx context.Context, id schema.TranscriptID, ifNoneMatch string) (io.ReadCloser, string, error)

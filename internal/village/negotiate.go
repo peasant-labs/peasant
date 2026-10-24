@@ -117,6 +117,29 @@ func ClassifyContract(cli, min, current schema.PushContractVersion) ContractNego
 	return NegotiationWithin
 }
 
+// NegotiatePullWindow intersects the CLI's pull window [cliMin, cliCurrent]
+// with the village-advertised window [min, current] and returns the newest
+// envelope version both sides share. An empty village bound is open, as in
+// ClassifyContract. ok is false when the windows do not overlap; the caller
+// handles an unadvertised window (both bounds empty) before calling.
+//
+// The pull surface is negotiated by overlap, not by the CLI's single version,
+// because a pull request names no version: the village serves its envelope and
+// this CLI reads every envelope in its own window.
+func NegotiatePullWindow(cliMin, cliCurrent, min, current schema.PushContractVersion) (schema.PushContractVersion, bool) {
+	low, high := cliMin, cliCurrent
+	if min != "" && compareSemver(min, low) > 0 {
+		low = min
+	}
+	if current != "" && compareSemver(current, high) < 0 {
+		high = current
+	}
+	if compareSemver(low, high) > 0 {
+		return "", false
+	}
+	return high, true
+}
+
 // CanDowngrade reports whether this CLI can serialize the older `target`
 // contract. A MAJOR-version gap is a breaking change and is NOT downgradable;
 // same-major older targets are (additions are backward-droppable).
