@@ -73,6 +73,12 @@ type claudeProducerCase struct {
 	SentinelLocator string `yaml:"sentinelLocator"`
 	// RecordedContextFrom carries a recorded context_from proof naming it.
 	RecordedContextFrom string `yaml:"recordedContextFrom"`
+	// RecordedContentHash binds the recorded relationship to the transcript
+	// bytes, as a stored artifact does.
+	RecordedContentHash bool `yaml:"recordedContentHash"`
+	// Relationship and Target assert the emitted generation provenance.
+	Relationship string `yaml:"relationship"`
+	Target       string `yaml:"target"`
 	// ContentOmitted marks the attempt as carrying the source-omitted flag.
 	ContentOmitted bool `yaml:"contentOmitted"`
 	// MaxRecordBytes overrides the per-record limit (0 keeps the production one).
@@ -158,6 +164,9 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 	}
 
 	metadata := makeReindexMeta(t, sessionID, sourcePath)
+	if row.RecordedContentHash {
+		metadata.ContentHash = schema.ComputeTranscriptHash([]byte(row.Transcript))
+	}
 	if row.MetadataSchemaVersion != 0 {
 		metadata.SchemaVersion = row.MetadataSchemaVersion
 	}
@@ -253,6 +262,25 @@ func assertClaudeProducerRefusal(t *testing.T, row claudeProducerCase, err error
 func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candidate ingest.GenerationCandidate) {
 	t.Helper()
 	generation := candidate.Result.Generation
+	if generation.Metadata.SchemaVersion != ingest.CurrentSchemaVersion {
+		t.Fatalf("metadata schemaVersion = %d, want %d", generation.Metadata.SchemaVersion, ingest.CurrentSchemaVersion)
+	}
+	if row.Relationship != "" {
+		if len(generation.Metadata.Relationships) != 1 {
+			t.Fatalf("relationships = %+v, want one %s", generation.Metadata.Relationships, row.Relationship)
+		}
+		relationship := generation.Metadata.Relationships[0]
+		if string(relationship.Kind) != row.Relationship {
+			t.Fatalf("relationship kind = %q, want %q", relationship.Kind, row.Relationship)
+		}
+		target := ""
+		if relationship.TargetLocalID != nil {
+			target = relationship.TargetLocalID.String()
+		}
+		if target != row.Target {
+			t.Fatalf("relationship target = %q, want %q", target, row.Target)
+		}
+	}
 	if got := string(generation.Completeness); got != row.Completeness {
 		t.Fatalf("completeness = %q, want %q", got, row.Completeness)
 	}

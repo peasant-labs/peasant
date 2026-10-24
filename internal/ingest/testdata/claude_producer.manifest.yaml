@@ -25,3 +25,6 @@ requiredNames:
   - over-bound-answer-key-refusal
   - legacy-schema-eight-metadata
   - forked-prompt-continuation
+  - retained-fork-continuation
+  - retained-disconnected-context-refusal
+  - legacy-root-agent
