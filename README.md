@@ -174,7 +174,7 @@ are replayed once through the ordinary push candidate path.
 | `--json` | Output as JSON instead of human-readable |
 | `--verbose` | Show file-level detail with subagent expansion |
 | `--reindex` | Re-process sessions with stale or missing index data |
-| `--detect-commits` | Detect and store git commits linked to each session |
+| `--detect-commits` | Detect and store git commits linked to each session (default on; pass `--detect-commits=false` to skip) |
 | `--config <path>` | Path to config file |
 
 When a selection index is configured (via `peasant kickstart`), ingest automatically filters to only
