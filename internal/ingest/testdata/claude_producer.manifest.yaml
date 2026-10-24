@@ -37,3 +37,6 @@ requiredNames:
   - future-schema-thirteen
   - negative-schema-metadata
   - refresh-free-schema-nine
+  - refresh-free-schema-eleven
+  - self-parent-agent-refusal
+  - retained-started-by-unbound-refusal

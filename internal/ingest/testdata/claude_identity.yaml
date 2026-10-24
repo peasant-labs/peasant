@@ -56,6 +56,8 @@ required_case_names:
   - legacy root agent with junk owner file is refused
   - legacy root agent that names its own session id is refused
   - legacy root agent with session-less assistant owner file is refused
+  - legacy nested agent that names its own session id is refused
+  - uuid-less foreign record alone does not prove the fork
   - disconnected local-command divergence
 cases:
   - name: matching root
@@ -536,3 +538,24 @@ cases:
       - path: -workspace/agent-abc444.jsonl
         lines:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc444","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy nested agent that names its own session id is refused
+    artifact: -workspace/agent-abc555/subagents/agent-abc555.jsonl
+    parent: agent-abc555
+    refuse: true
+    files:
+      - path: -workspace/agent-abc555/subagents/agent-abc555.jsonl
+        lines:
+          - '{"sessionId":"agent-abc555","agentId":"abc555","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: uuid-less foreign record alone does not prove the fork
+    artifact: -workspace/66666666-6666-4666-8666-666666666666.jsonl
+    refuse: true
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s2","parentUuid":"s1","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+      - path: -workspace/66666666-6666-4666-8666-666666666666.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","parentUuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"66666666-6666-4666-8666-666666666666","uuid":"own-root","type":"progress","message":{"role":"user","content":""}}'
+          - '{"sessionId":"66666666-6666-4666-8666-666666666666","uuid":"own-1","parentUuid":"own-root","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
