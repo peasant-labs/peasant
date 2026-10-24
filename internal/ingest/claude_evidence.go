@@ -58,11 +58,16 @@ type ClaudeTranscriptEvidence struct {
 	ModTimeUnixNano       int64
 	SizeBytes             int64
 	HasConversationRecord bool
-	Identity              *ClaudeTeammateIdentity
-	Spawns                []ClaudeTeammateIdentity
-	Title                 string
-	Branch                string
-	CWD                   string
+	// ControlRecordSeen marks a parsed record whose kind is a summary,
+	// file-history, or recognized control record but which carries no session
+	// id. It distinguishes a rotated owner transcript from an empty, blank, or
+	// junk file. It is derived at mine time and never persisted.
+	ControlRecordSeen bool `json:"-"`
+	Identity          *ClaudeTeammateIdentity
+	Spawns            []ClaudeTeammateIdentity
+	Title             string
+	Branch            string
+	CWD               string
 	// Origin is who drove the session, decided by the one rule at mine time from
 	// the evidence this record was read for. Every mined record carries a menu
 	// value: a root from its content, a subagent because it is a child.

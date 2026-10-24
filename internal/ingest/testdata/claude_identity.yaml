@@ -47,6 +47,17 @@ required_case_names:
   - legacy layout wins over unproved root duplicate
   - empty-id legacy layout wins over unproved root duplicate
   - explicit main-chain record without agent id is refused
+  - forked prompt continues the source chain
+  - legacy root agent with rotated owner file
+  - fork from an early message
+  - foreign compact boundary continues the source chain
+  - disconnected copied non-head record is refused
+  - legacy root agent with blank owner file is refused
+  - legacy root agent with junk owner file is refused
+  - legacy root agent that names its own session id is refused
+  - legacy root agent with session-less assistant owner file is refused
+  - legacy nested agent that names its own session id is refused
+  - uuid-less foreign record alone does not prove the fork
   - disconnected local-command divergence
 cases:
   - name: matching root
@@ -407,3 +418,144 @@ cases:
       - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
         lines:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","isSidechain":false,"uuid":"main-chain-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: forked prompt continues the source chain
+    # The retained proof needs the native parent snapshot; a transcript-only
+    # fork is the pair-recovery follow-up.
+    skip_retained: true
+    capture_status: incomplete
+    capture_failure: unknown_data_retained
+    artifact: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+    relationship: context_from
+    target: 11111111-1111-4111-8111-111111111111
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s2","parentUuid":"s1","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"fork-prompt","parentUuid":"s2","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","uuid":"new-root","type":"progress","message":{"role":"user","content":""}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","uuid":"new-1","parentUuid":"new-root","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy root agent with rotated owner file
+    artifact: -workspace/agent-abc789.jsonl
+    relationship: started_by
+    target: 11111111-1111-4111-8111-111111111111
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"type":"summary","summary":"rotated","leafUuid":"leaf"}'
+      - path: -workspace/agent-abc789.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc789","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: fork from an early message
+    # The retained proof needs the native parent snapshot; a transcript-only
+    # fork is the pair-recovery follow-up.
+    skip_retained: true
+    capture_status: incomplete
+    capture_failure: unknown_data_retained
+    artifact: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+    relationship: context_from
+    target: 11111111-1111-4111-8111-111111111111
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s2","parentUuid":"s1","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s3","parentUuid":"s2","type":"user","message":{"role":"user","content":"synthetic"}}'
+      - path: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"fork-early","parentUuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"type":"queue-operation","sessionId":"11111111-1111-4111-8111-111111111111","content":"synthetic queued prompt"}'
+          - '{"sessionId":"33333333-3333-4333-8333-333333333333","uuid":"new-root","type":"progress","message":{"role":"user","content":""}}'
+          - '{"sessionId":"33333333-3333-4333-8333-333333333333","uuid":"new-1","parentUuid":"new-root","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: foreign compact boundary continues the source chain
+    # The retained proof needs the native parent snapshot; a transcript-only
+    # fork is the pair-recovery follow-up.
+    skip_retained: true
+    capture_status: incomplete
+    capture_failure: unknown_data_retained
+    artifact: -workspace/44444444-4444-4444-8444-444444444444.jsonl
+    relationship: context_from
+    target: 11111111-1111-4111-8111-111111111111
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s2","parentUuid":"s1","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+      - path: -workspace/44444444-4444-4444-8444-444444444444.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"fork-head","parentUuid":"s2","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"boundary-foreign","type":"system","subtype":"compact_boundary"}'
+          - '{"sessionId":"44444444-4444-4444-8444-444444444444","uuid":"own-root","type":"progress","message":{"role":"user","content":""}}'
+          - '{"sessionId":"44444444-4444-4444-8444-444444444444","uuid":"own-1","parentUuid":"own-root","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: disconnected copied non-head record is refused
+    artifact: -workspace/55555555-5555-4555-8555-555555555555.jsonl
+    refuse: true
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s2","parentUuid":"s1","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s3","parentUuid":"s2","type":"user","message":{"role":"user","content":"synthetic"}}'
+      - path: -workspace/55555555-5555-4555-8555-555555555555.jsonl
+        lines:
+          - '{"sessionId":"55555555-5555-4555-8555-555555555555","uuid":"own-root","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s2","parentUuid":"s1","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy root agent with blank owner file is refused
+    artifact: -workspace/agent-abc111.jsonl
+    refuse: true
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines: []
+      - path: -workspace/agent-abc111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc111","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy root agent with junk owner file is refused
+    artifact: -workspace/agent-abc222.jsonl
+    refuse: true
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"foo":1}'
+      - path: -workspace/agent-abc222.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc222","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy root agent that names its own session id is refused
+    artifact: -workspace/agent-abc333.jsonl
+    refuse: true
+    files:
+      - path: -workspace/agent-abc333.jsonl
+        lines:
+          - '{"sessionId":"agent-abc333","agentId":"abc333","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy root agent with session-less assistant owner file is refused
+    artifact: -workspace/agent-abc444.jsonl
+    refuse: true
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+      - path: -workspace/agent-abc444.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc444","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: legacy nested agent that names its own session id is refused
+    artifact: -workspace/agent-abc555/subagents/agent-abc555.jsonl
+    parent: agent-abc555
+    refuse: true
+    files:
+      - path: -workspace/agent-abc555/subagents/agent-abc555.jsonl
+        lines:
+          - '{"sessionId":"agent-abc555","agentId":"abc555","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: uuid-less foreign record alone does not prove the fork
+    artifact: -workspace/66666666-6666-4666-8666-666666666666.jsonl
+    refuse: true
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"s2","parentUuid":"s1","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+      - path: -workspace/66666666-6666-4666-8666-666666666666.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","parentUuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
+          - '{"sessionId":"66666666-6666-4666-8666-666666666666","uuid":"own-root","type":"progress","message":{"role":"user","content":""}}'
+          - '{"sessionId":"66666666-6666-4666-8666-666666666666","uuid":"own-1","parentUuid":"own-root","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'

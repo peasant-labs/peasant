@@ -184,7 +184,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 
 	// Detect-commits flag (relevant for index and all modes).
 	if mode != harvestLogsOnly {
-		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", false, "Detect and store git commits linked to each session")
+		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", true, "Detect and store git commits linked to each session")
 		cmd.Flags().BoolVar(&flags.profileIndex, "profile-index", false, "Print INDEX parse/write timing diagnostics")
 	}
 }

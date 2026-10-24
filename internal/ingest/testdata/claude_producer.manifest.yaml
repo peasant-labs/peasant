@@ -23,3 +23,20 @@ requiredNames:
   - plain-prompt-text-array
   - plain-prompt-text-and-image-array
   - over-bound-answer-key-refusal
+  - legacy-schema-eight-metadata
+  - forked-prompt-continuation
+  - retained-fork-native-snapshot
+  - retained-fork-source-gone-refusal
+  - retained-disconnected-context-refusal
+  - legacy-root-agent
+  - retained-started-by-owner-gone
+  - retained-conflicting-owner-refusal
+  - self-owner-agent-refusal
+  - absent-schema-metadata
+  - refresh-free-schema-ten
+  - future-schema-thirteen
+  - negative-schema-metadata
+  - refresh-free-schema-nine
+  - refresh-free-schema-eleven
+  - self-parent-agent-refusal
+  - retained-started-by-unbound-refusal

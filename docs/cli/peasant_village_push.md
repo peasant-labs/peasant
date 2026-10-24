@@ -1,21 +1,21 @@
 ## peasant village push
 
-Push ingested transcripts to the Peasant village
+Push ingested transcripts to peasant online
 
 ### Synopsis
 
-Upload locally ingested session transcripts to the Peasant village for sharing and analytics.
+Upload locally ingested session transcripts to peasant online for sharing and analytics.
 
 Performance — the --concurrency default is max(1, NumCPU/2), tuned for the common case: a
 steady-state / no-change re-push, where the server manifest skips already-pushed annotations
 and unchanged transcripts so very little goes over the wire. A one-time LARGE COLD push (e.g.
 hundreds of new transcripts + tens of thousands of new annotations) benefits from a higher
---concurrency. Throughput is bounded by the per-transcript S3 round-trip and the village's
+--concurrency. Throughput is bounded by the per-transcript S3 round-trip and peasant online's
 CPU — NOT by the DB connection pool: a pooled connection is held only for the brief row
-insert (the S3 upload itself holds none), so the village pool (default ~2x its vCPUs) has
+insert (the S3 upload itself holds none), so the peasant online pool (default ~2x its vCPUs) has
 headroom. A genuinely cold run of N new transcripts costs roughly
 ceil(N / effective-concurrency) x the per-upload round-trip. For such a push set
---concurrency to about 2x NumCPU to scale throughput up to the village's capacity; confirm
+--concurrency to about 2x NumCPU to scale throughput up to peasant online's capacity; confirm
 with --timing. The default stays at max(1, NumCPU/2) — sufficient for the common
 steady-state re-push, where the manifest skip means little goes over the wire.)
 
@@ -36,9 +36,9 @@ Exit status — a caller that branches on it, including a generated Git hook, ne
 one distinction it cannot read out of prose: whether anything was published at all.
 
   0  the run succeeded.
-  1  the run failed after it had started talking to the village, so part of the work
+  1  the run failed after it had started talking to peasant online, so part of the work
      may be published and recorded as published.
-  3  the run failed BEFORE a single village request was made — a missing or expired
+  3  the run failed BEFORE a single peasant online request was made — a missing or expired
      login, an unreadable config, a store that would not open, a repository scope that
      would not resolve. Nothing was published and nothing was recorded as published.
 
@@ -52,13 +52,13 @@ peasant village push [flags]
       --annotation-hash stringArray   Only push annotations with these content hashes (repeatable; default: all).
       --annotation-id stringArray     Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.
       --auto-publish-event string     Require consent for this hook event (post-commit or pre-push)
-      --concurrency int               Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the village pool toward the <5s target.
+      --concurrency int               Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the peasant online pool toward the <5s target.
       --dry-run                       Show what would be pushed without uploading
       --force                         Re-push all sessions (including already-pushed ones)
   -h, --help                          help for push
       --json                          Output as JSON instead of human-readable
       --last-good                     Publish the last-good full transcript when a newer incomplete attempt is kept beside it. A hand-run choice: it skips the push wizard (the wizard previews the newer attempt, while this flag publishes the last-good authority) and does not imply --non-interactive, so the public-consent prompt still applies. It is refused together with --auto-publish-event/--require-auto-publish-rule and is never written into a hook file, so an automatic publication never sends stale last-good content. The store resolves the last-good authority server-side, so no session or generation identifier is accepted
-      --license string                Override the content license for this run (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0). Also relicenses every already-published session the run selects; a Creative Commons grant cannot be withdrawn. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt for this village account on this machine is sent the configured license
+      --license string                Override the content license for this run (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0). Also relicenses every already-published session the run selects; a Creative Commons grant cannot be withdrawn. Without it an update keeps the license a transcript has on peasant online, except that a session with no publication receipt for this peasant online account on this machine is sent the configured license
       --non-interactive               Run without the interactive wizard or public-consent prompt (for CI/scripts)
       --profile-output string         Write a local JSON v1 push profile to this file (local diagnostic only, mode 0600). Parent directory must exist. Enables profiling; prints path and bottleneck hints to stderr unless --quiet. Works with --json and --timing.
       --profile-trace string          Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output and a distinct regular-file destination with an existing parent. JSON records an opaque trace reference, not the path; the actual path is printed to stderr unless --quiet.
@@ -66,10 +66,10 @@ peasant village push [flags]
       --repository string             Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session
       --require-auto-publish-rule     Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)
       --source-harness string         Filter to a specific harness (claude-code, gemini-cli, codex, opencode, cursor, strike, pi)
-      --timeout duration              Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a village that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach the village. Default: no budget. Git hooks always pass one.
+      --timeout duration              Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a peasant online server that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach peasant online. Default: no budget. Git hooks always pass one.
       --timing                        Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.
       --verbose                       Show per-session detail
-      --visibility string             Override visibility for this run (private, public). Also changes every already-published session the run selects, including ones shared with collectives on the village, which otherwise keep the visibility they have there
+      --visibility string             Override visibility for this run (private, public). Also changes every already-published session the run selects, including ones shared with collectives on peasant online, which otherwise keep the visibility they have there
       --yes                           (alias for --non-interactive)
 ```
 
@@ -85,6 +85,6 @@ peasant village push [flags]
 
 ### SEE ALSO
 
-* [peasant village](peasant_village.md)	 - Interact with the Peasant village
+* [peasant village](peasant_village.md)	 - Interact with peasant online
 
-###### Auto generated by spf13/cobra on 17-Oct-2026
+###### Auto generated by spf13/cobra on 24-Oct-2026

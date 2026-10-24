@@ -55,7 +55,7 @@ Relationships:
 |---|---|---|---|---|
 | developer | peasant | runs commands and opens the local web app | terminal, browser | user |
 | peasant | agent session stores | reads sessions | JSONL, SQLite | `harvest`, `kickstart`, web ingest |
-| peasant | git repository | reads commits, sets hooks | git CLI | `harvest --detect-commits`, `village hooks` |
+| peasant | git repository | reads commits, sets hooks | git CLI | every ingest, `village hooks` |
 | git repository | peasant | runs the upload hook | shell | only after `village hooks install` |
 | peasant | village | publishes and pulls | HTTPS | `village push`, `/share`, `village transcripts pull` |
 | peasant | models.dev | syncs model prices | HTTPS | `peasant models sync` |
@@ -506,7 +506,7 @@ sequenceDiagram
   pipe->>ad: processSession: capture source bytes
   pipe->>pipe: filterOversizedJSONLRecords (over 256 MiB)
   pipe->>sync: write transcript and metadata (rename)
-  pipe->>pipe: LayeredDetection (--detect-commits)
+  pipe->>pipe: LayeredDetection (commit detection, default on)
   Note over cli,st: DB INSERT (drain loop)
   pipe->>st: mirrorDrainedBatch: MirrorArtifacts
   Note over cli,st: INDEX (parser pool, one serial writer)

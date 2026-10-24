@@ -687,6 +687,12 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
 			ingest.WithLogger(db),
 			ingest.WithIndexLogger(db),
+			// A session's commits are part of its identity, not an optional
+			// extra: they are what links a transcript to the pull requests it
+			// produced. Every ingest path detects them unless a caller
+			// explicitly opts out, so onboarding cannot publish a session
+			// without the evidence that makes it reachable from its PR.
+			ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
 		)
 
 		pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)

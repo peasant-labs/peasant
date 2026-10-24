@@ -113,6 +113,34 @@ func TestStreamingBehavior(t *testing.T) {
 	}
 }
 
+// TestSessionCommitsFollowLinkedWorktrees pins the reason detection reads every
+// ref: a session starts in the host checkout but commits in a linked worktree
+// it created, and that commit is what opened the pull request. Reading the
+// host's current branch alone would report no commit for the session.
+func TestSessionCommitsFollowLinkedWorktrees(t *testing.T) {
+	dir := initTestRepoWithModifiableFile(t)
+	worktree := filepath.Join(t.TempDir(), "feature-worktree")
+	mustGit(t, dir, "git", "worktree", "add", "-b", "feature", worktree)
+
+	since := time.Now().Add(-2 * time.Second)
+	addModifyCommit(t, worktree, "worktree content\n", "commit in a linked worktree")
+	until := time.Now().Add(2 * time.Second)
+
+	// The host branch still holds only the base commit, so this proves the read
+	// crossed into the linked worktree rather than reading the current branch.
+	analyzer := defaultAnalyzer()
+	commits, err := analyzer.GetSessionCommitsWithMetadata(context.Background(), dir, since, until)
+	if err != nil {
+		t.Fatalf("GetSessionCommitsWithMetadata: unexpected error: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("got %d commits from the linked worktree, want 1", len(commits))
+	}
+	if !strings.HasPrefix(commits[0].Message, "commit in a linked worktree") {
+		t.Fatalf("got commit %q, want the commit made in the linked worktree", commits[0].Message)
+	}
+}
+
 // TestBatchProcessing verifies that a small BatchSize does not drop commits —
 // the batch size controls memory, not the number of results.
 func TestBatchProcessing(t *testing.T) {

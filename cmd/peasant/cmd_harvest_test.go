@@ -111,7 +111,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 		{"debug", "false"},
 		{defaults.JSONFlagName, "false"},
 		{"all", "false"},
-		{"detect-commits", "false"},
+		{"detect-commits", "true"},
 	}
 
 	sliceFlags := []flagCheck{

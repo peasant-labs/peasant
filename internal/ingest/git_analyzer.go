@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,13 +116,23 @@ func (g *ExecGitDiffAnalyzer) GetSessionCommits(ctx context.Context, repoPath st
 }
 
 // GetSessionCommitsWithMetadata returns full CommitInfo records for commits
-// authored within [since, until). Commits are returned in chronological order.
+// authored within [since, until) in the session's repository. Commits are
+// returned in chronological order.
+//
+// A session starts in one checkout but may commit in a linked worktree it
+// creates (the per-branch worktree workflow the project uses). Those commits are
+// on a different branch, so reading only the checkout this session started in
+// would miss the commit that opened the pull request. The read therefore covers
+// every worktree git reports for the repository, and deduplicates by hash.
+// Author email and the session window still bound the result; CommitDetector's
+// transcript-activity gate remains the "did this session touch git" check.
 //
 // Streaming behaviour:
 //   - Reads git log output via bufio.Scanner (O(BatchSize) memory, not O(TotalCommits)).
 //   - Caps results at MaxCommits; hitting the cap is silent (no error).
-//   - Times out after LogTimeout; partial results are returned with a diagnostic error.
-//   - Git command failures return an empty slice with a diagnostic error.
+//   - Times out once after LogTimeout across all worktrees; partial results are
+//     returned with a diagnostic error.
+//   - Git command failures return partial results with a diagnostic error.
 //
 // Non-fatal: callers must record the returned error as a DiagnosticEntry warning
 // and continue session ingestion with the partial (or empty) commits list.
@@ -132,6 +144,68 @@ func (g *ExecGitDiffAnalyzer) GetSessionCommitsWithMetadata(ctx context.Context,
 	ctx, cancel := context.WithTimeout(ctx, logTimeout)
 	defer cancel()
 
+	seen := make(map[string]bool)
+	commits := make([]CommitInfo, 0, min(maxCommits, 64))
+	var failures []error
+	for i, path := range g.sessionCommitLogPaths(ctx, repoPath) {
+		// The session's own checkout is always read, even after the deadline,
+		// so a timeout is reported instead of silently returning no commits.
+		if i > 0 && ctx.Err() != nil {
+			break
+		}
+		found, err := g.logSessionCommits(ctx, path, since, until, maxCommits)
+		if err != nil {
+			failures = append(failures, err)
+		}
+		for _, commit := range found {
+			if seen[commit.Hash] {
+				continue
+			}
+			seen[commit.Hash] = true
+			commits = append(commits, commit)
+		}
+		if len(commits) >= maxCommits {
+			break
+		}
+	}
+
+	// Each checkout's log is chronological. A stable sort keeps that order for
+	// commits made within the same instant, which test repositories and busy
+	// sessions commonly do.
+	sort.SliceStable(commits, func(i, j int) bool {
+		return commits[i].CommitTime < commits[j].CommitTime
+	})
+	if len(commits) > maxCommits {
+		commits = commits[:maxCommits]
+	}
+	return commits, errors.Join(failures...)
+}
+
+// sessionCommitLogPaths lists the repository's worktrees, the one the session
+// started in first. A failed listing still yields that checkout: the session's
+// own worktree is the one read that must never be skipped.
+func (g *ExecGitDiffAnalyzer) sessionCommitLogPaths(ctx context.Context, repoPath string) []string {
+	paths := []string{repoPath}
+	seen := map[string]bool{repoPath: true}
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "list", "--porcelain")
+	proc.HideConsoleWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return paths
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		path, ok := strings.CutPrefix(line, "worktree ")
+		if !ok || path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+// logSessionCommits reads one checkout's log for the session window.
+func (g *ExecGitDiffAnalyzer) logSessionCommits(ctx context.Context, repoPath string, since, until time.Time, maxCommits int) ([]CommitInfo, error) {
 	// git log with strict ISO-8601 dates (%aI, %cI) for RFC3339 parsing.
 	// --diff-filter=M: only commits that modified files (reduces output in large repos).
 	// --reverse: oldest first, allows early termination when cap is hit.
@@ -215,7 +289,7 @@ func (g *ExecGitDiffAnalyzer) GetSessionCommitsWithMetadata(ctx context.Context,
 		return commits, fmt.Errorf(
 			"git log in %s: operation timed out after %v; returning %d commits collected before timeout "+
 				"(large repository — run 'peasant ingest --force' to retry)",
-			repoPath, logTimeout, len(commits),
+			repoPath, g.logTimeout(), len(commits),
 		)
 	}
 

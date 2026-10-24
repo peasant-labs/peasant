@@ -1389,6 +1389,11 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
 		ingest.WithLogger(db),
 		ingest.WithIndexLogger(db),
+		// Commit detection is part of ingest, not an opt-in harvest flag: the
+		// web ingest must store the same session_commits a CLI harvest does, or
+		// the transcript it publishes can never match the pull requests its own
+		// commits are in.
+		ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
 	)
 	if err != nil {
 		_ = db.Close()

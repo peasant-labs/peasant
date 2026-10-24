@@ -63,6 +63,9 @@ type claudeProducerCase struct {
 	RecordedSessionID string `yaml:"recordedSessionId"`
 	// RecordedParent is the recorded parent identity, when the session has one.
 	RecordedParent string `yaml:"recordedParent"`
+	// MetadataSchemaVersion overrides the recorded sidecar revision (0 keeps
+	// the current one).
+	MetadataSchemaVersion int `yaml:"metadataSchemaVersion"`
 	// SourcePath defaults to /native/<session>.jsonl.
 	SourcePath string `yaml:"sourcePath"`
 	// SentinelLocator, when set, becomes the recorded source path and must not
@@ -70,6 +73,16 @@ type claudeProducerCase struct {
 	SentinelLocator string `yaml:"sentinelLocator"`
 	// RecordedContextFrom carries a recorded context_from proof naming it.
 	RecordedContextFrom string `yaml:"recordedContextFrom"`
+	// RecordedStartedBy carries a recorded started_by proof naming it.
+	RecordedStartedBy string `yaml:"recordedStartedBy"`
+	// RecordedContentHash binds the recorded relationship to the transcript
+	// bytes, as a stored artifact does.
+	RecordedContentHash bool `yaml:"recordedContentHash"`
+	// MetadataSchemaVersionOmitted writes an absent (0) sidecar revision.
+	MetadataSchemaVersionOmitted bool `yaml:"metadataSchemaVersionOmitted"`
+	// Relationship and Target assert the emitted generation provenance.
+	Relationship string `yaml:"relationship"`
+	Target       string `yaml:"target"`
 	// ContentOmitted marks the attempt as carrying the source-omitted flag.
 	ContentOmitted bool `yaml:"contentOmitted"`
 	// MaxRecordBytes overrides the per-record limit (0 keeps the production one).
@@ -155,6 +168,14 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 	}
 
 	metadata := makeReindexMeta(t, sessionID, sourcePath)
+	if row.RecordedContentHash {
+		metadata.ContentHash = schema.ComputeTranscriptHash([]byte(row.Transcript))
+	}
+	if row.MetadataSchemaVersionOmitted {
+		metadata.SchemaVersion = 0
+	} else if row.MetadataSchemaVersion != 0 {
+		metadata.SchemaVersion = row.MetadataSchemaVersion
+	}
 	if row.RecordedParent != "" {
 		parent, err := ingest.NewSessionID(row.RecordedParent)
 		if err != nil {
@@ -174,6 +195,19 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 			Evidence:      schema.EvidenceNativeTyped,
 			Anchor:        &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorGeneral},
 		}}
+	}
+
+	if row.RecordedStartedBy != "" {
+		owner, err := ingest.NewSessionID(row.RecordedStartedBy)
+		if err != nil {
+			t.Fatalf("recorded started_by %q: %v", row.RecordedStartedBy, err)
+		}
+		metadata.Relationships = append(metadata.Relationships, schema.SessionRelationship{
+			Kind:          schema.SessionRelationshipStartedBy,
+			TargetState:   schema.RelationshipTargetKnown,
+			TargetLocalID: &owner,
+			Evidence:      schema.EvidenceNativeTyped,
+		})
 	}
 
 	idx := ingest.NewClaudeIndexer(mfs,
@@ -247,6 +281,31 @@ func assertClaudeProducerRefusal(t *testing.T, row claudeProducerCase, err error
 func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candidate ingest.GenerationCandidate) {
 	t.Helper()
 	generation := candidate.Result.Generation
+	wantSchema := ingest.CurrentSchemaVersion
+	if !row.MetadataSchemaVersionOmitted && ingest.MetadataSchemaVersionIsCurrent(row.MetadataSchemaVersion) {
+		wantSchema = row.MetadataSchemaVersion
+	}
+	if generation.Metadata.SchemaVersion != wantSchema {
+		t.Fatalf("metadata schemaVersion = %d, want %d", generation.Metadata.SchemaVersion, wantSchema)
+	}
+	if row.Relationship != "" {
+		if len(generation.Metadata.Relationships) != 1 {
+			t.Fatalf("relationships = %+v, want one %s", generation.Metadata.Relationships, row.Relationship)
+		}
+		relationship := generation.Metadata.Relationships[0]
+		if string(relationship.Kind) != row.Relationship {
+			t.Fatalf("relationship kind = %q, want %q", relationship.Kind, row.Relationship)
+		}
+		target := ""
+		if relationship.TargetLocalID != nil {
+			target = relationship.TargetLocalID.String()
+		}
+		if target != row.Target {
+			t.Fatalf("relationship target = %q, want %q", target, row.Target)
+		}
+	} else if len(generation.Metadata.Relationships) != 0 {
+		t.Fatalf("relationships = %+v, want none", generation.Metadata.Relationships)
+	}
 	if got := string(generation.Completeness); got != row.Completeness {
 		t.Fatalf("completeness = %q, want %q", got, row.Completeness)
 	}
