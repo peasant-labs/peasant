@@ -30,10 +30,17 @@ async function open(page, theme) {
   if (await html.getAttribute('data-theme') !== theme) {
     // The sidebar's footer toggle is named for the mode it switches to; on a phone it sits in the drawer.
     const menu = page.locator('.asb-bar .asb-menu');
-    if (await menu.isVisible()) await menu.click();
+    const drawer = await menu.isVisible();
+    if (drawer) await menu.click();
     await page.locator('.asb-panel').getByRole('button', { name: `switch to ${theme} mode`, exact: true }).click();
+    // Changing the theme does not navigate, so the phone drawer that holds the toggle stays open
+    // over the page. Close it through its own control; the theme is stored, so it is not reopened.
+    if (drawer) await page.locator('.asb-bar').getByRole('button', { name: 'close the menu', exact: true }).click();
   }
   await expect(html).toHaveAttribute('data-theme', theme);
+  // A closed drawer keeps its layout off screen behind the scrim. Every step below drives the
+  // page underneath, so a drawer left open would intercept its clicks.
+  await expect(page.locator('.asb')).toHaveAttribute('data-drawer-open', 'false');
   await expect(page.getByRole('heading', { name: 'online observations', exact: true })).toBeVisible();
   await expect(page.locator('.vobs')).toBeVisible();
 }
@@ -184,7 +191,9 @@ async function exercise(row, { page, request }, info) {
     await expect(page.getByRole('button', { name: 'log out', exact: true })).toBeVisible();
     // The rules are their own settings section: the sidebar links it on a wide screen, the section strip on a phone.
     await page.getByRole('link', { name: 'automatic publishing', exact: true }).click();
-    await expect(page.getByRole('heading', { level: 1, name: 'automatic publishing', exact: true })).toBeVisible();
+    // Settings keeps one page title, its own name; the chosen section's name heads its column below it.
+    await expect(page.getByRole('heading', { level: 1, name: 'settings', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'automatic publishing', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'add a folder or repository', exact: true }).click();
     const rule = page.getByRole('form', { name: 'add a folder or repository', exact: true });
     await expect(rule.getByText('saving installs no hook.', { exact: false })).toBeVisible();
