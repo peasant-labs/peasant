@@ -741,6 +741,8 @@ func TestSyncHomeProjectOptions(t *testing.T) {
 			Name               string
 			Selected, Projects []string
 			Narrow             bool
+			InvalidSelection   bool `yaml:"invalidSelection"`
+			Conflicting        bool `yaml:"conflictingSelection"`
 		}
 	}
 	if err := testutil.DecodeNamedFixtureYAML(syncProjectOptionsYAML, &f); err != nil {
@@ -766,6 +768,15 @@ func TestSyncHomeProjectOptions(t *testing.T) {
 			cfg := config.BaseConfig()
 			if tc.Narrow {
 				cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessOpenCode.String(): {Sessions: tc.Selected}}}
+			}
+			if tc.InvalidSelection {
+				cfg.Selection = config.SelectionConfig{Mode: config.SelectionMode("hostile-invalid")}
+			}
+			if tc.Conflicting {
+				cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessOpenCode.String(): {Projects: []config.ProjectSelection{
+					{GitRemote: "example.test/org/repo", Branches: []string{"main"}},
+					{Name: "/repo", Branches: []string{"dev"}},
+				}}}}
 			}
 			r := &boundedHomeReader{Store: db, allowed: map[string]bool{}, reads: map[string][]string{}}
 			response := httptest.NewRecorder()

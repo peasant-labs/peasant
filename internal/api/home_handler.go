@@ -162,65 +162,26 @@ func (r *syncHomePageReader) token(boundary store.SyncPageBoundary) schema.PageT
 // exact ancestry/counts remain explicit O(N) work, separate from window paging.
 type syncHomeCohort struct {
 	rows     map[string]store.HomeCandidate
+	ordered  []store.SessionRow
 	visible  map[string]bool
-	selected map[string]bool
 	parents  map[string]store.ParentIdentityRow
 	children map[string]int
 }
 
 func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error) {
-	c := syncHomeCohort{rows: map[string]store.HomeCandidate{}, visible: map[string]bool{}, selected: map[string]bool{}, parents: map[string]store.ParentIdentityRow{}, children: map[string]int{}}
+	c := syncHomeCohort{rows: map[string]store.HomeCandidate{}, visible: map[string]bool{}, parents: map[string]store.ParentIdentityRow{}, children: map[string]int{}}
 	rows, err := r.db.HomeIdentityCohort(ctx)
 	if err != nil {
 		return c, err
 	}
-	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
-	if r.config != nil {
-		selection = r.config.Selection
-	}
-	if !selection.Mode.IsValid() {
-		return c, fmt.Errorf("api.syncHomePageReader.cohort: the saved kickstart selection has no valid mode %q, so outsideSelection and autoPublish cannot be reported truthfully; no page was returned; run `peasant kickstart` to repair selection.mode (valid: all, selected), then retry", selection.Mode)
-	}
-	var matcher *ingest.SelectionMatcher
-	var prepared []preparedWebDiscoveryIdentity
-	var remotes, names []ingest.DiscoveryIdentityMultiplicity
-	if selection.Mode == config.SelectionModeSelected {
-		compiled := config.CompileSelectionMatcher(selection)
-		matcher = &compiled
-		identities := make([]store.SessionRow, len(rows))
-		for i, row := range rows {
-			if err := ctx.Err(); err != nil {
-				return c, err
-			}
-			identities[i] = row.Identity
-		}
-		prepared, remotes, names, err = prepareWebDiscoveryIdentities(ctx, identities, selection, r.resolver)
-		if err != nil {
-			return c, err
-		}
-	}
 	pushRows := make([]ingest.PushSessionRow, 0, len(rows))
-	for i, candidate := range rows {
+	for _, candidate := range rows {
 		if err := ctx.Err(); err != nil {
 			return c, err
 		}
 		row := candidate.Identity
-		selected := true
-		if matcher != nil {
-			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: value(row.GitBranch), RemoteMultiplicity: remotes[i], NameMultiplicity: names[i]})
-			switch match {
-			case ingest.BranchMatchYes:
-				selected = true
-			case ingest.BranchMatchNo:
-				selected = false
-			case ingest.BranchMatchWithheldConflict:
-				return c, fmt.Errorf("api.syncHomePageReader.cohort: conflicting persisted project branch rules for session %q; outsideSelection cannot be reported truthfully, so no page was returned; run `peasant kickstart` and make the project's branch selection consistent, then retry", row.SessionID)
-			default:
-				return c, fmt.Errorf("api.syncHomePageReader.cohort: unknown canonical matcher result for session %q; no page was returned because the saved ingest/push selection cannot be reported truthfully; update Peasant and retry", row.SessionID)
-			}
-		}
 		c.rows[row.SessionID] = candidate
-		c.selected[row.SessionID] = selected
+		c.ordered = append(c.ordered, row)
 		if candidate.Pushable {
 			// The saved kickstart selection is not a browsing predicate: every
 			// ingested, pushable session belongs to the page, whatever the saved
@@ -247,6 +208,49 @@ func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error)
 	}
 	return c, nil
 }
+
+// selectionMembership computes the saved INGEST/PUSH selector's verdict for the
+// complete stored cohort. It is requested only when a page actually reports
+// publication metadata or applies the explicit publication=auto filter; project
+// options and selection-free browse pages never evaluate it.
+func (r *syncHomePageReader) selectionMembership(ctx context.Context, cohort syncHomeCohort) (map[string]bool, error) {
+	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
+	if r.config != nil {
+		selection = r.config.Selection
+	}
+	if !selection.Mode.IsValid() {
+		return nil, fmt.Errorf("api.syncHomePageReader.selectionMembership: the saved kickstart selection has no valid mode %q, so outsideSelection and autoPublish cannot be reported truthfully; no page was returned; run `peasant kickstart` to repair selection.mode (valid: all, selected), then retry", selection.Mode)
+	}
+	membership := make(map[string]bool, len(cohort.ordered))
+	if selection.Mode == config.SelectionModeAll {
+		for _, row := range cohort.ordered {
+			membership[row.SessionID] = true
+		}
+		return membership, nil
+	}
+	compiled := config.CompileSelectionMatcher(selection)
+	prepared, remotes, names, err := prepareWebDiscoveryIdentities(ctx, cohort.ordered, selection, r.resolver)
+	if err != nil {
+		return nil, err
+	}
+	for i, row := range cohort.ordered {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		switch match := compiled.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: value(row.GitBranch), RemoteMultiplicity: remotes[i], NameMultiplicity: names[i]}); match {
+		case ingest.BranchMatchYes:
+			membership[row.SessionID] = true
+		case ingest.BranchMatchNo:
+			membership[row.SessionID] = false
+		case ingest.BranchMatchWithheldConflict:
+			return nil, fmt.Errorf("api.syncHomePageReader.selectionMembership: conflicting persisted project branch rules for session %q; outsideSelection cannot be reported truthfully, so no page was returned; run `peasant kickstart` and make the project's branch selection consistent, then retry", row.SessionID)
+		default:
+			return nil, fmt.Errorf("api.syncHomePageReader.selectionMembership: unknown canonical matcher result for session %q; no page was returned because the saved ingest/push selection cannot be reported truthfully; update Peasant and retry", row.SessionID)
+		}
+	}
+	return membership, nil
+}
+
 func (c syncHomeCohort) matches(id, parent string) bool {
 	if !c.visible[id] {
 		return false
@@ -287,15 +291,20 @@ func (r *syncHomePageReader) ReadPage(ctx context.Context, request schema.PageRe
 		return page, err
 	}
 	var auto func(string) bool
+	var membership map[string]bool
 	if filter == schema.LocalSyncPublicationAuto {
 		auto = r.publishing.autoPublicationChecker(ctx)
+		membership, err = r.selectionMembership(ctx, cohort)
+		if err != nil {
+			return page, err
+		}
 	}
 	ids := make([]string, 0, maximum)
 	for i, candidate := range window.Candidates {
 		if err := ctx.Err(); err != nil {
 			return page, err
 		}
-		if cohort.matches(candidate.ID, parent) && (auto == nil || auto(cohort.rows[candidate.ID].Identity.GitWorktree)) {
+		if cohort.matches(candidate.ID, parent) && (auto == nil || (membership[candidate.ID] && auto(cohort.rows[candidate.ID].Identity.GitWorktree))) {
 			ids = append(ids, candidate.ID)
 		}
 		// Only consumed candidates advance traversal. An empty/short eligible
@@ -312,11 +321,11 @@ func (r *syncHomePageReader) ReadPage(ctx context.Context, request schema.PageRe
 	if len(ids) == 0 {
 		return page, nil
 	}
-	page.Items, err = r.hydrate(ctx, ids, cohort)
+	page.Items, err = r.hydrate(ctx, ids, cohort, membership)
 	return page, err
 }
 
-func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort syncHomeCohort) ([]schema.LocalSyncSessionRow, error) {
+func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort syncHomeCohort, membership map[string]bool) ([]schema.LocalSyncSessionRow, error) {
 	rows, err := r.db.HomePageRows(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -328,12 +337,18 @@ func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort s
 		hydrated = append(hydrated, row.Sync)
 	}
 	// Publication metadata describes the saved INGEST/PUSH selector, which is a
-	// different question from whether the row may appear here. It is computed for
-	// exactly the returned identifiers so an unselected row can still say it is
-	// outside the selector without being hidden from the page.
+	// different question from whether the row may appear here. Membership uses
+	// the complete cohort to resolve repository ambiguity; only returned IDs are
+	// passed to publication hydration. An unselected row remains browsable.
+	if membership == nil {
+		membership, err = r.selectionMembership(ctx, cohort)
+		if err != nil {
+			return nil, err
+		}
+	}
 	scope := make(map[string]bool, len(ids))
 	for _, id := range ids {
-		inSelection, known := cohort.selected[id]
+		inSelection, known := membership[id]
 		if !known {
 			return nil, fmt.Errorf("api.syncHomePageReader.hydrate: session %q has no saved ingest/push selection membership, so outsideSelection cannot be reported truthfully; no page was returned; retry after verifying the local store and saved selection", id)
 		}

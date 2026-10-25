@@ -1,4 +1,4 @@
-requiredNames: [complete-root-projects, selection-scoped-projects, empty-selection-projects]
+requiredNames: [complete-root-projects, selection-scoped-projects, empty-selection-projects, invalid-selection-projects, conflicting-selection-projects]
 sessions:
   - {id: sess_a, project: a, name: zeta}
   - {id: sess_a2, project: a, name: zeta}
@@ -13,3 +13,7 @@ cases:
   - {name: complete-root-projects, projects: [b, e, a]}
   - {name: selection-scoped-projects, narrow: true, selected: [sess_a, sess_b, sess_child, sess_unresolved], projects: [b, e, a]}
   - {name: empty-selection-projects, narrow: true, selected: [sess_absent], projects: [b, e, a]}
+  # Project options carry no publication metadata, so an unusable or conflicting
+  # ingest selection must not gate them.
+  - {name: invalid-selection-projects, invalidSelection: true, projects: [b, e, a]}
+  - {name: conflicting-selection-projects, conflictingSelection: true, projects: [b, e, a]}

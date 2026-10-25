@@ -394,6 +394,33 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 		t.Fatalf("autoPublish after the install = %v; the listed session publishes and the one the selection leaves out does not", got)
 	}
 
+	// Bind the outside-selection repository too, so a managed hook would publish
+	// its session. The explicit auto view must still exclude it: the rendered
+	// autoPublish for that row is false because the saved ingest selector leaves
+	// it out, and the filter must match what it renders.
+	status, body = world.request(t, http.MethodPost, installRoute("work"), schema.AutoPublishInstallRequest{Path: world.second})
+	decodeContract(t, status, body, &installed)
+	if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
+		t.Fatalf("install outside-selection repository = %+v", installed)
+	}
+	var ordinary schema.LocalSyncSessionPage
+	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", &ordinary)
+	if len(ordinary.Items) != 3 {
+		t.Fatalf("Home ordinary page lists %d rows, want all 3 stored rows", len(ordinary.Items))
+	}
+	outsideAuto := map[string]bool{}
+	for _, item := range ordinary.Items {
+		outsideAuto[item.Sync.ID] = item.Publication.AutoPublish
+	}
+	if outsideAuto[recordedInsideSessionID] != true || outsideAuto[recordedOutsideSessionID] || outsideAuto[secondRecordedSessionID] {
+		t.Fatalf("Home per-row autoPublish = %v, want only the selected session true", outsideAuto)
+	}
+	var automaticHome schema.LocalSyncSessionPage
+	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&publication=auto", &automaticHome)
+	if len(automaticHome.Items) != 1 || automaticHome.Items[0].Sync.ID != recordedInsideSessionID {
+		t.Fatalf("Home auto view = %+v, want only the selected row whose rendered autoPublish is true", automaticHome.Items)
+	}
+
 	var removed schema.AutoPublishRemovalResponse
 	status, body = world.request(t, http.MethodDelete, ruleRoute("work"), nil)
 	decodeContract(t, status, body, &removed)
