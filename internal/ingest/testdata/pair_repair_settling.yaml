@@ -16,4 +16,4 @@ cases:
   - name: transcript_only_source_malformed
     stored_transcript: malformed
     native_source: malformed
-    diagnostic_mentions: "malformed complete JSON"
+    diagnostic_mentions: "capture JSONL record 2: malformed complete JSON"

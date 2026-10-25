@@ -4,15 +4,16 @@ import (
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pair_repair_settling.yaml
@@ -46,7 +47,7 @@ const damagedSourceTranscript = `{"type":"user","message":{"role":"user","conten
 // in a way the other assertion cannot see.
 func TestUnrepairableSourceSettles(t *testing.T) {
 	var fixtures pairRepairSettlingFixtures
-	if err := yaml.Unmarshal(pairRepairSettlingFixtureData, &fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(pairRepairSettlingFixtureData, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -56,10 +57,8 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 		}
 		names[fixture.Name] = true
 	}
-	for _, name := range fixtures.Required {
-		if !names[name] {
-			t.Fatalf("missing pair-repair settling fixture %s", name)
-		}
+	if err := testutil.RequireFixtureNames("pair-repair settling", "case", fixtures.Required, names); err != nil {
+		t.Fatal(err)
 	}
 	for _, fixture := range fixtures.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -109,7 +108,21 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			if len(mirrored) != 1 || mirrored[0].Err != nil || !mirrored[0].Mirrored {
 				t.Fatalf("seed stored artifact identity: %+v", mirrored)
 			}
-			seedStalePreviewCapture(t, ctx, database, id)
+			var priorPreview = "the last good entries"
+			writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+				SessionID: id, IndexVersion: 1, IndexerVersion: 15, IndexedAtMs: 1700000000000,
+				Result: indexformat.V1{Entries: []schema.SessionEntry{{
+					SessionID: id, EntryIndex: 0,
+					EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &priorPreview,
+				}}},
+			}})
+			if len(writes) != 1 || writes[0].Err != nil {
+				t.Fatalf("seed a last-good entry: %+v", writes)
+			}
+			beforeEntries, err := database.ListEntries(ctx, id)
+			if err != nil || len(beforeEntries) == 0 {
+				t.Fatalf("seed readable prior entries: %+v, %v", beforeEntries, err)
+			}
 
 			storedBytes := valid
 			if fixture.StoredTranscript == "malformed" {
@@ -178,6 +191,10 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			}
 			if _, err := memfs.ReadFile(storedPath); err != nil {
 				t.Fatalf("the readable stored copy was removed: %v", err)
+			}
+			afterEntries, err := database.ListEntries(ctx, id)
+			if err != nil || !reflect.DeepEqual(beforeEntries, afterEntries) {
+				t.Fatalf("the last-good entries changed: %+v, %v", afterEntries, err)
 			}
 			state, err := database.ReadIndexState(ctx, id)
 			if err != nil || state == nil {

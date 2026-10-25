@@ -318,7 +318,11 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 		})
 		if err != nil {
 			p.reportMetadataRefusal(string(sid), err)
-		} else if !changed {
+		} else if !changed && !p.config.Force {
+			// Routine harvests stay quiet once the transition is recorded. An
+			// explicit --force run is the user acting on the remediation this
+			// diagnostic names, so it still has to hear that the repair did not
+			// take; staying silent there would read as success.
 			return
 		}
 	}
@@ -675,25 +679,6 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		p.settleRepairResult(ctx, entry.Session.SessionID, &result)
 		return result
 	}
-	retained, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, entry.Session.SessionID)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) && p.pairNeedsRepair(ctx, entry.Session.SessionID) {
-			// Nothing saved is left to re-read for a session the store already
-			// knows: a managed transcript without its metadata sidecar has no
-			// stored pair to fall back to, so the ordinary refresh can never
-			// complete. Reporting the adapter refresh here repeats on every
-			// harvest and never settles. Report it once through the pair-repair
-			// vocabulary instead, which records the unavailable source and
-			// clears it when a later refresh saves the pair again. A first
-			// ingest that lost its source mid-run is NOT this case: it has no
-			// stored pair to preserve, so it keeps its error.
-			p.reportPairRepairUnavailable(ctx, entry.Session.SessionID, string(entry.Session.SourcePath), acquisition, writeLane)
-			p.settleRepairResult(ctx, entry.Session.SessionID, &result)
-			return result
-		}
-		p.reportMetadataRefusal(p.managedRelativePath(metadataPath), managedInputIOError(p.managedRelativePath(metadataPath), err))
-		return result
-	}
 	// The manual index refresh (harvest index --force) names its own
 	// unavailable native input; every other path, including a forced ordinary
 	// harvest, reports the adapter refresh it could not complete.
@@ -708,6 +693,11 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	})
 	result.result.Error = nil
 	result.result.Status = DiffUnchanged
+	retained, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, entry.Session.SessionID)
+	if err != nil {
+		p.reportMetadataRefusal(p.managedRelativePath(metadataPath), managedInputIOError(p.managedRelativePath(metadataPath), err))
+		return result
+	}
 	// No new file commit or DB success is claimed. The normal index capture
 	// guards independently verify that this stored pair matches its stored state.
 	result.meta = &retained.Metadata

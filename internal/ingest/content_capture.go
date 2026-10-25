@@ -239,7 +239,7 @@ func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data [
 			continue
 		}
 		if !json.Valid(raw) {
-			return nil, captureFailure(session, line, fmt.Errorf("malformed JSON"))
+			return nil, captureFailure(session, line, malformedSourceRecord{})
 		}
 		record, err := validate(raw)
 		if err != nil {

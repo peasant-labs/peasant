@@ -99,6 +99,13 @@ func (e *TornRetainedPairError) Error() string {
 	return fmt.Sprintf("content recovery %s: the saved pair no longer matches its stored identity; the database copy is preserved and the saved copy is reported as damaged", e.SessionID)
 }
 
+// malformedSourceRecord marks a source record a capture could not parse. The
+// message is the user-facing one it always was; the type is what tells a settle
+// that the bytes on disk, not the store or the process, are the problem.
+type malformedSourceRecord struct{}
+
+func (malformedSourceRecord) Error() string { return "malformed JSON" }
+
 // contentRecovery is one completed stored-content repair. Recovering content
 // repairs the stored capture only; it does not complete the session, so the
 // pipeline still evaluates the same session for independent adapter and
@@ -241,7 +248,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
 					continue
 				}
-				if p.sourceUnavailableRecorded(ctx, id) {
+				if sourceRecordUnusable(err) && p.sourceUnavailableRecorded(ctx, id) {
 					// The pair-repair lane already reported this session's
 					// acquisition failure with its cause, and the stored copy
 					// still serves. Repeating it here on every later run adds no
