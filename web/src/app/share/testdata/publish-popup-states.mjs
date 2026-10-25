@@ -227,7 +227,7 @@ export function collectiveId(index) {
 
 const GROUP_BASE = {
   created_at: '2026-06-01T09:00:00Z',
-  created_by: '0b6f8a2e-1c3d-4e5f-8a9b-0c1d2e3f4a5b',
+  creator: { kind: 'profile', id: '0b6f8a2e-1c3d-4e5f-8a9b-0c1d2e3f4a5b', username: 'collective-creator', display_name: null, avatar_url: null },
   data_access: 'members_only',
   description: null,
   display_members: true,

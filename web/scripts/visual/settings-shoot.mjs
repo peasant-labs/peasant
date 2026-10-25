@@ -111,7 +111,7 @@ for (const name of REPOS) {
 
 const village = http.createServer((req, res) => {
   const group = (collective) => ({
-    ...collective, acceptance_mode: 'open', created_at: '2026-01-01T00:00:00Z', created_by: collective.id, data_access: 'members_only', description: null,
+    ...collective, acceptance_mode: 'open', created_at: '2026-01-01T00:00:00Z', creator: { kind: 'anonymous' }, data_access: 'members_only', description: null,
     display_members: true, linked_github_org: 'acme', member_count: 6, member_since: '2026-01-01T00:00:00Z', role: 'member', transcript_count: 12,
     transcript_deletion_policy: 'user_choice', updated_at: '2026-01-01T00:00:00Z',
   })

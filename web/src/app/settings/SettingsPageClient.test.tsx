@@ -79,7 +79,7 @@ function villageGroup(id: string, name: string) {
     name,
     acceptance_mode: 'open',
     created_at: '2026-01-01T00:00:00Z',
-    created_by: id,
+    creator: { kind: 'anonymous' as const },
     data_access: 'members_only',
     description: null,
     display_members: true,

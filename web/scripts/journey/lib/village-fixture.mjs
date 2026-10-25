@@ -8,7 +8,7 @@ export async function startVillageFixture(exported, contract, control) {
   const time = f.ObservedAt;
   const record = () => ({ id: f.CollectiveID, name: scenario === 'complete' ? f.OldName : f.NewName,
     description: 'Permitted fixture metadata retained as dated evidence', acceptance_mode: 'open', data_access: 'public',
-    created_at: time, updated_at: time, created_by: account.UserID, display_members: true,
+    created_at: time, updated_at: time, creator: { kind: 'profile', id: account.UserID, username: account.Username, display_name: null, avatar_url: null }, display_members: true,
     linked_github_org: null, transcript_deletion_policy: 'user_choice' });
   const membership = () => ({ ...record(), role: 'member', member_since: time, member_count: 1, transcript_count: 1 });
   function validated(name, payload) {
