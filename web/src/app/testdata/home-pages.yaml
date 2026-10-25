@@ -104,6 +104,8 @@ cases:
     roots: 1
     children: 1
     teammate: { team: migration, name: tests }
+    assertTeammateLine: true
   - name: no-claude-teammate-line
     roots: 1
     children: 1
+    assertTeammateLine: true

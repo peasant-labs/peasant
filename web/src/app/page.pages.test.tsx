@@ -14,7 +14,7 @@ const channels = vi.hoisted(() => vi.fn<(subscriptions: unknown) => { connected:
 vi.mock('@/contexts/WebSocketContext', () => ({ useChannel: channels }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string; teammate?: { team: string; name: string } }
+interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string; teammate?: { team: string; name: string }; assertTeammateLine?: boolean }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedTokens: { parent: string | null; token: string }[]; failedRefreshTokens: { parent: string | null; token: string }[] } };
 const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-refresh-clears-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-recovery-survives-failed-retry', 'selection-recovery-survives-account-reset', 'claude-teammate-line', 'no-claude-teammate-line'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
@@ -108,7 +108,7 @@ describe('mounted bounded Home', () => {
       expect(screen.getByRole('link', { name: 'title root-0' }).getAttribute('href')).toContain('root-0');
       expect(choiceRows('status').find(row => row.getAttribute('aria-checked') === 'true')).toHaveTextContent('all');
 
-      if (testCase.name === 'claude-teammate-line' || testCase.name === 'no-claude-teammate-line') {
+      if (testCase.assertTeammateLine) {
         fireEvent.click(screen.getByRole('button', { name: 'subagents 1' }));
         await screen.findByRole('link', { name: 'title child-0' });
         const childCell = screen.getByRole('link', { name: 'title child-0' }).closest('.home-session') as HTMLElement;

@@ -131,9 +131,11 @@ describe('transcript prelude lineage', () => {
       render(<TestDetail />);
 
       if (testCase.teammate) {
-        expect(screen.getByText(`teammate ${testCase.teammate.name} on ${testCase.teammate.team}`)).toBeInTheDocument();
+        const line = screen.getByText(`teammate ${testCase.teammate.name} on ${testCase.teammate.team}`);
+        expect(line).toHaveAttribute('data-transcript-teammate', 'true');
       } else {
         expect(screen.queryByText(/^teammate /)).not.toBeInTheDocument();
+        expect(document.querySelector('[data-transcript-teammate]')).toBeNull();
       }
 
       if (testCase.teammate && testCase.parentSessionId) {
