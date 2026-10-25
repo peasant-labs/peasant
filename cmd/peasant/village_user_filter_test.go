@@ -165,6 +165,19 @@ func TestVillageUserFilterFixtures(t *testing.T) {
 						t.Fatal(err)
 					}
 					got = append(got, id)
+					// The JSON owner is the username, or null for an anonymous
+					// owner, never an empty string.
+					for _, world := range fixture.World.Transcripts {
+						if world.ID != id {
+							continue
+						}
+						if world.Anonymous && row.Owner != nil {
+							t.Errorf("offline JSON owner of anonymous %s = %q, want null", id, *row.Owner)
+						}
+						if !world.Anonymous && (row.Owner == nil || *row.Owner != world.Owner) {
+							t.Errorf("offline JSON owner of %s = %v, want %q", id, row.Owner, world.Owner)
+						}
+					}
 				}
 				if !sameTranscriptSet(got, c.Expect) {
 					t.Errorf("offline listing = %v, want %v", got, c.Expect)

@@ -228,9 +228,11 @@ func listPullableTranscripts(ctx context.Context, client *village.VillageClient,
 
 // jsonLocalListRow is the JSON-safe local inventory row.
 type jsonLocalListRow struct {
-	TranscriptID          string                          `json:"transcriptId"`
-	VillageHost           string                          `json:"villageHost"`
-	Owner                 string                          `json:"owner"`
+	TranscriptID string `json:"transcriptId"`
+	VillageHost  string `json:"villageHost"`
+	// Owner is the stored owner username, or null when the owner was
+	// anonymous to this viewer.
+	Owner                 *string                         `json:"owner"`
 	Title                 string                          `json:"title,omitempty"`
 	Harness               string                          `json:"harness,omitempty"`
 	LocalSessionID        string                          `json:"localSessionId,omitempty"`
@@ -256,7 +258,7 @@ func printLocalListJSON(cmd *cobra.Command, rows []store.PulledTranscriptRow, ob
 		out = append(out, jsonLocalListRow{
 			TranscriptID:          r.TranscriptID.String(),
 			VillageHost:           r.VillageHost,
-			Owner:                 r.OwnerUsername,
+			Owner:                 storedOwnerJSON(r.OwnerUsername),
 			Title:                 r.Title,
 			Harness:               r.Harness.String(),
 			LocalSessionID:        r.LocalSessionID,

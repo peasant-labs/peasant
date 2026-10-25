@@ -118,6 +118,23 @@ func TestVillagePullEnvelopeFixtures(t *testing.T) {
 			if !strings.Contains(out, c.WantContextOwner+"\n") {
 				t.Errorf("context header does not show %q: %q", c.WantContextOwner, out)
 			}
+
+			out, err = runVillage(t, dir, "transcripts", "context", "--json", single.String())
+			if err != nil {
+				t.Fatalf("context --json: %v (out=%q)", err, out)
+			}
+			var context struct {
+				OwnerUsername *string `json:"ownerUsername"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &context); err != nil {
+				t.Fatalf("decode context --json: %v (out=%q)", err, out)
+			}
+			switch {
+			case wantName == "" && context.OwnerUsername != nil:
+				t.Errorf("context --json ownerUsername = %q, want null", *context.OwnerUsername)
+			case wantName != "" && (context.OwnerUsername == nil || *context.OwnerUsername != wantName):
+				t.Errorf("context --json ownerUsername = %v, want %q", context.OwnerUsername, wantName)
+			}
 		})
 	}
 }

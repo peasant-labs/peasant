@@ -57,6 +57,8 @@ requiredNames:
   - user filter alone spans collectives on a pull
   - user filter never matches an anonymous owner
   - local user filter never matches an anonymous owner
+  - user filter of only spaces never matches an anonymous owner
+  - local user filter of only spaces never matches an anonymous owner
   - remote table prints anon for an anonymous owner
   - local table prints anon for an anonymous owner
 
@@ -216,6 +218,19 @@ cases:
   - name: local user filter never matches an anonymous owner
     command: list-local
     user: anon
+    expect: []
+
+  # A value of only spaces trims to an empty name, which is exactly what an
+  # anonymous owner stores; it still matches nobody.
+  - name: user filter of only spaces never matches an anonymous owner
+    command: list
+    user: "  "
+    expect: []
+    expectTotal: 0
+
+  - name: local user filter of only spaces never matches an anonymous owner
+    command: list-local
+    user: "  "
     expect: []
 
   # Tables print "anon" for an anonymous owner, never "@" with an empty name.

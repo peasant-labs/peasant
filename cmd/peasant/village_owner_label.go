@@ -24,3 +24,12 @@ func publicOwnerLabel(owner schema.VillagePublicOwner) string {
 	}
 	return ownerLabel(owner.Username)
 }
+
+// storedOwnerJSON renders a stored owner username for JSON output: the name,
+// or null when the owner was anonymous to this viewer, never an empty string.
+func storedOwnerJSON(username string) *string {
+	if username == "" {
+		return nil
+	}
+	return &username
+}
