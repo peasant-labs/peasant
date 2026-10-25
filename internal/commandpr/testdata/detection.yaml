@@ -8,6 +8,11 @@ requiredNames:
   - gh pr view is not an invocation
   - errored call
   - raw text arguments
+  - two distinct pull requests, first-seen order
+  - last matching url wins
+  - pull zero ignored
+  - piped gh pr create
+  - quoted mention
 urlRequiredNames:
   - fragment after the number
   - pull request sub-page
@@ -109,6 +114,66 @@ cases:
         repo: widgets
         number: 15
         url: https://github.com/acme/widgets/pull/15
+  - name: two distinct pull requests, first-seen order
+    calls:
+      - arguments: |
+          {"command":"gh pr create --repo acme/api --fill"}
+        result: |
+          https://github.com/acme/api/pull/42
+      - arguments: |
+          {"command":"gh pr create --repo acme/web --fill"}
+        result: |
+          https://github.com/acme/web/pull/42
+      - arguments: |
+          {"command":"gh pr create --repo acme/api --fill"}
+        result: |
+          https://github.com/acme/api/pull/42
+    expected:
+      - owner: acme
+        repo: api
+        number: 42
+        url: https://github.com/acme/api/pull/42
+      - owner: acme
+        repo: web
+        number: 42
+        url: https://github.com/acme/web/pull/42
+  - name: last matching url wins
+    calls:
+      - arguments: |
+          {"command":"gh pr create --fill"}
+        result: |
+          Draft pull request https://github.com/acme/api/pull/5
+          Pull request created https://github.com/acme/api/pull/31
+    expected:
+      - owner: acme
+        repo: api
+        number: 31
+        url: https://github.com/acme/api/pull/31
+  - name: pull zero ignored
+    calls:
+      - arguments: |
+          {"command":"gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/0
+    expected: []
+  - name: piped gh pr create
+    calls:
+      - arguments: |
+          {"command":"gh pr create --fill | tee /tmp/pr.log"}
+        result: |
+          https://github.com/acme/api/pull/56
+    expected:
+      - owner: acme
+        repo: api
+        number: 56
+        url: https://github.com/acme/api/pull/56
+  - name: quoted mention
+    calls:
+      - arguments: |
+          {"command":"echo \"gh pr create\""}
+        result: |
+          https://github.com/acme/api/pull/57
+    expected: []
 urls:
   - name: fragment after the number
     text: https://github.com/acme/widgets/pull/42#issuecomment-1

@@ -62,13 +62,15 @@ func TestDetectPullRequestURLEdgeCases(t *testing.T) {
 }
 
 // TestDetectEmptyInput pins the empty case the endpoint relies on: no tool
-// calls is no detection, never an error or a one-row placeholder.
+// calls is no detection, never an error or a one-row placeholder. The endpoint
+// normalizes a nil result to an empty list, so the number of rows is the
+// contract, not whether the slice is nil.
 func TestDetectEmptyInput(t *testing.T) {
 	t.Parallel()
-	if got := commandpr.Detect(nil); got != nil {
+	if got := commandpr.Detect(nil); len(got) != 0 {
 		t.Fatalf("Detect(nil) = %+v, want no rows", got)
 	}
-	if got := commandpr.Detect([]schema.ToolCallDetail{}); got != nil {
+	if got := commandpr.Detect([]schema.ToolCallDetail{}); len(got) != 0 {
 		t.Fatalf("Detect(empty) = %+v, want no rows", got)
 	}
 }
