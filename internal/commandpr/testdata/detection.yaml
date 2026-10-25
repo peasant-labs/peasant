@@ -21,6 +21,7 @@ urlRequiredNames:
   - another host is not GitHub
   - plural pulls path
   - no pull request URL
+  - created url first, lower number later
 cases:
   - name: real invocation after a cd
     calls:
@@ -117,10 +118,6 @@ cases:
   - name: two distinct pull requests, first-seen order
     calls:
       - arguments: |
-          {"command":"gh pr create --repo acme/api --fill"}
-        result: |
-          https://github.com/acme/api/pull/42
-      - arguments: |
           {"command":"gh pr create --repo acme/web --fill"}
         result: |
           https://github.com/acme/web/pull/42
@@ -128,15 +125,19 @@ cases:
           {"command":"gh pr create --repo acme/api --fill"}
         result: |
           https://github.com/acme/api/pull/42
+      - arguments: |
+          {"command":"gh pr create --repo acme/web --fill"}
+        result: |
+          https://github.com/acme/web/pull/42
     expected:
-      - owner: acme
-        repo: api
-        number: 42
-        url: https://github.com/acme/api/pull/42
       - owner: acme
         repo: web
         number: 42
         url: https://github.com/acme/web/pull/42
+      - owner: acme
+        repo: api
+        number: 42
+        url: https://github.com/acme/api/pull/42
   - name: last matching url wins
     calls:
       - arguments: |
@@ -212,3 +213,12 @@ urls:
   - name: no pull request URL
     text: pull request created successfully
     expected: {}
+  - name: created url first, lower number later
+    text: |
+      https://github.com/acme/api/pull/31
+      Draft pull request https://github.com/acme/api/pull/5
+    expected:
+      owner: acme
+      repo: api
+      number: 5
+      url: https://github.com/acme/api/pull/5

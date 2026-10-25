@@ -14,12 +14,20 @@ import (
 
 // sessionCommitsResponse is the commits read envelope. The key is the domain
 // noun the local transcript renders, not the store table name.
+//
+// Provisional mirror of schema.SessionCommitsResponse; fold into the schema
+// type when Peasant re-pins the contract, because the pinned schema module
+// predates the local API read.
 type sessionCommitsResponse struct {
 	Commits []ingest.CommitInfo `json:"commits"`
 }
 
 // sessionPullRequestsResponse is the pull-request read envelope. The rows are
 // detected from stored tool calls and are display-only.
+//
+// Provisional mirror of schema.SessionPullRequestsResponse; fold into the
+// schema type when Peasant re-pins the contract, because the pinned schema
+// module predates the local API read.
 type sessionPullRequestsResponse struct {
 	PullRequests []commandpr.PullRequest `json:"pullRequests"`
 }

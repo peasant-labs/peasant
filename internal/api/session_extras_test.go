@@ -82,10 +82,11 @@ func stringPointer(value string) *string { return &value }
 func intPointer(value int) *int          { return &value }
 
 // ghPRCreateEntries are the stored rows one assistant turn leaves when it runs
-// `gh pr create`: the turn itself, its tool_use child, and the tool_result
-// child that printed the created pull request's URL.
+// `gh pr create`: the turn itself, then one tool_use/tool_result pair per call.
+// The three calls create their pull requests in an order that no name sort
+// reproduces — storytold/photocraft, then acme/web, then acme/api — so the
+// served array pins first-seen order rather than an alphabetical one.
 func ghPRCreateEntries(sessionID string) []schema.SessionEntry {
-	const toolCallID = "call-1"
 	harness := schema.HarnessClaudeCode
 	return []schema.SessionEntry{
 		{
@@ -105,7 +106,7 @@ func ghPRCreateEntries(sessionID string) []schema.SessionEntry {
 			Role:           schema.RoleAssistant,
 			Depth:          1,
 			ParentIndex:    intPointer(0),
-			ToolCallID:     stringPointer(toolCallID),
+			ToolCallID:     stringPointer("call-1"),
 			ToolNamesCSV:   stringPointer("Bash"),
 			ToolInput:      stringPointer(`{"command":"cd /home/dev/storytold/photocraft && gh pr create --title \"Add the export flow\" --body-file body.md"}`),
 			SourceEntryRef: "e_call",
@@ -118,9 +119,59 @@ func ghPRCreateEntries(sessionID string) []schema.SessionEntry {
 			Role:           schema.RoleUser,
 			Depth:          1,
 			ParentIndex:    intPointer(0),
-			ToolCallID:     stringPointer(toolCallID),
+			ToolCallID:     stringPointer("call-1"),
 			ToolOutput:     stringPointer("https://github.com/storytold/photocraft/pull/1204"),
 			SourceEntryRef: "e_result",
+		},
+		{
+			SessionID:      schema.SessionID(sessionID),
+			EntryIndex:     3,
+			Harness:        harness,
+			EntryType:      schema.EntryTypeToolUse,
+			Role:           schema.RoleAssistant,
+			Depth:          1,
+			ParentIndex:    intPointer(0),
+			ToolCallID:     stringPointer("call-2"),
+			ToolNamesCSV:   stringPointer("Bash"),
+			ToolInput:      stringPointer(`{"command":"gh pr create --repo acme/web --fill"}`),
+			SourceEntryRef: "e_call_web",
+		},
+		{
+			SessionID:      schema.SessionID(sessionID),
+			EntryIndex:     4,
+			Harness:        harness,
+			EntryType:      schema.EntryTypeToolResult,
+			Role:           schema.RoleUser,
+			Depth:          1,
+			ParentIndex:    intPointer(0),
+			ToolCallID:     stringPointer("call-2"),
+			ToolOutput:     stringPointer("https://github.com/acme/web/pull/42"),
+			SourceEntryRef: "e_result_web",
+		},
+		{
+			SessionID:      schema.SessionID(sessionID),
+			EntryIndex:     5,
+			Harness:        harness,
+			EntryType:      schema.EntryTypeToolUse,
+			Role:           schema.RoleAssistant,
+			Depth:          1,
+			ParentIndex:    intPointer(0),
+			ToolCallID:     stringPointer("call-3"),
+			ToolNamesCSV:   stringPointer("Bash"),
+			ToolInput:      stringPointer(`{"command":"gh pr create --repo acme/api --fill"}`),
+			SourceEntryRef: "e_call_api",
+		},
+		{
+			SessionID:      schema.SessionID(sessionID),
+			EntryIndex:     6,
+			Harness:        harness,
+			EntryType:      schema.EntryTypeToolResult,
+			Role:           schema.RoleUser,
+			Depth:          1,
+			ParentIndex:    intPointer(0),
+			ToolCallID:     stringPointer("call-3"),
+			ToolOutput:     stringPointer("https://github.com/acme/api/pull/42"),
+			SourceEntryRef: "e_result_api",
 		},
 	}
 }
@@ -146,35 +197,56 @@ func seedStoredEntries(t *testing.T, db *store.Store, entries []schema.SessionEn
 	}
 }
 
-// seedExtrasCommits writes the commits the commits route must read, including
-// one row whose attribution and times are unknown (stored as SQL NULL).
+// seedExtrasCommits writes the commits the commits route must read. The seeded
+// values keep the three ordering rules independent of one another: the earliest
+// commit carries the lexically greatest hash and the latest carries the
+// smallest, so author time cannot be satisfied by sorting hashes; two rows share
+// one author time so the hash tie-break is the only thing that orders them; and
+// one row has no author time at all (stored as SQL NULL) so the unknown-time rows
+// are pinned last.
 func seedExtrasCommits(t *testing.T, db *store.Store) []ingest.CommitInfo {
 	t.Helper()
 	commits := []ingest.CommitInfo{
 		{
-			Hash:        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-			Message:     "second commit",
+			Hash:        "ffffffffffffffffffffffffffffffffffffffff",
+			Message:     "earliest commit, greatest hash",
+			AuthorName:  "Ada Lovelace",
+			AuthorEmail: "ada@example.com",
+			CommitTime:  1_700_000_010_000,
+			AuthorTime:  1_700_000_010_000,
+		},
+		{
+			Hash:        "0000000000000000000000000000000000000000",
+			Message:     "latest commit, smallest hash",
+			AuthorName:  "Ada Lovelace",
+			AuthorEmail: "ada@example.com",
+			CommitTime:  1_700_000_030_000,
+			AuthorTime:  1_700_000_030_000,
+		},
+		{
+			Hash:        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee01",
+			Message:     "tied commit, lower hash",
 			AuthorName:  "Ada Lovelace",
 			AuthorEmail: "ada@example.com",
 			CommitTime:  1_700_000_020_000,
 			AuthorTime:  1_700_000_020_000,
 		},
 		{
-			Hash:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			Message:     "first commit",
+			Hash:        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee02",
+			Message:     "tied commit, higher hash",
 			AuthorName:  "Ada Lovelace",
 			AuthorEmail: "ada@example.com",
-			CommitTime:  1_700_000_010_000,
-			AuthorTime:  1_700_000_010_000,
+			CommitTime:  1_700_000_020_000,
+			AuthorTime:  1_700_000_020_000,
 		},
 		{Hash: "cccccccccccccccccccccccccccccccccccccccc"},
 	}
 	if err := db.UpsertSessionCommits(context.Background(), ingest.SessionID(extrasSessionID), commits); err != nil {
 		t.Fatalf("seed session commits: %v", err)
 	}
-	// The order the route must serve: known author times oldest first, then
-	// the row with no author time, with the hash breaking ties.
-	return []ingest.CommitInfo{commits[1], commits[0], commits[2]}
+	// The order the route must serve: known author times oldest first, the tied
+	// pair by hash, then the row with no author time.
+	return []ingest.CommitInfo{commits[0], commits[2], commits[3], commits[1], commits[4]}
 }
 
 func getSessionExtras(t *testing.T, url string) (int, map[string]json.RawMessage) {
@@ -249,18 +321,36 @@ func TestSessionPullRequestsRoute(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("pullRequests do not decode: %v", err)
 	}
-	want := []pullRequestRow{{
-		Owner:  "storytold",
-		Repo:   "photocraft",
-		Number: 1204,
-		URL:    "https://github.com/storytold/photocraft/pull/1204",
-		Source: "gh_pr_create",
-	}}
+	want := []pullRequestRow{
+		{
+			Owner:  "storytold",
+			Repo:   "photocraft",
+			Number: 1204,
+			URL:    "https://github.com/storytold/photocraft/pull/1204",
+			Source: "gh_pr_create",
+		},
+		{
+			Owner:  "acme",
+			Repo:   "web",
+			Number: 42,
+			URL:    "https://github.com/acme/web/pull/42",
+			Source: "gh_pr_create",
+		},
+		{
+			Owner:  "acme",
+			Repo:   "api",
+			Number: 42,
+			URL:    "https://github.com/acme/api/pull/42",
+			Source: "gh_pr_create",
+		},
+	}
 	if len(got) != len(want) {
 		t.Fatalf("pullRequests = %+v, want %+v", got, want)
 	}
-	if got[0] != want[0] {
-		t.Fatalf("pullRequests[0] = %+v, want %+v", got[0], want[0])
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("pullRequests[%d] = %+v, want %+v (first-seen order, not a name sort)", index, got[index], want[index])
+		}
 	}
 }
 

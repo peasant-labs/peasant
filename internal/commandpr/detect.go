@@ -22,6 +22,10 @@ import (
 const SourceGHPRCreate = "gh_pr_create"
 
 // PullRequest is one pull request detected from a stored tool call.
+//
+// Provisional mirror of schema.SessionPullRequest; fold into the schema type
+// when Peasant re-pins the contract, because the pinned schema module predates
+// the local API read.
 type PullRequest struct {
 	Owner  string `json:"owner"`
 	Repo   string `json:"repo"`
@@ -122,9 +126,6 @@ func invokesGHPRCreate(command string) bool {
 	}
 	found := false
 	syntax.Walk(file, func(node syntax.Node) bool {
-		if found {
-			return false
-		}
 		call, ok := node.(*syntax.CallExpr)
 		if !ok {
 			return true
