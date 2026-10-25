@@ -9,7 +9,21 @@ interface DetectedPullRequestsProps {
 }
 
 /**
- * The pull requests a recorded `gh pr create` command created, under the
+ * The evidence label for one reported source. `gh_pr_create` keeps the wording
+ * readers already know; any other source is named as the server reported it, so
+ * the page never claims evidence it does not have.
+ */
+function evidenceLabel(source: string): string {
+  return source === 'gh_pr_create' ? 'gh pr create' : source.toLowerCase();
+}
+
+/** The distinct sources behind these rows, in the order they appear. */
+function evidenceSources(pullRequests: DetectedPullRequest[]): string[] {
+  return [...new Set(pullRequests.map((pr) => pr.source))];
+}
+
+/**
+ * The pull requests detected in this session's stored tool calls, under the
  * transcript header's meta row (mounted through the viewer's `pullRequests`
  * slot).
  *
@@ -42,11 +56,13 @@ export function DetectedPullRequests({ pullRequests }: DetectedPullRequestsProps
           </li>
         ))}
       </ul>
-      <p
-        className="mt-1 text-[14px] leading-5 text-ink-3"
-        title="found in a gh pr create command in this session; not verified by village."
-      >
-        detected from <span className="font-mono">gh pr create</span>; not verified by village.
+      <p className="mt-1 text-[14px] leading-5 text-ink-3">
+        {evidenceSources(pullRequests).map((source, index) => (
+          <span key={source}>
+            {index > 0 ? ' ' : null}
+            detected from <span className="font-mono">{evidenceLabel(source)}</span>; not verified by village.
+          </span>
+        ))}
       </p>
     </section>
   );

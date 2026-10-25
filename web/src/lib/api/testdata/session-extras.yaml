@@ -8,10 +8,14 @@ requiredNames:
   - commits-empty
   - commits-unknown-session
   - commits-outside-contract
+  - commits-null
   - pull-requests-detected
   - pull-requests-empty
   - pull-requests-outside-contract
   - pull-requests-number-not-an-integer
+  - pull-requests-null
+  - pull-requests-url-not-github
+  - pull-requests-url-not-https
 cases:
   - name: commits-recorded
     endpoint: commits
@@ -33,6 +37,11 @@ cases:
     status: 200
     body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow"}]}'
     expect: contract
+  - name: commits-null
+    endpoint: commits
+    status: 200
+    body: '{"commits":null}'
+    expect: contract
   - name: pull-requests-detected
     endpoint: pull-requests
     status: 200
@@ -52,4 +61,21 @@ cases:
     endpoint: pull-requests
     status: 200
     body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":"42","url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-null
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":null}'
+    expect: contract
+  # The row renders its URL as a link, so a destination outside GitHub over https
+  # is refused rather than shown behind a row that claims to be a pull request.
+  - name: pull-requests-url-not-github
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://gitlab.example/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-url-not-https
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"http://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
     expect: contract

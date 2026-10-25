@@ -80,10 +80,12 @@ describe('session extra reads', () => {
           message: expect.stringContaining('session not found'),
         });
       } else {
+        // A shape refusal names either the offending row or the missing array.
+        const field = caseRow.endpoint === 'commits' ? 'commits' : 'pullRequests';
         await expect(answer(caseRow)).rejects.toMatchObject({
           name: 'LocalRequestError',
           status: caseRow.status,
-          message: expect.stringContaining(`${caseRow.endpoint === 'commits' ? 'commits' : 'pullRequests'}[0]`),
+          message: expect.stringMatching(new RegExp(`${field}(\\[0\\]|" array)`)),
         });
       }
 

@@ -40,14 +40,11 @@ export interface DetectedPullRequest {
   source: string;
 }
 
-/** The evidence label the server reports for a detected pull request. */
-export const SOURCE_GH_PR_CREATE = 'gh_pr_create';
-
-export function sessionCommitsPath(sessionId: string): string {
+function sessionCommitsPath(sessionId: string): string {
   return `/api/v1/sessions/${encodeURIComponent(sessionId)}/commits`;
 }
 
-export function sessionPullRequestsPath(sessionId: string): string {
+function sessionPullRequestsPath(sessionId: string): string {
   return `/api/v1/sessions/${encodeURIComponent(sessionId)}/pull-requests`;
 }
 
@@ -69,10 +66,6 @@ function isField(value: unknown): value is string {
  * contract. Only safe integers are accepted, so widening them to the
  * transcript's bigint times can never lose precision.
  */
-function isMillis(value: unknown): value is number {
-  return isSafeInteger(value);
-}
-
 function isSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value);
 }
@@ -84,8 +77,29 @@ function isSessionCommit(value: unknown): value is SessionCommit {
     isField(value.message) &&
     isField(value.authorName) &&
     isField(value.authorEmail) &&
-    isMillis(value.commitTime) &&
-    isMillis(value.authorTime)
+    isSafeInteger(value.commitTime) &&
+    isSafeInteger(value.authorTime)
+  );
+}
+
+/**
+ * The row renders this URL as an external link, so it has to be a pull request
+ * on GitHub: a row that says "detected pull request" must never carry an
+ * insecure or non-GitHub destination. The path shape is the one GitHub serves
+ * (`/owner/repo/pull/number`); anything else is outside the contract.
+ */
+function isGithubPullRequestUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === 'https:' &&
+    url.hostname === 'github.com' &&
+    /^\/[^/]+\/[^/]+\/pull\/[0-9]+$/.test(url.pathname)
   );
 }
 
@@ -96,12 +110,12 @@ function isDetectedPullRequest(value: unknown): value is DetectedPullRequest {
     isField(value.repo) &&
     isSafeInteger(value.number) &&
     value.number > 0 &&
-    isField(value.url) &&
+    isGithubPullRequestUrl(value.url) &&
     isField(value.source)
   );
 }
 
-export const sessionCommitsContract: LocalContract<{ commits: SessionCommit[] }> = {
+const sessionCommitsContract: LocalContract<{ commits: SessionCommit[] }> = {
   safeParse(value) {
     if (!isRecord(value) || !Array.isArray(value.commits)) {
       return malformed('the answer has no "commits" array');
@@ -114,14 +128,17 @@ export const sessionCommitsContract: LocalContract<{ commits: SessionCommit[] }>
   },
 };
 
-export const sessionPullRequestsContract: LocalContract<{ pullRequests: DetectedPullRequest[] }> = {
+const sessionPullRequestsContract: LocalContract<{ pullRequests: DetectedPullRequest[] }> = {
   safeParse(value) {
     if (!isRecord(value) || !Array.isArray(value.pullRequests)) {
       return malformed('the answer has no "pullRequests" array');
     }
     const invalidRow = value.pullRequests.findIndex((row) => !isDetectedPullRequest(row));
     if (invalidRow !== -1) {
-      return malformed(`pullRequests[${invalidRow}] is not a pull request with owner, repo, number, url, and source`);
+      return malformed(
+        `pullRequests[${invalidRow}] is not a pull request with owner, repo, a positive number, `
+        + 'a GitHub pull request https URL, and source',
+      );
     }
     return { success: true, data: { pullRequests: value.pullRequests } };
   },
