@@ -20,14 +20,12 @@ const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-f
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
-/** The recorded teammate identity the current fixture case serves on child-0. */
-let servedTeammate: { team: string; name: string } | undefined;
-
-function row(id: string, children = 0): LocalSyncSessionRow {
+/** One fixture row; `teammate` is the identity the fixture case serves on it. */
+function row(id: string, children = 0, teammate?: { team: string; name: string }): LocalSyncSessionRow {
   return {
     sync: {
       id, harness: 'claude-code', projectName: 'fixture-project', projectHash: ALPHA_HASH, hostSlug: 'fixture-host', startTime: '2026-06-01T10:00:00Z', durationMs: BigInt(60000), totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false,
-      ...(id === 'child-0' && servedTeammate ? { teammate: { team: servedTeammate.team, name: servedTeammate.name, evidence: 'native_dynamic_workflow' as const } } : {}),
+      ...(teammate ? { teammate: { team: teammate.team, name: teammate.name, evidence: 'native_dynamic_workflow' as const } } : {}),
     },
     publication: { sessionId: id, state: 'unpublished', autoPublish: false, outsideSelection: false },
     title: `title ${id}`, preview: '', childCount: children,
@@ -99,9 +97,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('mounted bounded Home', () => {
   for (const testCase of fixture.cases) {
     it(testCase.name, async () => {
-      servedTeammate = testCase.teammate;
       roots = Array.from({ length: testCase.roots }, (_, index) => row(`root-${index}`, index === 0 ? testCase.children : 0));
-      children = Array.from({ length: testCase.children }, (_, index) => row(`child-${index}`, index === 0 ? 1 : 0));
+      children = Array.from({ length: testCase.children }, (_, index) => row(`child-${index}`, index === 0 ? 1 : 0, index === 0 ? testCase.teammate : undefined));
       mount();
       await screen.findByRole('link', { name: 'title root-0' });
       expect(channels).not.toHaveBeenCalled();
@@ -122,6 +119,12 @@ describe('mounted bounded Home', () => {
           expect(line).toHaveTextContent(`teammate ${testCase.teammate.name} · ${testCase.teammate.team}`);
           expect(childCell.querySelector('.home-session-title')).toHaveTextContent('title child-0');
           expect(childCell.querySelector('.home-session-meta')).toHaveTextContent('tokens');
+          // The identity is its own line in the session cell, never folded into
+          // the phone block that carries the other columns' facts.
+          const phone = childCell.querySelector('.home-session-phone');
+          expect(phone).not.toBeNull();
+          expect(phone?.querySelector('.home-session-teammate')).toBeNull();
+          expect(line?.closest('.home-session-phone')).toBeNull();
         } else {
           expect(document.querySelector('.home-session-teammate')).toBeNull();
         }

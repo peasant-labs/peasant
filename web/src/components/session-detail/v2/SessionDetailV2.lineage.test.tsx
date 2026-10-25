@@ -143,10 +143,12 @@ describe('transcript prelude lineage', () => {
         expect(screen.queryByRole('link', { name: 'parent transcript' })).not.toBeInTheDocument();
       }
 
-      const payload = payloads.at(-1);
-      expect(payload).toBeDefined();
-      expect(Object.keys(payload ?? {})).not.toContain('teammate');
-      expect(Object.keys(payload ?? {})).not.toContain('relationshipNavigation');
+      expect(payloads.length).toBeGreaterThan(0);
+      for (const [index, payload] of payloads.entries()) {
+        const keys = Object.keys(payload);
+        expect(keys, `captured durable payload ${index}`).not.toContain('teammate');
+        expect(keys, `captured durable payload ${index}`).not.toContain('relationshipNavigation');
+      }
     });
   }
 });
