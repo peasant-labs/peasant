@@ -22,8 +22,9 @@ import (
 )
 
 // villageListDefaultLimit is the page size requested for the remote pullable
-// listing. The remote list fetches the first page only (MVP); paging beyond it
-// is a possible FOLLOWUP.
+// listing. Both remote listings show the first page by default; --all pages to
+// the end. A listing narrowed with --user always pages to the end, because
+// filtering a single page would make the reported total a lie.
 const villageListDefaultLimit = 50
 
 // villageListDependencies keeps provenance I/O replaceable without replacing the
@@ -44,6 +45,7 @@ func buildVillageTranscriptsListCommand(options ...villageListDependencies) *cob
 		local          bool
 		jsonOutput     bool
 		limit          int
+		all            bool
 		collectiveRefs []string
 		user           string
 	)
@@ -56,8 +58,7 @@ group-shared transcripts; requires login), or the transcripts you have ALREADY
 pulled locally (--local; reads only local data and works offline).
 
 --collective narrows the remote listing to one or more collectives you belong
-to, named by a collective name, its UUID, or its /groups/<uuid> page URL, and
-pages to the end so the listing matches what a pull would take. --user keeps only
+to, named by a collective name, its UUID, or its /groups/<uuid> page URL. --user keeps only
 the transcripts one peasant online account contributed: combine it with --collective for
 a single collective, or pass it alone to span every collective you can pull from.
 With --local, --user filters stored owner usernames without credentials or network.
@@ -65,7 +66,8 @@ With --local, --user filters stored owner usernames without credentials or netwo
 account scope, still offline. Collective values are ORed, then --user intersects.
 Missing or invalidated disclosures never match; stale disclosures keep their
 original date. Signed-out collective filtering explains how to use accountless
-inventory instead. --limit sets the remote page size only.`,
+inventory instead. Both remote listings show the first page by default; --all
+pages to the end. --limit sets the remote page size only.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
@@ -74,15 +76,19 @@ inventory instead. --limit sets the remote page size only.`,
 				if cmd.Flags().Changed("limit") {
 					return fmt.Errorf("--limit values apply to the remote listing; --local reads the saved inventory")
 				}
+				if cmd.Flags().Changed("all") {
+					return fmt.Errorf("--all applies to the remote listing; --local reads the saved inventory")
+				}
 				return runVillageTranscriptsListLocal(cmd, jsonOutput, user, collectiveRefs, dependencies)
 			}
-			return runVillageTranscriptsListRemote(cmd, jsonOutput, collectiveRefs, user, limit)
+			return runVillageTranscriptsListRemote(cmd, jsonOutput, collectiveRefs, user, limit, all)
 		},
 	}
 
 	cmd.Flags().BoolVar(&local, "local", false, "List already-pulled transcripts from the local inventory (offline; no login)")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of a table")
 	cmd.Flags().IntVar(&limit, "limit", villageListDefaultLimit, "Page size for the remote listing")
+	cmd.Flags().BoolVar(&all, "all", false, "Page to the end instead of showing the first page (remote listing)")
 	cmd.Flags().StringArrayVar(&collectiveRefs, "collective", nil,
 		"List the transcripts a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values list the union")
 	cmd.Flags().StringVar(&user, "user", "",
@@ -126,11 +132,11 @@ func runVillageTranscriptsListLocal(cmd *cobra.Command, jsonOutput bool, owner s
 
 // runVillageTranscriptsListRemote fetches and renders the village's pullable
 // listing. Login is REQUIRED. NegotiatePull is called EXACTLY ONCE before the
-// listing GET used by the transcript list command. A collective listing, and any
-// listing narrowed to one contributor, follows the pages to the end, so the
-// listing matches what a pull would take; the plain listing keeps its
-// single-page behavior.
-func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collectiveRefs []string, owner string, limit int) error {
+// listing GET used by the transcript list command. Both listings show the first
+// page by default; --all follows the pages to the end. A listing narrowed to one
+// contributor always follows the pages to the end, because filtering a single
+// page would under-report and make the total a lie.
+func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collectiveRefs []string, owner string, limit int, all bool) error {
 	creds, err := requireVillageCredentials(cmd)
 	if err != nil {
 		return err
@@ -153,8 +159,9 @@ func runVillageTranscriptsListRemote(cmd *cobra.Command, jsonOutput bool, collec
 	}
 
 	// A contributor filter is applied here, so the listing must be complete first:
-	// filtering a single page would under-report and make the total a lie.
-	allPages := len(collectiveRefs) > 0 || owner != ""
+	// filtering a single page would under-report and make the total a lie. --all
+	// is the explicit form for every other case.
+	allPages := all || owner != ""
 	response, err := listPullableTranscripts(cmd.Context(), client, collectives, limit, allPages)
 	if err != nil {
 		return fmt.Errorf("list pullable transcripts: %w", err)
@@ -427,7 +434,7 @@ func printRemoteListTable(cmd *cobra.Command, resp *schema.PullListResponse) {
 	}
 	_ = tw.Flush()
 	if resp.Total > len(resp.Transcripts) {
-		fmt.Fprintf(w, "\nShowing %d of %d pullable transcripts.\n", len(resp.Transcripts), resp.Total)
+		fmt.Fprintf(w, "\nShowing %d of %d pullable transcripts. Use --all to page to the end.\n", len(resp.Transcripts), resp.Total)
 	}
 }
 

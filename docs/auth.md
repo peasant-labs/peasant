@@ -63,8 +63,8 @@ require login; purely-local reads are **offline**.
 |---------|-------------------|------|--------|
 | `village transcripts pull <ref>` | yes | **login required** — `requireVillageCredentials` (mirrors `cmd_push.go`) | `cmd_village_pull.go` |
 | `village transcripts pull --collective <ref>... [--user <name>]` (bulk) | yes | **login required** (same gate; exactly one selection: a ref, or `--collective`/`--user`, not both) | `cmd_village_pull.go` + `cmd_village_pull_collective.go` |
-| `village transcripts list` (remote, default) | yes | **login required** | `cmd_village_list.go` |
-| `village transcripts list --collective <ref>... [--user <name>] [--limit N]` (remote) | yes | **login required** (same gate; pages to the end, `--limit` sets the page size) | `cmd_village_list.go` |
+| `village transcripts list [--all]` (remote, default) | yes | **login required** | `cmd_village_list.go` |
+| `village transcripts list [--all] [--collective <ref>...] [--user <name>] [--limit N]` (remote) | yes | **login required** (same gate; first page by default, `--all` pages to the end, `--limit` sets the page size; `--user` always pages to the end) | `cmd_village_list.go` |
 | `village annotations sync` | yes | **login required** | `cmd_village_annotations.go` |
 | `village transcripts list --local [--user <name>]` | **no** | **OFFLINE** — no credentials loaded; `--user` filters stored owner usernames | `cmd_village_list.go` (`runVillageTranscriptsListLocal`) |
 | `village transcripts context <ref>` | **no** | **OFFLINE** — reads only the V34 index + on-disk blob | `cmd_village_transcripts.go` |
@@ -152,10 +152,11 @@ transcripts with an `approved` share into any listed collective the caller is a
 member of. A `--collective` value is a collective name, its UUID, or its page
 URL under `/groups/<uuid>` or `/collectives/<uuid>`; it is repeatable, and
 several values list the union, each transcript once. An omitted `collectives`
-filter lists everything pullable (own + approved-shared). A collective listing
-pages to the end so the listing matches what a pull would take, while the plain
-listing keeps its single-page behaviour; `--limit` sets the remote page size
-(`--local` refuses `--collective`/`--limit`).
+filter lists everything pullable (own + approved-shared). Both remote listings
+show the first page by default; `--all` follows the pages to the end. A listing
+narrowed to one contributor always pages to the end, because filtering a single
+page would make the reported total a lie. `--limit` sets the remote page size
+(`--local` refuses `--collective`/`--limit`/`--all`).
 
 ### 4.6 Contributor filter (`--user`)
 

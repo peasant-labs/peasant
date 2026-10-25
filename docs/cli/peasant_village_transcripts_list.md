@@ -9,8 +9,7 @@ group-shared transcripts; requires login), or the transcripts you have ALREADY
 pulled locally (--local; reads only local data and works offline).
 
 --collective narrows the remote listing to one or more collectives you belong
-to, named by a collective name, its UUID, or its /groups/<uuid> page URL, and
-pages to the end so the listing matches what a pull would take. --user keeps only
+to, named by a collective name, its UUID, or its /groups/<uuid> page URL. --user keeps only
 the transcripts one peasant online account contributed: combine it with --collective for
 a single collective, or pass it alone to span every collective you can pull from.
 With --local, --user filters stored owner usernames without credentials or network.
@@ -18,7 +17,8 @@ With --local, --user filters stored owner usernames without credentials or netwo
 account scope, still offline. Collective values are ORed, then --user intersects.
 Missing or invalidated disclosures never match; stale disclosures keep their
 original date. Signed-out collective filtering explains how to use accountless
-inventory instead. --limit sets the remote page size only.
+inventory instead. Both remote listings show the first page by default; --all
+pages to the end. --limit sets the remote page size only.
 
 ```
 peasant village transcripts list [flags]
@@ -27,6 +27,7 @@ peasant village transcripts list [flags]
 ### Options
 
 ```
+      --all                      Page to the end instead of showing the first page (remote listing)
       --collective stringArray   List the transcripts a collective holds (a name, its UUID, or its /groups/<uuid> page URL). Repeatable; several values list the union
   -h, --help                     help for list
       --json                     Output as JSON instead of a table

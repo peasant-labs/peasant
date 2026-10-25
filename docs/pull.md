@@ -440,12 +440,13 @@ only, requires no login, and makes no Village request. Matching is
 case-insensitive and exact; no matches produce an empty listing. Stored owner
 names are snapshots from the last pull, not a live Village lookup.
 
-Listing paging differs by selection: a collective listing, and any listing
-narrowed to one contributor, pages to the end
-(follows the pages, merges, and de-duplicates) so the listing matches what a
-pull would take, while the plain listing keeps its single-page behaviour.
-`--limit` sets the page size for the remote listing only (`--local` reads the
-local inventory and refuses `--limit`). `--local --collective` instead uses saved
+Both remote listings show the first page by default. `--all` follows the pages
+to the end, merges, and de-duplicates, so the listing matches what a pull would
+take. A listing narrowed to one contributor (`--user`) always pages to the end,
+because filtering a single page would under-report and make the reported total a
+lie; it never prints a partial-page note. `--limit` sets the page size for the
+remote listing only (`--local` reads the local inventory and refuses `--limit`).
+`--local --collective` instead uses saved
 per-transcript viewer disclosures for the selected account and normalized Village
 installation, without network access. Multiple collectives are ORed, then
 `--user` intersects the result. Missing or invalidated disclosures never match;
