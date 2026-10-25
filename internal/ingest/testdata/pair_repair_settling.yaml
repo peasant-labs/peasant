@@ -1,0 +1,19 @@
+# Settling for a session whose source cannot rebuild its saved pair.
+#
+# Each case seeds one stored session, runs the production harvest twice, and
+# asserts the second harvest owes the user nothing. The first harvest reports
+# the cause once; the stored copy keeps serving either way.
+required_names:
+  - transcript_only_source_missing
+  - transcript_only_source_malformed
+
+cases:
+  - name: transcript_only_source_missing
+    stored_transcript: valid
+    native_source: missing
+    diagnostic_mentions: "is unavailable"
+
+  - name: transcript_only_source_malformed
+    stored_transcript: malformed
+    native_source: malformed
+    diagnostic_mentions: "malformed complete JSON"

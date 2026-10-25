@@ -24,3 +24,15 @@ type SourceAvailabilityStore interface {
 	RecordSourceUnavailable(context.Context, SessionID, SourceUnavailabilityReason) (bool, error)
 	ReadSourceUnavailability(context.Context, SessionID) (*SourceUnavailabilityReason, error)
 }
+
+// sourceUnavailableRecorded reports whether the store already recorded that a
+// session's source could not repair it. It reads the recorded state only: no
+// managed file is opened, so a settled session costs no pair read.
+func (p *Pipeline) sourceUnavailableRecorded(ctx context.Context, sid SessionID) bool {
+	reader, ok := p.metricsStore.(SourceAvailabilityStore)
+	if !ok {
+		return false
+	}
+	reason, err := reader.ReadSourceUnavailability(ctx, sid)
+	return err == nil && reason != nil
+}

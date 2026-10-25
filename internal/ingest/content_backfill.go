@@ -241,6 +241,14 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
 					continue
 				}
+				if p.sourceUnavailableRecorded(ctx, id) {
+					// The pair-repair lane already reported this session's
+					// acquisition failure with its cause, and the stored copy
+					// still serves. Repeating it here on every later run adds no
+					// fact the user can act on. The recovery itself still runs,
+					// so a source that returns is still recovered.
+					continue
+				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
 				p.reportSessionDiagnostic(id, DiagnosticEntry{
 					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s stored-content recovery", id),
