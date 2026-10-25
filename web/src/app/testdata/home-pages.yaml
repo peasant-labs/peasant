@@ -17,6 +17,8 @@ requiredNames:
   - publish-during-refresh-queues-one-loaded-window
   - selection-recovery-survives-failed-retry
   - selection-recovery-survives-account-reset
+  - claude-teammate-line
+  - no-claude-teammate-line
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
@@ -98,3 +100,10 @@ cases:
     cachedSessionId: cached-selection-session
     cachedProject: cached-selection-project
     accountAfterFailure: second-account
+  - name: claude-teammate-line
+    roots: 1
+    children: 1
+    teammate: { team: migration, name: tests }
+  - name: no-claude-teammate-line
+    roots: 1
+    children: 1

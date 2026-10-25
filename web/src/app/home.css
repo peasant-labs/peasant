@@ -153,6 +153,9 @@
   overflow-wrap: anywhere;
 }
 .home-session-meta { font-family: var(--font-mono); font-size: var(--fs-label); line-height: var(--lh-mono); color: var(--ink-3); }
+/* The recorded teammate identity: one small line under the title, in the
+   surrounding meta line's mono type, with no badge, radius, or new color. */
+.home-session-teammate { font-family: var(--font-mono); font-size: var(--fs-label); line-height: var(--lh-mono); color: var(--ink-2); overflow-wrap: anywhere; }
 .home-session-agent { display: inline-flex; vertical-align: -0.125em; }
 .home-session-phone { display: none; }
 .home-project { display: block; min-width: 0; overflow-wrap: anywhere; }

@@ -76,7 +76,7 @@ interface SessionDetailV2Props {
  * contract is intersected back in here rather than weakening every consumer.
  */
 type SessionDetailWire = SessionDetailPayload &
-  Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
+  Pick<SessionDetailReadPayload, 'relationshipNavigation' | 'teammate'>;
 
 /** The disclosed retained-history sections, keyed the way the viewer keys them. */
 type EarlierHistoryOpen = Record<string, boolean>;
@@ -358,12 +358,14 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read carries authorized navigation ALONGSIDE the durable
-    // detail. The durable payload boundary rejects that read-only field, so the
-    // host separates the two: only the durable detail reaches `adaptTranscript`
-    // as payload, and the navigation travels through the published
-    // adapter-options boundary, which cooks it into usable source/parent links.
-    const { relationshipNavigation, ...durableDetail } = detail;
+    // The flat local read carries authorized navigation and the recorded
+    // teammate identity ALONGSIDE the durable detail. The durable payload
+    // boundary rejects both read-only fields, so the host separates them: only
+    // the durable detail reaches `adaptTranscript` as payload, and the
+    // navigation travels through the published adapter-options boundary, which
+    // cooks it into usable source/parent links. The teammate is host-owned: the
+    // stream prelude renders it and the durable payload never carries it.
+    const { relationshipNavigation, teammate, ...durableDetail } = detail;
     const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
     // Commits ride in as the legacy-compatible `gitContext.commits` shape, which
     // the adapter cooks into `session.git.commits` — the session-level rows the
@@ -476,8 +478,29 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Host-owned status context contains state the reader needs: the active-scope
   // chip plus stale-link and connection-error status. View controls remain in
   // the shared composite, while copy-as-markdown is a header action below.
+  //
+  // The recorded teammate identity and the parent transcript link lead the
+  // prelude: both describe where this transcript came from, and both are local
+  // read evidence the durable payload never carries. A session with neither
+  // renders nothing here.
+  const teammate = detail.teammate;
+  const parentSessionId = detail.parentSessionId;
   const streamPrelude = (
     <div className="flex flex-col gap-3">
+      {(teammate || parentSessionId) && (
+        <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[14px] text-ink-2">
+          {teammate && (
+            <span data-transcript-teammate="true">
+              teammate {teammate.name} on {teammate.team}
+            </span>
+          )}
+          {parentSessionId && (
+            <Link href={transcriptHref(projectHash, parentSessionId)} className="underline hover:no-underline focus-mono">
+              parent transcript
+            </Link>
+          )}
+        </p>
+      )}
       {filteringScope && scope.scope && (
         <ScopeChipRow
           label={scopeChipLabel(scope.scope, scope.scopeVal)}

@@ -14,15 +14,21 @@ const channels = vi.hoisted(() => vi.fn<(subscriptions: unknown) => { connected:
 vi.mock('@/contexts/WebSocketContext', () => ({ useChannel: channels }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string }
+interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string; teammate?: { team: string; name: string } }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedTokens: { parent: string | null; token: string }[]; failedRefreshTokens: { parent: string | null; token: string }[] } };
-const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-refresh-clears-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-recovery-survives-failed-retry', 'selection-recovery-survives-account-reset'];
+const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-refresh-clears-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-recovery-survives-failed-retry', 'selection-recovery-survives-account-reset', 'claude-teammate-line', 'no-claude-teammate-line'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
+/** The recorded teammate identity the current fixture case serves on child-0. */
+let servedTeammate: { team: string; name: string } | undefined;
+
 function row(id: string, children = 0): LocalSyncSessionRow {
   return {
-    sync: { id, harness: 'claude-code', projectName: 'fixture-project', projectHash: ALPHA_HASH, hostSlug: 'fixture-host', startTime: '2026-06-01T10:00:00Z', durationMs: BigInt(60000), totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false },
+    sync: {
+      id, harness: 'claude-code', projectName: 'fixture-project', projectHash: ALPHA_HASH, hostSlug: 'fixture-host', startTime: '2026-06-01T10:00:00Z', durationMs: BigInt(60000), totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false,
+      ...(id === 'child-0' && servedTeammate ? { teammate: { team: servedTeammate.team, name: servedTeammate.name, evidence: 'native_dynamic_workflow' as const } } : {}),
+    },
     publication: { sessionId: id, state: 'unpublished', autoPublish: false, outsideSelection: false },
     title: `title ${id}`, preview: '', childCount: children,
   };
@@ -93,6 +99,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('mounted bounded Home', () => {
   for (const testCase of fixture.cases) {
     it(testCase.name, async () => {
+      servedTeammate = testCase.teammate;
       roots = Array.from({ length: testCase.roots }, (_, index) => row(`root-${index}`, index === 0 ? testCase.children : 0));
       children = Array.from({ length: testCase.children }, (_, index) => row(`child-${index}`, index === 0 ? 1 : 0));
       mount();
@@ -104,6 +111,22 @@ describe('mounted bounded Home', () => {
       expect(screen.getByRole('link', { name: 'title root-0' }).getAttribute('href')).toContain('root-0');
       expect(choiceRows('status').find(row => row.getAttribute('aria-checked') === 'true')).toHaveTextContent('all');
 
+      if (testCase.name === 'claude-teammate-line' || testCase.name === 'no-claude-teammate-line') {
+        fireEvent.click(screen.getByRole('button', { name: 'subagents 1' }));
+        await screen.findByRole('link', { name: 'title child-0' });
+        const childCell = screen.getByRole('link', { name: 'title child-0' }).closest('.home-session') as HTMLElement;
+        if (testCase.teammate) {
+          // The line sits under the title and beside the facts that already
+          // render: the child title, its agent mark, its token count.
+          const line = childCell.querySelector('.home-session-teammate');
+          expect(line).toHaveTextContent(`teammate ${testCase.teammate.name} · ${testCase.teammate.team}`);
+          expect(childCell.querySelector('.home-session-title')).toHaveTextContent('title child-0');
+          expect(childCell.querySelector('.home-session-meta')).toHaveTextContent('tokens');
+        } else {
+          expect(document.querySelector('.home-session-teammate')).toBeNull();
+        }
+        expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
+      }
       if (testCase.name === 'first-page-and-next-page') {
         fireEvent.click(screen.getByRole('button', { name: 'next page' }));
         await screen.findByRole('link', { name: 'title root-25' });
