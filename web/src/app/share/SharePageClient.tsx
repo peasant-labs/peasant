@@ -26,8 +26,8 @@ export function SharePageClient() {
 
 /**
  * Resolve the session's project and replace this page with its transcript,
- * opened on the publish popup. The lookup applies no list scope: a session the
- * saved lists leave out still opens by its link.
+ * opened on the publish popup. The lookup applies no list scope: a stored
+ * session opens by its link regardless of the saved ingestion selection.
  */
 async function resolveProjectHash(sessionId: string): Promise<ProjectHash> {
   const path = `/api/v1/session-summaries?ids=${encodeURIComponent(sessionId)}`;

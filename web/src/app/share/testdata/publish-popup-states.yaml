@@ -46,7 +46,7 @@ requiredNames:
   - up-to-date
   - new-turns
   - auto-publish-on
-  - outside-saved-lists
+  - unpublished-outside-ingestion-selection
   # the popup
   - connect-to-village
   - waiting-for-github
@@ -147,7 +147,9 @@ cases:
       bar: { state: auto-publish, text: 'auto-publish on, Acme Platform', action: update }
       popup: null
 
-  - name: outside-saved-lists
+  - name: unpublished-outside-ingestion-selection
+    # The saved selection controls future ingestion. The stored transcript is
+    # still browsable and unpublished, so the bar uses the ordinary state.
     publication: { state: unpublished, outsideSelection: true }
     signIn: signed-in
     village: [Acme Platform, Acme Company, ML Reading Group]
@@ -155,7 +157,7 @@ cases:
     push: published
     steps: []
     expect:
-      bar: { state: outside-lists, text: 'not published, outside your saved lists', action: publish }
+      bar: { state: not-published, text: not published, action: publish }
       popup: null
 
   - name: connect-to-village
