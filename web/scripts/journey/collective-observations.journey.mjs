@@ -27,22 +27,21 @@ async function history(request, kind, page = 1, revision) {
 /** The page area the app mounted. While Next hydrates a route it keeps a hidden copy of the
  * streamed page outside `main`; a CSS query must count only the mounted section, never that copy. */
 function mountedPage(page) { return page.locator('main'); }
-/** The phone drawer closes as one user-visible transition: it slides out over `--dur-2` and
- * flips `visibility` only at the end, so the closed panel still reads as visible while it
- * leaves (fairtrade's AppSidebar.css keeps it in the focus order until it is out of view).
- * Sampling that property is not a settle signal — the panel can be read as visible, off
- * screen, after a hidden sample has already passed — so wake on the drawer's own transition
- * and then on the closed state a computed-style read depends on. */
+/** The phone drawer closes as one user-visible transition: the panel slides out at once and
+ * `visibility` flips only at the end of `--dur-2` (fairtrade's AppSidebar.css keeps the closed
+ * drawer's controls in the focus order until it is out of view). That flip is a delayed style
+ * change, not a DOM animation, and it reaches the controls the geometry read measures later
+ * than the panel itself: in the retained trace the panel already reported hidden while the
+ * four controls in its scroll area still reported visible, off screen. So settle on those
+ * controls — never on the panel property that leads them. */
 async function closeDrawer(page) {
-  const panel = page.locator('.asb-panel');
+  const settled = () => page.locator('.asb').first().evaluate(root => {
+    const panel = root.querySelector('.asb-panel');
+    if (!panel) return true;
+    return [...panel.querySelectorAll('a,button')].every(control => getComputedStyle(control).visibility === 'hidden');
+  });
   await expect(page.locator('.asb')).toHaveAttribute('data-drawer-open', 'false');
-  // The exit transition is created on the frame after the closed state lands, so let a frame
-  // pass before deciding the drawer has settled. A property read in between already reports
-  // the new `hidden` value while the transition has not started.
-  await panel.evaluate(element => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  // CSS transitions are DOM animations. Wait until the drawer's own exit has run and its
-  // visibility has finished flipping, instead of sampling one property mid-transition.
-  await expect.poll(() => panel.evaluate(element => getComputedStyle(element).visibility === 'hidden' && element.getAnimations().length === 0)).toBe(true);
+  await expect.poll(settled).toBe(true);
 }
 async function open(page, theme) {
   await page.goto('/village');
@@ -288,14 +287,22 @@ async function exercise(row, { page, request }, info) {
     // The sidebar is a column on a wide screen and a top bar with a drawer on a phone. The closed
     // drawer keeps its layout off screen and hides with visibility, so only visible controls count.
     // Settle that drawer again at this read: a fresh already-dark page never took the open and
-    // close path in `open`, and a hidden sample can pass before the exit transition runs, so
-    // only the transition queue settling is a safe signal at the read itself.
+    // close path in `open`, and the drawer's delayed visibility flip is the only state the read
+    // below depends on.
     if (surface === 'mobile') await closeDrawer(page);
     await expect(page.locator(surface === 'desktop' ? '.asb-panel' : '.asb-bar')).toBeVisible();
-    const chrome = await page.locator('.asb').first().locator('a,button').evaluateAll(elements => elements.filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden').map(element => {
-      const box = element.getBoundingClientRect();
-      return { name: element.getAttribute('aria-label') ?? element.textContent, left: box.left, right: box.right, width: box.width, height: box.height };
-    }));
+    // Read the controls and the drawer state in one task, so the geometry that is asserted is
+    // the geometry of a snapshot whose closed drawer had already left the focus order.
+    const { drawerClosed, chrome } = await page.locator('.asb').first().evaluate(root => {
+      const panel = root.querySelector('.asb-panel');
+      const chrome = [...root.querySelectorAll('a,button')].filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden').map(element => {
+        const box = element.getBoundingClientRect();
+        return { name: element.getAttribute('aria-label') ?? element.textContent, left: box.left, right: box.right, width: box.width, height: box.height };
+      });
+      const drawerClosed = !panel || [...panel.querySelectorAll('a,button')].every(control => getComputedStyle(control).visibility === 'hidden');
+      return { drawerClosed, chrome };
+    });
+    if (surface === 'mobile') expect(drawerClosed, 'the measured shell must be read after the phone drawer closed').toBe(true);
     for (const control of chrome) {
       expect(control.left, control.name).toBeGreaterThanOrEqual(0);
       expect(control.right, control.name).toBeLessThanOrEqual(page.viewportSize().width);
