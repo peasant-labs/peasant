@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VILLAGE_REF: d493ac933b8fa53baf9088fbf9597de7dd5b57e0
+  VILLAGE_REF: 1fd193c391ef48027bc86063eb25c7208c59379d
 
 permissions:
   contents: read
