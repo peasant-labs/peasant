@@ -36,7 +36,6 @@ const (
 	openCodeCurrentMessagesBeforeStatement   = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq < ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentMessagesBoundedStatement  = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT ?4"
 	openCodeSessionV2ForkEvidenceStatement   = "SELECT fork_session_id, fork_boundary FROM session_v2 WHERE id = ?1 LIMIT 2"
-	openCodeCurrentMessageSeqStatement       = "SELECT seq FROM session_message WHERE session_id = ?1 AND id = ?2 LIMIT 2"
 	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
 	// The payload-size probes count one session's payload-bearing rows and sum
 	// their data length. LENGTH() computes from the record header, so a probe
@@ -160,6 +159,7 @@ func (s openCodeSessionColumnSupport) extendedAttribution() bool {
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
+var _ OpenCodeForkEvidenceSource = (*zombiezenOpenCodeSQLiteSource)(nil)
 
 func (s *zombiezenOpenCodeSQLiteSource) withReadTransaction(ctx context.Context, fn func() error) (err error) {
 	select {
@@ -1413,35 +1413,6 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionForkEvidence(ctx context.Context,
 		return OpenCodeForkEvidence{}, false, s.sourceReadError(lease.ctx, "read native session fork evidence", err, "session_v2(fork_session_id, fork_boundary) where id", "supported OpenCode session_v2 fork evidence")
 	}
 	return evidence, present, nil
-}
-
-// CurrentMessageSeq resolves one native source message identity to its
-// sequence in the source session. Absence is reported, not guessed.
-func (s *zombiezenOpenCodeSQLiteSource) CurrentMessageSeq(ctx context.Context, sessionID OpenCodeCurrentSessionID, messageID string) (OpenCodeCurrentSeq, bool, error) {
-	lease, err := s.beginSourceRead(ctx, "read native fork boundary message sequence")
-	if err != nil {
-		return OpenCodeCurrentSeq{}, false, err
-	}
-	defer lease.release()
-
-	var seq OpenCodeCurrentSeq
-	found := false
-	decode := func(stmt *sqlite.Stmt) error {
-		if stmt.ColumnType(0) != sqlite.TypeInteger {
-			return nil
-		}
-		value, err := NewOpenCodeCurrentSeq(stmt.ColumnInt64(0))
-		if err != nil {
-			return nil
-		}
-		seq = value
-		found = true
-		return nil
-	}
-	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentMessageSeqStatement, []any{sessionID.value, messageID}, decode); err != nil || lease.ctx.Err() != nil {
-		return OpenCodeCurrentSeq{}, false, s.sourceReadError(lease.ctx, "read native fork boundary message sequence", err, "session_message(seq) where session_id and id", "supported OpenCode session_message")
-	}
-	return seq, found, nil
 }
 
 // decodeOpenCodeForkBoundary parses the native fork boundary JSON. The two

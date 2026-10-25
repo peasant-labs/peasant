@@ -10,12 +10,15 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// OpenCodeSnapshotOptions carries the caller-supplied evidence a snapshot read
-// cannot prove from message rows alone: the fork anchor, the revert state, and
-// the per-input subagent delivery correlation. Every field is explicit native
-// evidence or nil; the reader never infers them from timestamps or text.
+// OpenCodeSnapshotOptions carries the evidence a snapshot read cannot prove
+// from message rows alone: the fork anchor, the native fork pointer, the revert
+// state, and the per-input subagent delivery correlation. Fork and Revert are
+// caller-supplied proofs for repair paths; NativeFork is derived by
+// SnapshotOpenCodeProvenance from the session row. Every field is explicit
+// native evidence or nil; the reader never infers them from timestamps or text.
 type OpenCodeSnapshotOptions struct {
 	Fork              *OpenCodeForkProof
+	NativeFork        *OpenCodeForkEvidence
 	Revert            *OpenCodeRevertState
 	AgentDeliveredIDs map[string]bool
 	// Copied optionally supplies already-captured source rows. It exists for a
@@ -49,6 +52,7 @@ func SnapshotOpenCodeHistory(ctx context.Context, source OpenCodeSQLiteSource, s
 	snapshot := OpenCodeHistorySnapshot{
 		SessionID:         sessionID,
 		Fork:              opts.Fork,
+		NativeFork:        opts.NativeFork,
 		Revert:            opts.Revert,
 		AgentDeliveredIDs: opts.AgentDeliveredIDs,
 	}
@@ -251,8 +255,15 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 	}
 	if opts.Fork == nil {
 		if forkSource, ok := source.(OpenCodeForkEvidenceSource); ok {
-			if proof := openCodeNativeForkProof(ctx, source, forkSource, sessionID); proof != nil {
-				opts.Fork = proof
+			linkID, linkErr := NewOpenCodeSessionLinkID(sessionID)
+			if linkErr == nil {
+				evidence, present, evidenceErr := forkSource.SessionForkEvidence(ctx, linkID)
+				if evidenceErr != nil {
+					return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the native fork pointer could not be read", "verify the native database is readable and retry; no partial capture is certified", evidenceErr)
+				}
+				if present {
+					opts.NativeFork = &evidence
+				}
 			}
 		}
 	}
@@ -265,82 +276,6 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "close snapshot source", "the read-only source could not be released", "retry the snapshot; a bounded close retries the release", closeErr)
 	}
 	return read, nil
-}
-
-// openCodeNativeForkProof builds the fork proof from the native session_v2
-// pointer. The pointer is optional: absent or malformed evidence yields no
-// proof, and a source session whose boundary message cannot be resolved yields
-// a proof with an unproven boundary rather than a guessed one.
-func openCodeNativeForkProof(ctx context.Context, source OpenCodeSQLiteSource, forkSource OpenCodeForkEvidenceSource, sessionID string) *OpenCodeForkProof {
-	linkID, err := NewOpenCodeSessionLinkID(sessionID)
-	if err != nil {
-		return nil
-	}
-	evidence, present, err := forkSource.SessionForkEvidence(ctx, linkID)
-	if err != nil || !present {
-		return nil
-	}
-	proof := &OpenCodeForkProof{SourceSessionID: evidence.SourceSessionID.String()}
-	sourceID, err := NewOpenCodeCurrentSessionID(evidence.SourceSessionID.String())
-	if err != nil {
-		return nil
-	}
-	seq, found, err := forkSource.CurrentMessageSeq(ctx, sourceID, evidence.BoundaryMessageID)
-	if err != nil || !found {
-		return proof
-	}
-	value := seq.Value()
-	switch evidence.BoundaryType {
-	case OpenCodeForkBoundaryBefore:
-		proof.BeforeSeq = &value
-	case OpenCodeForkBoundaryThrough:
-		proof.ThroughSeq = &value
-		proof.ThroughCompleted = openCodeBoundarySettled(ctx, source, sourceID, seq)
-	}
-	return proof
-}
-
-// openCodeBoundarySettled reports whether the named source message is a settled
-// row. A through boundary over a running row stays unproven, so the
-// materializer admits no inherited row instead of guessing.
-func openCodeBoundarySettled(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, seq OpenCodeCurrentSeq) bool {
-	pageSize, err := NewOpenCodeCurrentPageSize(1)
-	if err != nil {
-		return false
-	}
-	request := OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize}
-	if seq.Value() > 0 {
-		after, err := NewOpenCodeCurrentSeq(seq.Value() - 1)
-		if err != nil {
-			return false
-		}
-		cursor := NewOpenCodeCurrentCursor(after)
-		request.After = &cursor
-	}
-	page, err := source.CurrentMessages(ctx, request)
-	if err != nil || len(page.Messages) != 1 {
-		return false
-	}
-	row := page.Messages[0]
-	if row.Seq.Value() != seq.Value() {
-		return false
-	}
-	scope := OpenCodeProvenanceScope{SessionID: sessionID.String(), Shape: OpenCodeProvenanceCurrent}
-	traversal := decodeOpenCodeCurrentTraversal([]byte(row.Data), true)
-	_, settled, err := decodeOpenCodeProvenanceRow(OpenCodeProvenanceRow{
-		ID:          row.ID.String(),
-		SessionID:   row.SessionID.String(),
-		Type:        row.Type.String(),
-		TimeCreated: row.TimeCreated,
-		TimeUpdated: row.TimeUpdated,
-		Seq:         row.Seq.Value(),
-		HasSeq:      true,
-		Data:        row.Data,
-	}, scope, &traversal)
-	if err != nil {
-		return false
-	}
-	return settled
 }
 
 // sanitizeOpenCodeRefusal reduces any failure on the snapshot or
@@ -372,6 +307,18 @@ func sanitizeOpenCodeRefusal(sessionID, step, reason, recovery string, err error
 	}
 }
 
+// hasOpenCodeContextFrom reports whether the metadata already names a
+// context_from target. The relationship kind occurs at most once, so a native
+// pointer must not add a second one.
+func hasOpenCodeContextFrom(relationships []schema.SessionRelationship) bool {
+	for _, relationship := range relationships {
+		if relationship.Kind == schema.SessionRelationshipContextFrom {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildOpenCodeProvenanceCapture resolves one snapshot into the shared
 // classified-capture contract: materialized copy proof and emission plan,
 // per-message native classification with delivery correlation applied, ordered
@@ -395,6 +342,26 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 	}
 	if metadata.ModelHarness != schema.HarnessOpenCode {
 		return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata names another harness", Recovery: "build the capture with the OpenCode harness metadata"}
+	}
+	nativeForkOmitted := false
+	if snapshot.NativeFork != nil && !hasOpenCodeContextFrom(metadata.Relationships) {
+		if target, targetErr := schema.NewSessionID(snapshot.NativeFork.SourceSessionID.String()); targetErr == nil {
+			candidate := append([]schema.SessionRelationship(nil), metadata.Relationships...)
+			candidate = append(candidate, schema.SessionRelationship{
+				Kind:          schema.SessionRelationshipContextFrom,
+				TargetState:   schema.RelationshipTargetKnown,
+				TargetLocalID: &target,
+				Evidence:      schema.EvidenceNativeTyped,
+				Anchor:        &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorGeneral},
+			})
+			if err := schema.ValidateSessionRelationships(candidate); err == nil {
+				metadata.Relationships = candidate
+			} else {
+				nativeForkOmitted = true
+			}
+		} else {
+			nativeForkOmitted = true
+		}
 	}
 	if snapshot.Fork != nil && len(snapshot.Copied) == 0 && prior.HasCapturedPrefix && len(prior.CapturedPrefix) > 0 {
 		// The live fork source no longer carries the captured rows. Retain the
@@ -420,6 +387,9 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 		Segments:             materialized.Segments,
 		Prior:                prior.Aliases.clone(),
 		Diagnostics:          append([]string(nil), materialized.Diagnostics...),
+	}
+	if nativeForkOmitted {
+		capture.Diagnostics = append(capture.Diagnostics, "native fork pointer names a source session that cannot be represented as a local relationship; the fork link was omitted")
 	}
 	if needsOpenCodeUncertainSection(materialized.Messages) {
 		capture.EarlierStates = []schema.EarlierHistoryState{schema.EarlierHistoryUncertainUnresolved}

@@ -2,7 +2,6 @@ package ingest_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -11,36 +10,35 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 const (
 	openCodeForkChild  = "ses_3cd91f52effeXd3QAJ54jOyzn1"
-	openCodeForkParent = "ses_fork_parent"
+	openCodeForkParent = "ses_f8c3ed088ffekU7T4UA5wVXwYk"
 )
 
-// TestOpenCodeNativeForkProducer proves the production snapshot derives the
-// fork proof from the native session_v2 pointer instead of a caller-supplied
-// proof. The before boundary copies the settled rows before the named message;
-// the through boundary copies that message too and records it as completed.
-func TestOpenCodeNativeForkProducer(t *testing.T) {
+// TestOpenCodeNativeForkContextRelationship proves the production snapshot
+// turns the native session_v2 pointer into a context_from relationship. The
+// child already holds the parent prefix, so the snapshot must not copy rows.
+func TestOpenCodeNativeForkContextRelationship(t *testing.T) {
 	cases := []struct {
-		name        string
-		boundary    string
-		wantBefore  *int64
-		wantThrough *int64
-		wantCopies  int
+		name          string
+		boundary      string
+		boundaryType  ingest.OpenCodeForkBoundaryType
+		boundaryMsgID string
 	}{
 		{
-			name:       "before boundary",
-			boundary:   `{"type":"before","messageID":"msg_fork_3"}`,
-			wantBefore: int64Ptr(2),
-			wantCopies: 2,
+			name:          "before boundary",
+			boundary:      `{"type":"before","messageID":"msg_fork_3"}`,
+			boundaryType:  ingest.OpenCodeForkBoundaryBefore,
+			boundaryMsgID: "msg_fork_3",
 		},
 		{
-			name:        "through boundary",
-			boundary:    `{"type":"through","messageID":"msg_fork_2"}`,
-			wantThrough: int64Ptr(1),
-			wantCopies:  2,
+			name:          "through boundary",
+			boundary:      `{"type":"through","messageID":"msg_fork_2"}`,
+			boundaryType:  ingest.OpenCodeForkBoundaryThrough,
+			boundaryMsgID: "msg_fork_2",
 		},
 	}
 
@@ -54,32 +52,49 @@ func TestOpenCodeNativeForkProducer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
 			}
-			if snapshot.Fork == nil {
-				t.Fatal("native fork evidence produced no proof")
+			if snapshot.Fork != nil {
+				t.Fatal("native pointer must not produce a copy proof")
 			}
-			if snapshot.Fork.SourceSessionID != openCodeForkParent {
-				t.Fatalf("fork source = %q, want %q", snapshot.Fork.SourceSessionID, openCodeForkParent)
+			if len(snapshot.Copied) != 0 {
+				t.Fatalf("native fork copied %d parent rows; OpenCode already materializes the prefix", len(snapshot.Copied))
 			}
-			if got, want := snapshot.Fork.BeforeSeq, testCase.wantBefore; !sameInt64Ptr(got, want) {
-				t.Fatalf("fork before seq = %v, want %v", int64PtrString(got), int64PtrString(want))
+			if got := len(snapshot.Messages); got != 2 {
+				t.Fatalf("child messages = %d, want the child's own 2 rows only", got)
 			}
-			if got, want := snapshot.Fork.ThroughSeq, testCase.wantThrough; !sameInt64Ptr(got, want) {
-				t.Fatalf("fork through seq = %v, want %v", int64PtrString(got), int64PtrString(want))
+			if snapshot.NativeFork == nil {
+				t.Fatal("native fork pointer was not captured")
 			}
-			if testCase.wantThrough != nil && !snapshot.Fork.ThroughCompleted {
-				t.Fatal("through boundary over settled rows was not marked completed")
+			if snapshot.NativeFork.SourceSessionID.String() != openCodeForkParent {
+				t.Fatalf("native fork source = %q, want %q", snapshot.NativeFork.SourceSessionID.String(), openCodeForkParent)
 			}
-			if len(snapshot.Copied) != testCase.wantCopies {
-				t.Fatalf("captured copies = %d, want %d", len(snapshot.Copied), testCase.wantCopies)
+			if snapshot.NativeFork.BoundaryType != testCase.boundaryType {
+				t.Fatalf("native fork boundary type = %q, want %q", snapshot.NativeFork.BoundaryType, testCase.boundaryType)
+			}
+			if snapshot.NativeFork.BoundaryMessageID != testCase.boundaryMsgID {
+				t.Fatalf("native fork boundary message = %q, want %q", snapshot.NativeFork.BoundaryMessageID, testCase.boundaryMsgID)
+			}
+
+			relationship := contextFromRelationship(t, buildOpenCodeForkCapture(t, snapshot))
+			if relationship == nil {
+				t.Fatal("native fork produced no context_from relationship")
+			}
+			if relationship.TargetLocalID == nil || *relationship.TargetLocalID != schema.SessionID(openCodeForkParent) {
+				t.Fatalf("context_from target = %v, want %q", relationship.TargetLocalID, openCodeForkParent)
+			}
+			if relationship.Evidence != schema.EvidenceNativeTyped {
+				t.Fatalf("context_from evidence = %q, want %q", relationship.Evidence, schema.EvidenceNativeTyped)
+			}
+			if relationship.Anchor == nil || relationship.Anchor.Kind != schema.PublicSourceAnchorGeneral {
+				t.Fatalf("context_from anchor = %+v, want general_source_session", relationship.Anchor)
 			}
 		})
 	}
 }
 
-// TestOpenCodeNativeForkProducerMalformedBoundaryIsAbsent proves malformed
-// native evidence stays fail-safe: no proof, no guessed ancestry, and the
-// session still snapshots.
-func TestOpenCodeNativeForkProducerMalformedBoundaryIsAbsent(t *testing.T) {
+// TestOpenCodeNativeForkMalformedBoundaryIsAbsent proves malformed native
+// evidence stays fail-safe: no relationship, no copy, and the session still
+// snapshots.
+func TestOpenCodeNativeForkMalformedBoundaryIsAbsent(t *testing.T) {
 	source := testfixture.MaterializeByName(t, "native-v2-only")
 	writeNativeForkFixture(t, source.Path, `{"type":"before","messageID":`)
 
@@ -88,9 +103,59 @@ func TestOpenCodeNativeForkProducerMalformedBoundaryIsAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
 	}
-	if snapshot.Fork != nil {
-		t.Fatalf("malformed fork evidence produced a proof: %+v", snapshot.Fork)
+	if snapshot.NativeFork != nil || snapshot.Fork != nil {
+		t.Fatalf("malformed fork evidence produced provenance: native=%+v proof=%+v", snapshot.NativeFork, snapshot.Fork)
 	}
+	if len(snapshot.Copied) != 0 {
+		t.Fatalf("malformed fork evidence copied %d rows", len(snapshot.Copied))
+	}
+	if relationship := contextFromRelationship(t, buildOpenCodeForkCapture(t, snapshot)); relationship != nil {
+		t.Fatalf("malformed fork evidence produced a relationship: %+v", relationship)
+	}
+}
+
+// TestOpenCodeNativeForkAbsentOnLegacyLayout proves a store without session_v2
+// fork columns produces no relationship and no error.
+func TestOpenCodeNativeForkAbsentOnLegacyLayout(t *testing.T) {
+	source := testfixture.MaterializeByName(t, "native-current-rows")
+
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{})
+	if err != nil {
+		t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
+	}
+	if snapshot.NativeFork != nil || snapshot.Fork != nil {
+		t.Fatalf("legacy layout produced provenance: native=%+v proof=%+v", snapshot.NativeFork, snapshot.Fork)
+	}
+}
+
+func buildOpenCodeForkCapture(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot) ingest.ClassifiedCapture {
+	t.Helper()
+	metadata := schema.UnifiedMetadata{
+		SchemaVersion: 1,
+		SessionID:     ingest.SessionID(openCodeForkChild),
+		ModelHarness:  schema.HarnessOpenCode,
+	}
+	capture, err := ingest.BuildOpenCodeProvenanceCapture(
+		snapshot,
+		"gen-native-fork",
+		metadata,
+		ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()},
+	)
+	if err != nil {
+		t.Fatalf("BuildOpenCodeProvenanceCapture: %v", err)
+	}
+	return capture
+}
+
+func contextFromRelationship(t *testing.T, capture ingest.ClassifiedCapture) *schema.SessionRelationship {
+	t.Helper()
+	for index := range capture.Metadata.Relationships {
+		if capture.Metadata.Relationships[index].Kind == schema.SessionRelationshipContextFrom {
+			return &capture.Metadata.Relationships[index]
+		}
+	}
+	return nil
 }
 
 func writeNativeForkFixture(t *testing.T, path, boundary string) {
@@ -120,20 +185,4 @@ func writeNativeForkFixture(t *testing.T, path, boundary string) {
 		)
 	}
 	execute("UPDATE session_v2 SET fork_session_id = ?1, fork_boundary = ?2 WHERE id = ?3", openCodeForkParent, boundary, openCodeForkChild)
-}
-
-func int64Ptr(value int64) *int64 { return &value }
-
-func sameInt64Ptr(left, right *int64) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return *left == *right
-}
-
-func int64PtrString(value *int64) string {
-	if value == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("%d", *value)
 }

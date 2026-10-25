@@ -683,7 +683,6 @@ type OpenCodeForkEvidence struct {
 // reports absence rather than guessing a relationship.
 type OpenCodeForkEvidenceSource interface {
 	SessionForkEvidence(context.Context, OpenCodeSessionLinkID) (OpenCodeForkEvidence, bool, error)
-	CurrentMessageSeq(context.Context, OpenCodeCurrentSessionID, string) (OpenCodeCurrentSeq, bool, error)
 }
 
 // OpenCodeEventSequence is the newest event sequence per session, read once from
