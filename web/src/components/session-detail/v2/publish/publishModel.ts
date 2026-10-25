@@ -70,9 +70,8 @@ export interface BarModel {
  * new turns, or is up to date. The collective count is left out when village
  * could not be asked who reads the transcript.
  *
- * The saved ingestion selection is push metadata, not a browsing or publish
- * state. A stored transcript outside it is still `not published`, and the bar
- * never claims auto-publish for such a row.
+ * The saved ingestion selection is push metadata and is not used to derive the
+ * bar's state; the server owns `autoPublish`.
  */
 export function barModel(options: {
   publication: LocalPublication;
@@ -87,14 +86,11 @@ export function barModel(options: {
   // still be public, which this read does not report, so the count is left
   // out rather than shown as 0.
   const collectives = audienceKnown && readers.length > 0 ? readers.length : undefined;
-  // A row outside the saved ingestion selection is never described as under
-  // auto-publish, a rule that would not publish it.
-  const autoPublish = publication.autoPublish && !publication.outsideSelection;
   if (publication.state !== 'published') {
-    if (autoPublish) return { state: 'auto-publish' };
+    if (publication.autoPublish) return { state: 'auto-publish' };
     return { state: 'not-published' };
   }
-  if (autoPublish) {
+  if (publication.autoPublish) {
     return { state: 'auto-publish', collective: readers.length ? readers.map((reader) => reader.name).join(', ') : undefined };
   }
   if (newTurns > 0) return { state: 'new-turns', collectives, newTurns };
