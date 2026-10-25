@@ -74,7 +74,12 @@ type OpenCodeHistorySnapshot struct {
 	Copied            []OpenCodeHistoryRow
 	AgentDeliveredIDs map[string]bool
 	Fork              *OpenCodeForkProof
-	Revert            *OpenCodeRevertState
+	// NativeFork is the native session_v2 fork pointer for this session. It is
+	// provenance evidence, not a copy proof: OpenCode already materializes the
+	// parent prefix in the child, so the pointer records the source session for
+	// a context_from relationship without re-reading or copying the parent.
+	NativeFork *OpenCodeForkEvidence
+	Revert     *OpenCodeRevertState
 	// SourceEvidenceDigest is the SHA-256 hex of the canonical snapshot fields
 	// the reader captured. The capture builder carries it into the generation
 	// so activation can verify what the candidate proves.
@@ -393,6 +398,11 @@ func DigestOpenCodeSnapshot(snapshot OpenCodeHistorySnapshot) string {
 		if snapshot.Fork.ThroughSeq != nil {
 			fmt.Fprintf(&sb, "through=%d completed=%t;", *snapshot.Fork.ThroughSeq, snapshot.Fork.ThroughCompleted)
 		}
+	}
+	if snapshot.NativeFork != nil {
+		writeSnapshotField(&sb, "native-fork-source", snapshot.NativeFork.SourceSessionID.String())
+		writeSnapshotField(&sb, "native-fork-boundary", string(snapshot.NativeFork.BoundaryType))
+		writeSnapshotField(&sb, "native-fork-message", snapshot.NativeFork.BoundaryMessageID)
 	}
 	if snapshot.Revert != nil {
 		fmt.Fprintf(&sb, "revert=%d committed=%t;", snapshot.Revert.TargetSeq, snapshot.Revert.Committed)

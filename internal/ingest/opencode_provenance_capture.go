@@ -10,12 +10,15 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// OpenCodeSnapshotOptions carries the caller-supplied evidence a snapshot read
-// cannot prove from message rows alone: the fork anchor, the revert state, and
-// the per-input subagent delivery correlation. Every field is explicit native
-// evidence or nil; the reader never infers them from timestamps or text.
+// OpenCodeSnapshotOptions carries the evidence a snapshot read cannot prove
+// from message rows alone: the fork anchor, the native fork pointer, the revert
+// state, and the per-input subagent delivery correlation. Fork and Revert are
+// caller-supplied proofs for repair paths; NativeFork is derived by
+// SnapshotOpenCodeProvenance from the session row. Every field is explicit
+// native evidence or nil; the reader never infers them from timestamps or text.
 type OpenCodeSnapshotOptions struct {
 	Fork              *OpenCodeForkProof
+	NativeFork        *OpenCodeForkEvidence
 	Revert            *OpenCodeRevertState
 	AgentDeliveredIDs map[string]bool
 	// Copied optionally supplies already-captured source rows. It exists for a
@@ -49,6 +52,7 @@ func SnapshotOpenCodeHistory(ctx context.Context, source OpenCodeSQLiteSource, s
 	snapshot := OpenCodeHistorySnapshot{
 		SessionID:         sessionID,
 		Fork:              opts.Fork,
+		NativeFork:        opts.NativeFork,
 		Revert:            opts.Revert,
 		AgentDeliveredIDs: opts.AgentDeliveredIDs,
 	}
@@ -249,6 +253,23 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 	if err != nil {
 		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "open snapshot source", "the read-only native source could not be opened", "verify the native database exists, is readable, and is not blocked by permissions, then retry without modifying it", err)
 	}
+	if opts.Fork == nil {
+		if forkSource, ok := source.(OpenCodeForkEvidenceSource); ok {
+			linkID, linkErr := NewOpenCodeSessionLinkID(sessionID)
+			if linkErr != nil {
+				_ = closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout)
+				return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the session identity cannot be used to read the native fork pointer", "repair the session identity and retry; no partial capture is certified", linkErr)
+			}
+			evidence, present, evidenceErr := forkSource.SessionForkEvidence(ctx, linkID)
+			if evidenceErr != nil {
+				_ = closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout)
+				return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the native fork pointer could not be read", "verify the native database is readable and retry; no partial capture is certified", evidenceErr)
+			}
+			if present {
+				opts.NativeFork = &evidence
+			}
+		}
+	}
 	read, readErr := SnapshotOpenCodeHistory(ctx, source, sessionID, opts)
 	closeErr := source.Close(ctx)
 	if readErr != nil {
@@ -289,6 +310,18 @@ func sanitizeOpenCodeRefusal(sessionID, step, reason, recovery string, err error
 	}
 }
 
+// hasOpenCodeContextFrom reports whether the metadata already names a
+// context_from target. The relationship kind occurs at most once, so a native
+// pointer must not add a second one.
+func hasOpenCodeContextFrom(relationships []schema.SessionRelationship) bool {
+	for _, relationship := range relationships {
+		if relationship.Kind == schema.SessionRelationshipContextFrom {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildOpenCodeProvenanceCapture resolves one snapshot into the shared
 // classified-capture contract: materialized copy proof and emission plan,
 // per-message native classification with delivery correlation applied, ordered
@@ -312,6 +345,26 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 	}
 	if metadata.ModelHarness != schema.HarnessOpenCode {
 		return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata names another harness", Recovery: "build the capture with the OpenCode harness metadata"}
+	}
+	nativeForkOmitted := false
+	if snapshot.NativeFork != nil && !hasOpenCodeContextFrom(metadata.Relationships) {
+		if target, targetErr := schema.NewSessionID(snapshot.NativeFork.SourceSessionID.String()); targetErr == nil {
+			candidate := append([]schema.SessionRelationship(nil), metadata.Relationships...)
+			candidate = append(candidate, schema.SessionRelationship{
+				Kind:          schema.SessionRelationshipContextFrom,
+				TargetState:   schema.RelationshipTargetKnown,
+				TargetLocalID: &target,
+				Evidence:      schema.EvidenceNativeTyped,
+				Anchor:        &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorGeneral},
+			})
+			if err := schema.ValidateSessionRelationships(candidate); err == nil {
+				metadata.Relationships = candidate
+			} else {
+				nativeForkOmitted = true
+			}
+		} else {
+			nativeForkOmitted = true
+		}
 	}
 	if snapshot.Fork != nil && len(snapshot.Copied) == 0 && prior.HasCapturedPrefix && len(prior.CapturedPrefix) > 0 {
 		// The live fork source no longer carries the captured rows. Retain the
@@ -337,6 +390,9 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 		Segments:             materialized.Segments,
 		Prior:                prior.Aliases.clone(),
 		Diagnostics:          append([]string(nil), materialized.Diagnostics...),
+	}
+	if nativeForkOmitted {
+		capture.Diagnostics = append(capture.Diagnostics, "native fork pointer names a source session that cannot be represented as a local relationship; the fork link was omitted")
 	}
 	if needsOpenCodeUncertainSection(materialized.Messages) {
 		capture.EarlierStates = []schema.EarlierHistoryState{schema.EarlierHistoryUncertainUnresolved}

@@ -2,7 +2,9 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 )
 
 // SourceUnavailabilityReason describes why a stored session cannot be repaired.
@@ -23,4 +25,27 @@ func NewSourceUnavailabilityReason(raw string) (SourceUnavailabilityReason, erro
 type SourceAvailabilityStore interface {
 	RecordSourceUnavailable(context.Context, SessionID, SourceUnavailabilityReason) (bool, error)
 	ReadSourceUnavailability(context.Context, SessionID) (*SourceUnavailabilityReason, error)
+}
+
+// sourceUnavailableRecorded reports whether the store already recorded that a
+// session's source could not repair it. It reads the recorded state only: no
+// managed file is opened, so a settled session costs no pair read.
+func (p *Pipeline) sourceUnavailableRecorded(ctx context.Context, sid SessionID) bool {
+	reader, ok := p.metricsStore.(SourceAvailabilityStore)
+	if !ok {
+		return false
+	}
+	reason, err := reader.ReadSourceUnavailability(ctx, sid)
+	return err == nil && reason != nil
+}
+
+// sourceRecordUnusable reports whether a stored-content failure is about the
+// source bytes themselves: the source is gone, or a record in it cannot be
+// parsed. A store, locator, or write fault is neither, so it keeps reporting.
+func sourceRecordUnusable(err error) bool {
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	var malformed malformedSourceRecord
+	return errors.As(err, &malformed)
 }

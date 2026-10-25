@@ -193,6 +193,34 @@ func validateCaptureRole(role string) error {
 	return fmt.Errorf("unsupported conversation role %q", role)
 }
 
+// malformedSourceRecord marks a source record a capture could not accept: a
+// record that is not complete JSON, or one whose fields fail validation. The
+// message stays the user-facing one it always was; the type is what tells a
+// settle that the bytes on disk, not the store or the process, are the problem.
+type malformedSourceRecord struct{ cause error }
+
+func (e malformedSourceRecord) Error() string {
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return "malformed JSON"
+}
+
+func (e malformedSourceRecord) Unwrap() error { return e.cause }
+
+// contentRecovery is one completed stored-content repair. Recovering content
+// repairs the stored capture only; it does not complete the session, so the
+// pipeline still evaluates the same session for independent adapter and
+// indexer work afterwards.
+type contentRecovery struct {
+	session     DiscoveredSession
+	entries     int
+	recoveredAt int64
+	// charged is the source bytes this recovery read, counted against the run's
+	// content budget.
+	charged int64
+}
+
 func captureFailure(session DiscoveredSession, line int, err error) error {
 	return fmt.Errorf("capture %s session %s at source record %d: %w; complete content was not stored; restore a supported intact transcript and rerun harvest index --force", session.Harness, session.SessionID, line, err)
 }
@@ -239,7 +267,7 @@ func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data [
 			continue
 		}
 		if !json.Valid(raw) {
-			return nil, captureFailure(session, line, fmt.Errorf("malformed JSON"))
+			return nil, captureFailure(session, line, malformedSourceRecord{})
 		}
 		record, err := validate(raw)
 		if err != nil {
@@ -250,7 +278,7 @@ func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data [
 				}
 				continue
 			}
-			return nil, captureFailure(session, line, err)
+			return nil, captureFailure(session, line, malformedSourceRecord{err})
 		}
 		if record != nil {
 			ignored = append(ignored, *record)

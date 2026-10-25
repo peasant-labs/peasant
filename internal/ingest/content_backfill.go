@@ -99,19 +99,6 @@ func (e *TornRetainedPairError) Error() string {
 	return fmt.Sprintf("content recovery %s: the saved pair no longer matches its stored identity; the database copy is preserved and the saved copy is reported as damaged", e.SessionID)
 }
 
-// contentRecovery is one completed stored-content repair. Recovering content
-// repairs the stored capture only; it does not complete the session, so the
-// pipeline still evaluates the same session for independent adapter and
-// indexer work afterwards.
-type contentRecovery struct {
-	session     DiscoveredSession
-	entries     int
-	recoveredAt int64
-	// charged is the source bytes this recovery read, counted against the run's
-	// content budget.
-	charged int64
-}
-
 // backfillIncompleteContent traverses by key, not by offset or a repeated first
 // page: a broken first snapshot cannot starve later recoverable sessions.
 //
@@ -239,6 +226,14 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					// one damaged-pair text every reader prints and preserve the
 					// database copy; the user re-saves it with harvest --force.
 					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
+					continue
+				}
+				if sourceRecordUnusable(err) && p.sourceUnavailableRecorded(ctx, id) {
+					// The pair-repair lane already reported this session's
+					// acquisition failure with its cause, and the stored copy
+					// still serves. Repeating it here on every later run adds no
+					// fact the user can act on. The recovery itself still runs,
+					// so a source that returns is still recovered.
 					continue
 				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)

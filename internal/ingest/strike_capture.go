@@ -43,7 +43,7 @@ func (idx *StrikeIndexer) captureDecodedStrike(ctx context.Context, s Discovered
 			return
 		}
 		if !json.Valid(raw) {
-			fail(fmt.Errorf("malformed JSON"))
+			fail(malformedSourceRecord{})
 			return
 		}
 		if at, yes := parseOmittedRecordSentinel(raw); yes {

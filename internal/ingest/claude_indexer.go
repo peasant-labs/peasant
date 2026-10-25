@@ -487,6 +487,20 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 		}
 	}
 
+	// A user prompt carried as a content-block array is one prompt, not a
+	// carrier plus one subagent turn per block. Its text blocks supply the
+	// carrier's complete text; a tool result makes the record a mixed wrapper
+	// instead, and that path keeps its existing per-block decomposition.
+	plainUserPrompt := entry.Role == RoleUser
+	if plainUserPrompt {
+		for _, block := range contentBlocks {
+			if block.Type == "tool_result" {
+				plainUserPrompt = false
+				break
+			}
+		}
+	}
+
 	var toolNames []string
 	var preview strings.Builder
 	var thinkingFallback string
@@ -508,7 +522,17 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 				thinkingFallback = block.Thinking
 			}
 		case "text":
-			if preview.Len() == 0 && block.Text != "" {
+			if block.Text == "" {
+				continue
+			}
+			if preview.Len() == 0 {
+				preview.WriteString(block.Text)
+				continue
+			}
+			if plainUserPrompt {
+				// The carrier is the whole prompt: the extension writes injected
+				// editor context and the typed prompt as separate text blocks.
+				preview.WriteString("\n")
 				preview.WriteString(block.Text)
 			}
 		case "tool_result":
@@ -711,9 +735,24 @@ func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 	if !role.IsValid() {
 		role = RoleAssistant
 	}
+	// The carrier already holds a plain user prompt's whole text. A mixed
+	// tool-result wrapper keeps its per-block decomposition so its children can
+	// be folded as tool calls.
+	plainUserPrompt := role == RoleUser
+	if plainUserPrompt {
+		for _, block := range blocks {
+			if block.Type == "tool_result" {
+				plainUserPrompt = false
+				break
+			}
+		}
+	}
 
 	var entries []schema.SessionEntry
 	for _, block := range blocks {
+		if plainUserPrompt && block.Type == "text" {
+			continue
+		}
 		entry := schema.SessionEntry{
 			SessionID:   sessionID,
 			EntryIndex:  *entryIndex,

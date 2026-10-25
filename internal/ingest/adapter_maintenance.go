@@ -305,8 +305,11 @@ func (p *Pipeline) pairSourceAvailable(session DiscoveredSession) bool {
 // reportPairRepairUnavailable names a session whose saved pair is missing or
 // damaged and whose native source could not be reached to repair it. The
 // stored copy keeps serving meanwhile; the repair runs automatically once the
-// source is available again.
-func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionID, source string, lane *storeWriteLane) {
+// source is available again. A non-nil cause is the acquisition failure that
+// stopped the repair, and it leads the message so a source that is present but
+// unusable names its real cause (a malformed record and its line) instead of
+// reading as a missing file.
+func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionID, source string, cause error, lane *storeWriteLane) {
 	if recorder, ok := p.metricsStore.(SourceAvailabilityStore); ok && !p.config.DryRun {
 		var changed bool
 		var err error
@@ -315,16 +318,39 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 		})
 		if err != nil {
 			p.reportMetadataRefusal(string(sid), err)
-		} else if !changed {
+		} else if !changed && !p.config.Force {
+			// Routine harvests stay quiet once the transition is recorded. An
+			// explicit --force run is the user acting on the remediation this
+			// diagnostic names, so it still has to hear that the repair did not
+			// take; staying silent there would read as success.
 			return
 		}
+	}
+	message := missingPairText(sid, source)
+	remediation := "Restore the original harness source and rerun harvest; the stored copy keeps serving meanwhile."
+	if cause != nil {
+		message = fmt.Sprintf("session %s could not be re-ingested from its original source %q: %v; the stored copy keeps its last-good entries", sid, source, cause)
+		remediation = "Restore a complete, supported transcript at the original source and rerun harvest; the stored copy keeps serving meanwhile."
 	}
 	p.reportSessionDiagnostic(sid, DiagnosticEntry{
 		ErrorType:   "pair_repair_unavailable",
 		Location:    fmt.Sprintf("session %s pair repair", sid),
-		Message:     missingPairText(sid, source),
-		Remediation: "Restore the original harness source and rerun harvest; the stored copy keeps serving meanwhile.",
+		Message:     message,
+		Remediation: remediation,
 	})
+}
+
+// hasCompletedStoredIndex reports whether an index attempt was ever stamped for
+// the session, which is what makes a stored copy exist to serve while its pair
+// cannot be rebuilt. A row with no stamp has never served anything, so its
+// failed install stays a real error.
+func (p *Pipeline) hasCompletedStoredIndex(ctx context.Context, sid SessionID) bool {
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	if !ok {
+		return false
+	}
+	state, err := reader.ReadIndexState(ctx, sid)
+	return err == nil && state != nil && state.IndexerVersion > 0
 }
 
 // pairRepairInScope applies the run's explicit harness, session and age filters
@@ -439,7 +465,7 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	var repaired []SessionID
 	for i, outcome := range outcomes {
 		if outcome.unavailableSource != nil {
-			p.reportPairRepairUnavailable(ctx, ids[i], *outcome.unavailableSource, nil)
+			p.reportPairRepairUnavailable(ctx, ids[i], *outcome.unavailableSource, nil, nil)
 		}
 		if outcome.damaged {
 			// The pair is not a readable index input. Record it so the index
@@ -570,7 +596,7 @@ func (p *Pipeline) pairRepairTargets(ctx context.Context, scanned []reindexTarge
 			continue
 		}
 		if session == nil {
-			p.reportPairRepairUnavailable(ctx, sid, "", nil)
+			p.reportPairRepairUnavailable(ctx, sid, "", nil, nil)
 			continue
 		}
 		if !p.pairRepairInScope(*session, startMs) {
@@ -641,7 +667,16 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		// A repair has no usable stored pair by definition: when the native
 		// source cannot be acquired, the failure is the outcome. Falling back
 		// would try to read the missing or damaged pair and hide the error.
-		p.reportPairRepairUnavailable(ctx, entry.Session.SessionID, string(entry.Session.SourcePath), writeLane)
+		p.reportPairRepairUnavailable(ctx, entry.Session.SessionID, string(entry.Session.SourcePath), acquisition, writeLane)
+		// A routine harvest reports this refusal instead of failing on it, but
+		// only while a completed stored index is what still serves. An explicit
+		// --force run is the remediation the diagnostic names, so it keeps the
+		// failure: a person or a script has to be able to tell that the repair
+		// did not take.
+		if !p.config.Force && p.hasCompletedStoredIndex(ctx, entry.Session.SessionID) {
+			result.result.Error = nil
+			result.result.Status = DiffUnchanged
+		}
 		return result
 	}
 	// The manual index refresh (harvest index --force) names its own

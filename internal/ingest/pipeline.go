@@ -5480,7 +5480,7 @@ func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, so
 			return true
 		}
 	}
-	p.reportPairRepairUnavailable(ctx, sid, target.originalSourcePath, nil)
+	p.reportPairRepairUnavailable(ctx, sid, target.originalSourcePath, nil, nil)
 	return false
 }
 

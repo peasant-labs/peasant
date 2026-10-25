@@ -432,7 +432,6 @@ cases:
     titleRefCount: 2
     keys:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta1"
-      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta1:0"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta2"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta2:0"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta3"
@@ -441,9 +440,8 @@ cases:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ta3"
     entries:
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "array prompt", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
-      - {depth: 1, role: user, entryType: text, partType: text, parentIndex: 0, toolCallIDFromIndex: -1, preview: "array prompt"}
       - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "array reply"}
-      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 2, toolCallIDFromIndex: -1, preview: "array reply"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "array reply"}
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "string prompt", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
 
   - name: plain-prompt-text-and-image-array
@@ -460,16 +458,14 @@ cases:
     titleRefCount: 1
     keys:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia1"
-      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia1:0"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia2"
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia2:0"
     acceptKeys:
       - "claude:99d59925-36bc-424c-a789-8be54d9702ba:ia1"
     entries:
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "look at this", extraContains: "retainedUnknown", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
-      - {depth: 1, role: user, entryType: text, partType: text, parentIndex: 0, toolCallIDFromIndex: -1, preview: "look at this"}
       - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "image reply"}
-      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 2, toolCallIDFromIndex: -1, preview: "image reply"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "image reply"}
 
   - name: over-bound-answer-key-refusal
     # An AskUserQuestion answer whose tool id pushes the assembled answer key
