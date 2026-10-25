@@ -11,11 +11,11 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// ClaudeTeammateReadBatchSize bounds one teammate evidence query. It is
-// exported so a caller can reason about how many batches a page costs, and so
-// the bounded-page test can span more than one batch without copying the
-// number.
-const ClaudeTeammateReadBatchSize = 256
+// ClaudeTeammateReadBatchSize bounds one teammate evidence query. It aliases
+// the store's read batch size rather than opening a second budget; it is
+// exported under this name only so callers and the external bounded-page test
+// can reason about how many batches a page costs without copying the number.
+const ClaudeTeammateReadBatchSize = indexFormatReadBatchSize
 
 // claudeTeammateQuery reads the recorded teammate identity of each requested
 // session. The identity is evidence, not inference: the child must be a stored

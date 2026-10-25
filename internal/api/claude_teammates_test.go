@@ -102,8 +102,13 @@ func TestClaudeTeammateIdentityReachesLocalReads(t *testing.T) {
 			if child.SessionOrigin != schema.SessionOriginAgent {
 				t.Fatalf("summary sessionOrigin = %q, want %q for a session whose transcript declares a teammate identity", child.SessionOrigin, schema.SessionOriginAgent)
 			}
-			assertTeammate(t, "SessionSummary for "+testCase.ParentSessionID, byID[testCase.ParentSessionID].Teammate, nil)
-			assertTeammate(t, "SessionSummary for "+testCase.RootSessionID, byID[testCase.RootSessionID].Teammate, nil)
+			for _, id := range []string{testCase.ParentSessionID, testCase.RootSessionID} {
+				summary, present := byID[id]
+				if !present {
+					t.Fatalf("summaries omitted session %q, so its absent teammate cannot be asserted", id)
+				}
+				assertTeammate(t, "SessionSummary for "+id, summary.Teammate, nil)
+			}
 
 			// 2. The grouped sync chooser's paired SessionSummary/LocalSyncSummary.
 			homes := newTestXDGHomes(t)

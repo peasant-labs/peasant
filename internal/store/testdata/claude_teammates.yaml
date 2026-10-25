@@ -8,10 +8,12 @@
 # subagent-scope cache row. A `want_error` case states the identity the cache
 # holds but the local contract refuses; the read must fail closed and name why.
 #
-# `batch_probe` names the two recorded spawn edges the bounded-page probe seeds
-# at the first and last positions of one page that spans several query batches.
+# `batch_probe` names the three recorded spawn edges the bounded-page probe seeds
+# at the first position, in the middle of the second query batch, and at the last
+# position of one three-batch page.
 requiredNames:
   - positive-spawn-edge
+  - positive-spawn-edge-in-the-middle
   - positive-spawn-edge-at-the-page-end
   - parent-without-spawn
   - same-team-different-name
@@ -23,6 +25,7 @@ requiredNames:
   - invalid-control-character-identity
 batch_probe:
   first: positive-spawn-edge
+  middle: positive-spawn-edge-in-the-middle
   last: positive-spawn-edge-at-the-page-end
 cases:
   - name: positive-spawn-edge
@@ -41,6 +44,23 @@ cases:
         identity: { team: migration, name: tests }
     want_present: true
     want_teammate: { team: migration, name: tests }
+
+  - name: positive-spawn-edge-in-the-middle
+    subject: 99999999-9999-4999-8999-999999999999
+    sessions:
+      - id: 88888888-8888-4888-8888-888888888888
+        harness: claude-code
+        source_path: /captured/88888888-8888-4888-8888-888888888888.jsonl
+        identity: { team: release, name: lead }
+        spawns:
+          - { team: release, name: notes }
+      - id: 99999999-9999-4999-8999-999999999999
+        harness: claude-code
+        source_path: /captured/99999999-9999-4999-8999-999999999999.jsonl
+        parent_id: 88888888-8888-4888-8888-888888888888
+        identity: { team: release, name: notes }
+    want_present: true
+    want_teammate: { team: release, name: notes }
 
   - name: positive-spawn-edge-at-the-page-end
     subject: 55555555-5555-4555-8555-555555555555

@@ -45,11 +45,13 @@ type claudeTeammateCase struct {
 	WantError string `yaml:"want_error"`
 }
 
-// claudeTeammateBatchProbe names the two recorded spawn edges the bounded-page
-// test seeds at the first and last positions of one multi-batch request.
+// claudeTeammateBatchProbe names the three recorded spawn edges the bounded-page
+// test seeds at the first position, in the middle of the second batch, and at
+// the last position of one three-batch request.
 type claudeTeammateBatchProbe struct {
-	First string `yaml:"first"`
-	Last  string `yaml:"last"`
+	First  string `yaml:"first"`
+	Middle string `yaml:"middle"`
+	Last   string `yaml:"last"`
 }
 
 type claudeTeammatesFixture struct {
@@ -64,8 +66,8 @@ func loadClaudeTeammatesFixture(t *testing.T) claudeTeammatesFixture {
 	if err := testutil.DecodeNamedFixtureYAML(claudeTeammatesYAML, &fixture); err != nil {
 		t.Fatalf("load Claude teammate fixture: %v", err)
 	}
-	if fixture.BatchProbe.First == "" || fixture.BatchProbe.Last == "" {
-		t.Fatalf("Claude teammate fixture must name the two batch-probe cases")
+	if fixture.BatchProbe.First == "" || fixture.BatchProbe.Middle == "" || fixture.BatchProbe.Last == "" {
+		t.Fatalf("Claude teammate fixture must name the first, middle, and last batch-probe cases")
 	}
 	for _, testCase := range fixture.Cases {
 		if testCase.Subject == "" || len(testCase.Sessions) == 0 {
@@ -158,78 +160,98 @@ func claudeTeammateWant(t *testing.T, testCase claudeTeammateCase) schema.Sessio
 }
 
 // TestClaudeTeammatesStaysBoundedToTheNamedPage proves the read answers only for
-// the identifiers the page already projects, and that it reads every batch of a
-// long page. The request puts a recorded spawn edge at its first and last
-// positions, with full batches of unrelated sessions between them, so dropping
-// either the first or a later batch loses a recorded edge instead of passing.
+// the identifiers the page already projects and reads every batch of a long
+// page. The page is exactly three read batches, with a recorded spawn edge at
+// its first position, in the middle of the second batch, and at its last
+// position; every other position is an unrelated Claude root with no recorded
+// spawn. A stride that skips a batch — first, middle, or last — therefore loses
+// an edge instead of passing.
 func TestClaudeTeammatesStaysBoundedToTheNamedPage(t *testing.T) {
 	fixture := loadClaudeTeammatesFixture(t)
 	byName := make(map[string]claudeTeammateCase, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {
 		byName[testCase.Name] = testCase
 	}
-	probes := []struct {
+	batch := store.ClaudeTeammateReadBatchSize
+	placements := []struct {
 		position string
+		index    int
+		batch    int
 		testCase claudeTeammateCase
 	}{
-		{position: "first", testCase: byName[fixture.BatchProbe.First]},
-		{position: "last", testCase: byName[fixture.BatchProbe.Last]},
+		{position: "first", index: 0, batch: 1, testCase: byName[fixture.BatchProbe.First]},
+		{position: "middle", index: batch + batch/2, batch: 2, testCase: byName[fixture.BatchProbe.Middle]},
+		{position: "last", index: 3*batch - 1, batch: 3, testCase: byName[fixture.BatchProbe.Last]},
 	}
-	for _, probe := range probes {
-		if !probe.testCase.WantPresent || probe.testCase.Subject == "" {
-			t.Fatalf("batch-probe case %q must be a recorded spawn edge", probe.testCase.Name)
+	seeded := make(map[string]bool, len(placements))
+	for _, placement := range placements {
+		testCase := placement.testCase
+		if !testCase.WantPresent || testCase.Subject == "" {
+			t.Fatalf("batch-probe case %q must be a recorded spawn edge", testCase.Name)
 		}
-	}
-	if probes[0].testCase.Subject == probes[1].testCase.Subject {
-		t.Fatalf("batch-probe cases %q and %q name the same session; the probe needs two distinct edges", probes[0].testCase.Name, probes[1].testCase.Name)
+		if seeded[testCase.Subject] {
+			t.Fatalf("batch-probe cases must name distinct sessions; %q is repeated", testCase.Subject)
+		}
+		seeded[testCase.Subject] = true
+		if got := placement.index/batch + 1; got != placement.batch {
+			t.Fatalf("the %s probe's position %d falls in batch %d, not the intended batch %d; the page layout and the read batch size disagree", placement.position, placement.index, got, placement.batch)
+		}
 	}
 
 	db := storetest.Open(t)
-	seedClaudeTeammateScenario(t, db, probes[0].testCase)
-	seedClaudeTeammateScenario(t, db, probes[1].testCase)
+	for _, placement := range placements {
+		seedClaudeTeammateScenario(t, db, placement.testCase)
+	}
 
-	// Derived from the production batch size: two full batches of unrelated
-	// sessions sit between the two edges, so the page spans three batches.
-	librarySize := 2 * store.ClaudeTeammateReadBatchSize
-	entries := make([]ingest.StoreEntry, 0, librarySize)
-	evidence := make([]ingest.ClaudeTranscriptEvidence, 0, librarySize)
+	// One identifier per position of the three batches, then the probe subjects
+	// at the positions above. Every other identifier names an unrelated Claude
+	// root that records an identity but no spawn, so it must contribute nothing.
+	requested := make([]string, 3*batch)
+	for i := range requested {
+		requested[i] = fmt.Sprintf("30000000-0000-4000-8000-%012d", i)
+	}
+	placed := make(map[int]bool, len(placements))
+	for _, placement := range placements {
+		requested[placement.index] = placement.testCase.Subject
+		placed[placement.index] = true
+	}
+	entries := make([]ingest.StoreEntry, 0, len(requested)-len(placements))
+	evidence := make([]ingest.ClaudeTranscriptEvidence, 0, len(requested)-len(placements))
 	projectHash := schema.ProjectHash(fmt.Sprintf("%064d", 7))
-	requested := make([]string, 0, librarySize+2)
-	requested = append(requested, probes[0].testCase.Subject)
-	for i := 0; i < librarySize; i++ {
-		id := fmt.Sprintf("30000000-0000-4000-8000-%012d", i)
+	for i, id := range requested {
+		if placed[i] {
+			continue
+		}
 		sourcePath := fmt.Sprintf("/captured/library/%s.jsonl", id)
 		entries = append(entries, claudeTeammateStoreEntry(t, id, schema.HarnessClaudeCode, sourcePath, nil, projectHash))
 		evidence = append(evidence, claudeTeammateEvidence(t, "", sourcePath, &claudeTeammateIdentityFixture{Team: "unrelated", Name: id}, nil))
-		requested = append(requested, id)
 	}
-	requested = append(requested, probes[1].testCase.Subject)
 	if err := db.InsertSessions(context.Background(), entries); err != nil {
 		t.Fatalf("seed unrelated library: %v", err)
 	}
 	if err := db.SaveClaudeEvidence(context.Background(), evidence, nil); err != nil {
 		t.Fatalf("seed unrelated evidence: %v", err)
 	}
-	batches := (len(requested) + store.ClaudeTeammateReadBatchSize - 1) / store.ClaudeTeammateReadBatchSize
-	if batches < 3 {
-		t.Fatalf("the bounded-page probe covers %d batches of %d identifiers; it must span at least three so a skipped middle or last batch is observable", batches, store.ClaudeTeammateReadBatchSize)
+	batches := (len(requested) + batch - 1) / batch
+	if batches != 3 {
+		t.Fatalf("the bounded-page probe covers %d batches of %d identifiers, want exactly three so each probe sits in its own batch", batches, batch)
 	}
 
 	got, err := db.ClaudeTeammates(context.Background(), requested)
 	if err != nil {
 		t.Fatalf("ClaudeTeammates across %d batches: %v", batches, err)
 	}
-	for _, probe := range probes {
-		teammate, present := got[probe.testCase.Subject]
+	for _, placement := range placements {
+		teammate, present := got[placement.testCase.Subject]
 		if !present {
-			t.Fatalf("the %s recorded spawn edge %q is missing from a %d-identifier page spanning %d batches of %d; a batch was skipped or the page was not read in full", probe.position, probe.testCase.Subject, len(requested), batches, store.ClaudeTeammateReadBatchSize)
+			t.Fatalf("the %s recorded spawn edge %q (batch %d of %d) is missing from a %d-identifier page spanning %d batches of %d; a batch was skipped or the page was not read in full", placement.position, placement.testCase.Subject, placement.batch, batches, len(requested), batches, batch)
 		}
-		if want := claudeTeammateWant(t, probe.testCase); teammate != want {
-			t.Fatalf("the %s recorded spawn edge %q = %+v, want %+v", probe.position, probe.testCase.Subject, teammate, want)
+		if want := claudeTeammateWant(t, placement.testCase); teammate != want {
+			t.Fatalf("the %s recorded spawn edge %q = %+v, want %+v", placement.position, placement.testCase.Subject, teammate, want)
 		}
 	}
-	if len(got) != len(probes) {
-		t.Fatalf("teammates across %d unrelated sessions = %+v, want exactly the two recorded spawn edges", librarySize, got)
+	if len(got) != len(placements) {
+		t.Fatalf("teammates across a %d-identifier page = %+v, want exactly the three recorded spawn edges", len(requested), got)
 	}
 }
 
