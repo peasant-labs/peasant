@@ -4,15 +4,15 @@ import { useEffect, useState } from 'react';
 import {
   fetchSessionCommits,
   fetchSessionPullRequests,
-  type DetectedPullRequest,
-  type SessionCommit,
+  type CommitInfo,
+  type SessionPullRequest,
 } from '@/lib/api/session-extras';
 
 export interface SessionExtras {
   /** The commits recorded for this session; empty when it produced none. */
-  commits: SessionCommit[];
+  commits: CommitInfo[];
   /** The pull requests a recorded `gh pr create` created; empty when none. */
-  pullRequests: DetectedPullRequest[];
+  pullRequests: SessionPullRequest[];
 }
 
 const NO_EXTRAS: SessionExtras = { commits: [], pullRequests: [] };

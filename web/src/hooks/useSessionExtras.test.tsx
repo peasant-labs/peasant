@@ -14,6 +14,13 @@ const COMMIT = {
   authorTime: 1752566400000,
 };
 
+/** The decoded row: the contract carries millisecond times as bigint. */
+const DECODED_COMMIT = {
+  ...COMMIT,
+  commitTime: BigInt(COMMIT.commitTime),
+  authorTime: BigInt(COMMIT.authorTime),
+};
+
 const PULL_REQUEST = {
   owner: 'storytold',
   repo: 'photocraft',
@@ -29,6 +36,13 @@ const NEXT_COMMIT = {
   authorEmail: 'ada@example.test',
   commitTime: 1752566520000,
   authorTime: 1752566520000,
+};
+
+/** The decoded row: the contract carries millisecond times as bigint. */
+const DECODED_NEXT_COMMIT = {
+  ...NEXT_COMMIT,
+  commitTime: BigInt(NEXT_COMMIT.commitTime),
+  authorTime: BigInt(NEXT_COMMIT.authorTime),
 };
 
 const NEXT_PULL_REQUEST = {
@@ -77,7 +91,7 @@ describe('useSessionExtras', () => {
     const { result } = renderHook(() => useSessionExtras('sess-extras-1'));
 
     await waitFor(() => {
-      expect(result.current.commits).toEqual([COMMIT]);
+      expect(result.current.commits).toEqual([DECODED_COMMIT]);
       expect(result.current.pullRequests).toEqual([PULL_REQUEST]);
     });
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
@@ -126,7 +140,7 @@ describe('useSessionExtras', () => {
       pending['sess-extras-4'].pullRequests.resolve(json({ pullRequests: [NEXT_PULL_REQUEST] }));
     });
     await waitFor(() => {
-      expect(result.current.commits).toEqual([NEXT_COMMIT]);
+      expect(result.current.commits).toEqual([DECODED_NEXT_COMMIT]);
       expect(result.current.pullRequests).toEqual([NEXT_PULL_REQUEST]);
     });
 
@@ -152,7 +166,7 @@ describe('useSessionExtras', () => {
       pending['sess-extras-5'].pullRequests.resolve(json({ pullRequests: [NEXT_PULL_REQUEST] }));
     });
     await waitFor(() => {
-      expect(result.current.commits).toEqual([NEXT_COMMIT]);
+      expect(result.current.commits).toEqual([DECODED_NEXT_COMMIT]);
       expect(result.current.pullRequests).toEqual([NEXT_PULL_REQUEST]);
     });
   });

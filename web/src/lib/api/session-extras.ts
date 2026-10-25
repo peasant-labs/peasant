@@ -1,4 +1,10 @@
 import {
+  zSessionCommitsResponse,
+  zSessionPullRequestsResponse,
+  type CommitInfo,
+  type SessionPullRequest,
+} from '@peasant-labs/schema';
+import {
   decodeLocalAnswer,
   localRefusal,
   readLocalAnswer,
@@ -16,38 +22,15 @@ import {
  * request detection reads stored tool calls — it never contacts GitHub. A
  * caller that cannot get an answer simply renders without these extras.
  *
- * The types and guards below are provisional: neither read has a generated
- * contract yet, so they restate the intended row shape by hand. They are
- * replaced by the generated zod schemas once the schema re-pin carries these
- * two routes, and no other module may rely on them in the meantime.
+ * The rows decode through the generated Local API contract. Two local
+ * hardening checks stay here because the contract does not carry them: a pull
+ * request URL must be a GitHub pull request over https (the row renders it as
+ * an external link), and a commit's millisecond times must arrive as JSON safe
+ * integers (the contract's int64 fields would otherwise coerce a string or
+ * fraction into an instant the local read never sent).
  */
 
-/** One commit recorded for a session (`session_commits`, incl. linked worktrees). */
-export interface SessionCommit {
-  hash: string;
-  message: string;
-  authorName: string;
-  authorEmail: string;
-  /** committer date, Unix milliseconds */
-  commitTime: number;
-  /** author date, Unix milliseconds */
-  authorTime: number;
-}
-
-/** One pull request detected in a session's stored tool calls. */
-export interface DetectedPullRequest {
-  owner: string;
-  repo: string;
-  number: number;
-  /** the GitHub pull request URL the recorded command result carried */
-  url: string;
-  /**
-   * the command that supplied the evidence; the server's current value is
-   * `gh_pr_create`, and the contract keeps the field open so a future detector
-   * can report its own command name
-   */
-  source: string;
-}
+export type { CommitInfo, SessionPullRequest };
 
 function sessionCommitsPath(sessionId: string): string {
   return `/api/v1/sessions/${encodeURIComponent(sessionId)}/commits`;
@@ -66,38 +49,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isField(value: unknown): value is string {
-  return typeof value === 'string';
+type LocalParseResult<T> = ReturnType<LocalContract<T>['safeParse']>;
+
+/** Render a schema issue path as `pullRequests[0].owner`. */
+function formatIssuePath(path: readonly PropertyKey[]): string {
+  return path.reduce<string>((text, segment) => {
+    if (typeof segment === 'number') return `${text}[${segment}]`;
+    const name = String(segment);
+    return text ? `${text}.${name}` : name;
+  }, '');
 }
 
 /**
- * A required text field the contract marks `minLength: 1`. An empty value is
- * outside it rather than a legitimate blank: a blank owner, repo, or source
- * would render a row that names no repository and claims no evidence.
+ * Prefix each generated issue with its location. The contract's own message
+ * says what is wrong with a value; without the path a reader cannot tell which
+ * row or field the page refused.
  */
-function isNonEmptyField(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
+function locateIssues<T>(
+  result: { success: true; data: T }
+    | { success: false; error: { issues: readonly { path: readonly PropertyKey[]; message: string }[] } },
+): LocalParseResult<T> {
+  if (result.success) return result;
+  return {
+    success: false,
+    error: {
+      issues: result.error.issues.map((issue) => {
+        const location = formatIssuePath(issue.path);
+        return { message: location ? `${location}: ${issue.message}` : issue.message };
+      }),
+    },
+  };
 }
 
 /**
  * A commit's timestamps arrive as JSON numbers but are int64 millis on the
- * contract. Only safe integers are accepted, so widening them to the
- * transcript's bigint times can never lose precision.
+ * contract. Only safe integers are accepted, so the generated bigint coercion
+ * can never turn a value the local read did not send into an instant.
  */
 function isSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value);
-}
-
-function isSessionCommit(value: unknown): value is SessionCommit {
-  return (
-    isRecord(value) &&
-    isField(value.hash) &&
-    isField(value.message) &&
-    isField(value.authorName) &&
-    isField(value.authorEmail) &&
-    isSafeInteger(value.commitTime) &&
-    isSafeInteger(value.authorTime)
-  );
 }
 
 /**
@@ -121,49 +111,41 @@ function isGithubPullRequestUrl(value: unknown): value is string {
   );
 }
 
-function isDetectedPullRequest(value: unknown): value is DetectedPullRequest {
-  return (
-    isRecord(value) &&
-    isNonEmptyField(value.owner) &&
-    isNonEmptyField(value.repo) &&
-    isSafeInteger(value.number) &&
-    value.number > 0 &&
-    isGithubPullRequestUrl(value.url) &&
-    isNonEmptyField(value.source)
-  );
-}
-
-const sessionCommitsContract: LocalContract<{ commits: SessionCommit[] }> = {
+const sessionCommitsContract: LocalContract<{ commits: CommitInfo[] }> = {
   safeParse(value) {
     if (!isRecord(value) || !Array.isArray(value.commits)) {
       return malformed('the answer has no "commits" array');
     }
-    const invalidRow = value.commits.findIndex((row) => !isSessionCommit(row));
-    if (invalidRow !== -1) {
-      return malformed(`commits[${invalidRow}] is not a commit with hash, message, author, and millisecond timestamps`);
+    const unsafeTimeRow = value.commits.findIndex((row) =>
+      isRecord(row) && (!isSafeInteger(row.commitTime) || !isSafeInteger(row.authorTime)));
+    if (unsafeTimeRow !== -1) {
+      return malformed(
+        `commits[${unsafeTimeRow}] is not a commit with hash, message, author, and millisecond timestamps`,
+      );
     }
-    return { success: true, data: { commits: value.commits } };
+    return locateIssues(zSessionCommitsResponse.safeParse(value));
   },
 };
 
-const sessionPullRequestsContract: LocalContract<{ pullRequests: DetectedPullRequest[] }> = {
+const sessionPullRequestsContract: LocalContract<{ pullRequests: SessionPullRequest[] }> = {
   safeParse(value) {
     if (!isRecord(value) || !Array.isArray(value.pullRequests)) {
       return malformed('the answer has no "pullRequests" array');
     }
-    const invalidRow = value.pullRequests.findIndex((row) => !isDetectedPullRequest(row));
-    if (invalidRow !== -1) {
+    const invalidUrlRow = value.pullRequests.findIndex((row) =>
+      isRecord(row) && !isGithubPullRequestUrl(row.url));
+    if (invalidUrlRow !== -1) {
       return malformed(
-        `pullRequests[${invalidRow}] is not a pull request with owner, repo, a positive number, `
+        `pullRequests[${invalidUrlRow}] is not a pull request with owner, repo, a positive number, `
         + 'a GitHub pull request https URL, and source',
       );
     }
-    return { success: true, data: { pullRequests: value.pullRequests } };
+    return locateIssues(zSessionPullRequestsResponse.safeParse(value));
   },
 };
 
 /** The commits stored for one session; empty when it produced none. */
-export async function fetchSessionCommits(sessionId: string, signal?: AbortSignal): Promise<SessionCommit[]> {
+export async function fetchSessionCommits(sessionId: string, signal?: AbortSignal): Promise<CommitInfo[]> {
   const path = sessionCommitsPath(sessionId);
   const answer = await readLocalAnswer(path, { signal });
   if (!answer.ok) throw localRefusal(path, answer);
@@ -174,7 +156,7 @@ export async function fetchSessionCommits(sessionId: string, signal?: AbortSigna
 export async function fetchSessionPullRequests(
   sessionId: string,
   signal?: AbortSignal,
-): Promise<DetectedPullRequest[]> {
+): Promise<SessionPullRequest[]> {
   const path = sessionPullRequestsPath(sessionId);
   const answer = await readLocalAnswer(path, { signal });
   if (!answer.ok) throw localRefusal(path, answer);

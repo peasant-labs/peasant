@@ -5,8 +5,8 @@ import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniq
 import {
   fetchSessionCommits,
   fetchSessionPullRequests,
-  type DetectedPullRequest,
-  type SessionCommit,
+  type CommitInfo,
+  type SessionPullRequest,
 } from './session-extras';
 
 // The two additive session reads are display-only, so the boundary that matters
@@ -49,10 +49,29 @@ const cases = root.cases.map((row, index) => {
 });
 requireUniqueNames(cases, 'session extras cases');
 
-function answer(caseRow: SessionExtrasCase): Promise<SessionCommit[] | DetectedPullRequest[]> {
+function answer(caseRow: SessionExtrasCase): Promise<CommitInfo[] | SessionPullRequest[]> {
   return caseRow.endpoint === 'commits'
     ? fetchSessionCommits(SESSION_ID)
     : fetchSessionPullRequests(SESSION_ID);
+}
+
+/** One raw commit as the local read carries it: millisecond times are JSON numbers. */
+type RawCommit = Omit<CommitInfo, 'commitTime' | 'authorTime'> & {
+  commitTime: number;
+  authorTime: number;
+};
+
+/** The decoded rows a `rows` case must produce: commit times are the contract's bigint. */
+function expectedRows(caseRow: SessionExtrasCase): CommitInfo[] | SessionPullRequest[] {
+  if (caseRow.endpoint === 'commits') {
+    const { commits } = JSON.parse(caseRow.body) as { commits: RawCommit[] };
+    return commits.map((commit) => ({
+      ...commit,
+      commitTime: BigInt(commit.commitTime),
+      authorTime: BigInt(commit.authorTime),
+    }));
+  }
+  return (JSON.parse(caseRow.body) as { pullRequests: SessionPullRequest[] }).pullRequests;
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -69,10 +88,7 @@ describe('session extra reads', () => {
 
       if (caseRow.expect === 'rows') {
         const rows = await answer(caseRow);
-        const expected = caseRow.endpoint === 'commits'
-          ? (JSON.parse(caseRow.body) as { commits: SessionCommit[] }).commits
-          : (JSON.parse(caseRow.body) as { pullRequests: DetectedPullRequest[] }).pullRequests;
-        expect(rows).toEqual(expected);
+        expect(rows).toEqual(expectedRows(caseRow));
       } else if (caseRow.expect === 'refusal') {
         await expect(answer(caseRow)).rejects.toMatchObject({
           name: 'LocalRequestError',

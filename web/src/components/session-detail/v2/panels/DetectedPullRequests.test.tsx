@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import type { SessionPullRequest } from '@/lib/api/session-extras';
 import { DetectedPullRequests } from './DetectedPullRequests';
 
 afterEach(() => cleanup());
 
-const PULL_REQUESTS = [
+const PULL_REQUESTS: SessionPullRequest[] = [
   {
     owner: 'storytold',
     repo: 'photocraft',
@@ -82,5 +83,17 @@ describe('DetectedPullRequests', () => {
     expect(evidence.textContent).toBe('detected from gh pr create, glab_MR_create; not verified by village.');
     expect(evidence.querySelectorAll('.font-mono')).toHaveLength(1);
     expect(section.textContent?.match(/detected from/g)).toHaveLength(1);
+  });
+
+  it('renders no evidence sentence when the list is empty', () => {
+    // The caller gates on length, so this is a prop-contract guard: an empty
+    // list must never render the dangling "detected from ;" sentence.
+    render(<DetectedPullRequests pullRequests={[]} />);
+
+    const section = screen.getByRole('region', { name: /pull requests/i });
+    expect(section).toHaveTextContent('pull requests');
+    expect(section.textContent).not.toContain('detected from');
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(section.querySelector('p:not(.v2-eyebrow)')).toBeNull();
   });
 });

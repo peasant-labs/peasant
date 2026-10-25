@@ -11,8 +11,8 @@ const DATED = {
   message: 'feat(canvas): port TurnRow',
   authorName: 'Ada Lovelace',
   authorEmail: 'ada@example.test',
-  commitTime: 1752566460000,
-  authorTime: 1752566400000,
+  commitTime: BigInt(1752566460000),
+  authorTime: BigInt(1752566400000),
 };
 
 const UNDATED = {
@@ -20,12 +20,12 @@ const UNDATED = {
   message: 'fix(api): keep the refusal reason',
   authorName: 'Ada Lovelace',
   authorEmail: 'ada@example.test',
-  commitTime: 0,
-  authorTime: 0,
+  commitTime: BigInt(0),
+  authorTime: BigInt(0),
 };
 
 describe('toTranscriptGitContext', () => {
-  it('keeps a recorded millisecond time, widened to the contract bigint', () => {
+  it('keeps a recorded millisecond time as the contract bigint', () => {
     const context = toTranscriptGitContext([DATED]);
 
     expect(context?.commits).toEqual([
@@ -34,8 +34,8 @@ describe('toTranscriptGitContext', () => {
         message: DATED.message,
         authorName: DATED.authorName,
         authorEmail: DATED.authorEmail,
-        commitTime: BigInt(DATED.commitTime),
-        authorTime: BigInt(DATED.authorTime),
+        commitTime: DATED.commitTime,
+        authorTime: DATED.authorTime,
       },
     ]);
   });
@@ -60,7 +60,7 @@ describe('toTranscriptGitContext', () => {
     const context = toTranscriptGitContext([DATED, UNDATED]);
     const [dated, undated] = context?.commits ?? [];
 
-    expect(dated).toHaveProperty('commitTime', BigInt(DATED.commitTime));
+    expect(dated).toHaveProperty('commitTime', DATED.commitTime);
     expect(undated).not.toHaveProperty('commitTime');
   });
 

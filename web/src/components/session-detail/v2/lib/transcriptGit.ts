@@ -1,5 +1,4 @@
-import type { CommitInfo } from '@peasant-labs/fairtrade/ui';
-import type { SessionCommit } from '@/lib/api/session-extras';
+import type { CommitInfo } from '@peasant-labs/schema';
 
 /**
  * The transcript's git compatibility shape (`payload.gitContext`), which is the
@@ -7,16 +6,16 @@ import type { SessionCommit } from '@/lib/api/session-extras';
  * `session.git.commits`, which is what lights up the viewer's header commit
  * count and its per-turn checkpoint markers.
  *
- * The local commits read carries the same fields as JSON numbers; the contract's
- * int64 times are bigint, so they are widened here at the single boundary
- * between the local read and the viewer's wire input.
+ * The local commits read decodes to the same `CommitInfo` the contract carries,
+ * so the times are already bigint at this boundary; only the unknown-time
+ * omission remains.
  *
  * Returns `undefined` — not an empty object — when the session produced no
  * commits, so the viewer renders neither a count of zero nor a checkpoint
  * cluster. A session with no commits is unchanged by this feature.
  */
 export function toTranscriptGitContext(
-  commits: SessionCommit[],
+  commits: CommitInfo[],
 ): { commits: CommitInfo[] } | undefined {
   if (commits.length === 0) return undefined;
   return { commits: commits.map(toTranscriptCommit) };
@@ -46,14 +45,17 @@ type UndatedCommit = Omit<CommitInfo, 'commitTime' | 'authorTime'> & {
  * that deliberate narrowness, kept at the single boundary where the local read
  * meets the viewer's wire input.
  */
-function toTranscriptCommit(commit: SessionCommit): CommitInfo {
+function toTranscriptCommit(commit: CommitInfo): CommitInfo {
   const row: UndatedCommit = {
     hash: commit.hash,
     message: commit.message,
     authorName: commit.authorName,
     authorEmail: commit.authorEmail,
   };
-  if (commit.commitTime !== 0) row.commitTime = BigInt(commit.commitTime);
-  if (commit.authorTime !== 0) row.authorTime = BigInt(commit.authorTime);
+  // The project targets a pre-ES2020 lib, so the zero instant is built rather
+  // than written as a bigint literal.
+  const unrecorded = BigInt(0);
+  if (commit.commitTime !== unrecorded) row.commitTime = commit.commitTime;
+  if (commit.authorTime !== unrecorded) row.authorTime = commit.authorTime;
   return row as CommitInfo;
 }

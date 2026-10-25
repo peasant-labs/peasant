@@ -1,11 +1,15 @@
 'use client';
 
 import { useId } from 'react';
-import type { DetectedPullRequest } from '@/lib/api/session-extras';
+import type { SessionPullRequest } from '@/lib/api/session-extras';
 
 interface DetectedPullRequestsProps {
-  /** The pull requests detected in this session's stored tool calls; the caller skips an empty list. */
-  pullRequests: DetectedPullRequest[];
+  /**
+   * The pull requests detected in this session's stored tool calls. The caller
+   * skips an empty list; one that arrives anyway still renders no evidence
+   * sentence.
+   */
+  pullRequests: SessionPullRequest[];
 }
 
 /**
@@ -19,7 +23,7 @@ function evidenceLabel(source: string): string {
 }
 
 /** The distinct sources behind these rows, in the order they appear. */
-function evidenceSources(pullRequests: DetectedPullRequest[]): string[] {
+function evidenceSources(pullRequests: SessionPullRequest[]): string[] {
   return [...new Set(pullRequests.map((pr) => pr.source))];
 }
 
@@ -58,9 +62,16 @@ export function DetectedPullRequests({ pullRequests }: DetectedPullRequestsProps
           </li>
         ))}
       </ul>
-      <p className="mt-1 text-[14px] leading-5 text-ink-3">
-        detected from <span className="font-mono">{labels.join(', ')}</span>; not verified by village.
-      </p>
+      {/*
+        Rows always carry a non-empty source, so an empty label list means an
+        empty list: skip the sentence rather than render "detected from ;".
+        The caller gates on length today; the prop contract holds either way.
+      */}
+      {labels.length > 0 && (
+        <p className="mt-1 text-[14px] leading-5 text-ink-3">
+          detected from <span className="font-mono">{labels.join(', ')}</span>; not verified by village.
+        </p>
+      )}
     </section>
   );
 }
