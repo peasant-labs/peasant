@@ -561,7 +561,13 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
 		hasObservation := turnObservations[t.Index].present
-		if t.SourceEntryRef == "" && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
+		// A managed generation puts a source ref on every entry, including a
+		// control record that carries no conversation. Those empty system turns
+		// are headers over an empty body in the viewer, so suppress them while
+		// keeping every other source-referenced empty turn as the evidence
+		// boundary it is.
+		suppressibleEmpty := t.SourceEntryRef == "" || (t.Role == schema.RoleSystem && t.EntryType == schema.EntryTypeSystem)
+		if suppressibleEmpty && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)
