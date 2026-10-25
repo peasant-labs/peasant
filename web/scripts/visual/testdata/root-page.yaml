@@ -35,3 +35,35 @@ family:
 trends:
   name: eight-active-weeks-show-the-summary-and-weekly-bars
   weeklySessions: [1, 2, 1, 3, 2, 3, 2, 3]
+
+# The populated project pickers behind the same shell. Each case is mounted on
+# the real route from `route`; `home-projects` reaches its picker through the
+# actual browse-by choice, while the other two open their picker route directly.
+# Every case renders the mock server's recorded project library: `destination`
+# is the href prefix of one row, `linkPrefix` is that row's start of accessible
+# name, and `breadcrumb` is the trail the page shows (empty on Home).
+projectPages:
+  requiredNames: [home-projects, map-projects, review-projects]
+  cases:
+    - name: home-projects
+      route: /
+      view: home-project-browse
+      hero: sessions
+      browseView: project
+      destination: /sessions
+      linkPrefix: Open the sessions of
+      breadcrumb: []
+    - name: map-projects
+      route: /map/
+      view: map-picker
+      hero: map
+      destination: /map
+      linkPrefix: Open the map of
+      breadcrumb: [home, map]
+    - name: review-projects
+      route: /review/
+      view: review-picker
+      hero: changes
+      destination: /review
+      linkPrefix: Open the changes of
+      breadcrumb: [home, changes]

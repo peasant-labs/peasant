@@ -10,7 +10,7 @@
 # requiredNames is the deletion guard. It names every state the bar and the
 # popup must reach; a case leaves only by removing its name here too, and a case
 # without a name here is refused.
-mobileCases: [not-published, ready-to-publish, update-with-new-turns]
+mobileCases: [not-published, ready-to-publish, update-with-new-turns, unpublished-outside-ingestion-selection]
 # Different request paths can finish on the same canonical result. Only these
 # named pairs/groups may share a screenshot; every case still asserts its own
 # rendered copy and exact request body before the non-empty image gate runs.
