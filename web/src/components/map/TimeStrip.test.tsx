@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import { TimeStrip, type TimeStripBranch, type TimeStripDay } from './TimeStrip';
 
 const DAYS: TimeStripDay[] = [
@@ -18,7 +18,7 @@ describe('TimeStrip', () => {
   it('renders one bar per day on the intensity ramp', () => {
     const { container } = render(<TimeStrip days={DAYS} />);
     expect(
-      screen.getByRole('img', { name: 'Session activity: 13 sessions over 4 days' }),
+      screen.getByRole('group', { name: 'Session activity: 13 sessions over 4 days' }),
     ).toBeInTheDocument();
     expect(container.querySelectorAll('.bg-intensity-0')).toHaveLength(1); // zero day
     expect(container.querySelectorAll('.bg-intensity-4')).toHaveLength(1); // max day
@@ -68,9 +68,16 @@ describe('TimeStrip', () => {
     expect(onScrub).toHaveBeenCalledWith(2);
   });
 
+  it('keeps its scrub buttons reachable: the strip is a labelled group, not an image', () => {
+    render(<TimeStrip days={DAYS} scrubbable />);
+    const strip = screen.getByRole('group', { name: /Session activity/ });
+    expect(screen.queryByRole('img', { name: /Session activity/ })).toBeNull();
+    expect(within(strip).getAllByRole('button').length).toBeGreaterThan(0);
+  });
+
   it('anchors the sparkline right so overflow clips history, never "now"', () => {
     render(<TimeStrip days={DAYS} />);
-    const sparkline = screen.getByRole('img', { name: /Session activity/ });
+    const sparkline = screen.getByRole('group', { name: /Session activity/ });
     expect(sparkline.className).toContain('justify-end');
     expect(sparkline.className).toContain('overflow-hidden');
   });

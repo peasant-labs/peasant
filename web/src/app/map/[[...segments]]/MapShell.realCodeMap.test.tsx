@@ -554,6 +554,12 @@ describe('MapShell - REAL CodeMap composition + interaction', () => {
     await user.keyboard('{End}{ArrowDown}');
     expect(document.activeElement).toBe(rows.at(-1));
     expandable!.focus();
+    // A folder the grain opens starts open (fairtrade 0.0.43): close it first,
+    // so the walk below starts from a closed folder whatever the grain chose.
+    if (expandable!.getAttribute('aria-expanded') === 'true') {
+      await user.keyboard('{ArrowLeft}');
+    }
+    expect(expandable).toHaveAttribute('aria-expanded', 'false');
     await user.keyboard('{ArrowRight}');
     expect(expandable).toHaveAttribute('aria-expanded', 'true');
     await user.keyboard('{ArrowRight}');

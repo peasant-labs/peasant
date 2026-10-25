@@ -86,7 +86,10 @@ export function TimeStrip({
           branch chips hang off. */}
       <div
         className="relative flex h-8 min-w-0 flex-1 items-end justify-end gap-[2px] overflow-hidden"
-        role="img"
+        // A group, not an image: when the strip scrubs, its day bars are
+        // buttons, and an image role would hide them from assistive tech while
+        // they stay in the tab order.
+        role="group"
         aria-label={`Session activity: ${total} sessions over ${days.length} days`}
       >
         {days.map((day, i) => {

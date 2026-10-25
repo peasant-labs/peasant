@@ -276,6 +276,15 @@ describe('MapShell — one map without lenses', () => {
     // One view, no lens fallback: nothing to draw as edges, nodes still render.
     expect(node).toHaveAttribute('data-structure-edges', '0');
     expect(node).toHaveAttribute('data-activity-edges', '0');
+    // Nothing was parsed, so every line count is an unmeasured 0: the
+    // navigator states none instead of "0 lines".
+    expect(lastCodeMapProps().lineCounts).toBe('unknown');
+  });
+
+  it('keeps line counts measured when the project parsed', async () => {
+    render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
+    await screen.findByTestId('map-canvas');
+    expect(lastCodeMapProps().lineCounts).toBe('measured');
   });
 
   it('shows an error line when the graph call fails', async () => {

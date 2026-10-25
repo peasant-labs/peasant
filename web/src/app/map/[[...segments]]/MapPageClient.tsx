@@ -461,6 +461,10 @@ export function MapShell({
           </div>
         )}
         legend={false}
+        // Peasant measures line counts only for code it parsed. With no parsed
+        // language every node's count is an unmeasured 0, so the navigator
+        // states none rather than "0 lines".
+        lineCounts={graph && graph.parsedLanguages.length === 0 ? 'unknown' : 'measured'}
       />
 
       {/* While scrubbed, say which point in history the map shows + a way
