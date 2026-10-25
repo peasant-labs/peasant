@@ -25,6 +25,8 @@ type pairRepairSettlingFixtures struct {
 		Name               string `yaml:"name"`
 		StoredTranscript   string `yaml:"stored_transcript"`
 		NativeSource       string `yaml:"native_source"`
+		Force              bool   `yaml:"force"`
+		WantRepaired       bool   `yaml:"want_repaired"`
 		DiagnosticMentions string `yaml:"diagnostic_mentions"`
 	} `yaml:"cases"`
 }
@@ -36,15 +38,16 @@ const damagedSourceTranscript = `{"type":"user","message":{"role":"user","conten
 {"type":"assistant","message":{"role":"assistant","content":
 `
 
-// TestUnrepairableSourceSettles proves a session whose stored pair cannot be
-// rebuilt costs one actionable diagnostic and then nothing.
+const priorPreview = "the last good entries"
+
+// TestUnrepairableSourceSettles holds what a stored session costs while its
+// saved pair cannot be rebuilt.
 //
-// The saved copy is still readable: its last-good entries keep serving, which
-// is why the failure must not be counted as a failed ingest again and again.
-// The second harvest asserts both halves — no new diagnostic and no new
-// parse or index work — because a run that stopped warning while still
-// re-reading and one that stopped working while still warning are each wrong
-// in a way the other assertion cannot see.
+// A repaired session indexes once and the next harvest reports nothing. An
+// unrepairable one reports its cause once, keeps serving the stored copy, and
+// reports nothing on the next harvest. Both runs are asserted: a run that
+// stopped warning while still failing and one that stayed silent while still
+// working are each wrong in a way the other cannot see.
 func TestUnrepairableSourceSettles(t *testing.T) {
 	var fixtures pairRepairSettlingFixtures
 	if err := testutil.DecodeFixtureYAML(pairRepairSettlingFixtureData, &fixtures); err != nil {
@@ -54,6 +57,19 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || names[fixture.Name] {
 			t.Fatalf("empty or duplicate pair-repair settling fixture %q", fixture.Name)
+		}
+		switch fixture.StoredTranscript {
+		case "valid", "malformed":
+		default:
+			t.Fatalf("fixture %s names unknown stored transcript %q", fixture.Name, fixture.StoredTranscript)
+		}
+		switch fixture.NativeSource {
+		case "valid", "missing", "malformed":
+		default:
+			t.Fatalf("fixture %s names unknown native source %q", fixture.Name, fixture.NativeSource)
+		}
+		if !fixture.WantRepaired && fixture.DiagnosticMentions == "" {
+			t.Fatalf("fixture %s asserts no diagnostic but names none to match", fixture.Name)
 		}
 		names[fixture.Name] = true
 	}
@@ -75,10 +91,14 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 				t.Fatal(err)
 			}
 			valid := []byte(missingPairNativeTranscript)
-			nativeBytes := valid
-			if fixture.NativeSource == "malformed" {
-				nativeBytes = []byte(damagedSourceTranscript)
+			malformed := []byte(damagedSourceTranscript)
+			pick := func(kind string) []byte {
+				if kind == "malformed" {
+					return malformed
+				}
+				return valid
 			}
+			nativeBytes := pick(fixture.NativeSource)
 			nativePath := "/synthetic/native/" + id.String() + ".jsonl"
 			if fixture.NativeSource != "missing" {
 				if err := memfs.WriteFile(nativePath, nativeBytes, 0600); err != nil {
@@ -98,8 +118,8 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
 				t.Fatal(err)
 			}
-			// The row records the identity of the last usable pair. The pair on
-			// disk then fails to match it, which is what selects the repair.
+			// The row records the identity of the last usable pair, so the pair
+			// on disk is what decides whether a repair is owed.
 			pair, err := ingest.NewManagedArtifact(encoded, valid)
 			if err != nil {
 				t.Fatal(err)
@@ -108,12 +128,11 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			if len(mirrored) != 1 || mirrored[0].Err != nil || !mirrored[0].Mirrored {
 				t.Fatalf("seed stored artifact identity: %+v", mirrored)
 			}
-			var priorPreview = "the last good entries"
 			writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 				SessionID: id, IndexVersion: 1, IndexerVersion: 15, IndexedAtMs: 1700000000000,
 				Result: indexformat.V1{Entries: []schema.SessionEntry{{
 					SessionID: id, EntryIndex: 0,
-					EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &priorPreview,
+					EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: ptrTo(priorPreview),
 				}}},
 			}})
 			if len(writes) != 1 || writes[0].Err != nil {
@@ -124,10 +143,7 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 				t.Fatalf("seed readable prior entries: %+v, %v", beforeEntries, err)
 			}
 
-			storedBytes := valid
-			if fixture.StoredTranscript == "malformed" {
-				storedBytes = []byte(damagedSourceTranscript)
-			}
+			storedBytes := pick(fixture.StoredTranscript)
 			storedPath := filepath.Join(ingest.SessionDir(testOutputDir, testutil.TestHostSlug, id.String(), ""), id.String()+"--transcript.jsonl")
 			if err := memfs.WriteFile(storedPath, storedBytes, 0600); err != nil {
 				t.Fatal(err)
@@ -142,6 +158,7 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 				ingest.HarnessClaudeCode: makeStubAdapter(nil, map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh}),
 			}
 			cfg := makePipelineConfig(testOutputDir)
+			cfg.Force = fixture.Force
 			run := func() *ingest.PipelineResult {
 				t.Helper()
 				pipeline, err := newTestPipeline(memfs, testutil.DefaultGitResolver(), adapters, cfg,
@@ -156,41 +173,87 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 				}
 				return result
 			}
+			// Only this session's diagnostics count: the golden database carries
+			// other rows this case says nothing about.
+			reported := func(result *ingest.PipelineResult, errorType string) []ingest.DiagnosticEntry {
+				t.Helper()
+				var found []ingest.DiagnosticEntry
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.ErrorType == errorType && strings.Contains(diagnostic.Location, id.String()) {
+						found = append(found, diagnostic)
+					}
+				}
+				return found
+			}
 
 			first := run()
-			if first.Summary.Errors != 0 {
-				t.Fatalf("a readable stored copy was counted as a failed ingest: %+v", first.Summary)
-			}
-			var reported []ingest.DiagnosticEntry
-			for _, diagnostic := range first.Diagnostics {
-				if diagnostic.ErrorType == "pair_repair_unavailable" {
-					reported = append(reported, diagnostic)
+
+			if fixture.WantRepaired {
+				if first.Summary.Indexed != 1 || first.Summary.Errors != 0 {
+					t.Fatalf("an available source was not rebuilt: %+v, diagnostics=%+v", first.Summary, first.Diagnostics)
 				}
+				if _, err := memfs.ReadFile(ingest.SessionMetadataPath(testOutputDir, testutil.TestHostSlug, id.String(), "")); err != nil {
+					t.Fatalf("the rebuilt pair has no metadata sidecar: %v", err)
+				}
+				second := run()
+				if second.Summary.Indexed != 0 || second.Summary.Errors != 0 {
+					t.Fatalf("a rebuilt pair was rebuilt again: %+v", second.Summary)
+				}
+				if repeated := reported(second, "pair_repair_unavailable"); len(repeated) != 0 {
+					t.Fatalf("a rebuilt pair still reported a repair: %+v", repeated)
+				}
+				return
 			}
-			if len(reported) != 1 {
-				t.Fatalf("want exactly one pair_repair_unavailable diagnostic, got %+v", first.Diagnostics)
+
+			// The stored bytes are what the case says they are: a decorative
+			// column would let a case pass without exercising its shape.
+			kept, err := memfs.ReadFile(storedPath)
+			if err != nil || !reflect.DeepEqual(kept, storedBytes) {
+				t.Fatalf("the stored transcript changed: %q, %v", kept, err)
 			}
-			if !strings.Contains(reported[0].Message, fixture.DiagnosticMentions) {
-				t.Fatalf("diagnostic %q does not name %q", reported[0].Message, fixture.DiagnosticMentions)
+
+			firstReports := reported(first, "pair_repair_unavailable")
+			if len(firstReports) != 1 {
+				t.Fatalf("want exactly one pair_repair_unavailable for this session, got %+v", first.Diagnostics)
 			}
-			if reported[0].Remediation == "" {
+			if !strings.Contains(firstReports[0].Message, fixture.DiagnosticMentions) {
+				t.Fatalf("diagnostic %q does not name %q", firstReports[0].Message, fixture.DiagnosticMentions)
+			}
+			if firstReports[0].Remediation == "" {
 				t.Fatal("diagnostic carries no remediation")
+			}
+			// An explicit retry is the remediation the diagnostic names, so it
+			// must still fail when the repair did not take.
+			if fixture.Force && first.Summary.Errors == 0 {
+				t.Fatalf("an explicit forced repair that did not take looked successful: %+v", first.Summary)
+			}
+			if !fixture.Force && first.Summary.Errors != 0 {
+				t.Fatalf("a readable stored copy was counted as a failed ingest: %+v", first.Summary)
 			}
 
 			second := run()
+			if fixture.Force {
+				// An explicit retry is never settled: it fails every time until
+				// the source is repaired, and the last-good entries still hold.
+				if second.Summary.Errors == 0 || len(reported(second, "pair_repair_unavailable")) != 1 {
+					t.Fatalf("a forced retry fell silent while the repair still failed: %+v", second.Summary)
+				}
+				if kept, err := database.ListEntries(ctx, id); err != nil || !reflect.DeepEqual(beforeEntries, kept) {
+					t.Fatalf("a forced retry changed the last-good entries: %+v, %v", kept, err)
+				}
+				return
+			}
 			if second.Summary.Errors != 0 {
 				t.Fatalf("the settled session failed a second ingest: %+v", second.Summary)
 			}
-			for _, diagnostic := range second.Diagnostics {
-				if diagnostic.ErrorType == "pair_repair_unavailable" || diagnostic.ErrorType == "content_recovery_unavailable" {
-					t.Fatalf("the settled refusal was reported again: %+v", second.Diagnostics)
-				}
+			if repeated := reported(second, "pair_repair_unavailable"); len(repeated) != 0 {
+				t.Fatalf("the settled refusal was reported again: %+v", repeated)
+			}
+			if repeated := reported(second, "content_recovery_unavailable"); len(repeated) != 0 {
+				t.Fatalf("content recovery repeated the settled refusal: %+v", repeated)
 			}
 			if got := indexLogErrors(t, database, id); got != 0 {
 				t.Fatalf("the settled session added %d index error row(s)", got)
-			}
-			if _, err := memfs.ReadFile(storedPath); err != nil {
-				t.Fatalf("the readable stored copy was removed: %v", err)
 			}
 			afterEntries, err := database.ListEntries(ctx, id)
 			if err != nil || !reflect.DeepEqual(beforeEntries, afterEntries) {
@@ -200,6 +263,9 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			if err != nil || state == nil {
 				t.Fatalf("read settled index state: %+v, %v", state, err)
 			}
+			if state.IndexerVersion != 15 || state.IndexedInputHash != nil {
+				t.Fatalf("a settled refusal changed the stored state: %+v", state)
+			}
 			reason, err := database.ReadSourceUnavailability(ctx, id)
 			if err != nil || reason == nil {
 				t.Fatalf("the settled refusal was not recorded: %v, %v", reason, err)
@@ -207,3 +273,5 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 		})
 	}
 }
+
+func ptrTo(value string) *string { return &value }

@@ -1,0 +1,36 @@
+# Which stored-content failures count as the source bytes being unusable.
+#
+# Only these settle. A store, locator, or write fault may clear on its own, so it
+# must keep reporting until it does.
+required_names:
+  - missing_source
+  - wrapped_missing_source
+  - truncated_record
+  - invalid_record
+  - locator_fault
+  - store_write_fault
+
+cases:
+  - name: missing_source
+    kind: not_exist
+    want: true
+
+  - name: wrapped_missing_source
+    kind: wrapped_not_exist
+    want: true
+
+  - name: truncated_record
+    kind: malformed
+    want: true
+
+  - name: invalid_record
+    kind: malformed_with_cause
+    want: true
+
+  - name: locator_fault
+    kind: locator
+    want: false
+
+  - name: store_write_fault
+    kind: store
+    want: false

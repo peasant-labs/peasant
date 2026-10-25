@@ -340,22 +340,17 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 	})
 }
 
-// settleRepairResult keeps a refused repair out of the failed-ingest count only
-// for a session that already has a completed stored index. That stored copy
-// still serves, so the refusal is a diagnostic, not a failure. A row with no
-// completed index has never served anything: its failed install is a real
-// error and stays one.
-func (p *Pipeline) settleRepairResult(ctx context.Context, sid SessionID, result *workerResult) {
+// hasCompletedStoredIndex reports whether an index attempt was ever stamped for
+// the session, which is what makes a stored copy exist to serve while its pair
+// cannot be rebuilt. A row with no stamp has never served anything, so its
+// failed install stays a real error.
+func (p *Pipeline) hasCompletedStoredIndex(ctx context.Context, sid SessionID) bool {
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
-		return
+		return false
 	}
 	state, err := reader.ReadIndexState(ctx, sid)
-	if err != nil || state == nil || state.IndexerVersion <= 0 {
-		return
-	}
-	result.result.Error = nil
-	result.result.Status = DiffUnchanged
+	return err == nil && state != nil && state.IndexerVersion > 0
 }
 
 // pairRepairInScope applies the run's explicit harness, session and age filters
@@ -672,11 +667,16 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		// A repair has no usable stored pair by definition: when the native
 		// source cannot be acquired, the failure is the outcome. Falling back
 		// would try to read the missing or damaged pair and hide the error.
-		// The diagnostic carries the cause, so the session is not also counted
-		// as a failed ingest: the stored copy is still readable and still
-		// serves, and a settled refusal must not fail every later harvest.
 		p.reportPairRepairUnavailable(ctx, entry.Session.SessionID, string(entry.Session.SourcePath), acquisition, writeLane)
-		p.settleRepairResult(ctx, entry.Session.SessionID, &result)
+		// A routine harvest reports this refusal instead of failing on it, but
+		// only while a completed stored index is what still serves. An explicit
+		// --force run is the remediation the diagnostic names, so it keeps the
+		// failure: a person or a script has to be able to tell that the repair
+		// did not take.
+		if !p.config.Force && p.hasCompletedStoredIndex(ctx, entry.Session.SessionID) {
+			result.result.Error = nil
+			result.result.Status = DiffUnchanged
+		}
 		return result
 	}
 	// The manual index refresh (harvest index --force) names its own
