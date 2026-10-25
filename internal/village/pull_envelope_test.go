@@ -34,11 +34,12 @@ type pullNegotiateFixture struct {
 }
 
 type pullEnvelopeReadFixture struct {
-	Name      string             `yaml:"name"`
-	Surface   string             `yaml:"surface"`
-	Body      string             `yaml:"body"`
-	Want      []pullPersonExpect `yaml:"want"`
-	WantError string             `yaml:"wantError"`
+	Name      string                     `yaml:"name"`
+	Envelope  schema.PushContractVersion `yaml:"envelope"`
+	Surface   string                     `yaml:"surface"`
+	Body      string                     `yaml:"body"`
+	Want      []pullPersonExpect         `yaml:"want"`
+	WantError string                     `yaml:"wantError"`
 }
 
 type pullPersonExpect struct {
@@ -108,8 +109,9 @@ func TestNegotiatePull_WindowOverlapFixtures(t *testing.T) {
 	}
 }
 
-// Every pull GET reads a person in either envelope; anything that is not a
-// profile reads as anonymous and keeps no identity.
+// Every pull GET reads a person in the negotiated envelope (either envelope
+// when none was negotiated); anything that is not a profile reads as anonymous
+// and keeps no identity.
 func TestPullGETs_ReadPersonFixtures(t *testing.T) {
 	id := mustTranscriptID(t)
 	for _, c := range loadPullEnvelopeFixtures(t).Read {
@@ -127,6 +129,7 @@ func TestPullGETs_ReadPersonFixtures(t *testing.T) {
 				_, _ = io.WriteString(w, strings.ReplaceAll(c.Body, "TRANSCRIPT", id.String()))
 			})
 			client := village.NewVillageClient(srv.URL, testAPIKey, nil)
+			client.SetPullEnvelope(c.Envelope)
 
 			var people []schema.VillagePublicOwner
 			var err error

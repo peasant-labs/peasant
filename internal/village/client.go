@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"sync/atomic"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -92,6 +93,10 @@ type VillageClient struct {
 	// before every push-side HTTP attempt. The push CLI uses it to distinguish
 	// failures that happened wholly locally from runs that may have reached the village.
 	beforeRequest func()
+	// pullEnvelope is the pull envelope version NegotiatePull (or the caller
+	// through SetPullEnvelope) settled for this client; the pull GETs decode
+	// exactly that envelope. Nil means not negotiated.
+	pullEnvelope atomic.Pointer[schema.PushContractVersion]
 }
 
 // NewVillageClient creates a VillageClient targeting the given base URL with the

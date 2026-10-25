@@ -117,27 +117,28 @@ func ClassifyContract(cli, min, current schema.PushContractVersion) ContractNego
 	return NegotiationWithin
 }
 
-// NegotiatePullWindow intersects the CLI's pull window [cliMin, cliCurrent]
-// with the village-advertised window [min, current] and returns the newest
-// envelope version both sides share. An empty village bound is open, as in
-// ClassifyContract. ok is false when the windows do not overlap; the caller
-// handles an unadvertised window (both bounds empty) before calling.
+// NegotiatePullWindow returns the pull envelope the village serves when this
+// CLI reads it. A pull request names no version, so the village serves its
+// current envelope to every caller: the one envelope that matters is the
+// village's advertised current version, and this CLI accepts the village only
+// when that version lies inside the CLI's window [cliMin, cliCurrent]. The
+// village's own floor says what older CLIs it still claims to serve and does
+// not change what this CLI receives.
 //
-// The pull surface is negotiated by overlap, not by the CLI's single version,
-// because a pull request names no version: the village serves its envelope and
-// this CLI reads every envelope in its own window.
+// A newer current version is refused even when the village's window reaches
+// back into the CLI's: on a 0.x contract a minor bump is not additive (pull
+// contract 0.3.0 removed the account strings 0.2.0 carried), so this CLI cannot
+// read an envelope newer than its own. ok is false when current is empty or
+// outside the window; the caller handles an unadvertised window (both bounds
+// empty) before calling.
 func NegotiatePullWindow(cliMin, cliCurrent, min, current schema.PushContractVersion) (schema.PushContractVersion, bool) {
-	low, high := cliMin, cliCurrent
-	if min != "" && compareSemver(min, low) > 0 {
-		low = min
-	}
-	if current != "" && compareSemver(current, high) < 0 {
-		high = current
-	}
-	if compareSemver(low, high) > 0 {
+	if current == "" || compareSemver(current, cliMin) < 0 || compareSemver(current, cliCurrent) > 0 {
 		return "", false
 	}
-	return high, true
+	if min != "" && compareSemver(min, current) > 0 {
+		return "", false
+	}
+	return current, true
 }
 
 // CanDowngrade reports whether this CLI can serialize the older `target`

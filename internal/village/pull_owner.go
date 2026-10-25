@@ -46,10 +46,43 @@ func legacyPublicOwner(id string, username *string) schema.VillagePublicOwner {
 	return PublicOwnerForReader(schema.NewVillagePublicProfile(schema.VillageUUID(id), name, nil, nil))
 }
 
+// PublicOwnerPullEnvelope is the first pull envelope that carries a person as
+// a public owner. A row read under it or a later envelope must carry the
+// public owner; the 0.2.0 account strings are refused rather than trusted as a
+// profile.
+const PublicOwnerPullEnvelope schema.PushContractVersion = "0.3.0"
+
+// SetPullEnvelope records the pull envelope the village serves, for a client
+// whose caller negotiated it on another client. NegotiatePull sets it itself.
+func (c *VillageClient) SetPullEnvelope(envelope schema.PushContractVersion) {
+	if envelope == "" {
+		c.pullEnvelope.Store(nil)
+		return
+	}
+	c.pullEnvelope.Store(&envelope)
+}
+
+// negotiatedPullEnvelope is the envelope this client decodes, or empty when it
+// was never negotiated.
+func (c *VillageClient) negotiatedPullEnvelope() schema.PushContractVersion {
+	if envelope := c.pullEnvelope.Load(); envelope != nil {
+		return *envelope
+	}
+	return ""
+}
+
 // resolvePullPerson selects the person from whichever envelope arrived. The
 // 0.3.0 field wins when both are present, so a stray account string never
 // overrides an anonymous value. A row carrying neither shape is refused.
-func resolvePullPerson(current json.RawMessage, legacyID, legacyUsername *string, currentField, legacyField string) (schema.VillagePublicOwner, error) {
+//
+// envelope is the negotiated pull envelope. Under PublicOwnerPullEnvelope or
+// later only the public owner is read; a row with only the 0.2.0 account
+// strings is refused. An empty envelope (a stored pull file, written by any
+// earlier CLI) reads either shape.
+func resolvePullPerson(envelope schema.PushContractVersion, current json.RawMessage, legacyID, legacyUsername *string, currentField, legacyField string) (schema.VillagePublicOwner, error) {
+	if current == nil && legacyID != nil && envelope != "" && compareSemver(envelope, PublicOwnerPullEnvelope) >= 0 {
+		return schema.VillagePublicOwner{}, fmt.Errorf("read pull envelope: pull contract %s carries %s, but the row has only the %s account strings of pull contract 0.2.0; refusing to read an account string as a profile", envelope, currentField, legacyField)
+	}
 	if current != nil {
 		var owner schema.VillagePublicOwner
 		if err := json.Unmarshal(current, &owner); err != nil {
@@ -73,8 +106,8 @@ type pullTranscriptInfoWire struct {
 	OwnerUsername *string         `json:"ownerUsername"`
 }
 
-func (w *pullTranscriptInfoWire) info() (schema.PullTranscriptInfo, error) {
-	owner, err := resolvePullPerson(w.Owner, w.OwnerUserID, w.OwnerUsername, "owner", "ownerUserId")
+func (w *pullTranscriptInfoWire) info(envelope schema.PushContractVersion) (schema.PullTranscriptInfo, error) {
+	owner, err := resolvePullPerson(envelope, w.Owner, w.OwnerUserID, w.OwnerUsername, "owner", "ownerUserId")
 	if err != nil {
 		return schema.PullTranscriptInfo{}, fmt.Errorf("transcript %s: %w", w.TranscriptID, err)
 	}
@@ -91,8 +124,8 @@ type pullAnnotationWire struct {
 	AuthorUsername *string         `json:"authorUsername"`
 }
 
-func (w *pullAnnotationWire) annotation() (schema.PullAnnotation, error) {
-	author, err := resolvePullPerson(w.Author, w.AuthorUserID, w.AuthorUsername, "author", "authorUserId")
+func (w *pullAnnotationWire) annotation(envelope schema.PushContractVersion) (schema.PullAnnotation, error) {
+	author, err := resolvePullPerson(envelope, w.Author, w.AuthorUserID, w.AuthorUsername, "author", "authorUserId")
 	if err != nil {
 		return schema.PullAnnotation{}, fmt.Errorf("annotation %s: %w", w.ID, err)
 	}
@@ -108,29 +141,32 @@ type pullListResponseWire struct {
 	Total       int                      `json:"total"`
 }
 
-// DecodePullTranscriptInfo reads one pull transcript metadata view, served by
-// the village or stored as a pull metadata snapshot, in either supported
-// envelope.
+// DecodePullTranscriptInfo reads one stored pull metadata snapshot, written
+// by this or any earlier CLI, in either supported envelope.
 func DecodePullTranscriptInfo(data []byte) (schema.PullTranscriptInfo, error) {
+	return decodePullTranscriptInfo(data, "")
+}
+
+func decodePullTranscriptInfo(data []byte, envelope schema.PushContractVersion) (schema.PullTranscriptInfo, error) {
 	var wire pullTranscriptInfoWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return schema.PullTranscriptInfo{}, err
 	}
-	return wire.info()
+	return wire.info(envelope)
 }
 
-// DecodePullAnnotation reads one pull annotation, served by the village or
-// stored as a pulled annotation payload, in either supported envelope.
+// DecodePullAnnotation reads one stored pulled annotation payload, written by
+// this or any earlier CLI, in either supported envelope.
 func DecodePullAnnotation(data []byte) (schema.PullAnnotation, error) {
 	var wire pullAnnotationWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return schema.PullAnnotation{}, err
 	}
-	return wire.annotation()
+	return wire.annotation("")
 }
 
 // decodePullAnnotations reads the annotations endpoint's bare array.
-func decodePullAnnotations(data []byte) ([]schema.PullAnnotation, error) {
+func decodePullAnnotations(data []byte, envelope schema.PushContractVersion) ([]schema.PullAnnotation, error) {
 	var wire []pullAnnotationWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return nil, err
@@ -140,7 +176,7 @@ func decodePullAnnotations(data []byte) ([]schema.PullAnnotation, error) {
 	}
 	out := make([]schema.PullAnnotation, 0, len(wire))
 	for i := range wire {
-		annotation, err := wire[i].annotation()
+		annotation, err := wire[i].annotation(envelope)
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +186,7 @@ func decodePullAnnotations(data []byte) ([]schema.PullAnnotation, error) {
 }
 
 // decodePullListResponse reads one page of the pullable listing.
-func decodePullListResponse(data []byte) (*schema.PullListResponse, error) {
+func decodePullListResponse(data []byte, envelope schema.PushContractVersion) (*schema.PullListResponse, error) {
 	var wire pullListResponseWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return nil, err
@@ -160,7 +196,7 @@ func decodePullListResponse(data []byte) (*schema.PullListResponse, error) {
 		out.Transcripts = make([]schema.PullTranscriptInfo, 0, len(wire.Transcripts))
 	}
 	for i := range wire.Transcripts {
-		info, err := wire.Transcripts[i].info()
+		info, err := wire.Transcripts[i].info(envelope)
 		if err != nil {
 			return nil, err
 		}
