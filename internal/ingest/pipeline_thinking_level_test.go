@@ -166,7 +166,7 @@ func TestPipelineThinkingLevel(t *testing.T) {
 			if observations != len(tc.Turns) {
 				t.Fatalf("assistant observations=%d, want %d; entries=%+v", observations, len(tc.Turns), entries)
 			}
-			provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+			provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 			session, err := provider.SessionByID(ctx, string(sid))
 			if err != nil {
 				t.Fatal(err)

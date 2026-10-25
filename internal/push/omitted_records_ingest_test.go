@@ -337,7 +337,7 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			// What a reader is served. The placeholder note reaches every
 			// transcript UI on the existing wire fields, so the served detail
 			// is where it has to be visible.
-			provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+			provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 			session, err := provider.SessionByID(ctx, omittedRecordsSessionID)
 			if err != nil {
 				t.Fatalf("the served session detail refused a session holding a large record: %v", err)

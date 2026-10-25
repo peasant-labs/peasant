@@ -24,13 +24,13 @@ cases:
             - {path: src/hidden.go, interaction: questioned, turn_count: 8, human_turns: 5}
             - {path: src/shared.go, interaction: questioned, turn_count: 7, human_turns: 5}
     expected:
-      file_paths: [src/selected.go, src/shared.go]
-      file_session_counts: {src/selected.go: 1, src/shared.go: 1}
-      file_total_turns: {src/selected.go: 3, src/shared.go: 2}
-      last_engaged_session: {src/selected.go: 11111111-1111-1111-1111-111111111111, src/shared.go: 11111111-1111-1111-1111-111111111111}
-      trail_session_ids: [11111111-1111-1111-1111-111111111111]
-      suggestion_paths: [src/selected.go]
-      absent_session_ids: [22222222-2222-2222-2222-222222222222]
+      file_paths: [src/hidden.go, src/shared.go, src/selected.go]
+      file_session_counts: {src/hidden.go: 1, src/shared.go: 2, src/selected.go: 1}
+      file_total_turns: {src/hidden.go: 8, src/shared.go: 9, src/selected.go: 3}
+      last_engaged_session: {src/hidden.go: 22222222-2222-2222-2222-222222222222, src/shared.go: 22222222-2222-2222-2222-222222222222, src/selected.go: 11111111-1111-1111-1111-111111111111}
+      trail_session_ids: [22222222-2222-2222-2222-222222222222, 11111111-1111-1111-1111-111111111111]
+      suggestion_paths: [src/hidden.go, src/shared.go, src/selected.go]
+      absent_session_ids: []
       arrays_non_null: true
 
   - name: hidden_only
@@ -51,13 +51,13 @@ cases:
           files:
             - {path: src/hidden.go, interaction: questioned, turn_count: 8, human_turns: 5}
     expected:
-      file_paths: []
-      file_session_counts: {}
-      file_total_turns: {}
-      last_engaged_session: {}
-      trail_session_ids: []
-      suggestion_paths: []
-      absent_session_ids: [22222222-2222-2222-2222-222222222222]
+      file_paths: [src/hidden.go]
+      file_session_counts: {src/hidden.go: 1}
+      file_total_turns: {src/hidden.go: 8}
+      last_engaged_session: {src/hidden.go: 22222222-2222-2222-2222-222222222222}
+      trail_session_ids: [22222222-2222-2222-2222-222222222222]
+      suggestion_paths: [src/hidden.go]
+      absent_session_ids: []
       arrays_non_null: true
 
   - name: all_mode_baseline
@@ -91,9 +91,9 @@ cases:
       arrays_non_null: true
 
   - name: policy_error
-    classification: must-fail
-    provenance: {source: requirement, ref: familiarity-visible-conflict}
-    mutation: {description: give the project conflicting remote and name branch rules before aggregation}
+    classification: must-pass
+    provenance: {source: requirement, ref: familiarity-ignores-ingest-selection}
+    mutation: {description: keep a conflicting saved selector and prove it cannot fail the aggregation}
     input:
       project_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       selection:
@@ -112,7 +112,14 @@ cases:
           files:
             - {path: src/conflict.go, interaction: read, turn_count: 1, human_turns: 0}
     expected:
-      error_contains: conflicting project branch rules
+      file_paths: [src/conflict.go]
+      file_session_counts: {src/conflict.go: 1}
+      file_total_turns: {src/conflict.go: 1}
+      last_engaged_session: {src/conflict.go: 11111111-1111-1111-1111-111111111111}
+      trail_session_ids: [11111111-1111-1111-1111-111111111111]
+      suggestion_paths: []
+      absent_session_ids: []
+      arrays_non_null: true
 
   - name: selected_session_survives_hidden_trail_cap
     classification: must-pass
@@ -139,22 +146,23 @@ cases:
         - {id: 00000000-0000-0000-0000-00000000000b, start_ms: 1710000001000, duration_ms: 1000, files: [{path: src/hidden-11.go, interaction: read, turn_count: 1, human_turns: 0}]}
         - {id: ffffffff-ffff-ffff-ffff-ffffffffffff, start_ms: 1700000000000, duration_ms: 1000, files: [{path: src/selected-cap.go, interaction: read, turn_count: 1, human_turns: 0}]}
     expected:
-      file_paths: [src/selected-cap.go]
-      file_session_counts: {src/selected-cap.go: 1}
-      file_total_turns: {src/selected-cap.go: 1}
-      last_engaged_session: {src/selected-cap.go: ffffffff-ffff-ffff-ffff-ffffffffffff}
-      trail_session_ids: [ffffffff-ffff-ffff-ffff-ffffffffffff]
+      file_paths:
+        - src/hidden-1.go
+        - src/hidden-2.go
+        - src/hidden-3.go
+        - src/hidden-4.go
+        - src/hidden-5.go
+        - src/hidden-6.go
+        - src/hidden-7.go
+        - src/hidden-8.go
+        - src/hidden-9.go
+        - src/hidden-10.go
+        - src/hidden-11.go
+        - src/selected-cap.go
+      file_session_counts: {src/hidden-1.go: 1, src/hidden-2.go: 1, src/hidden-3.go: 1, src/hidden-4.go: 1, src/hidden-5.go: 1, src/hidden-6.go: 1, src/hidden-7.go: 1, src/hidden-8.go: 1, src/hidden-9.go: 1, src/hidden-10.go: 1, src/hidden-11.go: 1, src/selected-cap.go: 1}
+      file_total_turns: {src/hidden-1.go: 1, src/hidden-2.go: 1, src/hidden-3.go: 1, src/hidden-4.go: 1, src/hidden-5.go: 1, src/hidden-6.go: 1, src/hidden-7.go: 1, src/hidden-8.go: 1, src/hidden-9.go: 1, src/hidden-10.go: 1, src/hidden-11.go: 1, src/selected-cap.go: 1}
+      last_engaged_session: {src/hidden-1.go: 00000000-0000-0000-0000-000000000001, src/hidden-2.go: 00000000-0000-0000-0000-000000000002, src/hidden-3.go: 00000000-0000-0000-0000-000000000003, src/hidden-4.go: 00000000-0000-0000-0000-000000000004, src/hidden-5.go: 00000000-0000-0000-0000-000000000005, src/hidden-6.go: 00000000-0000-0000-0000-000000000006, src/hidden-7.go: 00000000-0000-0000-0000-000000000007, src/hidden-8.go: 00000000-0000-0000-0000-000000000008, src/hidden-9.go: 00000000-0000-0000-0000-000000000009, src/hidden-10.go: 00000000-0000-0000-0000-00000000000a, src/hidden-11.go: 00000000-0000-0000-0000-00000000000b, src/selected-cap.go: ffffffff-ffff-ffff-ffff-ffffffffffff}
+      trail_session_ids: [00000000-0000-0000-0000-000000000001, 00000000-0000-0000-0000-000000000002, 00000000-0000-0000-0000-000000000003, 00000000-0000-0000-0000-000000000004, 00000000-0000-0000-0000-000000000005, 00000000-0000-0000-0000-000000000006, 00000000-0000-0000-0000-000000000007, 00000000-0000-0000-0000-000000000008, 00000000-0000-0000-0000-000000000009, 00000000-0000-0000-0000-00000000000a]
       suggestion_paths: []
-      absent_session_ids:
-        - 00000000-0000-0000-0000-000000000001
-        - 00000000-0000-0000-0000-000000000002
-        - 00000000-0000-0000-0000-000000000003
-        - 00000000-0000-0000-0000-000000000004
-        - 00000000-0000-0000-0000-000000000005
-        - 00000000-0000-0000-0000-000000000006
-        - 00000000-0000-0000-0000-000000000007
-        - 00000000-0000-0000-0000-000000000008
-        - 00000000-0000-0000-0000-000000000009
-        - 00000000-0000-0000-0000-00000000000a
-        - 00000000-0000-0000-0000-00000000000b
+      absent_session_ids: []
       arrays_non_null: true

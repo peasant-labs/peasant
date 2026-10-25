@@ -99,8 +99,9 @@ type Server struct {
 	// for a route owner that registers later, before Serve; handlers read it.
 	groupedMu       sync.RWMutex
 	groupedVariants map[GroupedRouteVariant]GroupedVariantSource
-	// groupedRevision is the selection revision captured at startup. A member
+	// groupedRevision is the browsing revision captured at startup. A member
 	// scope issued under a different revision is refused rather than replayed.
+	// It never changes with the saved kickstart selection.
 	groupedRevision string
 	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
 	memberScopes *memberScopeCache
@@ -253,11 +254,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	if s.cfg.Store != nil {
 		homeStore = s.cfg.Store
 	}
-	identityResolver := s.cfg.RepositoryIdentityResolver
-	if identityResolver == nil {
-		identityResolver = ingest.NewGitRepositoryIdentityResolver()
-	}
-	sh.home = &homeHandler{reader: homeStore, sync: sh, publishing: ph, resolver: identityResolver}
+	sh.home = &homeHandler{reader: homeStore, publishing: ph}
 	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
 	observations := &collectiveObservationHandler{service: collectiveobservations.New(collectiveobservations.Dependencies{Store: s.cfg.Store, ConfigHome: s.cfg.ConfigHome, LocallyHeldTranscriptIDs: observationinventory.Held(s.cfg.Store), FetchTimeout: fetchTimeout})}
 	observations.register(mux)

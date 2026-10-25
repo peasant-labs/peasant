@@ -226,10 +226,17 @@ the server serves the newly built assets before you trust a screenshot or a comp
   IDs.
 - `ingest.SelectionMatcher` is the canonical matcher. Ingest, push, and prune already use it. Do
   not implement its semantics again in React.
-- A selection scopes discovery and lists only. The scoped surfaces are the WS/REST session and
-  project lists, the Home and Map project pickers, the command palette, and the share chooser. A
-  selection is not an access-control boundary over stored data.
+- A selection scopes INGESTION only: source discovery, the branch/exclusion rules that decide what
+  is imported next, and the hook/CLI push and prune choices. It does NOT filter stored browsing.
+  Home, Map/Review, the WS/REST session and project lists, the command palette, grouped
+  search/member replay, counts, empty states, and the share chooser show every ingested row
+  (subject only to origin scope, index readiness, and the explicit query/account bounds those
+  surfaces already apply). A restrictive, empty, excluded, stale, or invalid saved selection must
+  never hide an ingested row or produce a false all-hidden state.
 - A session that is already ingested stays reachable through a direct deep link.
+- Publication metadata may still report that the saved selector leaves a session out of future
+  hook/CLI publication scope (`outsideSelection`); that report must never be used to hide a
+  browsing row or to widen automatic publication.
 - Ingest filters each newly discovered, unselected session before the session is stored.
 - Only a manual `peasant prune` removes historical rows. A narrower selection never deletes data
   by itself.
@@ -263,10 +270,12 @@ the server serves the newly built assets before you trust a screenshot or a comp
   hook publishes. Attaching is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
   transcripts already published. Do not add a path that publishes without one of these, and do
   not create a binding for the developer.
-- One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
-  user-facing lists show only the configured selection. An explicit session selection must not
-  widen visibility to the sibling sessions of its project. Apply the boundary server-side.
-  Derive the counts and the empty states from the same visible set.
+- The former #3 browsing-filter requirement is superseded by the ratified policy that ingestion
+  selection controls ingestion only. When `mode` is `selected`, the user-facing lists still show
+  every ingested row (subject only to origin scope, index readiness, and their explicit
+  query/account bounds); an explicit session selection must not widen or narrow what is browsable.
+  Derive counts and empty states from that same stored set. Do not reintroduce a saved-selection
+  browse filter.
 
 ## Git history and session UX
 

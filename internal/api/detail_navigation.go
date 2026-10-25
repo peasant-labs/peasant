@@ -26,9 +26,9 @@ func knownRelationshipTarget(state schema.RelationshipTargetState) bool {
 // on a validated detail payload to the additive read-only navigation the local
 // host renders before the first main turn.
 //
-// Local resolution uses the stored exact target identifier, never list
-// selection: a parent that is stored but filtered out of discovery stays
-// linkable. A known target that is absent from the store becomes
+// Local resolution uses the stored exact target identifier, never a browsing
+// list: a parent that is stored stays linkable. A known target that is absent
+// from the store becomes
 // known_unavailable with NO identifier, so an unresolved link can never leak a
 // hidden title or route to the wrong session. An unknown or conflicting target
 // state stays explicit rather than guessed. An explicit-none relationship

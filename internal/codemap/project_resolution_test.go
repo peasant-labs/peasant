@@ -15,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -173,11 +172,9 @@ func TestResolveProject_CanonicalAndLegacyIdentity(t *testing.T) {
 					t.Fatalf("seed project %s: %v", project.Hash, err)
 				}
 			}
-			visibility, err := sessionvisibility.New(fixtureCase.Input.Selection)
-			if err != nil {
-				t.Fatalf("selection policy: %v", err)
-			}
-			service := codemap.NewService(database, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder(), visibility)
+			// The fixture records a selection to prove resolution ignores it: an
+			// ingested project resolves whether or not the saved selector admits it.
+			service := codemap.NewService(database, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder())
 			payload, err := service.ResolveProject(context.Background(), fixtureCase.Input.Identity)
 			if fixtureCase.Classification == testcase.MustFail {
 				assertProjectResolutionError(t, err, fixtureCase.Expected)

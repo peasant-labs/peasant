@@ -38,10 +38,7 @@ func TestSyncGroupedViewIsOptInAndFlatRouteUnchanged(t *testing.T) {
 	}, 2)
 	helperGroupDropMetrics(t, db, "agent-sync-b2")
 
-	policy, err := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
 	provider := NewStoreDataProvider(db, policy)
 	base := startHelperGroupServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{Selection: config.SelectionConfig{Mode: config.SelectionModeAll}}, Provider: provider})
 

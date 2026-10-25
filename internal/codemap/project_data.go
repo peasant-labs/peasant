@@ -6,9 +6,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/schema"
 )
 
@@ -49,49 +46,21 @@ func (s *Service) loadProjectData(ctx context.Context, projectHash schema.Projec
 	if err != nil {
 		return nil, err
 	}
-	visibleSessions := make([]sessionRow, 0, len(sessions))
-	visibleIDs := make(map[string]bool, len(sessions))
-	for _, session := range sessions {
-		visible, visibilityErr := s.visibility.Visible(sessionvisibility.Candidate{
-			SessionID:   ingest.SessionID(session.id),
-			Harness:     defaults.Harness(session.harness),
-			GitRemote:   session.gitRemote,
-			ProjectName: session.projectName,
-			ClonePath:   s.resolveSessionClonePath(session.gitWorktree, session.projectName),
-			GitBranch:   session.gitBranch,
-		})
-		if visibilityErr != nil {
-			return nil, visibilityErr
-		}
-		if visible {
-			visibleSessions = append(visibleSessions, session)
-			visibleIDs[session.id] = true
-		}
-	}
-	sessions = visibleSessions
 	metrics, err := s.queryMetrics(ctx, projectHash)
 	if err != nil {
 		return nil, err
 	}
-	metrics = filterMetricRows(metrics, visibleIDs)
 	commits, err := s.queryCommits(ctx, projectHash)
 	if err != nil {
 		return nil, err
 	}
-	commits = filterCommitRows(commits, visibleIDs)
 	ledger, err := s.queryAssociationLedger(ctx, projectHash)
 	if err != nil {
 		return nil, err
 	}
-	ledger = filterCommitRows(ledger, visibleIDs)
 	labels, err := s.queryEffectiveLabels(ctx, projectHash)
 	if err != nil {
 		return nil, err
-	}
-	for sessionID := range labels {
-		if !visibleIDs[sessionID] {
-			delete(labels, sessionID)
-		}
 	}
 	tasks, err := s.loadTasks(ctx, cwd, sessions)
 	if err != nil {
@@ -129,26 +98,6 @@ func (s *Service) loadProjectData(ctx context.Context, projectHash schema.Projec
 		pd.editedByID[id] = sortedDistinct(files)
 	}
 	return pd, nil
-}
-
-func filterMetricRows(rows map[string]metricRow, visibleIDs map[string]bool) map[string]metricRow {
-	filtered := make(map[string]metricRow, len(visibleIDs))
-	for sessionID, row := range rows {
-		if visibleIDs[sessionID] {
-			filtered[sessionID] = row
-		}
-	}
-	return filtered
-}
-
-func filterCommitRows(rows []commitRow, visibleIDs map[string]bool) []commitRow {
-	filtered := make([]commitRow, 0, len(rows))
-	for _, row := range rows {
-		if visibleIDs[row.sessionID] {
-			filtered = append(filtered, row)
-		}
-	}
-	return filtered
 }
 
 // taskSummary maps a taskData to its wire form, attaching the session-level

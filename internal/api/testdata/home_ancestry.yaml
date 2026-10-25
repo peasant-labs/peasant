@@ -39,15 +39,20 @@ cases:
     query: parentSessionId=sess_b
     ids: [sess_latest]
     children: [0]
+  # The three cases below retain their required-name families and their saved
+  # selector inputs. Selection is ingest-only, so an ingested parent and its
+  # children stay reachable and an unusable selector still serves the page.
   - name: selected-parent-only
     selected: [sess_a]
     query: parentSessionId=sess_a
-    ids: []
-    children: []
+    ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
+    children: [0, 1, 0, 0]
   - name: hidden-parent
     selected: [sess_b]
     query: parentSessionId=sess_a
-    status: 404
+    ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
+    children: [0, 1, 0, 0]
   - name: invalid-selection
     invalidSelection: true
-    status: 500
+    ids: [sess_a, sess_b, sess_context, sess_none]
+    children: [4, 1, 0, 0]

@@ -132,10 +132,7 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	if err != nil {
 		return fmt.Errorf("web startup: load config %q: %w; the server stopped before exposing discovery with default selection, so fix config.yaml or run `peasant kickstart` and retry", cfgPath, err)
 	}
-	visibility, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		return fmt.Errorf("web startup: selection policy: %w", err)
-	}
+	visibility := sessionvisibility.New(cfg.Selection)
 
 	// Apply CLI overrides for mock data store
 	if mockDataStore != "" {

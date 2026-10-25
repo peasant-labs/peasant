@@ -10,7 +10,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -357,7 +356,7 @@ func newFixtureService(t *testing.T, repo gitops.Repository) (*codemap.Service, 
 	t.Helper()
 	s := storetest.Open(t)
 	seedActivityFixture(t, s)
-	svc := codemap.NewService(s, func(string) gitops.Repository { return repo }, codegraph.NewGraphBuilder(), sessionvisibility.All())
+	svc := codemap.NewService(s, func(string) gitops.Repository { return repo }, codegraph.NewGraphBuilder())
 	return svc, s
 }
 

@@ -1,8 +1,8 @@
 cases:
   - name: hidden_best_visible_next_limit_1
     classification: must-pass
-    provenance: {source: requirement, ref: selection-visible-search-limit}
-    mutation: {description: hide the highest-ranked row while requesting one visible result}
+    provenance: {source: requirement, ref: ingest-selection-does-not-narrow-search}
+    mutation: {description: keep the highest-ranked row outside the saved selection and request one result}
     input:
       query: needle
       limit: 1
