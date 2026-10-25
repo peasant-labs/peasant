@@ -1,0 +1,55 @@
+# The two additive session-extra reads. Each case is one Local API answer for
+# one endpoint; `expect` names what the fetch helper must do with it:
+#   rows     decoded to the endpoint's row list (numbers stay numbers)
+#   refusal  rejects with the server's own non-2xx reason
+#   contract rejects because the answer is outside the row shape
+requiredNames:
+  - commits-recorded
+  - commits-empty
+  - commits-unknown-session
+  - commits-outside-contract
+  - pull-requests-detected
+  - pull-requests-empty
+  - pull-requests-outside-contract
+  - pull-requests-number-not-an-integer
+cases:
+  - name: commits-recorded
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":1752566460000,"authorTime":1752566400000},{"hash":"1b2c3d4e5f60","message":"fix(api): keep the refusal reason","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":1752566520000,"authorTime":1752566520000}]}'
+    expect: rows
+  - name: commits-empty
+    endpoint: commits
+    status: 200
+    body: '{"commits":[]}'
+    expect: rows
+  - name: commits-unknown-session
+    endpoint: commits
+    status: 404
+    body: '{"error":"session not found"}'
+    expect: refusal
+  - name: commits-outside-contract
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow"}]}'
+    expect: contract
+  - name: pull-requests-detected
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: rows
+  - name: pull-requests-empty
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[]}'
+    expect: rows
+  - name: pull-requests-outside-contract
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-number-not-an-integer
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":"42","url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract

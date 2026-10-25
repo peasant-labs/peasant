@@ -19,6 +19,7 @@ import {
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
 import { useTheme } from '@/hooks/useTheme';
+import { useSessionExtras } from '@/hooks/useSessionExtras';
 import '@xyflow/react/dist/style.css';
 import { FeedbackPanel, Skeleton, type MenuItem } from '@/lib/ft-ui';
 import { useChannel } from '@/contexts/WebSocketContext';
@@ -35,6 +36,7 @@ import { sessionsHref, transcriptHref, EarlierHistoryParam, PublishParam, Transc
 import { useEntryLabels } from './lib/useEntryLabels';
 import { relationshipLinkHref } from './lib/relationshipLink';
 import { useTranscriptReadingState } from './lib/useTranscriptReadingState';
+import { toTranscriptGitContext } from './lib/transcriptGit';
 import {
   clearScopeQuery,
   collectFileTouches,
@@ -48,6 +50,7 @@ import {
 } from './lib/scopeTurns';
 import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { TurnTouchedFiles } from './panels/TurnTouchedFiles';
+import { DetectedPullRequests } from './panels/DetectedPullRequests';
 import { adaptQualitySessions } from '@/lib/quality/types';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
 import { SessionNotIndexed } from './SessionNotIndexed';
@@ -127,6 +130,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Authorized current-target navigation from the flat local read, kept separate
   // from the durable payload it was read beside.
   const relationshipNavigation = detail?.relationshipNavigation;
+  // The session's own commits and detected pull requests. These are additive,
+  // display-only reads beside the transcript: both degrade to empty on failure.
+  const { commits: sessionCommits, pullRequests } = useSessionExtras(sessionId);
 
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -359,8 +365,12 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // adapter-options boundary, which cooks it into usable source/parent links.
     const { relationshipNavigation, ...durableDetail } = detail;
     const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
+    // Commits ride in as the legacy-compatible `gitContext.commits` shape, which
+    // the adapter cooks into `session.git.commits` — the session-level rows the
+    // viewer renders as its header commit count and its checkpoint markers.
+    // Everything else on the payload is unchanged.
     const adapted = adaptTranscript(
-      { ...durableDetail, turns: visibleTurns },
+      { ...durableDetail, turns: visibleTurns, gitContext: toTranscriptGitContext(sessionCommits) },
       undefined,
       analytics,
       adapterOptions,
@@ -377,7 +387,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       ...adapted,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
     };
-  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation]);
+  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation, sessionCommits]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -571,6 +581,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             }}
             streamPrelude={streamPrelude}
             headerActions={headerActions}
+            // Detected pull requests sit under the meta row as evidence: the
+            // viewer only gives the list a place, the host owns its wording.
+            // Omitted entirely when none were detected, so no empty section
+            // appears on the sessions this feature does not touch.
+            pullRequests={
+              pullRequests.length > 0 ? (
+                <DetectedPullRequests pullRequests={pullRequests} />
+              ) : undefined
+            }
             // The page owns the header's actions: the viewer's own share and
             // more menus and its outcome chip are off, and the tab strip carries
             // the search trigger.
