@@ -144,34 +144,6 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 	writeEncodedJSON(w, response, "The publication state")
 }
 
-// selectionMembership reports the saved ingest/push selector's verdict for
-// exactly the named sessions, for publication metadata only. It never withholds
-// a row: an unavailable or unusable selector reports false (not admitted) for
-// every name, which is how Peasant's ingest path treats a selector it cannot
-// apply. No browsing surface may use this to narrow a list.
-func (h *publishingHandler) selectionMembership(ctx context.Context, ids []string) map[string]bool {
-	membership := make(map[string]bool, len(ids))
-	if h.selection == nil {
-		// Without a store-backed selector there is no saved selection to report;
-		// the pre-existing behaviour treats every named session as admitted.
-		for _, id := range ids {
-			membership[id] = true
-		}
-		return membership
-	}
-	scope, err := h.selection.SelectionScopeByID(ctx, ids)
-	if err != nil {
-		for _, id := range ids {
-			membership[id] = false
-		}
-		return membership
-	}
-	for _, id := range ids {
-		membership[id] = scope[id]
-	}
-	return membership
-}
-
 // localPublications is shared by the by-ID deep-link read and bounded Home
 // pages. The caller supplies selection membership; no audience HTTP runs here.
 func (h *publishingHandler) localPublications(ctx context.Context, ids []string, scope map[string]bool, creds *auth.Credentials) ([]schema.LocalPublication, error) {

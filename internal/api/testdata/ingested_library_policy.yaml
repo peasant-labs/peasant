@@ -1,4 +1,9 @@
 requiredNames: [mode_all, selected_restrictive, selected_empty, selected_excluded, selected_stale]
+# Home is a root page. The helper is grouped under its person-driven owner, so it
+# appears on that owner's child page; the combined set is the whole library.
+homeRootIds: [lib-c, lib-b, lib-a]
+homeChildIds: [lib-h]
+homeParentId: lib-a
 cases:
   - name: mode_all
     selection:

@@ -99,9 +99,8 @@ func decodeSummariesByID(source []byte) (summariesByIDFixture, error) {
 		if err := sessionorigin.Origin(row.Origin).Validate(); err != nil {
 			return fixture, fmt.Errorf("session-summaries-by-id fixture rows[%d] origin: %w", index, err)
 		}
-		if row.Listed && !row.Selected {
-			return fixture, fmt.Errorf("session-summaries-by-id fixture rows[%d] claims to be listed while outside the selection", index)
-		}
+		// Listed means "offered by the stored-session list". The saved selector
+		// is ingest-only metadata, so the two fields are independent.
 		if row.Listed && sessionorigin.Origin(row.Origin) == sessionorigin.Agent {
 			return fixture, fmt.Errorf("session-summaries-by-id fixture rows[%d] claims an agent-driven row is listed", index)
 		}

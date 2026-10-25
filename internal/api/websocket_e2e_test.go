@@ -1896,8 +1896,8 @@ func decodeSelectionVisibilityWSRecoveryFixture(source []byte) (selectionVisibil
 		if testCase.Topic != "dashboard" && testCase.Topic != "sessions" && testCase.Topic != "trends" {
 			return fixture, fmt.Errorf("selection visibility WS recovery fixture cases[%d] %q has unsupported topic %q", index, testCase.Name, testCase.Topic)
 		}
-		if testCase.ErrorKind != "selection" && testCase.ErrorKind != "generic" {
-			return fixture, fmt.Errorf("selection visibility WS recovery fixture cases[%d] %q has unsupported errorKind %q, want \"selection\" or \"generic\"", index, testCase.Name, testCase.ErrorKind)
+		if testCase.ErrorKind != "discovery" && testCase.ErrorKind != "generic" {
+			return fixture, fmt.Errorf("selection visibility WS recovery fixture cases[%d] %q has unsupported errorKind %q, want \"discovery\" or \"generic\"", index, testCase.Name, testCase.ErrorKind)
 		}
 	}
 	if len(seenCases) != len(requiredSelectionVisibilityWSRecoveryCaseNames) {
@@ -1926,8 +1926,8 @@ func TestSelectionVisibilityWSRecoveryFixture_LoaderRejectsMutations(t *testing.
 	)
 	duplicateName = bytes.Replace(
 		duplicateName,
-		[]byte("  - name: sessions channel recovers from a selection-visibility failure\n"),
-		[]byte("  - name: dashboard channel recovers from a selection-visibility failure\n"),
+		[]byte("  - name: sessions channel recovers from a discovery metadata failure\n"),
+		[]byte("  - name: dashboard channel recovers from a discovery metadata failure\n"),
 		1,
 	)
 	if _, err := decodeSelectionVisibilityWSRecoveryFixture(duplicateName); err == nil {
@@ -1951,27 +1951,13 @@ func TestSelectionVisibilityWSRecoveryFixture_LoaderRejectsMutations(t *testing.
 }
 
 // TestHub_SelectionVisibility_ErrorRecovery proves the production Hub's
-// full valid → conflict → cleared state → repaired recovery contract for a
-// persisted-selection-visibility failure on each ticker channel
-// (dashboard/sessions/trends): a fresh subscribe snapshot delivers real
-// data, an injected sessionvisibility failure clears that topic's stale
-// data and delivers an actionable topic-scoped error carrying the
-// "selection_visibility" code and kickstart remediation text (never a
-// generic/untyped error and never silently dropped), and a subsequent
-// subscribe after the failure clears delivers fresh data again with no
-// trace of the error or of a sibling topic's data. This exercises the same
-// production topicError/sendSnapshots code path broadcastAll uses on its
-// recurring tick.
-//
-// The negative-control case (errorKind: generic) proves the converse:
-// injecting an unrelated provider failure (not a sessionvisibility.Error)
-// still surfaces a topic-scoped error message, but WITHOUT the
-// "selection_visibility" code or the kickstart remediation suffix — so a
-// future topicError regression that tags every WS error (not just
-// selection-visibility ones) fails this test. Mirrors the REST-side
-// negative control already established by
-// TestProjectSummariesHandler_PreservesDiscoveryErrorClass's "unrelated
-// provider failure stays untyped" case in map_handlers_test.go.
+// valid → error → cleared → repaired recovery contract on each ticker channel
+// (dashboard/sessions/trends): a fresh subscribe snapshot delivers real data,
+// an injected discovery-metadata failure clears that topic's stale data and
+// delivers a topic-scoped error, and a later subscribe after the failure clears
+// delivers fresh data again with no sibling leakage. Browsing no longer depends
+// on the saved selector, so neither the metadata failure nor the generic
+// negative control carries the old selection code or kickstart suffix.
 func TestHub_SelectionVisibility_ErrorRecovery(t *testing.T) {
 	t.Parallel()
 

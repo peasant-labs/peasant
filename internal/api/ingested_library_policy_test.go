@@ -37,6 +37,9 @@ type libraryPolicyCase struct {
 
 type libraryPolicyFixture struct {
 	RequiredNames []string            `yaml:"requiredNames"`
+	HomeRootIDs   []string            `yaml:"homeRootIds"`
+	HomeChildIDs  []string            `yaml:"homeChildIds"`
+	HomeParentID  string              `yaml:"homeParentId"`
 	Cases         []libraryPolicyCase `yaml:"cases"`
 }
 
@@ -56,6 +59,9 @@ func loadLibraryPolicyFixture(t *testing.T) libraryPolicyFixture {
 	}
 	if len(fixture.Cases) != len(libraryPolicyRequiredNames) {
 		t.Fatalf("ingested library policy fixture has %d cases, want %d", len(fixture.Cases), len(libraryPolicyRequiredNames))
+	}
+	if len(fixture.HomeRootIDs) == 0 || len(fixture.HomeChildIDs) == 0 || fixture.HomeParentID == "" {
+		t.Fatal("ingested library policy fixture must declare its Home root, child and parent identities")
 	}
 	for _, fixtureCase := range fixture.Cases {
 		if !fixtureCase.Selection.Mode.IsValid() {
@@ -93,7 +99,8 @@ var (
 // the publication metadata must still describe the ingest/push selector honestly
 // without hiding the row.
 func TestIngestedLibraryBrowsingIgnoresSavedSelection(t *testing.T) {
-	for _, fixtureCase := range loadLibraryPolicyFixture(t).Cases {
+	fixture := loadLibraryPolicyFixture(t)
+	for _, fixtureCase := range fixture.Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			db := storetest.Open(t)
@@ -116,7 +123,7 @@ func TestIngestedLibraryBrowsingIgnoresSavedSelection(t *testing.T) {
 			assertLibraryGroupedSessions(t, base)
 			assertLibraryGroupedSearch(t, base)
 			assertLibraryGroupedProjectScope(t, base)
-			assertLibraryHomeAndParent(t, fixtureCase, db, cfg, provider, base)
+			assertLibraryHomeAndParent(t, fixture, fixtureCase, base)
 		})
 	}
 }
@@ -310,61 +317,64 @@ func assertLibraryGroupedProjectScope(t *testing.T, base string) {
 	}
 }
 
-func assertLibraryHomeAndParent(t *testing.T, fixtureCase libraryPolicyCase, db *store.Store, cfg *config.Config, provider *StoreDataProvider, base string) {
+func assertLibraryHomeAndParent(t *testing.T, fixture libraryPolicyFixture, fixtureCase libraryPolicyCase, base string) {
 	t.Helper()
-	publishing := &publishingHandler{store: db, configHome: t.TempDir()}
-	publishing.selection = provider
-	h := &homeHandler{reader: db, publishing: publishing}
-	homeQuery := schema.LocalSyncSessionsQuery{View: "home"}
 
-	page, err := h.newReader(homeQuery).ReadPage(context.Background(), schema.PageRequest{MaxItems: 100})
-	if err != nil {
-		t.Fatalf("Home ReadPage: %v", err)
+	rootBody, rootStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home")
+	if rootStatus != http.StatusOK {
+		t.Fatalf("Home root page status = %d (body %s)", rootStatus, rootBody)
 	}
-	if len(page.Items) != 4 {
-		t.Fatalf("Home items = %d, want all 4 pushable stored sessions", len(page.Items))
+	var roots schema.LocalSyncSessionPage
+	if err := json.Unmarshal(rootBody, &roots); err != nil {
+		t.Fatalf("decode Home root page: %v (body %s)", err, rootBody)
 	}
-	gotIDs := make([]string, 0, len(page.Items))
-	outside := make(map[string]bool, len(page.Items))
-	for _, item := range page.Items {
-		gotIDs = append(gotIDs, item.Sync.ID)
-		outside[item.Sync.ID] = item.Publication.OutsideSelection
-		if item.Publication.OutsideSelection && item.Publication.AutoPublish {
-			t.Fatalf("Home publication metadata for %q reports autoPublish=true while outsideSelection=true; a saved selector never auto-publishes a row it does not admit", item.Sync.ID)
-		}
+	if err := roots.Validate(); err != nil {
+		t.Fatalf("Home root page breaks the canonical wire contract: %v", err)
 	}
-	wantHome := []string{libraryInsideSession, libraryOutsideSession, libraryAgentSession, libraryHelperSession}
-	if !equalIDSet(gotIDs, wantHome) {
-		t.Fatalf("Home sessions = %v, want every stored pushable session %v", gotIDs, wantHome)
+	rootIDs := make([]string, 0, len(roots.Items))
+	for _, item := range roots.Items {
+		rootIDs = append(rootIDs, item.Sync.ID)
+		assertHomePublicationMetadata(t, item, fixtureCase.Outside)
 	}
-	for _, id := range fixtureCase.Outside {
-		if !outside[id] {
-			t.Fatalf("Home publication metadata for %q says insideSelection, want outsideSelection=true from the fixture's saved selector", id)
-		}
-	}
-	for id, isOutside := range outside {
-		if isOutside && !containsString(fixtureCase.Outside, id) {
-			t.Fatalf("Home publication metadata for %q says outsideSelection=true, but the saved selector admits it", id)
-		}
+	if !equalIDSequence(rootIDs, fixture.HomeRootIDs) {
+		t.Fatalf("Home root IDs = %v, want exact roots in start-desc-id-asc order %v", rootIDs, fixture.HomeRootIDs)
 	}
 
-	// A parent the saved selector excludes must still open. The page is empty,
-	// so it also round-trips through the published validation on the mounted
-	// route.
-	body, status := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&parentSessionId="+libraryOutsideSession)
-	if status != http.StatusOK {
-		t.Fatalf("Home parent %q status = %d, want 200 (body %s); an ingested parent's children must remain reachable", libraryOutsideSession, status, body)
+	childBody, childStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&parentSessionId="+fixture.HomeParentID)
+	if childStatus != http.StatusOK {
+		t.Fatalf("Home child page status = %d (body %s)", childStatus, childBody)
 	}
-	parentQuery := schema.LocalSyncSessionsQuery{View: "home"}
-	parentID := libraryOutsideSession
-	parentQuery.ParentSessionID = &parentID
-	if _, err := h.newReader(parentQuery).ReadPage(context.Background(), schema.PageRequest{MaxItems: 100}); err != nil {
-		t.Fatalf("Home ReadPage for an outside-selection parent: %v", err)
+	var children schema.LocalSyncSessionPage
+	if err := json.Unmarshal(childBody, &children); err != nil {
+		t.Fatalf("decode Home child page: %v (body %s)", err, childBody)
+	}
+	if err := children.Validate(); err != nil {
+		t.Fatalf("Home child page breaks the canonical wire contract: %v", err)
+	}
+	childIDs := make([]string, 0, len(children.Items))
+	for _, item := range children.Items {
+		childIDs = append(childIDs, item.Sync.ID)
+		assertHomePublicationMetadata(t, item, fixtureCase.Outside)
+	}
+	if !equalIDSequence(childIDs, fixture.HomeChildIDs) {
+		t.Fatalf("Home child IDs = %v, want exact children in start-desc-id-asc order %v", childIDs, fixture.HomeChildIDs)
+	}
+	combined := append(append([]string(nil), rootIDs...), childIDs...)
+	allStored := []string{libraryInsideSession, libraryOutsideSession, libraryAgentSession, libraryHelperSession}
+	if !equalIDSet(combined, allStored) {
+		t.Fatalf("Home root+child traversal = %v, want every stored session %v", combined, allStored)
 	}
 
-	options, err := h.newReader(schema.LocalSyncSessionsQuery{View: "project-options"}).projectOptions(context.Background())
-	if err != nil {
-		t.Fatalf("Home project options: %v", err)
+	optionsBody, optionsStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=project-options")
+	if optionsStatus != http.StatusOK {
+		t.Fatalf("Home project-options status = %d (body %s)", optionsStatus, optionsBody)
+	}
+	var options schema.LocalSyncProjectOptions
+	if err := json.Unmarshal(optionsBody, &options); err != nil {
+		t.Fatalf("decode Home project options: %v (body %s)", err, optionsBody)
+	}
+	if err := options.Validate(); err != nil {
+		t.Fatalf("Home project options break the canonical wire contract: %v", err)
 	}
 	optionHashes := make([]string, 0, len(options.Projects))
 	for _, option := range options.Projects {
@@ -374,25 +384,45 @@ func assertLibraryHomeAndParent(t *testing.T, fixtureCase libraryPolicyCase, db 
 		t.Fatalf("Home project options = %v, want every stored project", optionHashes)
 	}
 
-	// A continuation issued before the selection changed must keep working, and
-	// a real filter change must still invalidate it.
-	token := func() schema.PageToken {
-		first, readErr := h.newReader(homeQuery).ReadPage(context.Background(), schema.PageRequest{MaxItems: 1})
-		if readErr != nil {
-			t.Fatalf("Home first page: %v", readErr)
-		}
-		if first.Next == "" {
-			t.Fatal("Home first page has no continuation token")
-		}
-		return first.Next
-	}()
-	cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeAll}
-	if _, err := h.newReader(homeQuery).boundary(token); err != nil {
-		t.Fatalf("browsing continuation was invalidated by an ingest-selection change: %v", err)
+	firstBody, firstStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=1")
+	if firstStatus != http.StatusOK {
+		t.Fatalf("Home first page status = %d (body %s)", firstStatus, firstBody)
 	}
-	filtered := schema.LocalSyncSessionsQuery{View: "home", ProjectHash: &libraryAlphaHash}
-	if _, err := h.newReader(filtered).boundary(token); err == nil {
-		t.Fatal("continuation survived a real project-filter change; explicit query bounds must still be enforced")
+	var first schema.LocalSyncSessionPage
+	if err := json.Unmarshal(firstBody, &first); err != nil {
+		t.Fatalf("decode Home first page: %v (body %s)", err, firstBody)
+	}
+	if err := first.Validate(); err != nil {
+		t.Fatalf("Home first page breaks the canonical wire contract: %v", err)
+	}
+	if first.Next == "" {
+		t.Fatal("Home first page has no continuation token")
+	}
+	if _, replayStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=1&pageToken="+string(first.Next)); replayStatus != http.StatusOK {
+		t.Fatalf("Home continuation replay status = %d, want 200", replayStatus)
+	}
+	if _, filteredStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=1&pageToken="+string(first.Next)+"&projectHash="+libraryAlphaHash.String()); filteredStatus != http.StatusBadRequest {
+		t.Fatalf("Home continuation under a changed project filter status = %d, want 400", filteredStatus)
+	}
+}
+
+func assertHomePublicationMetadata(t *testing.T, item schema.LocalSyncSessionRow, outsideIDs []string) {
+	t.Helper()
+	if item.Publication.SessionID != item.Sync.ID {
+		t.Fatalf("Home row %q carries publication for %q", item.Sync.ID, item.Publication.SessionID)
+	}
+	wantOutside := false
+	for _, id := range outsideIDs {
+		if id == item.Sync.ID {
+			wantOutside = true
+			break
+		}
+	}
+	if item.Publication.OutsideSelection != wantOutside {
+		t.Fatalf("Home row %q outsideSelection=%t, want %t", item.Sync.ID, item.Publication.OutsideSelection, wantOutside)
+	}
+	if wantOutside && item.Publication.AutoPublish {
+		t.Fatalf("Home row %q reports autoPublish=true while outsideSelection=true", item.Sync.ID)
 	}
 }
 
@@ -419,6 +449,18 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func equalIDSequence(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func equalIDSet(got, want []string) bool {

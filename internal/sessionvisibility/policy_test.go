@@ -229,8 +229,21 @@ func assertDiscoveryScope(t *testing.T, policy sessionvisibility.Policy, candida
 }
 
 func TestZeroPolicyDiscoveryIsOriginOnly(t *testing.T) {
-	visible, err := (sessionvisibility.Policy{}).VisibleForDiscovery(sessionvisibility.Candidate{Origin: sessionorigin.User})
-	if err == nil || visible {
-		t.Fatalf("zero policy VisibleForDiscovery = %v, %v; want false and actionable error", visible, err)
+	// A policy with no saved selection still admits a valid person-driven or
+	// unknown-origin row: browsing never depended on selection, including on a
+	// zero-value policy.
+	for _, origin := range []sessionorigin.Origin{sessionorigin.User, sessionorigin.Unknown} {
+		visible, err := (sessionvisibility.Policy{}).VisibleForDiscovery(sessionvisibility.Candidate{Origin: origin})
+		if err != nil || !visible {
+			t.Fatalf("zero policy VisibleForDiscovery(origin=%q) = %v, %v; want true and no error", origin, visible, err)
+		}
+	}
+	if visible, err := (sessionvisibility.Policy{}).VisibleForDiscovery(sessionvisibility.Candidate{Origin: sessionorigin.Agent}); err != nil || visible {
+		t.Fatalf("zero policy VisibleForDiscovery(agent) = %v, %v; want false and no error", visible, err)
+	}
+	// An unusable stored origin still fails closed; the origin bound is not
+	// weakened by dropping the saved selection from browsing.
+	if visible, err := (sessionvisibility.Policy{}).VisibleForDiscovery(sessionvisibility.Candidate{Origin: sessionorigin.Origin("teammate")}); err == nil || visible {
+		t.Fatalf("zero policy VisibleForDiscovery(unusable origin) = %v, %v; want false and actionable error", visible, err)
 	}
 }

@@ -510,8 +510,25 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 			}
 			var home schema.LocalSyncSessionPage
 			world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", &home)
-			if len(home.Items) != 1 || home.Items[0].Sync.ID != recordedInsideSessionID || home.Items[0].Publication.AutoPublish != c.Expect {
-				t.Fatalf("Home ordinary page disagrees with canonical hook projection: %+v", home.Items)
+			homeByID := make(map[string]schema.LocalSyncSessionRow, len(home.Items))
+			for _, item := range home.Items {
+				homeByID[item.Sync.ID] = item
+			}
+			if len(home.Items) != 3 {
+				t.Fatalf("Home ordinary page lists %d stored rows, want all 3: %+v", len(home.Items), home.Items)
+			}
+			inside, ok := homeByID[recordedInsideSessionID]
+			if !ok || inside.Publication.OutsideSelection || inside.Publication.AutoPublish != c.Expect {
+				t.Fatalf("Home row for the selected session = %+v, want outsideSelection=false and autoPublish=%v", inside, c.Expect)
+			}
+			for _, id := range []string{recordedOutsideSessionID, secondRecordedSessionID} {
+				row, ok := homeByID[id]
+				if !ok {
+					t.Fatalf("Home omitted stored session %s", id)
+				}
+				if !row.Publication.OutsideSelection || row.Publication.AutoPublish {
+					t.Fatalf("Home row for unselected session %s = %+v, want outsideSelection=true and autoPublish=false", id, row.Publication)
+				}
 			}
 			var automatic schema.LocalSyncSessionPage
 			world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&publication=auto", &automatic)

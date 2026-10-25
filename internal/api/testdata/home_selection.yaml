@@ -7,15 +7,19 @@ cases:
   - name: clone-and-branch
     clone: true
     branch: main
-    ids: [session-selected-main, session-linked-feature, session-independent-clone, session-other-project]
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone]
   - name: ambiguous-remote-with-nonpushable-clone
     dropIndependentMetrics: true
     branch: main
-    ids: [session-selected-main, session-linked-feature, session-other-project]
+    ids: [session-other-project, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-linked-feature, session-selected-main]
   - name: branch-mismatch
     clone: true
     branch: missing-branch
-    ids: [session-selected-main, session-linked-feature, session-independent-clone, session-other-project]
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
   - name: explicit-session-does-not-widen
     explicit: session-selected-main
-    ids: [session-selected-main, session-linked-feature, session-independent-clone, session-other-project]
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone]

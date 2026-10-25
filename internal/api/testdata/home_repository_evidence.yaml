@@ -1,7 +1,8 @@
-# Home repository identity evidence. Home no longer consults the saved selector,
-# so it no longer needs repository topology at all: a recorded directory that is
-# outside Git, and a captured worktree that no longer resolves, are both ordinary
-# stored rows on this page.
+# Home repository identity evidence. The page itself no longer filters by the
+# saved selector, but its publication metadata still reports canonical ingest
+# membership. A project recorded outside Git is ordinary data; a captured
+# worktree that no longer resolves makes that membership ambiguous and fails the
+# metadata read closed.
 requiredNames: [non-git-recorded-directory, stale-git-worktree-directory]
 cases:
   - name: non-git-recorded-directory
@@ -10,5 +11,5 @@ cases:
     ids: [session-recorded-directory]
   - name: stale-git-worktree-directory
     storedWorktree: true
-    status: 200
-    ids: [session-recorded-directory]
+    status: 500
+    ids: []

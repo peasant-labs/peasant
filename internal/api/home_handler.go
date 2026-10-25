@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -36,7 +37,9 @@ var _ homeReader = (*store.Store)(nil)
 
 type homeHandler struct {
 	reader     homeReader
+	sync       *syncHandler
 	publishing *publishingHandler
+	resolver   ingest.RepositoryIdentityResolver
 }
 
 const syncPageScopeCode = "sync_page_scope_changed"
@@ -61,15 +64,17 @@ type syncPageToken struct {
 type syncHomePageReader struct {
 	db         homeReader
 	query      schema.LocalSyncSessionsQuery
+	config     *config.Config
 	publishing *publishingHandler
 	account    *auth.Credentials
+	resolver   ingest.RepositoryIdentityResolver
 	scope      string
 }
 
 var _ schema.PageReader[schema.LocalSyncSessionRow] = (*syncHomePageReader)(nil)
 
 func (h *homeHandler) newReader(q schema.LocalSyncSessionsQuery) *syncHomePageReader {
-	r := &syncHomePageReader{db: h.reader, query: q, publishing: h.publishing, account: h.publishing.signedIn()}
+	r := &syncHomePageReader{db: h.reader, query: q, config: h.sync.currentConfig(), publishing: h.publishing, account: h.publishing.signedIn(), resolver: h.resolver}
 	filter := schema.LocalSyncPublicationAll
 	if q.Publication != nil {
 		filter = *q.Publication
@@ -158,23 +163,64 @@ func (r *syncHomePageReader) token(boundary store.SyncPageBoundary) schema.PageT
 type syncHomeCohort struct {
 	rows     map[string]store.HomeCandidate
 	visible  map[string]bool
+	selected map[string]bool
 	parents  map[string]store.ParentIdentityRow
 	children map[string]int
 }
 
 func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error) {
-	c := syncHomeCohort{rows: map[string]store.HomeCandidate{}, visible: map[string]bool{}, parents: map[string]store.ParentIdentityRow{}, children: map[string]int{}}
+	c := syncHomeCohort{rows: map[string]store.HomeCandidate{}, visible: map[string]bool{}, selected: map[string]bool{}, parents: map[string]store.ParentIdentityRow{}, children: map[string]int{}}
 	rows, err := r.db.HomeIdentityCohort(ctx)
 	if err != nil {
 		return c, err
 	}
+	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
+	if r.config != nil {
+		selection = r.config.Selection
+	}
+	if !selection.Mode.IsValid() {
+		return c, fmt.Errorf("api.syncHomePageReader.cohort: the saved kickstart selection has no valid mode %q, so outsideSelection and autoPublish cannot be reported truthfully; no page was returned; run `peasant kickstart` to repair selection.mode (valid: all, selected), then retry", selection.Mode)
+	}
+	var matcher *ingest.SelectionMatcher
+	var prepared []preparedWebDiscoveryIdentity
+	var remotes, names []ingest.DiscoveryIdentityMultiplicity
+	if selection.Mode == config.SelectionModeSelected {
+		compiled := config.CompileSelectionMatcher(selection)
+		matcher = &compiled
+		identities := make([]store.SessionRow, len(rows))
+		for i, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return c, err
+			}
+			identities[i] = row.Identity
+		}
+		prepared, remotes, names, err = prepareWebDiscoveryIdentities(ctx, identities, selection, r.resolver)
+		if err != nil {
+			return c, err
+		}
+	}
 	pushRows := make([]ingest.PushSessionRow, 0, len(rows))
-	for _, candidate := range rows {
+	for i, candidate := range rows {
 		if err := ctx.Err(); err != nil {
 			return c, err
 		}
 		row := candidate.Identity
+		selected := true
+		if matcher != nil {
+			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: value(row.GitBranch), RemoteMultiplicity: remotes[i], NameMultiplicity: names[i]})
+			switch match {
+			case ingest.BranchMatchYes:
+				selected = true
+			case ingest.BranchMatchNo:
+				selected = false
+			case ingest.BranchMatchWithheldConflict:
+				return c, fmt.Errorf("api.syncHomePageReader.cohort: conflicting persisted project branch rules for session %q; outsideSelection cannot be reported truthfully, so no page was returned; run `peasant kickstart` and make the project's branch selection consistent, then retry", row.SessionID)
+			default:
+				return c, fmt.Errorf("api.syncHomePageReader.cohort: unknown canonical matcher result for session %q; no page was returned because the saved ingest/push selection cannot be reported truthfully; update Peasant and retry", row.SessionID)
+			}
+		}
 		c.rows[row.SessionID] = candidate
+		c.selected[row.SessionID] = selected
 		if candidate.Pushable {
 			// The saved kickstart selection is not a browsing predicate: every
 			// ingested, pushable session belongs to the page, whatever the saved
@@ -285,7 +331,14 @@ func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort s
 	// different question from whether the row may appear here. It is computed for
 	// exactly the returned identifiers so an unselected row can still say it is
 	// outside the selector without being hidden from the page.
-	scope := r.publishing.selectionMembership(ctx, ids)
+	scope := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		inSelection, known := cohort.selected[id]
+		if !known {
+			return nil, fmt.Errorf("api.syncHomePageReader.hydrate: session %q has no saved ingest/push selection membership, so outsideSelection cannot be reported truthfully; no page was returned; retry after verifying the local store and saved selection", id)
+		}
+		scope[id] = inSelection
+	}
 	metadata, err := push.LoadPublicationMetadata(ctx, r.db, hydrated)
 	if err != nil {
 		return nil, err

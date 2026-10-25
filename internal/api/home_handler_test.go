@@ -135,8 +135,9 @@ func seedHomeSessions(t *testing.T, db *store.Store, ids []string) {
 }
 func homeTestHandler(t *testing.T, reader homeReader, db *store.Store, cfg *config.Config) http.Handler {
 	t.Helper()
-	sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-	sh.home = &homeHandler{reader: reader, publishing: &publishingHandler{store: db, configHome: t.TempDir()}}
+	sh := &syncHandler{config: newLiveConfig(cfg)}
+	h := &homeHandler{reader: reader, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: fixtureRepositoryResolver{}}
+	sh.home = h
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+defaults.RouteSyncSessions.String(), sh.handleSyncSessions)
 	return mux
@@ -366,7 +367,7 @@ func TestSyncHomeTokenScope(t *testing.T) {
 			cfg := config.BaseConfig()
 			hs := newTestXDGHomes(t)
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			h := &homeHandler{reader: db, publishing: &publishingHandler{store: db, configHome: hs.Config}}
+			h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: hs.Config}, resolver: fixtureRepositoryResolver{}}
 			sh.home = h
 			if tc.Owner {
 				writeSyncDoorCredentials(t, hs.Config, "https://owner.example")
@@ -509,14 +510,79 @@ func TestSyncHomeAncestryIgnoresSavedSelection(t *testing.T) {
 	}
 }
 
+// TestSyncHomeInvalidSelectionFailsMetadataButNotStoredBrowsing proves the two
+// questions stay separate. Home publication metadata cannot be reported
+// truthfully from an unusable saved selector, so the page fails closed with no
+// partial body. Plain stored browsing has no such dependency and still lists
+// the same rows.
+func TestSyncHomeInvalidSelectionFailsMetadataButNotStoredBrowsing(t *testing.T) {
+	var fixture struct {
+		Sessions []struct {
+			ID string `yaml:"id"`
+		} `yaml:"sessions"`
+	}
+	if err := testutil.DecodeFixtureYAML(homeAncestryYAML, &fixture); err != nil {
+		t.Fatalf("decode home ancestry fixture: %v", err)
+	}
+	if len(fixture.Sessions) == 0 {
+		t.Fatal("home ancestry fixture has no sessions")
+	}
+	db := storetest.Open(t)
+	ids := make([]string, len(fixture.Sessions))
+	for i, session := range fixture.Sessions {
+		ids[i] = session.ID
+	}
+	seedHomeSessions(t, db, ids)
+
+	cfg := config.BaseConfig()
+	cfg.Selection.Mode = config.SelectionMode("hostile-invalid")
+
+	response := httptest.NewRecorder()
+	homeTestHandler(t, db, db, cfg).ServeHTTP(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", nil))
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("Home status with an unusable selector = %d, want 500 (body %s)", response.Code, response.Body.String())
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &keys); err != nil {
+		t.Fatalf("decode Home failure body: %v (body %s)", err, response.Body.String())
+	}
+	if keys["items"] != nil || keys["next"] != nil {
+		t.Fatalf("Home failure returned a partial page: %s", response.Body.String())
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode Home error envelope: %v", err)
+	}
+	if !strings.Contains(envelope.Error, "selection") || !strings.Contains(envelope.Error, "kickstart") {
+		t.Fatalf("Home failure message = %q, want the saved-selection cause and its remedy", envelope.Error)
+	}
+
+	provider := NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection))
+	sessions, err := provider.Sessions(context.Background())
+	if err != nil {
+		t.Fatalf("plain Sessions: %v", err)
+	}
+	if len(sessions) != len(ids) {
+		t.Fatalf("plain Sessions = %d rows, want all %d stored rows with the same unusable selector", len(sessions), len(ids))
+	}
+	projects, err := provider.ProjectSummaries(context.Background())
+	if err != nil {
+		t.Fatalf("plain ProjectSummaries: %v", err)
+	}
+	if len(projects.Projects) == 0 {
+		t.Fatal("plain ProjectSummaries returned no stored project for an unusable selector")
+	}
+}
+
 func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 	var f struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
 			Name, Branch, Explicit string
 			Clone                  bool
-			DropIndependentMetrics bool `yaml:"dropIndependentMetrics"`
-			IDs                    []string
+			DropIndependentMetrics bool     `yaml:"dropIndependentMetrics"`
+			IDs                    []string `yaml:"ids"`
+			OutsideSelection       []string `yaml:"outsideSelection"`
 		}
 	}
 	if err := testutil.DecodeNamedFixtureYAML(homeSelectionYAML, &f); err != nil {
@@ -526,7 +592,7 @@ func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			db := storetest.Open(t)
 			source := loadDiscoveryHTTPFixture(t)
-			paths, _ := seedDiscoveryHTTPStore(t, db, source)
+			paths, resolver := seedDiscoveryHTTPStore(t, db, source)
 			selection := config.SelectionHarnessConfig{}
 			if tc.Explicit != "" {
 				selection.Sessions = []string{tc.Explicit}
@@ -543,11 +609,24 @@ func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 			cfg := config.BaseConfig()
 			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessClaudeCode.String(): selection}}
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			sh.home = &homeHandler{reader: db, publishing: &publishingHandler{store: db, configHome: t.TempDir()}}
+			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: resolver}
 			p := syncPageRequest(t, http.HandlerFunc(sh.handleSyncSessions), "view=home", 200)
 			ids := []string{}
 			for _, row := range p.Items {
 				ids = append(ids, row.Sync.ID)
+				wantOutside := false
+				for _, id := range tc.OutsideSelection {
+					if id == row.Sync.ID {
+						wantOutside = true
+						break
+					}
+				}
+				if row.Publication.OutsideSelection != wantOutside {
+					t.Fatalf("session %q outsideSelection=%t, want %t", row.Sync.ID, row.Publication.OutsideSelection, wantOutside)
+				}
+				if wantOutside && row.Publication.AutoPublish {
+					t.Fatalf("session %q reports autoPublish=true while outsideSelection=true", row.Sync.ID)
+				}
 			}
 			if !reflect.DeepEqual(ids, tc.IDs) {
 				t.Fatalf("ids=%v want=%v", ids, tc.IDs)
@@ -728,11 +807,10 @@ func TestSyncHomeCancellationAndUnavailable(t *testing.T) {
 	syncPageRequest(t, homeTestHandler(t, nil, db, config.BaseConfig()), "view=home", 503)
 }
 
-// TestSyncHomeRepositoryIdentityEvidence pins that Home reads stored rows
-// without repository topology: the saved selector (which was the only reason
-// this page resolved clone identity) no longer narrows it, so a project
-// recorded outside Git and a captured worktree that no longer resolves are both
-// ordinary stored rows.
+// TestSyncHomeRepositoryIdentityEvidence pins Home's publication-metadata
+// identity boundary: browsing no longer filters by the saved selector, but an
+// ambiguous captured worktree still prevents outsideSelection from being
+// reported truthfully, while a project recorded outside Git stays ordinary.
 func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -770,7 +848,7 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 				defaults.HarnessOpenCode.String(): {Projects: []config.ProjectSelection{{Name: "unrelated-name", ClonePaths: []string{physical.String()}}}},
 			}}
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			sh.home = &homeHandler{reader: db, publishing: &publishingHandler{store: db, configHome: t.TempDir()}}
+			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: ingest.NewGitRepositoryIdentityResolver()}
 			response := httptest.NewRecorder()
 			http.HandlerFunc(sh.handleSyncSessions).ServeHTTP(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", nil))
 			if response.Code != tc.Status {

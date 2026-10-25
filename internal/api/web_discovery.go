@@ -61,23 +61,18 @@ func (s *Server) handleWebDiscovery(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(webDiscoveryPayload{Items: items})
 }
 
-// discoverySelection moves a saved selection onto the ingest/push metadata
-// question this endpoint reports. An unusable saved selector admits nothing, so
-// it is presented as an empty selected-mode selector instead of failing the
-// metadata a browsing surface joins against.
-func discoverySelection(saved config.SelectionConfig) config.SelectionConfig {
-	if saved.Mode.IsValid() {
-		return saved
-	}
-	return config.SelectionConfig{Mode: config.SelectionModeSelected}
-}
-
 func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config, resolver ingest.RepositoryIdentityResolver) ([]WebDiscoveryItem, error) {
 	rows, err := db.AllSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Web discovery could not read stored sessions in internal/api.buildWebDiscovery. No partial metadata was returned. Retry; if the failure repeats, inspect the Peasant server logs: %w", err)
 	}
-	selection := discoverySelection(cfg.Selection)
+	// This endpoint reports the saved INGEST selection, not browsing eligibility.
+	// An unusable selector is a real metadata failure, so it is refused with its
+	// actionable cause rather than masked as an empty selected-mode answer.
+	selection := cfg.Selection
+	if !selection.Mode.IsValid() {
+		return nil, fmt.Errorf("Web discovery could not compute ingest selection status because the saved kickstart selection has no valid mode %q in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair selection.mode (valid: all, selected), then retry", selection.Mode)
+	}
 	var matcher *ingest.SelectionMatcher
 	if selection.Mode == config.SelectionModeSelected {
 		compiled := config.CompileSelectionMatcher(selection)
