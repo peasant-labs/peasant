@@ -9,6 +9,8 @@ requiredNames:
   - commits-unknown-session
   - commits-outside-contract
   - commits-null
+  - commits-time-not-an-integer
+  - commits-time-unsafe-integer
   - pull-requests-detected
   - pull-requests-empty
   - pull-requests-outside-contract
@@ -16,6 +18,11 @@ requiredNames:
   - pull-requests-null
   - pull-requests-url-not-github
   - pull-requests-url-not-https
+  - pull-requests-number-zero
+  - pull-requests-missing-source
+  - pull-requests-empty-owner
+  - pull-requests-empty-repo
+  - pull-requests-empty-source
 cases:
   - name: commits-recorded
     endpoint: commits
@@ -41,6 +48,19 @@ cases:
     endpoint: commits
     status: 200
     body: '{"commits":null}'
+    expect: contract
+  # The contract's times are int64 millis. A fraction is not an instant, and an
+  # integer past 2^53 cannot survive the JSON number the local read carries, so
+  # both are refused rather than widened into a wrong instant.
+  - name: commits-time-not-an-integer
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":1.5,"authorTime":1752566400000}]}'
+    expect: contract
+  - name: commits-time-unsafe-integer
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":9007199254740993,"authorTime":1752566400000}]}'
     expect: contract
   - name: pull-requests-detected
     endpoint: pull-requests
@@ -78,4 +98,32 @@ cases:
     endpoint: pull-requests
     status: 200
     body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"http://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  # GitHub numbers pull requests from 1.
+  - name: pull-requests-number-zero
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":0,"url":"https://github.com/storytold/photocraft/pull/0","source":"gh_pr_create"}]}'
+    expect: contract
+  # The contract marks owner, repo, and source `minLength: 1`. A blank of any of
+  # them names no repository and no evidence, so the row is outside it.
+  - name: pull-requests-missing-source
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42"}]}'
+    expect: contract
+  - name: pull-requests-empty-owner
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-empty-repo
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-empty-source
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":""}]}'
     expect: contract

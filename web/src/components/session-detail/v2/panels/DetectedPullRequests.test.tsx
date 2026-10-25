@@ -59,10 +59,28 @@ describe('DetectedPullRequests', () => {
   });
 
   it('names an unknown source as reported instead of claiming gh pr create', () => {
-    render(<DetectedPullRequests pullRequests={[{ ...PULL_REQUESTS[0], source: 'glab_mr_create' }]} />);
+    render(<DetectedPullRequests pullRequests={[{ ...PULL_REQUESTS[0], source: 'glab_MR_create' }]} />);
 
     const section = screen.getByRole('region', { name: /pull requests/i });
-    expect(evidenceParagraph(section).textContent).toBe('detected from glab_mr_create; not verified by village.');
+    // Verbatim: the page names the source the server reported, it does not
+    // normalize it into a casing the server never used.
+    expect(evidenceParagraph(section).textContent).toBe('detected from glab_MR_create; not verified by village.');
     expect(section.textContent).not.toContain('gh pr create');
+  });
+
+  it('names several distinct sources in one sentence', () => {
+    render(
+      <DetectedPullRequests
+        pullRequests={[PULL_REQUESTS[0], { ...PULL_REQUESTS[1], source: 'glab_MR_create' }]}
+      />,
+    );
+
+    const section = screen.getByRole('region', { name: /pull requests/i });
+    // One sentence for the whole list; the same two rows from one command still
+    // name that command once.
+    const evidence = evidenceParagraph(section);
+    expect(evidence.textContent).toBe('detected from gh pr create, glab_MR_create; not verified by village.');
+    expect(evidence.querySelectorAll('.font-mono')).toHaveLength(1);
+    expect(section.textContent?.match(/detected from/g)).toHaveLength(1);
   });
 });

@@ -15,6 +15,11 @@ import {
  * Both are display-only. Neither widens who may read a transcript, and pull
  * request detection reads stored tool calls — it never contacts GitHub. A
  * caller that cannot get an answer simply renders without these extras.
+ *
+ * The types and guards below are provisional: neither read has a generated
+ * contract yet, so they restate the intended row shape by hand. They are
+ * replaced by the generated zod schemas once the schema re-pin carries these
+ * two routes, and no other module may rely on them in the meantime.
  */
 
 /** One commit recorded for a session (`session_commits`, incl. linked worktrees). */
@@ -36,7 +41,11 @@ export interface DetectedPullRequest {
   number: number;
   /** the GitHub pull request URL the recorded command result carried */
   url: string;
-  /** the command that supplied the evidence; the server always sends `gh_pr_create` */
+  /**
+   * the command that supplied the evidence; the server's current value is
+   * `gh_pr_create`, and the contract keeps the field open so a future detector
+   * can report its own command name
+   */
   source: string;
 }
 
@@ -59,6 +68,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isField(value: unknown): value is string {
   return typeof value === 'string';
+}
+
+/**
+ * A required text field the contract marks `minLength: 1`. An empty value is
+ * outside it rather than a legitimate blank: a blank owner, repo, or source
+ * would render a row that names no repository and claims no evidence.
+ */
+function isNonEmptyField(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
 }
 
 /**
@@ -106,12 +124,12 @@ function isGithubPullRequestUrl(value: unknown): value is string {
 function isDetectedPullRequest(value: unknown): value is DetectedPullRequest {
   return (
     isRecord(value) &&
-    isField(value.owner) &&
-    isField(value.repo) &&
+    isNonEmptyField(value.owner) &&
+    isNonEmptyField(value.repo) &&
     isSafeInteger(value.number) &&
     value.number > 0 &&
     isGithubPullRequestUrl(value.url) &&
-    isField(value.source)
+    isNonEmptyField(value.source)
   );
 }
 

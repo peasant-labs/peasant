@@ -98,17 +98,19 @@ describe('useSessionExtras', () => {
     expect(result.current.commits).toEqual([]);
   });
 
-  it('discards the previous session rows before the next reads land, and ignores its late answer', async () => {
-    const latePullRequests = deferred();
-    const nextCommits = deferred();
-    const nextPullRequests = deferred();
+  it('discards the previous session rows before the next reads land, and ignores both late answers', async () => {
+    // Every read below stays in flight until the test delivers it, so a switch
+    // can be made while a previous session's answers are still outstanding.
+    const pending: Record<string, { commits: ReturnType<typeof deferred>; pullRequests: ReturnType<typeof deferred> }> = {
+      'sess-extras-3': { commits: deferred(), pullRequests: deferred() },
+      'sess-extras-4': { commits: deferred(), pullRequests: deferred() },
+      'sess-extras-5': { commits: deferred(), pullRequests: deferred() },
+    };
     const fetcher = vi.fn((url: string) => {
-      if (url.includes('sess-extras-3')) {
-        return url.includes('/commits')
-          ? Promise.resolve(json({ commits: [COMMIT] }))
-          : latePullRequests.promise;
-      }
-      return url.includes('/commits') ? nextCommits.promise : nextPullRequests.promise;
+      const session = Object.keys(pending).find((id) => url.includes(id));
+      if (!session) throw new Error(`unexpected read: ${url}`);
+      const piece = url.includes('/pull-requests') ? pending[session].pullRequests : pending[session].commits;
+      return piece.promise;
     });
     vi.stubGlobal('fetch', fetcher);
 
@@ -116,31 +118,38 @@ describe('useSessionExtras', () => {
       initialProps: { sessionId: 'sess-extras-3' },
     });
 
-    // The first session's commits are on screen; its pull request read is still
-    // in flight, so the switch below starts from a non-empty state.
-    await waitFor(() => expect(result.current.commits).toEqual([COMMIT]));
-    expect(result.current.pullRequests).toEqual([]);
-
+    // Session 3's reads are the slow ones: they are abandoned below, so nothing
+    // of theirs may surface under a later session.
     rerender({ sessionId: 'sess-extras-4' });
+    await act(async () => {
+      pending['sess-extras-4'].commits.resolve(json({ commits: [NEXT_COMMIT] }));
+      pending['sess-extras-4'].pullRequests.resolve(json({ pullRequests: [NEXT_PULL_REQUEST] }));
+    });
+    await waitFor(() => {
+      expect(result.current.commits).toEqual([NEXT_COMMIT]);
+      expect(result.current.pullRequests).toEqual([NEXT_PULL_REQUEST]);
+    });
 
-    // The switch clears the previous session's rows as its effect runs, before
-    // the next session's reads (still pending) can deliver anything.
+    // The switch to session 5 clears the rows session 4 delivered, before
+    // session 5's reads (still pending) can deliver anything.
+    rerender({ sessionId: 'sess-extras-5' });
     expect(result.current.commits).toEqual([]);
     expect(result.current.pullRequests).toEqual([]);
-    expect(fetcher).toHaveBeenCalledTimes(4);
 
-    // The abandoned read finishes after the switch; its rows must not appear
-    // under the session the reader is now looking at.
+    // The abandoned session 3 finishes after two switches. Its commits and its
+    // pull request must not appear under the session the reader is looking at,
+    // and must not overwrite it either.
     await act(async () => {
-      latePullRequests.resolve(json({ pullRequests: [PULL_REQUEST] }));
+      pending['sess-extras-3'].commits.resolve(json({ commits: [COMMIT] }));
+      pending['sess-extras-3'].pullRequests.resolve(json({ pullRequests: [PULL_REQUEST] }));
       await settle();
     });
     expect(result.current.commits).toEqual([]);
     expect(result.current.pullRequests).toEqual([]);
 
     await act(async () => {
-      nextCommits.resolve(json({ commits: [NEXT_COMMIT] }));
-      nextPullRequests.resolve(json({ pullRequests: [NEXT_PULL_REQUEST] }));
+      pending['sess-extras-5'].commits.resolve(json({ commits: [NEXT_COMMIT] }));
+      pending['sess-extras-5'].pullRequests.resolve(json({ pullRequests: [NEXT_PULL_REQUEST] }));
     });
     await waitFor(() => {
       expect(result.current.commits).toEqual([NEXT_COMMIT]);

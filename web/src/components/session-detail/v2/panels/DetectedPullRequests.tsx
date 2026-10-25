@@ -10,11 +10,12 @@ interface DetectedPullRequestsProps {
 
 /**
  * The evidence label for one reported source. `gh_pr_create` keeps the wording
- * readers already know; any other source is named as the server reported it, so
- * the page never claims evidence it does not have.
+ * readers already know — the current value the server sends. Any other source
+ * is named exactly as the server reported it, so the page never invents a
+ * command name, and never edits one into a shape it did not arrive in.
  */
 function evidenceLabel(source: string): string {
-  return source === 'gh_pr_create' ? 'gh pr create' : source.toLowerCase();
+  return source === 'gh_pr_create' ? 'gh pr create' : source;
 }
 
 /** The distinct sources behind these rows, in the order they appear. */
@@ -37,6 +38,7 @@ function evidenceSources(pullRequests: DetectedPullRequest[]): string[] {
  */
 export function DetectedPullRequests({ pullRequests }: DetectedPullRequestsProps) {
   const titleId = useId();
+  const labels = evidenceSources(pullRequests).map(evidenceLabel);
   return (
     <section aria-labelledby={titleId} className="flex min-w-0 flex-col">
       <p className="v2-eyebrow" id={titleId}>
@@ -57,12 +59,7 @@ export function DetectedPullRequests({ pullRequests }: DetectedPullRequestsProps
         ))}
       </ul>
       <p className="mt-1 text-[14px] leading-5 text-ink-3">
-        {evidenceSources(pullRequests).map((source, index) => (
-          <span key={source}>
-            {index > 0 ? ' ' : null}
-            detected from <span className="font-mono">{evidenceLabel(source)}</span>; not verified by village.
-          </span>
-        ))}
+        detected from <span className="font-mono">{labels.join(', ')}</span>; not verified by village.
       </p>
     </section>
   );
