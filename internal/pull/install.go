@@ -308,6 +308,9 @@ func (p *Pipeline) recoverInstall(ctx context.Context, host string, id schema.Tr
 	if err := json.Unmarshal(data, &j); err != nil {
 		return installError(err)
 	}
+	if err := normalizeJournalAnnotations(&j.Commit); err != nil {
+		return installError(err)
+	}
 	stageID, err := uuid.Parse(j.Stage)
 	final := p.pullDir(host, id)
 	if err != nil ||
@@ -621,6 +624,31 @@ func (p *Pipeline) cleanAbandonedStages(root string, transcriptID schema.Transcr
 				return installError(err)
 			}
 		}
+	}
+	return nil
+}
+
+// normalizeJournalAnnotations re-encodes each journaled annotation payload in
+// the shape this CLI writes. A journal left by an earlier CLI holds payloads
+// in the pull contract 0.2.0 shape (authorUserId/authorUsername); decoding
+// them through the same reader as a fresh pull and re-encoding makes the
+// journal compare equal to the projection rebuilt from the published files, so
+// an interrupted install from an older CLI recovers. The journaled author
+// columns are kept as written, so they must still match the payload's author
+// (for a 0.2.0 payload, the same account id and username) or the projection
+// check refuses the journal.
+func normalizeJournalAnnotations(commit *store.PullCommit) error {
+	for i := range commit.Annotations {
+		row := &commit.Annotations[i]
+		annotation, err := village.DecodePullAnnotation([]byte(row.Payload))
+		if err != nil {
+			return fmt.Errorf("read journaled annotation %s: %w", row.ContentHash, err)
+		}
+		payload, err := json.Marshal(annotation)
+		if err != nil {
+			return fmt.Errorf("re-encode journaled annotation %s: %w", row.ContentHash, err)
+		}
+		row.Payload = string(payload)
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -378,6 +380,14 @@ func TestContentInstallSafety(t *testing.T) {
 				}
 				return
 			}
+			if c.Kind == "older-cli" {
+				rewriteJournalAsOlderCLI(t, journalPath, journal, stage)
+				if err := run(replacementReader(), filesystem, db, c.Force); err != nil {
+					t.Fatalf("interrupted install from an older CLI was not recovered: %v", err)
+				}
+				assertInstalledContent(t, db, final, replacementReader())
+				return
+			}
 			switch c.Target {
 			case "version":
 				journal["version"] = json.RawMessage(`99`)
@@ -537,4 +547,75 @@ func (f *installSwapFS) Rename(src, dst string) error {
 		f.swap()
 	}
 	return f.FileSystem.Rename(src, dst)
+}
+
+// rewriteJournalAsOlderCLI turns a pending install into the one an earlier
+// CLI (pull contract 0.2.0) would have left: the staged metadata snapshot and
+// the journaled annotation payloads carry the owner and author as account
+// strings, and the journal digest covers those staged bytes.
+func rewriteJournalAsOlderCLI(t *testing.T, journalPath string, journal map[string]json.RawMessage, stage string) {
+	t.Helper()
+	metadataPath := filepath.Join(stage, pull.MetadataFilename)
+	current, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := village.DecodePullTranscriptInfo(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyMetadata, err := testutil.LegacyPullEnvelope(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, legacyMetadata, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var commit store.PullCommit
+	if err := json.Unmarshal(journal["commit"], &commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Annotations) == 0 {
+		t.Fatal("the older-CLI journal needs an annotation to carry the 0.2.0 author shape")
+	}
+	for i := range commit.Annotations {
+		annotation, err := village.DecodePullAnnotation([]byte(commit.Annotations[i].Payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy, err := testutil.LegacyPullEnvelope([]schema.PullAnnotation{annotation})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rows []json.RawMessage
+		if err := json.Unmarshal(legacy, &rows); err != nil || len(rows) != 1 {
+			t.Fatalf("re-encode legacy annotation: %v", err)
+		}
+		if !strings.Contains(string(rows[0]), `"authorUserId"`) {
+			t.Fatalf("legacy payload lacks the 0.2.0 author strings: %s", rows[0])
+		}
+		commit.Annotations[i].Payload = string(rows[0])
+	}
+	if journal["commit"], err = json.Marshal(commit); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(stage, pull.ManifestFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := os.ReadFile(filepath.Join(stage, pull.TranscriptFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := schema.ComputeTranscriptHash([]byte(schema.ComputeTranscriptHash(manifest) + schema.ComputeTranscriptHash(blob) + schema.ComputeTranscriptHash(legacyMetadata)))
+	if journal["digest"], err = json.Marshal(digest); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journalPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

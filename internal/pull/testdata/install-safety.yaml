@@ -31,6 +31,8 @@ requiredNames:
   - force-refuses-stage-symlink
   - pending-journal-unsupported-version
   - force-refuses-unsupported-journal-version
+  - pending-journal-from-older-cli
+  - force-recovers-journal-from-older-cli
 cases:
   - {name: damaged-metadata-normal-then-force, kind: force, target: metadata.json}
   - {name: damaged-blob-normal-then-force, kind: force, target: transcript.jsonl}
@@ -64,3 +66,8 @@ cases:
   - {name: force-refuses-stage-symlink, kind: pending, target: stage-link, force: true}
   - {name: pending-journal-unsupported-version, kind: pending, target: version}
   - {name: force-refuses-unsupported-journal-version, kind: pending, target: version, force: true}
+  # An install an earlier CLI (pull contract 0.2.0) left pending: the staged
+  # metadata and the journaled annotation payloads carry account strings. It
+  # is recovered, with and without --force.
+  - {name: pending-journal-from-older-cli, kind: older-cli, target: journal}
+  - {name: force-recovers-journal-from-older-cli, kind: older-cli, target: journal, force: true}
