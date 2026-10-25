@@ -29,6 +29,7 @@ func TestVillagePullEnvelopeFixtures(t *testing.T) {
 			LegacyEnvelope   bool                       `yaml:"legacyEnvelope"`
 			Owner            string                     `yaml:"owner"`
 			Anonymous        bool                       `yaml:"anonymous"`
+			ThenAnonymous    bool                       `yaml:"thenAnonymous"`
 			WantEnvelope     schema.PushContractVersion `yaml:"wantEnvelope"`
 			WantContextOwner string                     `yaml:"wantContextOwner"`
 		} `yaml:"cases"`
@@ -55,13 +56,23 @@ func TestVillagePullEnvelopeFixtures(t *testing.T) {
 			server.Share(shared, pullCollectiveAID, schema.VillageShareStatusApproved)
 			writeCredsAt(t, dir, server.URL())
 
-			for _, args := range [][]string{
-				{"transcripts", "pull", single.String()},
-				{"transcripts", "pull", "--collective", pullCollectiveAName},
-			} {
-				if out, err := runVillage(t, dir, args...); err != nil {
-					t.Fatalf("%v: %v (out=%q)", args, err, out)
+			pullBoth := func() {
+				t.Helper()
+				for _, args := range [][]string{
+					{"transcripts", "pull", single.String()},
+					{"transcripts", "pull", "--collective", pullCollectiveAName},
+				} {
+					if out, err := runVillage(t, dir, args...); err != nil {
+						t.Fatalf("%v: %v (out=%q)", args, err, out)
+					}
 				}
+			}
+			pullBoth()
+			if c.ThenAnonymous {
+				for _, id := range []schema.TranscriptID{single, shared} {
+					server.SetPullTranscriptOwner(id, pullCollectiveTestBlob(t, id), nil, schema.AnonymousVillageOwner())
+				}
+				pullBoth()
 			}
 
 			db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
@@ -77,7 +88,7 @@ func TestVillagePullEnvelopeFixtures(t *testing.T) {
 				t.Fatalf("pulled %d transcripts, want 2", len(rows))
 			}
 			wantID, wantName := ownerID, c.Owner
-			if c.Anonymous {
+			if c.Anonymous || c.ThenAnonymous {
 				wantID, wantName = "", ""
 			}
 			for _, row := range rows {

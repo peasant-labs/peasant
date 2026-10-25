@@ -9,6 +9,7 @@ requiredNames:
   - released village serves pull contract 0.2.0
   - public owner village serves pull contract 0.3.0
   - public owner village shows an owner anonymously
+  - owner hidden between two pulls
 
 cases:
   - name: released village serves pull contract 0.2.0
@@ -22,5 +23,13 @@ cases:
     wantContextOwner: "owner:   @alice"
   - name: public owner village shows an owner anonymously
     anonymous: true
+    wantEnvelope: "0.3.0"
+    wantContextOwner: "owner:   anon"
+  # Pulled while alice was shown, re-pulled after she became anonymous to this
+  # viewer: the bulk pull's skip-gate compares hashes only, so the stored copy
+  # must still go through the pipeline and lose her identity.
+  - name: owner hidden between two pulls
+    owner: alice
+    thenAnonymous: true
     wantEnvelope: "0.3.0"
     wantContextOwner: "owner:   anon"

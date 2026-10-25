@@ -216,6 +216,14 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 			return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
 		}
 		envelope = negotiated
+	} else if opts.EnvelopeVersion != "" {
+		// The caller negotiated on its own client: tell this reader which
+		// envelope to decode, so it refuses the other shape.
+		if reader, ok := p.reader.(interface {
+			SetPullEnvelope(schema.PushContractVersion)
+		}); ok {
+			reader.SetPullEnvelope(opts.EnvelopeVersion)
+		}
 	}
 	if envelope == "" {
 		envelope = defaults.PullContractVersion
@@ -272,14 +280,25 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 		storedHash = storedManifest.ServedBlobHash
 		storedETag = storedManifest.ServedETag
 	}
-	// A stored copy whose owner the village now shows differently (a person who
-	// became anonymous to this viewer, or one who became visible) is re-pulled in
-	// full instead of taking a metadata-only update: the manifest and the
-	// annotation provenance must be rewritten so they keep no identity the
-	// village no longer shows, and the install check requires the manifest owner
-	// to match the metadata owner.
-	ownerID, _ := publicPersonColumns(meta.Owner)
-	refresh := opts.Force || (hasStored && storedManifest.OwnerUserID != ownerID)
+	// A stored copy whose people the village now shows differently is re-pulled
+	// in full instead of taking a metadata-only update, so the manifest and the
+	// annotation provenance are rewritten and keep no identity the village no
+	// longer shows (and pick up a renamed username):
+	//   - the owner changed kind, account or username;
+	//   - an annotation author stored as a profile is now shown differently.
+	//     Only a fresh annotation read can tell, so a stored copy that names any
+	//     author re-reads its annotations here; the read is reused below.
+	refresh := opts.Force || (hasStored && storedOwnerChanged(storedManifest, meta.Owner))
+	var annotations []schema.PullAnnotation
+	annotationsRead := false
+	if !refresh && hasStored && storedHasProfileAuthor(storedManifest) {
+		read, status, err := p.readAnnotations(ctx, ref.ID, meta.Owner)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: status, VillageHost: host}, err
+		}
+		annotations, annotationsRead = read, true
+		refresh = storedAuthorsChanged(storedManifest, manifestAnnotations(annotations))
+	}
 	if !refresh &&
 		storedHash != "" && meta.ContentHash != "" &&
 		storedHash == meta.ContentHash {
@@ -386,15 +405,14 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 		}, nil
 	}
 
-	// --- FETCH-ANNOTATIONS (to memory) ---
-	annotations, err := p.reader.GetPullTranscriptAnnotations(ctx, ref.ID)
-	if err != nil {
-		return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+	// --- FETCH-ANNOTATIONS (to memory; reused when the DIFF already read them) ---
+	if !annotationsRead {
+		read, status, err := p.readAnnotations(ctx, ref.ID, meta.Owner)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: status, VillageHost: host}, err
+		}
+		annotations = read
 	}
-	if err := validatePulledAnnotations(annotations); err != nil {
-		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, err
-	}
-	annotations = readerAnnotations(annotations)
 
 	now := p.clock.NowUnixMilli()
 
@@ -453,6 +471,20 @@ func (p *Pipeline) ObservePulledAssociations(ctx context.Context, result *PullRe
 		}}
 	}
 	result.AssociationMetadata = &metadata
+}
+
+// readAnnotations fetches a transcript's annotations, validates the batch at
+// the schema boundary, and returns them as this CLI may show them. On failure
+// it returns the status the caller reports.
+func (p *Pipeline) readAnnotations(ctx context.Context, id schema.TranscriptID, owner schema.VillagePublicOwner) ([]schema.PullAnnotation, PullStatus, error) {
+	annotations, err := p.reader.GetPullTranscriptAnnotations(ctx, id)
+	if err != nil {
+		return nil, classifyStatus(err), err
+	}
+	if err := validatePulledAnnotations(annotations); err != nil {
+		return nil, PullStatusError, err
+	}
+	return readerAnnotations(annotations, owner), "", nil
 }
 
 // validatePulledAnnotations applies the schema's canonical response target

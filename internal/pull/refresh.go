@@ -63,7 +63,7 @@ func (p *Pipeline) RefreshOwnAnnotations(ctx context.Context, opts RefreshOption
 		if err := validatePulledAnnotations(annotations); err != nil {
 			return &RefreshResult{Status: PullStatusError, VillageHost: host, TranscriptsScanned: len(own)}, err
 		}
-		annotations = readerAnnotations(annotations)
+		annotations = readerAnnotations(annotations, info.Owner)
 		for j := range annotations {
 			a := &annotations[j]
 			// The village always shows a viewer their own profile, so an

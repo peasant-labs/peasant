@@ -12,6 +12,10 @@ requiredNames:
   - owner-hidden-since-last-pull
   - owner-visible-since-last-pull
   - released-village-envelope
+  - author-hidden-since-last-pull
+  - authors-unchanged-take-the-fast-path
+  - owner-renamed-since-last-pull
+  - repository-targets-dropped-beside-anonymous-owner
   - refresh-anonymous-author-stays-foreign
   - refresh-anonymous-owner-is-never-own
 
@@ -76,6 +80,55 @@ pull:
     wantAuthors:
       - {id: 0a000000-0000-4000-8000-000000000001, username: alice}
     wantDownloads: 2
+  # Bob authored an annotation while the village showed him; he is now
+  # anonymous to this viewer while the owner and the blob are unchanged. The
+  # annotation re-read sees it and the copy is re-pulled without his identity.
+  - name: author-hidden-since-last-pull
+    previousOwner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    previousAuthors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    authors:
+      - {kind: anonymous}
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantAuthors:
+      - {}
+    wantDownloads: 2
+    forbidden: [0a000000-0000-4000-8000-000000000002, bob]
+  # Nothing about the people changed: the re-read confirms it and the blob is
+  # not downloaded again.
+  - name: authors-unchanged-take-the-fast-path
+    previousOwner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    previousAuthors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    authors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantStatus: up-to-date
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantAuthors:
+      - {id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantDownloads: 1
+  # Same account, new username: the manifest picks up the new name.
+  - name: owner-renamed-since-last-pull
+    previousOwner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    previousAuthors: []
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice-renamed}
+    authors: []
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice-renamed}
+    wantAuthors: []
+    wantDownloads: 2
+  # Beside an anonymous owner the village withholds an annotation's project
+  # hash and file path; the pipeline keeps none that arrives.
+  - name: repository-targets-dropped-beside-anonymous-owner
+    owner: {kind: anonymous}
+    authors:
+      - {kind: anonymous}
+    annotationTargets: true
+    wantOwner: {}
+    wantAuthors:
+      - {}
+    forbidden: [6f1ed002ab5595859014ebf0951522d9, private/secret-file.go]
   - name: released-village-envelope
     envelope: "0.2.0"
     owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}

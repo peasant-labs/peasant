@@ -127,11 +127,14 @@ func TestContentInstallSearchOnlyAncestor(t *testing.T) {
 			retry := happyReader()
 			retry.Meta = reader.Meta
 			retry.ContentErr = errors.New("hash reuse/recovery must not download content")
-			retry.AnnotationsErr = errors.New("hash reuse/recovery must not transfer annotations")
+			// A stored copy that names an annotation author re-reads the
+			// annotations to confirm the author is still shown; the same
+			// annotations come back, so nothing is transferred or installed.
+			retry.Annotations = reader.Annotations
 			if _, err := pull.NewPipeline(retry, filesystem, db, testutil.NewFixedClock(), testCreds(), pulls).PullTranscript(ctx, ref, pull.PullOptions{}); err != nil {
 				t.Fatalf("reuse/recovery through search-only ancestor: %v", err)
 			}
-			if retry.ContentCalls != 0 || retry.AnnotationsCalls != 0 {
+			if retry.ContentCalls != 0 || retry.AnnotationsCalls > 1 {
 				t.Fatal("remote transfers masked local reuse/recovery")
 			}
 			assertInstalledContent(t, db, filepath.Join(pulls, testutil.TestVillageHost, ref.ID.String()), reader)

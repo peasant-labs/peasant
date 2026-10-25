@@ -161,7 +161,8 @@ func TestContentInstallDryRunDoesNotRepairOrWrite(t *testing.T) {
 	result, err := pull.NewPipeline(reader, filesystem, neverCommit, testutil.NewFixedClock(), testCreds(), pulls).PullTranscript(ctx, newRef(t), pull.PullOptions{DryRun: true})
 	if err != nil || !result.DryRun ||
 		neverCommit.fired || reader.ContentCalls != 0 ||
-		reader.AnnotationsCalls != 0 {
+		// One read may confirm the stored annotation authors are still shown.
+		reader.AnnotationsCalls > 1 {
 		t.Fatalf("dry run performed mutation/transfer: %+v %v", result, err)
 	}
 	after, err := os.ReadFile(filepath.Join(pulls, testutil.TestVillageHost, ".install-"+testutil.TestTranscriptUUID, "journal.json"))
@@ -542,13 +543,15 @@ func TestContentInstallRestartRecovery(t *testing.T) {
 				metaCopy.ContentHash = schema.ComputeTranscriptHash(reader.ContentBody)
 				retry.Meta = &metaCopy
 				retry.ContentErr = errors.New("restart must not download replacement bytes")
-				retry.AnnotationsErr = errors.New("restart must not fetch replacement annotations")
+				// The re-read that confirms the stored authors are still shown
+				// returns the same annotations, so no replacement is installed.
 			}
 			result, err = pull.NewPipeline(retry, osfs, db, testutil.NewFixedClock(), testCreds(), pulls).PullTranscript(ctx, ref, pull.PullOptions{Force: fixture.ForceRecovery})
 			if err != nil || (result.Status != pull.PullStatusPulled && result.Status != pull.PullStatusUpToDate) {
 				t.Fatalf("restart repair: result=%+v error=%v", result, err)
 			}
-			if fixture.RecoveryOnly && (retry.ContentCalls != 0 || retry.AnnotationsCalls != 0) {
+			// At most one annotation read, which confirms the stored authors.
+			if fixture.RecoveryOnly && (retry.ContentCalls != 0 || retry.AnnotationsCalls > 1) {
 				t.Fatal("remote transfer masked failed local journal recovery")
 			}
 			assertInstalledContent(t, db, final, reader)

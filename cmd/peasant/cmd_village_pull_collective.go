@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/peasant-labs/peasant/internal/auth"
@@ -373,14 +375,27 @@ func currentHeldTranscripts(ctx context.Context, db *store.Store, client *villag
 		return nil, err
 	}
 
+	listedByID := make(map[schema.TranscriptID]schema.PullTranscriptInfo, len(listed))
+	for _, row := range listed {
+		listedByID[row.TranscriptID] = row
+	}
 	current := make(map[schema.TranscriptID]store.PulledTranscriptRow)
 	for _, result := range answer.Results {
 		if !result.ContentCurrent || !result.AnnotationsCurrent {
 			continue
 		}
-		if local, ok := heldByID[result.TranscriptID]; ok {
-			current[result.TranscriptID] = local
+		local, ok := heldByID[result.TranscriptID]
+		if !ok {
+			continue
 		}
+		// The gate compares hashes, not people: a held copy whose owner or
+		// annotation authors the village may now show differently goes to the
+		// pipeline, which rewrites what it no longer shows.
+		manifest, err := os.ReadFile(filepath.Join(local.PullDir, pull.ManifestFilename))
+		if err != nil || !pull.HeldIdentityCurrent(manifest, listedByID[result.TranscriptID]) {
+			continue
+		}
+		current[result.TranscriptID] = local
 	}
 	return current, nil
 }

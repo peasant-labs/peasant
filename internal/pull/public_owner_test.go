@@ -45,17 +45,19 @@ type storedPersonFixture struct {
 }
 
 type publicOwnerPullFixture struct {
-	Name            string                     `yaml:"name"`
-	Envelope        schema.PushContractVersion `yaml:"envelope"`
-	PreviousOwner   *publicPersonFixture       `yaml:"previousOwner"`
-	PreviousAuthors []publicPersonFixture      `yaml:"previousAuthors"`
-	Owner           publicPersonFixture        `yaml:"owner"`
-	ProjectName     *string                    `yaml:"projectName"`
-	Authors         []publicPersonFixture      `yaml:"authors"`
-	WantOwner       storedPersonFixture        `yaml:"wantOwner"`
-	WantAuthors     []storedPersonFixture      `yaml:"wantAuthors"`
-	WantDownloads   int                        `yaml:"wantDownloads"`
-	Forbidden       []string                   `yaml:"forbidden"`
+	Name              string                     `yaml:"name"`
+	Envelope          schema.PushContractVersion `yaml:"envelope"`
+	PreviousOwner     *publicPersonFixture       `yaml:"previousOwner"`
+	PreviousAuthors   []publicPersonFixture      `yaml:"previousAuthors"`
+	Owner             publicPersonFixture        `yaml:"owner"`
+	ProjectName       *string                    `yaml:"projectName"`
+	Authors           []publicPersonFixture      `yaml:"authors"`
+	AnnotationTargets bool                       `yaml:"annotationTargets"`
+	WantStatus        pull.PullStatus            `yaml:"wantStatus"`
+	WantOwner         storedPersonFixture        `yaml:"wantOwner"`
+	WantAuthors       []storedPersonFixture      `yaml:"wantAuthors"`
+	WantDownloads     int                        `yaml:"wantDownloads"`
+	Forbidden         []string                   `yaml:"forbidden"`
 }
 
 type publicOwnerRefreshFixture struct {
@@ -125,12 +127,23 @@ func TestPullTranscript_StoresPublicOwnerFixtures(t *testing.T) {
 			}
 			reader.Meta = &meta
 			reader.Annotations = authoredAnnotations(c.Authors)
+			if c.AnnotationTargets {
+				for i := range reader.Annotations {
+					hash, path := schema.ProjectHash("6f1ed002ab5595859014ebf0951522d9"), "private/secret-file.go"
+					reader.Annotations[i].TargetProjectHash = &hash
+					reader.Annotations[i].TargetFilePath = &path
+				}
+			}
 			res, err := p.PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
 			if err != nil {
 				t.Fatalf("PullTranscript: %v", err)
 			}
-			if res.Status != pull.PullStatusPulled {
-				t.Fatalf("status = %q, want pulled", res.Status)
+			wantStatus := c.WantStatus
+			if wantStatus == "" {
+				wantStatus = pull.PullStatusPulled
+			}
+			if res.Status != wantStatus {
+				t.Fatalf("status = %q, want %q", res.Status, wantStatus)
 			}
 			if want := max(c.WantDownloads, 1); reader.ContentCalls != want {
 				t.Errorf("content downloads = %d, want %d", reader.ContentCalls, want)
@@ -159,6 +172,12 @@ func TestPullTranscript_StoresPublicOwnerFixtures(t *testing.T) {
 				t.Fatalf("manifest annotations = %d, want %d", len(manifest.Annotations), len(c.WantAuthors))
 			}
 			commit := st.Commits[len(st.Commits)-1]
+			if res.Status == pull.PullStatusUpToDate {
+				// No new install: the last commit is the previous pull's.
+				if len(st.Commits) != 1 {
+					t.Errorf("an up-to-date pull committed again: %d commits", len(st.Commits))
+				}
+			}
 			if commit.Transcript.OwnerUserID != c.WantOwner.ID || commit.Transcript.OwnerUsername != c.WantOwner.Username {
 				t.Errorf("index owner = %q/%q, want %q/%q", commit.Transcript.OwnerUserID, commit.Transcript.OwnerUsername, c.WantOwner.ID, c.WantOwner.Username)
 			}
