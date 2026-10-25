@@ -27,6 +27,23 @@ async function history(request, kind, page = 1, revision) {
 /** The page area the app mounted. While Next hydrates a route it keeps a hidden copy of the
  * streamed page outside `main`; a CSS query must count only the mounted section, never that copy. */
 function mountedPage(page) { return page.locator('main'); }
+/** The phone drawer closes as one user-visible transition: it slides out over `--dur-2` and
+ * flips `visibility` only at the end, so the closed panel still reads as visible while it
+ * leaves (fairtrade's AppSidebar.css keeps it in the focus order until it is out of view).
+ * Sampling that property is not a settle signal — the panel can be read as visible, off
+ * screen, after a hidden sample has already passed — so wake on the drawer's own transition
+ * and then on the closed state a computed-style read depends on. */
+async function closeDrawer(page) {
+  const panel = page.locator('.asb-panel');
+  await expect(page.locator('.asb')).toHaveAttribute('data-drawer-open', 'false');
+  // The exit transition is created on the frame after the closed state lands, so let a frame
+  // pass before deciding the drawer has settled. A property read in between already reports
+  // the new `hidden` value while the transition has not started.
+  await panel.evaluate(element => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  // CSS transitions are DOM animations. Wait until the drawer's own exit has run and its
+  // visibility has finished flipping, instead of sampling one property mid-transition.
+  await expect.poll(() => panel.evaluate(element => getComputedStyle(element).visibility === 'hidden' && element.getAnimations().length === 0)).toBe(true);
+}
 async function open(page, theme) {
   await page.goto('/village');
   const html = page.locator('html');
@@ -40,9 +57,7 @@ async function open(page, theme) {
     // over the page. Close it through its own control; the theme is stored, so it is not reopened.
     if (drawer) {
       await page.locator('.asb-bar').getByRole('button', { name: 'close the menu', exact: true }).click();
-      // The drawer leaves the screen before its panel stops being visible, so its off-screen
-      // controls are still visible to a computed-style read or a click. Wait for the exit itself.
-      await expect(page.locator('.asb-panel')).toBeHidden();
+      await closeDrawer(page);
     }
   }
   await expect(html).toHaveAttribute('data-theme', theme);
@@ -272,6 +287,10 @@ async function exercise(row, { page, request }, info) {
     expect(styles.panelPosition).toBe('relative');
     // The sidebar is a column on a wide screen and a top bar with a drawer on a phone. The closed
     // drawer keeps its layout off screen and hides with visibility, so only visible controls count.
+    // Settle that drawer again at this read: a fresh already-dark page never took the open and
+    // close path in `open`, and a hidden sample can pass before the exit transition runs, so
+    // only the transition queue settling is a safe signal at the read itself.
+    if (surface === 'mobile') await closeDrawer(page);
     await expect(page.locator(surface === 'desktop' ? '.asb-panel' : '.asb-bar')).toBeVisible();
     const chrome = await page.locator('.asb').first().locator('a,button').evaluateAll(elements => elements.filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden').map(element => {
       const box = element.getBoundingClientRect();
