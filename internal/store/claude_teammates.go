@@ -82,7 +82,7 @@ func (s *Store) ClaudeTeammates(ctx context.Context, sessionIDs []string) (map[s
 				teammate := schema.SessionTeammate{
 					Team:     stmt.ColumnText(1),
 					Name:     stmt.ColumnText(2),
-					Evidence: schema.EvidenceNativeDynamicWorkflow,
+					Evidence: schema.SessionTeammateEvidenceNativeDynamicWorkflow,
 				}
 				if validateErr := teammate.Validate(); validateErr != nil {
 					return fmt.Errorf("store: stored Claude teammate identity for session %q cannot be emitted on a local read: %w; run `peasant ingest verify`, let discovery re-mine that transcript, then retry", sessionID, validateErr)

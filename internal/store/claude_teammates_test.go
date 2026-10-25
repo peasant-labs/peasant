@@ -91,7 +91,7 @@ func TestClaudeTeammatesReadsOnlyRecordedSpawnEdges(t *testing.T) {
 			want := schema.SessionTeammate{
 				Team:     testCase.WantTeammate.Team,
 				Name:     testCase.WantTeammate.Name,
-				Evidence: schema.EvidenceNativeDynamicWorkflow,
+				Evidence: schema.SessionTeammateEvidenceNativeDynamicWorkflow,
 			}
 			if teammate != want {
 				t.Fatalf("teammate for %q = %+v, want the recorded %+v", testCase.Subject, teammate, want)

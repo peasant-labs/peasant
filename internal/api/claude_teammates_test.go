@@ -76,7 +76,7 @@ func TestClaudeTeammateIdentityReachesLocalReads(t *testing.T) {
 			want := schema.SessionTeammate{
 				Team:     testCase.Team,
 				Name:     testCase.Agent,
-				Evidence: schema.EvidenceNativeDynamicWorkflow,
+				Evidence: schema.SessionTeammateEvidenceNativeDynamicWorkflow,
 			}
 
 			// 1. The session summary construction site both list paths share.
