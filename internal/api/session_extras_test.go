@@ -198,21 +198,28 @@ func seedStoredEntries(t *testing.T, db *store.Store, entries []schema.SessionEn
 }
 
 // seedExtrasCommits writes the commits the commits route must read. The seeded
-// values keep the three ordering rules independent of one another: the earliest
-// commit carries the lexically greatest hash and the latest carries the
-// smallest, so author time cannot be satisfied by sorting hashes; two rows share
-// one author time so the hash tie-break is the only thing that orders them; and
-// one row has no author time at all (stored as SQL NULL) so the unknown-time rows
-// are pinned last.
+// values keep the observable ordering rules independent of one another: the
+// earliest commit carries the lexically greatest hash and the latest carries the
+// smallest, so author time cannot be satisfied by sorting hashes; the earliest
+// commit also carries a committer time far later than its author time, so a read
+// ordered by commit_time would serve it last among the known-time rows instead
+// of first; and one row has no author time at all (stored as SQL NULL) so the
+// unknown-time row is pinned last.
+//
+// Two rows share one author time. Their served sequence is the observable
+// author-time tie order, but this read cannot prove the ORDER BY hash tie-break
+// itself: session_commits is keyed (session_id, commit_hash), so a scan of one
+// session already yields hash order. The tie-break stays a SQL-level guarantee
+// in the query; the fixture pins what a consumer can actually observe.
 func seedExtrasCommits(t *testing.T, db *store.Store) []ingest.CommitInfo {
 	t.Helper()
 	commits := []ingest.CommitInfo{
 		{
 			Hash:        "ffffffffffffffffffffffffffffffffffffffff",
-			Message:     "earliest commit, greatest hash",
+			Message:     "earliest commit, greatest hash, latest committer time",
 			AuthorName:  "Ada Lovelace",
 			AuthorEmail: "ada@example.com",
-			CommitTime:  1_700_000_010_000,
+			CommitTime:  1_700_000_090_000,
 			AuthorTime:  1_700_000_010_000,
 		},
 		{
@@ -245,7 +252,9 @@ func seedExtrasCommits(t *testing.T, db *store.Store) []ingest.CommitInfo {
 		t.Fatalf("seed session commits: %v", err)
 	}
 	// The order the route must serve: known author times oldest first, the tied
-	// pair by hash, then the row with no author time.
+	// pair by hash, then the row with no author time. Ordering by commit_time
+	// instead would serve commits[2], commits[3], commits[1], commits[0],
+	// commits[4], so the sequence itself pins which column the query orders by.
 	return []ingest.CommitInfo{commits[0], commits[2], commits[3], commits[1], commits[4]}
 }
 
@@ -292,6 +301,36 @@ func TestSessionCommitsRoute(t *testing.T) {
 	for index := range want {
 		if got[index] != want[index] {
 			t.Fatalf("commits[%d] = %+v, want %+v", index, got[index], want[index])
+		}
+	}
+
+	// Decoding into inert structs cannot tell a committed zero from an omitted
+	// key, so read the same payload as raw objects. The wire contract requires
+	// both timestamps present on every row, including the unknown-time row: the
+	// zero is the value the consumer renders, so both keys must be emitted there
+	// rather than dropped.
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("commits do not decode as raw objects: %v", err)
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("raw commits = %d rows, want %d", len(rows), len(want))
+	}
+	unknownTimeRow := rows[len(rows)-1]
+	wantUnknownHash, err := json.Marshal(want[len(want)-1].Hash)
+	if err != nil {
+		t.Fatalf("marshal the expected unknown-time hash: %v", err)
+	}
+	if string(unknownTimeRow["hash"]) != string(wantUnknownHash) {
+		t.Fatalf("last served row hash = %s, want the unknown-time commit %s", unknownTimeRow["hash"], wantUnknownHash)
+	}
+	for _, key := range []string{"commitTime", "authorTime"} {
+		value, present := unknownTimeRow[key]
+		if !present {
+			t.Fatalf("unknown-time commit row keys = %v, want a present %s key", unknownTimeRow, key)
+		}
+		if string(value) != "0" {
+			t.Fatalf("unknown-time commit %s = %s, want the committed zero", key, value)
 		}
 	}
 }
