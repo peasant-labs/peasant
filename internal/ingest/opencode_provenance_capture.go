@@ -256,14 +256,17 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 	if opts.Fork == nil {
 		if forkSource, ok := source.(OpenCodeForkEvidenceSource); ok {
 			linkID, linkErr := NewOpenCodeSessionLinkID(sessionID)
-			if linkErr == nil {
-				evidence, present, evidenceErr := forkSource.SessionForkEvidence(ctx, linkID)
-				if evidenceErr != nil {
-					return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the native fork pointer could not be read", "verify the native database is readable and retry; no partial capture is certified", evidenceErr)
-				}
-				if present {
-					opts.NativeFork = &evidence
-				}
+			if linkErr != nil {
+				_ = closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout)
+				return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the session identity cannot be used to read the native fork pointer", "repair the session identity and retry; no partial capture is certified", linkErr)
+			}
+			evidence, present, evidenceErr := forkSource.SessionForkEvidence(ctx, linkID)
+			if evidenceErr != nil {
+				_ = closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout)
+				return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the native fork pointer could not be read", "verify the native database is readable and retry; no partial capture is certified", evidenceErr)
+			}
+			if present {
+				opts.NativeFork = &evidence
 			}
 		}
 	}
