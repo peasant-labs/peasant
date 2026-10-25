@@ -4,6 +4,12 @@ requiredNames: [mode_all, selected_restrictive, selected_empty, selected_exclude
 homeRootIds: [lib-c, lib-b, lib-a]
 homeChildIds: [lib-h]
 homeParentId: lib-a
+# Project options carry no publication metadata and are ordered by project name,
+# then hash: alpha, beta, gamma. The helper project has no root session.
+homeProjectHashes:
+  - aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  - cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 cases:
   - name: mode_all
     selection:

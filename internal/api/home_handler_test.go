@@ -430,25 +430,44 @@ func TestSyncHomeTokenScope(t *testing.T) {
 	}
 }
 
+type homeAncestrySession struct {
+	ID       string
+	Cache    string
+	Snapshot string
+	Kind     string
+	State    string
+	Target   string
+	Latest   bool
+	Inactive bool
+}
+
+type homeAncestryCase struct {
+	Name             string
+	Query            string
+	IDs              []string
+	Children         []int
+	Selected         []string
+	Status           int
+	InvalidSelection bool `yaml:"invalidSelection"`
+}
+
+type homeAncestryDocument struct {
+	RequiredNames []string `yaml:"requiredNames"`
+	Sessions      []homeAncestrySession
+	Cases         []homeAncestryCase
+}
+
+func loadHomeAncestry(t *testing.T) homeAncestryDocument {
+	t.Helper()
+	var document homeAncestryDocument
+	if err := testutil.DecodeNamedFixtureYAML(homeAncestryYAML, &document); err != nil {
+		t.Fatalf("decode home ancestry fixture: %v", err)
+	}
+	return document
+}
+
 func TestSyncHomeAncestryIgnoresSavedSelection(t *testing.T) {
-	var f struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Sessions      []struct {
-			ID, Cache, Snapshot, Kind, State, Target string
-			Latest, Inactive                         bool
-		}
-		Cases []struct {
-			Name, Query      string
-			IDs              []string
-			Children         []int
-			Selected         []string
-			Status           int
-			InvalidSelection bool `yaml:"invalidSelection"`
-		}
-	}
-	if err := testutil.DecodeNamedFixtureYAML(homeAncestryYAML, &f); err != nil {
-		t.Fatal(err)
-	}
+	f := loadHomeAncestry(t)
 	db := storetest.Open(t)
 	ids := make([]string, len(f.Sessions))
 	for i, s := range f.Sessions {
@@ -516,14 +535,7 @@ func TestSyncHomeAncestryIgnoresSavedSelection(t *testing.T) {
 // partial body. Plain stored browsing has no such dependency and still lists
 // the same rows.
 func TestSyncHomeInvalidSelectionFailsMetadataButNotStoredBrowsing(t *testing.T) {
-	var fixture struct {
-		Sessions []struct {
-			ID string `yaml:"id"`
-		} `yaml:"sessions"`
-	}
-	if err := testutil.DecodeFixtureYAML(homeAncestryYAML, &fixture); err != nil {
-		t.Fatalf("decode home ancestry fixture: %v", err)
-	}
+	fixture := loadHomeAncestry(t)
 	if len(fixture.Sessions) == 0 {
 		t.Fatal("home ancestry fixture has no sessions")
 	}

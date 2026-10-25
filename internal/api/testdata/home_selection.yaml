@@ -22,4 +22,4 @@ cases:
   - name: explicit-session-does-not-widen
     explicit: session-selected-main
     ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
-    outsideSelection: [session-other-project, session-independent-clone]
+    outsideSelection: [session-other-project, session-independent-clone, session-linked-feature]

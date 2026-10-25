@@ -163,8 +163,14 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	for _, row := range sessionRows {
 		sessionIDs = append(sessionIDs, stringField(t, row, "id"))
 	}
-	if !reflect.DeepEqual(sessionIDs, []string{fixture.Sessions[0].ID, fixture.Sessions[1].ID, fixture.Sessions[2].ID, fixture.Sessions[3].ID}) {
-		t.Fatalf("sessions visibility changed: %v", sessionIDs)
+	// Stored sessions are listed newest-first. The fixture seeds them in
+	// ascending start order, so the transport order is its reverse.
+	wantSessionIDs := make([]string, 0, len(fixture.Sessions))
+	for i := len(fixture.Sessions) - 1; i >= 0; i-- {
+		wantSessionIDs = append(wantSessionIDs, fixture.Sessions[i].ID)
+	}
+	if !reflect.DeepEqual(sessionIDs, wantSessionIDs) {
+		t.Fatalf("sessions visibility or order changed: %v, want %v", sessionIDs, wantSessionIDs)
 	}
 	// The stored-session list and the ingest-selection metadata are independent:
 	// a row outside the saved selector is still listed, and its discovery status

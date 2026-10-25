@@ -639,11 +639,12 @@ cases:
         - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
     expected:
       statusCode: 200
-      totalItems: 1
-      ordinarySessionTotal: 1
+      totalItems: 2
+      ordinarySessionTotal: 2
       helperThreadTotal: 1
       items:
         - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1], syncStatus: held}
+        - {kind: transcript, sessionId: agent-a2, groupCount: 0, syncStatus: held}
       memberPages:
         - itemIndex: 0
           pages:

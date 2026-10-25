@@ -36,11 +36,12 @@ type libraryPolicyCase struct {
 }
 
 type libraryPolicyFixture struct {
-	RequiredNames []string            `yaml:"requiredNames"`
-	HomeRootIDs   []string            `yaml:"homeRootIds"`
-	HomeChildIDs  []string            `yaml:"homeChildIds"`
-	HomeParentID  string              `yaml:"homeParentId"`
-	Cases         []libraryPolicyCase `yaml:"cases"`
+	RequiredNames     []string            `yaml:"requiredNames"`
+	HomeRootIDs       []string            `yaml:"homeRootIds"`
+	HomeChildIDs      []string            `yaml:"homeChildIds"`
+	HomeParentID      string              `yaml:"homeParentId"`
+	HomeProjectHashes []string            `yaml:"homeProjectHashes"`
+	Cases             []libraryPolicyCase `yaml:"cases"`
 }
 
 func loadLibraryPolicyFixture(t *testing.T) libraryPolicyFixture {
@@ -60,8 +61,8 @@ func loadLibraryPolicyFixture(t *testing.T) libraryPolicyFixture {
 	if len(fixture.Cases) != len(libraryPolicyRequiredNames) {
 		t.Fatalf("ingested library policy fixture has %d cases, want %d", len(fixture.Cases), len(libraryPolicyRequiredNames))
 	}
-	if len(fixture.HomeRootIDs) == 0 || len(fixture.HomeChildIDs) == 0 || fixture.HomeParentID == "" {
-		t.Fatal("ingested library policy fixture must declare its Home root, child and parent identities")
+	if len(fixture.HomeRootIDs) == 0 || len(fixture.HomeChildIDs) == 0 || fixture.HomeParentID == "" || len(fixture.HomeProjectHashes) == 0 {
+		t.Fatal("ingested library policy fixture must declare its Home root, child, parent and project-option identities")
 	}
 	for _, fixtureCase := range fixture.Cases {
 		if !fixtureCase.Selection.Mode.IsValid() {
@@ -380,8 +381,8 @@ func assertLibraryHomeAndParent(t *testing.T, fixture libraryPolicyFixture, fixt
 	for _, option := range options.Projects {
 		optionHashes = append(optionHashes, option.ProjectHash.String())
 	}
-	if !equalIDSet(optionHashes, []string{libraryAlphaHash.String(), libraryBetaHash.String(), libraryGammaHash.String(), libraryHelperHash.String()}) {
-		t.Fatalf("Home project options = %v, want every stored project", optionHashes)
+	if !equalIDSequence(optionHashes, fixture.HomeProjectHashes) {
+		t.Fatalf("Home project options = %v, want project-name then hash order %v", optionHashes, fixture.HomeProjectHashes)
 	}
 
 	firstBody, firstStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=1")
