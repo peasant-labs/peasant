@@ -7,6 +7,8 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-24
+
 ### Changed
 - Pulling reads pull contract 0.3.0, where peasant online shows each
   transcript owner and annotation author as you may see them: their public
