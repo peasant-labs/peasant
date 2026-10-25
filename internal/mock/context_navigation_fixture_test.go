@@ -70,6 +70,13 @@ func TestProviderReadServesStoredLinksAndRetainedHistory(t *testing.T) {
 		}
 	}
 
+	// The child's durable parent names the same stored session its started_by
+	// relationship targets, so the transcript's parent link reads a parent the
+	// store holds instead of an unresolved reference.
+	if read.ParentSessionID == nil || *read.ParentSessionID != schema.SessionID(fixture.Parent.ID) {
+		t.Errorf("parentSessionId = %v, want the stored parent %q", read.ParentSessionID, fixture.Parent.ID)
+	}
+
 	// The recorded spawn edge reaches the mounted read as the contract's
 	// teammate object, carrying the identity the fixture declares rather than
 	// one the read invents.

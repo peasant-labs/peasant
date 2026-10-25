@@ -321,11 +321,11 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       throw fail('rendering the recorded teammate identity', `the identity line painted ${JSON.stringify({ color: prelude.color, opacity: prelude.opacity })}, so it is invisible`)
     }
     if (prelude.parentLinkText !== 'parent transcript') throw fail('rendering the parent transcript link', `the prelude link reads ${JSON.stringify(prelude.parentLinkText)}, expected "parent transcript" beside a recorded teammate identity`)
-    if (!prelude.parentHref?.includes(FIXTURE.parentId)) throw fail('rendering the parent transcript link', `the prelude link targets ${JSON.stringify(prelude.parentHref)}, which is not the authorized parent ${FIXTURE.parentId}`)
+    if (!prelude.parentHref?.includes(FIXTURE.childParentSessionId)) throw fail('rendering the parent transcript link', `the prelude link targets ${JSON.stringify(prelude.parentHref)}, which is not the child's stored parent ${FIXTURE.childParentSessionId}`)
     const preludeHandle = await page.evaluateHandle(() => document.querySelector('[data-transcript-teammate="true"]')?.closest('p'))
     if (!preludeHandle.asElement()) throw fail('capturing the recorded teammate identity', 'the prelude paragraph the identity line belongs to disappeared before the capture')
     const preludeCapture = await captureHandle(page, gate, preludeHandle.asElement(), theme, 'context-teammate-prelude', '[data-transcript-teammate="true"] (closest p)', evidence)
-    evidence.teammatePrelude = { theme, ...prelude, capture: preludeCapture }
+    evidence.teammatePreludes = [...(evidence.teammatePreludes ?? []), { theme, ...prelude, capture: preludeCapture }]
 
     const collapsed = await page.$eval('.txn-earlier-toggle', (node) => node.getAttribute('aria-expanded'))
     if (collapsed !== 'false') throw fail('capturing the child context links', `retained history was disclosed without a reader action (aria-expanded=${collapsed})`)

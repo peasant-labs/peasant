@@ -13,6 +13,8 @@
 # of a native dynamic workflow spawn named this team and name. The other three
 # sessions carry ordinary parentage and no teammate, so a local read that
 # claimed an identity without a recorded spawn edge would be visible as drift.
+# The child's durable parent names the same stored session as its started_by
+# relationship, so the transcript's parent link reads a parent the store holds.
 #
 # The Go mock provider and the real-binary visual harness both read this one
 # file, so a route, link target, or label can never drift between them.
@@ -21,6 +23,9 @@ project:
   name: fortuna
 child:
   id: sess_contextchild
+  # The durable logical parent: the stored session the recorded spawn edge
+  # names, the same target its started_by relationship resolves to.
+  parentSessionId: sess_contextparent
   project: fortuna
   harness: claude-code
   model: claude-sonnet-4

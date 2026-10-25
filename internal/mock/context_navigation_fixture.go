@@ -51,6 +51,7 @@ type contextNavigationTeammateFixture struct {
 
 type contextNavigationSessionFixture struct {
 	ID                   string                                 `yaml:"id"`
+	ParentSessionID      string                                 `yaml:"parentSessionId"`
 	Project              string                                 `yaml:"project"`
 	Harness              string                                 `yaml:"harness"`
 	Model                string                                 `yaml:"model"`
@@ -140,6 +141,11 @@ func loadContextNavigationFixture(source []byte) (contextNavigationFixture, erro
 				return contextNavigationFixture{}, err
 			}
 		}
+		if session.ParentSessionID != "" {
+			if _, err := schema.NewSessionID(session.ParentSessionID); err != nil {
+				return contextNavigationFixture{}, fmt.Errorf("%s.parentSessionId %q is invalid: %w", name, session.ParentSessionID, err)
+			}
+		}
 	}
 	// The child is the session the mounted transcript opens, so its recorded
 	// teammate identity is the evidence the read projection must carry. Requiring
@@ -173,6 +179,14 @@ func loadContextNavigationFixture(source []byte) (contextNavigationFixture, erro
 		if found != want {
 			return contextNavigationFixture{}, fmt.Errorf("child relationship %q must target %q, received %q", kind, want, found)
 		}
+	}
+	// A stored child's durable parent and its started_by target name the same
+	// session: the served snapshot takes the generation's started_by target as
+	// the logical parent, and the transcript's parent link reads that durable
+	// field. A fixture that let the two disagree would prove a link the stored
+	// read cannot support.
+	if fixture.Child.ParentSessionID != fixture.Parent.ID {
+		return contextNavigationFixture{}, fmt.Errorf("child.parentSessionId %q must be the started_by target %q, because a stored child's durable parent is the session its recorded spawn edge names", fixture.Child.ParentSessionID, fixture.Parent.ID)
 	}
 	if fixture.Expected.ContextLabel == "" || fixture.Expected.StarterLabel == "" || fixture.Expected.StarterLinkAction == "" || fixture.Expected.EarlierSummary == "" {
 		return contextNavigationFixture{}, fmt.Errorf("expected labels and summary must be non-empty")
@@ -276,6 +290,10 @@ func (fixture contextNavigationFixture) session(source contextNavigationSessionF
 			TargetLocalID: &target,
 			Evidence:      schema.EvidenceKind(relationship.Evidence),
 		})
+	}
+	if source.ParentSessionID != "" {
+		parent := schema.SessionID(source.ParentSessionID)
+		session.ParentSessionID = &parent
 	}
 	return session
 }

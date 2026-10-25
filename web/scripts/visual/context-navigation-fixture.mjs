@@ -89,6 +89,11 @@ export function loadContextNavigationFixture() {
     if (childTeammate.evidence !== 'native_dynamic_workflow') {
       throw new Error(`context navigation fixture.child.teammate.evidence ${JSON.stringify(childTeammate.evidence)} must be "native_dynamic_workflow": only a recorded native dynamic workflow spawn names a teammate, so another kind would claim evidence the stored parent transcript does not carry`)
     }
+    // The child's durable parent and its started_by target name the same stored
+    // session: the transcript's parent link reads the durable field, so a
+    // fixture that let them disagree would prove a link the read cannot support.
+    const childParentSessionId = requiredSessionId(child, 'parentSessionId', 'context navigation fixture.child')
+    if (childParentSessionId !== parentId) throw new Error(`context navigation fixture.child.parentSessionId ${JSON.stringify(childParentSessionId)} must be the started_by target ${JSON.stringify(parentId)}`)
 
     // The unresolved child must name a target the store does NOT hold, so the
     // honest-reference arm can never accidentally become a link.
@@ -105,6 +110,7 @@ export function loadContextNavigationFixture() {
       projectHash,
       projectName,
       childSessionId,
+      childParentSessionId,
       childOpening: openingTurn(child, 'context navigation fixture.child'),
       childTeammate,
       sourceId,
