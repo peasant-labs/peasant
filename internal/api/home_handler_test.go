@@ -586,16 +586,80 @@ func TestSyncHomeInvalidSelectionFailsMetadataButNotStoredBrowsing(t *testing.T)
 	}
 }
 
+// assertProjectFilteredConflictMetadata proves a Home page filtered to a
+// healthy project never evaluates ingest rules for an unrelated stored project.
+// The full cohort still supplies identity evidence, but only requested rows are
+// matched. Requesting the conflicting project's metadata fails truthfully.
+func assertProjectFilteredConflictMetadata(t *testing.T, tc homeSelectionCase, db *store.Store, source discoveryHTTPFixture, resolver fixtureRepositoryResolver) {
+	t.Helper()
+	healthy, conflicting := source.Sessions[0], source.Sessions[3]
+	selection := config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
+		defaults.HarnessClaudeCode.String(): {
+			Sessions: []string{healthy.ID},
+			Projects: []config.ProjectSelection{
+				{GitRemote: conflicting.Remote, Branches: []string{"release"}},
+				{GitRemote: conflicting.Remote, Branches: []string{"main"}},
+			},
+		},
+	}}
+	cfg := config.BaseConfig()
+	cfg.Selection = selection
+	sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
+	h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: resolver}
+
+	healthyPage := syncPageRequest(t, http.HandlerFunc(h.handleSessions), "view=home&projectHash="+healthy.ProjectHash, 200)
+	gotIDs := make([]string, 0, len(healthyPage.Items))
+	for _, item := range healthyPage.Items {
+		gotIDs = append(gotIDs, item.Sync.ID)
+		wantOutside := false
+		for _, id := range tc.OutsideSelection {
+			if id == item.Sync.ID {
+				wantOutside = true
+				break
+			}
+		}
+		if item.Publication.OutsideSelection != wantOutside {
+			t.Fatalf("healthy project session %q outsideSelection=%t, want %t", item.Sync.ID, item.Publication.OutsideSelection, wantOutside)
+		}
+	}
+	if !reflect.DeepEqual(gotIDs, tc.IDs) {
+		t.Fatalf("project-filtered Home IDs = %v, want %v", gotIDs, tc.IDs)
+	}
+
+	response := httptest.NewRecorder()
+	h.handleSessions(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&projectHash="+conflicting.ProjectHash, nil))
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("conflicting-project Home status = %d, want 500 (body %s)", response.Code, response.Body.String())
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &keys); err != nil {
+		t.Fatalf("decode conflicting-project failure: %v (body %s)", err, response.Body.String())
+	}
+	if keys["items"] != nil || keys["next"] != nil {
+		t.Fatalf("conflicting-project failure returned a partial page: %s", response.Body.String())
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode conflicting-project error: %v", err)
+	}
+	if !strings.Contains(envelope.Error, "conflicting") {
+		t.Fatalf("conflicting-project failure = %q, want the conflicting-rule cause", envelope.Error)
+	}
+}
+
+type homeSelectionCase struct {
+	Name, Branch, Explicit string
+	Clone                  bool
+	DropIndependentMetrics bool     `yaml:"dropIndependentMetrics"`
+	ConflictUnrelated      bool     `yaml:"conflictUnrelated"`
+	IDs                    []string `yaml:"ids"`
+	OutsideSelection       []string `yaml:"outsideSelection"`
+}
+
 func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 	var f struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Cases         []struct {
-			Name, Branch, Explicit string
-			Clone                  bool
-			DropIndependentMetrics bool     `yaml:"dropIndependentMetrics"`
-			IDs                    []string `yaml:"ids"`
-			OutsideSelection       []string `yaml:"outsideSelection"`
-		}
+		RequiredNames []string            `yaml:"requiredNames"`
+		Cases         []homeSelectionCase `yaml:"cases"`
 	}
 	if err := testutil.DecodeNamedFixtureYAML(homeSelectionYAML, &f); err != nil {
 		t.Fatal(err)
@@ -605,6 +669,10 @@ func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 			db := storetest.Open(t)
 			source := loadDiscoveryHTTPFixture(t)
 			paths, resolver := seedDiscoveryHTTPStore(t, db, source)
+			if tc.ConflictUnrelated {
+				assertProjectFilteredConflictMetadata(t, tc, db, source, resolver)
+				return
+			}
 			selection := config.SelectionHarnessConfig{}
 			if tc.Explicit != "" {
 				selection.Sessions = []string{tc.Explicit}
