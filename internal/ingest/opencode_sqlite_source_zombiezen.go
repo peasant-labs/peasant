@@ -35,6 +35,8 @@ const (
 	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentMessagesBeforeStatement   = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq < ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentMessagesBoundedStatement  = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT ?4"
+	openCodeSessionV2ForkEvidenceStatement   = "SELECT fork_session_id, fork_boundary FROM session_v2 WHERE id = ?1 LIMIT 2"
+	openCodeCurrentMessageSeqStatement       = "SELECT seq FROM session_message WHERE session_id = ?1 AND id = ?2 LIMIT 2"
 	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
 	// The payload-size probes count one session's payload-bearing rows and sum
 	// their data length. LENGTH() computes from the record header, so a probe
@@ -1365,6 +1367,103 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, req
 		page.Next = &cursor
 	}
 	return page, nil
+}
+
+// SessionForkEvidence reads the native session_v2 fork pointer for one session.
+// The pointer is optional evidence: an absent or malformed row reports no
+// evidence, and this read never guesses a relationship from other fields.
+func (s *zombiezenOpenCodeSQLiteSource) SessionForkEvidence(ctx context.Context, sessionID OpenCodeSessionLinkID) (OpenCodeForkEvidence, bool, error) {
+	lease, err := s.beginSourceRead(ctx, "read native session fork evidence")
+	if err != nil {
+		return OpenCodeForkEvidence{}, false, err
+	}
+	defer lease.release()
+
+	columns, err := s.columnsLocked(lease.ctx, string(OpenCodeSessionTableV2))
+	if err != nil {
+		return OpenCodeForkEvidence{}, false, s.sourceReadError(lease.ctx, "read session_v2 fork columns", err, "pragma_table_info(session_v2)", "supported OpenCode session_v2")
+	}
+	if !projectColumnsPresent(columns, "fork_session_id", "fork_boundary") {
+		return OpenCodeForkEvidence{}, false, nil
+	}
+
+	var evidence OpenCodeForkEvidence
+	present := false
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeText || stmt.ColumnText(0) == "" {
+			return nil
+		}
+		sourceID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(0))
+		if err != nil {
+			return nil
+		}
+		boundaryType, messageID, ok := decodeOpenCodeForkBoundary(stmt.ColumnText(1))
+		if !ok {
+			return nil
+		}
+		evidence = OpenCodeForkEvidence{
+			SourceSessionID:   sourceID,
+			BoundaryType:      boundaryType,
+			BoundaryMessageID: messageID,
+		}
+		present = true
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeSessionV2ForkEvidenceStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodeForkEvidence{}, false, s.sourceReadError(lease.ctx, "read native session fork evidence", err, "session_v2(fork_session_id, fork_boundary) where id", "supported OpenCode session_v2 fork evidence")
+	}
+	return evidence, present, nil
+}
+
+// CurrentMessageSeq resolves one native source message identity to its
+// sequence in the source session. Absence is reported, not guessed.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentMessageSeq(ctx context.Context, sessionID OpenCodeCurrentSessionID, messageID string) (OpenCodeCurrentSeq, bool, error) {
+	lease, err := s.beginSourceRead(ctx, "read native fork boundary message sequence")
+	if err != nil {
+		return OpenCodeCurrentSeq{}, false, err
+	}
+	defer lease.release()
+
+	var seq OpenCodeCurrentSeq
+	found := false
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeInteger {
+			return nil
+		}
+		value, err := NewOpenCodeCurrentSeq(stmt.ColumnInt64(0))
+		if err != nil {
+			return nil
+		}
+		seq = value
+		found = true
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentMessageSeqStatement, []any{sessionID.value, messageID}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodeCurrentSeq{}, false, s.sourceReadError(lease.ctx, "read native fork boundary message sequence", err, "session_message(seq) where session_id and id", "supported OpenCode session_message")
+	}
+	return seq, found, nil
+}
+
+// decodeOpenCodeForkBoundary parses the native fork boundary JSON. The two
+// accepted kinds are the closed native vocabulary; anything else is malformed
+// evidence and reports absence.
+func decodeOpenCodeForkBoundary(raw string) (OpenCodeForkBoundaryType, string, bool) {
+	var wire struct {
+		Type      string `json:"type"`
+		MessageID string `json:"messageID"`
+	}
+	if json.Unmarshal([]byte(raw), &wire) != nil {
+		return "", "", false
+	}
+	switch OpenCodeForkBoundaryType(wire.Type) {
+	case OpenCodeForkBoundaryBefore, OpenCodeForkBoundaryThrough:
+	default:
+		return "", "", false
+	}
+	if _, err := NewOpenCodeCurrentMessageID(wire.MessageID); err != nil {
+		return "", "", false
+	}
+	return OpenCodeForkBoundaryType(wire.Type), wire.MessageID, true
 }
 
 // CurrentSessionHasSubstantive reports whether the current session_message

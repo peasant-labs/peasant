@@ -249,6 +249,13 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 	if err != nil {
 		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "open snapshot source", "the read-only native source could not be opened", "verify the native database exists, is readable, and is not blocked by permissions, then retry without modifying it", err)
 	}
+	if opts.Fork == nil {
+		if forkSource, ok := source.(OpenCodeForkEvidenceSource); ok {
+			if proof := openCodeNativeForkProof(ctx, source, forkSource, sessionID); proof != nil {
+				opts.Fork = proof
+			}
+		}
+	}
 	read, readErr := SnapshotOpenCodeHistory(ctx, source, sessionID, opts)
 	closeErr := source.Close(ctx)
 	if readErr != nil {
@@ -258,6 +265,82 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "close snapshot source", "the read-only source could not be released", "retry the snapshot; a bounded close retries the release", closeErr)
 	}
 	return read, nil
+}
+
+// openCodeNativeForkProof builds the fork proof from the native session_v2
+// pointer. The pointer is optional: absent or malformed evidence yields no
+// proof, and a source session whose boundary message cannot be resolved yields
+// a proof with an unproven boundary rather than a guessed one.
+func openCodeNativeForkProof(ctx context.Context, source OpenCodeSQLiteSource, forkSource OpenCodeForkEvidenceSource, sessionID string) *OpenCodeForkProof {
+	linkID, err := NewOpenCodeSessionLinkID(sessionID)
+	if err != nil {
+		return nil
+	}
+	evidence, present, err := forkSource.SessionForkEvidence(ctx, linkID)
+	if err != nil || !present {
+		return nil
+	}
+	proof := &OpenCodeForkProof{SourceSessionID: evidence.SourceSessionID.String()}
+	sourceID, err := NewOpenCodeCurrentSessionID(evidence.SourceSessionID.String())
+	if err != nil {
+		return nil
+	}
+	seq, found, err := forkSource.CurrentMessageSeq(ctx, sourceID, evidence.BoundaryMessageID)
+	if err != nil || !found {
+		return proof
+	}
+	value := seq.Value()
+	switch evidence.BoundaryType {
+	case OpenCodeForkBoundaryBefore:
+		proof.BeforeSeq = &value
+	case OpenCodeForkBoundaryThrough:
+		proof.ThroughSeq = &value
+		proof.ThroughCompleted = openCodeBoundarySettled(ctx, source, sourceID, seq)
+	}
+	return proof
+}
+
+// openCodeBoundarySettled reports whether the named source message is a settled
+// row. A through boundary over a running row stays unproven, so the
+// materializer admits no inherited row instead of guessing.
+func openCodeBoundarySettled(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, seq OpenCodeCurrentSeq) bool {
+	pageSize, err := NewOpenCodeCurrentPageSize(1)
+	if err != nil {
+		return false
+	}
+	request := OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize}
+	if seq.Value() > 0 {
+		after, err := NewOpenCodeCurrentSeq(seq.Value() - 1)
+		if err != nil {
+			return false
+		}
+		cursor := NewOpenCodeCurrentCursor(after)
+		request.After = &cursor
+	}
+	page, err := source.CurrentMessages(ctx, request)
+	if err != nil || len(page.Messages) != 1 {
+		return false
+	}
+	row := page.Messages[0]
+	if row.Seq.Value() != seq.Value() {
+		return false
+	}
+	scope := OpenCodeProvenanceScope{SessionID: sessionID.String(), Shape: OpenCodeProvenanceCurrent}
+	traversal := decodeOpenCodeCurrentTraversal([]byte(row.Data), true)
+	_, settled, err := decodeOpenCodeProvenanceRow(OpenCodeProvenanceRow{
+		ID:          row.ID.String(),
+		SessionID:   row.SessionID.String(),
+		Type:        row.Type.String(),
+		TimeCreated: row.TimeCreated,
+		TimeUpdated: row.TimeUpdated,
+		Seq:         row.Seq.Value(),
+		HasSeq:      true,
+		Data:        row.Data,
+	}, scope, &traversal)
+	if err != nil {
+		return false
+	}
+	return settled
 }
 
 // sanitizeOpenCodeRefusal reduces any failure on the snapshot or
