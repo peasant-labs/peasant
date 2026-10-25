@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
@@ -181,6 +183,42 @@ func TestClaudeTeammateIdentityReachesLocalReads(t *testing.T) {
 				t.Fatalf("DetailReadPayload(parent): %v", err)
 			}
 			assertTeammate(t, "SessionDetailReadPayload for "+testCase.ParentSessionID, parentRead.Teammate, nil)
+
+			// 5. The flat legacy sync route is deliberately unchanged: a
+			// child row keeps its parent marker and never gains a teammate
+			// key. The grouped and Home reads are the only sync surfaces that
+			// carry it.
+			flat := httptest.NewRecorder()
+			serveSyncSessions(flat, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String(), nil), db)
+			if flat.Code != http.StatusOK {
+				t.Fatalf("flat sync route status = %d (body %s)", flat.Code, flat.Body.String())
+			}
+			var flatEnvelope struct {
+				Sessions []map[string]json.RawMessage `json:"sessions"`
+			}
+			if err := json.Unmarshal(flat.Body.Bytes(), &flatEnvelope); err != nil {
+				t.Fatalf("decode flat sync response: %v", err)
+			}
+			var flatChild map[string]json.RawMessage
+			for _, row := range flatEnvelope.Sessions {
+				var id string
+				if err := json.Unmarshal(row["id"], &id); err != nil {
+					t.Fatalf("decode flat sync row id: %v", err)
+				}
+				if id == testCase.ChildSessionID {
+					flatChild = row
+					break
+				}
+			}
+			if flatChild == nil {
+				t.Fatalf("the flat sync route omitted the stored child %q", testCase.ChildSessionID)
+			}
+			if _, carried := flatChild["teammate"]; carried {
+				t.Fatalf("the flat legacy sync row for %q carries a teammate key; only the grouped and Home reads expose the recorded identity", testCase.ChildSessionID)
+			}
+			if _, carried := flatChild["parentSessionId"]; !carried {
+				t.Fatalf("the flat legacy sync row for %q lost its parent marker; the teammate change must not disturb it", testCase.ChildSessionID)
+			}
 		})
 	}
 }

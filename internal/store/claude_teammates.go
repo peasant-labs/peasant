@@ -11,6 +11,12 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// ClaudeTeammateReadBatchSize bounds one teammate evidence query. It is
+// exported so a caller can reason about how many batches a page costs, and so
+// the bounded-page test can span more than one batch without copying the
+// number.
+const ClaudeTeammateReadBatchSize = 256
+
 // claudeTeammateQuery reads the recorded teammate identity of each requested
 // session. The identity is evidence, not inference: the child must be a stored
 // Claude Code session with a stored parent, both transcripts' root records must
@@ -62,8 +68,8 @@ func (s *Store) ClaudeTeammates(ctx context.Context, sessionIDs []string) (map[s
 	defer s.pool.Put(conn)
 
 	teammates := make(map[string]schema.SessionTeammate, len(sessionIDs))
-	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
-		end := min(start+indexFormatReadBatchSize, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += ClaudeTeammateReadBatchSize {
+		end := min(start+ClaudeTeammateReadBatchSize, len(sessionIDs))
 		selected := sessionIDs[start:end]
 		placeholders := make([]string, len(selected))
 		args := make([]any, len(selected))

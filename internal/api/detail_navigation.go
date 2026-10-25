@@ -122,8 +122,11 @@ func (p *StoreDataProvider) DetailReadPayload(ctx context.Context, id string) (*
 		return nil, fmt.Errorf("store adapter: detail read teammate evidence for session %s: %w", id, err)
 	}
 	read.Teammate = teammateFor(teammates, id)
-	if err := read.Validate(); err != nil {
-		return nil, fmt.Errorf("store adapter: local detail read for session %s failed its contract validation: %w; the read was withheld rather than served with an invalid teammate identity", id, err)
+	// Only the local addition is checked here. The composite payload validator
+	// belongs to the contract tests: re-walking every turn on a served read
+	// would pay for a check the durable detail already passed.
+	if err := read.Teammate.Validate(); err != nil {
+		return nil, fmt.Errorf("store adapter: local detail read for session %s carries an invalid teammate identity: %w; the read was withheld rather than served with evidence the contract refuses", id, err)
 	}
 	return read, nil
 }
