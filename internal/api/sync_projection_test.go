@@ -82,7 +82,7 @@ func TestSyncParentProjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			summary, syncSummary, err := buildSyncGroupedRow(entries[0], store.GroupingEvidenceRow{}, "")
+			summary, syncSummary, err := buildSyncGroupedRow(entries[0], store.GroupingEvidenceRow{}, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,0 +1,26 @@
+# Claude Code teammate identity on the local read surfaces.
+#
+# One scenario records three Claude Code root transcripts: the parent transcript
+# that records spawning a teammate, the child transcript that declares that
+# identity, and an unrelated user root. Harvesting them runs the production
+# discovery/link path, so the child's stored parent is the recorded link and its
+# recorded origin is the producer's decision. Only the child owns a spawn edge,
+# so every local read must carry the identity on that row and on no other.
+requiredNames:
+  - positive-spawn-edge
+cases:
+  - name: positive-spawn-edge
+    parent_session_id: 11111111-1111-4111-8111-111111111111
+    child_session_id: 22222222-2222-4222-8222-222222222222
+    root_session_id: 33333333-3333-4333-8333-333333333333
+    # The identity the parent transcript records spawning, and the pair the
+    # child transcript declares. They match exactly.
+    team: migration
+    agent: tests
+    parent_transcript:
+      - '{"sessionId":"PARENT_SESSION_ID","type":"user","cwd":"/workspace","message":{"role":"user","content":"coordinate the migration work"}}'
+      - '{"sessionId":"PARENT_SESSION_ID","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"teammate started"}}'
+    child_transcript:
+      - '{"sessionId":"CHILD_SESSION_ID","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write the migration tests"}}'
+    root_transcript:
+      - '{"sessionId":"ROOT_SESSION_ID","type":"user","cwd":"/workspace","teamName":"migration","agentName":"docs","message":{"role":"user","content":"write the migration notes"}}'

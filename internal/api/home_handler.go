@@ -31,6 +31,7 @@ type homeReader interface {
 	SyncParentIdentities(context.Context, []ingest.PushSessionRow) ([]store.ParentIdentityRow, error)
 	FirstUserMessageBulk(context.Context, []string) (map[string]string, error)
 	GroupingEvidenceForSessions(context.Context, []string) (map[string]store.GroupingEvidenceRow, error)
+	ClaudeTeammates(context.Context, []string) (map[string]schema.SessionTeammate, error)
 }
 
 var _ homeReader = (*store.Store)(nil)
@@ -338,6 +339,10 @@ func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort s
 	if err != nil {
 		return nil, err
 	}
+	teammates, err := r.db.ClaudeTeammates(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	publications, err := r.publishing.localPublications(ctx, ids, scope, r.account)
 	if err != nil {
 		return nil, err
@@ -356,7 +361,7 @@ func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort s
 			return nil, fmt.Errorf("api.syncHomePageReader: session %q changed during hydration; no page returned; restart traversal", id)
 		}
 		status, hold := computeSyncStatus(row.Sync, false, push.PublicationMetadataReady(metadata[id]))
-		_, summary, err := buildSyncGroupedRow(syncSessionEntry{row: row.Sync, status: status, hold: hold, identity: cohort.parents[id]}, evidence[id], previews[id])
+		_, summary, err := buildSyncGroupedRow(syncSessionEntry{row: row.Sync, status: status, hold: hold, identity: cohort.parents[id]}, evidence[id], previews[id], teammateFor(teammates, id))
 		if err != nil {
 			return nil, err
 		}

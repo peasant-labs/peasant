@@ -74,6 +74,9 @@ type syncGroupedReader interface {
 	syncSessionReader
 	GroupingEvidenceForSessions(ctx context.Context, sessionIDs []string) (map[string]store.GroupingEvidenceRow, error)
 	FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error)
+	// ClaudeTeammates reads the recorded Claude Code teammate identity for the
+	// same page. A missing key means the session carries no recorded spawn edge.
+	ClaudeTeammates(ctx context.Context, sessionIDs []string) (map[string]schema.SessionTeammate, error)
 }
 
 // gatherGroupedSyncCandidates builds the registered GroupedRouteSync predicate.
@@ -137,12 +140,16 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 	if err != nil {
 		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read session previews for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
 	}
+	teammates, err := reader.ClaudeTeammates(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read recorded teammate evidence for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
+	}
 
 	candidates := make([]GroupedCandidate, 0, len(entries))
 	for _, entry := range entries {
 		row := entry.row
 		ev := evidence[row.SessionID]
-		summary, syncSummary, buildErr := buildSyncGroupedRow(entry, ev, previews[row.SessionID])
+		summary, syncSummary, buildErr := buildSyncGroupedRow(entry, ev, previews[row.SessionID], teammateFor(teammates, row.SessionID))
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -166,9 +173,11 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 
 // buildSyncGroupedRow derives the matching SessionSummary/LocalSyncSummary pair
 // for one pushable row from the SAME database read, so the schema's mirror check
-// (identity, harness, project, tokens, turn count and optional input count) can
-// only hold or fail closed here rather than downstream.
-func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, preview string) (schema.SessionSummary, schema.LocalSyncSummary, error) {
+// (identity, harness, project, tokens, turn count, optional input count and the
+// teammate identity) can only hold or fail closed here rather than downstream.
+// The teammate is one read's answer, so both summaries carry the same pointer
+// and cannot disagree about it.
+func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, preview string, teammate *schema.SessionTeammate) (schema.SessionSummary, schema.LocalSyncSummary, error) {
 	row := entry.row
 	parentID, unresolved := syncParentMarkers(entry.identity)
 	projectHash, hashErr := schema.NewProjectHash(row.ProjectHash)
@@ -195,6 +204,7 @@ func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, p
 		Purpose:          ev.Purpose,
 		ParentSessionID:  parentID,
 		ParentUnresolved: unresolved,
+		Teammate:         teammate,
 	}
 	syncSummary := schema.LocalSyncSummary{
 		ID:                   row.SessionID,
@@ -213,6 +223,7 @@ func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, p
 		PreviouslyPushed:     row.PushedAt != nil,
 		ParentSessionID:      parentID,
 		ParentUnresolved:     unresolved,
+		Teammate:             teammate,
 	}
 	return summary, syncSummary, nil
 }

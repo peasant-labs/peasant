@@ -109,6 +109,12 @@ func (r *boundedHomeReader) GroupingEvidenceForSessions(ctx context.Context, ids
 	}
 	return r.Store.GroupingEvidenceForSessions(ctx, ids)
 }
+func (r *boundedHomeReader) ClaudeTeammates(ctx context.Context, ids []string) (map[string]schema.SessionTeammate, error) {
+	if err := r.record("teammate", ids); err != nil {
+		return nil, err
+	}
+	return r.Store.ClaudeTeammates(ctx, ids)
+}
 
 func homeExec(t *testing.T, db *store.Store, query string, args ...any) {
 	t.Helper()
@@ -184,7 +190,7 @@ func assertHydrated(t *testing.T, reader *boundedHomeReader, want []string) {
 			t.Fatalf("%s hydrated %v want %v", kind, ids, want)
 		}
 	}
-	if len(want) > 0 && len(reader.reads) != 4 {
+	if len(want) > 0 && len(reader.reads) != 5 {
 		t.Fatalf("hydration exits missing: %v", reader.reads)
 	}
 }
