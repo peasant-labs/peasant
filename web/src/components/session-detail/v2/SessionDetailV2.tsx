@@ -365,7 +365,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // navigation travels through the published adapter-options boundary, which
     // cooks it into usable source/parent links. The teammate is host-owned: the
     // stream prelude renders it and the durable payload never carries it.
-    const { relationshipNavigation, teammate, ...durableDetail } = detail;
+    const { relationshipNavigation, teammate: _teammate, ...durableDetail } = detail;
     const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
     // Commits ride in as the legacy-compatible `gitContext.commits` shape, which
     // the adapter cooks into `session.git.commits` — the session-level rows the

@@ -20,6 +20,13 @@ const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-f
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
+// The mounted capture and this component suite read one fixture. Keep the
+// visual harness identity and the case identity tied to the same value so a
+// one-sided edit cannot publish a screenshot that proves a different name.
+const visualTeammate = (fixture as { visual?: { teammate?: { team: string; name: string } } }).visual?.teammate;
+if (!visualTeammate) throw new Error('home-pages.yaml visual.teammate must name the identity the mounted capture serves');
+expect(fixture.cases.find(row => row.name === 'claude-teammate-line')?.teammate).toEqual({ team: visualTeammate.team, name: visualTeammate.name });
+
 /** One fixture row; `teammate` is the identity the fixture case serves on it. */
 function row(id: string, children = 0, teammate?: { team: string; name: string }): LocalSyncSessionRow {
   return {
