@@ -25,6 +25,16 @@ func readerMeta(meta *schema.PullTranscriptInfo) *schema.PullTranscriptInfo {
 	return &out
 }
 
+// projectNameColumn returns the project name the local index keeps: the
+// served name, or an empty string when the village withheld or never recorded
+// it.
+func projectNameColumn(name *string) string {
+	if name == nil {
+		return ""
+	}
+	return *name
+}
+
 // readerAnnotations returns a copy of annotations whose authors are as this CLI
 // may show them.
 func readerAnnotations(annotations []schema.PullAnnotation) []schema.PullAnnotation {

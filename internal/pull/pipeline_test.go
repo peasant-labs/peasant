@@ -44,6 +44,10 @@ func testCreds() pull.Credentials {
 	return pull.Credentials{UserID: testutil.TestPullAuthorUserID, VillageURL: testVillageURL}
 }
 
+// testProjectName is the served project name; PullTranscriptInfo carries it as
+// a pointer because the village omits it beside an anonymous owner.
+var testProjectName = testutil.TestProjectName
+
 // happyMeta returns a server metadata view with a non-empty served-blob hash.
 func happyMeta() *schema.PullTranscriptInfo {
 	return &schema.PullTranscriptInfo{
@@ -52,7 +56,7 @@ func happyMeta() *schema.PullTranscriptInfo {
 		Owner:           testutil.PublicProfile(testutil.TestPullAuthorUserID, "self"), // requester owns it (refresh path)
 		Title:           "Fix the bug",
 		Harness:         schema.Harness(defaults.HarnessClaudeCode),
-		ProjectName:     testutil.TestProjectName,
+		ProjectName:     &testProjectName,
 		Visibility:      schema.VisibilityGroup,
 		License:         schema.LicenseCCBYSA,
 		ContentHash:     testServedHash,

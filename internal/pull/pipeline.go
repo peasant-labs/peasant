@@ -531,7 +531,7 @@ func (p *Pipeline) buildCommit(host, pullDir, servedHash string, now int64, meta
 			LocalSessionID:  meta.LocalID,
 			Title:           meta.Title,
 			Harness:         meta.Harness,
-			ProjectName:     meta.ProjectName,
+			ProjectName:     projectNameColumn(meta.ProjectName),
 			ContentHash:     servedHash,
 			Visibility:      meta.Visibility,
 			License:         meta.License,
