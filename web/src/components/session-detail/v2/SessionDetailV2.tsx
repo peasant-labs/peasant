@@ -487,13 +487,11 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   const parentSessionId = detail.parentSessionId;
   const streamPrelude = (
     <div className="flex flex-col gap-3">
-      {(teammate || parentSessionId) && (
+      {teammate && (
         <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[14px] text-ink-2">
-          {teammate && (
-            <span data-transcript-teammate="true">
-              teammate {teammate.name} on {teammate.team}
-            </span>
-          )}
+          <span data-transcript-teammate="true">
+            teammate {teammate.name} on {teammate.team}
+          </span>
           {parentSessionId && (
             <Link href={transcriptHref(projectHash, parentSessionId)} className="underline hover:no-underline focus-mono">
               parent transcript

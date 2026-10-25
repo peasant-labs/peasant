@@ -136,7 +136,7 @@ describe('transcript prelude lineage', () => {
         expect(screen.queryByText(/^teammate /)).not.toBeInTheDocument();
       }
 
-      if (testCase.parentSessionId) {
+      if (testCase.teammate && testCase.parentSessionId) {
         const link = screen.getByRole('link', { name: 'parent transcript' });
         expect(link).toHaveAttribute('href', transcriptHref(PROJECT_HASH, testCase.parentSessionId));
       } else {
