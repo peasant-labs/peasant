@@ -1227,6 +1227,14 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
+	// The run can finish while leaving the stored copy in place: the recording
+	// may be gone, or the new capture may have been refused and the previous
+	// index preserved. The popup would otherwise repeat the same re-index
+	// action against the same evidence. Say that the run did not replace the
+	// copy and name the step that can still change it.
+	if evidenceErr := h.storedEvidenceStillRefused(r.Context(), id); storedEvidenceRefusal(evidenceErr) {
+		notes = append(notes, storedEvidenceStillRefusedNote(evidenceErr))
+	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	_ = json.NewEncoder(w).Encode(sessionIngestResponse{Status: "done", Duration: time.Since(started).Round(time.Millisecond).String(), Notes: notes, Unreadable: unreadable})
 }
@@ -1250,6 +1258,36 @@ type sessionIngestUnreadable struct {
 // sessionIngestFailure is why a scoped run did not re-index the session, or
 // empty when it did. A session the run never reached is a failure too: its
 // recording is no longer where the source reads.
+// storedEvidenceStillRefused applies the publication reader's strict evidence
+// check to the stored copy after a one-session re-index. It reports the exact
+// reason the share scan would still refuse the session, so the response can
+// name a step that changes the outcome instead of inviting the same re-index.
+func (h *syncHandler) storedEvidenceStillRefused(ctx context.Context, id ingest.SessionID) error {
+	entries, err := h.store.ListEntries(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if _, err := ingest.RetainedUnknownOf(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func storedEvidenceRefusal(err error) bool {
+	if err == nil {
+		return false
+	}
+	var integrity *ingest.EvidenceIntegrityError
+	var legacy *ingest.LegacyPositionUnavailableError
+	return errors.As(err, &integrity) || errors.As(err, &legacy)
+}
+
+func storedEvidenceStillRefusedNote(evidenceErr error) string {
+	return fmt.Sprintf("the stored copy still fails the publication evidence check after re-indexing: %v; the re-index did not replace it, so re-indexing it again will not change it. Restore or repair the original recording and re-index, or re-capture this session.", evidenceErr)
+}
+
 func sessionIngestFailure(result *ingest.PipelineResult, id ingest.SessionID) string {
 	reached := false
 	for _, session := range result.Sessions {
