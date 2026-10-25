@@ -20,6 +20,9 @@ func TestVerifyContentFailsOnContentWhoseSessionRowIsGone(t *testing.T) {
 	if strings.Contains(out, "orphan content: 0 bodies") {
 		t.Errorf("verify --content did not count the ownerless bodies:\n%s", out)
 	}
+	if !strings.Contains(out, "also counted in the orphan content totals") {
+		t.Errorf("verify --content does not say the ownerless bodies are in the orphan totals too:\n%s", out)
+	}
 	if !strings.Contains(out, seed.sessionID) {
 		t.Errorf("verify --content did not name the session whose row is gone:\n%s", out)
 	}

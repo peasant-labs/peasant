@@ -77,6 +77,9 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 		fmt.Fprintf(out, "  - %s: run peasant harvest --force --session %s to re-index and sweep orphan content; peasant migrate also drains owned directory leftovers\n", id, id)
 	}
 	fmt.Fprintf(out, "sessions with content but no sessions row: %d\n", len(report.OwnerlessSessions))
+	if len(report.OwnerlessSessions) > 0 {
+		fmt.Fprintln(out, "  (their bodies are also counted in the orphan content totals above)")
+	}
 	for _, id := range report.OwnerlessSessions {
 		fmt.Fprintf(out, "  - %s: its sessions row is missing; run peasant harvest --force --session %s to re-index it from its transcript\n", id, id)
 	}
