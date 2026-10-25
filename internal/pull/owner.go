@@ -17,11 +17,17 @@ func publicPersonColumns(person schema.VillagePublicOwner) (id, username string)
 }
 
 // readerMeta returns a copy of meta whose owner is as this CLI may show them
-// (see village.PublicOwnerForReader). The pipeline applies it to whatever its
+// (see village.PublicOwnerForReader), with no project name beside an anonymous
+// owner. The pipeline applies it to whatever its
 // reader returned before it stores or re-encodes the metadata.
 func readerMeta(meta *schema.PullTranscriptInfo) *schema.PullTranscriptInfo {
 	out := *meta
 	out.Owner = village.PublicOwnerForReader(meta.Owner)
+	if !out.Owner.IsProfile() {
+		// The repository identifies an anonymous owner; the village withholds
+		// it, and this CLI keeps none that arrives anyway.
+		out.ProjectName = nil
+	}
 	return &out
 }
 

@@ -40,15 +40,16 @@ pull:
       - {}
       - {id: 0a000000-0000-4000-8000-000000000002, username: bob}
   # A reader double hands the pipeline a kind this contract does not know,
-  # still carrying identity: the pipeline stores none of it.
+  # still carrying identity and a project name: the pipeline stores none of it.
   - name: unknown-kind-stores-nothing
     owner: {kind: organization, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    projectName: alice-private-repo
     authors:
       - {kind: organization, id: 0a000000-0000-4000-8000-000000000002, username: bob}
     wantOwner: {}
     wantAuthors:
       - {}
-    forbidden: [0a000000-0000-4000-8000-000000000001, alice, 0a000000-0000-4000-8000-000000000002, bob]
+    forbidden: [0a000000-0000-4000-8000-000000000001, alice, 0a000000-0000-4000-8000-000000000002, bob, alice-private-repo]
   # The transcript was pulled while the village showed alice; she is now
   # anonymous to this viewer. The unchanged blob is re-pulled in full so the
   # manifest, metadata and index drop her identity.

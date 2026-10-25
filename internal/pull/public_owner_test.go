@@ -50,6 +50,7 @@ type publicOwnerPullFixture struct {
 	PreviousOwner   *publicPersonFixture       `yaml:"previousOwner"`
 	PreviousAuthors []publicPersonFixture      `yaml:"previousAuthors"`
 	Owner           publicPersonFixture        `yaml:"owner"`
+	ProjectName     *string                    `yaml:"projectName"`
 	Authors         []publicPersonFixture      `yaml:"authors"`
 	WantOwner       storedPersonFixture        `yaml:"wantOwner"`
 	WantAuthors     []storedPersonFixture      `yaml:"wantAuthors"`
@@ -119,6 +120,9 @@ func TestPullTranscript_StoresPublicOwnerFixtures(t *testing.T) {
 			}
 			meta := *happyMeta()
 			meta.Owner = c.Owner.person()
+			if c.ProjectName != nil {
+				meta.ProjectName = c.ProjectName
+			}
 			reader.Meta = &meta
 			reader.Annotations = authoredAnnotations(c.Authors)
 			res, err := p.PullTranscript(context.Background(), newRef(t), pull.PullOptions{})
