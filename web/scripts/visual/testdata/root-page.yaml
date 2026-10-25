@@ -9,6 +9,7 @@
 # autoPublish:      a managed hook publishes the session on push
 # audience:         how many collectives can read it (include=audience)
 # outsideSelection: ingestion/push metadata only; the stored row stays browsable
+autoPublishTipCopy: publish sessions automatically, with secrets hidden.
 pattern:
   - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: false }
   - { state: published, syncStatus: synced, autoPublish: false, audience: 2, outsideSelection: false }

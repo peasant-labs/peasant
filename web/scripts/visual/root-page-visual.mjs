@@ -58,13 +58,14 @@ const FILTERS = [
   { id: 'published', label: 'published' },
   { id: 'auto', label: 'auto-publish on' },
 ]
+const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
 // Bytes only this change introduces: the list marker and the strip's accessible
 // name live in the app chunk, the strip and publish-state classes in fairtrade's.
 const FEATURE_GROUPS = [
   { label: 'root page', signatures: ['data-root-session-list', 'data-home-bounded'] },
   { label: 'recursive session family', signatures: ['data-session-group-child', 'session-group-rows:', 'var(--sp-5) + var(--sp-4)'] },
   { label: 'parent-attached session disclosure', signatures: ['data-session-family'] },
-  { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', 'your sessions can publish on their own'] },
+  { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', FIXTURE.autoPublishTipCopy] },
   { label: 'fairtrade publish state', signatures: ['pub-state-text'] },
 ]
 // Copy only the removed saved-selection browsing states carried. The public
@@ -78,11 +79,11 @@ const RETIRED_SELECTION_BROWSING_COPY = [
 const PROJECT_PAGE_NAMES = ['home-projects', 'map-projects', 'review-projects']
 const PROJECT_PAGE_VIEWS = new Set(['home-project-browse', 'map-picker', 'review-picker'])
 const PROJECT_DESTINATIONS = new Set(['/sessions', '/map', '/review'])
-const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
 const CONTEXT = loadContextNavigationFixture()
 const pause = (ms) => new Promise((done) => setTimeout(done, ms))
 const fail = (message) => { throw new Error(`Root page visual harness failed: ${message}`) }
 if ([PORT, PORT + 1].includes(8690)) fail('the regression runner must use sandbox ports, never the user server')
+if (typeof FIXTURE.autoPublishTipCopy !== 'string' || !FIXTURE.autoPublishTipCopy.trim()) fail('root-page.yaml must pin the automatic publishing tip copy')
 
 function loadProjectPages() {
   const block = FIXTURE.projectPages
@@ -614,7 +615,7 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       const lines = [...range.getClientRects()]
       return { copy: text.textContent, docs: aside.querySelector('a[data-docs-topic="autoPublish"][target="_blank"]')?.getAttribute('href') ?? null, dismiss: !!aside.querySelector('button[aria-label="dismiss auto-publish tip"]'), font: getComputedStyle(text).fontFamily, size: getComputedStyle(text).fontSize, left: box.left, right: box.right, width: innerWidth, textRight: Math.max(...lines.map((line) => line.right)), textLeft: Math.min(...lines.map((line) => line.left)) }
     })
-    if (!tip || !tip.copy.includes('your sessions can publish on their own') || !tip.docs || tip.copy.includes('/peasant auto') || !tip.dismiss) fail(`${where}: the actual automatic publishing tip, its docs link or its exit is missing`)
+    if (!tip || !tip.copy.includes(FIXTURE.autoPublishTipCopy) || !tip.docs || tip.copy.includes('/peasant auto') || !tip.dismiss) fail(`${where}: the actual automatic publishing tip, its docs link or its exit is missing`)
     if (tip.left < 0 || tip.right > tip.width + 1 || tip.textRight > tip.right + 1 || tip.textLeft < tip.left - 1) fail(`${where}: the mounted tip overflows its phone or desktop bounds ${JSON.stringify(tip)}`)
     if (!/atkinson/i.test(tip.font) || parseFloat(tip.size) < 16) fail(`${where}: the tip body violates the canonical font or 16px floor ${JSON.stringify(tip)}`)
     const probe = await probeStyles(page, where)
