@@ -12,14 +12,23 @@ Release, which holds the signed artifacts and checksums.
   transcript owner and annotation author as you may see them: their public
   profile, or `anon` when they are not discoverable to you. Lists, tables and
   the `context` header print `anon` for such a person, `--user` never matches
-  one, and the pull manifest and local index store none of their identity. A
-  transcript pulled before its owner became anonymous to you is re-pulled in
-  full on the next pull, so the stored copy drops the identity too.
-- This CLI pulls from peasant online on pull contract 0.2.0 or 0.3.0, and the
-  pull manifest records which one each transfer used. Older CLIs read only
-  0.2.0, so once peasant online moves to 0.3.0 they stop pulling with the
-  "pull-contract incompatible" error and must upgrade. Publishing and every
-  other command keep working on older CLIs.
+  one, and the pull manifest and local index store none of their identity,
+  nor the project name or repository targets beside an anonymous owner. A
+  transcript pulled before its owner or an annotation author became anonymous
+  to you, or before its owner was renamed, is re-pulled in full on the next
+  pull, so the stored copy drops the identity too.
+- **JSON output:** `village transcripts list --json` (remote) prints each
+  `owner` as an object, `{"kind":"profile","id","username","display_name",
+  "avatar_url"}` or `{"kind":"anonymous"}`; the `ownerUserId` and
+  `ownerUsername` fields are gone. `list --local --json` keeps `owner`, and
+  `context --json` keeps `ownerUsername`, as the stored username, or `null`
+  for an anonymous owner.
+- This CLI pulls from peasant online on pull contract 0.2.0 or 0.3.0: it
+  accepts the envelope peasant online serves when that version is one it
+  reads, decodes exactly that envelope, and records it in the pull manifest.
+  Older CLIs read only 0.2.0, so once peasant online moves to 0.3.0 they stop
+  pulling with the "pull-contract incompatible" error and must upgrade.
+  Publishing and every other command keep working on older CLIs.
 
 ## [0.11.1] - 2026-10-23
 
