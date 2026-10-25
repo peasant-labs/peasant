@@ -79,9 +79,14 @@ type CollectiveVillage struct {
 	// and sends the owner and author as the ownerUserId/ownerUsername and
 	// authorUserId/authorUsername account strings.
 	legacyPullEnvelope bool
-	collectivesStatus  int
-	repositoriesStatus int
-	promptRequests     []schema.VillagePromptRequest
+	// legacyCollectivePeople makes the double send collective records and
+	// linked repositories as a village before Village API 0.29.0 did: a
+	// created_by account id instead of creator, and a linked_by account id
+	// string instead of a public owner.
+	legacyCollectivePeople bool
+	collectivesStatus      int
+	repositoriesStatus     int
+	promptRequests         []schema.VillagePromptRequest
 	// pullBlobs holds each pullable transcript's served blob bytes, keyed by
 	// transcript. pullAnnotations holds its authored annotations, and pullInfos
 	// holds the metadata view the listing and the single-transcript GET serve.
@@ -209,6 +214,34 @@ func (v *CollectiveVillage) ServeLegacyPullEnvelope(legacy bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.legacyPullEnvelope = legacy
+}
+
+// ServeLegacyCollectivePeople makes the double send collective records and
+// linked repositories in the shape a village before Village API 0.29.0 sends
+// (created_by and a string linked_by). False restores the current shape.
+func (v *CollectiveVillage) ServeLegacyCollectivePeople(legacy bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.legacyCollectivePeople = legacy
+}
+
+// encodeCollectives writes a collective or repository answer, in the legacy
+// person shape when ServeLegacyCollectivePeople is set.
+func (v *CollectiveVillage) encodeCollectives(w http.ResponseWriter, value any) {
+	v.mu.Lock()
+	legacy := v.legacyCollectivePeople
+	v.mu.Unlock()
+	if !legacy {
+		_ = json.NewEncoder(w).Encode(value)
+		return
+	}
+	body, err := LegacyCollectivePeople(value)
+	if err != nil {
+		v.t.Errorf("encode legacy collective people: %v", err)
+		http.Error(w, `{"error":"encode"}`, http.StatusInternalServerError)
+		return
+	}
+	_, _ = w.Write(body)
 }
 
 // DeleteTranscript removes a transcript and its shares, as its owner can on
@@ -479,7 +512,7 @@ func (v *CollectiveVillage) serve(w http.ResponseWriter, r *http.Request) {
 		if group.Acceptance == "" {
 			group.Acceptance = schema.VillageGroupAcceptanceOpen
 		}
-		_ = json.NewEncoder(w).Encode(schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: id, Name: group.Name, Creator: villageDoubleCreator, AcceptanceMode: group.Acceptance, DataAccess: schema.VillageGroupDataAccessMembersOnly, CreatedAt: villageDoubleTime, UpdatedAt: villageDoubleTime}})
+		v.encodeCollectives(w, schema.VillageGroupDetailResponse{Group: schema.VillageGroupDetailRecord{ID: id, Name: group.Name, Creator: villageDoubleCreator, AcceptanceMode: group.Acceptance, DataAccess: schema.VillageGroupDataAccessMembersOnly, CreatedAt: villageDoubleTime, UpdatedAt: villageDoubleTime}})
 	case r.Method == http.MethodGet && path == "/api/v1/auth/me":
 		v.mu.Lock()
 		user := v.authenticatedUser
@@ -792,7 +825,7 @@ func (v *CollectiveVillage) listCollectives(w http.ResponseWriter) {
 			Role: schema.VillageGroupRoleMember, MemberSince: villageDoubleTime, MemberCount: 2,
 		})
 	}
-	_ = json.NewEncoder(w).Encode(groups)
+	v.encodeCollectives(w, groups)
 }
 
 func (v *CollectiveVillage) listRepositories(w http.ResponseWriter, id schema.VillageUUID) {
@@ -815,7 +848,7 @@ func (v *CollectiveVillage) listRepositories(w http.ResponseWriter, id schema.Vi
 		owner, name, _ := strings.Cut(fullName, "/")
 		repositories = append(repositories, schema.VillageLinkedRepository{ID: "00000000-0000-4000-8000-000000000002", GroupID: id, Owner: owner, Name: name, InstallationID: 1, LinkedBy: villageDoubleCreator})
 	}
-	_ = json.NewEncoder(w).Encode(schema.VillageLinkedRepositoriesResponse{Repositories: repositories})
+	v.encodeCollectives(w, schema.VillageLinkedRepositoriesResponse{Repositories: repositories})
 }
 
 // pullableLocked reports whether the double holds pull data for the transcript

@@ -140,7 +140,7 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 			publishingContractBreachCode)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(response)
+	writeEncodedJSON(w, response, "The publication state")
 }
 
 // localPublications is shared by the by-ID deep-link read and bounded Home
@@ -319,7 +319,7 @@ func (h *publishingHandler) handleVillageCollectives(w http.ResponseWriter, r *h
 			villageUnreachableCode)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(response)
+	writeEncodedJSON(w, response, "The Village collectives")
 }
 
 // linkedRepositoriesFor reads each collective's linked repositories, only when
@@ -393,4 +393,18 @@ func writeVillageReadError(w http.ResponseWriter, what string, err error) {
 	writeAPIError(w, http.StatusBadGateway,
 		what+" because Village could not be read: "+err.Error()+". Nothing was read. Check the connection to Village, then retry.",
 		villageUnreachableCode)
+}
+
+// writeEncodedJSON encodes the whole response before writing it, so a value
+// that cannot be encoded answers an actionable 500 instead of a 200 with an
+// empty or truncated body.
+func writeEncodedJSON(w http.ResponseWriter, value any, subject string) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			subject+" could not be encoded as JSON: "+err.Error()+". Nothing was returned. Retry; if the failure repeats, check the Village version and report it.",
+			publishingContractBreachCode)
+		return
+	}
+	_, _ = w.Write(append(body, '\n'))
 }

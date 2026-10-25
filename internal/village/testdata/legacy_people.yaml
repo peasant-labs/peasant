@@ -1,0 +1,55 @@
+# Person references in collective reads from a village before and after
+# Village API 0.29.0. An older village sends a created_by account id and a
+# linked_by account id string; this CLI never shows or matches those people,
+# so anything that is not a readable public owner decodes as anonymous and the
+# decoded value always re-encodes.
+#
+# surface: collectives (GET /api/v1/collectives), repositories
+# (GET /api/v1/collectives/{id}/repositories), or detail
+# (GET /api/v1/collectives/{id}, read for observations).
+requiredNames:
+  - collectives created_by account id
+  - collectives creator profile
+  - collectives creator null
+  - collectives creator malformed
+  - repositories linked_by account id string
+  - repositories linked_by profile
+  - repositories linked_by missing
+  - detail created_by account id
+
+cases:
+  - name: collectives created_by account id
+    surface: collectives
+    body: '[{"id":"COLLECTIVE","name":"platform","description":null,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","created_by":"0a000000-0000-4000-8000-000000000001","acceptance_mode":"open","data_access":"members_only","display_members":true,"linked_github_org":null,"transcript_deletion_policy":"user_choice","role":"member","member_since":"2026-01-01T00:00:00Z","member_count":2,"transcript_count":1}]'
+    want: [anonymous]
+  - name: collectives creator profile
+    surface: collectives
+    body: '[{"id":"COLLECTIVE","name":"platform","description":null,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","creator":{"kind":"profile","id":"0a000000-0000-4000-8000-000000000001","username":"alice","display_name":null,"avatar_url":null},"acceptance_mode":"open","data_access":"members_only","display_members":true,"linked_github_org":null,"transcript_deletion_policy":"user_choice","role":"member","member_since":"2026-01-01T00:00:00Z","member_count":2,"transcript_count":1}]'
+    want: [profile]
+  - name: collectives creator null
+    surface: collectives
+    body: '[{"id":"COLLECTIVE","name":"platform","description":null,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","creator":null,"acceptance_mode":"open","data_access":"members_only","display_members":true,"linked_github_org":null,"transcript_deletion_policy":"user_choice","role":"member","member_since":"2026-01-01T00:00:00Z","member_count":2,"transcript_count":1}]'
+    want: [anonymous]
+  - name: collectives creator malformed
+    surface: collectives
+    body: '[{"id":"COLLECTIVE","name":"platform","description":null,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","creator":{"kind":"profile","id":"not-a-uuid"},"acceptance_mode":"open","data_access":"members_only","display_members":true,"linked_github_org":null,"transcript_deletion_policy":"user_choice","role":"member","member_since":"2026-01-01T00:00:00Z","member_count":2,"transcript_count":1}]'
+    want: [anonymous]
+  - name: repositories linked_by account id string
+    surface: repositories
+    body: '{"repositories":[{"id":"0b000000-0000-4000-8000-000000000001","group_id":"COLLECTIVE","owner":"acme","name":"tools","installation_id":1,"linked_by":"0a000000-0000-4000-8000-000000000001"}]}'
+    want: [anonymous]
+    wantRepositoryOwner: acme
+  - name: repositories linked_by profile
+    surface: repositories
+    body: '{"repositories":[{"id":"0b000000-0000-4000-8000-000000000001","group_id":"COLLECTIVE","owner":"acme","name":"tools","installation_id":1,"linked_by":{"kind":"profile","id":"0a000000-0000-4000-8000-000000000001","username":"alice","display_name":null,"avatar_url":null}}]}'
+    want: [profile]
+    wantRepositoryOwner: acme
+  - name: repositories linked_by missing
+    surface: repositories
+    body: '{"repositories":[{"id":"0b000000-0000-4000-8000-000000000001","group_id":"COLLECTIVE","owner":"acme","name":"tools","installation_id":1}]}'
+    want: [anonymous]
+    wantRepositoryOwner: acme
+  - name: detail created_by account id
+    surface: detail
+    body: '{"group":{"id":"COLLECTIVE","name":"platform","description":null,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","created_by":"0a000000-0000-4000-8000-000000000001","acceptance_mode":"open","data_access":"members_only","display_members":true,"linked_github_org":null,"transcript_deletion_policy":"user_choice"},"members":[{"role":"member","joined_at":"2026-01-01T00:00:00Z","id":"0a000000-0000-4000-8000-000000000001","github_username":"alice","display_name":null,"avatar_url":null,"github_orgs":[]}],"contributors":[],"transcripts":[]}'
+    want: [anonymous]

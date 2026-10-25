@@ -148,6 +148,8 @@ cases:
       - id: 33333333-3333-4333-8333-333333333333
         name: member collective
         description: permitted
+        # The body carries no creator, so the read records an anonymous one.
+        creator: {kind: anonymous}
         role: member
         membersince: 2026-01-01T00:00:00Z
         acceptancemode: curated
@@ -180,6 +182,7 @@ cases:
       id: 33333333-3333-4333-8333-333333333333
       name: visible collective
       description: permitted description
+      creator: {kind: anonymous}
       acceptancemode: open
       dataaccess: public
   - name: detail-wrong-identity-refused

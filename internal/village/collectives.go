@@ -254,7 +254,7 @@ func (c *VillageClient) readCollectiveJSON(ctx context.Context, operation, path 
 	if resp.StatusCode != http.StatusOK {
 		return &StatusError{Operation: operation, Path: path, StatusCode: resp.StatusCode, Message: villageErrorText(raw)}
 	}
-	if err := json.Unmarshal(raw, into); err != nil {
+	if err := decodeVillageJSON(raw, into); err != nil {
 		return fmt.Errorf("%s: decode peasant online's answer: %w", operation, err)
 	}
 	return nil

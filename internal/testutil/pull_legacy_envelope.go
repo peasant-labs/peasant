@@ -53,3 +53,49 @@ func legacyPullPeople(node any) error {
 	}
 	return nil
 }
+
+// LegacyCollectivePeople re-encodes a current collective answer (records,
+// a detail response, or linked repositories) the way a village before Village
+// API 0.29.0 sent it: creator becomes a created_by account id and linked_by
+// becomes the linker's account id string.
+func LegacyCollectivePeople(value any) ([]byte, error) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var tree any
+	if err := json.Unmarshal(body, &tree); err != nil {
+		return nil, err
+	}
+	legacyCollectiveNode(tree)
+	return json.Marshal(tree)
+}
+
+func legacyCollectiveNode(node any) {
+	switch typed := node.(type) {
+	case []any:
+		for _, item := range typed {
+			legacyCollectiveNode(item)
+		}
+	case map[string]any:
+		if person, ok := typed["creator"].(map[string]any); ok {
+			delete(typed, "creator")
+			typed["created_by"] = legacyAccountID(person)
+		}
+		if person, ok := typed["linked_by"].(map[string]any); ok {
+			typed["linked_by"] = legacyAccountID(person)
+		}
+		for _, value := range typed {
+			legacyCollectiveNode(value)
+		}
+	}
+}
+
+// legacyAccountID is the account id an older village sent for a person. An
+// anonymous person had no such field then, so a fixed account id stands in.
+func legacyAccountID(person map[string]any) any {
+	if id, ok := person["id"].(string); ok {
+		return id
+	}
+	return "00000000-0000-4000-8000-0000000000ff"
+}

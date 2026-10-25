@@ -55,8 +55,15 @@ func (h *collectiveObservationHandler) fetch(w http.ResponseWriter, r *http.Requ
 }
 func writeObservationJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+	body, err := json.Marshal(value)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			"The collective observation response could not be encoded as JSON: "+err.Error()+". Nothing was returned. Retry; if the failure repeats, check the Village version and report it.",
+			"")
+		return
+	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	_, _ = w.Write(append(body, '\n'))
 }
 func writeObservationError(w http.ResponseWriter, err error) {
 	var history *store.ContributionHistoryError

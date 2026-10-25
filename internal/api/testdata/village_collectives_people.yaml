@@ -1,0 +1,13 @@
+# The publish popup's collectives route against a village before and after
+# Village API 0.29.0. An older village sends a collective's created_by account
+# id and a linked repository's linked_by account id string; the route must
+# still answer a body that decodes and validates, with the same suggestions.
+requiredNames:
+  - village on the public owner shape
+  - village before the public owner shape
+
+cases:
+  - name: village on the public owner shape
+    legacyPeople: false
+  - name: village before the public owner shape
+    legacyPeople: true

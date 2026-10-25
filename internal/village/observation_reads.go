@@ -2,7 +2,6 @@ package village
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,7 +50,7 @@ func (c *VillageClient) readObservationJSON(ctx context.Context, operation, path
 	if resp.StatusCode != http.StatusOK {
 		return &StatusError{Operation: operation, Path: path, StatusCode: resp.StatusCode, Message: villageErrorText(raw)}
 	}
-	if err := json.Unmarshal(raw, into); err != nil {
+	if err := decodeVillageJSON(raw, into); err != nil {
 		return fmt.Errorf("%s: decode complete metadata response: %w; prior observations remain unchanged; correct the peasant online response and retry", operation, err)
 	}
 	return nil
