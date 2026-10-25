@@ -106,10 +106,7 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	selection := config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
 		defaults.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{{GitRemote: fixture.Sessions[0].Remote, ClonePaths: []string{paths[fixture.Sessions[0].Worktree]}, Branches: []string{fixture.Sessions[0].Branch}}}},
 	}}
-	policy, err := sessionvisibility.New(selection)
-	if err != nil {
-		t.Fatalf("create mounted API selection: %v", err)
-	}
+	policy := sessionvisibility.New(selection)
 	provider := NewStoreDataProvider(db, policy)
 	base := startDiscoveryHTTPServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{Selection: selection}, Provider: provider, RepositoryIdentityResolver: resolver})
 
@@ -162,14 +159,40 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	sessions := getMountedJSON(t, base+"/api/v1/sessions", http.StatusOK)
 	assertExactKeys(t, sessions, "sessions")
 	sessionRows := objectSlice(t, sessions["sessions"])
-	if len(sessionRows) != 1 || stringField(t, sessionRows[0], "id") != fixture.Sessions[0].ID {
-		t.Fatalf("sessions visibility changed: %+v", sessionRows)
+	sessionIDs := make([]string, 0, len(sessionRows))
+	for _, row := range sessionRows {
+		sessionIDs = append(sessionIDs, stringField(t, row, "id"))
+	}
+	if !reflect.DeepEqual(sessionIDs, []string{fixture.Sessions[0].ID, fixture.Sessions[1].ID, fixture.Sessions[2].ID, fixture.Sessions[3].ID}) {
+		t.Fatalf("sessions visibility changed: %v", sessionIDs)
 	}
 	// sessionOrigin is the producer's declaration of who drove the session. It
 	// is always present on a stored row, because sessions.session_origin is NOT
 	// NULL over the three-value menu.
 	assertExactKeys(t, sessionRows[0], "durationMins", "harness", "id", "preview", "project", "projectHash", "sessionOrigin", "startTime", "toolCallCount", "totalTokens", "turnCount")
 	assertNoHostileEvidence(t, sessions, fixture.Forbidden)
+}
+
+// TestWebDiscoveryReportsAnUnusableSelectorWithoutFailing proves the metadata
+// read a browsing surface joins against never fails because the saved ingest
+// selector is unusable: an invalid selector admits nothing, so every stored row
+// reports "unselected" and the library itself is unaffected.
+func TestWebDiscoveryReportsAnUnusableSelectorWithoutFailing(t *testing.T) {
+	fixture := loadDiscoveryHTTPFixture(t)
+	db := storetest.Open(t)
+	_, resolver := seedDiscoveryHTTPStore(t, db, fixture)
+	cfg := &config.Config{Selection: config.SelectionConfig{Mode: config.SelectionMode("hostile-invalid")}}
+	base := startDiscoveryHTTPServer(t, ServerConfig{Port: 0, Store: db, Config: cfg, RepositoryIdentityResolver: resolver})
+	body := getMountedJSON(t, base+"/api/v1/web/discovery", http.StatusOK)
+	items := objectSlice(t, body["items"])
+	if len(items) != fixture.ExpectedRowCount {
+		t.Fatalf("discovery rows = %d, want %d", len(items), fixture.ExpectedRowCount)
+	}
+	for _, item := range items {
+		if got := stringField(t, item, "selectionStatus"); got != "unselected" {
+			t.Fatalf("item %s selectionStatus = %q, want unselected for an unusable saved selector", stringField(t, item, "sessionId"), got)
+		}
+	}
 }
 
 func TestMountedDiscoveryFailsClosed(t *testing.T) {
@@ -185,8 +208,6 @@ func TestMountedDiscoveryFailsClosed(t *testing.T) {
 				resolver.identities[ingest.ClonePath(paths[fixture.Sessions[0].Worktree])] = ingest.RepositoryIdentity{}
 			case "ambiguous-topology":
 				resolver.failPath = fixture.Sessions[0].Worktree
-			case "invalid-selection":
-				cfg.Selection.Mode = config.SelectionMode("hostile-invalid")
 			case "unsupported-query":
 				path += "?physical=/private/credential"
 			default:

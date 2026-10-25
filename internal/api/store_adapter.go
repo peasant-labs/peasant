@@ -84,7 +84,7 @@ func NewStoreDataProviderWithFSAndResolver(
 	}
 	return &StoreDataProvider{
 		store:                s,
-		codemap:              newCodemapService(s, visibility, resolver),
+		codemap:              newCodemapService(s, resolver),
 		visibility:           visibility,
 		pathIdentityResolver: resolver,
 		fs:                   fs,
@@ -116,8 +116,9 @@ func (p *StoreDataProvider) Sessions(ctx context.Context) ([]ingest.Session, err
 }
 
 // SessionSummaries returns the lightweight session summaries a person may be
-// OFFERED: the discovery list, scoped by both the persisted kickstart selection
-// and the declared session origin.
+// OFFERED: the discovery list, scoped by index readiness and the declared
+// session origin. The saved kickstart selection is NOT applied: it decides what
+// Peasant ingests next, not which already-ingested rows the library shows.
 func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSummary, error) {
 	rows, err := p.store.AllSessions(ctx)
 	if err != nil {
@@ -150,11 +151,10 @@ func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumm
 
 // SessionSummariesByID returns summaries for exactly the named sessions, in the
 // order they were named. It is the link-resolution path, deliberately OUTSIDE
-// the discovery machinery: it applies NEITHER origin scope NOR selection scope,
+// the discovery machinery: it applies NEITHER origin scope nor any selection,
 // because the caller is not browsing — it already holds the identifiers.
 // Discovery scope decides what a person is OFFERED; it has never decided what
-// they may OPEN, and this project already settled that rule for stored sessions
-// a narrowed selection hides.
+// they may OPEN.
 //
 // An identifier that names no stored session is OMITTED rather than reported as
 // an error, so one stale link inside an evidence set cannot fail the resolution
@@ -270,11 +270,11 @@ func (p *StoreDataProvider) sessionCandidate(row *store.SessionRow) sessionvisib
 }
 
 // SelectionScopeByID reports, for each named session stored on this computer,
-// whether the saved selection admits it into the local lists. It applies
-// selection scope only, through the same projection the lists use, and reads
+// whether the saved selection admits it for INGEST and PUSH metadata. It reads
 // exactly the named rows. An identifier that names no stored session is absent
-// from the map. The publication read uses it to say that a session it returns
-// is one the lists leave out; it is never a reason to withhold the session.
+// from the map. The publication read uses it to describe the saved ingest/push
+// selector; it is never a reason to withhold the session, and no browsing
+// surface may use it to narrow a list.
 func (p *StoreDataProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
 	rows, err := p.store.SessionsByIDs(ctx, ids)
 	if err != nil {
@@ -282,27 +282,19 @@ func (p *StoreDataProvider) SelectionScopeByID(ctx context.Context, ids []string
 	}
 	selected := make(map[string]bool, len(rows))
 	for i := range rows {
-		visible, err := p.visibleSessionRow(&rows[i])
+		inSelection, err := p.visibility.SelectedForIngest(p.sessionCandidate(&rows[i]))
 		if err != nil {
 			return nil, fmt.Errorf("store adapter: selection scope of session %q: %w", rows[i].SessionID, err)
 		}
-		selected[rows[i].SessionID] = visible
+		selected[rows[i].SessionID] = inSelection
 	}
 	return selected, nil
 }
 
-// visibleSessionRow applies SELECTION scope only. It backs the aggregate
-// surfaces (dashboard totals, trends), which count the work a store holds for
-// the selected projects rather than listing sessions to choose from. Origin
-// scope is a discovery-list boundary and would silently drop agent-driven work
-// out of those totals.
-func (p *StoreDataProvider) visibleSessionRow(row *store.SessionRow) (bool, error) {
-	return p.visibility.Visible(p.sessionCandidate(row))
-}
-
-// discoverableSessionRow applies BOTH scopes. It backs the surfaces a person
-// picks from: the REST sessions list, the WebSocket sessions channel, and
-// therefore the /share chooser.
+// discoverableSessionRow applies the origin discovery scope. It backs the
+// surfaces a person picks from: the REST sessions list, the WebSocket sessions
+// channel, and therefore the /share chooser. The saved kickstart selection is
+// not consulted anywhere on that path.
 func (p *StoreDataProvider) discoverableSessionRow(row *store.SessionRow) (bool, error) {
 	return p.visibility.VisibleForDiscovery(p.sessionCandidate(row))
 }
@@ -325,24 +317,6 @@ func (p *StoreDataProvider) resolveSessionClonePath(row *store.SessionRow) inges
 		return ""
 	}
 	return resolved
-}
-
-func (p *StoreDataProvider) visibleSessionRows(ctx context.Context) ([]store.SessionRow, error) {
-	rows, err := p.store.AllSessions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	visibleRows := make([]store.SessionRow, 0, len(rows))
-	for i := range rows {
-		visible, visibilityErr := p.visibleSessionRow(&rows[i])
-		if visibilityErr != nil {
-			return nil, visibilityErr
-		}
-		if visible {
-			visibleRows = append(visibleRows, rows[i])
-		}
-	}
-	return visibleRows, nil
 }
 
 // SessionByID returns a single session by ID, or an error if not found.
@@ -423,9 +397,9 @@ func (p *StoreDataProvider) ChildSessionsForParent(ctx context.Context, parentID
 
 // DashboardMetrics returns dashboard aggregates from the store.
 func (p *StoreDataProvider) DashboardMetrics(ctx context.Context) (*DashboardPayload, error) {
-	rows, err := p.visibleSessionRows(ctx)
+	rows, err := p.store.AllSessions(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("store adapter: dashboard visibility: %w", err)
+		return nil, fmt.Errorf("store adapter: dashboard sessions: %w", err)
 	}
 	harnessBreakdown := make(map[ingest.Harness]int)
 	var totalTokens, totalTurns int
@@ -455,9 +429,9 @@ func (p *StoreDataProvider) DashboardMetrics(ctx context.Context) (*DashboardPay
 
 // TrendsData returns daily summary data mapped to the trends payload.
 func (p *StoreDataProvider) TrendsData(ctx context.Context) (*TrendsPayload, error) {
-	rows, err := p.visibleSessionRows(ctx)
+	rows, err := p.store.AllSessions(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("store adapter: trends visibility: %w", err)
+		return nil, fmt.Errorf("store adapter: trends sessions: %w", err)
 	}
 	type dayAggregate struct{ tokens, sessions int }
 	byDay := make(map[string]dayAggregate)
@@ -513,17 +487,7 @@ func (p *StoreDataProvider) QualitySessions(ctx context.Context, f QualityFilter
 		return nil, fmt.Errorf("store adapter: quality sessions: %w", err)
 	}
 
-	// Apply the selection boundary before request-specific filtering.
-	var filtered []store.SessionRow
-	for i := range rows {
-		visible, visibilityErr := p.visibleSessionRow(&rows[i])
-		if visibilityErr != nil {
-			return nil, fmt.Errorf("store adapter: quality sessions visibility: %w", visibilityErr)
-		}
-		if visible {
-			filtered = append(filtered, rows[i])
-		}
-	}
+	filtered := rows
 
 	// Post-filter by project name if specified.
 	if len(f.Projects) > 0 {
@@ -595,21 +559,12 @@ func (p *StoreDataProvider) ProjectFamiliarity(ctx context.Context, projectHash 
 		if row.ProjectHash != projectHash.String() {
 			continue
 		}
-		visible, visibilityErr := p.visibleSessionRow(row)
-		if visibilityErr != nil {
-			return nil, fmt.Errorf(
-				"store adapter: project familiarity visibility failed for project %q session %q while filtering stored sessions before aggregation; no familiarity payload was returned because hidden contributions cannot be safely excluded; repair the persisted selection with `peasant kickstart` and retry: %w",
-				projectHash, row.SessionID, visibilityErr,
-			)
-		}
-		if visible {
-			allowedSessions[row.SessionID] = *row
-		}
+		allowedSessions[row.SessionID] = *row
 	}
 
 	rawSessionFiles, err := p.store.GetSessionFilesForProject(ctx, projectHash.String())
 	if err != nil {
-		return nil, fmt.Errorf("store adapter: project familiarity session files for %q after visibility filtering: %w", projectHash, err)
+		return nil, fmt.Errorf("store adapter: project familiarity session files for %q: %w", projectHash, err)
 	}
 	visibleSessionFiles := make([]store.SessionFileRow, 0, len(rawSessionFiles))
 	for _, row := range rawSessionFiles {

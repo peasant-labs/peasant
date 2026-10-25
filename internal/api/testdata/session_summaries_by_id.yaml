@@ -4,7 +4,8 @@
 # that differs only in the one fact that withholds it, so an absence cannot pass
 # because the row would have been missing anyway:
 #   hidden-agent-root            <-> listed-user-root          (origin)
-#   hidden-unselected-user-root  <-> listed-user-root          (selection)
+#   hidden-unselected-user-root  <-> listed-user-root          (formerly selection;
+#                                   now listed, proving the selector is ingest-only)
 #   hidden-agent-subagent-row    <-> listed-user-subagent-row  (origin, both parented)
 #
 # Both hidden roles must still resolve through the by-id route, which applies
@@ -62,7 +63,7 @@ rows:
     duration_ms: 180000
     origin: user
     selected: false
-    listed: false
+    listed: true
   - role: listed-user-subagent-row
     session_id: 74444444-4444-4444-8444-444444444444
     project_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

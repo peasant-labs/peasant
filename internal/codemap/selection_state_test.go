@@ -15,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -129,27 +128,11 @@ func TestSelectionStateFixtureGuards(t *testing.T) {
 	}
 }
 
-// buildSelectionPolicy turns a fixture selection into a real
-// sessionvisibility.Policy via the same config.SelectionConfig +
-// sessionvisibility.New path production code uses (never a hand-rolled
-// double of the matcher logic).
-func buildSelectionPolicy(t *testing.T, sel config.SelectionConfig) sessionvisibility.Policy {
-	t.Helper()
-	policy, err := sessionvisibility.New(sel)
-	if err != nil {
-		t.Fatalf("selection policy: %v", err)
-	}
-	return policy
-}
-
-// TestProjectSummaries_SelectionState drives ProjectSummaries' SelectionState
-// over the fixture corpus: an inactive (mode=all) selection reports nothing
-// hidden, an active selection that excludes a whole project reports it in
-// HiddenProjects (and all its sessions in HiddenSessions), and an active
-// selection that keeps a project's row but excludes some of its sessions
-// reports only HiddenSessions — proving the two counters are independent and
-// derived from the same visibility pass ProjectSummaries uses to build Projects
-// after project-selection usability testing.
+// TestProjectSummaries_SelectionState drives ProjectSummaries' retained
+// SelectionState carrier over the fixture corpus. Every case carries a saved
+// selection (restrictive, empty, or mode all) and every case must list every
+// stored project and session with an inactive, zero-hidden state: the saved
+// selection controls future ingestion, never browsing.
 func TestProjectSummaries_SelectionState(t *testing.T) {
 	t.Parallel()
 	corpus := loadSelectionStateCorpus(t)
@@ -201,12 +184,10 @@ func TestProjectSummaries_SelectionState(t *testing.T) {
 				}
 			}
 
-			policy := buildSelectionPolicy(t, fixtureCase.Input.Selection)
 			service := codemap.NewService(
 				database,
 				func(string) gitops.Repository { return noRepo() },
 				codegraph.NewGraphBuilder(),
-				policy,
 				codemap.WithPathIdentityResolver(selectionStatePathResolver{}),
 			)
 			result, err := service.ProjectSummaries(context.Background())

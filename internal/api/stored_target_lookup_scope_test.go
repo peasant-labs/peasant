@@ -121,7 +121,7 @@ func TestStoreDataProviderSessionSummariesByIDIsTargetScoped(t *testing.T) {
 	}
 	api.MarkStoredSessionsIndexed(t, db)
 
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	requested := []string{targetA, targetB}
 	// Warm the pool and any lazy per-store state so the measurement isolates the
 	// lookup itself.
@@ -162,7 +162,7 @@ func TestStoreDataProviderSessionSummariesByIDIsTargetScoped(t *testing.T) {
 // error and fails here.
 func TestServerSessionDetailRouteMissingSessionIsNotFound(t *testing.T) {
 	db := openGenerationCapableTestStore(t)
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	baseURL := startDetailReadServer(t, provider)
 
 	const missingID = "60000000-0000-4000-8000-000000000001"
@@ -204,7 +204,7 @@ func TestServerSessionDetailRouteResolvesStoredTargetAgainstLargeLibrary(t *test
 		Evidence:      schema.EvidenceNativeTyped,
 	}})
 
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	baseURL := startDetailReadServer(t, provider)
 
 	status, _, body := getJSON(t, baseURL+"/api/v1/sessions/"+targetID)

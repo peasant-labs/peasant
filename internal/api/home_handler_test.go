@@ -136,7 +136,7 @@ func seedHomeSessions(t *testing.T, db *store.Store, ids []string) {
 func homeTestHandler(t *testing.T, reader homeReader, db *store.Store, cfg *config.Config) http.Handler {
 	t.Helper()
 	sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-	sh.home = &homeHandler{reader: reader, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: fixtureRepositoryResolver{}}
+	sh.home = &homeHandler{reader: reader, publishing: &publishingHandler{store: db, configHome: t.TempDir()}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+defaults.RouteSyncSessions.String(), sh.handleSyncSessions)
 	return mux
@@ -201,6 +201,7 @@ type syncTraversalCase struct {
 type syncScopeCase struct {
 	Name, Query, Origin, Code string
 	Selection, Owner, Missing bool
+	OK                        bool `yaml:"ok"`
 	Version                   int
 	InvalidID                 bool `yaml:"invalidID"`
 	Duplicate                 bool
@@ -288,7 +289,7 @@ func TestSyncHomePageBounds(t *testing.T) {
 			}
 		})
 	}
-	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.All()), ConfigHome: t.TempDir()})
+	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.Browsing()), ConfigHome: t.TempDir()})
 	resp, err := http.Get(base + defaults.RouteSyncSessions.String() + "?view=home")
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +366,7 @@ func TestSyncHomeTokenScope(t *testing.T) {
 			cfg := config.BaseConfig()
 			hs := newTestXDGHomes(t)
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: hs.Config}, resolver: fixtureRepositoryResolver{}}
+			h := &homeHandler{reader: db, publishing: &publishingHandler{store: db, configHome: hs.Config}}
 			sh.home = h
 			if tc.Owner {
 				writeSyncDoorCredentials(t, hs.Config, "https://owner.example")
@@ -411,6 +412,14 @@ func TestSyncHomeTokenScope(t *testing.T) {
 			}
 			response := httptest.NewRecorder()
 			sh.handleSyncSessions(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&pageToken="+url.QueryEscape(string(token))+"&"+tc.Query, nil))
+			if tc.OK {
+				// Changing the saved ingest selection must not invalidate an
+				// unrelated browsing continuation.
+				if response.Code != http.StatusOK {
+					t.Fatalf("unchanged-scope replay status = %d, want 200; body=%s", response.Code, response.Body.String())
+				}
+				return
+			}
 			var refusal errorEnvelope
 			_ = json.Unmarshal(response.Body.Bytes(), &refusal)
 			if response.Code != 400 || refusal.Code != tc.Code || !strings.Contains(refusal.Error, "restart") {
@@ -420,7 +429,7 @@ func TestSyncHomeTokenScope(t *testing.T) {
 	}
 }
 
-func TestSyncHomeAncestryAndSelection(t *testing.T) {
+func TestSyncHomeAncestryIgnoresSavedSelection(t *testing.T) {
 	var f struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Sessions      []struct {
@@ -500,7 +509,7 @@ func TestSyncHomeAncestryAndSelection(t *testing.T) {
 	}
 }
 
-func TestSyncHomeCompleteCloneSelectionCohort(t *testing.T) {
+func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 	var f struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -517,7 +526,7 @@ func TestSyncHomeCompleteCloneSelectionCohort(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			db := storetest.Open(t)
 			source := loadDiscoveryHTTPFixture(t)
-			paths, resolver := seedDiscoveryHTTPStore(t, db, source)
+			paths, _ := seedDiscoveryHTTPStore(t, db, source)
 			selection := config.SelectionHarnessConfig{}
 			if tc.Explicit != "" {
 				selection.Sessions = []string{tc.Explicit}
@@ -534,7 +543,7 @@ func TestSyncHomeCompleteCloneSelectionCohort(t *testing.T) {
 			cfg := config.BaseConfig()
 			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessClaudeCode.String(): selection}}
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: resolver}
+			sh.home = &homeHandler{reader: db, publishing: &publishingHandler{store: db, configHome: t.TempDir()}}
 			p := syncPageRequest(t, http.HandlerFunc(sh.handleSyncSessions), "view=home", 200)
 			ids := []string{}
 			for _, row := range p.Items {
@@ -590,7 +599,7 @@ func TestSyncHomeAccountPublications(t *testing.T) {
 			if tc.Origin != "" {
 				writeSyncDoorCredentials(t, hs.Config, tc.Origin)
 			}
-			base := startDiscoveryHTTPServer(t, hs.config(ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.All())}))
+			base := startDiscoveryHTTPServer(t, hs.config(ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.Browsing())}))
 			query := "view=home&" + tc.Query
 			read := func(query string, status int) schema.LocalSyncSessionPage {
 				t.Helper()
@@ -719,12 +728,11 @@ func TestSyncHomeCancellationAndUnavailable(t *testing.T) {
 	syncPageRequest(t, homeTestHandler(t, nil, db, config.BaseConfig()), "view=home", 503)
 }
 
-// TestSyncHomeRepositoryIdentityEvidence pins the difference between a stored
-// Git worktree and the canonical project directory used as recorded-path
-// evidence. A project recorded outside Git (the user's home directory, /tmp, a
-// scratch capture folder) is ordinary stored data: asking it for repository
-// topology must not fail the whole Home projection. A captured worktree that
-// no longer resolves remains ambiguous evidence and still fails closed.
+// TestSyncHomeRepositoryIdentityEvidence pins that Home reads stored rows
+// without repository topology: the saved selector (which was the only reason
+// this page resolved clone identity) no longer narrows it, so a project
+// recorded outside Git and a captured worktree that no longer resolves are both
+// ordinary stored rows.
 func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -762,7 +770,7 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 				defaults.HarnessOpenCode.String(): {Projects: []config.ProjectSelection{{Name: "unrelated-name", ClonePaths: []string{physical.String()}}}},
 			}}
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: ingest.NewGitRepositoryIdentityResolver()}
+			sh.home = &homeHandler{reader: db, publishing: &publishingHandler{store: db, configHome: t.TempDir()}}
 			response := httptest.NewRecorder()
 			http.HandlerFunc(sh.handleSyncSessions).ServeHTTP(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", nil))
 			if response.Code != tc.Status {

@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/auth"
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -37,9 +36,7 @@ var _ homeReader = (*store.Store)(nil)
 
 type homeHandler struct {
 	reader     homeReader
-	sync       *syncHandler
 	publishing *publishingHandler
-	resolver   ingest.RepositoryIdentityResolver
 }
 
 const syncPageScopeCode = "sync_page_scope_changed"
@@ -64,32 +61,28 @@ type syncPageToken struct {
 type syncHomePageReader struct {
 	db         homeReader
 	query      schema.LocalSyncSessionsQuery
-	config     *config.Config
 	publishing *publishingHandler
 	account    *auth.Credentials
-	resolver   ingest.RepositoryIdentityResolver
 	scope      string
 }
 
 var _ schema.PageReader[schema.LocalSyncSessionRow] = (*syncHomePageReader)(nil)
 
 func (h *homeHandler) newReader(q schema.LocalSyncSessionsQuery) *syncHomePageReader {
-	r := &syncHomePageReader{db: h.reader, query: q, config: h.sync.currentConfig(), publishing: h.publishing, account: h.publishing.signedIn(), resolver: h.resolver}
-	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
-	if r.config != nil {
-		selection = r.config.Selection
-	}
+	r := &syncHomePageReader{db: h.reader, query: q, publishing: h.publishing, account: h.publishing.signedIn()}
 	filter := schema.LocalSyncPublicationAll
 	if q.Publication != nil {
 		filter = *q.Publication
 	}
 	origin, owner := r.accountScope()
-	// Immutable request configuration, including canonical selection. MaxItems
-	// is intentionally absent, so callers can change their page size.
+	// Immutable request configuration. The saved kickstart selection is
+	// deliberately absent: it controls future ingestion and hook/CLI push, never
+	// which ingested rows this page may show, so changing it must not invalidate
+	// a browsing continuation. MaxItems is intentionally absent, so callers can
+	// change their page size.
 	encoded, _ := json.Marshal(struct {
 		Resource, Order, Parent, Project, Publication, Origin, Owner string
-		Selection                                                    config.SelectionConfig
-	}{"sync/home", "start-desc-id-asc/v1", value(q.ParentSessionID), projectValue(q.ProjectHash), filter.String(), origin, owner, selection})
+	}{"sync/home", "start-desc-id-asc/v1", value(q.ParentSessionID), projectValue(q.ProjectHash), filter.String(), origin, owner})
 	sum := sha256.Sum256(encoded)
 	r.scope = hex.EncodeToString(sum[:])
 	return r
@@ -151,7 +144,7 @@ func (r *syncHomePageReader) boundary(token schema.PageToken) (*store.SyncPageBo
 		return nil, pageTokenError(syncPageTokenCode, "pageToken encoding or shape is unsupported")
 	}
 	if *decoded.Scope != r.scope {
-		return nil, pageTokenError(syncPageScopeCode, "pageToken scope no longer matches selection, account, parent, project or publication filter")
+		return nil, pageTokenError(syncPageScopeCode, "pageToken scope no longer matches account, parent, project or publication filter")
 	}
 	return &store.SyncPageBoundary{StartMs: *decoded.StartMs, ID: *decoded.ID}, nil
 }
@@ -175,54 +168,18 @@ func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error)
 	if err != nil {
 		return c, err
 	}
-	policy, err := syncSelectionPolicy(r.config)
-	if err != nil {
-		return c, err
-	}
-	mode, matcher, err := policy.ProjectionInputs()
-	if err != nil {
-		return c, err
-	}
-	var prepared []preparedWebDiscoveryIdentity
-	var remotes, names []ingest.DiscoveryIdentityMultiplicity
-	if mode != config.SelectionModeAll {
-		identities := make([]store.SessionRow, len(rows))
-		for i, row := range rows {
-			if err := ctx.Err(); err != nil {
-				return c, err
-			}
-			identities[i] = row.Identity
-		}
-		prepared, remotes, names, err = prepareWebDiscoveryIdentities(ctx, identities, r.config.Selection, r.resolver)
-		if err != nil {
-			return c, err
-		}
-	}
 	pushRows := make([]ingest.PushSessionRow, 0, len(rows))
-	for i, candidate := range rows {
+	for _, candidate := range rows {
 		if err := ctx.Err(); err != nil {
 			return c, err
 		}
 		row := candidate.Identity
-		selected := true
-		if matcher != nil {
-			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: value(row.GitBranch), RemoteMultiplicity: remotes[i], NameMultiplicity: names[i]})
-			switch match {
-			case ingest.BranchMatchYes:
-				selected = true
-			case ingest.BranchMatchNo:
-				selected = false
-			default:
-				_, err = policy.Visible(syncVisibilityCandidate(ingest.PushSessionRow{SessionID: row.SessionID, ModelHarness: row.ModelHarness, GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ProjectPath: row.GitWorktree, GitBranch: row.GitBranch}))
-				if err == nil {
-					err = fmt.Errorf("api.syncHomePageReader: unsupported selection result for %q; no page returned; repair kickstart selection and retry", row.SessionID)
-				}
-				return c, err
-			}
-		}
 		c.rows[row.SessionID] = candidate
 		if candidate.Pushable {
-			c.visible[row.SessionID] = selected
+			// The saved kickstart selection is not a browsing predicate: every
+			// ingested, pushable session belongs to the page, whatever the saved
+			// selection says about future ingest or hook pushes.
+			c.visible[row.SessionID] = true
 			pushRows = append(pushRows, ingest.PushSessionRow{SessionID: row.SessionID, ParentID: value(row.ParentID)})
 		}
 	}
@@ -272,7 +229,7 @@ func (r *syncHomePageReader) ReadPage(ctx context.Context, request schema.PageRe
 	}
 	parent := value(r.query.ParentSessionID)
 	if parent != "" && !cohort.visible[parent] {
-		return page, &syncPageError{code: "home_parent_not_found", message: "api.syncHomePageReader: parent is unknown or unselected; no child identities returned; choose a visible parent and retry"}
+		return page, &syncPageError{code: "home_parent_not_found", message: "api.syncHomePageReader: parent is not a stored pushable session; no child identities returned; open a parent from the current Home list and retry"}
 	}
 	filter := schema.LocalSyncPublicationAll
 	if r.query.Publication != nil {
@@ -320,12 +277,15 @@ func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort s
 	}
 	byID := make(map[string]store.HomePageRow, len(rows))
 	hydrated := make([]ingest.PushSessionRow, 0, len(rows))
-	scope := map[string]bool{}
 	for _, row := range rows {
 		byID[row.Sync.SessionID] = row
 		hydrated = append(hydrated, row.Sync)
-		scope[row.Sync.SessionID] = true
 	}
+	// Publication metadata describes the saved INGEST/PUSH selector, which is a
+	// different question from whether the row may appear here. It is computed for
+	// exactly the returned identifiers so an unselected row can still say it is
+	// outside the selector without being hidden from the page.
+	scope := r.publishing.selectionMembership(ctx, ids)
 	metadata, err := push.LoadPublicationMetadata(ctx, r.db, hydrated)
 	if err != nil {
 		return nil, err

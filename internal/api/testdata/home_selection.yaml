@@ -1,17 +1,21 @@
+# Every case carries a different saved selector and asserts the same stored Home
+# set: selection controls future ingestion, never this page. The
+# dropIndependentMetrics case removes one row's metrics, which is a real
+# push-eligibility bound and still applies.
 requiredNames: [clone-and-branch, ambiguous-remote-with-nonpushable-clone, branch-mismatch, explicit-session-does-not-widen]
 cases:
   - name: clone-and-branch
     clone: true
     branch: main
-    ids: [session-linked-feature, session-selected-main]
+    ids: [session-selected-main, session-linked-feature, session-independent-clone, session-other-project]
   - name: ambiguous-remote-with-nonpushable-clone
     dropIndependentMetrics: true
     branch: main
-    ids: []
+    ids: [session-selected-main, session-linked-feature, session-other-project]
   - name: branch-mismatch
     clone: true
     branch: missing-branch
-    ids: []
+    ids: [session-selected-main, session-linked-feature, session-independent-clone, session-other-project]
   - name: explicit-session-does-not-widen
     explicit: session-selected-main
-    ids: [session-selected-main]
+    ids: [session-selected-main, session-linked-feature, session-independent-clone, session-other-project]

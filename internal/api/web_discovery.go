@@ -15,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 )
 
@@ -62,20 +61,29 @@ func (s *Server) handleWebDiscovery(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(webDiscoveryPayload{Items: items})
 }
 
-func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config, resolver ingest.RepositoryIdentityResolver) ([]WebDiscoveryItem, error) {
-	policy, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		return nil, fmt.Errorf("Web discovery could not build selection status because the saved kickstart selection is invalid in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair the selection, then retry: %w", err)
+// discoverySelection moves a saved selection onto the ingest/push metadata
+// question this endpoint reports. An unusable saved selector admits nothing, so
+// it is presented as an empty selected-mode selector instead of failing the
+// metadata a browsing surface joins against.
+func discoverySelection(saved config.SelectionConfig) config.SelectionConfig {
+	if saved.Mode.IsValid() {
+		return saved
 	}
+	return config.SelectionConfig{Mode: config.SelectionModeSelected}
+}
+
+func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config, resolver ingest.RepositoryIdentityResolver) ([]WebDiscoveryItem, error) {
 	rows, err := db.AllSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Web discovery could not read stored sessions in internal/api.buildWebDiscovery. No partial metadata was returned. Retry; if the failure repeats, inspect the Peasant server logs: %w", err)
 	}
-	mode, matcher, err := policy.ProjectionInputs()
-	if err != nil {
-		return nil, fmt.Errorf("Web discovery could not prepare the canonical selection matcher in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair the selection, then retry: %w", err)
+	selection := discoverySelection(cfg.Selection)
+	var matcher *ingest.SelectionMatcher
+	if selection.Mode == config.SelectionModeSelected {
+		compiled := config.CompileSelectionMatcher(selection)
+		matcher = &compiled
 	}
-	prepared, remoteMultiplicity, nameMultiplicity, err := prepareWebDiscoveryIdentities(ctx, rows, cfg.Selection, resolver)
+	prepared, remoteMultiplicity, nameMultiplicity, err := prepareWebDiscoveryIdentities(ctx, rows, selection, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +105,7 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 		if row.CanonicalRemote != nil {
 			remote = *row.CanonicalRemote
 		}
-		selected := mode == config.SelectionModeAll
+		selected := matcher == nil
 		if matcher != nil {
 			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: remote, ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: branch, RemoteMultiplicity: remoteMultiplicity[i], NameMultiplicity: nameMultiplicity[i]})
 			switch match {

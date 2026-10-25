@@ -12,7 +12,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/schema"
 )
 
@@ -42,8 +41,6 @@ func writeJSONError(w http.ResponseWriter, code int, msg string) {
 // HTTP status with an inline JSON body.
 func writeMapError(w http.ResponseWriter, err error) {
 	switch {
-	case sessionvisibility.IsError(err):
-		writeAPIError(w, http.StatusInternalServerError, "Map or changes data could not be loaded because the saved kickstart selection is invalid. No partial project data was returned. Run `peasant kickstart` to repair the selection, then retry the request.", "map_selection_visibility")
 	case errors.Is(err, codemap.ErrProjectNotFound):
 		writeAPIError(w, http.StatusNotFound, "The project could not be opened because its canonical hash is not in the local index. No project data was returned. Refresh project discovery and open a current link.", "map_project_not_found")
 	case errors.Is(err, codemap.ErrProjectAmbiguous):
@@ -315,11 +312,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := s.cfg.Provider.Search(r.Context(), query, limit)
 	if err != nil {
-		if sessionvisibility.IsError(err) {
-			writeAPIError(w, http.StatusInternalServerError, "Search results could not be loaded because the saved kickstart selection is invalid. No partial search results were returned. Run `peasant kickstart` to repair the selection, then retry the search.", "search_selection_visibility")
-		} else {
-			writeAPIError(w, http.StatusInternalServerError, "Search results could not be loaded because the local search provider failed while serving the request. No partial search results were returned. Retry; if the failure repeats, inspect the Peasant server logs.", "search_provider_failure")
-		}
+		writeAPIError(w, http.StatusInternalServerError, "Search results could not be loaded because the local search provider failed while serving the request. No partial search results were returned. Retry; if the failure repeats, inspect the Peasant server logs.", "search_provider_failure")
 		return
 	}
 	json.NewEncoder(w).Encode(payload)

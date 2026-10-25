@@ -211,7 +211,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			if !reflect.DeepEqual(decoded.SessionDetail.NativeMetadata, p.NativeMetadata) {
 				t.Fatal("outbound metadata changed")
 			}
-			provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+			provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 			local, err := provider.SessionByID(ctx, string(sid))
 			if err != nil {
 				t.Fatal(err)

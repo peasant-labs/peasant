@@ -1,8 +1,8 @@
 expectedCaseCount: 2
 cases:
-  - name: persisted selection failure is typed
-    errorKind: selection
-    wantCode: selection_visibility
+  - name: discovery metadata failure stays untyped
+    errorKind: discovery
+    wantCode: ""
   - name: unrelated provider failure stays untyped
     errorKind: generic
     wantCode: ""

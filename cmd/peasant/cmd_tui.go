@@ -49,10 +49,7 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 	if err != nil {
 		return fmt.Errorf("tui startup: load config %q: %w; the TUI stopped before exposing discovery with default selection, so fix config.yaml or run `peasant kickstart` and retry", cfgPath, err)
 	}
-	visibility, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		return fmt.Errorf("tui startup: selection policy: %w", err)
-	}
+	visibility := sessionvisibility.New(cfg.Selection)
 
 	// Apply CLI overrides
 	if mockDataStore != "" {

@@ -68,8 +68,8 @@ no transcript, and it writes nothing to disk or to the local store to show the p
 keeps the turns of the last few previewed sessions in memory only, and it drops them when it exits.
 A session that discovery found no transcript for is identified as not imported yet.
 
-Changing selection controls future discovery and import lists. It does not delete sessions already in
-the local store and does not remove copies shared previously.
+Changing selection controls future discovery and import. It does not hide sessions already in the
+local store, delete them, or remove copies shared previously.
 
 ## Save, retention, and local import
 
@@ -299,20 +299,20 @@ does not delete existing data.
 
 ## Viewer lists and stored data
 
-Home and Map show the same project list. If one available child session is
-selected, its stored parent project appears in that list. Showing the parent does not select its
-sibling sessions. The normal push chooser still offers only sessions that the saved selection admits.
+Home and Map show every stored project. If one available child session is selected, its stored
+parent project appears in that list. Showing the parent does not select its sibling sessions.
 
-When the saved selection hides every stored project, Home and Map show one recovery panel. The panel
-shows aggregate hidden project and session counts. It does not show project names, session IDs, or
-paths. It states that the data stays ingested and indexed, is absent from the web viewer, and is not
-available for a future push. It also states that Peasant did not delete data. The panel provides a
-copyable `peasant kickstart` command. A store with no recorded projects keeps the first-use ingest
-message instead.
+Selection controls future ingestion and the hook/CLI push and prune choices. It is not a browsing
+filter and not an access-control rule for stored history: Home, Map/Review, the session and
+project lists, search, the command palette, counts, and the share chooser show every ingested row
+they are allowed to show for its origin, index readiness, and the explicit query or account bounds.
+The share chooser still lists every ingested pushable session; a row the saved selector leaves out
+of future automatic or CLI publication is marked outside the selection, and an explicit publish
+from the chooser remains a separate user action. A restrictive, empty, stale, or invalid saved
+selection cannot hide the library or produce an all-hidden state.
 
-Selection scopes discovery, viewer lists, and future push choices. It is not an access-control rule
-for stored history. A direct link to a stored session or canonical project still resolves. Saving a
-narrow selection does not delete files or database rows, and it does not unpublish Village copies.
+A direct link to a stored session or canonical project still resolves. Saving a narrow selection
+does not delete files or database rows, and it does not unpublish Village copies.
 
 `peasant prune --unselected` is a separate destructive command. It requires
 `selection.mode: selected`. It checks harness, project, clone, branch, explicit session, and exact

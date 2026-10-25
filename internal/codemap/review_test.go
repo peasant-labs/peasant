@@ -11,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/codegraph"
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/gitops"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -613,7 +612,7 @@ func TestReviewChanges_StructureDeltaCapAndMemo(t *testing.T) {
 	s := storetest.Open(t)
 	seedActivityFixture(t, s)
 	builder := &countingBuilder{inner: codegraph.NewGraphBuilder()}
-	svc := codemap.NewService(s, func(string) gitops.Repository { return repo }, builder, sessionvisibility.All())
+	svc := codemap.NewService(s, func(string) gitops.Repository { return repo }, builder)
 
 	payload, err := svc.ReviewChanges(context.Background(), fxProjectHash)
 	if err != nil {

@@ -156,7 +156,7 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 			if h.store != nil {
 				reader = h.store
 			}
-			home = &homeHandler{reader: reader, sync: h, publishing: &publishingHandler{store: h.store, configHome: h.configHome}, resolver: ingest.NewGitRepositoryIdentityResolver()}
+			home = &homeHandler{reader: reader, publishing: &publishingHandler{store: h.store, configHome: h.configHome}}
 		}
 		home.handleSessions(w, r)
 		return

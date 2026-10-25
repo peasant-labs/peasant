@@ -209,13 +209,13 @@ func runIndexReadOperation(t *testing.T, db *store.Store, sid schema.SessionID, 
 		_, _, err := db.GetCurrentSessionEntriesHash(ctx, sid)
 		return err
 	case indexReadAPIDetail:
-		_, err := api.NewStoreDataProviderWithFS(db, sessionvisibility.All(), filesystem, managedRoot).SessionByID(ctx, string(sid))
+		_, err := api.NewStoreDataProviderWithFS(db, sessionvisibility.Browsing(), filesystem, managedRoot).SessionByID(ctx, string(sid))
 		return err
 	case indexReadExport:
 		_, err := export.ExportSession(ctx, db, filesystem, string(sid), managedRoot)
 		return err
 	case indexReadSearch:
-		_, err := codemap.NewService(db, nil, nil, sessionvisibility.All()).Search(ctx, "searchable", 1)
+		_, err := codemap.NewService(db, nil, nil).Search(ctx, "searchable", 1)
 		return err
 	case indexReadMetadata:
 		_, err := db.SessionByID(ctx, string(sid))

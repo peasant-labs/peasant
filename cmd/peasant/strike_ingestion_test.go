@@ -54,7 +54,7 @@ func TestStrikeIngestCommandPersistsSessionDetail(t *testing.T) {
 	}
 	defer db.Close()
 
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	ctx := context.Background()
 	rootSession, err := provider.SessionByID(ctx, strikeFixtureRootID)
 	if err != nil {
@@ -175,7 +175,7 @@ func TestStrikeIngestCommandAddsChildAfterParentSourceDisappears(t *testing.T) {
 		t.Fatalf("open two-run Strike store: %v", err)
 	}
 	defer db.Close()
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	children, err := provider.ChildSessionsForParent(context.Background(), strikeFixtureRootID)
 	if err != nil {
 		t.Fatalf("load children after second Strike harvest: %v", err)
@@ -264,7 +264,7 @@ func TestStrikeIngestKeepsARecordOverTheRetiredPerLineLimit(t *testing.T) {
 		t.Fatalf("open large-record test store: %v", err)
 	}
 	defer db.Close()
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	detail, err := provider.SessionByID(context.Background(), strikeFixtureRootID)
 	if err != nil {
 		t.Fatalf("the session detail read refused a session holding a large record: %v", err)

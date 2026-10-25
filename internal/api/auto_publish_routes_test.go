@@ -103,10 +103,7 @@ func newAutoPublishWorld(t *testing.T, options autoPublishWorldOptions) *autoPub
 	cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
 		defaults.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{{GitRemote: "git@github.com:acme/tools.git"}}},
 	}}
-	policy, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(cfg.Selection)
 	ctx, cancel := context.WithCancel(context.Background())
 	server := NewServer(hs.config(ServerConfig{Port: 0, Store: db, Config: cfg, Provider: NewStoreDataProvider(db, policy)}))
 	if err := server.Listen(ctx); err != nil {

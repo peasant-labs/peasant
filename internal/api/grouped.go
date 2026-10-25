@@ -95,15 +95,16 @@ type GroupedCandidate struct {
 
 // GroupedVariantSource is the fixed seam a route owner registers so the shared
 // member route and cache can replay its predicate. Gather MUST apply the
-// originating route predicate with CURRENT authorization and selection before
-// returning, and MUST NOT widen beyond the recorded filters.
+// originating route predicate with CURRENT authorization, origin scope and
+// readiness before returning, and MUST NOT widen beyond the recorded filters.
+// The saved kickstart selection is not part of a browsing predicate.
 type GroupedVariantSource struct {
 	Variant GroupedRouteVariant
 	Gather  func(ctx context.Context, filters GroupedFilters) ([]GroupedCandidate, error)
 }
 
 // groupedCandidateProvider is implemented by the production store provider. It
-// supplies the session-list and search candidate sets plus the selection
+// supplies the session-list and search candidate sets plus the browsing
 // revision the member scope compares against.
 type groupedCandidateProvider interface {
 	GroupedCandidates(ctx context.Context, filters GroupedFilters) ([]GroupedCandidate, error)

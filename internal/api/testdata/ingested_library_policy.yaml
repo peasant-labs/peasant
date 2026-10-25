@@ -1,0 +1,42 @@
+requiredNames: [mode_all, selected_restrictive, selected_empty, selected_excluded, selected_stale]
+cases:
+  - name: mode_all
+    selection:
+      mode: all
+    outside_selection: []
+
+  - name: selected_restrictive
+    selection:
+      mode: selected
+      harnesses:
+        codex:
+          projects:
+            - {name: alpha-project}
+    # Only lib-a is admitted by the saved ingest/push selector.
+    outside_selection: [lib-b, lib-c, lib-h]
+
+  - name: selected_empty
+    selection:
+      mode: selected
+    outside_selection: [lib-a, lib-b, lib-c, lib-h]
+
+  - name: selected_excluded
+    selection:
+      mode: selected
+      harnesses:
+        codex:
+          projects:
+            - {name: alpha-project}
+          exclusions:
+            sessions: [lib-a]
+    outside_selection: [lib-a, lib-b, lib-c, lib-h]
+
+  - name: selected_stale
+    selection:
+      mode: selected
+      harnesses:
+        codex:
+          projects:
+            - {name: deleted-project}
+          sessions: [lib-gone]
+    outside_selection: [lib-a, lib-b, lib-c, lib-h]

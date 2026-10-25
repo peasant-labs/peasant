@@ -8,6 +8,7 @@ cases:
       hash: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678
       name: repo
       cwd: /repo
+    # Retained saved-selection input: it must not narrow the baseline.
     selection:
       mode: selected
       harnesses:
@@ -38,10 +39,10 @@ cases:
       - 22222222-2222-2222-2222-222222222222
     promoteSessionID: 44444444-4444-4444-4444-444444444444
     expected:
-      visibleMetricCount: 3
-      initialSignalCount: 1
+      visibleMetricCount: 4
+      initialSignalCount: 0
       promotedSignalCount: 0
       signalKind: retryLoops
       initialPerChange: 4.5
-      initialPerProject: 3
+      initialPerProject: 2252.25
       hiddenRetryLoops: 9000

@@ -75,8 +75,9 @@ func (h *publishingHandler) signedIn() *auth.Credentials {
 
 // handlePublications reports whether each named session is published on
 // Village for the signed-in account, from the receipts and attempts this
-// computer recorded. It ignores the saved selection: a session the lists leave
-// out is still returned, marked outsideSelection.
+// computer recorded. It reports the saved INGEST/PUSH selector on every row and
+// never withholds one: outsideSelection describes future hook/CLI publication
+// scope, not whether the row may be browsed.
 func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	query := r.URL.Query()
@@ -141,6 +142,34 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeEncodedJSON(w, response, "The publication state")
+}
+
+// selectionMembership reports the saved ingest/push selector's verdict for
+// exactly the named sessions, for publication metadata only. It never withholds
+// a row: an unavailable or unusable selector reports false (not admitted) for
+// every name, which is how Peasant's ingest path treats a selector it cannot
+// apply. No browsing surface may use this to narrow a list.
+func (h *publishingHandler) selectionMembership(ctx context.Context, ids []string) map[string]bool {
+	membership := make(map[string]bool, len(ids))
+	if h.selection == nil {
+		// Without a store-backed selector there is no saved selection to report;
+		// the pre-existing behaviour treats every named session as admitted.
+		for _, id := range ids {
+			membership[id] = true
+		}
+		return membership
+	}
+	scope, err := h.selection.SelectionScopeByID(ctx, ids)
+	if err != nil {
+		for _, id := range ids {
+			membership[id] = false
+		}
+		return membership
+	}
+	for _, id := range ids {
+		membership[id] = scope[id]
+	}
+	return membership
 }
 
 // localPublications is shared by the by-ID deep-link read and bounded Home
