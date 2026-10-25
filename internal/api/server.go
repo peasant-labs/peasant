@@ -180,6 +180,8 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteConfigCapabilities.String(), s.handleUICapabilities)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
 	mux.HandleFunc("GET "+defaults.RouteSessionDetail.String(), s.handleSessionDetail)
+	mux.HandleFunc("GET "+defaults.RouteSessionCommits.String(), s.handleSessionCommits)
+	mux.HandleFunc("GET "+defaults.RouteSessionPullRequests.String(), s.handleSessionPullRequests)
 	mux.HandleFunc("GET "+defaults.RouteSessionSummaries.String(), s.handleSessionSummariesByID)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
