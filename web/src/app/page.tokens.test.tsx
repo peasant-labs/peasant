@@ -14,7 +14,7 @@ vi.mock('@/contexts/WebSocketContext', () => ({ useChannel: () => { throw new Er
 interface Page { ids: string[]; next: string; status?: number; code?: string; failOnce?: number; deferred?: boolean }
 interface Case { name: string; pages: Record<string, Page>; children?: Record<string, Page>; refreshed?: Record<string, Page>; refreshedChildren?: Record<string, Page>; expectedTokens: string[]; expectedChildTokens?: string[]; rejectRestart?: boolean; deferOptions?: boolean; optionsError?: { status: number; code: string } }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-token-pages.yaml'), 'utf8')) as { requiredNames: string[]; projects: LocalSyncProjectOption[]; cases: Case[] };
-const required = ['short-and-empty-root-continuation', 'empty-first-page-can-continue', 'continuation-retries-same-token', 'child-empty-continuation-retries', 'finite-refresh-follows-fresh-root-and-child-tokens', 'scope-error-restarts-once', 'generic400-does-not-restart', 'project-options-do-not-block-rows', 'project-filter-aborts-old-continuation', 'late-options-cannot-win-filter-reset', 'account-reset-reloads-project-options', 'project-options-error-retains-rows-and-retries', 'project-options-selection-error-clears-content'];
+const required = ['short-and-empty-root-continuation', 'empty-first-page-can-continue', 'continuation-retries-same-token', 'child-empty-continuation-retries', 'finite-refresh-follows-fresh-root-and-child-tokens', 'scope-error-restarts-once', 'generic400-does-not-restart', 'project-options-do-not-block-rows', 'project-filter-aborts-old-continuation', 'late-options-cannot-win-filter-reset', 'account-reset-reloads-project-options', 'project-options-error-retains-rows-and-retries', 'project-options-selection-error-retains-rows-and-retries'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 const projects = zLocalSyncProjectOptions.parse({ projects: fixture.projects }).projects;
@@ -49,7 +49,7 @@ describe('mounted Home opaque continuation', () => {
         optionSignals.push(init?.signal as AbortSignal);
         if (testCase.pages[''].ids.length) expect(screen.queryByRole('link', { name: /root-one|root-last/ })).toBeInTheDocument();
         else expect(screen.getByText('no session to list here.')).toBeInTheDocument();
-        if (testCase.optionsError && optionsRead === 1) return json({ error: 'project choices could not be read; retry or run peasant kickstart', code: testCase.optionsError.code }, testCase.optionsError.status);
+        if (testCase.optionsError && optionsRead === 1) return json({ error: 'project choices could not be read; retry', code: testCase.optionsError.code }, testCase.optionsError.status);
         if (testCase.deferOptions && optionsRead === 1) {
           const snapshot = options;
           return new Promise<Response>(done => releases.push(() => done(json({ projects: snapshot }))));
@@ -77,13 +77,6 @@ describe('mounted Home opaque continuation', () => {
       return json(body);
     }));
     render(<PublishProvider><HomePage /></PublishProvider>);
-    if (testCase.optionsError?.code === 'selection_visibility') {
-      await screen.findByRole('button', { name: 'retry the session list' });
-      expect(screen.queryByRole('link', { name: 'root-one' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /^filters/ })).not.toBeInTheDocument();
-      expect(tokens(homeReads())).toEqual(testCase.expectedTokens);
-      return;
-    }
     if (testCase.pages[''].ids.length) await screen.findByRole('link', { name: 'root-one' });
     else await screen.findByRole('button', { name: 'next page' });
     const idle = () => waitFor(() => expect(screen.getByRole('region', { name: 'sessions' })).not.toHaveAttribute('aria-busy'));
@@ -188,7 +181,7 @@ describe('mounted Home opaque continuation', () => {
       await waitFor(() => expect(projectChoice('alpha')).toBeNull());
       expect(screen.queryByRole('link', { name: 'root-one' })).not.toBeInTheDocument();
     }
-    if (testCase.name === 'project-options-error-retains-rows-and-retries') {
+    if (testCase.name === 'project-options-error-retains-rows-and-retries' || testCase.name === 'project-options-selection-error-retains-rows-and-retries') {
       await waitFor(() => expect(screen.getByRole('menuitem', { name: 'retry project choices', hidden: true })).toBeInTheDocument());
       expect(screen.getByRole('link', { name: 'root-one' })).toBeInTheDocument();
       fireEvent.click(filtersTrigger());

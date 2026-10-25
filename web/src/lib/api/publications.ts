@@ -7,11 +7,10 @@
  * contract. A body the contract refuses stops the list with an actionable
  * error instead of being rendered as a guessed row or count.
  *
- * The flat sync list does not apply the saved selection; the publications read
- * reports, for every named session, whether the selection leaves it out
- * (`outsideSelection`). The root list shows only what both reads agree is
- * visible, so the saved selection is decided on the server and only compared
- * here.
+ * The flat sync list is the stored library. The publications read states each
+ * named session's publish state and may also report that the ingestion
+ * selection leaves it out (`outsideSelection`); that is push metadata, never a
+ * reason to hide a stored row.
  */
 
 import {
@@ -53,8 +52,8 @@ function decodeError(path: string, operation: string, reason: string): Error {
 
 /**
  * GET `path` and return its JSON body. `route` names the request in an error:
- * the publications query string lists session IDs, including ones the saved
- * selection hides, so an error names the route and never the IDs.
+ * the publications query string lists session IDs, so an error names the route
+ * and never the IDs.
  */
 async function getBody(path: string, route = path): Promise<unknown> {
   const response = await fetch(`${getApiBaseUrl()}${path}`);

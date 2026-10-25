@@ -105,7 +105,7 @@ const REQUIRED_NAMES = [
   'not-published-counts',
   'published-counts',
   'auto-counts',
-  'outside-selection-hidden',
+  'outside-selection-still-browsable',
   'next-page',
   'pending-collectives-cannot-read',
   'parent-visible-child-grouped',
@@ -115,7 +115,7 @@ const REQUIRED_NAMES = [
   'unresolved-child-hidden',
   'cache-only-child-grouped',
   'filtered-parent-omits-child',
-  'selection-hidden-parent-and-child',
+  'selection-metadata-does-not-hide-family',
   'fork-without-markers-top-level',
   'paging-keeps-child-with-parent',
   'child-search-keeps-publish-label',
@@ -255,11 +255,11 @@ function serve(specs: SessionSpec[], options: ServeOptions = {}) {
       if (options.publicationsError) return json({ error: options.publicationsError.error, code: options.publicationsError.code }, options.publicationsError.status);
       const parent = url.searchParams.get('parentSessionId');
       const filter = url.searchParams.get('publication') ?? 'all';
-      const source = specs.filter(spec => spec.publication !== false && !spec.outsideSelection && !spec.parentUnresolved
+      const source = specs.filter(spec => spec.publication !== false && !spec.parentUnresolved
         && (parent ? spec.parentSessionId === parent : !spec.parentSessionId)
         && (parent || filter === 'all' || (filter === 'published' && spec.state === 'published') || (filter === 'not-published' && spec.state === 'unpublished') || (filter === 'auto' && spec.autoPublish)));
       const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0;
-      return json({ items: source.slice(start, start + 25).map((spec) => ({ sync: syncRow(spec, specs.indexOf(spec)), publication: publicationRow(spec, specs.indexOf(spec), false), title: spec.title ?? '', preview: spec.preview ?? '', childCount: specs.filter(child => child.parentSessionId === spec.id && !child.outsideSelection && child.publication !== false).length })), next: start + 25 < source.length ? 'more-sessions' : '' });
+      return json({ items: source.slice(start, start + 25).map((spec) => ({ sync: syncRow(spec, specs.indexOf(spec)), publication: publicationRow(spec, specs.indexOf(spec), false), title: spec.title ?? '', preview: spec.preview ?? '', childCount: specs.filter(child => child.parentSessionId === spec.id && child.publication !== false).length })), next: start + 25 < source.length ? 'more-sessions' : '' });
     }
     if (url.searchParams.get('include') === 'audience') {
       for (const id of url.searchParams.get('sessionIds')!.split(',')) {
@@ -545,9 +545,10 @@ describe('root page publish filters', () => {
         assertSessionsStat();
       }
 
-      // A session the selection leaves out, or one the publications read did
-      // not return, appears nowhere on the page.
-      for (const spec of specs.filter((candidate) => candidate.outsideSelection || candidate.publication === false)) {
+      // A session with no publication record cannot have its publish state
+      // stated, so it appears nowhere on the page. A row the saved ingestion
+      // selection marks outside stays browsable and is asserted above.
+      for (const spec of specs.filter((candidate) => candidate.publication === false)) {
         expect(document.body.textContent).not.toContain(spec.id);
       }
     });
@@ -606,12 +607,12 @@ describe('root page list reads', () => {
     expect(stateLabel(list, 's-pub')).toBe('published');
   });
 
-  it('fails closed with the selection guidance when the publications read cannot apply the saved selection', async () => {
+  it('fails closed, with a retry, when the publications read fails', async () => {
     serve(SPECS, {
-      publicationsError: { status: 500, code: 'selection_visibility', error: 'failed to read the publication state: saved selection could not be applied' },
+      publicationsError: { status: 500, code: 'publication_read_failed', error: 'failed to read the publication state' },
     });
     render(<HomePage />);
-    expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
+    expect(await screen.findByText(/failed to read the publication state/)).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'sessions' })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain('s-pub');
     expect(screen.getByRole('button', { name: 'retry the session list' })).toBeInTheDocument();

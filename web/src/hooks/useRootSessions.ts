@@ -13,14 +13,13 @@ const LOADING: RootSessionsState = { status: 'loading', rows: null, error: null 
 
 /**
  * The root page's session rows: the flat sync list joined with the publication
- * state of every session in it, keeping only what the publications read says
- * the saved selection shows.
+ * state of every session in it. The sync list is the stored library, so no row
+ * is hidden because of a saved ingestion selection.
  *
  * `invalidationKey` is any value that changes when the WebSocket sessions
  * channel delivers a new session set; the rows are read again then. While a
- * reread is in flight the last rows stay on screen. `enabled: false` (a
- * selection failure or recovery state owns the page) drops the rows and reads
- * nothing, so no stale row survives a fail-closed state.
+ * reread is in flight the last rows stay on screen. `enabled: false` drops the
+ * rows and reads nothing, for a host that owns the surface with its own state.
  */
 export function useRootSessions({
   enabled,

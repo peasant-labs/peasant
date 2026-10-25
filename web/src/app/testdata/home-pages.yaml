@@ -5,7 +5,7 @@ requiredNames:
   - lazy-children-and-child-more
   - account-change-clears-old-rows
   - collapsed-late-child-is-ignored
-  - selection-refresh-clears-loaded-content
+  - selection-error-keeps-loaded-content
   - overlapping-refresh-does-not-race
   - collapse-cancels-expanded-refresh
   - collapsed-ancestor-skips-descendant-refresh
@@ -15,8 +15,8 @@ requiredNames:
   - generic-child404-retains-visible-content
   - publish-settlement-refreshes-loaded-window
   - publish-during-refresh-queues-one-loaded-window
-  - selection-recovery-survives-failed-retry
-  - selection-recovery-survives-account-reset
+  - selection-error-retry-failure-keeps-loaded-content
+  - selection-error-account-change-refreshes-loaded-content
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
@@ -55,7 +55,7 @@ cases:
   - name: collapsed-late-child-is-ignored
     roots: 30
     children: 30
-  - name: selection-refresh-clears-loaded-content
+  - name: selection-error-keeps-loaded-content
     roots: 30
     children: 0
   - name: overlapping-refresh-does-not-race
@@ -87,14 +87,10 @@ cases:
   - name: publish-during-refresh-queues-one-loaded-window
     roots: 80
     children: 30
-  - name: selection-recovery-survives-failed-retry
+  - name: selection-error-retry-failure-keeps-loaded-content
     roots: 30
     children: 0
-    cachedSessionId: cached-selection-session
-    cachedProject: cached-selection-project
-  - name: selection-recovery-survives-account-reset
+  - name: selection-error-account-change-refreshes-loaded-content
     roots: 30
     children: 0
-    cachedSessionId: cached-selection-session
-    cachedProject: cached-selection-project
     accountAfterFailure: second-account

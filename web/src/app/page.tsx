@@ -95,8 +95,7 @@ function HomeView() {
     return () => clearTimeout(timer);
   }, [query]);
   const roots = home.groups.get('');
-  const selectionFailed = home.selectionError !== null;
-  const discoveryError = home.selectionError ?? roots?.error;
+  const discoveryError = roots?.error;
   const rootPages = roots?.pages;
   const rows = useMemo(() => [...new Map((rootPages ?? []).flatMap(page => page.items).map(row => [row.sync.id, row])).values()], [rootPages]);
   const children = new Map([...home.groups].filter(([id]) => id !== '').map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.items).map(row => [row.sync.id, row])).values()]]));
@@ -158,13 +157,13 @@ function HomeView() {
     </div>}
     <div className="home-board">
       <div className="home-toolbar" data-home-toolbar="true">
-        {browse === 'sessions' && !selectionFailed && <label className="home-search">
+        {browse === 'sessions' && <label className="home-search">
           <Search className="home-search-icon" aria-hidden="true" />
           <input type="search" aria-label="search your sessions" placeholder="search titles, prompts, tool output" value={query} onChange={event => setQuery(event.target.value)} />
           {query && <button type="button" className="btn btn-ghost btn-sm btn-icon home-search-clear" aria-label="clear search" onClick={() => setQuery('')}><X aria-hidden="true" /></button>}
         </label>}
         <div className="home-toolbar-menus">
-          {browse === 'sessions' && !selectionFailed && !search && <ChoiceMenu
+          {browse === 'sessions' && !search && <ChoiceMenu
             ariaLabel="filters"
             align="end"
             closeOnChoose={false}
@@ -177,11 +176,11 @@ function HomeView() {
         </div>
       </div>
       {browse === 'sessions' ? <>
-        {!selectionFailed && (search ? <GroupedSessionsSection key={`${search}-${home.revision}`} variant="search" query={search} heading="search results" rowDetail={row => <SearchDetail row={row} />} />
+        {search ? <GroupedSessionsSection key={`${search}-${home.revision}`} variant="search" query={search} heading="search results" rowDetail={row => <SearchDetail row={row} />} />
           : !roots?.pages.length && roots?.error != null ? null
-          : <RootSessionList rows={rows} childGroups={children} titles={titles} previews={previews} home={home} filter={filter} scope={`${filter}:${project?.projectHash ?? ''}`} loading={!roots?.pages.length && roots?.error == null} />)}
+          : <RootSessionList rows={rows} childGroups={children} titles={titles} previews={previews} home={home} filter={filter} scope={`${filter}:${project?.projectHash ?? ''}`} loading={!roots?.pages.length && roots?.error == null} />}
       </> : <section aria-label={`browse by ${BROWSE_LABELS[browse]}`} id={`home-browse-${browse}`} className="home-browse">
-        {!selectionFailed && <Suspense fallback={<SkeletonList rows={4} />}><LegacyHomeBrowse view={browse} /></Suspense>}
+        <Suspense fallback={<SkeletonList rows={4} />}><LegacyHomeBrowse view={browse} /></Suspense>
       </section>}
     </div>
   </div>;

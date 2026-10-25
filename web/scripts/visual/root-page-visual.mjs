@@ -9,7 +9,7 @@
  * The mock store holds no Home pages or publication receipts, so the
  * browser fulfils the home/project-options sync views and publications from
  * the mock sessions and the pattern in testdata/root-page.yaml. The project
- * summary is intercepted only for the selection notice and recovery states.
+ * summary is the recorded project library.
  * Global statistics are deliberately absent. The complementary bounded-page
  * journey protects first25 and loaded-window refresh request counts.
  * The page, the shell, the fairtrade components and every request path stay
@@ -17,10 +17,8 @@
  *
  * States, each in both themes at desktop and phone width: the list under each
  * filter (all, not published, published, auto), the collapsed and expanded
- * child family, a search, the selection
- * notice, the selection recovery panel, and the empty install. Every filter's
- * membership is checked against the rows it lists, walking every page of the
- * table.
+ * child family, a search, and the empty install. Every filter's membership is
+ * checked against the rows it lists, walking every page of the table.
  *
  * Usage: CHROME_PATH=/path/to/chrome node scripts/visual/root-page-visual.mjs
  *        PLAYWRIGHT_MODULE may name an installed Playwright ESM entry when
@@ -153,10 +151,10 @@ function publishingAnswers(sessions) {
   for (const id of [CONTEXT.childSessionId, CONTEXT.unresolvedChildId]) {
     const row = sync.find((row) => row.id === id)
     const parent = id === CONTEXT.childSessionId ? CONTEXT.parentId : CONTEXT.absentTargetId
-    if (row?.parentSessionId !== parent || row.parentUnresolved || publications.get(id)?.outsideSelection !== false) fail(`root-page-visual.mjs publishingAnswers: context_navigation.yaml child ${id} lost its nameable parent or selected publication; omission cannot prove childhood; restore parentSessionId=${parent} and the publication row, then rerun visual:root-page`)
+    if (row?.parentSessionId !== parent || row.parentUnresolved) fail(`root-page-visual.mjs publishingAnswers: context_navigation.yaml child ${id} lost its nameable parent; omission cannot prove childhood; restore parentSessionId=${parent}, then rerun visual:root-page`)
   }
   const expected = sync.filter((row) => !row.parentSessionId && !row.parentUnresolved)
-    .map((row) => publications.get(row.id)).filter((entry) => entry && !entry.outsideSelection)
+    .map((row) => publications.get(row.id)).filter(Boolean)
   return { sessions, sync, publications, expected }
 }
 
@@ -193,16 +191,16 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
     // Hide the development mock badge so the capture shows the production chrome.
     if (url.pathname === '/api/v1/config/mock') return respond(json({ enabled: false }))
     if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') {
-      const options = new Map((answers?.sync ?? []).filter(row => !row.parentSessionId && !row.parentUnresolved && !answers.publications.get(row.id)?.outsideSelection).map(row => [row.projectHash, { projectHash: row.projectHash, projectName: row.projectName }]))
+      const options = new Map((answers?.sync ?? []).filter(row => !row.parentSessionId && !row.parentUnresolved).map(row => [row.projectHash, { projectHash: row.projectHash, projectName: row.projectName }]))
       return respond(json({ projects: [...options.values()].sort((a, b) => a.projectName.localeCompare(b.projectName) || a.projectHash.localeCompare(b.projectHash)) }))
     }
     if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
       const parent = url.searchParams.get('parentSessionId')
       const publication = url.searchParams.get('publication') ?? 'all'
       const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0
-      const source = !answers || (summary?.projects?.length === 0 && summary.selection?.active) ? [] : answers.sync.filter(row => {
+      const source = !answers ? [] : answers.sync.filter(row => {
         const receipt = answers.publications.get(row.id)
-        return receipt && !receipt.outsideSelection && !row.parentUnresolved
+        return receipt && !row.parentUnresolved
           && (parent ? row.parentSessionId === parent : !row.parentSessionId)
           && (parent || publication === 'all' || publication === 'auto' && receipt.autoPublish
             || publication === 'published' && receipt.state === 'published' || publication === 'not-published' && receipt.state === 'unpublished')
@@ -210,7 +208,7 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
       return respond(json({ items: source.slice(start, start + 25).map(sync => {
         const { audience, ...publication } = answers.publications.get(sync.id)
         const session = answers.sessions.find(session => session.id === sync.id)
-        return { sync, publication, title: session?.title ?? '', preview: sync.firstPrompt ?? session?.preview ?? '', childCount: answers.sync.filter(child => child.parentSessionId === sync.id && !answers.publications.get(child.id)?.outsideSelection).length }
+        return { sync, publication, title: session?.title ?? '', preview: sync.firstPrompt ?? session?.preview ?? '', childCount: answers.sync.filter(child => child.parentSessionId === sync.id && answers.publications.get(child.id)).length }
       }), next: start + 25 < source.length ? 'more-sessions' : '' }))
     }
     if (answers && url.pathname === '/api/v1/sync/sessions') return respond(json({ sessions: answers.sync }))
@@ -266,7 +264,7 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
     await page.screenshot({ path: file, fullPage: true })
   }
   if (contentSelector) {
-    // A short recovery panel paints only a small part of the full frame. Keep
+    // A short mounted state paints only a small part of the full frame. Keep
     // the complete shell capture, and apply the unchanged pixel gate to the
     // actual mounted panel rather than the empty space below it.
     const full = await gate.measure(file)
@@ -284,7 +282,7 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
     if (!chrome || chrome.height <= 0 || chrome.x < 0 || (chrome.which === 'bar' && Math.abs(chrome.width - chrome.innerWidth) > 1)) fail(`${label}: shell sidebar missing or incomplete: ${JSON.stringify(chrome)} viewport=${JSON.stringify(viewport)}`)
     const panel = await page.$(contentSelector)
     const panelBox = panel ? await panel.boundingBox() : null
-     if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > full.w + 1 || panelBox.y + panelBox.height > full.h + 1) fail(`${label}: mounted recovery panel is not contained in the full shell/body capture (${contentSelector})`)
+     if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > full.w + 1 || panelBox.y + panelBox.height > full.h + 1) fail(`${label}: mounted state is not contained in the full shell/body capture (${contentSelector})`)
     const contentFile = file.replace(/\.png$/, '.content.png')
     await panel.screenshot({ path: contentFile })
     await gate.assert(`${label}/content`, contentFile, { sel: contentSelector, where: 'root-page-visual.mjs' })
@@ -674,40 +672,6 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
   }
 }
 
-async function runSelection(browser, gate, theme, viewport, answers, summaryBase) {
-  const where = `${theme}/${viewport.id}`
-  const diagnostics = []
-  let page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { ...summaryBase, selection: FIXTURE.selectionNotice } })
-  try {
-    await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the list never mounted under a selection notice`))
-    await browseBy(page, 'project')
-    await page.getByRole('status').filter({ hasText: 'hidden by a saved selection' }).waitFor({ state: 'visible' })
-    const notice = await page.evaluate(() => [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent.trim()).find((text) => text.includes('hidden by a saved selection')) ?? '')
-    const { hiddenProjects, hiddenSessions } = FIXTURE.selectionNotice
-    if (notice !== `${hiddenProjects} projects and ${hiddenSessions} sessions hidden by a saved selection`) fail(`${where}: selection notice reads ${JSON.stringify(notice)}`)
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-notice.png'), `${where}/selection-notice`)
-    // The session list is the other view of the same menu.
-    await browseBy(page, 'sessions')
-    await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the list never came back from the project view`))
-    await listedRows(page)
-    await assertMissingParentOmitted(page, `${where}/selection-notice`)
-  } finally {
-    await page.close()
-  }
-
-  page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { projects: [], selection: FIXTURE.selectionRecovery } })
-  try {
-    await browseBy(page, 'project')
-    await page.waitForSelector('[role="status"][aria-label="project selection recovery"]', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the recovery panel never mounted`))
-    const leaked = await page.locator('[data-root-session-list] [data-session-id], [data-browse-view="projects"] a:not([data-docs-topic])').count()
-    if (leaked) fail(`${where}: selection recovery leaked session/project identities`)
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-recovery.png'), `${where}/selection-recovery`, { contentSelector: '[role="status"][aria-label="project selection recovery"]' })
-  } finally {
-    await page.close()
-  }
-  if (diagnostics.length) fail(`${where}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
-}
-
 async function runEmpty(browser, gate, theme, viewport) {
   const where = `${theme}/${viewport.id}`
   const diagnostics = []
@@ -749,7 +713,6 @@ try {
   console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk.path)).join(',')} served=true`)
 
   const mockSessions = (await (await fetch(`${MOCK_ORIGIN}/api/v1/sessions`)).json()).sessions
-  const summaryBase = await (await fetch(`${MOCK_ORIGIN}/api/v1/projects/summary`)).json()
   if (!Array.isArray(mockSessions) || mockSessions.length < FIXTURE.pattern.length) fail(`the mock store served ${mockSessions?.length} sessions; the pattern needs at least ${FIXTURE.pattern.length}`)
   const answers = publishingAnswers(mockSessions)
 
@@ -758,12 +721,11 @@ try {
     for (const viewport of VIEWPORTS) {
       const { expectedCounts } = await runPopulated(browser, gate, theme, viewport, answers)
       await runNestedAlignment(browser, gate, theme, viewport, answers)
-      await runSelection(browser, gate, theme, viewport, answers, summaryBase)
       await runEmpty(browser, gate, theme, viewport)
       console.log(`OK ${theme}/${viewport.id} counts=${JSON.stringify(expectedCounts)}`)
     }
   }
-  console.log(`captures=${OUT}/{dark,light}/{desktop,phone}/{filter-all,filter-not-published,filter-published,filter-auto,collapsed-group,expanded-group,nested-group,search,selection-notice,selection-recovery,empty}.png`)
+  console.log(`captures=${OUT}/{dark,light}/{desktop,phone}/{filter-all,filter-not-published,filter-published,filter-auto,collapsed-group,expanded-group,nested-group,search,empty}.png`)
 } finally {
   const cleanup = await Promise.allSettled([browser?.close(), ...servers.map(async (booted) => {
     await new Promise((resolve, reject) => {

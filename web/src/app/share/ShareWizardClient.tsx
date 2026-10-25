@@ -182,9 +182,9 @@ async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
  *
  * When the URL carried linked identifiers, they are resolved separately through
  * GET /api/v1/session-summaries?ids=, which applies no discovery scope, and the
- * two results are unioned by id. That split is the mechanism behind a rule this
- * project already settled: hiding a session from a list is discovery scope and
- * never access control, so a link to a hidden session still opens it.
+ * two results are unioned by id. A linked session can be absent from the grouped
+ * sync list for a non-selection reason (for example, it is not pushable in this
+ * build), so the link still resolves it explicitly.
  */
 async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
   const [grouped, linked, metadata] = await Promise.all([
@@ -622,9 +622,9 @@ export function ShareWizardClient() {
   // The Choose list, filtered to the evidence set when one rode in on the
   // URL. Redact/Submit keep the full list — the selection (which only
   // ever contains visible Choose rows) is what scopes them.
-  // The unioned list already carries the linked sessions the discovery list
-  // withheld, so filtering it resolves a link to a hidden session instead of
-  // falling through to the none-were-found state.
+  // The unioned list already carries the linked sessions the grouped list did
+  // not offer, so filtering it resolves an evidence link instead of falling
+  // through to the none-were-found state.
   const evidenceSessions = evidenceIds
     ? disc.sessions.filter((s) => evidenceIds.has(s.id))
     : null;

@@ -4,10 +4,10 @@
  * read. Nothing here re-derives a server rule. Each function compares fields
  * the server returned:
  *
- * - Visibility: the publications read decides, through the same selection
- *   projection the lists use, whether the saved selection leaves a session out
- *   (`outsideSelection`). A sync row without a publication row cannot be
- *   checked, so it is left out too.
+ * - Visibility: the flat sync list is the stored library, so every row it
+ *   returns is browsable. A sync row without a publication row cannot have its
+ *   publish state stated, so it is left out; a row the server marks
+ *   `outsideSelection` is ingestion metadata and stays browsable.
  * - Published or not: the publication `state`.
  * - Auto: the publication `autoPublish` flag.
  * - New turns: a published session whose sync status is `updated`, meaning the
@@ -44,8 +44,8 @@ export interface RootSessionRow {
 
 /**
  * The sessions the root list shows, in the sync list's order (newest first):
- * each sync row the publications read returned and did not mark outside the
- * saved selection.
+ * each sync row the publications read returned. `outsideSelection` is
+ * ingestion and push metadata; it is never used to hide a stored row here.
  */
 export function visibleRootRows(
   sync: readonly LocalSyncSummary[],
@@ -55,7 +55,7 @@ export function visibleRootRows(
   const rows: RootSessionRow[] = [];
   for (const session of sync) {
     const publication = byId.get(session.id);
-    if (!publication || publication.outsideSelection) continue;
+    if (!publication) continue;
     rows.push({ sync: session, publication });
   }
   return rows;
