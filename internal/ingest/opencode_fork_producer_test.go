@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -58,8 +59,8 @@ func TestOpenCodeNativeForkContextRelationship(t *testing.T) {
 			if len(snapshot.Copied) != 0 {
 				t.Fatalf("native fork copied %d parent rows; OpenCode already materializes the prefix", len(snapshot.Copied))
 			}
-			if got := len(snapshot.Messages); got != 2 {
-				t.Fatalf("child messages = %d, want the child's own 2 rows only", got)
+			if got := len(snapshot.Messages); got != 5 {
+				t.Fatalf("child messages = %d, want the materialized 5 rows (3 prefix + 2 own)", got)
 			}
 			if snapshot.NativeFork == nil {
 				t.Fatal("native fork pointer was not captured")
@@ -174,7 +175,8 @@ func writeNativeForkFixture(t *testing.T, path, boundary string) {
 	}
 
 	execute("INSERT INTO session_v2 (id, time_created, time_updated) VALUES (?1, ?2, ?3)", openCodeForkParent, int64(1), int64(1))
-	for index, messageID := range []string{"msg_fork_1", "msg_fork_2", "msg_fork_3"} {
+	parentRows := []string{"msg_fork_1", "msg_fork_2", "msg_fork_3"}
+	for index, messageID := range parentRows {
 		execute(
 			"INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, 'user', ?3, ?3, ?4, ?5)",
 			messageID,
@@ -182,6 +184,30 @@ func writeNativeForkFixture(t *testing.T, path, boundary string) {
 			int64(10+index),
 			`{"text":"parent question","time":{"created":10}}`,
 			int64(index),
+		)
+	}
+
+	// OpenCode materializes the parent prefix in the child before the child
+	// continues. Model that real shape so a copy would show up as extra rows.
+	execute("DELETE FROM session_message WHERE session_id = ?1", openCodeForkChild)
+	for index, messageID := range parentRows {
+		execute(
+			"INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, 'user', ?3, ?3, ?4, ?5)",
+			"msg_child_prefix_"+messageID,
+			openCodeForkChild,
+			int64(10+index),
+			`{"text":"parent question","time":{"created":10}}`,
+			int64(index),
+		)
+	}
+	for index := 0; index < 2; index++ {
+		execute(
+			"INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, 'user', ?3, ?3, ?4, ?5)",
+			"msg_child_own_"+strconv.Itoa(index),
+			openCodeForkChild,
+			int64(30+index),
+			`{"text":"child question","time":{"created":30}}`,
+			int64(3+index),
 		)
 	}
 	execute("UPDATE session_v2 SET fork_session_id = ?1, fork_boundary = ?2 WHERE id = ?3", openCodeForkParent, boundary, openCodeForkChild)
