@@ -60,6 +60,22 @@ var claudeControlRecordEnvelopeKeys = map[string]bool{
 // only an identity object so one oversized record cannot bloat the index.
 const claudeControlPayloadLimit = 8192
 
+// claudeOwnerRotationRecordTypes are the record kinds a rotated owner file
+// keeps when its session records are gone: metadata about the transcript rather
+// than conversation content. Reading one is what decides that a file with no
+// session records is still the same owner, so the set is named once here beside
+// the control set instead of being spelled at the call site.
+var claudeOwnerRotationRecordTypes = map[string]bool{
+	"summary":               true,
+	"file-history-snapshot": true,
+}
+
+// isClaudeOwnerRotationRecord reports whether a record kind is one this build
+// reads as owner-rotation evidence rather than conversation content.
+func isClaudeOwnerRotationRecord(recordType string) bool {
+	return claudeOwnerRotationRecordTypes[recordType] || isClaudeControlRecordType(recordType)
+}
+
 // isClaudeControlRecordType reports whether a record type names a control
 // record this build represents.
 func isClaudeControlRecordType(recordType string) bool {
