@@ -17,7 +17,7 @@ import (
 )
 
 //go:embed testdata/source_record_unusable.yaml
-var sourceRecordUnusableFixtureData []byte
+var sourceUnavailableFixtureData []byte
 
 //go:embed testdata/source_unavailable_cause.yaml
 var sourceUnavailableCauseFixtureData []byte
@@ -25,7 +25,7 @@ var sourceUnavailableCauseFixtureData []byte
 //go:embed testdata/source_settle_rereport.yaml
 var sourceSettleRereportFixtureData []byte
 
-type sourceRecordUnusableFixtures struct {
+type sourceUnavailableFixtures struct {
 	Required []string `yaml:"required_names"`
 	Cases    []struct {
 		Name string `yaml:"name"`
@@ -34,10 +34,9 @@ type sourceRecordUnusableFixtures struct {
 	} `yaml:"cases"`
 }
 
-// TestSourceRecordUnusableClassifiesOnlyTheSourceBytes pins the boundary the
-// settle depends on: the bytes on disk can settle, because they are the problem
-// the user has to fix, while a store, locator, or write fault must keep
-// reporting until it clears on its own.
+// decodeOneFixture reads a single-document fixture with unknown fields
+// refused, so a renamed or removed key is a failure rather than a silently
+// ignored line.
 func decodeOneFixture(t *testing.T, data []byte, dest any, label string) {
 	t.Helper()
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -74,9 +73,13 @@ func requireNamedCases(t *testing.T, label string, required []string, present ma
 	}
 }
 
-func TestSourceRecordUnusableClassifiesOnlyTheSourceBytes(t *testing.T) {
-	var fixtures sourceRecordUnusableFixtures
-	decodeOneFixture(t, sourceRecordUnusableFixtureData, &fixtures, "source-record fixture")
+// TestSourceUnavailableClassifiesOnlyTheSourceBytes pins the boundary the
+// settle depends on: the bytes on disk can settle, because they are the problem
+// the user has to fix whether they are missing or unusable, while a store,
+// locator, or write fault must keep reporting until it clears on its own.
+func TestSourceUnavailableClassifiesOnlyTheSourceBytes(t *testing.T) {
+	var fixtures sourceUnavailableFixtures
+	decodeOneFixture(t, sourceUnavailableFixtureData, &fixtures, "source-record fixture")
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || names[fixture.Name] {
@@ -106,8 +109,8 @@ func TestSourceRecordUnusableClassifiesOnlyTheSourceBytes(t *testing.T) {
 			default:
 				t.Fatalf("case %s names unknown kind %q", fixture.Name, fixture.Kind)
 			}
-			if got := sourceRecordUnusable(err); got != fixture.Want {
-				t.Fatalf("sourceRecordUnusable(%v) = %v, want %v", err, got, fixture.Want)
+			if got := sourceUnavailable(err); got != fixture.Want {
+				t.Fatalf("sourceUnavailable(%v) = %v, want %v", err, got, fixture.Want)
 			}
 		})
 	}

@@ -44,18 +44,19 @@ type SourceAvailabilityStore interface {
 	ReadSourceUnavailability(context.Context, SessionID) (*SourceUnavailabilityReason, error)
 }
 
-// sourceRecordUnusable reports whether a stored-content failure is about the
+// sourceUnavailable reports whether a stored-content failure is about the
 // source bytes themselves: the source is gone, or a record in it cannot be
-// parsed. A store, locator, or write fault is neither, so it keeps reporting.
-func sourceRecordUnusable(err error) bool {
+// parsed. Both are the user's to repair, so both settle. A store, locator, or
+// write fault is neither, so it keeps reporting.
+func sourceUnavailable(err error) bool {
 	_, ok := sourceUnavailableCause(err)
 	return ok
 }
 
 // sourceUnavailableCause classifies a source-shaped failure. A malformed
 // record means the source is present but cannot be used. A missing file is
-// the other class. Anything else, including a store, locator, or write fault,
-// is not a source cause.
+// the other class: there are no saved bytes to read. Anything else, including a
+// store, locator, or write fault, is not a source cause.
 func sourceUnavailableCause(err error) (SourceUnavailabilityReason, bool) {
 	if err == nil {
 		return "", false
@@ -80,7 +81,9 @@ func sourceUnavailableCause(err error) (SourceUnavailabilityReason, bool) {
 // The direction is one-way, so a stored present-but-unusable row that a later
 // harvest sees as a missing file stays quiet on every routine harvest: the
 // row keeps the more specific cause and no report is owed until the source is
-// repaired or --force retries the same cause.
+// repaired. settleUnavailableSource never writes a less specific cause over a
+// more specific one, and that holds for an explicit --force retry too: the row
+// keeps the specific cause, while the forced run still owes its report.
 func causeSupersedes(stored, next SourceUnavailabilityReason) bool {
 	return stored == SourceUnavailableNoSavedCopy && next == SourceUnavailableRecordUnusable
 }
@@ -89,20 +92,26 @@ func causeSupersedes(stored, next SourceUnavailabilityReason) bool {
 // and reports whether this run owes the user the transition. A stored row
 // with the same cause is quiet on a routine harvest. A missing row, a cause
 // that supersedes the stored one, or an explicit --force retry is recorded
-// and owed. A less specific cause does not replace a more specific one and
-// is quiet on a later harvest. A record error is reported and still owed, so
-// a failure to keep the evidence cannot hide the diagnostic. A row written
-// earlier in this same harvest is still owed by a later lane: the index lane
-// reports even when stored-content recovery already recorded the same cause.
-// Callers keep doing their work: only the report settles, and the recorded
-// row is never a reason to skip indexing.
+// and owed. A less specific cause never replaces a more specific one: a routine
+// harvest is quiet about it, and an explicit --force retry reports it without
+// downgrading the stored row, so the one-way replacement holds on both. A
+// record error is reported and still owed, so a failure to keep the evidence
+// cannot hide the diagnostic. A row written earlier in this same harvest is
+// still owed by a later lane: the index lane reports even when stored-content
+// recovery already recorded the same cause. Callers keep doing their work: only
+// the report settles, and the recorded row is never a reason to skip indexing.
 func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, cause SourceUnavailabilityReason, lane *storeWriteLane) bool {
-	stored, readErr := p.readUnavailableCause(ctx, sid)
-	same := readErr == nil && stored != nil && *stored == cause
-	if stored != nil && !p.config.Force && (same || !causeSupersedes(*stored, cause)) {
-		// A routine harvest owes no repeat of a cause the user already heard,
-		// and it does not let a less specific observation erase a more
-		// specific one. A row this run just wrote is still owed by a later lane.
+	// A failed read is treated as no stored cause: this harvest still records
+	// what it observed, and a write failure is reported below.
+	stored, _ := p.readUnavailableCause(ctx, sid)
+	if stored != nil && *stored != cause && !causeSupersedes(*stored, cause) {
+		// The stored cause is more specific than this observation. Keep it and
+		// owe the routine user nothing; an explicit retry still owes its report.
+		return p.config.Force || p.unavailableRecordedThisRun(sid)
+	}
+	if stored != nil && *stored == cause && !p.config.Force {
+		// A routine harvest owes no repeat of a cause the user already heard.
+		// A row this run just wrote is still owed by a later lane.
 		return p.unavailableRecordedThisRun(sid)
 	}
 	recorder, ok := p.metricsStore.(SourceAvailabilityStore)

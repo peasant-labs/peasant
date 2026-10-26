@@ -84,7 +84,7 @@ func TestCancelledOpenCodeRecordStaysUnmarked(t *testing.T) {
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancelled %s returned %v, want context.Canceled", testCase.Record, err)
 			}
-			if sourceRecordUnusable(err) {
+			if sourceUnavailable(err) {
 				t.Fatalf("cancelled %s was marked as a source refusal: %v", testCase.Record, err)
 			}
 			wantPrefix := "message " + testCase.MessageName + ":"
