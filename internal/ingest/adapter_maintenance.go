@@ -318,11 +318,17 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 		})
 		if err != nil {
 			p.reportMetadataRefusal(string(sid), err)
-		} else if !changed && !p.config.Force {
-			// Routine harvests stay quiet once the transition is recorded. An
-			// explicit --force run is the user acting on the remediation this
-			// diagnostic names, so it still has to hear that the repair did not
-			// take; staying silent there would read as success.
+		} else if changed {
+			// Another lane in this harvest still owes its own report. A later
+			// harvest sees the stored row and does not.
+			p.markUnavailableRecordedThisRun(sid)
+		} else if !p.config.Force && !p.unavailableRecordedThisRun(sid) {
+			// Routine harvests stay quiet once an earlier harvest recorded the
+			// transition. An explicit --force run is the user acting on the
+			// remediation this diagnostic names, so it still has to hear that
+			// the repair did not take; staying silent there would read as
+			// success. A row written earlier in this same harvest does not
+			// count: this lane has not reported yet.
 			return
 		}
 	}

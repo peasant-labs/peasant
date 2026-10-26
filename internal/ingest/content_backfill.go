@@ -228,12 +228,12 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
 					continue
 				}
-				if sourceRecordUnusable(err) && p.sourceUnavailableRecorded(ctx, id) {
-					// The pair-repair lane already reported this session's
-					// acquisition failure with its cause, and the stored copy
-					// still serves. Repeating it here on every later run adds no
-					// fact the user can act on. The recovery itself still runs,
-					// so a source that returns is still recovered.
+				if sourceRecordUnusable(err) && !p.settleUnavailableSource(ctx, id) {
+					// An earlier harvest already reported that this session's
+					// source cannot give it complete content, and the stored
+					// copy still serves. Recovery already ran above, so repaired
+					// bytes are still seen, but repeating the warning adds no
+					// fact the user can act on.
 					continue
 				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
