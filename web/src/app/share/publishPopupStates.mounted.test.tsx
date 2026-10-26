@@ -593,7 +593,7 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
     if (!('alert' in expected.bar)) expect(within(bar()).getByRole('button', { name: expected.bar.action })).toBeInTheDocument();
     // The viewer's own tail and outcome chip are off: the bar is the header's only action.
     expect(screen.queryByRole('button', { name: /^share$/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /search this transcript/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /search transcript/ })).toBeInTheDocument();
 
     if (expected.popup === null) {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
