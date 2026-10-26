@@ -100,7 +100,10 @@ newest pull contract this CLI reads (0.3.0). A village that advertises
 that and names it in the same response header; the response is decoded as
 exactly that envelope, and any 0.3.z patch is read as 0.3.0. A response without
 the header comes from a village that predates it and is decoded as the envelope
-`NegotiatePull` settled (0.2.0 when nothing was negotiated).
+`NegotiatePull` settled (0.2.0 when nothing was negotiated). During a village
+rolling deploy, a response from an instance that predates the header can be
+decoded as a negotiated 0.3.0 and refused; the pull fails closed and a retry
+fixes it.
 
 ---
 
