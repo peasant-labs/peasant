@@ -134,7 +134,7 @@ func captureBySession(report harnesslayout.Report) map[string]harnesslayout.Capt
 	return out
 }
 
-func fieldPaths(shape harnesslayout.ArtifactShape) map[string]harnesslayout.FieldShape {
+func cursorFieldPaths(shape harnesslayout.ArtifactShape) map[string]harnesslayout.FieldShape {
 	out := map[string]harnesslayout.FieldShape{}
 	for _, field := range shape.Fields {
 		out[field.Path] = field
@@ -182,7 +182,7 @@ func TestCursorCLICapturesChatStoreShapeAndMetadata(t *testing.T) {
 	if store.Artifact != "chat-store" || store.Format != harnesslayout.FormatSQLite || store.Records != 7 || store.Malformed != 0 {
 		t.Fatalf("store = %+v", store)
 	}
-	fields := fieldPaths(store)
+	fields := cursorFieldPaths(store)
 	for _, path := range []string{
 		"$.meta.key", "$.meta.value", "$.blobs.id", "$.blobs.data",
 		"$.meta.value.agentId", "$.meta.value.blobEncryptionKey", "$.meta.value.latestRootBlobId",

@@ -104,7 +104,7 @@ func TestCursorIDEStateCapturesComposersAndBubbles(t *testing.T) {
 			t.Fatalf("global kinds = %v, want %v", global.Kinds, want)
 		}
 	}
-	fields := fieldPaths(global)
+	fields := cursorFieldPaths(global)
 	for _, path := range []string{
 		"$.cursorDiskKV.key", "$.cursorDiskKV.value", "$.composerHeaders.workspaceId", "$.composerHeaders.createdAt",
 		"$.cursorDiskKV.composerData.unifiedMode", "$.cursorDiskKV.composerData.fullConversationHeadersOnly[].bubbleId",
