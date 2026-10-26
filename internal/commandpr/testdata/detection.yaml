@@ -13,6 +13,16 @@ requiredNames:
   - pull zero ignored
   - piped gh pr create
   - quoted mention
+  - sudo gh pr create
+  - sudo with an environment flag
+  - command gh pr create
+  - env assignment before gh pr create
+  - bash -c script
+  - sh -lc script
+  - sudo bash -c script
+  - windows gh executable
+  - bash -c echoes a quoted mention
+  - bash -c echoes the words
 urlRequiredNames:
   - fragment after the number
   - pull request sub-page
@@ -174,6 +184,108 @@ cases:
           {"command":"echo \"gh pr create\""}
         result: |
           https://github.com/acme/api/pull/57
+    expected: []
+  - name: sudo gh pr create
+    calls:
+      - arguments: |
+          {"command":"sudo gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/61
+    expected:
+      - owner: acme
+        repo: api
+        number: 61
+        url: https://github.com/acme/api/pull/61
+  - name: sudo with an environment flag
+    calls:
+      - arguments: |
+          {"command":"sudo -E gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/62
+    expected:
+      - owner: acme
+        repo: api
+        number: 62
+        url: https://github.com/acme/api/pull/62
+  - name: command gh pr create
+    calls:
+      - arguments: |
+          {"command":"command gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/63
+    expected:
+      - owner: acme
+        repo: api
+        number: 63
+        url: https://github.com/acme/api/pull/63
+  - name: env assignment before gh pr create
+    calls:
+      - arguments: |
+          {"command":"env GH_TOKEN=ghp_example gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/64
+    expected:
+      - owner: acme
+        repo: api
+        number: 64
+        url: https://github.com/acme/api/pull/64
+  - name: bash -c script
+    calls:
+      - arguments: |
+          {"command":"bash -c 'cd /home/dev/acme && gh pr create --fill'"}
+        result: |
+          https://github.com/acme/api/pull/65
+    expected:
+      - owner: acme
+        repo: api
+        number: 65
+        url: https://github.com/acme/api/pull/65
+  - name: sh -lc script
+    calls:
+      - arguments: |
+          {"command":"sh -lc \"gh pr create --fill\""}
+        result: |
+          https://github.com/acme/api/pull/66
+    expected:
+      - owner: acme
+        repo: api
+        number: 66
+        url: https://github.com/acme/api/pull/66
+  - name: sudo bash -c script
+    calls:
+      - arguments: |
+          {"command":"sudo bash -c 'gh pr create --fill'"}
+        result: |
+          https://github.com/acme/api/pull/67
+    expected:
+      - owner: acme
+        repo: api
+        number: 67
+        url: https://github.com/acme/api/pull/67
+  - name: windows gh executable
+    calls:
+      - arguments: |
+          {"command":"gh.exe pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/68
+    expected:
+      - owner: acme
+        repo: api
+        number: 68
+        url: https://github.com/acme/api/pull/68
+  - name: bash -c echoes a quoted mention
+    calls:
+      - arguments: |
+          {"command":"bash -c 'echo \"gh pr create\"'"}
+        result: |
+          https://github.com/acme/api/pull/69
+    expected: []
+  - name: bash -c echoes the words
+    calls:
+      - arguments: |
+          {"command":"bash -c 'echo gh pr create'"}
+        result: |
+          https://github.com/acme/api/pull/70
     expected: []
 urls:
   - name: fragment after the number
