@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -40,6 +41,19 @@ func loadSourceUnavailabilityUpsertSteps(t *testing.T) []sourceUnavailabilityUps
 	}
 	if len(doc.RequiredNames) == 0 {
 		t.Fatal("source unavailability upsert fixture declares no required step names")
+	}
+	// This white-box store test cannot import internal/testutil, which imports
+	// this package, so the blank and duplicate guards live here rather than
+	// reusing RequireFixtureNames.
+	seenRequired := make(map[string]bool, len(doc.RequiredNames))
+	for _, name := range doc.RequiredNames {
+		if strings.TrimSpace(name) == "" {
+			t.Fatal("source unavailability upsert fixture declares a blank required step name")
+		}
+		if seenRequired[name] {
+			t.Fatalf("source unavailability upsert fixture repeats required step name %q", name)
+		}
+		seenRequired[name] = true
 	}
 	names := make(map[string]bool, len(doc.Steps))
 	for _, step := range doc.Steps {
