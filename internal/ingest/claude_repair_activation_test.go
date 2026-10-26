@@ -90,7 +90,8 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 	// A legacy store is a row and a sidecar at the old schema with no format-2
 	// generation yet, not a rewritten file beside a current row. Proving the
 	// downgrade took keeps the assertions below from comparing current to
-	// current.
+	// current, and clearing the generation pointer is what makes the format-2
+	// assertion below measure the repair rather than the first ingest.
 	rewriteLegacySidecar(t, fs, sidecarPath, 8)
 	execSessionSQL(t, database,
 		"UPDATE sessions SET schema_version = 8, index_format_version = 1, active_generation_id = NULL WHERE session_id = ?",
@@ -156,6 +157,8 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 		"the repaired session did not activate a format-2 generation", string(id))
 	assertStoredInt(t, conn, "SELECT COUNT(*) FROM sessions", 1,
 		"the repair created a second session row")
+	assertStoredInt(t, conn, "SELECT COUNT(*) FROM sessions WHERE active_generation_id IS NOT NULL", 1,
+		"the repair did not activate a managed generation")
 	assertStoredInt(t, conn, "SELECT COUNT(*) FROM ingest_log WHERE id > ? AND sessions_error <> 0", 0,
 		"the repair was counted as a session error", repairLogBefore)
 }
