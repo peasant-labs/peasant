@@ -273,3 +273,24 @@ commands:
       - args: ["--help"]
         expect_error: false
         output_contains: ["migrate"]
+
+  - name: Service
+    use: service
+    subcommands:
+      - use: install
+        flags:
+          - { name: interval, type: duration, default: "1h0m0s" }
+          - { name: on-calendar, type: string, default: "" }
+          - { name: randomized-delay, type: duration, default: "5m0s" }
+          - { name: source-harness, type: string, default: "" }
+          - { name: source-path, type: string, default: "" }
+          - { name: no-redact, type: bool, default: "false" }
+          - { name: dry-run, type: bool, default: "false" }
+      - use: status
+      - use: uninstall
+        flags:
+          - { name: dry-run, type: bool, default: "false" }
+    exit_cases:
+      - args: ["--help"]
+        expect_error: false
+        output_contains: ["service", "install", "status", "uninstall"]

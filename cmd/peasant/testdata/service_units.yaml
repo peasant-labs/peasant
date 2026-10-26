@@ -1,0 +1,60 @@
+# service_units.yaml: expected systemd unit text rendered by
+# `peasant service install` (renderServiceUnits). Each case pins the full
+# ExecStart line (systemd quoting) and the [Timer] section.
+#
+# Schema:
+#   cases[].name              case name
+#   cases[].args              harvest command line, binary first
+#   cases[].redact_args       redact command line (omit for --no-redact)
+#   cases[].exec_start_redact expected second ExecStart= value
+#   cases[].interval          Go duration (omit with on_calendar)
+#   cases[].on_calendar       systemd calendar expression
+#   cases[].randomized_delay  Go duration ("0s" omits the line)
+#   cases[].environment       Environment= assignments (name, value)
+#   cases[].environment_lines expected Environment= lines
+#   cases[].exec_start        expected ExecStart= value
+#   cases[].timer             expected [Timer] section lines
+cases:
+  - name: default interval
+    args: ["/opt/peasant/bin/peasant", "harvest", "--data-dir", "/home/u/.local/share"]
+    redact_args: ["/opt/peasant/bin/peasant", "redact", "--data-dir", "/home/u/.local/share", "--all"]
+    exec_start_redact: '"/opt/peasant/bin/peasant" "redact" "--data-dir" "/home/u/.local/share" "--all"' 
+    interval: 1h
+    randomized_delay: 5m
+    exec_start: '"/opt/peasant/bin/peasant" "harvest" "--data-dir" "/home/u/.local/share"'
+    timer: ["OnStartupSec=2min", "OnUnitActiveSec=1h", "RandomizedDelaySec=5min"]
+  - name: odd interval and no delay
+    args: ["/p", "harvest"]
+    interval: 1h30m15s
+    randomized_delay: 0s
+    exec_start: '"/p" "harvest"'
+    timer: ["OnStartupSec=2min", "OnUnitActiveSec=1h 30min 15s"]
+  - name: multi-day interval
+    args: ["/p", "harvest"]
+    interval: 50h
+    randomized_delay: 90s
+    exec_start: '"/p" "harvest"'
+    timer: ["OnStartupSec=2min", "OnUnitActiveSec=2d 2h", "RandomizedDelaySec=1min 30s"]
+  - name: on calendar is persistent
+    args: ["/p", "harvest"]
+    on_calendar: "*-*-* 09:00"
+    randomized_delay: 5m
+    exec_start: '"/p" "harvest"'
+    timer: ["OnCalendar=*-*-* 09:00", "Persistent=true", "RandomizedDelaySec=5min"]
+  - name: spaces quotes percent dollar backslash
+    args: ["/home/u/My Tools/peasant", "harvest", "--data-dir", "/d/it's \"q\" 100% $HOME \\x"]
+    redact_args: ["/home/u/My Tools/peasant", "redact", "--all"]
+    exec_start_redact: '"/home/u/My Tools/peasant" "redact" "--all"' 
+    interval: 15m
+    randomized_delay: 0s
+    exec_start: '"/home/u/My Tools/peasant" "harvest" "--data-dir" "/d/it''s \"q\" 100%% $$HOME \\x"'
+    timer: ["OnStartupSec=2min", "OnUnitActiveSec=15min"]
+  - name: environment keeps dollar literal and doubles percent
+    args: ["/p", "harvest"]
+    environment:
+      - { name: XDG_DATA_HOME, value: "/d/100% $x \"q\"" }
+    interval: 1h
+    randomized_delay: 0s
+    environment_lines: ['Environment="XDG_DATA_HOME=/d/100%% $x \"q\""']
+    exec_start: '"/p" "harvest"'
+    timer: ["OnStartupSec=2min", "OnUnitActiveSec=1h"]

@@ -30,6 +30,7 @@ var commands = [...]func() *cobra.Command{
 	BuildReclaimCommand,
 	BuildMigrateCommand,
 	BuildRedactCommand,
+	BuildServiceCommand,
 	BuildDocgenCommand,
 	BuildPlayIngestCommand,
 	BuildPlayPushCommand,

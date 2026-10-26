@@ -77,6 +77,7 @@ privacy boundaries, and recovery behavior.
 |---------|-------------|
 | `peasant ingest` | Run the data ingestion pipeline |
 | `peasant ingest verify` | Verify database schema integrity |
+| `peasant service install` / `status` / `uninstall` | Run `peasant harvest` on a schedule with a systemd user timer (Linux; see [scheduled harvest](#scheduled-harvest-peasant-service)) |
 | `peasant village push` | Push ingested transcripts + annotations to the Peasant village (incremental — server-manifest skip-gate + retraction; see [flags](#peasant-village-push-flags)) |
 | `peasant village auto` | Publish this repository's sessions on every `git push`, redacted and private, to the collectives you published to last: saves an auto-publish rule in `hooks.yaml` (see [the network reference](docs/NETWORK.md#6-hook-triggered-push)) and installs the pre-push hook here |
 | `peasant login` / `peasant logout` | Authenticate with / disconnect from the village |
@@ -179,6 +180,63 @@ are replayed once through the ordinary push candidate path.
 
 When a selection index is configured (via `peasant kickstart`), ingest automatically filters to only
 the selected projects, branches, and sessions. The `--session` flag overrides this filter.
+
+### Scheduled harvest (`peasant service`)
+
+On Linux with systemd, `peasant service install` writes a user timer. Each run is
+`peasant harvest` followed by `peasant redact --all`, the same commands you would run by hand.
+
+- Harvest imports new and changed sessions with your kickstart selection.
+- Redact then redacts the transcript copies at your configured redaction level. These are in
+  `peasant-sync`, or in `output.basePath` when your config sets one. Redact skips sessions
+  that are already current. It runs even when harvest fails, for example because one session
+  could not be read.
+- The run is reported as failed when harvest fails, when redact fails, or both. When both
+  fail, `systemctl --user status` shows only harvest's failure (systemd keeps the first one);
+  redact's error and exit status are only in `journalctl --user -u peasant-harvest`.
+- The unit sets `TimeoutStopSec=30min`, which caps the redact step only (harvest has no time
+  limit). A redact stopped at the limit leaves whole files, the run is reported as failed
+  (`Result=timeout`, unless harvest already failed), and the next run continues where it
+  stopped.
+- As after a manual harvest, the local database index keeps transcript content as recorded.
+- `--no-redact` runs harvest only.
+- The timer never publishes to the Village.
+
+```bash
+peasant service install --dry-run           # print both unit files; change nothing
+peasant service install                     # every 1h (+ up to 5min random delay)
+peasant service install --interval 15m      # or: --on-calendar '*-*-* 09:00'
+peasant service status
+journalctl --user -u peasant-harvest        # each run's harvest summary
+peasant service uninstall
+```
+
+- The units are `peasant-harvest.service` (`Type=oneshot`) and `peasant-harvest.timer`. They
+  are written to `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`).
+- `install` resolves the data, config, and state directories and writes them into both
+  commands. It also writes `--config` when you pass it, and sets the same directories as
+  `XDG_*` in the unit's environment. The timer then uses the database and config that the
+  `install` command resolved, whatever environment the user manager has. The copies go to
+  `output.basePath` if your config sets it, and otherwise to `peasant-sync` under that data
+  directory.
+- `install` refuses a directory or binary path that contains a control character, such as a
+  newline. It also refuses a binary path that contains `"`, `\`, `'`, or `$`, because systemd
+  cannot run such a path.
+- When `peasant` on your `PATH` is a link to the running binary, the unit names that `PATH`
+  entry. A Nix profile or Homebrew `bin` link is an example. A package-manager upgrade then
+  keeps the timer working. Otherwise the unit names the binary file itself, and you re-run
+  `install` after you move or upgrade it.
+- Re-running `install` replaces the units. `install` and `uninstall` touch only files that
+  start with peasant's marker comment. A unit you wrote by hand under the same name is never
+  overwritten or removed.
+- systemd starts at most one run of the service at a time. A manual `peasant harvest` or
+  `peasant redact` can still run at the same time as the timer. Redact writes each file by
+  rename, so no file is left half-written. However, a copy that a concurrent harvest writes
+  after redact has passed it stays unredacted until the next run.
+- Interval timers (`--interval`) count from the last run and do not catch up on runs missed
+  while the machine was off or asleep. `--on-calendar` timers do.
+- The timer runs only while your user manager runs. For it to run while you are logged out,
+  run `loginctl enable-linger`.
 
 ### `peasant web start` flags
 

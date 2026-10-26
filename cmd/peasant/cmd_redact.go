@@ -162,7 +162,10 @@ func BuildRedactCommand() *cobra.Command {
 			}
 
 			// Resolve output sync directory.
-			syncDir := resolveOutputSyncDir(cmd)
+			syncDir, err := redactSyncDir(cmd, cfg)
+			if err != nil {
+				return err
+			}
 
 			// Process each session.
 			var results []redactSessionResult
@@ -242,6 +245,23 @@ func BuildRedactCommand() *cobra.Command {
 // opens the database.
 func resolveOutputSyncDir(cmd *cobra.Command) string {
 	return filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))), "peasant-sync")
+}
+
+// redactSyncDir is the peasant-sync directory redact reads and rewrites: the
+// configured output.basePath when the config sets one, because that is where
+// harvest wrote the copies; otherwise the peasant-sync under the data dir
+// (resolveOutputSyncDir). A basePath equal to the environment default is not
+// a choice the user made, so it keeps following --data-dir like openDB.
+func redactSyncDir(cmd *cobra.Command, cfg *config.Config) (string, error) {
+	basePath := cfg.Output.BasePath
+	if basePath == "" || basePath == defaults.ResolveOutputBasePath().String() {
+		return resolveOutputSyncDir(cmd), nil
+	}
+	resolved, err := ingest.NewResolvedPath(basePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve output.basePath %q: %w", basePath, err)
+	}
+	return string(resolved), nil
 }
 
 // processRedactSession handles redaction for a single session.
@@ -343,8 +363,10 @@ func processRedactSession(
 	redactedMeta.ContentHash = newContentHash
 	redactedMeta.MetadataHash = schema.ComputeMetadataHash(redactedMeta)
 
-	// Write transcript.
-	if err := os.WriteFile(transcriptPath, redactedTranscript, defaults.PrivateFilePerm); err != nil {
+	// Write transcript and metadata through temp+rename: an interrupted run
+	// (a stopped timer, a logout) leaves the previous file whole, never a
+	// truncated one.
+	if err := writeFileAtomic(transcriptPath, redactedTranscript, defaults.PrivateFilePerm); err != nil {
 		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: fmt.Sprintf("write transcript: %v", err)}
 	}
 
@@ -353,7 +375,7 @@ func processRedactSession(
 	if err != nil {
 		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: fmt.Sprintf("marshal metadata: %v", err)}
 	}
-	if err := os.WriteFile(metadataPath, newMetaBytes, defaults.PrivateFilePerm); err != nil {
+	if err := writeFileAtomic(metadataPath, newMetaBytes, defaults.PrivateFilePerm); err != nil {
 		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: fmt.Sprintf("write metadata: %v", err)}
 	}
 
