@@ -228,7 +228,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
 					continue
 				}
-				if sourceRecordUnusable(err) && !p.settleUnavailableSource(ctx, id) {
+				if sourceRecordUnusable(err) && !p.settleUnavailableSource(ctx, id, nil) {
 					// An earlier harvest already reported that this session's
 					// source cannot give it complete content, and the stored
 					// copy still serves. Recovery already ran above, so repaired

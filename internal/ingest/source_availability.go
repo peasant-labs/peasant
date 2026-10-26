@@ -57,7 +57,7 @@ func sourceRecordUnusable(err error) bool {
 // the evidence was recorded during this run or cannot be kept, so reporting
 // never goes silent by accident. Callers keep doing their work: only the
 // report settles, and the recorded row is never a reason to skip indexing.
-func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID) bool {
+func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, lane *storeWriteLane) bool {
 	if p.unavailableRecordedThisRun(sid) {
 		return true
 	}
@@ -77,7 +77,7 @@ func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID) b
 	var err error
 	// Parser workers reach this too, so the write takes the store lane the
 	// other maintenance writes use instead of racing them.
-	p.runStoreWrite(nil, func() {
+	p.runStoreWrite(lane, func() {
 		changed, err = recorder.RecordSourceUnavailable(ctx, sid, SourceUnavailableNoSavedCopy)
 	})
 	if err != nil {
