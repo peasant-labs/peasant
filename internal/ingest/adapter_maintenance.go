@@ -311,7 +311,13 @@ func (p *Pipeline) pairSourceAvailable(session DiscoveredSession) bool {
 // present but unusable names its real cause (a malformed record and its line)
 // instead of reading as a missing file.
 func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionID, source string, cause error, lane *storeWriteLane) {
-	if causeClass, shaped := pairUnavailableCause(cause); shaped {
+	// A nil cause is a missing source: the repair was not attempted because no
+	// file could be reached. Any other cause is classified by its source bytes.
+	causeClass, shaped := SourceUnavailableNoSavedCopy, true
+	if cause != nil {
+		causeClass, shaped = sourceUnavailableCause(cause)
+	}
+	if shaped {
 		if !p.settleUnavailableSource(ctx, sid, causeClass, lane) || p.laneCauseAlreadyReported(sid, causeClass) {
 			// A routine harvest stays quiet once this cause is recorded, and
 			// so does this lane when stored-content recovery already reported
@@ -367,18 +373,16 @@ func completedStoredIndex(state *SessionIndexState) bool {
 }
 
 // noteUnroutedForcedRepair records one forced repair that could not be sent to
-// native re-ingestion. A routine harvest does not call through: the diagnostic
-// is the whole report. A dry run plans and does not fail sessions. The same
-// session is recorded once. The process path's own error, when it already
-// failed the session, is the one the summary counts.
-func (p *Pipeline) noteUnroutedForcedRepair(ctx context.Context, sid SessionID, harness Harness, source string) {
-	if !p.config.Force || p.config.DryRun {
-		return
-	}
-	if harness == "" {
-		harness = p.storedSessionHarness(ctx, sid)
-	}
-	if !p.includesManagedSession(sid, harness) {
+// native re-ingestion. inScope is the run's explicit-filter verdict, taken
+// where the repair was selected: a repair the run's filters exclude is not this
+// run's failed session, and a --since window is one of those filters. A repair
+// that reached the selection is already in scope, so a harness the store cannot
+// name keeps it instead of dropping it. A routine harvest does not call
+// through: the diagnostic is the whole report. A dry run plans and does not
+// fail sessions. The same session is recorded once. The process path's own
+// error, when it already failed the session, is the one the summary counts.
+func (p *Pipeline) noteUnroutedForcedRepair(sid SessionID, harness Harness, source string, inScope bool) {
+	if !inScope || !p.config.Force || p.config.DryRun {
 		return
 	}
 	p.unroutedRepairMu.Lock()
@@ -420,8 +424,10 @@ func (p *Pipeline) storedSessionHarness(ctx context.Context, sid SessionID) Harn
 }
 
 // appendUnroutedRepairFailures adds forced repairs that never entered the
-// process path. A session that already has an error is left as the process
-// path recorded it, so the same repair is not counted twice.
+// process path. A session the results already carry is left as the process path
+// recorded it, so one repair never produces two rows: an already failed session
+// keeps the process path's error, and a session the process path settled is not
+// failed by a selection-stage note it outgrew.
 func (p *Pipeline) appendUnroutedRepairFailures(results []SessionResult) []SessionResult {
 	p.unroutedRepairMu.Lock()
 	pending := append([]SessionResult(nil), p.unroutedRepairs...)
@@ -429,18 +435,16 @@ func (p *Pipeline) appendUnroutedRepairFailures(results []SessionResult) []Sessi
 	if len(pending) == 0 {
 		return results
 	}
-	failed := make(map[SessionID]bool, len(results))
+	present := make(map[SessionID]bool, len(results)+len(pending))
 	for _, result := range results {
-		if result.Error != nil {
-			failed[result.SessionID] = true
-		}
+		present[result.SessionID] = true
 	}
 	for _, result := range pending {
-		if failed[result.SessionID] {
+		if present[result.SessionID] {
 			continue
 		}
 		results = append(results, result)
-		failed[result.SessionID] = true
+		present[result.SessionID] = true
 	}
 	return results
 }
@@ -453,11 +457,16 @@ func (p *Pipeline) resetUnroutedRepairs() {
 }
 
 // pairRepairInScope applies the run's explicit harness, session and age filters
-// to a repair candidate. A session whose start is unknown is excluded when
-// --since is set, matching how the index selection treats a reconstructed
-// target without a recorded start.
+// to a repair candidate. A harness the store cannot name keeps the candidate:
+// the repair already reached the selection, so only a named harness can fail a
+// --harness filter. A session whose start is unknown is excluded when --since is
+// set, matching how the index selection treats a reconstructed target without a
+// recorded start.
 func (p *Pipeline) pairRepairInScope(session DiscoveredSession, startMs int64) bool {
-	if !p.includesManagedSession(session.SessionID, session.Harness) {
+	if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[session.SessionID] {
+		return false
+	}
+	if p.config.Harness != nil && session.Harness != "" && session.Harness != *p.config.Harness {
 		return false
 	}
 	if p.config.Since == nil {
@@ -566,8 +575,9 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 		if outcome.unavailableSource != nil {
 			p.reportPairRepairUnavailable(ctx, ids[i], *outcome.unavailableSource, nil, nil)
 			// The session was not queued, so the process path will not record
-			// this failure. An explicit forced run still has to count it.
-			p.noteUnroutedForcedRepair(ctx, ids[i], outcome.unavailableHarness, *outcome.unavailableSource)
+			// this failure. An explicit forced run still has to count it, but
+			// only when the run's own filters cover the repair.
+			p.noteUnroutedForcedRepair(ids[i], outcome.unavailableHarness, *outcome.unavailableSource, outcome.unavailableInScope)
 		}
 		if outcome.damaged {
 			// The pair is not a readable index input. Record it so the index
@@ -604,6 +614,10 @@ const (
 type pairRepairOutcome struct {
 	unavailableSource  *string
 	unavailableHarness Harness
+	// unavailableInScope is the run's explicit-filter verdict for the repair
+	// this candidate could not route. A candidate the run's filters exclude is
+	// reported, but its unrouted repair is not counted as this run's failure.
+	unavailableInScope bool
 	kind               pairRepairOutcomeKind
 	queuedIndex        int
 	metadataPath       string
@@ -653,7 +667,15 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		}
 		if reconstructed == nil {
 			source := ""
-			return pairRepairOutcome{damaged: true, unavailableSource: &source, unavailableHarness: p.storedSessionHarness(ctx, sid)}
+			harness := p.storedSessionHarness(ctx, sid)
+			// No file pair and no recorded locator: only the stored harness is
+			// known, so the run's filters decide without a start.
+			return pairRepairOutcome{
+				damaged:            true,
+				unavailableSource:  &source,
+				unavailableHarness: harness,
+				unavailableInScope: p.pairRepairInScope(DiscoveredSession{SessionID: sid, Harness: harness}, 0),
+			}
 		}
 		session = *reconstructed
 		if !p.pairRepairInScope(session, startMs) {
@@ -664,7 +686,12 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 	}
 	if !p.pairSourceAvailable(session) {
 		source := session.SourcePath.String()
-		return pairRepairOutcome{damaged: true, unavailableSource: &source, unavailableHarness: session.Harness}
+		// The scope was applied immediately above, so this repair is this
+		// run's work and its failure is this run's failure.
+		return pairRepairOutcome{
+			damaged: true, unavailableSource: &source,
+			unavailableHarness: session.Harness, unavailableInScope: true,
+		}
 	}
 	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
 		Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
@@ -701,9 +728,11 @@ func (p *Pipeline) pairRepairTargets(ctx context.Context, scanned []reindexTarge
 		if session == nil {
 			p.reportPairRepairUnavailable(ctx, sid, "", nil, nil)
 			// No target is added, so the reindex process path never sees this
-			// session. A forced run still has to count the repair that could
-			// not be routed.
-			p.noteUnroutedForcedRepair(ctx, sid, p.storedSessionHarness(ctx, sid), "")
+			// session and the process path cannot count the repair that could
+			// not be routed. A forced run still has to count it, but only when
+			// the run's own filters cover the repair.
+			harness := p.storedSessionHarness(ctx, sid)
+			p.noteUnroutedForcedRepair(sid, harness, "", p.pairRepairInScope(DiscoveredSession{SessionID: sid, Harness: harness}, 0))
 			continue
 		}
 		if !p.pairRepairInScope(*session, startMs) {
