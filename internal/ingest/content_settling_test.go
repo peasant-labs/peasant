@@ -139,6 +139,11 @@ func TestIntactPairMalformedSourceSettles(t *testing.T) {
 		t.Fatalf("a readable stored copy was counted as a failed ingest: %+v", first.Summary)
 	}
 	storedUnchanged()
+	// The in-memory index log is not the settled record. The store row is.
+	firstReason, err := database.ReadSourceUnavailability(ctx, id)
+	if err != nil || firstReason == nil || *firstReason != ingest.SourceUnavailableRecordUnusable {
+		t.Fatalf("settled cause = %v, %v; want %s", firstReason, err, ingest.SourceUnavailableRecordUnusable)
+	}
 
 	// The stored copy still serves; a second harvest owes the user nothing.
 	// The index attempt is still audited, so a repaired source is not the
@@ -161,6 +166,10 @@ func TestIntactPairMalformedSourceSettles(t *testing.T) {
 	}
 	if !audited {
 		t.Fatalf("the quiet harvest dropped the index audit row: %+v", second.IndexLog)
+	}
+	quietReason, err := database.ReadSourceUnavailability(ctx, id)
+	if err != nil || quietReason == nil || *quietReason != *firstReason {
+		t.Fatalf("the quiet harvest changed the stored cause: %v, %v; want %s", quietReason, err, *firstReason)
 	}
 
 	// Repairing the bytes returns the session to the index lane.
