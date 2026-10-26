@@ -225,7 +225,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					// The saved pair no longer matches the row. Report it in the
 					// one damaged-pair text every reader prints and preserve the
 					// database copy; the user re-saves it with harvest --force.
-					p.reportDamagedPair(ctx, id)
+					p.reportDamagedPair(id, state)
 					continue
 				}
 				if cause, ok := sourceUnavailableCause(err); ok {
@@ -243,7 +243,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 				// keep once an index has finished. Before that the reader gets
 				// nothing, so the text says so instead of offering a copy.
 				preserved := "the prior content and producer evidence were preserved; nothing is served from the database for this session yet; ordinary supported indexing remains eligible"
-				if p.hasCompletedStoredIndex(ctx, id) {
+				if state.Completed() {
 					preserved = "the prior content and producer evidence were preserved; the stored copy keeps serving meanwhile; ordinary supported indexing remains eligible"
 				}
 				p.reportSessionDiagnostic(id, DiagnosticEntry{
@@ -365,9 +365,9 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	// the row that names it. Read the pair once and compare its identity to the
 	// recorded hash: a torn or mixed pair, or a hand edit, is reported as damaged
 	// and left for an explicit re-save rather than re-captured from corrupt
-	// bytes. The database still serves the session. The provider-source path has
-	// no stored-pair identity to check, so this guard is scoped to the snapshot
-	// authority.
+	// bytes. The database keeps serving the session only while an index has
+	// completed. The provider-source path has no stored-pair identity to check,
+	// so this guard is scoped to the snapshot authority.
 	if authority == ContentSourcePeasantSnapshot && state.ArtifactHash != nil {
 		pair, pairErr := ReadManagedPair(p.fs, p.config.OutputDir.String(), metaPath, id)
 		if pairErr != nil || pair.ArtifactHash != *state.ArtifactHash {

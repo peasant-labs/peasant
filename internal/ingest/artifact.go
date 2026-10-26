@@ -315,10 +315,12 @@ func damagedPairText(sid SessionID, serving bool) string {
 }
 
 // reportDamagedPair names a saved pair a reader refused, in the one text every
-// reader prints. The row's own state decides whether a stored copy is still
-// serving, so the message never promises one that does not exist.
-func (p *Pipeline) reportDamagedPair(ctx context.Context, sid SessionID) {
-	p.reportMetadataRefusal(string(sid), fmt.Errorf("%s", damagedPairText(sid, p.hasCompletedStoredIndex(ctx, sid))))
+// reader prints. The caller passes the row snapshot it already holds, and
+// SessionIndexState.Completed decides whether a stored copy is still serving, so
+// the message never promises one that does not exist and no second state read
+// can disagree with the one the caller acted on.
+func (p *Pipeline) reportDamagedPair(sid SessionID, state *SessionIndexState) {
+	p.reportMetadataRefusal(string(sid), fmt.Errorf("%s", damagedPairText(sid, state.Completed())))
 }
 
 // missingPairText names a session whose saved pair is missing or damaged and

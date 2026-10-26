@@ -78,7 +78,8 @@ cases:
   # The crash-reachable mixed ordering: the transcript is the new content while
   # the metadata is still the old file that names the old transcript hash. The
   # pair fails its hash check on read, so it is refused, never served as a
-  # matching pair; the row keeps serving and the rebuild reports it as damaged.
+  # matching pair; the row is left untouched, and because no index has finished
+  # the rebuild reports it as damaged without promising a stored copy.
   - name: mixed_pair_transcript_new_metadata_old
     scenario: mixed_transcript_new_metadata_old
     expect_diagnostic: "is damaged, and no stored transcript is being served from the database for it yet. Run `peasant harvest --force --session"

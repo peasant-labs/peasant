@@ -360,19 +360,20 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 			// reads it again; only the full rebuild pass does, and only to
 			// report a saved copy whose bytes no longer match the row. Such a
 			// pair is NEVER mirrored: overwriting the database with the file's
-			// backup after a power loss would fire the identity trigger. The
-			// database still serves the session; the file is what needs repair.
+			// backup after a power loss would fire the identity trigger. Only a
+			// completed index still serves the session; the file is what needs
+			// repair either way.
 			if !p.config.RebuildAll {
 				continue
 			}
 			artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
 			if err != nil {
-				p.reportDamagedPair(ctx, target.session.SessionID)
+				p.reportDamagedPair(target.session.SessionID, state)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 				continue
 			}
 			if artifact.ArtifactHash != *state.ArtifactHash {
-				p.reportDamagedPair(ctx, target.session.SessionID)
+				p.reportDamagedPair(target.session.SessionID, state)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 			}
 			continue
@@ -381,9 +382,10 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 		if err != nil {
 			// A torn or unreadable pair with no row cannot be recorded. The
 			// rebuild names it as a skipped saved copy; a plain index leaves it
-			// to the ordinary readers.
+			// to the ordinary readers. There is no row, so no index has
+			// completed and nothing serves from the database.
 			if p.config.RebuildAll {
-				p.reportDamagedPair(ctx, target.session.SessionID)
+				p.reportDamagedPair(target.session.SessionID, state)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 			}
 			continue
