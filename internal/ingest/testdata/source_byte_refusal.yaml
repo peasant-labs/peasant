@@ -1,7 +1,9 @@
 # Capture refusals that blame the source bytes, and the refusals that must
 # not. A marked refusal keeps the sentence the capture already printed. A
-# cancelled run and a stored omission flag stay unmarked. SESSION_ID is the
-# session the capture is asked to read.
+# validation or typed-decode refusal pins that sentence in full. A cancelled
+# run and a stored omission flag stay unmarked. SESSION_ID is the session the
+# capture is asked to read. The pinned sentences use
+# 11111111-1111-4111-8111-111111111111, the session this check reads.
 required_names:
   - pi-unparseable
   - pi-validation
@@ -28,7 +30,7 @@ cases:
     harness: pi
     kind: validation
     settles: true
-    message_contains: "nonheader entry requires parentId (null for root)"
+    message: "Pi tree failed in ingest at physical line 2: nonheader entry requires parentId (null for root); this session was not accepted and other sessions may continue; restore a valid Pi v3 recording and retry harvest"
     transcript: |
       {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
       {"type":"message","id":"u1","timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
@@ -36,7 +38,7 @@ cases:
     harness: pi
     kind: typed-decode
     settles: true
-    message_contains: "cannot unmarshal number"
+    message: "Pi message content failed in ingest at physical line 2: json: cannot unmarshal number into Go struct field block.text of type string; this session was not accepted and other sessions may continue; restore a valid Pi v3 recording and retry harvest"
     transcript: |
       {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
       {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":[{"type":"text","text":1}],"timestamp":1767312001000}}
@@ -66,7 +68,7 @@ cases:
     harness: strike
     kind: typed-decode
     settles: true
-    message_contains: "json: cannot unmarshal string into Go struct field strikeEventData.inputTokens"
+    message: "capture strike session 11111111-1111-4111-8111-111111111111 at source record 2: json: cannot unmarshal string into Go struct field strikeEventData.inputTokens of type int; complete content was not stored; restore a supported intact transcript and rerun harvest index --force"
     transcript: |
       {"type":"user.message","data":{"text":"healthy session"}}
       {"type":"usage.reported","data":{"inputTokens":"wrong"}}
@@ -74,7 +76,7 @@ cases:
     harness: strike
     kind: validation
     settles: true
-    message_contains: "tool begin requires callId, name and input"
+    message: "capture strike session 11111111-1111-4111-8111-111111111111 at source record 1: tool begin requires callId, name and input; complete content was not stored; restore a supported intact transcript and rerun harvest index --force"
     transcript: |
       {"type":"tool.begin","data":{"text":"missing call"}}
   - name: strike-cancelled

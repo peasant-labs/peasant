@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -22,6 +23,7 @@ type sourceByteRefusalCase struct {
 	Harness         string `yaml:"harness"`
 	Kind            string `yaml:"kind"`
 	Settles         bool   `yaml:"settles"`
+	Message         string `yaml:"message"`
 	MessageContains string `yaml:"message_contains"`
 	Transcript      string `yaml:"transcript"`
 }
@@ -57,8 +59,16 @@ func loadSourceByteRefusalFixture(t *testing.T) sourceByteRefusalFixture {
 		if strings.TrimSpace(testCase.Transcript) == "" {
 			t.Fatalf("case %s has no transcript", testCase.Name)
 		}
-		if testCase.Kind != "cancelled" && strings.TrimSpace(testCase.MessageContains) == "" {
-			t.Fatalf("case %s does not name the sentence the user already sees", testCase.Name)
+		switch testCase.Kind {
+		case "validation", "typed-decode":
+			if strings.TrimSpace(testCase.Message) == "" {
+				t.Fatalf("case %s does not pin the full refusal sentence", testCase.Name)
+			}
+		case "cancelled":
+		default:
+			if strings.TrimSpace(testCase.MessageContains) == "" {
+				t.Fatalf("case %s does not name the sentence the user already sees", testCase.Name)
+			}
 		}
 	}
 	for _, name := range fixture.Required {
@@ -111,11 +121,20 @@ func TestSourceByteRefusalKeepsTheSentenceAndLeavesCancellationUnmarked(t *testi
 				}
 				return
 			}
-			if !strings.Contains(err.Error(), testCase.MessageContains) {
-				t.Fatalf("message changed\n got %q\nwant it to contain %q", err.Error(), testCase.MessageContains)
-			}
-			if testCase.Kind == "unparseable" {
+			switch testCase.Kind {
+			case "validation", "typed-decode":
+				if err.Error() != testCase.Message {
+					t.Fatalf("message changed\n got %q\nwant %q", err.Error(), testCase.Message)
+				}
+			case "unparseable":
+				if !strings.Contains(err.Error(), testCase.MessageContains) {
+					t.Fatalf("message changed\n got %q\nwant it to contain %q", err.Error(), testCase.MessageContains)
+				}
 				assertUnmarkedSentence(t, session, data, err)
+			default:
+				if !strings.Contains(err.Error(), testCase.MessageContains) {
+					t.Fatalf("message changed\n got %q\nwant it to contain %q", err.Error(), testCase.MessageContains)
+				}
 			}
 		})
 	}
@@ -169,15 +188,11 @@ func unmarkedStrikeSentence(t *testing.T, session DiscoveredSession, data []byte
 		rest = next
 		line++
 		raw = bytes.TrimSpace(raw)
-		if len(raw) == 0 || jsonValid(raw) {
+		if len(raw) == 0 || json.Valid(raw) {
 			continue
 		}
 		return captureFailure(session, line, malformedSourceRecord{}).Error()
 	}
 	t.Fatal("Strike fixture has no unparseable record to compare")
 	return ""
-}
-
-func jsonValid(raw []byte) bool {
-	return len(bytes.TrimSpace(raw)) > 0 && bytes.TrimSpace(raw)[0] == '{'
 }
