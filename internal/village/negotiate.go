@@ -3,7 +3,6 @@ package village
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/peasant-labs/schema"
@@ -164,7 +163,7 @@ func NegotiatePullWindow(cliMin, cliCurrent, min, current, max schema.PushContra
 // sameMinor reports whether two versions share their major and minor, so they
 // differ at most by an additive patch.
 func sameMinor(a, b schema.PushContractVersion) bool {
-	pa, pb := parseSemver(a), parseSemver(b)
+	pa, pb := semverParts(a), semverParts(b)
 	return pa[0] == pb[0] && pa[1] == pb[1]
 }
 
@@ -172,48 +171,60 @@ func sameMinor(a, b schema.PushContractVersion) bool {
 // contract. A MAJOR-version gap is a breaking change and is NOT downgradable;
 // same-major older targets are (additions are backward-droppable).
 func CanDowngrade(cli, target schema.PushContractVersion) bool {
-	return parseSemver(cli)[0] == parseSemver(target)[0]
+	return semverParts(cli)[0] == semverParts(target)[0]
 }
 
 // compareSemver returns -1, 0, or 1 for a<b, a==b, a>b over MAJOR.MINOR.PATCH.
 // Package-internal: the public window helpers (ClassifyContract/CanDowngrade,
 // consumed by internal/push) build on it; there is no external consumer.
-// Each component is compared NUMERICALLY (so 0.10.0 > 0.9.0). Any pre-release or
-// build suffix on the patch component is ignored.
+// Each component is compared NUMERICALLY (so 0.10.0 > 0.9.0) without
+// converting it to an integer, so a run of digits too long for an int (which a
+// version header may carry) still compares by value instead of overflowing.
+// Any pre-release or build suffix on the patch component is ignored.
 func compareSemver(a, b schema.PushContractVersion) int {
-	pa, pb := parseSemver(a), parseSemver(b)
+	pa, pb := semverParts(a), semverParts(b)
 	for i := 0; i < 3; i++ {
-		switch {
-		case pa[i] < pb[i]:
-			return -1
-		case pa[i] > pb[i]:
-			return 1
+		if c := compareDigits(pa[i], pb[i]); c != 0 {
+			return c
 		}
 	}
 	return 0
 }
 
-// parseSemver splits "MAJOR.MINOR.PATCH" into a numeric triple. Missing
-// components default to 0; non-numeric/suffix content is truncated at the first
-// non-digit so "1.2.3-rc1" parses as {1,2,3}.
-func parseSemver(v schema.PushContractVersion) [3]int {
-	var out [3]int
+// compareDigits orders two runs of ASCII digits with no leading zeros by
+// value: the longer run is larger, and runs of equal length order as strings.
+func compareDigits(a, b string) int {
+	switch {
+	case len(a) != len(b):
+		if len(a) < len(b) {
+			return -1
+		}
+		return 1
+	default:
+		return strings.Compare(a, b)
+	}
+}
+
+// semverParts splits "MAJOR.MINOR.PATCH" into its three leading digit runs,
+// each with leading zeros removed so equal values compare equal. Missing
+// components and components with no leading digit are "" (zero);
+// non-numeric/suffix content is truncated at the first non-digit so
+// "1.2.3-rc1" parses as {1,2,3}.
+func semverParts(v schema.PushContractVersion) [3]string {
+	var out [3]string
 	parts := strings.SplitN(v.String(), ".", 3)
 	for i := 0; i < len(parts) && i < 3; i++ {
-		out[i] = leadingInt(parts[i])
+		out[i] = leadingDigits(parts[i])
 	}
 	return out
 }
 
-// leadingInt parses the leading run of ASCII digits in s (0 if none).
-func leadingInt(s string) int {
+// leadingDigits returns the leading run of ASCII digits in s without its
+// leading zeros ("" for zero or no digits).
+func leadingDigits(s string) string {
 	end := 0
 	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
 		end++
 	}
-	if end == 0 {
-		return 0
-	}
-	n, _ := strconv.Atoi(s[:end])
-	return n
+	return strings.TrimLeft(s[:end], "0")
 }

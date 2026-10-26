@@ -53,6 +53,8 @@ requiredNames:
   - refused-406-metadata
   - refused-406-annotations
   - refused-406-content
+  - negotiate-long-digit-floor-above-current-refused
+  - served-long-digit-patch-reads-as-0.3.0
 
 negotiate:
   - name: negotiate-released-village-0.2.0
@@ -126,6 +128,12 @@ negotiate:
     min: "0.3.0"
     current: "0.3.2"
     wantEnvelope: "0.3.0"
+  # Version parts longer than an int still compare by value: this floor is one
+  # above the current patch, so the window is malformed and refused.
+  - name: negotiate-long-digit-floor-above-current-refused
+    min: "0.3.99999999999999999999999"
+    current: "0.3.99999999999999999999998"
+    wantError: incompatible
 
 # surface selects the pull GET that serves body: metadata
 # (/pull/transcripts/{id}), annotations (/pull/transcripts/{id}/annotations),
@@ -329,3 +337,9 @@ read:
     body: '{"error":"pull contract 0.3.0 is below the minimum this server serves"}'
     wantIncompatible: true
     wantError: upgrade the peasant CLI
+  - name: served-long-digit-patch-reads-as-0.3.0
+    served: "0.3.99999999999999999999999"
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"anonymous"},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}
