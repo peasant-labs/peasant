@@ -371,6 +371,10 @@ type Pipeline struct {
 	diagnostics          []DiagnosticEntry
 	diagnosticSessions   map[sessionDiagnostic]struct{}
 	diagnosticSet        map[DiagnosticEntry]struct{}
+	// The two maps below record what this harvest has already told the user
+	// about a session's unusable source. They share one mutex because both are
+	// written from the same lanes in the same run.
+	//
 	// unavailableSettledThisRun names sessions whose source-unavailability
 	// transition was recorded during this harvest. A later lane in the same
 	// run still owes its own report; a later harvest sees the stored row and
@@ -381,7 +385,7 @@ type Pipeline struct {
 	// lane and the pair-repair lane. If one of them already reported a cause
 	// for a session, the other stays quiet for that same cause. A different
 	// cause still reports. The index lane does not use it.
-	unavailableSettledMu      sync.Mutex
+	sourceRunStateMu          sync.Mutex
 	unavailableSettledThisRun map[SessionID]struct{}
 	laneCauseReportedThisRun  map[laneCauseReport]struct{}
 	// unroutedRepairs are forced repairs whose source could not be routed to
@@ -5516,8 +5520,10 @@ func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, so
 	p.reportPairRepairUnavailable(ctx, sid, target.originalSourcePath, nil, nil)
 	// Returning false leaves the session out of the extract batch. A forced
 	// run still has to count that unrouted repair; the caller must not also
-	// index the stored pair, which is missing or damaged by definition.
-	p.noteUnroutedForcedRepair(ctx, sid, target.session.Harness, target.originalSourcePath)
+	// index the stored pair, which is missing or damaged by definition. The
+	// target reached this call through the run's explicit filters, so the
+	// repair is this run's work.
+	p.noteUnroutedForcedRepair(sid, target.session.Harness, target.originalSourcePath, true)
 	return false
 }
 

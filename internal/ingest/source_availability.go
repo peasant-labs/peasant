@@ -70,22 +70,17 @@ func sourceUnavailableCause(err error) (SourceUnavailabilityReason, bool) {
 	return "", false
 }
 
-// pairUnavailableCause classifies a pair-repair failure. A nil cause is a
-// missing source: the repair was not attempted because no file could be
-// reached. Any other cause uses the source-byte classifier.
-func pairUnavailableCause(cause error) (SourceUnavailabilityReason, bool) {
-	if cause == nil {
-		return SourceUnavailableNoSavedCopy, true
-	}
-	return sourceUnavailableCause(cause)
-}
-
 // causeSupersedes reports whether next is a more specific observation than
 // the cause already stored. A source that is present but unusable replaces a
 // missing-source row, so restoring a missing file as a bad record is reported.
 // The reverse does not replace it: another lane can still be stating a path
 // that is absent while the bytes a later lane parsed are unusable, and
 // letting that flip the row would make every later harvest report again.
+//
+// The direction is one-way, so a stored present-but-unusable row that a later
+// harvest sees as a missing file stays quiet on every routine harvest: the
+// row keeps the more specific cause and no report is owed until the source is
+// repaired or --force retries the same cause.
 func causeSupersedes(stored, next SourceUnavailabilityReason) bool {
 	return stored == SourceUnavailableNoSavedCopy && next == SourceUnavailableRecordUnusable
 }
@@ -143,15 +138,15 @@ func (p *Pipeline) readUnavailableCause(ctx context.Context, sid SessionID) (*So
 }
 
 func (p *Pipeline) unavailableRecordedThisRun(sid SessionID) bool {
-	p.unavailableSettledMu.Lock()
-	defer p.unavailableSettledMu.Unlock()
+	p.sourceRunStateMu.Lock()
+	defer p.sourceRunStateMu.Unlock()
 	_, ok := p.unavailableSettledThisRun[sid]
 	return ok
 }
 
 func (p *Pipeline) markUnavailableRecordedThisRun(sid SessionID) {
-	p.unavailableSettledMu.Lock()
-	defer p.unavailableSettledMu.Unlock()
+	p.sourceRunStateMu.Lock()
+	defer p.sourceRunStateMu.Unlock()
 	if p.unavailableSettledThisRun == nil {
 		p.unavailableSettledThisRun = make(map[SessionID]struct{})
 	}
@@ -159,8 +154,8 @@ func (p *Pipeline) markUnavailableRecordedThisRun(sid SessionID) {
 }
 
 func (p *Pipeline) resetUnavailableSettledThisRun() {
-	p.unavailableSettledMu.Lock()
-	defer p.unavailableSettledMu.Unlock()
+	p.sourceRunStateMu.Lock()
+	defer p.sourceRunStateMu.Unlock()
 	p.unavailableSettledThisRun = nil
 	p.laneCauseReportedThisRun = nil
 }
@@ -169,8 +164,8 @@ func (p *Pipeline) resetUnavailableSettledThisRun() {
 // pair-repair lane already reported this cause for the session during this
 // harvest. The index lane does not consult it.
 func (p *Pipeline) laneCauseAlreadyReported(sid SessionID, cause SourceUnavailabilityReason) bool {
-	p.unavailableSettledMu.Lock()
-	defer p.unavailableSettledMu.Unlock()
+	p.sourceRunStateMu.Lock()
+	defer p.sourceRunStateMu.Unlock()
 	_, ok := p.laneCauseReportedThisRun[laneCauseReport{session: sid, cause: cause}]
 	return ok
 }
@@ -179,8 +174,8 @@ func (p *Pipeline) laneCauseAlreadyReported(sid SessionID, cause SourceUnavailab
 // pair-repair lane has reported in this harvest, so the other of those two
 // lanes stays quiet for the same cause. A different cause is not marked.
 func (p *Pipeline) markLaneCauseReported(sid SessionID, cause SourceUnavailabilityReason) {
-	p.unavailableSettledMu.Lock()
-	defer p.unavailableSettledMu.Unlock()
+	p.sourceRunStateMu.Lock()
+	defer p.sourceRunStateMu.Unlock()
 	if p.laneCauseReportedThisRun == nil {
 		p.laneCauseReportedThisRun = make(map[laneCauseReport]struct{})
 	}
