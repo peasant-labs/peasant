@@ -113,6 +113,24 @@ func piSourceError(step string, line int, cause error) error {
 	return fmt.Errorf("Pi %s failed in ingest at physical line %d: %w; this session was not accepted and other sessions may continue; restore a valid Pi v3 recording and retry harvest", step, line, cause)
 }
 
+// piRecordRefusal is a refusal that blames the bytes of a Pi recording: the
+// record did not parse, a field failed validation, or a typed decode failed.
+// The sentence stays the one piSourceError already prints. The mark is what
+// tells a later harvest that those bytes were already reported.
+//
+// A cancelled read is not a property of the bytes, so it is returned unmarked.
+// A settle must not treat a cancelled run as a source the user has to repair.
+func piRecordRefusal(step string, line int, cause error) error {
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		return cause
+	}
+	var already malformedSourceRecord
+	if errors.As(cause, &already) {
+		return piSourceError(step, line, cause)
+	}
+	return piSourceError(step, line, malformedSourceRecord{cause: cause})
+}
+
 func readPiSource(ctx context.Context, fs FileSystem, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -211,40 +229,40 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 				doc.warnings = append(doc.warnings, piWarning("incomplete_tail", line+1, "Incomplete final JSONL line was ignored; the complete prefix was imported."))
 				break
 			}
-			return doc, piSourceError("raw validation", line+1, err)
+			return doc, piRecordRefusal("raw validation", line+1, err)
 		}
 		// Interpret/validate the trimmed view, but retain the scanner's original
 		// record text (excluding its newline delimiter) for unknown evidence.
 		entry, err := decodePiEntry(physical, line+1)
 		if err != nil {
-			return doc, piSourceError("decode", line+1, err)
+			return doc, piRecordRefusal("decode", line+1, err)
 		}
 		sequence++
 		entry.sequence = sequence
 		entry.assignPiPositions(&position)
 		if (entry.Type == "" && entry.unknownKind == "") || strings.TrimSpace(entry.ID) == "" {
-			return doc, piSourceError("decode", line+1, fmt.Errorf("entry type and id are required"))
+			return doc, piRecordRefusal("decode", line+1, fmt.Errorf("entry type and id are required"))
 		}
 		if doc.header.ID == "" {
 			if entry.Type != piSession || entry.Version != 3 || !hasAbsolutePathForm(entry.CWD) {
-				return doc, piSourceError("header", line+1, fmt.Errorf("first nonempty record must be a v3 session header with absolute cwd"))
+				return doc, piRecordRefusal("header", line+1, fmt.Errorf("first nonempty record must be a v3 session header with absolute cwd"))
 			}
 			if _, err := NewSessionID(entry.ID); err != nil {
-				return doc, piSourceError("header", line+1, err)
+				return doc, piRecordRefusal("header", line+1, err)
 			}
 			doc.header = entry
 			continue
 		}
 		if entry.Type == piSession || entry.ID == doc.header.ID {
-			return doc, piSourceError("tree", line+1, fmt.Errorf("duplicate header or id"))
+			return doc, piRecordRefusal("tree", line+1, fmt.Errorf("duplicate header or id"))
 		}
 		if _, exists := entries[entry.ID]; exists {
-			return doc, piSourceError("tree", line+1, fmt.Errorf("duplicate entry id"))
+			return doc, piRecordRefusal("tree", line+1, fmt.Errorf("duplicate entry id"))
 		}
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(raw, &fields)
 		if _, exists := fields["parentId"]; !exists {
-			return doc, piSourceError("tree", line+1, fmt.Errorf("nonheader entry requires parentId (null for root)"))
+			return doc, piRecordRefusal("tree", line+1, fmt.Errorf("nonheader entry requires parentId (null for root)"))
 		}
 		entries[entry.ID] = entry
 		order = append(order, entry.ID)
@@ -260,7 +278,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 		return doc, err
 	}
 	if doc.header.ID == "" {
-		return doc, piSourceError("header", 0, fmt.Errorf("session header is missing"))
+		return doc, piRecordRefusal("header", 0, fmt.Errorf("session header is missing"))
 	}
 	if len(order) == 0 {
 		return doc, nil
@@ -280,7 +298,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	seen := make(map[string]bool)
 	for id := order[len(order)-1]; id != ""; {
 		if seen[id] {
-			return doc, piSourceError("active tree", 0, fmt.Errorf("cycle in active path"))
+			return doc, piRecordRefusal("active tree", 0, fmt.Errorf("cycle in active path"))
 		}
 		seen[id] = true
 		entry, ok := entries[id]
@@ -303,14 +321,14 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 				// still better than failing it.
 				break
 			}
-			return doc, piSourceError("active tree", 0, fmt.Errorf("dangling active parent"))
+			return doc, piRecordRefusal("active tree", 0, fmt.Errorf("dangling active parent"))
 		}
 		doc.active = append(doc.active, entry)
 		id = ""
 		if entry.ParentID != nil {
 			id = *entry.ParentID
 			if id == "" {
-				return doc, piSourceError("active tree", 0, fmt.Errorf("empty parent is not a root; use null"))
+				return doc, piRecordRefusal("active tree", 0, fmt.Errorf("empty parent is not a root; use null"))
 			}
 		}
 	}
@@ -323,7 +341,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 		path := make(map[string]bool)
 		for id := start; id != "" && !done[id]; {
 			if path[id] {
-				return doc, piSourceError("tree", 0, fmt.Errorf("cycle in inactive path"))
+				return doc, piRecordRefusal("tree", 0, fmt.Errorf("cycle in inactive path"))
 			}
 			entry, ok := entries[id]
 			if !ok {

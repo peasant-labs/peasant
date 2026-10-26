@@ -2,7 +2,7 @@ package ingest_test
 
 import (
 	"bytes"
-	_ "embed"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -17,65 +17,13 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-//go:embed testdata/mixed_peer_source_settling.yaml
-var mixedPeerSourceSettlingYAML []byte
-
-// mixedPeerSourceSettling says whether the malformed peer's index refusal is
-// reported once. Pi and Strike validation refusals are not unusable source
-// records, so those two keep reporting the index refusal on every harvest.
-// A missing native source is an unusable source for every harness, so the
-// content-recovery warning settles with the others. The healthy sibling is
-// indexed on the first harvest either way: recording that warning must not
-// keep a readable stored pair out of the index.
-type mixedPeerSourceSettling struct {
-	Harness                ingest.Harness
-	IndexRefusalSettles    bool
-	ContentRecoverySettles bool
-	Note                   string
-}
-
-func loadMixedPeerSourceSettling(t *testing.T) map[ingest.Harness]mixedPeerSourceSettling {
-	t.Helper()
-	var document struct {
-		Required []string `yaml:"required_names"`
-		Cases    []struct {
-			Harness                string `yaml:"harness"`
-			IndexRefusalSettles    bool   `yaml:"index_refusal_settles"`
-			ContentRecoverySettles bool   `yaml:"content_recovery_settles"`
-			Note                   string `yaml:"note"`
-		} `yaml:"cases"`
-	}
-	if err := testutil.DecodeFixtureYAML(mixedPeerSourceSettlingYAML, &document); err != nil {
-		t.Fatal(err)
-	}
-	loaded := make(map[ingest.Harness]mixedPeerSourceSettling, len(document.Cases))
-	names := make(map[string]bool, len(document.Cases))
-	for _, row := range document.Cases {
-		harness := ingest.Harness(row.Harness)
-		if !harness.IsKnown() {
-			t.Fatalf("source-settling fixture names unknown harness %q", row.Harness)
-		}
-		if _, seen := loaded[harness]; seen {
-			t.Fatalf("source-settling fixture repeats harness %s", harness)
-		}
-		if (!row.IndexRefusalSettles || !row.ContentRecoverySettles) && strings.TrimSpace(row.Note) == "" {
-			t.Fatalf("source-settling fixture for %s keeps a per-harvest refusal but does not say why", harness)
-		}
-		loaded[harness] = mixedPeerSourceSettling{
-			Harness: harness, IndexRefusalSettles: row.IndexRefusalSettles,
-			ContentRecoverySettles: row.ContentRecoverySettles, Note: row.Note,
-		}
-		names[row.Harness] = true
-	}
-	if err := testutil.RequireFixtureNames("mixed peer source settling", "harness", document.Required, names); err != nil {
-		t.Fatal(err)
-	}
-	return loaded
-}
-
+// TestConcreteParserFailurePreservesOtherSessions holds a malformed session
+// beside a healthy one for every harness. The first harvest names each cause
+// once. The retry names neither. The healthy sibling is indexed on the first
+// harvest: recording the refusal is not a reason to keep a readable stored
+// pair out of the index.
 func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 	t.Parallel()
-	settling := loadMixedPeerSourceSettling(t)
 	covered := make(map[ingest.Harness]bool)
 	for _, fixture := range loadIndexFormatOutputFixtures(t) {
 		if fixture.HealthyTranscript == "" {
@@ -86,10 +34,6 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 		}
 		covered[fixture.Harness] = true
 		t.Run(fixture.Name, func(t *testing.T) {
-			policy, ok := settling[fixture.Harness]
-			if !ok {
-				t.Fatalf("no source-settling expectation for %s; say whether its index refusal is reported once", fixture.Harness)
-			}
 			filesystem := testutil.NewMemFS()
 			database := storetest.OpenWith(t, store.WithPoolSize(1))
 			t.Cleanup(func() { _ = database.Close() })
@@ -149,21 +93,13 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 			if retry.Summary.Indexed != 0 || retry.Summary.Errors != 0 || len(retry.IndexLog) != 1 || retry.IndexLog[0].SessionID != badID {
 				t.Fatalf("next invocation did not retry only the incomplete parser: %+v diagnostics=%+v logs=%+v", retry.Summary, retry.Diagnostics, retry.IndexLog)
 			}
-			// Both peers stay named so an unexpected warning is attributed. The
-			// content-recovery warning settles when that failure is an unusable
-			// source record. The index refusal settles only when the capture
-			// error is one too. Pi and Strike are not there yet.
-			retryWant := map[schema.SessionID][]completionDiagnosticCode{
+			// Both peers stay named so an unexpected warning is attributed. A
+			// refusal about the source bytes is reported once; the retry owes
+			// neither peer either cause.
+			assertCompletionDiagnostics(t, "retry", retry.Diagnostics, map[schema.SessionID][]completionDiagnosticCode{
 				badID:  nil,
 				goodID: nil,
-			}
-			if !policy.IndexRefusalSettles {
-				retryWant[badID] = append(retryWant[badID], diagnosticIndexRefused)
-			}
-			if !policy.ContentRecoverySettles {
-				retryWant[badID] = append(retryWant[badID], diagnosticContentRecoveryUnavailable)
-			}
-			assertCompletionDiagnostics(t, "retry", retry.Diagnostics, retryWant)
+			})
 			if after := readMetadataPolicyIndexState(t, database, goodID); after != goodState {
 				t.Fatal("retry unnecessarily re-indexed healthy session")
 			}
@@ -244,6 +180,147 @@ func assertCompletionDiagnostics(t *testing.T, stage string, diagnostics []schem
 		if _, expected := want[sessionID]; !expected {
 			t.Fatalf("%s reported %v for session %s, which was expected to carry no diagnostic at all", stage, got[sessionID], sessionID)
 		}
+	}
+}
+
+// TestPiAndStrikeMalformedSourceRecoversAfterRepair holds the same intact-pair
+// shape as the Claude settle, for the two captures that name the bad record
+// themselves. The first harvest reports each cause once, the retry is quiet,
+// and restoring the bytes returns the session to the index lane.
+func TestPiAndStrikeMalformedSourceRecoversAfterRepair(t *testing.T) {
+	for _, fixture := range loadIndexFormatOutputFixtures(t) {
+		if fixture.Harness != ingest.HarnessPi && fixture.Harness != ingest.HarnessStrike {
+			continue
+		}
+		if fixture.HealthyTranscript == "" || fixture.WantLogError == "" {
+			continue
+		}
+		t.Run(string(fixture.Harness), func(t *testing.T) {
+			ctx := t.Context()
+			memfs := testutil.NewMemFS()
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+
+			id, err := ingest.NewSessionID(testutil.TestSessionUUID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			valid := []byte(fixture.TranscriptIdentity.expandSessionPlaceholder(fixture.HealthyTranscript, id))
+			malformed := []byte(fixture.TranscriptIdentity.expandSessionPlaceholder(fixture.Transcript, id))
+			nativePath := "/synthetic/native/" + id.String() + ".jsonl"
+			if err := memfs.WriteFile(nativePath, malformed, 0600); err != nil {
+				t.Fatal(err)
+			}
+			meta := makeMinimalMeta(t, id.String())
+			meta.ModelHarness = fixture.Harness
+			meta.Source.Format = ingest.SourceFormatJSONL
+			meta.Source.FilePath = nativePath
+			meta.ContentHash = schema.ComputeTranscriptHash(malformed)
+			encoded, err := json.Marshal(meta)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessionDir := filepath.Join(testOutputDir, testutil.TestHostSlug, id.String())
+			transcriptPath := filepath.Join(sessionDir, id.String()+"--transcript.jsonl")
+			if err := memfs.WriteFile(transcriptPath, malformed, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := memfs.WriteFile(filepath.Join(sessionDir, id.String()+"--metadata.json"), encoded, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+				t.Fatal(err)
+			}
+			pair, err := ingest.NewManagedArtifact(encoded, malformed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mirrored := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: pair}})
+			if len(mirrored) != 1 || mirrored[0].Err != nil || !mirrored[0].Mirrored {
+				t.Fatalf("seed pair identity: %+v", mirrored)
+			}
+			seedStalePreviewCapture(t, ctx, database, id)
+
+			fresh := makeMinimalMeta(t, id.String())
+			fresh.ModelHarness = fixture.Harness
+			fresh.Source.FilePath = nativePath
+			fresh.Source.Format = ingest.SourceFormatJSONL
+			fresh.ContentHash = schema.ComputeTranscriptHash(malformed)
+			adapters := map[ingest.Harness]ingest.AdapterFactory{
+				fixture.Harness: makeStubAdapter(nil, map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh}),
+			}
+			run := func() *ingest.PipelineResult {
+				t.Helper()
+				pipeline, err := newTestPipeline(memfs, testutil.DefaultGitResolver(), adapters, makePipelineConfig(testOutputDir),
+					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database), ingest.WithLogger(database),
+					ingest.WithIndexers(ingest.NewIndexerRegistry(memfs, ingest.IndexerRegistryOptions{})))
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := pipeline.Run(ctx)
+				if err != nil {
+					t.Fatalf("harvest: %v", err)
+				}
+				return result
+			}
+			ours := func(result *ingest.PipelineResult) []ingest.DiagnosticEntry {
+				t.Helper()
+				var found []ingest.DiagnosticEntry
+				for _, diagnostic := range result.Diagnostics {
+					if strings.Contains(diagnostic.Location, id.String()) {
+						found = append(found, diagnostic)
+					}
+				}
+				return found
+			}
+			count := func(diagnostics []ingest.DiagnosticEntry, errorType string) int {
+				n := 0
+				for _, diagnostic := range diagnostics {
+					if diagnostic.ErrorType == errorType {
+						n++
+					}
+				}
+				return n
+			}
+
+			first := run()
+			firstOurs := ours(first)
+			if count(firstOurs, "content_recovery_unavailable") != 1 || count(firstOurs, "index_refused") != 1 {
+				t.Fatalf("the first harvest did not report each cause once: %+v", first.Diagnostics)
+			}
+			for _, diagnostic := range firstOurs {
+				if diagnostic.ErrorType != "content_recovery_unavailable" && diagnostic.ErrorType != "index_refused" {
+					continue
+				}
+				if !strings.Contains(diagnostic.Message, fixture.WantLogError) {
+					t.Fatalf("the diagnostic does not keep the capture sentence %q: %q", fixture.WantLogError, diagnostic.Message)
+				}
+			}
+
+			second := run()
+			for _, diagnostic := range ours(second) {
+				if diagnostic.ErrorType == "content_recovery_unavailable" || diagnostic.ErrorType == "index_refused" {
+					t.Fatalf("the settled refusal was reported again: %+v", diagnostic)
+				}
+			}
+
+			if err := memfs.WriteFile(nativePath, valid, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := memfs.WriteFile(transcriptPath, valid, 0600); err != nil {
+				t.Fatal(err)
+			}
+			third := run()
+			if third.Summary.Errors != 0 {
+				t.Fatalf("a repaired source failed: %+v, diagnostics=%+v", third.Summary, third.Diagnostics)
+			}
+			if third.Summary.Indexed != 1 {
+				t.Fatalf("a repaired source did not return the session to the index lane: %+v diagnostics=%+v", third.Summary, third.Diagnostics)
+			}
+		})
 	}
 }
 

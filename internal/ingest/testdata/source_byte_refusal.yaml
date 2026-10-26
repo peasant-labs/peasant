@@ -1,0 +1,92 @@
+# Capture refusals that blame the source bytes, and the refusals that must
+# not. A marked refusal keeps the sentence the capture already printed. A
+# cancelled run and a stored omission flag stay unmarked. SESSION_ID is the
+# session the capture is asked to read.
+required_names:
+  - pi-unparseable
+  - pi-validation
+  - pi-typed-decode
+  - pi-cancelled
+  - pi-omitted
+  - strike-unparseable
+  - strike-typed-decode
+  - strike-validation
+  - strike-cancelled
+  - strike-omitted
+
+cases:
+  - name: pi-unparseable
+    harness: pi
+    kind: unparseable
+    settles: true
+    message_contains: "raw JSON validation failed"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+      malformed
+  - name: pi-validation
+    harness: pi
+    kind: validation
+    settles: true
+    message_contains: "nonheader entry requires parentId (null for root)"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+  - name: pi-typed-decode
+    harness: pi
+    kind: typed-decode
+    settles: true
+    message_contains: "cannot unmarshal number"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":[{"type":"text","text":1}],"timestamp":1767312001000}}
+  - name: pi-cancelled
+    harness: pi
+    kind: cancelled
+    settles: false
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+  - name: pi-omitted
+    harness: pi
+    kind: omitted
+    settles: false
+    message_contains: "stored transcript omitted source content"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+  - name: strike-unparseable
+    harness: strike
+    kind: unparseable
+    settles: true
+    message_contains: "malformed JSON"
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}
+      malformed
+  - name: strike-typed-decode
+    harness: strike
+    kind: typed-decode
+    settles: true
+    message_contains: "json: cannot unmarshal string into Go struct field strikeEventData.inputTokens"
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}
+      {"type":"usage.reported","data":{"inputTokens":"wrong"}}
+  - name: strike-validation
+    harness: strike
+    kind: validation
+    settles: true
+    message_contains: "tool begin requires callId, name and input"
+    transcript: |
+      {"type":"tool.begin","data":{"text":"missing call"}}
+  - name: strike-cancelled
+    harness: strike
+    kind: cancelled
+    settles: false
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}
+  - name: strike-omitted
+    harness: strike
+    kind: omitted
+    settles: false
+    message_contains: "omits source records without positional evidence"
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}

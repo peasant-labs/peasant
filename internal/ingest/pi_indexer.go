@@ -62,7 +62,7 @@ func (i *PiIndexer) IndexTranscriptBytesForCapture(ctx context.Context, session 
 		return TranscriptCaptureResult{}, err
 	}
 	if doc.header.ID != session.SessionID.String() {
-		return TranscriptCaptureResult{}, piSourceError("index", 0, fmt.Errorf("header id changed since discovery"))
+		return TranscriptCaptureResult{}, piRecordRefusal("index", 0, fmt.Errorf("header id changed since discovery"))
 	}
 	// Completeness covers every accepted canonical entry, not an unfinished
 	// physical EOF record. Preserve that diagnostic while retaining full text.
@@ -93,7 +93,7 @@ func (i *PiIndexer) IndexTranscriptBytes(ctx context.Context, session Discovered
 		return nil, err
 	}
 	if doc.header.ID != session.SessionID.String() {
-		return nil, piSourceError("index", 0, fmt.Errorf("header id changed since discovery"))
+		return nil, piRecordRefusal("index", 0, fmt.Errorf("header id changed since discovery"))
 	}
 	entries, _, err := i.project(doc, session.SessionID)
 	return entries, err
@@ -329,7 +329,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		case piMessage:
 			var message piMessagePayload
 			if err := json.Unmarshal(entry.Message, &message); err != nil {
-				return nil, nil, piSourceError("message", entry.line, err)
+				return nil, nil, piRecordRefusal("message", entry.line, err)
 			}
 			if message.Role == piRoleBash {
 				// A user shell execution has a real execute-style result, but is not
@@ -355,7 +355,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				extra.SourceRef = PiPublicRef(sessionID.String(), "entry", entry.ID+":result")
 				usage, err := PiUsageFromRaw(sessionID.String(), entry.ID+":result", schema.UsageScopeTool, message.Usage)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, malformedSourceRecord{cause: err}
 				}
 				extra.Usage = &usage
 				if err := appendRow(result, extra); err != nil {
@@ -365,7 +365,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			}
 			decodedContent, err := decodePiContent(message.Content, message.Role == piRoleAssistant)
 			if err != nil {
-				return nil, nil, piSourceError("message content", entry.line, err)
+				return nil, nil, piRecordRefusal("message content", entry.line, err)
 			}
 			content, tools = decodedContent.Text, decodedContent.Tools
 			switch message.Role {
@@ -378,16 +378,16 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				model := message.Model
 				if len(message.ResponseModel) > 0 {
 					if bytes.Equal(bytes.TrimSpace(message.ResponseModel), []byte("null")) {
-						return nil, nil, piSourceError("response model", 0, fmt.Errorf("responseModel must be a valid observed model string when present, not null"))
+						return nil, nil, piRecordRefusal("response model", 0, fmt.Errorf("responseModel must be a valid observed model string when present, not null"))
 					}
 					if err := json.Unmarshal(message.ResponseModel, &model); err != nil {
-						return nil, nil, piSourceError("response model", 0, err)
+						return nil, nil, piRecordRefusal("response model", 0, err)
 					}
 				}
 				if model != "" || len(message.ResponseModel) > 0 {
 					observed, modelErr := schema.NewObservedModelID(model)
 					if modelErr != nil {
-						return nil, nil, piSourceError("response model", 0, modelErr)
+						return nil, nil, piRecordRefusal("response model", 0, modelErr)
 					}
 					extra.ModelID = observed
 				}
@@ -403,7 +403,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			case piRoleToolResult:
 				owner := calls[message.ToolCallID]
 				if owner == nil || owner.finished || owner.name != message.ToolName {
-					return nil, nil, piSourceError("tool pairing", 0, fmt.Errorf("result has no unique preceding matching call"))
+					return nil, nil, piRecordRefusal("tool pairing", 0, fmt.Errorf("result has no unique preceding matching call"))
 				}
 				owner.finished = true
 				id := PiPublicRef(sessionID.String(), "tool", message.ToolCallID)
@@ -412,16 +412,16 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				scope, rawUsage = schema.UsageScopeTool, message.Usage
 				metadataKind, sourceType, data = schema.NativeMetadataPiToolResultDetails, schema.NativeSourcePiMessage, message.Details
 			default:
-				return nil, nil, piSourceError("message role", 0, fmt.Errorf("unsupported message role"))
+				return nil, nil, piRecordRefusal("message role", 0, fmt.Errorf("unsupported message role"))
 			}
 			if message.Role != piRoleAssistant && len(tools) > 0 {
-				return nil, nil, piSourceError("tool pairing", 0, fmt.Errorf("only assistant messages may declare tool calls"))
+				return nil, nil, piRecordRefusal("tool pairing", 0, fmt.Errorf("only assistant messages may declare tool calls"))
 			}
 		case piCustomMessage:
 			var err error
 			content, tools, err = piContent(entry.Content, false)
 			if err != nil || len(tools) > 0 {
-				return nil, nil, piSourceError("custom message", 0, fmt.Errorf("expected text/image context content"))
+				return nil, nil, piRecordRefusal("custom message", 0, fmt.Errorf("expected text/image context content"))
 			}
 			metadataKind, sourceType, data = schema.NativeMetadataPiCustomMessageDetails, schema.NativeSourcePiCustomMessage, entry.Details
 		case piCompaction, piBranchSummary:
@@ -445,7 +445,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		if scope != "" {
 			usage, err := PiUsageFromRaw(sessionID.String(), entry.ID, scope, rawUsage)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, malformedSourceRecord{cause: err}
 			}
 			extra.Usage, extra.Kind = &usage, PiExtraUsage
 			if scope == schema.UsageScopeAssistant && usage.Tokens != nil {
@@ -461,7 +461,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		}
 		if len(data) > 0 {
 			if (entry.Type == piCustom || entry.Type == piCustomMessage) && strings.TrimSpace(entry.CustomType) == "" {
-				return nil, nil, piSourceError("metadata", 0, fmt.Errorf("customType is required for custom metadata"))
+				return nil, nil, piRecordRefusal("metadata", 0, fmt.Errorf("customType is required for custom metadata"))
 			}
 			metadataCount++
 			metadataBytes += len(data)
@@ -470,7 +470,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			}
 			safe, err := SanitizePiMetadataData(data, func(s string) (string, error) { return s, nil })
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, malformedSourceRecord{cause: err}
 			}
 			record := schema.NativeMetadataRecord{ID: PiPublicRef(sessionID.String(), "metadata", entry.ID), Kind: metadataKind, Source: schema.NativeSourceRef{EntryRef: schema.SourceEntryRef(extra.SourceRef), SourceType: sourceType}, Data: safe}
 			if entry.Type == piCustom || entry.Type == piCustomMessage {
@@ -496,7 +496,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		}
 		for _, tool := range tools {
 			if _, exists := calls[tool.ID]; exists {
-				return nil, nil, piSourceError("tool pairing", 0, fmt.Errorf("duplicate tool call id"))
+				return nil, nil, piRecordRefusal("tool pairing", 0, fmt.Errorf("duplicate tool call id"))
 			}
 			calls[tool.ID] = &piToolOwner{parent: parent, name: tool.Name}
 			id := PiPublicRef(sessionID.String(), "tool", tool.ID)

@@ -120,14 +120,14 @@ func preparePiUnknown(entry piEntry, sessionID SessionID) (piEntry, []RetainedUn
 		}
 		var blocks []json.RawMessage
 		if err := json.Unmarshal(raw, &blocks); err != nil {
-			return nil, err
+			return nil, malformedSourceRecord{cause: err}
 		}
 		kept := make([]json.RawMessage, 0, len(blocks))
 		for index, block := range blocks {
 			var tag piBlockType
 			kind, known, err := piDiscriminator(block, "type", &tag)
 			if err != nil {
-				return nil, err
+				return nil, malformedSourceRecord{cause: err}
 			}
 			if known {
 				kept = append(kept, block)
@@ -143,7 +143,7 @@ func preparePiUnknown(entry piEntry, sessionID SessionID) (piEntry, []RetainedUn
 		var role piMessageRole
 		kind, known, err := piDiscriminator(entry.Message, "role", &role)
 		if err != nil {
-			return entry, nil, false, err
+			return entry, nil, false, malformedSourceRecord{cause: err}
 		}
 		if !known {
 			err := retain("message_role", kind, "/message", entry.Message)
@@ -151,7 +151,7 @@ func preparePiUnknown(entry piEntry, sessionID SessionID) (piEntry, []RetainedUn
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(entry.Message, &fields); err != nil {
-			return entry, nil, false, err
+			return entry, nil, false, malformedSourceRecord{cause: err}
 		}
 		if raw, present := fields["content"]; present {
 			fields["content"], err = filter(raw, "/message/content")
