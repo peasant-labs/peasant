@@ -874,7 +874,9 @@ async function runProjectPickers(browser, gate, theme, viewport, summary) {
       }
       await pause(150)
       await probeProjectPicker(page, testCase, where, summary, theme)
-      await shoot(page, gate, join(OUT, theme, viewport.id, `${testCase.name}.png`), where)
+      await shoot(page, gate, join(OUT, theme, viewport.id, `${testCase.name}.png`), where, {
+        contentSelector: '[data-tour="project-picker"]',
+      })
       if (testCase.name !== 'home-projects') await followFirstProject(page, testCase, summary.projects, where)
       if (diagnostics.length) fail(`${where}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
     } finally {
