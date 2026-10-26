@@ -24,8 +24,11 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
@@ -2491,6 +2494,15 @@ func typeCheckOpenCodeSources(filenames []string) (openCodeTypedSource, error) {
 	return openCodeTypedSource{fileSet: fileSet, files: files, info: info, pkg: checked}, nil
 }
 
+// openCodeExportPaths remembers the build-cache export file go list reports
+// for an import. Every OpenCode guard type-checks the same module graph, and
+// a fresh go list per import per check was most of that cost. The export
+// file is content-addressed, so a path stays valid for the process.
+var (
+	openCodeExportPaths sync.Map
+	openCodeExportGroup singleflight.Group
+)
+
 func openCodeModuleImporter(fileSet *token.FileSet) types.Importer {
 	_, currentFile, _, ok := runtime.Caller(0)
 	directory := "."
@@ -2498,16 +2510,27 @@ func openCodeModuleImporter(fileSet *token.FileSet) types.Importer {
 		directory = filepath.Dir(currentFile)
 	}
 	lookup := func(importPath string) (io.ReadCloser, error) {
-		command := exec.Command("go", "list", "-export", "-f={{.Export}}", importPath)
-		command.Dir = directory
-		output, err := command.Output()
+		resolved, err, _ := openCodeExportGroup.Do(importPath, func() (any, error) {
+			if cached, ok := openCodeExportPaths.Load(importPath); ok {
+				return cached, nil
+			}
+			command := exec.Command("go", "list", "-export", "-f={{.Export}}", importPath)
+			command.Dir = directory
+			output, err := command.Output()
+			if err != nil {
+				return nil, fmt.Errorf("resolve export data for %q with module-aware go list: %w", importPath, err)
+			}
+			exportPath := strings.TrimSpace(string(output))
+			if exportPath == "" {
+				return nil, fmt.Errorf("resolve export data for %q: go list returned an empty export path", importPath)
+			}
+			openCodeExportPaths.Store(importPath, exportPath)
+			return exportPath, nil
+		})
 		if err != nil {
-			return nil, fmt.Errorf("resolve export data for %q with module-aware go list: %w", importPath, err)
+			return nil, err
 		}
-		exportPath := strings.TrimSpace(string(output))
-		if exportPath == "" {
-			return nil, fmt.Errorf("resolve export data for %q: go list returned an empty export path", importPath)
-		}
+		exportPath := resolved.(string)
 		file, err := os.Open(exportPath)
 		if err != nil {
 			return nil, fmt.Errorf("open export data for %q at %q: %w", importPath, exportPath, err)
