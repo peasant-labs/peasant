@@ -302,10 +302,23 @@ func retainedTranscriptPath(metadataPath string, sid SessionID, format SourceFor
 	return filepath.Join(filepath.Dir(metadataPath), string(sid)+"--transcript."+string(format))
 }
 
-// damagedPairText is the one text every reader of a damaged pair prints. The
-// database still serves the session; the saved copy is what needs repair.
-func damagedPairText(sid SessionID) string {
-	return fmt.Sprintf("The saved copy of session %s is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session %s` to save it again from the source.", sid, sid)
+// damagedPairText is the one text every reader of a damaged pair prints. It
+// names a stored copy only when one is actually serving: a completed index is
+// the only state that still has something to serve, so a row with nothing
+// indexed gets the neutral wording instead of a promise the database cannot
+// keep. The saved copy is what needs repair either way.
+func damagedPairText(sid SessionID, serving bool) string {
+	if serving {
+		return fmt.Sprintf("The saved copy of session %s is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session %s` to save it again from the source.", sid, sid)
+	}
+	return fmt.Sprintf("The saved copy of session %s is damaged, and no stored transcript is being served from the database for it yet. Run `peasant harvest --force --session %s` to save it again from the source.", sid, sid)
+}
+
+// reportDamagedPair names a saved pair a reader refused, in the one text every
+// reader prints. The row's own state decides whether a stored copy is still
+// serving, so the message never promises one that does not exist.
+func (p *Pipeline) reportDamagedPair(ctx context.Context, sid SessionID) {
+	p.reportMetadataRefusal(string(sid), fmt.Errorf("%s", damagedPairText(sid, p.hasCompletedStoredIndex(ctx, sid))))
 }
 
 // missingPairText names a session whose saved pair is missing or damaged and

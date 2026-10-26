@@ -367,12 +367,12 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 			}
 			artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
 			if err != nil {
-				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.reportDamagedPair(ctx, target.session.SessionID)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 				continue
 			}
 			if artifact.ArtifactHash != *state.ArtifactHash {
-				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.reportDamagedPair(ctx, target.session.SessionID)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 			}
 			continue
@@ -383,7 +383,7 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 			// rebuild names it as a skipped saved copy; a plain index leaves it
 			// to the ordinary readers.
 			if p.config.RebuildAll {
-				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.reportDamagedPair(ctx, target.session.SessionID)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 			}
 			continue

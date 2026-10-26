@@ -225,7 +225,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					// The saved pair no longer matches the row. Report it in the
 					// one damaged-pair text every reader prints and preserve the
 					// database copy; the user re-saves it with harvest --force.
-					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
+					p.reportDamagedPair(ctx, id)
 					continue
 				}
 				if cause, ok := sourceUnavailableCause(err); ok {
@@ -239,9 +239,16 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					p.markLaneCauseReported(id, cause)
 				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
+				// Preserving the prior content is only a promise the database can
+				// keep once an index has finished. Before that the reader gets
+				// nothing, so the text says so instead of offering a copy.
+				preserved := "the prior content and producer evidence were preserved; nothing is served from the database for this session yet; ordinary supported indexing remains eligible"
+				if p.hasCompletedStoredIndex(ctx, id) {
+					preserved = "the prior content and producer evidence were preserved; the stored copy keeps serving meanwhile; ordinary supported indexing remains eligible"
+				}
 				p.reportSessionDiagnostic(id, DiagnosticEntry{
 					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s stored-content recovery", id),
-					Message:     err.Error() + "; the prior content and producer evidence were preserved; ordinary supported indexing remains eligible",
+					Message:     err.Error() + "; " + preserved,
 					Remediation: "Restore the stored transcript or native source and retry harvest; inspect the recovery error before forcing replacement.",
 				})
 				continue
