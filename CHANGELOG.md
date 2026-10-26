@@ -7,7 +7,32 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-26
+
+### Added
+- The session read carries the commits a session produced and the pull
+  requests its `gh pr create` calls detected, so the local web shows both
+  under a session instead of leaving them to the git history alone. A pulled
+  request is bound to the evidence that named it, an unknown-time commit stays
+  unattributed, and the session read advances to schema 0.34.1.
+- The local reads expose a recorded Claude teammate identity and its lineage.
+  A session qualifies only when a stored Claude Code child and its stored
+  parent both name the same team and agent, and the parent's recorded spawns
+  name that pair; the relation is read from the existing evidence cache with
+  no schema change, and the durable detail payload never carries it.
+- A native OpenCode fork is recorded as a `context_from` relationship. The
+  child already materialises the parent prefix, so the relation carries the
+  native evidence and an anchor rather than a copied prefix, and the snapshot
+  digest binds the pointer and the boundary.
+- The command pull-request detector unwraps shell wrappers around
+  `gh pr create`, so a request created through a wrapper script is detected and
+  its branches have pinned handling.
+
 ### Changed
+- The local web moves to Fairtrade 0.0.46 and the ledger reading surface: a
+  turn reads as a role-led line, its tool calls group into one work panel, a
+  system notice is one compact row, and the session views sit in a bottom bar
+  with the reading-width control, zen, and the shared work grid.
 - Pulling asks peasant online for pull contract 0.3.0. Each pull read (the
   list, a transcript's metadata, its annotations and its content) sends the
   `Peasant-Pull-Contract` header, so a peasant online that serves 0.2.0 by
@@ -19,6 +44,20 @@ Release, which holds the signed artifacts and checksums.
   answers 406 and the pull stops with the "pull-contract incompatible" error,
   which says to upgrade the CLI. The same error stops a pull when peasant
   online serves an envelope this CLI does not read.
+
+### Fixed
+- A Claude Code VS Code prompt stays one user turn. The extension writes
+  injected editor context and the typed prompt as two text blocks, and the
+  decomposition turned the prompt into a subagent turn while repeating the
+  context; a user record written as a content-block array now stores its whole
+  text on the one depth-0 carrier, and empty system control turns with a source
+  reference no longer render as empty headers.
+- A one-session re-index that leaves the stored evidence refused says so. The
+  response used to report done while the same stored copy stayed in place, so
+  the publish popup offered the same repair again; it now names the step that
+  is actually left.
+- An intact pair whose source refuses is settled once instead of repeating on
+  every ingest, and an unrepairable stored pair is settled rather than retried.
 
 ## [0.12.0] - 2026-10-24
 
