@@ -45,6 +45,18 @@ type pairRepairCase struct {
 	// it the seed is a pre-capture row, which an ordinary harvest re-reads from
 	// native input once in order to capture it.
 	CapturedSeed bool `yaml:"capturedSeed"`
+	// NativeSource names the bytes the native source holds: empty for the valid
+	// fixture transcript, "malformed" for bytes that are present but cannot be
+	// used. The second shape is how an acquisition failure reaches the pair
+	// lane, which is the only place the re-ingest template is printed.
+	NativeSource string `yaml:"nativeSource"`
+	// WantCause is the source-unavailability reason the refused repair must
+	// record. It is required with WantSourceReport, because the two causes are
+	// different user situations and a wrong one is a wrong fix.
+	WantCause string `yaml:"wantCause"`
+	// WantMessageContains pins wording of the one source report: the template
+	// the reporting lane must print, not only the session it names.
+	WantMessageContains string `yaml:"wantMessageContains"`
 }
 
 func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
@@ -67,6 +79,19 @@ func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 		case "", "source-info", "location":
 		default:
 			t.Fatalf("pair repair fixture %s names unknown locator fault %q", fixture.Name, fixture.LocatorFault)
+		}
+		switch fixture.NativeSource {
+		case "", "malformed":
+		default:
+			t.Fatalf("pair repair fixture %s names unknown native source %q", fixture.Name, fixture.NativeSource)
+		}
+		if fixture.WantSourceReport && fixture.WantCause == "" {
+			t.Fatalf("pair repair fixture %s reports an unavailable source without naming its cause", fixture.Name)
+		}
+		if fixture.WantCause != "" {
+			if _, err := ingest.NewSourceUnavailabilityReason(fixture.WantCause); err != nil {
+				t.Fatalf("pair repair fixture %s names unknown cause %q", fixture.Name, fixture.WantCause)
+			}
 		}
 		names[fixture.Name] = true
 	}
@@ -98,7 +123,13 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			}
 			nativeTranscript := []byte(document.NativeTranscript)
 			nativePath := "/synthetic/native/" + id.String() + ".jsonl"
-			if err := memfs.WriteFile(nativePath, nativeTranscript, 0600); err != nil {
+			nativeBytes := nativeTranscript
+			if fixture.NativeSource == "malformed" {
+				// Present but unusable: the acquisition fails on a record, which
+				// is a different cause from a source that is not there.
+				nativeBytes = []byte(damagedSourceTranscript)
+			}
+			if err := memfs.WriteFile(nativePath, nativeBytes, 0600); err != nil {
 				t.Fatal(err)
 			}
 			meta := makeMinimalMeta(t, id.String())
@@ -282,9 +313,13 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 					t.Fatalf("a refused repair indexed %d session(s)", result.Summary.Indexed)
 				}
 				if fixture.WantSourceReport {
+					wantCause, err := ingest.NewSourceUnavailabilityReason(fixture.WantCause)
+					if err != nil {
+						t.Fatal(err)
+					}
 					reason, err := database.ReadSourceUnavailability(ctx, id)
-					if err != nil || reason == nil || *reason != ingest.SourceUnavailableNoSavedCopy {
-						t.Fatalf("unavailable source was not persisted: %v %v", reason, err)
+					if err != nil || reason == nil || *reason != wantCause {
+						t.Fatalf("unavailable source was not persisted: %v %v, want %s", reason, err, wantCause)
 					}
 					second := run()
 					kept, err := database.ListEntries(ctx, id)
@@ -309,6 +344,9 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 					}
 					if !strings.Contains(reported[0].Message, id.String()) {
 						t.Fatalf("the unavailable-source diagnostic does not name session %s: %q", id, reported[0].Message)
+					}
+					if !strings.Contains(reported[0].Message, fixture.WantMessageContains) {
+						t.Fatalf("the unavailable-source diagnostic does not say %q: %q", fixture.WantMessageContains, reported[0].Message)
 					}
 				} else if len(result.Diagnostics) == 0 {
 					t.Fatalf("a refused repair reported nothing")

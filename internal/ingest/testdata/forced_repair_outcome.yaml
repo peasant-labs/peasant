@@ -17,6 +17,11 @@
 # there; the harvest rows are named by the pair lane. want_diagnostics states
 # how many of the two lanes speak, and want_mentions names the one diagnostic
 # that carries the contract text.
+#
+# want_content_promise pins the stored-content lane's own message, which is a
+# different sentence from the pair lane's. A row with no completed index must say
+# nothing is served from the database yet; a row that has finished indexing must
+# say the stored copy keeps serving instead.
 required_names:
   - harvest-missing-routine
   - harvest-missing-forced
@@ -88,6 +93,8 @@ cases:
     want_updated: 1
     want_promise: serving
     want_mentions: "file does not exist"
+    want_content_promise: serving
+
   - name: reindex-missing-forced
     command: reindex
     source: missing
@@ -107,6 +114,8 @@ cases:
     want_indexed: 0
     want_promise: serving
     want_mentions: "malformed JSON"
+    want_content_promise: serving
+
   - name: reindex-malformed-forced
     command: reindex
     source: malformed
@@ -154,6 +163,8 @@ cases:
     want_indexed: 0
     want_promise: neutral
     want_mentions: "no recorded original source"
+    want_content_promise: neutral
+
   - name: reindex-unrecorded-forced
     command: reindex
     source: unrecorded
@@ -167,6 +178,8 @@ cases:
   # The run's own age filter bounds the failure count. This session has no
   # recorded start, so a --since window cannot place it inside the window and its
   # unrouted repair is not this run's failed session.
+    want_content_promise: neutral
+
   - name: harvest-unrecorded-forced-outside-since
     command: harvest
     source: unrecorded
@@ -209,6 +222,8 @@ cases:
   # The same window on a session whose stored metadata survived: its recorded
   # start is inside the window, so the repair is this run's work and the forced
   # failure is counted.
+    want_content_promise: neutral
+
   - name: reindex-damaged-forced-inside-since
     command: reindex
     source: missing

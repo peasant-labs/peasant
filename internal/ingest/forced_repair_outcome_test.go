@@ -37,26 +37,31 @@ type forcedRepairOutcomeFixtures struct {
 		WantDiagnostics int    `yaml:"want_diagnostics"`
 		WantPromise     string `yaml:"want_promise"`
 		WantMentions    string `yaml:"want_mentions"`
+		// WantContentPromise pins the wording of the stored-content lane's own
+		// report, which is a different message from the pair lane's. It is
+		// asserted on the content-recovery diagnostic itself, so reverting that
+		// lane to an unconditional promise fails even though the pair lane's
+		// text is unchanged.
+		WantContentPromise string `yaml:"want_content_promise"`
 	} `yaml:"cases"`
 }
 
 // storedCopyClaims are the clauses that tell the reader a stored copy is still
-// there to read. Every message that promises one uses one of these, so a row
-// with no completed index must carry none of them. The list is a phrase scan on
-// purpose: the honest messages also say "no usable saved copy" and "nothing is
-// served", and a word scan on "copy" or "served" would flag those as promises.
+// there to read. Every production message that promises one uses exactly one of
+// these, so a row with no completed index must carry none of them. Each entry is
+// the shortest fragment that still identifies its own sentence, and no entry is
+// a substring of another, so every entry can match independently: a duplicate
+// would look like extra coverage while testing nothing new. The list is a phrase
+// scan on purpose: the honest messages also say "no usable saved copy" and
+// "nothing is served", and a word scan on "copy" or "served" would flag those as
+// promises.
 var storedCopyClaims = []string{
+	// "…; the stored copy keeps serving meanwhile."
 	"keeps serving",
-	"keeps it serving",
-	"keeps serving meanwhile",
+	// "; the stored copy keeps its last-good entries"
 	"keeps its last-good",
-	"keeps its last good",
-	"last-good",
-	"stored copy keeps",
-	"saved copy keeps",
+	// "Its stored transcript is still served from the database."
 	"still served",
-	"still serves",
-	"remains served",
 }
 
 // TestForcedRepairOutcomeFailsEveryUnroutedShape runs the production harvest
@@ -108,6 +113,11 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 			if fixture.WantMentions == "" {
 				t.Fatalf("fixture %s asserts no diagnostic text", fixture.Name)
 			}
+		}
+		switch fixture.WantContentPromise {
+		case "", "serving", "neutral":
+		default:
+			t.Fatalf("fixture %s names unknown content-recovery promise %q", fixture.Name, fixture.WantContentPromise)
 		}
 		names[fixture.Name] = true
 	}
@@ -244,6 +254,7 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 					}
 				}
 			}
+			assertContentRecoveryWording(t, result, id, fixture.Name, fixture.WantContentPromise)
 			sessionErrors := failedSessionCount(result, id)
 			if fixture.WantErrors {
 				if result.Summary.Errors == 0 || sessionErrors != 1 {
@@ -259,6 +270,40 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 				t.Fatalf("updated %d sessions, want %d: the run must still process every repair it kept: %+v", result.Summary.Updated, fixture.WantUpdated, result.Summary)
 			}
 		})
+	}
+}
+
+// assertContentRecoveryWording pins the stored-content lane's own report. That
+// lane prints a different sentence from the pair lane, so the pair lane's
+// wording says nothing about it: a row with no completed index must say nothing
+// is served yet, and a row that still serves must say so instead. The neutral
+// clause is asserted word for word, so restoring the unconditional promise is a
+// failure here and not only a change in tone.
+func assertContentRecoveryWording(t *testing.T, result *ingest.PipelineResult, id ingest.SessionID, name, want string) {
+	t.Helper()
+	if want == "" {
+		return
+	}
+	reports := typedSessionDiagnostics(result, id, "content_recovery_unavailable")
+	if len(reports) != 1 {
+		t.Fatalf("the stored-content lane reported %d times, want exactly one: %+v", len(reports), sessionDiagnostics(result, id))
+	}
+	text := diagnosticText(reports[0])
+	switch want {
+	case "serving":
+		if !mentionsStoredCopyPromise(text) {
+			t.Fatalf("%s: a completed index was not told its stored copy keeps serving: %q", name, text)
+		}
+		if strings.Contains(text, "nothing is served from the database for this session yet") {
+			t.Fatalf("%s: a completed index was told nothing is served: %q", name, text)
+		}
+	case "neutral":
+		if mentionsStoredCopyPromise(text) {
+			t.Fatalf("%s: a row with no completed index was promised a stored copy: %q", name, text)
+		}
+		if !strings.Contains(text, "nothing is served from the database for this session yet") {
+			t.Fatalf("%s: a row with no completed index did not say nothing is served yet: %q", name, text)
+		}
 	}
 }
 
