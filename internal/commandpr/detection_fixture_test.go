@@ -11,6 +11,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/commandpr"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,8 +56,9 @@ type detectionURLCase struct {
 	Expected pullRequestRow `yaml:"expected"`
 }
 
-// pullRequestRow is one expected detected pull request. The source is not a
-// fixture field: every detected row carries the same constant.
+// pullRequestRow is one expected detected pull request, as the fixture spells
+// it. The fixture carries no source field, because every detected row carries
+// the same detector constant, so the conversion below supplies it.
 type pullRequestRow struct {
 	Owner  string `yaml:"owner"`
 	Repo   string `yaml:"repo"`
@@ -126,14 +128,15 @@ func decodeDetectionFixture(source []byte) (detectionFixture, error) {
 	return fixture, nil
 }
 
-// expectedPullRequests converts fixture rows to the public detected shape.
-func expectedPullRequests(rows []pullRequestRow) []commandpr.PullRequest {
+// expectedPullRequests converts fixture rows to the contract rows the detector
+// returns.
+func expectedPullRequests(rows []pullRequestRow) []schema.SessionPullRequest {
 	if len(rows) == 0 {
 		return nil
 	}
-	expected := make([]commandpr.PullRequest, len(rows))
+	expected := make([]schema.SessionPullRequest, len(rows))
 	for index, row := range rows {
-		expected[index] = commandpr.PullRequest{
+		expected[index] = schema.SessionPullRequest{
 			Owner:  row.Owner,
 			Repo:   row.Repo,
 			Number: row.Number,

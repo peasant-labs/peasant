@@ -49,7 +49,7 @@ func TestDetectPullRequestURLEdgeCases(t *testing.T) {
 				Result:    urlCase.Text,
 			}}
 
-			var want []commandpr.PullRequest
+			var want []schema.SessionPullRequest
 			if urlCase.Expected != (pullRequestRow{}) {
 				want = expectedPullRequests([]pullRequestRow{urlCase.Expected})
 			}

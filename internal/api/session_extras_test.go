@@ -258,7 +258,10 @@ func seedExtrasCommits(t *testing.T, db *store.Store) []ingest.CommitInfo {
 	return []ingest.CommitInfo{commits[0], commits[2], commits[3], commits[1], commits[4]}
 }
 
-func getSessionExtras(t *testing.T, url string) (int, map[string]json.RawMessage) {
+// getSessionExtras performs one read and returns the status, the raw body, and
+// the body decoded as a top-level object so a test can assert the exact key set
+// the route serves.
+func getSessionExtras(t *testing.T, url string) (int, []byte, map[string]json.RawMessage) {
 	t.Helper()
 	resp, err := http.Get(url)
 	if err != nil {
@@ -273,14 +276,14 @@ func getSessionExtras(t *testing.T, url string) (int, map[string]json.RawMessage
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("GET %s body is not a JSON object: %v (body %s)", url, err, body)
 	}
-	return resp.StatusCode, decoded
+	return resp.StatusCode, body, decoded
 }
 
 func TestSessionCommitsRoute(t *testing.T) {
 	baseURL, db := newSessionExtrasTestServer(t)
 	want := seedExtrasCommits(t, db)
 
-	status, decoded := getSessionExtras(t, baseURL+"/api/v1/sessions/"+extrasSessionID+"/commits")
+	status, body, decoded := getSessionExtras(t, baseURL+"/api/v1/sessions/"+extrasSessionID+"/commits")
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
@@ -291,10 +294,16 @@ func TestSessionCommitsRoute(t *testing.T) {
 	if !ok {
 		t.Fatalf("response keys = %v, want a commits key", decoded)
 	}
-	var got []schema.CommitInfo
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("commits do not decode: %v", err)
+	// The served payload is the contract envelope, so decoding it into that type
+	// and validating pins the wire shape the consumer reads.
+	var envelope schema.SessionCommitsResponse
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("commits envelope does not decode into schema.SessionCommitsResponse: %v (body %s)", err, body)
 	}
+	if err := envelope.Validate(); err != nil {
+		t.Fatalf("served commits envelope violates the schema contract: %v", err)
+	}
+	got := envelope.Commits
 	if len(got) != len(want) {
 		t.Fatalf("commits = %+v, want %+v", got, want)
 	}
@@ -338,29 +347,28 @@ func TestSessionCommitsRoute(t *testing.T) {
 func TestSessionPullRequestsRoute(t *testing.T) {
 	baseURL, _ := newSessionExtrasTestServer(t)
 
-	status, decoded := getSessionExtras(t, baseURL+"/api/v1/sessions/"+extrasSessionID+"/pull-requests")
+	status, body, decoded := getSessionExtras(t, baseURL+"/api/v1/sessions/"+extrasSessionID+"/pull-requests")
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
 	if len(decoded) != 1 {
 		t.Fatalf("response keys = %v, want exactly pullRequests", decoded)
 	}
-	raw, ok := decoded["pullRequests"]
-	if !ok {
+	if _, ok := decoded["pullRequests"]; !ok {
 		t.Fatalf("response keys = %v, want a pullRequests key", decoded)
 	}
-	type pullRequestRow struct {
-		Owner  string `json:"owner"`
-		Repo   string `json:"repo"`
-		Number int    `json:"number"`
-		URL    string `json:"url"`
-		Source string `json:"source"`
+	// The served payload is the contract envelope. Decoding it into the schema
+	// type and validating checks both the row shape and the fields the contract
+	// refuses to serve empty.
+	var envelope schema.SessionPullRequestsResponse
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("pull requests envelope does not decode into schema.SessionPullRequestsResponse: %v (body %s)", err, body)
 	}
-	var got []pullRequestRow
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("pullRequests do not decode: %v", err)
+	if err := envelope.Validate(); err != nil {
+		t.Fatalf("served pull requests envelope violates the schema contract: %v", err)
 	}
-	want := []pullRequestRow{
+	got := envelope.PullRequests
+	want := []schema.SessionPullRequest{
 		{
 			Owner:  "storytold",
 			Repo:   "photocraft",
@@ -408,7 +416,7 @@ func TestSessionExtrasEmptyResults(t *testing.T) {
 		{"pull requests", "/api/v1/sessions/" + plainSessionID + "/pull-requests", "pullRequests"},
 	} {
 		t.Run(route.name, func(t *testing.T) {
-			status, decoded := getSessionExtras(t, baseURL+route.path)
+			status, _, decoded := getSessionExtras(t, baseURL+route.path)
 			if status != http.StatusOK {
 				t.Fatalf("status = %d, want 200", status)
 			}

@@ -19,20 +19,11 @@ import (
 
 // SourceGHPRCreate names the one command that produces a detected pull
 // request. Consumers render it as evidence for where the row came from.
-const SourceGHPRCreate = "gh_pr_create"
-
-// PullRequest is one pull request detected from a stored tool call.
 //
-// Provisional mirror of schema.SessionPullRequest; fold into the schema type
-// when Peasant re-pins the contract, because the pinned schema module predates
-// the local API read.
-type PullRequest struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	Source string `json:"source"`
-}
+// The contract keeps the source string open so a later detector can be added
+// without rewriting rows a consumer already cached; this is the only value the
+// current detector emits.
+const SourceGHPRCreate = "gh_pr_create"
 
 // pullRequestURL matches a GitHub pull request URL. Owner and repository
 // names may contain letters, digits, dots, underscores, and dashes; the
@@ -50,8 +41,12 @@ var pullRequestURL = regexp.MustCompile(`https://github\.com/([A-Za-z0-9._-]+)/(
 //
 // Rows are deduplicated by owner/repository/number and keep the order in which
 // they were first seen, so the same pull request mentioned twice renders once.
-func Detect(toolCalls []schema.ToolCallDetail) []PullRequest {
-	var detected []PullRequest
+//
+// The returned rows are the contract's schema.SessionPullRequest, so the local
+// read serves exactly what the wire contract validates rather than a private
+// mirror of it.
+func Detect(toolCalls []schema.ToolCallDetail) []schema.SessionPullRequest {
+	var detected []schema.SessionPullRequest
 	seen := make(map[string]struct{}, len(toolCalls))
 	for _, call := range toolCalls {
 		if call.IsError {
@@ -70,7 +65,7 @@ func Detect(toolCalls []schema.ToolCallDetail) []PullRequest {
 			continue
 		}
 		seen[key] = struct{}{}
-		detected = append(detected, PullRequest{
+		detected = append(detected, schema.SessionPullRequest{
 			Owner:  reference.Owner,
 			Repo:   reference.Repo,
 			Number: reference.Number,

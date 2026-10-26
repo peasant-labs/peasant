@@ -12,25 +12,10 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// sessionCommitsResponse is the commits read envelope. The key is the domain
-// noun the local transcript renders, not the store table name.
-//
-// Provisional mirror of schema.SessionCommitsResponse; fold into the schema
-// type when Peasant re-pins the contract, because the pinned schema module
-// predates the local API read.
-type sessionCommitsResponse struct {
-	Commits []ingest.CommitInfo `json:"commits"`
-}
-
-// sessionPullRequestsResponse is the pull-request read envelope. The rows are
-// detected from stored tool calls and are display-only.
-//
-// Provisional mirror of schema.SessionPullRequestsResponse; fold into the
-// schema type when Peasant re-pins the contract, because the pinned schema
-// module predates the local API read.
-type sessionPullRequestsResponse struct {
-	PullRequests []commandpr.PullRequest `json:"pullRequests"`
-}
+// The two session-extra reads build the contract's own envelopes
+// (schema.SessionCommitsResponse, schema.SessionPullRequestsResponse) and
+// validate them before serving, so a response the contract refuses is reported
+// as a server fault instead of being sent to a consumer that cannot read it.
 
 // sessionExtrasSessionID validates the path identifier the two session-extra
 // reads share. It writes the refusal itself so both routes answer an
@@ -96,9 +81,16 @@ func (s *Server) handleSessionCommits(w http.ResponseWriter, r *http.Request) {
 	if commits == nil {
 		commits = []ingest.CommitInfo{}
 	}
-	data, err := json.Marshal(sessionCommitsResponse{Commits: commits})
+	response := schema.SessionCommitsResponse{Commits: commits}
+	if err := response.Validate(); err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			fmt.Sprintf("the commits read for session %s produced a response that breaks the Local API session-commits contract, so nothing was served: %v; repair the read in the session commits handler before retrying", sessionID, err), "")
+		return
+	}
+	data, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, `{"error":"failed to marshal session commits"}`, http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError,
+			fmt.Sprintf("the commits read for session %s built a valid contract response but could not be encoded for the caller: %v; nothing was served; repair the session commits handler before retrying", sessionID, err), "")
 		return
 	}
 	w.Write(data)
@@ -148,11 +140,18 @@ func (s *Server) handleSessionPullRequests(w http.ResponseWriter, r *http.Reques
 	}
 	pullRequests := commandpr.Detect(calls)
 	if pullRequests == nil {
-		pullRequests = []commandpr.PullRequest{}
+		pullRequests = []schema.SessionPullRequest{}
 	}
-	data, err := json.Marshal(sessionPullRequestsResponse{PullRequests: pullRequests})
+	response := schema.SessionPullRequestsResponse{PullRequests: pullRequests}
+	if err := response.Validate(); err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			fmt.Sprintf("the pull-request read for session %s produced a response that breaks the Local API session-pull-requests contract, so nothing was served: %v; repair the detector or the read in the session pull requests handler before retrying", sessionID, err), "")
+		return
+	}
+	data, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, `{"error":"failed to marshal session pull requests"}`, http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError,
+			fmt.Sprintf("the pull-request read for session %s built a valid contract response but could not be encoded for the caller: %v; nothing was served; repair the session pull requests handler before retrying", sessionID, err), "")
 		return
 	}
 	w.Write(data)
