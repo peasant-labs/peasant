@@ -110,6 +110,9 @@ func parseOpenCodeJSONInput(input *openCodeJSONInput, completion *indexCompletio
 		}
 		for _, capturedPart := range captured.Parts {
 			if err := completion.record(capturedPart.Data); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil, fmt.Errorf("part %s: %w", capturedPart.Name, err)
+				}
 				return nil, fmt.Errorf("part %s: %w", capturedPart.Name, malformedSourceRecord{err})
 			}
 			partID := strings.TrimSuffix(capturedPart.Name, defaults.ExtJSON.String())

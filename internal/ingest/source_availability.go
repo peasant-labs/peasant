@@ -87,8 +87,9 @@ func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID) b
 	if !changed {
 		// A row written by an earlier harvest, or by another lane that does
 		// not share this run's report, is not owed again. A row this run just
-		// wrote is owed even when this call lost the insert.
-		return p.unavailableRecordedThisRun(sid)
+		// wrote is owed even when this call lost the insert, and an explicit
+		// --force retry is always owed: it is the remediation the refusal names.
+		return p.config.Force || p.unavailableRecordedThisRun(sid)
 	}
 	p.markUnavailableRecordedThisRun(sid)
 	return true
