@@ -616,9 +616,18 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       const text = aside?.querySelector('p')
       if (!aside || !text) return null
       const box = aside.getBoundingClientRect()
-      const range = document.createRange()
-      range.selectNodeContents(text)
-      const lines = [...range.getClientRects()]
+      // A range over the whole paragraph includes clipped screen-reader copy.
+      // Measure painted text nodes without changing the mounted DOM.
+      const nodes = document.createTreeWalker(text, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => node.parentElement?.closest('.sr-only')
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+      })
+      const lines = []
+      while (nodes.nextNode()) {
+        const range = document.createRange()
+        range.selectNodeContents(nodes.currentNode)
+        lines.push(...range.getClientRects())
+      }
       return { copy: text.textContent, docs: aside.querySelector('a[data-docs-topic="autoPublish"][target="_blank"]')?.getAttribute('href') ?? null, dismiss: !!aside.querySelector('button[aria-label="dismiss auto-publish tip"]'), font: getComputedStyle(text).fontFamily, size: getComputedStyle(text).fontSize, left: box.left, right: box.right, width: innerWidth, textRight: Math.max(...lines.map((line) => line.right)), textLeft: Math.min(...lines.map((line) => line.left)) }
     })
     if (!tip || !tip.copy.includes(FIXTURE.autoPublishTipCopy) || !tip.docs || tip.copy.includes('/peasant auto') || !tip.dismiss) fail(`${where}: the actual automatic publishing tip, its docs link or its exit is missing`)
