@@ -9,7 +9,7 @@ const migrationV69 = `
 CREATE TABLE session_source_unavailability_v68 AS SELECT * FROM session_source_unavailability;
 DROP TABLE session_source_unavailability;
 
-CREATE TABLE session_source_unavailability(
+CREATE TABLE session_source_unavailability (
  session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
  reason TEXT NOT NULL CHECK (reason IN ('original-source-unavailable-no-usable-saved-copy','original-source-present-record-unusable'))
 ) STRICT;

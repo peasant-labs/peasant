@@ -1049,7 +1049,7 @@ CREATE TABLE session_section_native_metadata (
     REFERENCES session_projection_sections(session_id, generation_id, partition_id) ON DELETE CASCADE
 ) STRICT;
 
-CREATE TABLE session_source_unavailability(
+CREATE TABLE session_source_unavailability (
  session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
  reason TEXT NOT NULL CHECK (reason IN ('original-source-unavailable-no-usable-saved-copy','original-source-present-record-unusable'))
 ) STRICT;

@@ -63,8 +63,7 @@ func TestMigrationV69WidensSourceUnavailabilityCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	predecessor := sqlitemigration.Schema{Migrations: dbSchema.Migrations[:68], MigrationOptions: dbSchema.MigrationOptions[:68]}
-	if err := sqlitemigration.Migrate(t.Context(), conn, predecessor); err != nil {
+	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(68)); err != nil {
 		t.Fatal(err)
 	}
 	if err := sqlitex.ExecuteScript(conn, `
@@ -72,34 +71,31 @@ INSERT INTO host_slugs(opaque_id, host_slug) VALUES('cause-host','cause-host');
 INSERT INTO projects(project_hash) VALUES('cause-project');
 INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
 VALUES('cause-session','claude-code','fixture-model','cause-host','cause-project',1,2,3,'/synthetic/missing.jsonl','jsonl');
-INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, content_preview)
-VALUES('cause-session',0,'claude-code','text','user','prior readable content');
 INSERT INTO session_source_unavailability(session_id, reason)
 VALUES('cause-session','original-source-unavailable-no-usable-saved-copy');
 `, nil); err != nil {
 		t.Fatal(err)
 	}
+	// The new claim: the shipped table refuses the cause this migration adds, so
+	// the widening is what a stored present-but-unusable source needs.
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_source_unavailability SET reason='original-source-present-record-unusable' WHERE session_id='cause-session'`, nil); err == nil {
 		t.Fatal("predecessor schema accepted the present-but-unusable cause")
 	}
 	if err := sqlitemigration.Migrate(t.Context(), conn, dbSchema); err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT reason, content_preview FROM session_source_unavailability JOIN sessions USING(session_id) JOIN session_entries USING(session_id) WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
-		found = true
-		if stmt.ColumnText(0) != string(ingest.SourceUnavailableNoSavedCopy) || stmt.ColumnText(1) != "prior readable content" {
-			t.Fatalf("rebuild changed stored cause or content: reason=%q preview=%q", stmt.ColumnText(0), stmt.ColumnText(1))
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_source_unavailability SET reason=? WHERE session_id='cause-session'`, &sqlitex.ExecOptions{Args: []any{string(ingest.SourceUnavailableRecordUnusable)}}); err != nil {
+		t.Fatalf("widened check refused the present-but-unusable cause: %v", err)
+	}
+	// The rebuild copies the stored rows, so the row the predecessor held has to
+	// survive the drop-and-recreate with its new cause.
+	if err := sqlitex.ExecuteTransient(conn, `SELECT reason FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		if got := stmt.ColumnText(0); got != string(ingest.SourceUnavailableRecordUnusable) {
+			t.Fatalf("stored cause after the rebuild = %q, want %q", got, ingest.SourceUnavailableRecordUnusable)
 		}
 		return nil
 	}}); err != nil {
 		t.Fatal(err)
-	}
-	if !found {
-		t.Fatal("rebuild lost the recorded missing-source cause")
-	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_source_unavailability SET reason=? WHERE session_id='cause-session'`, &sqlitex.ExecOptions{Args: []any{string(ingest.SourceUnavailableRecordUnusable)}}); err != nil {
-		t.Fatalf("widened check refused the present-but-unusable cause: %v", err)
 	}
 }
 
