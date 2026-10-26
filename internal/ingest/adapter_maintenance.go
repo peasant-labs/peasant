@@ -35,7 +35,9 @@ func (p *Pipeline) adapterTargetMetadata(ctx context.Context, target reindexTarg
 }
 
 func (p *Pipeline) adapterTargetMetadataIn(ctx context.Context, target reindexTarget, snap locationSnapshot) *UnifiedMetadata {
-	if !p.includesManagedSession(target.session.SessionID, target.session.Harness) || p.config.Since != nil && time.UnixMilli(target.startMs).Before(*p.config.Since) {
+	// The strict harness and session filters plus the age window: an adapter
+	// refresh reads the stored pair for a session the run explicitly asked for.
+	if !p.includesManagedSession(target.session.SessionID, target.session.Harness) || !p.withinRunAge(target.startMs) {
 		return nil
 	}
 	adapterTarget := p.versionTargets()[target.session.Harness].AdapterVersion
@@ -447,28 +449,33 @@ func (p *Pipeline) resetUnroutedRepairs() {
 	p.unroutedRepairSeen = nil
 }
 
-// pairRepairInScope applies the run's explicit harness, session and age filters
-// to a repair candidate through the shared managed-session predicate, so it
-// applies the same scope test every database-driven inventory uses. A harness
-// the store cannot name keeps the candidate (the shared predicate treats an
-// unnamed harness as not filtered out): the repair already reached the
-// selection, so only a named harness can fail a --harness filter. A session
-// whose start is unknown is excluded when --since is set, matching how the index
-// selection treats a reconstructed target without a recorded start.
+// pairRepairInScope applies the run's explicit filters to a repair candidate.
+// The harness half is the tolerant one (includesManagedSessionOrUnknown): the
+// repair already reached the selection from the database, so a harness the
+// store could not name keeps the candidate while only a named harness can fail
+// a --harness filter. The session half and the age window are the same ones
+// every inventory applies. A start the candidate itself carries is used when
+// the caller has none, because a repair selected from native discovery has no
+// metadata start to read; discoveredSessionStart resolves it, preferring the
+// created time over the file time. A session with neither is excluded when
+// --since is set, matching how the index selection treats a reconstructed
+// target without a recorded start.
 func (p *Pipeline) pairRepairInScope(session DiscoveredSession, startMs int64) bool {
-	if !p.includesManagedSession(session.SessionID, session.Harness) {
+	if !p.includesManagedSessionOrUnknown(session.SessionID, session.Harness) {
 		return false
 	}
 	if p.config.Since == nil {
 		return true
 	}
-	if startMs <= 0 && !session.CreatedAt.IsZero() {
-		startMs = session.CreatedAt.UnixMilli()
+	if startMs <= 0 {
+		startMs = discoveredSessionStart(session)
 	}
-	if startMs <= 0 && !session.ModTime.IsZero() {
-		startMs = session.ModTime.UnixMilli()
+	if startMs <= 0 {
+		// An unknown start cannot be placed inside a window, and this branch is
+		// only reached when one is set.
+		return false
 	}
-	return startMs > 0 && !time.UnixMilli(startMs).Before(*p.config.Since)
+	return p.withinRunAge(startMs)
 }
 
 // cacheRepairLocations makes the repair candidates answerable from the bulk
@@ -866,7 +873,7 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 		if !p.includesManagedSession(sid, artifact.Metadata.ModelHarness) {
 			return nil
 		}
-		if p.config.Since != nil && time.UnixMilli(artifact.Metadata.Timestamp.Start).Before(*p.config.Since) {
+		if !p.withinRunAge(artifact.Metadata.Timestamp.Start) {
 			return nil
 		}
 		usable = true

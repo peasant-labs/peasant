@@ -959,23 +959,19 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			}
 		}
 
-		// Since filter: skip sessions older than the cutoff.
-		if p.config.Since != nil {
-			sessionTime := entry.Session.ModTime
-			if !entry.Session.CreatedAt.IsZero() {
-				sessionTime = entry.Session.CreatedAt
-			}
-			if sessionTime.Before(*p.config.Since) {
-				recordDryRun(entry, DiffUnchanged)
-				sessionResults = append(sessionResults, SessionResult{
-					SessionID:  entry.Session.SessionID,
-					Harness:    entry.Session.Harness,
-					ParentUUID: entry.Session.ParentUUID,
-					Status:     DiffUnchanged,
-				})
-				advanceFilter()
-				continue
-			}
+		// Since filter: skip sessions older than the cutoff. A discovered
+		// session's own start is the created time the harness recorded, or the
+		// file time when it recorded none.
+		if !p.withinRunAge(discoveredSessionStart(entry.Session)) {
+			recordDryRun(entry, DiffUnchanged)
+			sessionResults = append(sessionResults, SessionResult{
+				SessionID:  entry.Session.SessionID,
+				Harness:    entry.Session.Harness,
+				ParentUUID: entry.Session.ParentUUID,
+				Status:     DiffUnchanged,
+			})
+			advanceFilter()
+			continue
 		}
 
 		// A supported source the discovery hint could not prove unchanged is
@@ -5082,8 +5078,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		allowed := p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[target.session.SessionID]
 		// Stored metadata records the native session start. The managed file's
 		// mtime is publication time, so it cannot establish a session's age.
-		if allowed && p.config.Since != nil {
-			allowed = !time.UnixMilli(target.startMs).Before(*p.config.Since)
+		if allowed {
+			allowed = p.withinRunAge(target.startMs)
 		}
 		if allowed {
 			if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
@@ -5504,9 +5500,9 @@ func (t reindexTarget) repairMetadataPath() string {
 // reports and returns false when no source is reachable.
 //
 // inScope is the run's explicit-filter verdict for this target, computed by each
-// caller from pairRepairInScope: the shared harness, session and age test. It is
-// a parameter rather than an assumption because the filters are applied by the
-// caller's stage, not here.
+// caller from pairRepairInScope: the tolerant harness test, the session filter,
+// and the --since window. It is a parameter rather than an assumption because
+// the filters are applied by the caller's stage, not here.
 func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool, inScope bool) bool {
 	sid := target.session.SessionID
 	if discovered, found := sourceSessions[sid]; found {

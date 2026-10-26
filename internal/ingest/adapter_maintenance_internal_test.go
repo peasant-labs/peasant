@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"errors"
 	"testing"
-	"time"
 )
 
 //go:embed testdata/unrouted_repair_failures.yaml
@@ -86,66 +85,23 @@ func TestAppendUnroutedRepairFailuresKeepsOneRowPerSession(t *testing.T) {
 	}
 }
 
-// TestRepairScopeKeepsARepairWhoseHarnessIsUnnamed holds the scope a forced
-// repair is counted under. A repair that reached the selection is already the
-// run's work, so a --harness run cannot drop it for a harness the store could
-// not name; a named harness, an explicit session list and an age window still
-// exclude what they name. The scope is the shared managed-session predicate
-// every database-driven inventory uses, not a second copy of those filters.
-func TestRepairScopeKeepsARepairWhoseHarnessIsUnnamed(t *testing.T) {
+// TestForcedRepairWithAnUnnamedHarnessIsStillCounted holds the summary side of
+// the tolerant repair scope: a repair the store could not name a harness for is
+// still this run's failed session when a forced run cannot route it. The scope
+// cases themselves live in testdata/run_scope.yaml; this test only checks that
+// the verdict reaches the summary once.
+func TestForcedRepairWithAnUnnamedHarnessIsStillCounted(t *testing.T) {
 	harness := HarnessClaudeCode
 	sid := SessionID("11111111-1111-4111-8111-111111111111")
 	const source = "/synthetic/missing.jsonl"
 
-	t.Run("the shared scope test keeps an unnamed harness", func(t *testing.T) {
-		pipeline := &Pipeline{config: PipelineConfig{Harness: &harness}}
-		if !pipeline.includesManagedSession(sid, "") {
-			t.Fatal("the shared scope test dropped a session whose harness is unnamed")
-		}
-		if pipeline.includesManagedSession(sid, HarnessCodex) {
-			t.Fatal("the shared scope test kept a named harness the run did not ask for")
-		}
-	})
-
-	t.Run("an unnamed harness stays in a harness run", func(t *testing.T) {
-		pipeline := &Pipeline{config: PipelineConfig{Harness: &harness}}
-		if !pipeline.pairRepairInScope(DiscoveredSession{SessionID: sid}, 0) {
-			t.Fatal("a repair the store could not name a harness for was dropped by a --harness run")
-		}
-	})
-
-	t.Run("a named harness the run did not ask for is excluded", func(t *testing.T) {
-		other := HarnessCodex
-		pipeline := &Pipeline{config: PipelineConfig{Harness: &other}}
-		if pipeline.pairRepairInScope(DiscoveredSession{SessionID: sid, Harness: harness}, 0) {
-			t.Fatal("a repair for another harness survived a --harness run")
-		}
-	})
-
-	t.Run("a session filter excludes a repair outside it", func(t *testing.T) {
-		pipeline := &Pipeline{config: PipelineConfig{AllowedSessionIDs: map[SessionID]bool{"another-session": true}}}
-		if pipeline.pairRepairInScope(DiscoveredSession{SessionID: sid, Harness: harness}, 0) {
-			t.Fatal("a repair outside the explicit session list was counted")
-		}
-	})
-
-	t.Run("an age filter excludes a repair with no start", func(t *testing.T) {
-		since := time.UnixMilli(1748736000000)
-		pipeline := &Pipeline{config: PipelineConfig{Since: &since}}
-		if pipeline.pairRepairInScope(DiscoveredSession{SessionID: sid, Harness: harness}, 0) {
-			t.Fatal("a repair with no known start was counted inside an age window")
-		}
-	})
-
-	t.Run("a forced repair with an unnamed harness is still counted", func(t *testing.T) {
-		pipeline := &Pipeline{config: PipelineConfig{Force: true, Harness: &harness}}
-		inScope := pipeline.pairRepairInScope(DiscoveredSession{SessionID: sid}, 0)
-		pipeline.noteUnroutedForcedRepair(sid, "", source, inScope)
-		failures := pipeline.appendUnroutedRepairFailures(nil)
-		if len(failures) != 1 || failures[0].SessionID != sid || failures[0].Error == nil {
-			t.Fatalf("the forced repair was not counted once: %+v", failures)
-		}
-	})
+	pipeline := &Pipeline{config: PipelineConfig{Force: true, Harness: &harness}}
+	inScope := pipeline.pairRepairInScope(DiscoveredSession{SessionID: sid}, 0)
+	pipeline.noteUnroutedForcedRepair(sid, "", source, inScope)
+	failures := pipeline.appendUnroutedRepairFailures(nil)
+	if len(failures) != 1 || failures[0].SessionID != sid || failures[0].Error == nil {
+		t.Fatalf("the forced repair was not counted once: %+v", failures)
+	}
 }
 
 // TestRoutePairRepairCountsAFailureOnlyInsideTheRunFilters pins where the
