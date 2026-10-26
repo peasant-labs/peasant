@@ -343,9 +343,15 @@ type SessionIndexState struct {
 // producer revision AND a recorded completion time: a producer revision with no
 // completion time has never served, and a completion time with no producer
 // revision names no parser output. The format stamp is not a substitute for
-// either half. The store states the same rule in SQL as completedIndexSQL, and
-// its one other reader of the rule (the metric-input refusal) calls this method,
-// so the two cannot drift.
+// either half.
+//
+// The migration that added the index format version backfilled its column with
+// this same predicate written out in SQL. That statement is frozen history: it
+// is a literal inside the shipped migration, and no live query builds SQL from
+// this method or from a shared constant, so this method is the only place the
+// rule can change. The other reader of the rule, the metric-input refusal, calls
+// this method instead of restating it. A migration-slot needle pins the frozen
+// bytes, and the store's own V54 fixture exercises what that SQL decided.
 func (s *SessionIndexState) Completed() bool {
 	return s != nil && s.IndexerVersion > 0 && s.IndexedAt != nil
 }
