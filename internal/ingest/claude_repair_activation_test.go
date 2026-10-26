@@ -87,10 +87,26 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 
 	// Downgrade the stored sidecar to the legacy revision this build
 	// re-extracts. The repair has to notice it and rebuild the pair.
-	// The stored row carries the revision too, so a legacy store is a row and a
-	// sidecar at the old schema, not a rewritten file beside a current row.
+	// A legacy store is a row and a sidecar at the old schema with no format-2
+	// generation yet, not a rewritten file beside a current row. Proving the
+	// downgrade took keeps the assertions below from comparing current to
+	// current.
 	rewriteLegacySidecar(t, fs, sidecarPath, 8)
-	downgradeStoredSchema(t, database, id, 8)
+	execSessionSQL(t, database,
+		"UPDATE sessions SET schema_version = 8, index_format_version = 1, active_generation_id = NULL WHERE session_id = ?",
+		string(id))
+	if got := readSidecarSchemaVersion(t, fs, sidecarPath); got != 8 {
+		t.Fatalf("the legacy downgrade did not take: sidecar schemaVersion = %d, want 8", got)
+	}
+
+	// Different native bytes, so the repaired sidecar's hash proves the repair
+	// rebuilt from the source rather than reusing the stored pair.
+	repairedNative := append(append([]byte{}, transcript...), []byte(
+		`{"type":"assistant","uuid":"a2","parentUuid":"a1","sessionId":"`+id.String()+`","message":{"role":"assistant","content":[{"type":"text","text":"late reply"}]}}`+"\n")...)
+	if err := fs.WriteFile(nativePath, repairedNative, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repairLogBefore := readIngestLogHighWater(t, database)
 	fs.ResetCounts()
 
 	second := run()
@@ -121,13 +137,13 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 	if sidecar.SchemaVersion != int(ingest.CurrentSchemaVersion) {
 		t.Fatalf("repaired sidecar schemaVersion = %d, want %d", sidecar.SchemaVersion, ingest.CurrentSchemaVersion)
 	}
-	if sidecar.ContentHash != schema.ComputeTranscriptHash(transcript) {
-		t.Fatalf("repaired sidecar contentHash = %q, want the native bytes' hash", sidecar.ContentHash)
+	if sidecar.ContentHash != schema.ComputeTranscriptHash(repairedNative) {
+		t.Fatalf("repaired sidecar contentHash = %q, want the repaired native bytes' hash", sidecar.ContentHash)
 	}
 
 	// A repaired session settles: the next harvest owes it nothing.
 	third := run()
-	if third.Summary.Indexed != 0 || third.Summary.Errors != 0 {
+	if third.Summary.Indexed != 0 || third.Summary.Updated != 0 || third.Summary.Errors != 0 {
 		t.Fatalf("a repaired session was not settled: %+v, diagnostics=%+v", third.Summary, third.Diagnostics)
 	}
 
@@ -138,10 +154,10 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 	defer database.Pool().Put(conn)
 	assertStoredInt(t, conn, "SELECT COALESCE(index_format_version, 0) FROM sessions WHERE session_id = ?", 2,
 		"the repaired session did not activate a format-2 generation", string(id))
-	assertStoredInt(t, conn, "SELECT COUNT(*) FROM sessions WHERE session_id = ?", 1,
-		"the repair created a second session row", string(id))
-	assertStoredInt(t, conn, "SELECT sessions_error FROM ingest_log ORDER BY id DESC LIMIT 1", 0,
-		"the repair was counted as a session error")
+	assertStoredInt(t, conn, "SELECT COUNT(*) FROM sessions", 1,
+		"the repair created a second session row")
+	assertStoredInt(t, conn, "SELECT COUNT(*) FROM ingest_log WHERE id > ? AND sessions_error <> 0", 0,
+		"the repair was counted as a session error", repairLogBefore)
 }
 
 // rewriteLegacySidecar sets the stored sidecar's schema revision to the given
@@ -166,9 +182,25 @@ func rewriteLegacySidecar(t *testing.T, fs *testutil.CountingFS, path string, ve
 	}
 }
 
-// downgradeStoredSchema sets the row's recorded metadata revision, which is what
-// the harvest's refresh selection reads.
-func downgradeStoredSchema(t *testing.T, database *store.Store, id ingest.SessionID, version int) {
+// readSidecarSchemaVersion reports the schema revision a stored sidecar records.
+func readSidecarSchemaVersion(t *testing.T, fs *testutil.CountingFS, path string) int {
+	t.Helper()
+	data, err := fs.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read sidecar %s: %v", path, err)
+	}
+	var document struct {
+		SchemaVersion int `json:"schemaVersion"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("decode sidecar %s: %v", path, err)
+	}
+	return document.SchemaVersion
+}
+
+// readIngestLogHighWater returns the newest ingest_log id, so an assertion can
+// name the runs that follow it instead of whichever run happened to be last.
+func readIngestLogHighWater(t *testing.T, database *store.Store) int {
 	t.Helper()
 	ctx := t.Context()
 	conn, err := database.Pool().Take(ctx)
@@ -176,11 +208,13 @@ func downgradeStoredSchema(t *testing.T, database *store.Store, id ingest.Sessio
 		t.Fatal(err)
 	}
 	defer database.Pool().Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, "UPDATE sessions SET schema_version = ? WHERE session_id = ?", &sqlitex.ExecOptions{
-		Args: []any{version, string(id)},
+	got := 0
+	if err := sqlitex.ExecuteTransient(conn, "SELECT COALESCE(MAX(id), 0) FROM ingest_log", &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error { got = stmt.ColumnInt(0); return nil },
 	}); err != nil {
-		t.Fatalf("downgrade stored schema: %v", err)
+		t.Fatalf("read ingest_log high water: %v", err)
 	}
+	return got
 }
 
 func assertStoredInt(t *testing.T, conn *sqlite.Conn, query string, want int, message string, args ...any) {
