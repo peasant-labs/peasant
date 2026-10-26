@@ -1,0 +1,39 @@
+# What one session owes the user across harvests when its source cannot
+# repair it.
+#
+# The steps run in order against one stored row. A routine repeat of the
+# stored cause is quiet. An explicit retry of that same cause reports again.
+# A cause that replaces the stored one reports once, then goes quiet.
+required_names:
+  - first_missing
+  - routine_repeat
+  - forced_repeat
+  - cause_change
+  - changed_cause_quiet
+
+steps:
+  - name: first_missing
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: true
+    want_stored: original-source-unavailable-no-usable-saved-copy
+
+  - name: routine_repeat
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: false
+    want_stored: original-source-unavailable-no-usable-saved-copy
+
+  - name: forced_repeat
+    force: true
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: true
+    want_stored: original-source-unavailable-no-usable-saved-copy
+
+  - name: cause_change
+    cause: original-source-present-record-unusable
+    want_report: true
+    want_stored: original-source-present-record-unusable
+
+  - name: changed_cause_quiet
+    cause: original-source-present-record-unusable
+    want_report: false
+    want_stored: original-source-present-record-unusable
