@@ -37,6 +37,7 @@ import YAML from 'yaml'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { loadContextNavigationFixture } from './context-navigation-fixture.mjs'
+import { chromeFailures, loadShellChromeManifest, shippedItems } from './shell-chrome-manifest.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -59,6 +60,8 @@ const FILTERS = [
   { id: 'auto', label: 'auto-publish on' },
 ]
 const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
+const SHELL_MANIFEST = loadShellChromeManifest()
+const SHIPPED_SHELL_ITEMS = shippedItems(SHELL_MANIFEST)
 // Bytes only this change introduces: the list marker and the strip's accessible
 // name live in the app chunk, the strip and publish-state classes in fairtrade's.
 const FEATURE_GROUPS = [
@@ -351,6 +354,12 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
   }
 }
 
+/** Verify the same required-name shell manifest as the mounted chrome gates. */
+async function assertChrome(page, theme, where) {
+  const failures = await page.evaluate(chromeFailures, { manifest: SHELL_MANIFEST, context: { theme, shipped: SHIPPED_SHELL_ITEMS } })
+  if (failures.length) fail(`${where}: persistent product shell: ${failures.join('; ')}`)
+}
+
 /** Computed-style claims the design system makes about this page. */
 async function probeStyles(page, where) {
   const probe = await page.evaluate(() => {
@@ -370,11 +379,7 @@ async function probeStyles(page, where) {
       titleSize: title ? getComputedStyle(title).fontSize : '',
       pageOverflow: root.scrollWidth - root.clientWidth,
       pathname: location.pathname,
-      shell: !!document.querySelector('.asb a.asb-brand[href="/"]')
-        && !!document.querySelector('.asb a[href="/settings"], .asb a[href="/settings/"]')
-        && !!document.querySelector('.asb button[title^="search"]')
-        && !!document.querySelector('.asb button[title^="switch to "]')
-        && document.querySelector('.asb-panel [aria-current="page"]')?.getAttribute('href') === '/',
+      homeNav: document.querySelector('.asb-panel [aria-current="page"]')?.getAttribute('href') ?? null,
     }
   })
   if (!/atkinson\s*hyperlegible/i.test(probe.bodyFont) || /mono/i.test(probe.bodyFont.split(',')[0])) fail(`${where}: body font is ${probe.bodyFont}`)
@@ -384,7 +389,8 @@ async function probeStyles(page, where) {
   if (probe.optionRadius !== '0px') fail(`${where}: filters trigger radius is ${probe.optionRadius}`)
   if (!probe.tablePresent || probe.titleSize !== '16px') fail(`${where}: session table probe ${JSON.stringify(probe)}`)
   if (probe.pageOverflow > 0) fail(`${where}: the page scrolls sideways by ${probe.pageOverflow}px`)
-  if (!probe.shell || probe.pathname !== '/') fail(`${where}: the home route or persistent product shell is missing ${JSON.stringify(probe)}`)
+  await assertChrome(page, probe.theme, where)
+  if (probe.homeNav !== '/' || probe.pathname !== '/') fail(`${where}: the home route or active navigation is wrong ${JSON.stringify(probe)}`)
   return probe
 }
 
@@ -770,10 +776,6 @@ async function probeProjectPicker(page, testCase, where, summary, theme) {
       browse,
       browseView: !!document.querySelector('[data-browse-view="projects"]'),
       table: !!document.querySelector('[data-root-session-list]'),
-      shell: !!document.querySelector('.asb a.asb-brand[href="/"]')
-        && !!document.querySelector('.asb a[href="/settings"], .asb a[href="/settings/"]')
-        && !!document.querySelector('.asb button[title^="search"]')
-        && !!document.querySelector('.asb button[title^="switch to "]'),
       homeNav: document.querySelector('.asb-panel [aria-current="page"]')?.getAttribute('href') ?? null,
       retiredCopy: ['hidden by a saved selection', 'your saved selection hides all projects', 'project selection recovery']
         .some((copy) => bodyText.includes(copy)),
@@ -787,7 +789,7 @@ async function probeProjectPicker(page, testCase, where, summary, theme) {
     fail(`${where}: project page title probe ${JSON.stringify(probe)}`)
   }
   if (probe.pageOverflow > 0) fail(`${where}: the project page scrolls sideways by ${probe.pageOverflow}px`)
-  if (!probe.shell) fail(`${where}: the persistent product shell is incomplete ${JSON.stringify(probe)}`)
+  await assertChrome(page, theme, where)
   if (probe.pathname !== expectedRoute) fail(`${where}: mounted at ${probe.pathname}, expected ${expectedRoute}`)
   if (probe.theme !== theme) fail(`${where}: data-theme is ${probe.theme}`)
   if (probe.table) fail(`${where}: the session table mounted on a project picker`)

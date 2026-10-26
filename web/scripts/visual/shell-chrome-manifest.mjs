@@ -155,11 +155,17 @@ export function routePageFile(path, webRoot = WEB_ROOT) {
 /**
  * Checks the mounted sidebar against the manifest and returns every failure (empty when it holds).
  * Self-contained so it can run in a browser via page.evaluate.
- * @param {ShellChromeManifest} manifest
- * @param {{ theme: 'light' | 'dark', shipped: Record<string, boolean> }} context
+ * @param {ShellChromeManifest | { manifest: ShellChromeManifest, context: { theme: 'light' | 'dark', shipped: Record<string, boolean> } }} manifest
+ * @param {{ theme: 'light' | 'dark', shipped: Record<string, boolean> }} [context]
  * @returns {string[]}
  */
 export function chromeFailures(manifest, context) {
+  // Playwright takes one evaluation argument; legacy callers pass two.
+  if ('manifest' in manifest) {
+    context = manifest.context
+    manifest = manifest.manifest
+  }
+  if (!context) return ['no shell theme/shipped context was supplied']
   const failures = []
   const chrome = document.querySelector('.asb')
   if (!chrome) return ['no sidebar (.asb) is mounted']
