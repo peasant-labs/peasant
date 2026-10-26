@@ -63,14 +63,23 @@ func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID) b
 	}
 	// A row from an earlier harvest is not owed again. Reading it avoids a
 	// write on every later recovery of a source the user already heard about.
-	if p.sourceUnavailableRecorded(ctx, sid) {
+	if p.sourceUnavailableRecorded(ctx, sid) && !p.config.Force {
+		// A routine harvest owes no repeat, but --force is the remediation the
+		// refusal names: it must report again, so a repair that did not take
+		// cannot read as success.
 		return false
 	}
 	recorder, ok := p.metricsStore.(SourceAvailabilityStore)
 	if !ok || p.config.DryRun {
 		return true
 	}
-	changed, err := recorder.RecordSourceUnavailable(ctx, sid, SourceUnavailableNoSavedCopy)
+	var changed bool
+	var err error
+	// Parser workers reach this too, so the write takes the store lane the
+	// other maintenance writes use instead of racing them.
+	p.runStoreWrite(nil, func() {
+		changed, err = recorder.RecordSourceUnavailable(ctx, sid, SourceUnavailableNoSavedCopy)
+	})
 	if err != nil {
 		p.reportMetadataRefusal(string(sid), err)
 		return true

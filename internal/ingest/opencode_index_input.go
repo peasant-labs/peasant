@@ -85,6 +85,9 @@ func parseOpenCodeJSONInput(input *openCodeJSONInput, completion *indexCompletio
 	for _, captured := range input.Messages {
 		completion.line++
 		if err := completion.record(captured.File.Data); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("message %s: %w", captured.File.Name, err)
+			}
 			return nil, fmt.Errorf("message %s: %w", captured.File.Name, malformedSourceRecord{err})
 		}
 		messageID := strings.TrimSuffix(captured.File.Name, defaults.ExtJSON.String())
