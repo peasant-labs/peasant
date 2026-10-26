@@ -74,11 +74,8 @@ type Runner struct {
 	GoBin       string
 	Concurrency int
 	Env         []string
-	// SerialPassB forces the RACE=1 partition pass to run one invocation at a
-	// time, so getrusage(RUSAGE_CHILDREN) attributes each partition test
-	// without cross-talk. The RACE=0 single pass is the whole suite and stays
-	// at Concurrency: serializing it makes the budget wall the sum of every
-	// package.
+	// SerialPassB forces the no-race pass to run one invocation at a time so
+	// getrusage(RUSAGE_CHILDREN) attributes per unit without cross-talk.
 	SerialPassB bool
 }
 
@@ -190,7 +187,7 @@ func (r *Runner) Run(ctx context.Context, plan *Plan, mode PassMode, race bool) 
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	if mode == ModeNoRace && race && r.SerialPassB {
+	if mode == ModeNoRace && r.SerialPassB {
 		concurrency = 1
 	}
 
