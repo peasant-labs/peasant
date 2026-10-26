@@ -875,7 +875,9 @@ async function runProjectPickers(browser, gate, theme, viewport, summary) {
       await pause(150)
       await probeProjectPicker(page, testCase, where, summary, theme)
       await shoot(page, gate, join(OUT, theme, viewport.id, `${testCase.name}.png`), where, {
-        contentSelector: '[data-tour="project-picker"]',
+        // Include the route heading and controls, not just the shared table:
+        // the mounted page is the surface, and its title distinguishes routes.
+        contentSelector: '.asb-page',
       })
       if (testCase.name !== 'home-projects') await followFirstProject(page, testCase, summary.projects, where)
       if (diagnostics.length) fail(`${where}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
