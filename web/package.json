@@ -45,7 +45,7 @@
   },
   "dependencies": {
     "@peasant-labs/fairtrade": "0.0.45",
-    "@peasant-labs/schema": "0.33.0",
+    "@peasant-labs/schema": "0.34.1",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
