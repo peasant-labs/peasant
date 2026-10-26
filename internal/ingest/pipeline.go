@@ -376,8 +376,14 @@ type Pipeline struct {
 	// run still owes its own report; a later harvest sees the stored row and
 	// owes nothing. It is not a selection signal: a recorded failure never
 	// decides whether a stored pair is indexed.
+	//
+	// laneCauseReportedThisRun is written and read only by the stored-content
+	// lane and the pair-repair lane. If one of them already reported a cause
+	// for a session, the other stays quiet for that same cause. A different
+	// cause still reports. The index lane does not use it.
 	unavailableSettledMu      sync.Mutex
 	unavailableSettledThisRun map[SessionID]struct{}
+	laneCauseReportedThisRun  map[laneCauseReport]struct{}
 
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
@@ -2226,7 +2232,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// A refusal about the source bytes is reported once. The audit row still
 		// records every attempt, and the parse still runs every harvest, so a
 		// repaired source is seen; only the user-facing repeat settles.
-		if !sourceRecordUnusable(err) || p.settleUnavailableSource(ctx, im.session.SessionID, writeLane) {
+		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, cause, writeLane) {
 			p.reportIndexRefusal(im.session.SessionID, err)
 		}
 		errMsg := err.Error()
@@ -3261,6 +3267,11 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 				piConsumedBytes = doc.consumedBytes
 			} else {
 				data, err = completeJSONLPrefix(data)
+				if err != nil {
+					// A record that is not complete JSON is a present source
+					// whose bytes cannot be used, distinct from a missing file.
+					err = malformedSourceRecord{cause: err}
+				}
 			}
 		}
 		if err != nil {

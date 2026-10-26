@@ -228,13 +228,15 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
 					continue
 				}
-				if sourceRecordUnusable(err) && !p.settleUnavailableSource(ctx, id, nil) {
-					// An earlier harvest already reported that this session's
-					// source cannot give it complete content, and the stored
-					// copy still serves. Recovery already ran above, so repaired
-					// bytes are still seen, but repeating the warning adds no
-					// fact the user can act on.
-					continue
+				if cause, ok := sourceUnavailableCause(err); ok {
+					if !p.settleUnavailableSource(ctx, id, cause, nil) || p.laneCauseAlreadyReported(id, cause) {
+						// An earlier harvest already reported this cause, or the
+						// pair-repair lane already reported it in this harvest.
+						// Recovery already ran above, so repaired bytes are
+						// still seen. A different cause still reports.
+						continue
+					}
+					p.markLaneCauseReported(id, cause)
 				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
 				p.reportSessionDiagnostic(id, DiagnosticEntry{

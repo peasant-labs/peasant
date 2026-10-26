@@ -292,22 +292,24 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 						t.Fatalf("unavailable source changed prior readable entries: %v %v", kept, err)
 					}
 					for _, diagnostic := range second.Diagnostics {
-						if diagnostic.ErrorType == "pair_repair_unavailable" {
+						if diagnostic.ErrorType == "pair_repair_unavailable" || diagnostic.ErrorType == "content_recovery_unavailable" {
 							t.Fatalf("unchanged unavailable source warned again: %+v", diagnostic)
 						}
 					}
-					found := false
+					// Harvest index runs stored-content recovery before pair
+					// repair, so the one report for this missing source may come
+					// from either lane. The other lane stays quiet.
+					found := 0
 					for _, diagnostic := range result.Diagnostics {
-						if diagnostic.ErrorType != "pair_repair_unavailable" ||
+						if (diagnostic.ErrorType != "pair_repair_unavailable" && diagnostic.ErrorType != "content_recovery_unavailable") ||
 							!strings.Contains(diagnostic.Location, id.String()) ||
-							!strings.Contains(diagnostic.Message, "could not be re-ingested") ||
 							diagnostic.Remediation == "" {
 							continue
 						}
-						found = true
+						found++
 					}
-					if !found {
-						t.Fatalf("the unavailable source was not reported with an actionable diagnostic: %+v", result.Diagnostics)
+					if found != 1 {
+						t.Fatalf("the unavailable source was reported %d times, want one actionable diagnostic: %+v", found, result.Diagnostics)
 					}
 				} else if len(result.Diagnostics) == 0 {
 					t.Fatalf("a refused repair reported nothing")

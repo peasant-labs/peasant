@@ -310,27 +310,15 @@ func (p *Pipeline) pairSourceAvailable(session DiscoveredSession) bool {
 // unusable names its real cause (a malformed record and its line) instead of
 // reading as a missing file.
 func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionID, source string, cause error, lane *storeWriteLane) {
-	if recorder, ok := p.metricsStore.(SourceAvailabilityStore); ok && !p.config.DryRun {
-		var changed bool
-		var err error
-		p.runStoreWrite(lane, func() {
-			changed, err = recorder.RecordSourceUnavailable(ctx, sid, SourceUnavailableNoSavedCopy)
-		})
-		if err != nil {
-			p.reportMetadataRefusal(string(sid), err)
-		} else if changed {
-			// Another lane in this harvest still owes its own report. A later
-			// harvest sees the stored row and does not.
-			p.markUnavailableRecordedThisRun(sid)
-		} else if !p.config.Force && !p.unavailableRecordedThisRun(sid) {
-			// Routine harvests stay quiet once an earlier harvest recorded the
-			// transition. An explicit --force run is the user acting on the
-			// remediation this diagnostic names, so it still has to hear that
-			// the repair did not take; staying silent there would read as
-			// success. A row written earlier in this same harvest does not
-			// count: this lane has not reported yet.
+	if causeClass, shaped := pairUnavailableCause(cause); shaped {
+		if !p.settleUnavailableSource(ctx, sid, causeClass, lane) || p.laneCauseAlreadyReported(sid, causeClass) {
+			// A routine harvest stays quiet once this cause is recorded, and
+			// so does this lane when stored-content recovery already reported
+			// the same cause in this harvest. A store, locator, or write fault
+			// is not a source cause: it is not recorded and keeps reporting.
 			return
 		}
+		p.markLaneCauseReported(sid, causeClass)
 	}
 	message := missingPairText(sid, source)
 	remediation := "Restore the original harness source and rerun harvest; the stored copy keeps serving meanwhile."
@@ -674,12 +662,13 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		// source cannot be acquired, the failure is the outcome. Falling back
 		// would try to read the missing or damaged pair and hide the error.
 		p.reportPairRepairUnavailable(ctx, entry.Session.SessionID, string(entry.Session.SourcePath), acquisition, writeLane)
-		// A routine harvest reports this refusal instead of failing on it, but
-		// only while a completed stored index is what still serves. An explicit
-		// --force run is the remediation the diagnostic names, so it keeps the
-		// failure: a person or a script has to be able to tell that the repair
-		// did not take.
-		if !p.config.Force && p.hasCompletedStoredIndex(ctx, entry.Session.SessionID) {
+		// A routine harvest reports a source-shaped refusal instead of failing
+		// on it, but only while a completed stored index is what still serves.
+		// A store, locator, or write fault keeps the failure even then. An
+		// explicit --force run is the remediation the diagnostic names, so it
+		// keeps the failure: a person or a script has to be able to tell that
+		// the repair did not take.
+		if !p.config.Force && sourceRecordUnusable(acquisition) && p.hasCompletedStoredIndex(ctx, entry.Session.SessionID) {
 			result.result.Error = nil
 			result.result.Status = DiffUnchanged
 		}
