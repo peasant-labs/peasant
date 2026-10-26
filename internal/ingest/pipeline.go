@@ -384,6 +384,12 @@ type Pipeline struct {
 	unavailableSettledMu      sync.Mutex
 	unavailableSettledThisRun map[SessionID]struct{}
 	laneCauseReportedThisRun  map[laneCauseReport]struct{}
+	// unroutedRepairs are forced repairs whose source could not be routed to
+	// native re-ingestion. They are counted once as failed sessions. A session
+	// the process path already failed is not counted again.
+	unroutedRepairMu   sync.Mutex
+	unroutedRepairs    []SessionResult
+	unroutedRepairSeen map[SessionID]struct{}
 
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
@@ -700,6 +706,7 @@ func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map
 func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) {
 	p.resetDiagnostics()
 	p.resetUnavailableSettledThisRun()
+	p.resetUnroutedRepairs()
 	p.locationCache = nil
 	p.seqCursorCache = nil
 	defer func() {
@@ -4295,6 +4302,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	refusedKinds []RecordKindRefusal,
 ) (*PipelineResult, error) {
 	prog := p.config.Progress
+	sessionResults = p.appendUnroutedRepairFailures(sessionResults)
 
 	// INDEX session_entries (best-effort, non-fatal).
 	// successfullyIndexed tracks successfully stored index results. Persistent
@@ -5147,8 +5155,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			// Native re-ingestion is the repair: prefer the session as
 			// discovery saw it, and fall back to the stored source locator
 			// when discovery did not offer it. A source that is gone is
-			// reported, not silently dropped.
-			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) {
+			// reported, not silently dropped. A forced run counts that as a
+			// failed session instead of indexing the damaged pair.
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) && !p.config.Force {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5159,7 +5168,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// selected sessions are checked, so no tree is walked and no pair is
 		// read for work this run does not owe.
 		if p.pairNeedsRepair(ctx, t.session.SessionID) {
-			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) {
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) && !p.config.Force {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5505,6 +5514,10 @@ func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, so
 		}
 	}
 	p.reportPairRepairUnavailable(ctx, sid, target.originalSourcePath, nil, nil)
+	// Returning false leaves the session out of the extract batch. A forced
+	// run still has to count that unrouted repair; the caller must not also
+	// index the stored pair, which is missing or damaged by definition.
+	p.noteUnroutedForcedRepair(ctx, sid, target.session.Harness, target.originalSourcePath)
 	return false
 }
 

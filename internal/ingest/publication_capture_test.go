@@ -438,18 +438,23 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				filesystem.mutateAfterReadAt = 2
 			}
 			manualResult := run()
-			if manualResult.Summary.Errors != 0 || manualResult.Summary.StoreError != nil {
-				t.Fatalf("manual reindex failed: %+v", manualResult)
+			// A forced reindex whose saved pair no longer matches and whose
+			// source is gone cannot be routed. The run fails so the miss is
+			// visible, and it does not index the damaged pair.
+			forcedUnrouted := cfg.Force && c.ReindexChangeManaged && c.ReindexRemoveSource
+			if manualResult.Summary.StoreError != nil || (manualResult.Summary.Errors != 0) != forcedUnrouted {
+				t.Fatalf("manual reindex errors = %d, want forced-unrouted %v: %+v", manualResult.Summary.Errors, forcedUnrouted, manualResult)
 			}
 			if manualResult.Summary.Indexed != *c.ExpectedManualIndexed {
 				t.Fatalf("manual indexed = %d want %d: %+v", manualResult.Summary.Indexed, *c.ExpectedManualIndexed, manualResult)
 			}
 			if c.ReindexChangeManaged {
 				// A managed pair whose transcript no longer matches its committed
-				// metadata is refused, not re-indexed: the refusal is a warning
-				// naming the session AND the checksum that failed, the run has no
-				// error, the last-good index is untouched, and the verified
-				// capture is still served.
+				// metadata is refused, not re-indexed. The refusal names the
+				// session. A forced run whose source is also gone reports that
+				// the repair could not be routed; every other reader reports
+				// the checksum that failed. The last-good index is untouched,
+				// and the verified capture is still served.
 				//
 				// Either strict reader of the committed pair may be the one that
 				// meets it: the reconciliation walk, which reads a pair only when
@@ -457,9 +462,11 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				// capture, which verifies the pair of every session it evaluates.
 				warned := false
 				for _, diagnostic := range manualResult.Diagnostics {
-					reportedBy := diagnostic.ErrorType == "artifact_recovery_incomplete" || diagnostic.ErrorType == "index_refused"
-					if reportedBy && strings.Contains(diagnostic.Message, c.ID) && diagnostic.Remediation != "" &&
-						strings.Contains(diagnostic.Message, "transcript checksum does not match committed metadata") {
+					namesSession := strings.Contains(diagnostic.Message, c.ID) && diagnostic.Remediation != ""
+					checksum := (diagnostic.ErrorType == "artifact_recovery_incomplete" || diagnostic.ErrorType == "index_refused") &&
+						strings.Contains(diagnostic.Message, "transcript checksum does not match committed metadata")
+					unrouted := diagnostic.ErrorType == "pair_repair_unavailable"
+					if namesSession && (checksum || unrouted) {
 						warned = true
 					}
 				}

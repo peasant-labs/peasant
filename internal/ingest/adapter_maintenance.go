@@ -304,11 +304,12 @@ func (p *Pipeline) pairSourceAvailable(session DiscoveredSession) bool {
 
 // reportPairRepairUnavailable names a session whose saved pair is missing or
 // damaged and whose native source could not be reached to repair it. The
-// stored copy keeps serving meanwhile; the repair runs automatically once the
-// source is available again. A non-nil cause is the acquisition failure that
-// stopped the repair, and it leads the message so a source that is present but
-// unusable names its real cause (a malformed record and its line) instead of
-// reading as a missing file.
+// repair runs automatically once the source is available again. A completed
+// index is the only state that still has something to serve, so the message
+// promises that copy only then. A non-nil cause is the acquisition failure
+// that stopped the repair, and it leads the message so a source that is
+// present but unusable names its real cause (a malformed record and its line)
+// instead of reading as a missing file.
 func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionID, source string, cause error, lane *storeWriteLane) {
 	if causeClass, shaped := pairUnavailableCause(cause); shaped {
 		if !p.settleUnavailableSource(ctx, sid, causeClass, lane) || p.laneCauseAlreadyReported(sid, causeClass) {
@@ -320,11 +321,19 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 		}
 		p.markLaneCauseReported(sid, causeClass)
 	}
+	serving := p.hasCompletedStoredIndex(ctx, sid)
 	message := missingPairText(sid, source)
-	remediation := "Restore the original harness source and rerun harvest; the stored copy keeps serving meanwhile."
+	remediation := "Restore the original harness source and rerun harvest."
+	if serving {
+		remediation = "Restore the original harness source and rerun harvest; the stored copy keeps serving meanwhile."
+	}
 	if cause != nil {
-		message = fmt.Sprintf("session %s could not be re-ingested from its original source %q: %v; the stored copy keeps its last-good entries", sid, source, cause)
-		remediation = "Restore a complete, supported transcript at the original source and rerun harvest; the stored copy keeps serving meanwhile."
+		message = fmt.Sprintf("session %s could not be re-ingested from its original source %q: %v", sid, source, cause)
+		remediation = "Restore a complete, supported transcript at the original source and rerun harvest."
+		if serving {
+			message += "; the stored copy keeps its last-good entries"
+			remediation = "Restore a complete, supported transcript at the original source and rerun harvest; the stored copy keeps serving meanwhile."
+		}
 	}
 	p.reportSessionDiagnostic(sid, DiagnosticEntry{
 		ErrorType:   "pair_repair_unavailable",
@@ -334,17 +343,113 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 	})
 }
 
-// hasCompletedStoredIndex reports whether an index attempt was ever stamped for
-// the session, which is what makes a stored copy exist to serve while its pair
-// cannot be rebuilt. A row with no stamp has never served anything, so its
-// failed install stays a real error.
+// hasCompletedStoredIndex reports whether the stored index is finished and can
+// keep serving while its pair cannot be rebuilt. The store's rule is a positive
+// producer revision and a recorded completion time (sessions.index_version > 0
+// AND indexed_at IS NOT NULL). IndexerVersion is that producer revision;
+// IndexedAt is the completion time. A legacy row with a producer revision and
+// no completion time has never served anything, so its failed install stays a
+// real error. A missing row, or a store that cannot answer, has nothing to serve.
 func (p *Pipeline) hasCompletedStoredIndex(ctx context.Context, sid SessionID) bool {
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
 		return false
 	}
 	state, err := reader.ReadIndexState(ctx, sid)
-	return err == nil && state != nil && state.IndexerVersion > 0
+	return err == nil && completedStoredIndex(state)
+}
+
+// completedStoredIndex is the store rule for a finished index, read from one
+// snapshot. A nil state is no row. The format version is not part of the rule:
+// a format stamp without a producer revision and a completion time has not served.
+func completedStoredIndex(state *SessionIndexState) bool {
+	return state != nil && state.IndexerVersion > 0 && state.IndexedAt != nil
+}
+
+// noteUnroutedForcedRepair records one forced repair that could not be sent to
+// native re-ingestion. A routine harvest does not call through: the diagnostic
+// is the whole report. A dry run plans and does not fail sessions. The same
+// session is recorded once. The process path's own error, when it already
+// failed the session, is the one the summary counts.
+func (p *Pipeline) noteUnroutedForcedRepair(ctx context.Context, sid SessionID, harness Harness, source string) {
+	if !p.config.Force || p.config.DryRun {
+		return
+	}
+	if harness == "" {
+		harness = p.storedSessionHarness(ctx, sid)
+	}
+	if !p.includesManagedSession(sid, harness) {
+		return
+	}
+	p.unroutedRepairMu.Lock()
+	defer p.unroutedRepairMu.Unlock()
+	if p.unroutedRepairSeen == nil {
+		p.unroutedRepairSeen = make(map[SessionID]struct{})
+	}
+	if _, seen := p.unroutedRepairSeen[sid]; seen {
+		return
+	}
+	p.unroutedRepairSeen[sid] = struct{}{}
+	p.unroutedRepairs = append(p.unroutedRepairs, SessionResult{
+		SessionID: sid,
+		Harness:   harness,
+		Status:    DiffUpdated,
+		Error:     unroutedRepairError(sid, source),
+	})
+}
+
+func unroutedRepairError(sid SessionID, source string) error {
+	if source == "" {
+		return fmt.Errorf("repair session %s: no recorded original source could be reached during this harvest, so the forced repair did not take and nothing was indexed; restore the original harness source and rerun harvest", sid)
+	}
+	return fmt.Errorf("repair session %s: original source %q could not be reached during this harvest, so the forced repair did not take and nothing was indexed; restore that source and rerun harvest", sid, source)
+}
+
+// storedSessionHarness reads the harness recorded with the index snapshot.
+// An unrouted repair may have no discovered session to name it.
+func (p *Pipeline) storedSessionHarness(ctx context.Context, sid SessionID) Harness {
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	if !ok {
+		return ""
+	}
+	state, err := reader.ReadIndexState(ctx, sid)
+	if err != nil || state == nil {
+		return ""
+	}
+	return state.Harness
+}
+
+// appendUnroutedRepairFailures adds forced repairs that never entered the
+// process path. A session that already has an error is left as the process
+// path recorded it, so the same repair is not counted twice.
+func (p *Pipeline) appendUnroutedRepairFailures(results []SessionResult) []SessionResult {
+	p.unroutedRepairMu.Lock()
+	pending := append([]SessionResult(nil), p.unroutedRepairs...)
+	p.unroutedRepairMu.Unlock()
+	if len(pending) == 0 {
+		return results
+	}
+	failed := make(map[SessionID]bool, len(results))
+	for _, result := range results {
+		if result.Error != nil {
+			failed[result.SessionID] = true
+		}
+	}
+	for _, result := range pending {
+		if failed[result.SessionID] {
+			continue
+		}
+		results = append(results, result)
+		failed[result.SessionID] = true
+	}
+	return results
+}
+
+func (p *Pipeline) resetUnroutedRepairs() {
+	p.unroutedRepairMu.Lock()
+	defer p.unroutedRepairMu.Unlock()
+	p.unroutedRepairs = nil
+	p.unroutedRepairSeen = nil
 }
 
 // pairRepairInScope applies the run's explicit harness, session and age filters
@@ -460,6 +565,9 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	for i, outcome := range outcomes {
 		if outcome.unavailableSource != nil {
 			p.reportPairRepairUnavailable(ctx, ids[i], *outcome.unavailableSource, nil, nil)
+			// The session was not queued, so the process path will not record
+			// this failure. An explicit forced run still has to count it.
+			p.noteUnroutedForcedRepair(ctx, ids[i], outcome.unavailableHarness, *outcome.unavailableSource)
 		}
 		if outcome.damaged {
 			// The pair is not a readable index input. Record it so the index
@@ -494,11 +602,12 @@ const (
 // pairRepairOutcome carries one candidate's decision from a parallel worker
 // back to the serial pass that applies it in candidate order.
 type pairRepairOutcome struct {
-	unavailableSource *string
-	kind              pairRepairOutcomeKind
-	queuedIndex       int
-	metadataPath      string
-	entry             DiffEntry
+	unavailableSource  *string
+	unavailableHarness Harness
+	kind               pairRepairOutcomeKind
+	queuedIndex        int
+	metadataPath       string
+	entry              DiffEntry
 	// damaged reports that the candidate's saved pair is missing or damaged,
 	// whether or not this pass found a native source to repair it from. The
 	// index inventory must not re-attempt such a candidate: its pair is not a
@@ -544,7 +653,7 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		}
 		if reconstructed == nil {
 			source := ""
-			return pairRepairOutcome{damaged: true, unavailableSource: &source}
+			return pairRepairOutcome{damaged: true, unavailableSource: &source, unavailableHarness: p.storedSessionHarness(ctx, sid)}
 		}
 		session = *reconstructed
 		if !p.pairRepairInScope(session, startMs) {
@@ -555,7 +664,7 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 	}
 	if !p.pairSourceAvailable(session) {
 		source := session.SourcePath.String()
-		return pairRepairOutcome{damaged: true, unavailableSource: &source}
+		return pairRepairOutcome{damaged: true, unavailableSource: &source, unavailableHarness: session.Harness}
 	}
 	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
 		Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
@@ -591,6 +700,10 @@ func (p *Pipeline) pairRepairTargets(ctx context.Context, scanned []reindexTarge
 		}
 		if session == nil {
 			p.reportPairRepairUnavailable(ctx, sid, "", nil, nil)
+			// No target is added, so the reindex process path never sees this
+			// session. A forced run still has to count the repair that could
+			// not be routed.
+			p.noteUnroutedForcedRepair(ctx, sid, p.storedSessionHarness(ctx, sid), "")
 			continue
 		}
 		if !p.pairRepairInScope(*session, startMs) {

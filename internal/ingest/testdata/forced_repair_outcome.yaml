@@ -1,0 +1,118 @@
+# A repair that cannot reach its source. A routine harvest reports it and does
+# not fail the run. An explicit forced run counts it as a failed session and
+# does not index it. The cause text promises a stored copy only when a
+# completed index is what still serves.
+required_names:
+  - harvest-missing-routine
+  - harvest-missing-forced
+  - harvest-malformed-routine
+  - harvest-malformed-forced
+  - reindex-missing-routine
+  - reindex-missing-forced
+  - reindex-malformed-routine
+  - reindex-malformed-forced
+  - harvest-malformed-no-index
+  - harvest-missing-no-index
+  - reindex-unrecorded-routine
+  - reindex-unrecorded-forced
+cases:
+  - name: harvest-missing-routine
+    command: harvest
+    source: missing
+    completed_index: true
+    want_errors: false
+    want_unindexed: true
+    want_promise: serving
+    want_mentions: "is unavailable"
+  - name: harvest-missing-forced
+    command: harvest
+    source: missing
+    force: true
+    completed_index: true
+    want_errors: true
+    want_unindexed: true
+    want_promise: serving
+    want_mentions: "is unavailable"
+  - name: harvest-malformed-routine
+    command: harvest
+    source: malformed
+    completed_index: true
+    want_errors: false
+    want_unindexed: true
+    want_promise: serving
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  - name: harvest-malformed-forced
+    command: harvest
+    source: malformed
+    force: true
+    completed_index: true
+    want_errors: true
+    want_unindexed: true
+    want_promise: serving
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  - name: reindex-missing-routine
+    command: reindex
+    source: missing
+    completed_index: true
+    want_errors: false
+    want_promise: serving
+    want_mentions: "is unavailable"
+  - name: reindex-missing-forced
+    command: reindex
+    source: missing
+    force: true
+    completed_index: true
+    want_errors: true
+    want_unindexed: true
+    want_promise: serving
+    want_mentions: "is unavailable"
+  - name: reindex-malformed-routine
+    command: reindex
+    source: malformed
+    completed_index: true
+    want_errors: false
+    want_unindexed: true
+    want_promise: serving
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  - name: reindex-malformed-forced
+    command: reindex
+    source: malformed
+    force: true
+    completed_index: true
+    want_errors: true
+    want_unindexed: true
+    want_promise: serving
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  - name: harvest-malformed-no-index
+    command: harvest
+    source: malformed
+    completed_index: false
+    want_errors: true
+    want_unindexed: true
+    want_promise: neutral
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  - name: harvest-missing-no-index
+    command: harvest
+    source: missing
+    completed_index: false
+    want_errors: false
+    want_unindexed: true
+    want_promise: neutral
+    want_mentions: "is unavailable"
+  - name: reindex-unrecorded-routine
+    command: reindex
+    source: unrecorded
+    completed_index: false
+    want_errors: false
+    want_unindexed: true
+    want_promise: neutral
+    want_mentions: "no recorded original source"
+  - name: reindex-unrecorded-forced
+    command: reindex
+    source: unrecorded
+    force: true
+    completed_index: false
+    want_errors: true
+    want_unindexed: true
+    want_promise: neutral
+    want_mentions: "no recorded original source"
