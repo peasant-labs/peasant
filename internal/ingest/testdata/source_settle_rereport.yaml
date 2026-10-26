@@ -10,6 +10,7 @@ required_names:
   - forced_repeat
   - cause_change
   - changed_cause_quiet
+  - missing_after_unusable_quiet
 
 steps:
   - name: first_missing
@@ -35,5 +36,14 @@ steps:
 
   - name: changed_cause_quiet
     cause: original-source-present-record-unusable
+    want_report: false
+    want_stored: original-source-present-record-unusable
+
+  # The reverse observation: a later harvest sees the file gone where it last
+  # saw unusable bytes. The stored cause is the more specific one, so it stays,
+  # and nothing is reported: a one-way replacement is what keeps a routine
+  # harvest quiet instead of re-reporting on every run.
+  - name: missing_after_unusable_quiet
+    cause: original-source-unavailable-no-usable-saved-copy
     want_report: false
     want_stored: original-source-present-record-unusable

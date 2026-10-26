@@ -3,10 +3,10 @@ package ingest_test
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -24,24 +24,39 @@ var forcedRepairOutcomeFixtureData []byte
 type forcedRepairOutcomeFixtures struct {
 	Required []string `yaml:"required_names"`
 	Cases    []struct {
-		Name           string `yaml:"name"`
-		Command        string `yaml:"command"`
-		Source         string `yaml:"source"`
-		Force          bool   `yaml:"force"`
-		CompletedIndex bool   `yaml:"completed_index"`
-		WantErrors     bool   `yaml:"want_errors"`
-		WantUnindexed  bool   `yaml:"want_unindexed"`
-		WantPromise    string `yaml:"want_promise"`
-		WantMentions   string `yaml:"want_mentions"`
+		Name            string `yaml:"name"`
+		Command         string `yaml:"command"`
+		Source          string `yaml:"source"`
+		StoredPair      string `yaml:"stored_pair"`
+		Since           string `yaml:"since"`
+		Force           bool   `yaml:"force"`
+		CompletedIndex  bool   `yaml:"completed_index"`
+		WantErrors      bool   `yaml:"want_errors"`
+		WantIndexed     int    `yaml:"want_indexed"`
+		WantUpdated     int    `yaml:"want_updated"`
+		WantDiagnostics int    `yaml:"want_diagnostics"`
+		WantPromise     string `yaml:"want_promise"`
+		WantMentions    string `yaml:"want_mentions"`
 	} `yaml:"cases"`
 }
 
-// storedCopyPromises are the clauses that claim a finished index is still
-// serving. A row with no completed index must not carry any of them.
-var storedCopyPromises = []string{
+// storedCopyClaims are the clauses that tell the reader a stored copy is still
+// there to read. Every message that promises one uses one of these, so a row
+// with no completed index must carry none of them. The list is a phrase scan on
+// purpose: the honest messages also say "no usable saved copy" and "nothing is
+// served", and a word scan on "copy" or "served" would flag those as promises.
+var storedCopyClaims = []string{
 	"keeps serving",
+	"keeps it serving",
+	"keeps serving meanwhile",
+	"keeps its last-good",
+	"keeps its last good",
 	"last-good",
 	"stored copy keeps",
+	"saved copy keeps",
+	"still served",
+	"still serves",
+	"remains served",
 }
 
 // TestForcedRepairOutcomeFailsEveryUnroutedShape runs the production harvest
@@ -70,13 +85,29 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 		default:
 			t.Fatalf("fixture %s names unknown source %q", fixture.Name, fixture.Source)
 		}
-		switch fixture.WantPromise {
-		case "serving", "neutral":
+		switch fixture.StoredPair {
+		case "", "damaged-identity":
 		default:
-			t.Fatalf("fixture %s names unknown promise %q", fixture.Name, fixture.WantPromise)
+			t.Fatalf("fixture %s names unknown stored pair %q", fixture.Name, fixture.StoredPair)
 		}
-		if fixture.WantMentions == "" {
-			t.Fatalf("fixture %s asserts no diagnostic text", fixture.Name)
+		switch fixture.Since {
+		case "", "in-window", "out-of-window":
+		default:
+			t.Fatalf("fixture %s names unknown since window %q", fixture.Name, fixture.Since)
+		}
+		if fixture.WantDiagnostics == 0 {
+			if fixture.WantMentions != "" {
+				t.Fatalf("fixture %s asserts text on a run that owes no diagnostic", fixture.Name)
+			}
+		} else {
+			switch fixture.WantPromise {
+			case "serving", "neutral":
+			default:
+				t.Fatalf("fixture %s names unknown promise %q", fixture.Name, fixture.WantPromise)
+			}
+			if fixture.WantMentions == "" {
+				t.Fatalf("fixture %s asserts no diagnostic text", fixture.Name)
+			}
 		}
 		names[fixture.Name] = true
 	}
@@ -109,22 +140,7 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 			meta.ModelHarness = ingest.HarnessClaudeCode
 			meta.Source.Format = ingest.SourceFormatJSONL
 			meta.Source.FilePath = nativePath
-			meta.ContentHash = schema.ComputeTranscriptHash(valid)
-			encoded, err := json.Marshal(meta)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
-				t.Fatal(err)
-			}
-			pair, err := ingest.NewManagedArtifact(encoded, valid)
-			if err != nil {
-				t.Fatal(err)
-			}
-			mirrored := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: pair}})
-			if len(mirrored) != 1 || mirrored[0].Err != nil || !mirrored[0].Mirrored {
-				t.Fatalf("seed stored artifact identity: %+v", mirrored)
-			}
+			artifact := seedStoredPair(t, database, meta, valid)
 			if fixture.CompletedIndex {
 				writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 					SessionID: id, IndexVersion: 1, IndexerVersion: 15, IndexedAtMs: 1700000000000,
@@ -143,9 +159,21 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 			// A stored transcript that does not match the recorded identity makes
 			// the pair need repair when the file is present. Leaving it absent
 			// is the missing-pair shape both commands already select.
+			storedDir := ingest.SessionDir(testOutputDir, testutil.TestHostSlug, id.String(), "")
 			if fixture.Source == "malformed" {
-				storedPath := filepath.Join(ingest.SessionDir(testOutputDir, testutil.TestHostSlug, id.String(), ""), id.String()+"--transcript.jsonl")
-				if err := memfs.WriteFile(storedPath, []byte(damagedSourceTranscript), 0600); err != nil {
+				if err := memfs.WriteFile(filepath.Join(storedDir, id.String()+"--transcript.jsonl"), []byte(damagedSourceTranscript), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if fixture.StoredPair == "damaged-identity" {
+				// Both halves are readable, and the transcript is not the bytes the
+				// row recorded. The pair still needs repair, and the metadata that
+				// survived is what gives the session a start the run's age filter can
+				// compare against.
+				if err := memfs.WriteFile(filepath.Join(storedDir, id.String()+"--metadata.json"), artifact.MetadataJSON, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := memfs.WriteFile(filepath.Join(storedDir, id.String()+"--transcript.jsonl"), []byte(distinctStoredTranscript), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -158,6 +186,16 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Force = fixture.Force
 			cfg.Reindex = fixture.Command == "reindex"
+			switch fixture.Since {
+			case "in-window":
+				// Before the recorded session start, so the session is this run's work.
+				since := time.UnixMilli(1577836800000) // 2020-01-01T00:00:00Z
+				cfg.Since = &since
+			case "out-of-window":
+				// After the recorded session start, so the age filter excludes it.
+				since := time.UnixMilli(1748736000000) // 2025-06-01T00:00:00Z
+				cfg.Since = &since
+			}
 			// The golden database carries other rows. Scope the run to this
 			// session so their repair state cannot change the counts.
 			cfg.AllowedSessionIDs = map[ingest.SessionID]bool{id: true}
@@ -175,14 +213,26 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 			}
 
 			// Harvest reports the pair diagnostic itself. Reindex runs stored-content
-			// recovery first, so the pair lane stays quiet when that lane already
-			// named the same cause; the fault is still reported, just once.
-			reports := diagnosticsFor(result, id, "pair_repair_unavailable")
-			if len(reports) == 1 {
-				text := reports[0].Message + "\n" + reports[0].Remediation
-				if !strings.Contains(text, fixture.WantMentions) {
-					t.Fatalf("diagnostic %q does not name %q", text, fixture.WantMentions)
+			// recovery first, so the stored-content lane is the one that names a
+			// missing or malformed source there, and the pair lane stays quiet for
+			// that same cause. Whichever lane carries it, the wording is the same
+			// contract, so the text is asserted on the diagnostic that states it and
+			// the total is asserted separately.
+			reported := sourceUnavailableDiagnostics(result, id)
+			if len(reported) != fixture.WantDiagnostics {
+				t.Fatalf("the unavailable source was reported %d times, want %d: %+v", len(reported), fixture.WantDiagnostics, result.Diagnostics)
+			}
+			if fixture.WantDiagnostics > 0 {
+				var reporting []ingest.DiagnosticEntry
+				for _, diagnostic := range reported {
+					if strings.Contains(diagnosticText(diagnostic), fixture.WantMentions) {
+						reporting = append(reporting, diagnostic)
+					}
 				}
+				if len(reporting) != 1 {
+					t.Fatalf("want exactly one diagnostic naming %q, got %+v", fixture.WantMentions, reported)
+				}
+				text := diagnosticText(reporting[0])
 				switch fixture.WantPromise {
 				case "serving":
 					if !mentionsStoredCopyPromise(text) {
@@ -193,51 +243,32 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 						t.Fatalf("a row with no completed index was promised a stored copy: %q", text)
 					}
 				}
-			} else if fixture.Command == "harvest" || len(diagnosticsFor(result, id, "content_recovery_unavailable")) == 0 {
-				t.Fatalf("want the pair diagnostic, or on reindex the one content diagnostic for the same cause; got %+v", result.Diagnostics)
 			}
-			sessionErrors := errorsFor(result, id)
+			sessionErrors := failedSessionCount(result, id)
 			if fixture.WantErrors {
 				if result.Summary.Errors == 0 || sessionErrors != 1 {
 					t.Fatalf("forced or unserving repair errors = summary %d session %d, want summary > 0 and exactly one session error; summary=%+v", result.Summary.Errors, sessionErrors, result.Summary)
 				}
 			} else if result.Summary.Errors != 0 || sessionErrors != 0 {
-				t.Fatalf("a routine repair was counted as a failed session: summary=%+v sessionErrors=%d diagnostics=%+v", result.Summary, sessionErrors, reports)
+				t.Fatalf("a routine repair was counted as a failed session: summary=%+v sessionErrors=%d diagnostics=%+v", result.Summary, sessionErrors, result.Diagnostics)
 			}
-			if fixture.WantUnindexed && result.Summary.Indexed != 0 {
-				t.Fatalf("the unrepaired session was indexed: %+v", result.Summary)
+			if result.Summary.Indexed != fixture.WantIndexed {
+				t.Fatalf("indexed %d sessions, want %d: %+v", result.Summary.Indexed, fixture.WantIndexed, result.Summary)
+			}
+			if result.Summary.Updated != fixture.WantUpdated {
+				t.Fatalf("updated %d sessions, want %d: the run must still process every repair it kept: %+v", result.Summary.Updated, fixture.WantUpdated, result.Summary)
 			}
 		})
 	}
 }
 
 func mentionsStoredCopyPromise(text string) bool {
-	for _, phrase := range storedCopyPromises {
+	for _, phrase := range storedCopyClaims {
 		if strings.Contains(text, phrase) {
 			return true
 		}
 	}
 	return false
-}
-
-func diagnosticsFor(result *ingest.PipelineResult, id ingest.SessionID, errorType string) []ingest.DiagnosticEntry {
-	var found []ingest.DiagnosticEntry
-	for _, diagnostic := range result.Diagnostics {
-		if diagnostic.ErrorType == errorType && strings.Contains(diagnostic.Location, id.String()) {
-			found = append(found, diagnostic)
-		}
-	}
-	return found
-}
-
-func errorsFor(result *ingest.PipelineResult, id ingest.SessionID) int {
-	count := 0
-	for _, session := range result.Sessions {
-		if session.SessionID == id && session.Error != nil {
-			count++
-		}
-	}
-	return count
 }
 
 func clearRecordedSource(t *testing.T, ctx context.Context, database *store.Store, id ingest.SessionID) {

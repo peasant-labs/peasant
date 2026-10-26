@@ -1,0 +1,32 @@
+# What one harvest's session results look like once the forced repairs that never
+# reached the process path are appended to them.
+#
+# A scheduled repair that no source could route is counted as a failed session
+# once. A session the results already carry is left as the process path recorded
+# it: a pre-failed session keeps that error instead of gaining a second row, and
+# a session the process path settled is not failed by a selection-time note it
+# outgrew. The pending list may name one session more than once; the append still
+# emits one row.
+required_names:
+  - duplicate_pending_emits_one_row
+  - pre_failed_keeps_process_error
+  - settled_session_is_not_failed
+cases:
+  - name: duplicate_pending_emits_one_row
+    pending: [session-a, session-a]
+    results: []
+    want_appended: [session-a]
+
+  - name: pre_failed_keeps_process_error
+    pending: [session-a, session-b]
+    results:
+      - session: session-a
+        failed: true
+    want_appended: [session-b]
+
+  - name: settled_session_is_not_failed
+    pending: [session-a, session-b]
+    results:
+      - session: session-a
+        failed: false
+    want_appended: [session-b]

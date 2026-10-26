@@ -298,18 +298,17 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 					}
 					// Harvest index runs stored-content recovery before pair
 					// repair, so the one report for this missing source may come
-					// from either lane. The other lane stays quiet.
-					found := 0
-					for _, diagnostic := range result.Diagnostics {
-						if (diagnostic.ErrorType != "pair_repair_unavailable" && diagnostic.ErrorType != "content_recovery_unavailable") ||
-							!strings.Contains(diagnostic.Location, id.String()) ||
-							diagnostic.Remediation == "" {
-							continue
-						}
-						found++
+					// from either lane. The other lane stays quiet, and the
+					// message has to name the session it is about.
+					reported := sourceUnavailableDiagnostics(result, id)
+					if len(reported) != 1 {
+						t.Fatalf("the unavailable source was reported %d times, want one actionable diagnostic: %+v", len(reported), result.Diagnostics)
 					}
-					if found != 1 {
-						t.Fatalf("the unavailable source was reported %d times, want one actionable diagnostic: %+v", found, result.Diagnostics)
+					if reported[0].Remediation == "" {
+						t.Fatalf("the unavailable-source diagnostic carries no remediation: %+v", reported[0])
+					}
+					if !strings.Contains(reported[0].Message, id.String()) {
+						t.Fatalf("the unavailable-source diagnostic does not name session %s: %q", id, reported[0].Message)
 					}
 				} else if len(result.Diagnostics) == 0 {
 					t.Fatalf("a refused repair reported nothing")

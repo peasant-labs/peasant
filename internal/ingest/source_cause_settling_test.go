@@ -2,7 +2,6 @@ package ingest_test
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -128,21 +127,11 @@ func testHarvestIndexReportsOneCause(t *testing.T, wantReason string) {
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh}),
 	}
 	result := runCauseHarvest(t, memfs, adapters, true, database)
-	contentAndPair := 0
-	indexReports := 0
-	for _, diagnostic := range diagnosticsForSession(result, id) {
-		switch diagnostic.ErrorType {
-		case "content_recovery_unavailable", "pair_repair_unavailable":
-			contentAndPair++
-		case "index_refused":
-			indexReports++
-		}
+	if contentAndPair := len(sourceUnavailableDiagnostics(result, id)); contentAndPair != 1 {
+		t.Fatalf("content and pair lanes reported the same cause %d times, want 1: %+v", contentAndPair, sessionDiagnostics(result, id))
 	}
-	if contentAndPair != 1 {
-		t.Fatalf("content and pair lanes reported the same cause %d times, want 1: %+v", contentAndPair, diagnosticsForSession(result, id))
-	}
-	if indexReports != 1 {
-		t.Fatalf("index lane report changed: got %d index_refused, want 1: %+v", indexReports, diagnosticsForSession(result, id))
+	if indexReports := len(typedSessionDiagnostics(result, id, "index_refused")); indexReports != 1 {
+		t.Fatalf("index lane report changed: got %d index_refused, want 1: %+v", indexReports, sessionDiagnostics(result, id))
 	}
 	assertStoredCause(t, database, id, wantReason)
 }
@@ -184,7 +173,7 @@ func testPairLaneStoreFaultKeepsFailure(t *testing.T, fault string) {
 		t.Fatalf("store fault wrote a settle row: %v %v", reason, err)
 	}
 	reported := false
-	for _, diagnostic := range diagnosticsForSession(result, id) {
+	for _, diagnostic := range sessionDiagnostics(result, id) {
 		if strings.Contains(diagnostic.Message, fault) {
 			reported = true
 		}
@@ -206,22 +195,7 @@ func seedRepairableSession(t *testing.T, database *store.Store, memfs *testutil.
 	meta.ModelHarness = ingest.HarnessClaudeCode
 	meta.Source.Format = ingest.SourceFormatJSONL
 	meta.Source.FilePath = nativePath
-	meta.ContentHash = schema.ComputeTranscriptHash([]byte(missingPairNativeTranscript))
-	if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
-		t.Fatal(err)
-	}
-	encoded, err := json.Marshal(meta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pair, err := ingest.NewManagedArtifact(encoded, []byte(missingPairNativeTranscript))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mirrored := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: pair}})
-	if len(mirrored) != 1 || mirrored[0].Err != nil || !mirrored[0].Mirrored {
-		t.Fatalf("seed pair identity: %+v", mirrored)
-	}
+	seedStoredPair(t, database, meta, []byte(missingPairNativeTranscript))
 	if incomplete {
 		seedStalePreviewCapture(t, ctx, database, id)
 	} else {
@@ -272,26 +246,11 @@ func runCauseHarvest(t *testing.T, memfs *testutil.MemFS, adapters map[ingest.Ha
 	return result
 }
 
-func diagnosticsForSession(result *ingest.PipelineResult, id ingest.SessionID) []ingest.DiagnosticEntry {
-	var found []ingest.DiagnosticEntry
-	for _, diagnostic := range result.Diagnostics {
-		if strings.Contains(diagnostic.Location, id.String()) || strings.Contains(diagnostic.Message, id.String()) {
-			found = append(found, diagnostic)
-		}
-	}
-	return found
-}
-
 func assertSourceReports(t *testing.T, result *ingest.PipelineResult, id ingest.SessionID, want int, mentions string) {
 	t.Helper()
-	var matched []ingest.DiagnosticEntry
-	for _, diagnostic := range diagnosticsForSession(result, id) {
-		if diagnostic.ErrorType == "content_recovery_unavailable" || diagnostic.ErrorType == "pair_repair_unavailable" {
-			matched = append(matched, diagnostic)
-		}
-	}
+	matched := sourceUnavailableDiagnostics(result, id)
 	if len(matched) != want {
-		t.Fatalf("want %d source diagnostic(s), got %+v", want, diagnosticsForSession(result, id))
+		t.Fatalf("want %d source diagnostic(s), got %+v", want, sessionDiagnostics(result, id))
 	}
 	if want == 0 {
 		return

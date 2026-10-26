@@ -4,8 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/completed_stored_index.yaml
@@ -41,9 +39,7 @@ func (s completedIndexStateStore) ReadIndexState(context.Context, SessionID) (*S
 // The format stamp is not a substitute for either half.
 func TestCompletedStoredIndexMatchesTheStoreRule(t *testing.T) {
 	var fixtures completedStoredIndexFixtures
-	if err := yaml.Unmarshal(completedStoredIndexFixtureData, &fixtures); err != nil {
-		t.Fatal(err)
-	}
+	decodeOneFixture(t, completedStoredIndexFixtureData, &fixtures, "completed-index fixture")
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || names[fixture.Name] {
@@ -51,11 +47,7 @@ func TestCompletedStoredIndexMatchesTheStoreRule(t *testing.T) {
 		}
 		names[fixture.Name] = true
 	}
-	for _, name := range fixtures.Required {
-		if !names[name] {
-			t.Fatalf("missing completed-index fixture %s", name)
-		}
-	}
+	requireNamedCases(t, "completed-index fixture", fixtures.Required, names)
 	sid := SessionID("11111111-1111-1111-1111-111111111111")
 	for _, fixture := range fixtures.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
