@@ -53,8 +53,10 @@ var ErrPullNotFound = errors.New("village pull transcript not found (404): not p
 // ErrPullContractIncompatible is wrapped (via %w) into the actionable
 // negotiation-failure messages returned by NegotiatePull when the village's
 // advertised pull window is MISSING (village too old) or this CLI's pull-contract
-// version falls OUTSIDE the advertised window. Callers classify with errors.Is;
-// The pull pipeline maps it to PullStatus "contract-error".
+// version falls OUTSIDE the advertised window, and into the pull GETs' errors
+// when the village refuses the requested pull contract (406) or serves an
+// envelope this CLI does not read. Callers classify with errors.Is; the pull
+// pipeline maps it to PullStatus "contract-error".
 var ErrPullContractIncompatible = errors.New("village pull contract incompatible: peasant online's pull window is absent or excludes this CLI's pull-contract version")
 
 // --- Pull-window negotiation (stricter than push) ---
@@ -110,10 +112,15 @@ func pullContractError(cliMin, cliCurrent, min, current schema.PushContractVersi
 // the push negotiate(): a MISSING window is a hard error
 // (villageTooOldForPullError), not a fail-open passthrough.
 //
-// The CLI sends no version on the pull GETs, so the village alone chooses the
-// envelope it serves. The negotiated version is recorded in the pull manifest,
-// and the client keeps it so the pull GETs decode exactly that envelope: at
-// 0.3.0 and later a row carrying only the 0.2.0 account strings is refused.
+// The pull GETs ask for this CLI's newest envelope in the
+// schema.PullContractHeader request header. A village that advertises
+// pullContractMaxVersion serves the highest envelope it supports at or below
+// that; an older village ignores the header and serves its advertised current
+// envelope. The negotiated version is the envelope expected, and it is recorded
+// in the pull manifest. Each pull response names the envelope it carries in the
+// same header and is decoded as exactly that envelope; a response without the
+// header is decoded as the negotiated one. At 0.3.0 and later a row carrying
+// only the 0.2.0 account strings is refused.
 //
 // This is the explicit NEGOTIATE stage of the pull pipeline
 // (RESOLVE → AUTH-CHECK → NEGOTIATE → FETCH-META → …). The pipeline calls it
@@ -142,12 +149,17 @@ func (c *VillageClient) NegotiatePull(ctx context.Context) (schema.PushContractV
 
 	min := resp.MinPullContractVersion
 	current := resp.PullContractVersion
+	max := resp.MaxPullContractVersion
 	if min == "" && current == "" {
 		return "", villageTooOldForPullError(c.baseURL)
 	}
-	envelope, ok := NegotiatePullWindow(cliMin, cliCurrent, min, current)
+	envelope, ok := NegotiatePullWindow(cliMin, cliCurrent, min, current, max)
 	if !ok {
-		return "", pullContractError(cliMin, cliCurrent, min, current)
+		newest := current
+		if max != "" {
+			newest = max
+		}
+		return "", pullContractError(cliMin, cliCurrent, min, newest)
 	}
 	c.SetPullEnvelope(envelope)
 	return envelope, nil
@@ -242,7 +254,7 @@ func (c *VillageClient) ListPullableTranscripts(ctx context.Context, opts PullLi
 		query.Set("collectives", strings.Join(identifiers, ","))
 	}
 	endpoint := c.baseURL + pullTranscriptsEndpoint + "?" + query.Encode()
-	req, err := c.newAuthedGet(ctx, endpoint)
+	req, err := c.newPullGet(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -256,12 +268,16 @@ func (c *VillageClient) ListPullableTranscripts(ctx context.Context, opts PullLi
 	if resp.StatusCode != http.StatusOK {
 		return nil, pullStatusError("list pullable transcripts", pullTranscriptsEndpoint, resp)
 	}
+	envelope, err := c.servedPullEnvelope(resp, pullTranscriptsEndpoint)
+	if err != nil {
+		return nil, err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read pull-list response: %w", err)
 	}
-	result, err := decodePullListResponse(body, c.negotiatedPullEnvelope())
+	result, err := decodePullListResponse(body, envelope)
 	if err != nil {
 		return nil, fmt.Errorf("decode pull-list response: %w", err)
 	}
@@ -276,7 +292,7 @@ func (c *VillageClient) ListPullableTranscripts(ctx context.Context, opts PullLi
 // stages — this method does NOT preflight the pull window.
 func (c *VillageClient) GetPullTranscript(ctx context.Context, id schema.TranscriptID) (*schema.PullTranscriptInfo, error) {
 	path := pullTranscriptPath(id)
-	req, err := c.newAuthedGet(ctx, c.baseURL+path)
+	req, err := c.newPullGet(ctx, c.baseURL+path)
 	if err != nil {
 		return nil, err
 	}
@@ -290,12 +306,16 @@ func (c *VillageClient) GetPullTranscript(ctx context.Context, id schema.Transcr
 	if resp.StatusCode != http.StatusOK {
 		return nil, pullStatusError(fmt.Sprintf("get pull metadata for transcript %s", id), path, resp)
 	}
+	envelope, err := c.servedPullEnvelope(resp, path)
+	if err != nil {
+		return nil, err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read pull-metadata response: %w", err)
 	}
-	result, err := decodePullTranscriptInfo(body, c.negotiatedPullEnvelope())
+	result, err := decodePullTranscriptInfo(body, envelope)
 	if err != nil {
 		return nil, fmt.Errorf("decode pull-metadata response: %w", err)
 	}
@@ -314,7 +334,7 @@ func (c *VillageClient) GetPullTranscript(ctx context.Context, id schema.Transcr
 // method does NOT preflight the pull window.
 func (c *VillageClient) GetPullTranscriptContent(ctx context.Context, id schema.TranscriptID, ifNoneMatch string) (io.ReadCloser, string, error) {
 	path := pullTranscriptContentPath(id)
-	req, err := c.newAuthedGet(ctx, c.baseURL+path)
+	req, err := c.newPullGet(ctx, c.baseURL+path)
 	if err != nil {
 		return nil, "", err
 	}
@@ -334,6 +354,12 @@ func (c *VillageClient) GetPullTranscriptContent(ctx context.Context, id schema.
 		_ = resp.Body.Close()
 		return nil, resp.Header.Get("ETag"), ErrNotModified
 	case http.StatusOK:
+		// The blob carries its own publish-time contract and is not decoded
+		// here, but an envelope this CLI does not read still stops the pull.
+		if _, err := c.servedPullEnvelope(resp, path); err != nil {
+			_ = resp.Body.Close()
+			return nil, "", err
+		}
 		// Caller owns and must Close resp.Body.
 		return resp.Body, resp.Header.Get("ETag"), nil
 	default:
@@ -352,7 +378,7 @@ func (c *VillageClient) GetPullTranscriptContent(ctx context.Context, id schema.
 // before the FETCH stages — this method does NOT preflight the pull window.
 func (c *VillageClient) GetPullTranscriptAnnotations(ctx context.Context, id schema.TranscriptID) ([]schema.PullAnnotation, error) {
 	path := pullTranscriptAnnotationsPath(id)
-	req, err := c.newAuthedGet(ctx, c.baseURL+path)
+	req, err := c.newPullGet(ctx, c.baseURL+path)
 	if err != nil {
 		return nil, err
 	}
@@ -366,12 +392,16 @@ func (c *VillageClient) GetPullTranscriptAnnotations(ctx context.Context, id sch
 	if resp.StatusCode != http.StatusOK {
 		return nil, pullStatusError(fmt.Sprintf("get pull annotations for transcript %s", id), path, resp)
 	}
+	envelope, err := c.servedPullEnvelope(resp, path)
+	if err != nil {
+		return nil, err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read pull-annotations response: %w", err)
 	}
-	result, err := decodePullAnnotations(body, c.negotiatedPullEnvelope())
+	result, err := decodePullAnnotations(body, envelope)
 	if err != nil {
 		return nil, fmt.Errorf("decode pull-annotations response: %w", err)
 	}
@@ -379,7 +409,7 @@ func (c *VillageClient) GetPullTranscriptAnnotations(ctx context.Context, id sch
 }
 
 // newAuthedGet builds an authed GET request (Bearer apiKey) against the given
-// full URL. Shared by all four pull GETs to keep auth/header handling in one place.
+// full URL. The four pull GETs add the pull contract header through newPullGet.
 func (c *VillageClient) newAuthedGet(ctx context.Context, url string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -411,6 +441,8 @@ func pullStatusError(op, path string, resp *http.Response) error {
 				"  fix:  verify the transcript ID/URL, or ask the owner to share it with a group you belong to\n"+
 				"  (%w)",
 			op, path, ErrPullNotFound)
+	case http.StatusNotAcceptable:
+		return pullContractRefusedError(op, path, body)
 	default:
 		return fmt.Errorf("%s: peasant online returned %d for %s: %s", op, resp.StatusCode, path, string(body))
 	}

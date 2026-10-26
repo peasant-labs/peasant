@@ -78,6 +78,9 @@ type claudeProducerCase struct {
 	// RecordedContentHash binds the recorded relationship to the transcript
 	// bytes, as a stored artifact does.
 	RecordedContentHash bool `yaml:"recordedContentHash"`
+	// RecordedContentHashMismatch records a content hash that names other
+	// bytes: the relationship is present but not bound to this transcript.
+	RecordedContentHashMismatch bool `yaml:"recordedContentHashMismatch"`
 	// MetadataSchemaVersionOmitted writes an absent (0) sidecar revision.
 	MetadataSchemaVersionOmitted bool `yaml:"metadataSchemaVersionOmitted"`
 	// Relationship and Target assert the emitted generation provenance.
@@ -170,6 +173,9 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 	metadata := makeReindexMeta(t, sessionID, sourcePath)
 	if row.RecordedContentHash {
 		metadata.ContentHash = schema.ComputeTranscriptHash([]byte(row.Transcript))
+	}
+	if row.RecordedContentHashMismatch {
+		metadata.ContentHash = strings.Repeat("0", 64)
 	}
 	if row.MetadataSchemaVersionOmitted {
 		metadata.SchemaVersion = 0

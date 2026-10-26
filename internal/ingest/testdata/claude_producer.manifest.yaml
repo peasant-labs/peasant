@@ -40,3 +40,4 @@ requiredNames:
   - refresh-free-schema-eleven
   - self-parent-agent-refusal
   - retained-started-by-unbound-refusal
+  - retained-started-by-wrong-hash-refusal
