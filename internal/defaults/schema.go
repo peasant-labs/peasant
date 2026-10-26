@@ -36,17 +36,19 @@ const MinPushContractVersion schema.PushContractVersion = "0.1.0"
 // typed; the PullContractVersion NAME disambiguates the axis.
 //
 // 0.3.0 replaced the owner and annotation-author account strings with a person
-// as the viewer may see them (a public profile, or anonymous).
-const PullContractVersion schema.PushContractVersion = "0.3.0"
+// as the viewer may see them (a public profile, or anonymous). Every pull read
+// requests it in the schema.PullContractHeader request header, so a village
+// that serves 0.2.0 by default serves this CLI 0.3.0.
+const PullContractVersion schema.PushContractVersion = schema.PublicOwnerPullContractVersion
 
 // MinPullContractVersion is the OLDEST pull envelope version this CLI still
 // reads. Together with PullContractVersion it is the CLI's pull window
-// [MinPullContractVersion, PullContractVersion]. A pull request carries no
-// version, so the village serves the one envelope it serves; NegotiatePull
-// accepts a village whose advertised window overlaps this one and records the
-// newest version both sides share as the envelope of the transfer.
+// [MinPullContractVersion, PullContractVersion]. A pull request asks for
+// PullContractVersion; a village that predates the request header serves its
+// one advertised envelope instead. NegotiatePull accepts a village that serves
+// an envelope in this window and records it as the envelope of the transfer.
 //
 // 0.2.0 is held so this CLI keeps pulling from a village that still serves the
 // account-string envelope. It is also the floor because a 0.1.0 village ignores
 // the collectives filter and would over-pull.
-const MinPullContractVersion schema.PushContractVersion = "0.2.0"
+const MinPullContractVersion schema.PushContractVersion = schema.LegacyPullContractVersion

@@ -118,27 +118,54 @@ func ClassifyContract(cli, min, current schema.PushContractVersion) ContractNego
 }
 
 // NegotiatePullWindow returns the pull envelope the village serves when this
-// CLI reads it. A pull request names no version, so the village serves its
-// current envelope to every caller: the one envelope that matters is the
-// village's advertised current version, and this CLI accepts the village only
-// when that version lies inside the CLI's window [cliMin, cliCurrent]. The
-// village's own floor says what older CLIs it still claims to serve and does
-// not change what this CLI receives.
+// CLI reads it, from the window the village advertises: its floor (min), its
+// default (current) and, when the envelope is requestable, its newest (max).
 //
-// A newer current version is refused even when the village's window reaches
-// back into the CLI's: on a 0.x contract a minor bump is not additive (pull
-// contract 0.3.0 removed the account strings 0.2.0 carried), so this CLI cannot
-// read an envelope newer than its own. ok is false when current is empty or
-// outside the window; the caller handles an unadvertised window (both bounds
-// empty) before calling.
-func NegotiatePullWindow(cliMin, cliCurrent, min, current schema.PushContractVersion) (schema.PushContractVersion, bool) {
-	if current == "" || compareSemver(current, cliMin) < 0 || compareSemver(current, cliCurrent) > 0 {
+// A village that advertises max serves the envelope a pull read asks for in the
+// schema.PullContractHeader request header: the highest it supports at or below
+// the requested version and at or above its floor. This CLI asks for
+// cliCurrent, so the served envelope is cliCurrent, or max when max is older.
+// A patch bump within a minor is additive, so a served version in cliCurrent's
+// minor is read as cliCurrent. The village refuses a request below its floor
+// (406), so a floor above the served envelope is refused here first.
+//
+// A village that advertises no max predates the header and serves its current
+// envelope to every caller: this CLI accepts it only when that version lies
+// inside the CLI's window [cliMin, cliCurrent]. A newer current version is
+// refused even when the village's window reaches back into the CLI's: on a 0.x
+// contract a minor bump is not additive (pull contract 0.3.0 removed the
+// account strings 0.2.0 carried), so this CLI cannot read an envelope newer
+// than its own.
+//
+// ok is false when no envelope this CLI reads is served; the caller handles an
+// unadvertised window (min and current both empty) before calling. The
+// returned envelope is always a readable envelope's canonical version (0.2.0 or
+// 0.3.0), never a patch of one.
+func NegotiatePullWindow(cliMin, cliCurrent, min, current, max schema.PushContractVersion) (schema.PushContractVersion, bool) {
+	served := current
+	if max != "" {
+		served = cliCurrent
+		if compareSemver(max, cliCurrent) < 0 {
+			served = max
+		}
+	}
+	if served == "" || compareSemver(served, cliMin) < 0 {
 		return "", false
 	}
-	if min != "" && compareSemver(min, current) > 0 {
+	if compareSemver(served, cliCurrent) > 0 && !sameMinor(served, cliCurrent) {
 		return "", false
 	}
-	return current, true
+	if min != "" && compareSemver(min, served) > 0 {
+		return "", false
+	}
+	return readablePullEnvelope(served)
+}
+
+// sameMinor reports whether two versions share their major and minor, so they
+// differ at most by an additive patch.
+func sameMinor(a, b schema.PushContractVersion) bool {
+	pa, pb := parseSemver(a), parseSemver(b)
+	return pa[0] == pb[0] && pa[1] == pb[1]
 }
 
 // CanDowngrade reports whether this CLI can serialize the older `target`

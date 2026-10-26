@@ -7,6 +7,19 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Changed
+- Pulling asks peasant online for pull contract 0.3.0. Each pull read (the
+  list, a transcript's metadata, its annotations and its content) sends the
+  `Peasant-Pull-Contract` header, so a peasant online that serves 0.2.0 by
+  default serves this CLI the 0.3.0 envelope, where each person is shown as you
+  may see them. The response names the envelope it carries in the same header
+  and is read as exactly that envelope; any 0.3.x patch is read as 0.3.0. A
+  peasant online that predates the header is read as before.
+- When peasant online no longer serves the pull contract this CLI reads, it
+  answers 406 and the pull stops with the "pull-contract incompatible" error,
+  which says to upgrade the CLI. The same error stops a pull when peasant
+  online serves an envelope this CLI does not read.
+
 ## [0.12.0] - 2026-10-24
 
 ### Changed
