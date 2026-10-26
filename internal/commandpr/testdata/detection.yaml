@@ -42,6 +42,8 @@ requiredNames:
   - bash -c non-literal script
   - quoted command word
   - bash with a script file
+  - env long unset option
+  - bash -c with an escaped title
 urlRequiredNames:
   - fragment after the number
   - pull request sub-page
@@ -487,6 +489,28 @@ cases:
           {"command":"bash script.sh gh pr create --fill"}
         result: |
           https://github.com/acme/api/pull/89
+    expected: []
+  # GNU env treats --unset as an option; the loose assignment check sees its
+  # "=" and still reaches the command, matching what env actually runs.
+  - name: env long unset option
+    calls:
+      - arguments: |
+          {"command":"env --unset=GH_TOKEN gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/90
+    expected:
+      - owner: acme
+        repo: api
+        number: 90
+        url: https://github.com/acme/api/pull/90
+  # Knowingly accepted miss: an escaped title keeps a backslash in the literal
+  # script, so the escape policy refuses to unwrap it rather than guess.
+  - name: bash -c with an escaped title
+    calls:
+      - arguments: |
+          {"command":"bash -c \"gh pr create --title \\\"feat: x\\\" --fill\""}
+        result: |
+          https://github.com/acme/api/pull/91
     expected: []
 urls:
   - name: fragment after the number
