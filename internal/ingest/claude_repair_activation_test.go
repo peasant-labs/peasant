@@ -24,7 +24,7 @@ import (
 // depends on.
 func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 	ctx := t.Context()
-	fs := testutil.NewMemFS()
+	fs := testutil.NewCountingFS(testutil.NewMemFS())
 	root := filepath.Join(t.TempDir(), "artifacts")
 	artifacts, err := store.NewOSGenerationArtifactStore(root)
 	if err != nil {
@@ -74,8 +74,13 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 	fresh.Source.FilePath = nativePath
 	fresh.Source.Format = ingest.SourceFormatJSONL
 	fresh.ContentHash = schema.ComputeTranscriptHash(transcript)
+	// Discovery offers the session so the repair takes the native lane: it has
+	// to read the source, rewrite the legacy sidecar, and index the capture.
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
-		ingest.HarnessClaudeCode: makeStubAdapter(nil, map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh}),
+		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{{
+			SessionID: id, Harness: ingest.HarnessClaudeCode,
+			SourcePath: ingest.ResolvedPath(nativePath), SourceFormat: ingest.SourceFormatJSONL,
+		}}, map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh}),
 	}
 	cfg := makePipelineConfig(testOutputDir)
 	cfg.Force = true
@@ -93,8 +98,11 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 	if result.Summary.Errors != 0 {
 		t.Fatalf("a repairable session failed the harvest: %+v, diagnostics=%+v", result.Summary, result.Diagnostics)
 	}
-	if result.Summary.Indexed != 1 {
-		t.Fatalf("the repaired session was not indexed: %+v", result.Summary)
+	if result.Summary.New != 1 || result.Summary.Indexed != 1 {
+		t.Fatalf("the repaired session did not take the native lane and index: %+v", result.Summary)
+	}
+	if reads := fs.ReadCount(nativePath); reads == 0 {
+		t.Fatal("the repair never read the native source it was supposed to re-ingest")
 	}
 
 	conn, err := database.Pool().Take(ctx)
@@ -102,24 +110,26 @@ func TestRepairedLegacyClaudeArtifactActivatesFormatTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Pool().Put(conn)
-	assertStoredInt(t, conn, "SELECT COALESCE(index_format_version, 0) FROM sessions WHERE session_id = ?", string(id), 2,
-		"the repaired session did not activate a format-2 generation")
-	assertStoredInt(t, conn, "SELECT sessions_error FROM ingest_log ORDER BY id DESC LIMIT 1", "", 0,
+	assertStoredInt(t, conn, "SELECT COALESCE(index_format_version, 0) FROM sessions WHERE session_id = ?", 2,
+		"the repaired session did not activate a format-2 generation", string(id))
+	assertStoredInt(t, conn, "SELECT sessions_error FROM ingest_log ORDER BY id DESC LIMIT 1", 0,
 		"the repair was counted as a session error")
 }
 
-func assertStoredInt(t *testing.T, conn *sqlite.Conn, query, arg string, want int, message string) {
+func assertStoredInt(t *testing.T, conn *sqlite.Conn, query string, want int, message string, args ...any) {
 	t.Helper()
-	got := -1
-	opts := &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+	found := false
+	got := 0
+	opts := &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
+		found = true
 		got = stmt.ColumnInt(0)
 		return nil
 	}}
-	if arg != "" {
-		opts.Args = []any{arg}
-	}
 	if err := sqlitex.ExecuteTransient(conn, query, opts); err != nil {
 		t.Fatalf("%s: %v", message, err)
+	}
+	if !found {
+		t.Fatalf("%s: the query returned no row", message)
 	}
 	if got != want {
 		t.Fatalf("%s: got %d, want %d", message, got, want)

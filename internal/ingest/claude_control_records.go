@@ -60,11 +60,11 @@ var claudeControlRecordEnvelopeKeys = map[string]bool{
 // only an identity object so one oversized record cannot bloat the index.
 const claudeControlPayloadLimit = 8192
 
-// claudeOwnerRotationRecordTypes are the record kinds a rotated owner file
-// keeps when its session records are gone: metadata about the transcript rather
-// than conversation content. Reading one is what decides that a file with no
-// session records is still the same owner, so the set is named once here beside
-// the control set instead of being spelled at the call site.
+// claudeOwnerRotationRecordTypes are the record kinds that prove a file with no
+// session records is still a Claude owner file. Membership is NOT the
+// content/control split: summary is indexed as text, and file-history-snapshot
+// is neither. The set is named once here beside the control set so a rotated
+// owner file keeps proving ownership without widening the control vocabulary.
 var claudeOwnerRotationRecordTypes = map[string]bool{
 	"summary":               true,
 	"file-history-snapshot": true,

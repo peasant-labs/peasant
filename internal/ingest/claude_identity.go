@@ -449,9 +449,9 @@ func claudeNativeSpawn(records []ClaudeIdentityRecord, agentID string) bool {
 
 // claudeOwnerMatch reports whether an artifact's recorded identity names the
 // same owner its transcript does, and whether that owner can only be derived
-// because the artifact predates the recorded parent field. A legacy root agent
-// file and a rotated owner transcript reach the same verdict, so the native and
-// retained exits share this one rule.
+// because the artifact predates the recorded parent field. The native and
+// retained exits share this match rule; each still proves a derived owner its
+// own way, and says so where it does.
 func claudeOwnerMatch(sessionID string, parent *SessionID, owner SessionID, nativeAgentID string) (matches, derived bool) {
 	if sessionID != defaults.ClaudeSubagentPrefix+nativeAgentID {
 		return false, false
