@@ -37,7 +37,10 @@ var pullRequestURL = regexp.MustCompile(`https://github\.com/([A-Za-z0-9._-]+)/(
 // together: the recorded shell command actually invokes `gh pr create`, and
 // the recorded result carries a GitHub pull request URL. The command is parsed
 // as shell, so a heredoc body or a quoted string that merely mentions the
-// command is not an invocation. An errored call is skipped.
+// command is not an invocation. A shell `-c` script whose literal text still
+// carries an escape is not unwrapped, because the stored text has not been
+// through the shell's own unquoting; such a call detects nothing rather than
+// being guessed at. An errored call is skipped.
 //
 // Rows are deduplicated by owner/repository/number and keep the order in which
 // they were first seen, so the same pull request mentioned twice renders once.
@@ -106,10 +109,13 @@ func commandFromArguments(arguments string) string {
 	return arguments
 }
 
-// maxWrapperDepth bounds how many nested shell wrappers a command may unwrap
-// before detection gives up. Four levels cover `sudo bash -c '…'` and the
-// other shapes a recorded command takes; a deeper command is not a shell
-// script a person writes, and the bound keeps a pathological input finite.
+// maxWrapperDepth bounds how many nested `-c` re-parses detection follows
+// before it gives up. The bound counts only the shell scripts re-parsed; the
+// `sudo`, `command`, `env`, and `nohup` wrappers around them cost no depth
+// because they are read from the same parse. Four levels cover the shapes a
+// recorded command takes (`bash -c 'bash -c "…"'` and friends); a deeper
+// command is not a shell script a person writes, and the bound keeps a
+// pathological input finite.
 const maxWrapperDepth = 4
 
 // invokesGHPRCreate reports whether the command runs the `gh pr create`
@@ -184,6 +190,11 @@ func commandWords(call *syntax.CallExpr) []commandWord {
 // literalWordText returns the text a word expands to when no part of it can
 // change at run time. An expansion, a substitution, or an ANSI-C quoted word is
 // not literal, and false tells the caller to reject it.
+//
+// The text is the source text a shell has not unescaped: the script of
+// `bash -c "echo \"hi\""` reads back with its backslashes still in place. A
+// caller that hands the text to a shell again must decide what to do about
+// that; shellCommandScript refuses such a script outright.
 func literalWordText(word *syntax.Word) (string, bool) {
 	var builder strings.Builder
 	for _, part := range word.Parts {
@@ -231,8 +242,11 @@ var shellWrappers = [...]string{"bash", "sh", "zsh", "dash", "ksh"}
 // rejected. That is what keeps `echo "gh pr create"` and
 // `bash -c 'echo gh pr create'` false: the words after the wrapper are not the
 // gh command, and no text search ever runs.
+//
+// depth is always non-negative here: commandInvokesGHPRCreate rejects a spent
+// budget before it walks, and only that function decrements.
 func wordsInvoke(words []commandWord, depth int) bool {
-	if depth < 0 || len(words) == 0 {
+	if len(words) == 0 {
 		return false
 	}
 	for _, name := range ghCommandNames {
@@ -280,14 +294,20 @@ func wordsInvoke(words []commandWord, depth int) bool {
 // Wrapper options that take no value, and the options that consume the next
 // word. Each set is deliberately closed: an option this code does not
 // recognize is treated as the wrapped command, so a wrapper form that was not
-// considered fails to detect rather than guessing.
+// considered fails to detect rather than guessing. A bare `--` is not listed
+// because skipWrapperOptions handles it for every wrapper.
+//
+// A flag belongs here only when the wrapper still runs the command after
+// skipping it. `command -v`/`-V` and `nohup --help`/`--version` report on the
+// command instead of running it, so they are absent and those words become the
+// wrapped command, which fails the check.
 var (
-	sudoFlags      = stringSet("-E", "-H", "-n", "-S", "-b", "--")
+	sudoFlags      = stringSet("-E", "-H", "-n", "-S", "-b")
 	sudoValueFlags = stringSet("-u", "-g", "-h", "-p", "-C", "-T", "-r", "-t")
-	commandFlags   = stringSet("-p", "-v", "-V", "--")
-	envFlags       = stringSet("-i", "-0", "--")
+	commandFlags   = stringSet("-p")
+	envFlags       = stringSet("-i", "-0")
 	envValueFlags  = stringSet("-u", "-C", "-S")
-	nohupFlags     = stringSet("--help", "--version", "--")
+	nohupFlags     = stringSet()
 )
 
 // stringSet builds a lookup set from a closed list of words.
@@ -336,20 +356,7 @@ func hasWord(set map[string]struct{}, word string) bool {
 // form env accepts before the command it runs.
 func isEnvironmentAssignment(word commandWord) bool {
 	name, _, ok := strings.Cut(word.value, "=")
-	if !ok || name == "" {
-		return false
-	}
-	for index, char := range name {
-		switch {
-		case char == '_':
-		case char >= 'A' && char <= 'Z':
-		case char >= 'a' && char <= 'z':
-		case index > 0 && char >= '0' && char <= '9':
-		default:
-			return false
-		}
-	}
-	return true
+	return ok && name != ""
 }
 
 // shellValueFlags are the short shell options that consume the following word,
@@ -361,6 +368,17 @@ var shellValueFlags = stringSet("-o", "-O")
 // `c` (`-lc`, `-xec`). A shell followed by a script file instead of `-c` runs
 // no inline command and reports no script, and so does a script that is not a
 // literal word.
+//
+// A literal script that still contains a backslash also reports no script.
+// The stored text comes from the syntax tree before a shell applies its own
+// quoting rules, so `bash -c "echo \"; gh pr create; echo \""` reads as
+// `echo \"; gh pr create; echo \"`. Re-parsing that text would treat the
+// escaped quote as a real quote and turn an echoed string into an invocation,
+// and unescaping it here would mean re-implementing the shell's rules at every
+// quoting form. Escaped scripts are therefore deliberately not unwrapped: the
+// call detects nothing rather than guessing. The cost is accepted knowingly: a
+// script that would really run the command and happens to keep a backslash is
+// missed, which is cheaper than reporting a pull request nobody created.
 func shellCommandScript(args []commandWord) (string, bool) {
 	for index := 0; index < len(args); index++ {
 		word := args[index].value
@@ -382,7 +400,11 @@ func shellCommandScript(args []commandWord) (string, bool) {
 			if index+1 >= len(args) || !args[index+1].literal {
 				return "", false
 			}
-			return args[index+1].text, true
+			script := args[index+1].text
+			if strings.ContainsRune(script, '\\') {
+				return "", false
+			}
+			return script, true
 		default:
 			// A non-flag word before -c is a script file the shell reads; the
 			// words after it are that script's arguments, not a shell command.

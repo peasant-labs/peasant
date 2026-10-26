@@ -23,6 +23,25 @@ requiredNames:
   - windows gh executable
   - bash -c echoes a quoted mention
   - bash -c echoes the words
+  - bash -c with an escaped quote
+  - bash -c plain script
+  - command -v is not an invocation
+  - command with the default-search flag
+  - nohup --help is not an invocation
+  - nohup gh pr create
+  - sudo with the end-of-options marker
+  - sudo with an unknown flag
+  - sudo -u user
+  - sudo -u consumes the command word
+  - env -u variable
+  - env -u consumes the command word
+  - bash -o pipefail -c script
+  - bash -c nested two levels
+  - bash -c nested four levels
+  - bash -c nested five levels
+  - bash -c non-literal script
+  - quoted command word
+  - bash with a script file
 urlRequiredNames:
   - fragment after the number
   - pull request sub-page
@@ -286,6 +305,188 @@ cases:
           {"command":"bash -c 'echo gh pr create'"}
         result: |
           https://github.com/acme/api/pull/70
+    expected: []
+  # The -c script keeps the backslash a shell would consume, so detection deliberately
+  # does not unwrap it: read back, the echoed string would look like a real invocation.
+  - name: bash -c with an escaped quote
+    calls:
+      - arguments: |
+          {"command":"bash -c \"echo \\\"; gh pr create; echo \\\"\""}
+        result: |
+          https://github.com/acme/api/pull/71
+    expected: []
+  - name: bash -c plain script
+    calls:
+      - arguments: |
+          {"command":"bash -c 'gh pr create --fill'"}
+        result: |
+          https://github.com/acme/api/pull/72
+    expected:
+      - owner: acme
+        repo: api
+        number: 72
+        url: https://github.com/acme/api/pull/72
+  # `command -v` reports on the command instead of running it.
+  - name: command -v is not an invocation
+    calls:
+      - arguments: |
+          {"command":"command -v gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/73
+    expected: []
+  - name: command with the default-search flag
+    calls:
+      - arguments: |
+          {"command":"command -p gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/74
+    expected:
+      - owner: acme
+        repo: api
+        number: 74
+        url: https://github.com/acme/api/pull/74
+  # `nohup --help` prints usage instead of running the command.
+  - name: nohup --help is not an invocation
+    calls:
+      - arguments: |
+          {"command":"nohup --help gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/75
+    expected: []
+  - name: nohup gh pr create
+    calls:
+      - arguments: |
+          {"command":"nohup gh pr create"}
+        result: |
+          https://github.com/acme/api/pull/76
+    expected:
+      - owner: acme
+        repo: api
+        number: 76
+        url: https://github.com/acme/api/pull/76
+  - name: sudo with the end-of-options marker
+    calls:
+      - arguments: |
+          {"command":"sudo -- gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/77
+    expected:
+      - owner: acme
+        repo: api
+        number: 77
+        url: https://github.com/acme/api/pull/77
+  # An option detection does not know becomes the wrapped command, so it fails closed.
+  - name: sudo with an unknown flag
+    calls:
+      - arguments: |
+          {"command":"sudo -Q gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/78
+    expected: []
+  - name: sudo -u user
+    calls:
+      - arguments: |
+          {"command":"sudo -u root gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/79
+    expected:
+      - owner: acme
+        repo: api
+        number: 79
+        url: https://github.com/acme/api/pull/79
+  # -u takes a value, so `gh` is the user and `pr` is the command.
+  - name: sudo -u consumes the command word
+    calls:
+      - arguments: |
+          {"command":"sudo -u gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/80
+    expected: []
+  - name: env -u variable
+    calls:
+      - arguments: |
+          {"command":"env -u GH_TOKEN gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/81
+    expected:
+      - owner: acme
+        repo: api
+        number: 81
+        url: https://github.com/acme/api/pull/81
+  - name: env -u consumes the command word
+    calls:
+      - arguments: |
+          {"command":"env -u gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/82
+    expected: []
+  - name: bash -o pipefail -c script
+    calls:
+      - arguments: |
+          {"command":"bash -o pipefail -c 'gh pr create --fill'"}
+        result: |
+          https://github.com/acme/api/pull/83
+    expected:
+      - owner: acme
+        repo: api
+        number: 83
+        url: https://github.com/acme/api/pull/83
+  - name: bash -c nested two levels
+    calls:
+      - arguments: |
+          {"command":"bash -c 'bash -c \"gh pr create --fill\"'"}
+        result: |
+          https://github.com/acme/api/pull/84
+    expected:
+      - owner: acme
+        repo: api
+        number: 84
+        url: https://github.com/acme/api/pull/84
+  # Four nested -c scripts sit exactly on maxWrapperDepth. Each level splices the next
+  # level's quotes in as separate words (the '"'"' idiom), so no level carries a backslash.
+  - name: bash -c nested four levels
+    calls:
+      - arguments: |
+          {"command":"bash -c 'bash -c '\"'\"'bash -c \"bash -c '\"'\"'\"'\"'\"'\"'\"'\"'gh pr create --fill'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"''"}
+        result: |
+          https://github.com/acme/api/pull/85
+    expected:
+      - owner: acme
+        repo: api
+        number: 85
+        url: https://github.com/acme/api/pull/85
+  # Five nested -c scripts exceed maxWrapperDepth; the same command detects with a larger
+  # budget, so the rejection is the bound and not a quoting artifact.
+  - name: bash -c nested five levels
+    calls:
+      - arguments: |
+          {"command":"bash -c 'bash -c '\"'\"'bash -c '\"'\"'\"'\"'\"'\"'\"'\"'bash -c \"bash -c '\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'gh pr create --fill'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"'\"''\"'\"''"}
+        result: |
+          https://github.com/acme/api/pull/86
+    expected: []
+  # An expansion is not a literal script, so the text it runs is unknown.
+  - name: bash -c non-literal script
+    calls:
+      - arguments: |
+          {"command":"bash -c \"$SCRIPT\""}
+        result: |
+          https://github.com/acme/api/pull/87
+    expected: []
+  # A quoted command word has no literal value, so it never matches the command name.
+  - name: quoted command word
+    calls:
+      - arguments: |
+          {"command":"\"gh\" pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/88
+    expected: []
+  # A shell given a script file runs that file, not an inline -c script.
+  - name: bash with a script file
+    calls:
+      - arguments: |
+          {"command":"bash script.sh gh pr create --fill"}
+        result: |
+          https://github.com/acme/api/pull/89
     expected: []
 urls:
   - name: fragment after the number
