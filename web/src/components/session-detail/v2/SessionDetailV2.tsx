@@ -19,6 +19,7 @@ import {
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
 import { useTheme } from '@/hooks/useTheme';
+import { useSessionExtras } from '@/hooks/useSessionExtras';
 import '@xyflow/react/dist/style.css';
 import { FeedbackPanel, Skeleton, type MenuItem } from '@/lib/ft-ui';
 import { useChannel } from '@/contexts/WebSocketContext';
@@ -35,6 +36,7 @@ import { sessionsHref, transcriptHref, EarlierHistoryParam, PublishParam, Transc
 import { useEntryLabels } from './lib/useEntryLabels';
 import { relationshipLinkHref } from './lib/relationshipLink';
 import { useTranscriptReadingState } from './lib/useTranscriptReadingState';
+import { toTranscriptGitContext } from './lib/transcriptGit';
 import {
   clearScopeQuery,
   collectFileTouches,
@@ -48,6 +50,7 @@ import {
 } from './lib/scopeTurns';
 import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { TurnTouchedFiles } from './panels/TurnTouchedFiles';
+import { DetectedPullRequests } from './panels/DetectedPullRequests';
 import { adaptQualitySessions } from '@/lib/quality/types';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
 import { SessionNotIndexed } from './SessionNotIndexed';
@@ -73,7 +76,7 @@ interface SessionDetailV2Props {
  * contract is intersected back in here rather than weakening every consumer.
  */
 type SessionDetailWire = SessionDetailPayload &
-  Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
+  Pick<SessionDetailReadPayload, 'relationshipNavigation' | 'teammate'>;
 
 /** The disclosed retained-history sections, keyed the way the viewer keys them. */
 type EarlierHistoryOpen = Record<string, boolean>;
@@ -127,6 +130,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Authorized current-target navigation from the flat local read, kept separate
   // from the durable payload it was read beside.
   const relationshipNavigation = detail?.relationshipNavigation;
+  // The session's own commits and detected pull requests. These are additive,
+  // display-only reads beside the transcript: both degrade to empty on failure.
+  const { commits: sessionCommits, pullRequests } = useSessionExtras(sessionId);
 
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -352,15 +358,21 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read carries authorized navigation ALONGSIDE the durable
-    // detail. The durable payload boundary rejects that read-only field, so the
-    // host separates the two: only the durable detail reaches `adaptTranscript`
-    // as payload, and the navigation travels through the published
-    // adapter-options boundary, which cooks it into usable source/parent links.
-    const { relationshipNavigation, ...durableDetail } = detail;
+    // The flat local read carries authorized navigation and the recorded
+    // teammate identity ALONGSIDE the durable detail. The durable payload
+    // boundary rejects both read-only fields, so the host separates them: only
+    // the durable detail reaches `adaptTranscript` as payload, and the
+    // navigation travels through the published adapter-options boundary, which
+    // cooks it into usable source/parent links. The teammate is host-owned: the
+    // stream prelude renders it and the durable payload never carries it.
+    const { relationshipNavigation, teammate: _teammate, ...durableDetail } = detail;
     const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
+    // Commits ride in as the legacy-compatible `gitContext.commits` shape, which
+    // the adapter cooks into `session.git.commits` — the session-level rows the
+    // viewer renders as its header commit count and its checkpoint markers.
+    // Everything else on the payload is unchanged.
     const adapted = adaptTranscript(
-      { ...durableDetail, turns: visibleTurns },
+      { ...durableDetail, turns: visibleTurns, gitContext: toTranscriptGitContext(sessionCommits) },
       undefined,
       analytics,
       adapterOptions,
@@ -377,7 +389,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       ...adapted,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
     };
-  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation]);
+  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation, sessionCommits]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -466,8 +478,27 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Host-owned status context contains state the reader needs: the active-scope
   // chip plus stale-link and connection-error status. View controls remain in
   // the shared composite, while copy-as-markdown is a header action below.
+  //
+  // The recorded teammate identity and the parent transcript link lead the
+  // prelude: both describe where this transcript came from, and both are local
+  // read evidence the durable payload never carries. A session with neither
+  // renders nothing here.
+  const teammate = detail.teammate;
+  const parentSessionId = detail.parentSessionId;
   const streamPrelude = (
     <div className="flex flex-col gap-3">
+      {teammate && (
+        <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[14px] text-ink-2">
+          <span data-transcript-teammate="true">
+            teammate {teammate.name} on {teammate.team}
+          </span>
+          {parentSessionId && (
+            <Link href={transcriptHref(projectHash, parentSessionId)} className="underline hover:no-underline focus-mono">
+              parent transcript
+            </Link>
+          )}
+        </p>
+      )}
       {filteringScope && scope.scope && (
         <ScopeChipRow
           label={scopeChipLabel(scope.scope, scope.scopeVal)}
@@ -571,6 +602,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             }}
             streamPrelude={streamPrelude}
             headerActions={headerActions}
+            // Detected pull requests sit under the meta row as evidence: the
+            // viewer only gives the list a place, the host owns its wording.
+            // Omitted entirely when none were detected, so no empty section
+            // appears on the sessions this feature does not touch.
+            pullRequests={
+              pullRequests.length > 0 ? (
+                <DetectedPullRequests pullRequests={pullRequests} />
+              ) : undefined
+            }
             // The page owns the header's actions: the viewer's own share and
             // more menus and its outcome chip are off, and the tab strip carries
             // the search trigger.

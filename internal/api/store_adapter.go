@@ -212,6 +212,15 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 		return nil, fmt.Errorf("store adapter: session summaries preview: %w", err)
 	}
 
+	// The recorded teammate identity is evidence for the same page: the read
+	// answers only for these identifiers, and a missing key means the session
+	// carries no recorded spawn edge. Both arms of this one construction site
+	// therefore carry it, exactly as they carry the preview.
+	teammates, err := p.store.ClaudeTeammates(ctx, sessionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: session summaries teammate evidence: %w", err)
+	}
+
 	summaries := make([]SessionSummary, len(rows))
 	for i := range rows {
 		row := &rows[i]
@@ -238,9 +247,21 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 			s.Outcome = *row.Outcome
 		}
 		s.ParentSessionID = row.ParentID
+		s.Teammate = teammateFor(teammates, row.SessionID)
 		summaries[i] = s
 	}
 	return summaries, nil
+}
+
+// teammateFor returns the recorded teammate identity for one session, or nil
+// when the evidence read named none. The pointer names a value copied out of
+// the read's map, so callers cannot alias the map's storage.
+func teammateFor(teammates map[string]schema.SessionTeammate, sessionID string) *schema.SessionTeammate {
+	teammate, ok := teammates[sessionID]
+	if !ok {
+		return nil
+	}
+	return &teammate
 }
 
 // sessionCandidate projects a stored row onto the visibility package's input.

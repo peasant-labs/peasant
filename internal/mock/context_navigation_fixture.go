@@ -40,8 +40,18 @@ type contextNavigationRelationshipFixture struct {
 	Evidence      string `yaml:"evidence"`
 }
 
+// contextNavigationTeammateFixture is the recorded Claude Code teammate identity
+// a session was spawned under. It is local read evidence, so only a session
+// whose parent transcript records the spawn edge carries one.
+type contextNavigationTeammateFixture struct {
+	Team     string `yaml:"team"`
+	Name     string `yaml:"name"`
+	Evidence string `yaml:"evidence"`
+}
+
 type contextNavigationSessionFixture struct {
 	ID                   string                                 `yaml:"id"`
+	ParentSessionID      string                                 `yaml:"parentSessionId"`
 	Project              string                                 `yaml:"project"`
 	Harness              string                                 `yaml:"harness"`
 	Model                string                                 `yaml:"model"`
@@ -57,6 +67,7 @@ type contextNavigationSessionFixture struct {
 	Turns                []contextNavigationTurnFixture         `yaml:"turns"`
 	EarlierHistory       []contextNavigationEarlierFixture      `yaml:"earlierHistory"`
 	Relationships        []contextNavigationRelationshipFixture `yaml:"relationships"`
+	Teammate             *contextNavigationTeammateFixture      `yaml:"teammate"`
 }
 
 type contextNavigationExpectedFixture struct {
@@ -125,6 +136,23 @@ func loadContextNavigationFixture(source []byte) (contextNavigationFixture, erro
 		if _, err := time.Parse(time.RFC3339, session.EndTime); err != nil {
 			return contextNavigationFixture{}, fmt.Errorf("%s.endTime %q is invalid: %w", name, session.EndTime, err)
 		}
+		if session.Teammate != nil {
+			if err := session.Teammate.validate(name); err != nil {
+				return contextNavigationFixture{}, err
+			}
+		}
+		if session.ParentSessionID != "" {
+			if _, err := schema.NewSessionID(session.ParentSessionID); err != nil {
+				return contextNavigationFixture{}, fmt.Errorf("%s.parentSessionId %q is invalid: %w", name, session.ParentSessionID, err)
+			}
+		}
+	}
+	// The child is the session the mounted transcript opens, so its recorded
+	// teammate identity is the evidence the read projection must carry. Requiring
+	// it here keeps that evidence from disappearing silently when the fixture is
+	// edited.
+	if fixture.Child.Teammate == nil {
+		return contextNavigationFixture{}, fmt.Errorf("child.teammate must be present: the mounted child is the transcript whose recorded teammate identity the local read serves, and without it the captured identity line would prove nothing")
 	}
 	if fixture.Child.InputSubmissionCount == nil || *fixture.Child.InputSubmissionCount != 1 {
 		return contextNavigationFixture{}, fmt.Errorf("child.inputSubmissionCount must be present and 1 for the one-submission fixture")
@@ -152,6 +180,14 @@ func loadContextNavigationFixture(source []byte) (contextNavigationFixture, erro
 			return contextNavigationFixture{}, fmt.Errorf("child relationship %q must target %q, received %q", kind, want, found)
 		}
 	}
+	// A stored child's durable parent and its started_by target name the same
+	// session: the served snapshot takes the generation's started_by target as
+	// the logical parent, and the transcript's parent link reads that durable
+	// field. A fixture that let the two disagree would prove a link the stored
+	// read cannot support.
+	if fixture.Child.ParentSessionID != fixture.Parent.ID {
+		return contextNavigationFixture{}, fmt.Errorf("child.parentSessionId %q must be the started_by target %q, because a stored child's durable parent is the session its recorded spawn edge names", fixture.Child.ParentSessionID, fixture.Parent.ID)
+	}
 	if fixture.Expected.ContextLabel == "" || fixture.Expected.StarterLabel == "" || fixture.Expected.StarterLinkAction == "" || fixture.Expected.EarlierSummary == "" {
 		return contextNavigationFixture{}, fmt.Errorf("expected labels and summary must be non-empty")
 	}
@@ -165,6 +201,47 @@ func loadContextNavigationFixture(source []byte) (contextNavigationFixture, erro
 		}
 	}
 	return fixture, nil
+}
+
+// validate applies the contract's own teammate rules to the declared identity
+// and additionally pins the evidence kind: the identity validates through
+// schema.SessionTeammate so the fixture cannot state an identity the local read
+// would refuse, and the evidence check keeps this fixture naming the one record
+// kind a recorded spawn edge produces even if the contract's menu widens.
+func (teammate contextNavigationTeammateFixture) validate(where string) error {
+	const why = "the mounted transcript would render an identity the local read cannot serve; emit the team and name the parent transcript recorded, with the spawn evidence kind, or omit teammate"
+	identity := schema.SessionTeammate{
+		Team:     teammate.Team,
+		Name:     teammate.Name,
+		Evidence: schema.SessionTeammateEvidence(teammate.Evidence),
+	}
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("%s.teammate is invalid: %w; %s", where, err, why)
+	}
+	if identity.Evidence != schema.SessionTeammateEvidenceNativeDynamicWorkflow {
+		return fmt.Errorf("%s.teammate.evidence %q must be %q: only a recorded native dynamic workflow spawn names a teammate, so another kind would claim evidence the stored parent transcript does not carry; %s",
+			where, identity.Evidence, schema.SessionTeammateEvidenceNativeDynamicWorkflow, why)
+	}
+	return nil
+}
+
+// teammateIdentities returns the recorded teammate identity of each stored
+// session that declares one, keyed by session identifier. The mock provider
+// serves these on the local detail read exactly as the generation-backed store
+// serves the spawn evidence it read from the parent transcript.
+func (fixture contextNavigationFixture) teammateIdentities() map[string]schema.SessionTeammate {
+	identities := make(map[string]schema.SessionTeammate, 1)
+	for _, source := range []contextNavigationSessionFixture{fixture.Child, fixture.Source, fixture.Parent, fixture.Unresolved} {
+		if source.Teammate == nil {
+			continue
+		}
+		identities[source.ID] = schema.SessionTeammate{
+			Team:     source.Teammate.Team,
+			Name:     source.Teammate.Name,
+			Evidence: schema.SessionTeammateEvidence(source.Teammate.Evidence),
+		}
+	}
+	return identities
 }
 
 func (fixture contextNavigationFixture) storedSessions() []ingest.Session {
@@ -213,6 +290,10 @@ func (fixture contextNavigationFixture) session(source contextNavigationSessionF
 			TargetLocalID: &target,
 			Evidence:      schema.EvidenceKind(relationship.Evidence),
 		})
+	}
+	if source.ParentSessionID != "" {
+		parent := schema.SessionID(source.ParentSessionID)
+		session.ParentSessionID = &parent
 	}
 	return session
 }

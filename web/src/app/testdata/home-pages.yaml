@@ -17,6 +17,8 @@ requiredNames:
   - publish-during-refresh-queues-one-loaded-window
   - selection-error-retry-failure-keeps-loaded-content
   - selection-error-account-change-refreshes-loaded-content
+  - claude-teammate-line
+  - no-claude-teammate-line
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
@@ -33,6 +35,10 @@ visual:
     - { name: desktop, width: 1440, height: 1100 }
     - { name: phone, width: 390, height: 844 }
   projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90
+  # The recorded teammate identity the mounted child row carries, so the Home
+  # capture proves the served row's identity line instead of a harness-only
+  # string.
+  teammate: { team: migration, name: tests, evidence: native_dynamic_workflow }
   projects:
     - { projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90, projectName: fixture-project }
     - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: unseen-project }
@@ -94,3 +100,12 @@ cases:
     roots: 30
     children: 0
     accountAfterFailure: second-account
+  - name: claude-teammate-line
+    roots: 1
+    children: 1
+    teammate: { team: migration, name: tests }
+    assertTeammateLine: true
+  - name: no-claude-teammate-line
+    roots: 1
+    children: 1
+    assertTeammateLine: true

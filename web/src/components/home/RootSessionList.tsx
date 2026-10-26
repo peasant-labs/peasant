@@ -256,11 +256,20 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
           ) : (
             <span className="home-session-title">{title.text}</span>
           );
+          // The recorded teammate identity is evidence the server read from the
+          // parent transcript, so it rides under the title as one small line and
+          // never replaces the title, agent, token, project, count, or state.
+          const teammate = row.sync.teammate ? (
+            <span className="home-session-teammate">
+              teammate {row.sync.teammate.name} · {row.sync.teammate.team}
+            </span>
+          ) : null;
           if (row.kind === 'child') {
             return (
               <div className="home-session-cell" style={{ paddingLeft: `calc(${row.depth} * (var(--sp-5) + var(--sp-4)))` }}>
                 <span id={`session-group-rows:${row.id}`} data-session-group-child={row.id} className="home-session">
                   {link}
+                  {teammate}
                   {meta}
                   {phone}
                 </span>
@@ -272,6 +281,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
             <div className="home-session-cell" data-session-family={row.id}>
               <span className="home-session" data-session-id={row.id}>
                 {link}
+                {teammate}
                 {meta}
                 {phone}
               </span>
